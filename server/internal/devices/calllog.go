@@ -117,6 +117,15 @@ func (m *Machine) logCall(method string, err error, took time.Duration, tries in
 	if errors.As(err, &re) && re.Code != "" {
 		fmt.Fprintf(&b, " code=%s", re.Code)
 	}
+	if took >= callSlow || result == callDeadline {
+		// What the connection's writer held then: a slow call behind bulk shows its queue (rpc.LaneStats).
+		m.mu.Lock()
+		peer := m.peer
+		m.mu.Unlock()
+		if peer != nil && peer.Framed() {
+			fmt.Fprintf(&b, " %s", peer.LaneStats())
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(&b, " err=%q", oneLineErr(err))
 	}

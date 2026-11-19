@@ -57,7 +57,9 @@ class LarkThreadLoader(private val rootId: String, private val source: LarkThrea
     private val usedCursors = mutableSetOf<String>()
 
     suspend fun load(older: Boolean = false) {
-        if (!lock.tryLock()) return
+        // A second older page is not asked for while a read runs; the newest page (after a reply, "latest") waits for it
+        // and then is read, so what it brings is never dropped (#9937).
+        if (!older) lock.lock() else if (!lock.tryLock()) return
         val previous = mutable.value
         try {
             if (older && (!previous.loaded || !previous.hasOlder)) return

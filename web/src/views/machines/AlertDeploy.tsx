@@ -9,8 +9,8 @@ import { stateOf } from "../../lib/format";
 import { buildGap, buildTime, gapText } from "../../lib/machine-alerts";
 import { useStore } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
-import { Button, cx, Dialog, Spinner } from "../../ui/atoms";
-import { Icon } from "../../ui/icons";
+import { Button, Dialog } from "../../ui/atoms";
+import { Steps } from "../../ui/Steps";
 import { useDeploy } from "./MachineDeploy";
 import { SheetPart } from "./AlertParts";
 
@@ -109,7 +109,7 @@ export function DeploySection({ machine, agents }: { machine: Machine; agents: r
         )}
       </SheetPart>
       <SheetPart part="do">
-        {progress.outcome !== "idle" && <Stepper progress={progress} />}
+        {progress.outcome !== "idle" && <Steps steps={STEPS.map((s) => ({ key: s, label: stepLabel(s) }))} step={progress.step} outcome={progress.outcome} label={t("machines-alerts.stepper_label")} testId="deploy-stepper" />}
         {progress.outcome === "done" && <p className="mt-2 text-meta text-green" role="status" data-testid="deploy-done">{t("machines-alerts.deploy_done", { build: nodeVersion || "—" })}</p>}
         {progress.outcome === "failed" && (
           <p className="mt-2 break-words text-meta text-red" role="alert" data-testid="deploy-failed">
@@ -157,25 +157,5 @@ function Build({ label, version }: { label: string; version?: string }) {
       <div className="truncate font-mono text-meta text-ink" title={version || undefined}>{version || "—"}</div>
       {at !== undefined && <div className="text-submeta text-ink-3 tabular-nums">{formatDate(at, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>}
     </div>
-  );
-}
-
-function Stepper({ progress }: { progress: DeployProgress }) {
-  return (
-    <ol className="space-y-1.5" data-testid="deploy-stepper" aria-label={t("machines-alerts.stepper_label")}>
-      {STEPS.map((s, i) => {
-        const done = i < progress.step || (progress.outcome === "done" && i === progress.step);
-        const current = i === progress.step && progress.outcome !== "done";
-        const failed = current && progress.outcome === "failed";
-        return (
-          <li key={s} className="flex items-center gap-2 text-meta" data-step={s} data-state={failed ? "failed" : done ? "done" : current ? "current" : "todo"} aria-current={current ? "step" : undefined}>
-            <span className={cx("flex size-5 shrink-0 items-center justify-center rounded-full", failed ? "bg-red-tint text-red" : done ? "bg-green-tint text-green" : current ? "bg-field text-ink" : "bg-field text-ink-3")}>
-              {failed ? <Icon name="x" size={11} /> : done ? <Icon name="check" size={11} /> : current ? <Spinner size={10} /> : <span className="text-submeta tabular-nums">{i + 1}</span>}
-            </span>
-            <span className={cx(current || done ? "text-ink" : "text-ink-3", failed && "text-red")}>{stepLabel(s)}</span>
-          </li>
-        );
-      })}
-    </ol>
   );
 }

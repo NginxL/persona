@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -448,23 +449,66 @@ func TestRuntimeWorkspacesOnlyAsAnEngine(t *testing.T) {
 	}
 }
 
-// One deadline for the whole of a create: what asking the runtime for its folder took is not given again to making the
-// worktree, and running out of it says so.
+// cueDeadline is a hub call's context whose deadline the test runs out when it chooses (Err: context.DeadlineExceeded,
+// as when the time is up), not after a set time: the node's checks before the step under test run git, which takes
+// what it takes on a busy machine, and never race it.
+type cueDeadline struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+	at   atomic.Pointer[time.Time] // when it ran out
+}
+
+func newCueDeadline() *cueDeadline {
+	return &cueDeadline{Context: context.Background(), done: make(chan struct{})}
+}
+
+func (c *cueDeadline) Done() <-chan struct{} { return c.done }
+
+func (c *cueDeadline) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+// expire runs the deadline out (once).
+func (c *cueDeadline) expire() {
+	c.once.Do(func() {
+		now := time.Now()
+		c.at.Store(&now)
+		close(c.done)
+	})
+}
+
+// since is how long ago it ran out; zero when it has not.
+func (c *cueDeadline) since() time.Duration {
+	if at := c.at.Load(); at != nil {
+		return time.Since(*at)
+	}
+	return 0
+}
+
+// One deadline for the whole of a create: making the worktree gets no time past the call's (what the checks and asking
+// the runtime for its folder took is not given again), running out of it says so, and the node's own deadline ends a
+// create that nothing else ends.
 func TestRuntimeWorktreeCreateHasOneDeadline(t *testing.T) {
 	r := runtimeRepoNode(t)
-	old := runtimeWorktreeDeadline
-	runtimeWorktreeDeadline = 600 * time.Millisecond
-	t.Cleanup(func() { runtimeWorktreeDeadline = old })
-	// The create is held until the test ends: only the deadline ends the call. Should the node not give up, the runtime
-	// answers after 3 s, so that the test fails rather than hangs.
+	// The create is held until the test ends: only a deadline ends the call. Should the node not give up, the runtime
+	// answers after 3 s, so that the test fails rather than hangs. The call's deadline runs out once the runtime is asked
+	// to make the worktree, however long the checks before it took.
 	held := make(chan struct{})
 	t.Cleanup(func() { close(held) })
+	cue := newCueDeadline()
+	r.rt.mu.Lock()
 	r.rt.answer = func(method string, _ json.RawMessage) (any, error) {
 		switch method {
 		case "workspace.prepare":
-			time.Sleep(400 * time.Millisecond) // sleep-ok: a slow runtime's prepare spends part of the create's one deadline
 			return map[string]any{"checkouts": r.trees}, nil
 		case "workspace.create":
+			cue.expire()
 			select {
 			case <-held:
 			case <-time.After(3 * time.Second):
@@ -472,13 +516,29 @@ func TestRuntimeWorktreeCreateHasOneDeadline(t *testing.T) {
 		}
 		return map[string]any{"ok": true}, nil
 	}
-	start := time.Now()
-	_, err := request(t, r.n, "worktree.create", map[string]any{"workspace_id": "wks_main", "kind": "paseo", "branch": "slow",
-		"path": filepath.Join(r.trees, "slow"), "locale": "en"})
+	r.rt.mu.Unlock()
+	create := func(ctx context.Context, branch string) error {
+		_, err := requestCtx(t, ctx, r.n, "worktree.create", map[string]any{"workspace_id": "wks_main", "kind": "paseo",
+			"branch": branch, "path": filepath.Join(r.trees, branch), "locale": "en"})
+		return err
+	}
+	err := create(cue, "slow")
 	if err == nil || !strings.Contains(err.Error(), "Paseo didn’t finish making the worktree in time") {
 		t.Fatalf("a create past its deadline: %v", err)
 	}
+	if took := cue.since(); took > 2*time.Second {
+		t.Fatalf("ended %s after its deadline: making the worktree had a deadline of its own", took)
+	}
+
+	// Nothing else ends it: the node's own deadline does, wherever it runs out (in the checks, on a busy machine).
+	old := runtimeWorktreeDeadline
+	runtimeWorktreeDeadline = 300 * time.Millisecond
+	t.Cleanup(func() { runtimeWorktreeDeadline = old })
+	start := time.Now()
+	if err := create(context.Background(), "slower"); err == nil {
+		t.Fatal("a create past the node's deadline went through")
+	}
 	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("took %s: making the worktree had a deadline of its own", took)
+		t.Fatalf("took %s: the node's deadline did not end the create", took)
 	}
 }

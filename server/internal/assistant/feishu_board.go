@@ -372,8 +372,15 @@ type awaitingAccept struct {
 
 // awaitingAcceptance are the to-dos whose "Please verify" ask is up (with a card or without, NoCard) and not passed: the ones that can still be passed
 // (not closed by the owner or a review, not asked before the latest reopen), in the order they were asked. Read only:
-// the sweeps that forget the ended ones are the reminders' and the snapshot's.
+// the sweeps that forget the ended ones are the reminders' and the snapshot's. A decision returned to its supervisor is
+// kept in the book but is not an owner row until a fresh review re-issues it.
 func (s *Service) awaitingAcceptance(ctx context.Context) []awaitingAccept {
+	return s.acceptanceRounds(ctx, false)
+}
+
+// acceptanceRounds reads open asks. includeReturned is for the recheck sweep itself; every owner-facing projection
+// leaves returned rounds out, including legacy undecidable reviews and rechecks persisted by an older release.
+func (s *Service) acceptanceRounds(ctx context.Context, includeReturned bool) []awaitingAccept {
 	b := &s.accept
 	b.mu.Lock()
 	if !s.loadAcceptLocked(ctx) {
@@ -391,6 +398,9 @@ func (s *Service) awaitingAcceptance(ctx context.Context) []awaitingAccept {
 	for id, a := range asks {
 		t, ok := s.todoNow(id)
 		if !ok || acceptAskEnded(&a, t) || acceptAskStale(&a, t) {
+			continue
+		}
+		if !includeReturned && (!a.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision)) {
 			continue
 		}
 		out = append(out, awaitingAccept{todo: id, title: t.Title, machine: a.MachineID, session: a.SessionID, since: a.AskedAt, ask: a})

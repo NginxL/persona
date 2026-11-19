@@ -39,7 +39,7 @@ var bgSlot = make(chan struct{}, 1)
 // transcript's goal, ultracode and plan markers (bgMatch).
 var bgMarkers = [][]byte{[]byte("ScheduleWakeup"), []byte("Next wakeup scheduled"), []byte("CronCreate"), []byte("CronDelete"),
 	[]byte("run_in_background"), []byte("in background with ID"), []byte("moved to the background"), []byte("manually ba"), []byte("Async agent launched"),
-	[]byte("task-notification"), []byte(`"name":"Agent"`), []byte(`"name":"Task"`), []byte(`"TaskStop"`), []byte(`"KillShell"`),
+	[]byte("task-notification"), []byte(`"name":"Agent"`), []byte(`"name":"Task"`), []byte(`"TaskStop"`), []byte(`"Kill`),
 	[]byte(`"name":"Workflow"`), []byte("Workflow launched in background"), []byte(`"name":"Monitor"`), []byte("Monitor started")}
 
 func (n *Node) backgroundTasks(path string) (tasks []proto.BackgroundTask, loop *proto.LoopInfo, goal *proto.GoalInfo, pending bool) {
@@ -116,6 +116,32 @@ func (n *Node) bgWorkflows(path string) ([]proto.Workflow, map[string]string) {
 	return slices.Clone(sc.meta.Workflows), maps.Clone(sc.meta.WorkflowScripts)
 }
 
+// bgEnded returns retained shell / Monitor outcomes from the last backgroundTasks scan, oldest first.
+func (n *Node) bgEnded(path string) []proto.BackgroundTask {
+	n.mu.Lock()
+	sc := n.bgScans[path]
+	n.mu.Unlock()
+	if sc == nil {
+		return nil
+	}
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.pending {
+		return nil
+	}
+	return recentBackgroundEnded(sc.meta.BackgroundEnded)
+}
+
+func recentBackgroundEnded(tasks []proto.BackgroundTask) []proto.BackgroundTask {
+	var ended []proto.BackgroundTask
+	for _, t := range tasks {
+		if t.EndedAt != nil && time.Since(*t.EndedAt) < workflowKeep {
+			ended = append(ended, t)
+		}
+	}
+	return ended
+}
+
 // bgPlan is the plan the last backgroundTasks scan of path found (transcript.Meta.Plan), nil while a big first read runs.
 func (n *Node) bgPlan(path string) *proto.PlanInfo {
 	n.mu.Lock()
@@ -170,8 +196,8 @@ func scanBackground(f *os.File, off *int64, m *transcript.Meta, size int64) {
 		}
 		// api-request blobs repeat everything; skip them
 		// The static markers (bgMarkers and transcript's goal, ultracode and plan ones) in one pass over the line (bgmatch.go).
-		// A plan tool's result line does not name the tool: it is the line with the call's id.
-		if !long && len(line) <= 64<<10 && (match.match(line) || containsAny(line, m.PlanPending())) {
+		// Plan and Stop result lines do not name the tool: they hold the call's id.
+		if !long && len(line) <= 64<<10 && (match.match(line) || containsAny(line, m.PlanPending()) || containsAny(line, m.BackgroundPending())) {
 			// A copy: m outlives this scan, and the parser keeps the line it was given (the tree's raw record, #8407),
 			// which here would be the pooled buffer, holding another transcript's lines by the next look (#8440).
 			transcript.ParseLine(0, bytes.Clone(bytes.TrimSuffix(line, []byte("\n"))), m)

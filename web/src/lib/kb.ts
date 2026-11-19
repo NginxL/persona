@@ -46,6 +46,12 @@ export interface KBEntry {
   extra?: string;
   /** recordings: meeting, note or day (#8870); absent from an older hub */
   recording_kind?: string;
+  /** chats: the source they came from; docs, meetings and events: the connector that supplied them (#8872) */
+  source?: string;
+  /** recordings: the id of the imported meeting it overlaps, as the meetings list has it (#8872) */
+  meeting_id?: string;
+  /** recordings in the meetings list (this client's, `mergeMeetingLists` in views/knowledge/meetings.ts): the imported meeting it stands for (#8872) */
+  imported?: KBEntry;
 }
 
 /** The tag a recording's row carries in the meetings list (#8871): notes and all-day recordings are the exceptions among
@@ -55,13 +61,6 @@ export function recordingKindTag(e: KBEntry): string | null {
   if (e.recording_kind === "note") return t("lib-kb.recording_note");
   if (e.recording_kind === "day") return t("lib-kb.recording_day");
   return null;
-}
-
-/** The meetings list (#8871): the meetings imported from connected apps and the recordings made in Persona, read from
- *  both lists; tags that both have appear once. */
-export function mergeMeetingLists(meetings: KBList, recordings: KBList): KBList {
-  const tags = [...(meetings.tags ?? []), ...(recordings.tags ?? [])];
-  return { items: [...(meetings.items ?? []), ...(recordings.items ?? [])], tags: [...new Set(tags)] };
 }
 
 export interface KBList {
@@ -94,6 +93,8 @@ export interface KBDetail {
   log?: string[] | null;
   recent?: string;
   links?: KBEntry[] | null;
+  /** The links the user removed by hand (meta.excluded), named as links are: Persona leaves them out until allowed again. */
+  removed?: KBEntry[] | null;
   moments?: KBMomentRef[] | null;
   /** recordings: the transcript, seconds from the start (docs/protocol/protocol.md "Recording sync"). */
   segments?: KBSegment[] | null;
@@ -430,6 +431,12 @@ export interface KBUpdate {
   remove_people?: string[];
   remove_chats?: string[];
   remove_projects?: string[];
+  /** With a removal: also lock the whole lists on both entries; false keeps out only the removed link. */
+  lock_lists?: boolean;
+  /** Links the user removed that Persona may make again on its own; nothing is linked. */
+  allow_people?: string[];
+  allow_chats?: string[];
+  allow_projects?: string[];
   /** Omitted preserves confirmed facts; an explicit empty string clears them. */
   pinned?: string;
   importance?: string;

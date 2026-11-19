@@ -1,0 +1,7 @@
+{
+  "not_started": "The assistant could not start",
+  "computer_away": "The assistant's computer is not connected",
+  "gone": "This conversation no longer exists",
+  "sending_now": "This message is being sent right now. Try again in a moment.",
+  "behind": "Waits behind earlier messages that did not go in"
+}

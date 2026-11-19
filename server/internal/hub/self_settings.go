@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -93,20 +93,22 @@ func (h *Hub) toolPersonaSettings(ctx context.Context, from string, m *Machine, 
 		}
 		return "", fmt.Errorf("no setting %q (action list shows them)", a.Key)
 	}
-	var change *selfChange
-	var err error
-	switch {
-	case a.Action == "get":
-		return s.get(ctx)
-	case a.Action == "set" && s.set != nil:
-		change, err = s.set(ctx, a.Value)
-	case a.Action == "add" && s.add != nil:
-		change, err = s.add(ctx, a.Value)
-	case a.Action == "remove" && s.remove != nil:
-		change, err = s.remove(ctx, a.ID)
-	default:
-		return "", fmt.Errorf("%s does not take %q (it takes %s)", s.key, a.Action, strings.Join(s.actions(), ", "))
+	build := func(ctx context.Context) (*selfChange, error) {
+		switch {
+		case a.Action == "set" && s.set != nil:
+			return s.set(ctx, a.Value)
+		case a.Action == "add" && s.add != nil:
+			return s.add(ctx, a.Value)
+		case a.Action == "remove" && s.remove != nil:
+			return s.remove(ctx, a.ID)
+		default:
+			return nil, fmt.Errorf("%s does not take %q (it takes %s)", s.key, a.Action, strings.Join(s.actions(), ", "))
+		}
 	}
+	if a.Action == "get" {
+		return s.get(ctx)
+	}
+	change, err := build(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -117,22 +119,23 @@ func (h *Hub) toolPersonaSettings(ctx context.Context, from string, m *Machine, 
 	ix := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: m.cfg.ID, SessionID: sessionID, Kind: proto.IxPermission,
 		ToolName: "persona_settings", Summary: change.summary, ToolInput: shown, Fields: change.fields, SessionTitle: "Persona",
 		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(15 * time.Minute).UTC()}
-	r, err := h.waitMCPApproval(ctx, ix, report)
-	if err != nil {
-		return "", err
-	}
-	if !r.UserAllowed() { // only the user's own answer counts: an expired card, or one answered for them, is no decline (#3722)
-		if r.UserDenied() {
-			return "The user declined the change: nothing changed.", nil
-		}
-		return prompts.RenderSettingUnanswered(), nil
-	}
-	for _, f := range change.fields {
-		if !f.Optional && strings.TrimSpace(r.Values[f.Key]) == "" {
-			return "", fmt.Errorf("%s was left empty on the phone: nothing changed", f.Label)
-		}
-	}
-	return change.apply(ctx, r.Values)
+	original := *change
+	out, err := h.waitPreparedSetting(ctx, from, ix, m.cfg.ID+"\x00"+sessionID+"\x00"+s.key,
+		func(ctx context.Context, r proto.Resolution) (string, error) {
+			// Rebuild from current state and execute only that fresh operation. The
+			// closure shown before a question may have captured a stale before/after.
+			fresh, err := build(ctx)
+			if err != nil || fresh == nil || fresh.apply == nil || fresh.summary != original.summary {
+				return "", approval.ErrStale
+			}
+			for _, f := range fresh.fields {
+				if !f.Optional && strings.TrimSpace(r.Values[f.Key]) == "" {
+					return "", fmt.Errorf("%s was left empty on the phone: nothing changed", f.Label)
+				}
+			}
+			return fresh.apply(ctx, r.Values)
+		}, report)
+	return out.Text, err
 }
 
 func orNone(s string) string {

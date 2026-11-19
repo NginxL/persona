@@ -462,7 +462,7 @@ func (s *Service) renderTodoDecisionsContext(ctx context.Context, todoID string,
 		}
 	}
 	loc := s.location(ctx)
-	d := prompts.TodoDecisions{Title: contextText(todos[todoID].Title)}
+	d := prompts.TodoDecisions{Language: answerLanguage(s.hello(ctx).Locale), Title: contextText(todos[todoID].Title)}
 	for i, r := range list {
 		var source, asker, ancestor string
 		switch r.Source {

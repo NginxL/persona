@@ -294,15 +294,17 @@ export function clock(iso?: string): string {
   return t("lib-format.date_time", { date: formatDate(d, { month: "short", day: "numeric" }), time: hm });
 }
 
+/** "512 B", "1.5 KB", "250 MB". The unit and the decimal follow the figure as it is shown, after rounding, as the
+ *  machine pages' bytesBin does: 1023.5 KB is "1.0 MB", not "1024 KB"; 99.95 KB is "100 KB", not "100.0 KB" (#9969). */
 export function bytes(n?: number): string {
   if (n === undefined || !Number.isFinite(n)) return "—";
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
-  while (n >= 1024 && i < u.length - 1) {
+  while (n >= 1023.5 && i < u.length - 1) {
     n /= 1024;
     i++;
   }
-  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+  return `${n >= 99.95 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
 /**

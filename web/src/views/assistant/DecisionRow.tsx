@@ -1,15 +1,18 @@
 // A decision in the Needs you tray that can be answered on its row (#3804, docs/assistant/todos.md "Waiting for the
 // owner"): what is to be decided, where the task came from and where it stands in one line, what each option leads to,
 // the options as buttons (the recommended one first, the only solid one), what happens when nobody answers, and
-// "Other…", which opens the task to answer in words. The answers that are no option — "You decide", "This isn't what I
-// asked for", "Tell me the background first" — and the options that do not fit the row are in its ⋯ menu. Every answer
-// goes through POST /todos/{id}/accept (lib/feed acceptBrief), as the recommendation's OK always did.
+// "Other…", which opens the originating conversation with this decision routed to its composer for an answer in words.
+// The answers that are no option — "You decide", "This isn't what I
+// asked for", "Tell me the background first" — and the options that do not fit the row are in its ⋯ menu. Option answers
+// go through POST /todos/{id}/accept (lib/feed acceptBrief), as the recommendation's OK always did; a written answer uses
+// the existing decision-answer route (lib/feed setRoute).
 import { openTask } from "../../lib/handoff";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { ApiError, errorText } from "../../lib/api";
-import { acceptBrief, type AskAnswer } from "../../lib/feed";
+import { acceptBrief, setRoute, type AskAnswer } from "../../lib/feed";
 import { clock } from "../../lib/format";
+import { conversationPage } from "../../lib/conversation-page";
 import { navigate } from "../../lib/router";
 import { refreshTodos } from "../../lib/store";
 import { askOptions, type AskOption, type AskResponse, type Todo, type TodoAsk } from "../../lib/todos";
@@ -99,7 +102,7 @@ function useFitting(count: number, round: string) {
   return { row, fit: Math.min(fit, count) };
 }
 
-export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocked = false, footer, hideTitle = false }: { todo: Pick<Todo, "id" | "title">; ask: TodoAsk; rowKey?: string; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; footer?: ReactNode; hideTitle?: boolean }) {
+export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocked = false, footer, hideTitle = false }: { todo: Pick<Todo, "id" | "title" | "origin" | "manager">; ask: TodoAsk; rowKey?: string; admission?: { current: boolean }; onBusyChange?: (busy: boolean) => void; blocked?: boolean; footer?: ReactNode; hideTitle?: boolean }) {
   const options = askOptions(ask);
   const responses = askResponses(ask);
   const [answering, setAnswering] = useState<Answering>({ state: "idle" });
@@ -112,6 +115,14 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
   const busy = answering.state === "busy";
   const disabled = busy || blocked;
   const open = () => openTask(todo.id);
+  const answerInWords = () => {
+    if (!todo.origin) {
+      open();
+      return;
+    }
+    setRoute(todo.origin, todo.id, ask.asked_at);
+    navigate(conversationPage(todo.origin, undefined, todo.manager));
+  };
 
   const answer = (key: string, body: AskAnswer, done: string) => {
     if (admitted.current || answering.state !== "idle") return;
@@ -232,7 +243,7 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
             </Button>
           ))}
           <span data-decision-tail className="flex shrink-0">
-            <Button tone="quiet" disabled={disabled} title={t("assistant-decisionrow.another_row", { title: todo.title })} onClick={open}>
+            <Button tone="quiet" disabled={disabled} title={t("assistant-decisionrow.another_row", { title: todo.title })} onClick={answerInWords}>
               {t("assistant-decisionrow.another")}
             </Button>
           </span>

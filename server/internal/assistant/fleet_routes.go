@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -23,6 +24,7 @@ import (
 // FleetRoutes are those routes.
 var FleetRoutes = []string{
 	"POST /api/v1/interactions/{id}/resolve",
+	"POST /api/v1/interactions/{id}/clarify",
 	"POST /api/v1/interactions/{id}/reanswer",
 	"GET /api/v1/interactions/history",
 	"POST /api/v1/sessions/{mid}/{sid}/seen",
@@ -59,6 +61,30 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 			return
 		}
 		apierr.WriteJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("POST /api/v1/interactions/{id}/clarify", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text        string `json:"text"`
+			ClientMsgID string `json:"client_msg_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		// This endpoint has no resolution or field-value envelope: clarification
+		// cannot allow, deny, dismiss or attribute the card.
+		if err := s.clarify(r.Context(), r.PathValue("id"), in.Text, strings.TrimSpace(in.ClientMsgID), nil); err != nil {
+			switch {
+			case errors.Is(err, errClarifyUnavailable):
+				apierr.Write(w, http.StatusGone, err)
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				apierr.Call(w, err)
+			default:
+				apierr.Write(w, http.StatusBadRequest, err)
+			}
+			return
+		}
+		apierr.WriteJSON(w, map[string]any{"ok": true, "pending": true})
 	})
 	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer)    // "Change answer" (fleet_delegate.go)
 	mux.HandleFunc("GET /api/v1/interactions/history", s.serveInteractionHistory) // interaction_history.go
@@ -205,6 +231,10 @@ func (s *Service) localFleetAppCall(ctx context.Context, p AppCall) (json.RawMes
 		Answers       map[string]string `json:"answers"`
 		Reason        string            `json:"reason"` // interactions.answer: why the assistant answered so (interaction_answer)
 		Resolution    proto.Resolution  `json:"resolution"`
+		Text          string            `json:"text"`
+		ClientMsgID   string            `json:"client_msg_id"`
+		ChatID        string            `json:"chat_id"`
+		MessageID     string            `json:"message_id"`
 		Action        string            `json:"action"`
 		Channel       string            `json:"channel"`
 	}
@@ -231,6 +261,13 @@ func (s *Service) localFleetAppCall(ctx context.Context, p AppCall) (json.RawMes
 		}
 	case InteractionsResolve:
 		r, err := s.channelResolve(ctx, a.Channel, a.InteractionID, a.Resolution, a.Action)
+		if err != nil {
+			return nil, true, err
+		}
+		out = r
+	case assistantwire.InteractionsClarify:
+		r, err := s.channelClarify(ctx, a.Channel, a.InteractionID, a.Text, a.ClientMsgID, a.Action,
+			&clarificationOrigin{Channel: a.Channel, ChatID: a.ChatID, MessageID: a.MessageID})
 		if err != nil {
 			return nil, true, err
 		}
@@ -275,4 +312,32 @@ func (s *Service) channelResolve(ctx context.Context, ch, id string, r proto.Res
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+// channelClarify verifies the same fresh owner action as channelResolve, then
+// takes the separate non-final path. Blank and over-limit input is rejected
+// before that action is consumed. Field values never enter this envelope.
+func (s *Service) channelClarify(ctx context.Context, ch, id, text, clientMsgID, action string, origin *clarificationOrigin) (any, error) {
+	if err := validateClarifyQuestion(text); err != nil {
+		return nil, err
+	}
+	id = strings.TrimSpace(id)
+	ix, ok := s.pendingIx(id)
+	if !ok {
+		return map[string]any{"ok": false, "status": s.interactionOutcome(ctx, id)}, nil
+	}
+	if ch != channel.Feishu || !ix.CanClarify || ix.Private {
+		return nil, errClarifyUnavailable
+	}
+	if err := s.appCall(ctx, AppInteractions, assistantwire.InteractionsOwnerAction, map[string]any{"interaction_id": id,
+		"action": action, "channel": ch, "kind": ix.Kind}, nil); err != nil {
+		return nil, err
+	}
+	if err := s.clarify(ctx, id, text, clientMsgID, origin); err != nil {
+		if errors.Is(err, errClarifyUnavailable) {
+			return map[string]any{"ok": false, "status": s.interactionOutcome(ctx, id)}, nil
+		}
+		return nil, err
+	}
+	return map[string]any{"ok": true, "pending": true}, nil
 }

@@ -28,6 +28,16 @@ struct PersonaApp: App {
                 .overlay { ButtonContrastOverlay() } // `-showButtonContrast YES`: secondary buttons on every surface (#6157)
                 #endif
                 .environment(model)
+                // A link to one of Persona's pages opens in the app on every screen that has no link handling of its own
+                // (#9926, docs/protocol/deep-links.md); any other link opens as it did.
+                .environment(\.openURL, OpenURLAction { url in
+                    guard let opened = model.openOwnLink(url) else { return .systemAction }
+                    if case .sheet(let page) = opened { model.linkSheet = page }
+                    return .handled
+                })
+                .rootHubLinkSheet($model.linkSheet)
+                // A pairing link from outside the app asks before it pairs (#9929).
+                .pairConfirmation($model.pairToConfirm) { model.pairFromLink($0.config) }
                 #if os(iOS)
                 // A redial from the Phone app's Recents (#9290), where SwiftUI hands it over rather than the scene's delegate;
                 // the two are one tap (`PersonaCalls.continueActivity` takes it once).
@@ -52,6 +62,17 @@ struct PersonaApp: App {
                     if let link = ExtensionSystemLink(url: url) { model.openExtension(link); return }
                     if SentSettingsLink.matches(url) { model.openSentRecords(); return }
                     if IPhoneSetupLink.matches(url) { model.openIPhoneSetup(); return }
+                    // The web sign-in page's code, read by the Camera app: only the scanner in Settings › Devices
+                    // approves a browser (#10293), so a link says where to scan it and does nothing else.
+                    if BrowserLoginLink.matches(url) {
+                        model.toast = Toast(String(localized: "To sign in a browser, scan its code in Settings › Devices › Scan Browser Sign-in Code."))
+                        return
+                    }
+                    // A page of Persona's (persona://open<path>, an older persona:// form, #9926): only opens it.
+                    if let opened = model.openOwnLink(url) {
+                        if case .sheet(let page) = opened { model.linkSheet = page }
+                        return
+                    }
                     // A computer's pairing link (「添加电脑」, Add computer) is for Persona Link on that computer, not for this device (#4198).
                     if ServerConfig.isComputerLink(url) {
                         model.toast = Toast(String(localized: "Open this link on the computer you're adding"))
@@ -65,24 +86,8 @@ struct PersonaApp: App {
                         }
                         return
                     }
-                    Task {
-                        do {
-                            try await model.pair(cfg)
-                            let host = cfg.url.host() ?? String(localized: "Server")
-                            model.toast = Toast(String(localized: "Connected to \(host)"), style: .success)
-                        }
-                        catch {
-                            // An expired code says so (showPairing); anything else is said too, not through `show`, which
-                            // keeps quiet about a timeout or no network: a hub out of reach then said nothing after 30 s on
-                            // the welcome page (#4273).
-                            if PairError.isExpiredCode(error) {
-                                model.showPairing(error)
-                            } else if !error.isCancellation {
-                                model.toast = Toast(String(localized: "Couldn't connect: \(error.localizedDescription)"), style: .error)
-                                Haptics.error()
-                            }
-                        }
-                    }
+                    // A link only opens pages: pairing waits for the user's Connect (#9929).
+                    model.askToPair(cfg)
                 }
         }
         #if os(visionOS)
@@ -174,6 +179,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Urgent calls' PushKit registry, when they are on: a VoIP push that launches the app reaches only one made now.
         UrgentCallPush.shared.start()
         #endif
+        #if DEBUG && os(iOS)
+        TerminationActivities.install() // a test's Live Activities end with the app, not at the next run's install (#10109)
+        #endif
         #if DEBUG
         // Simulator automation: `simctl launch … -pairURL persona://pair?...`; `-pairURL2`, `-pairURL3` pair more hubs
         // (several groups, docs/protocol/multi-hub.md「Tests」).
@@ -184,12 +192,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let d = UserDefaults.standard
         #if os(iOS)
         // `-showUrgentCallSample YES|held`: the urgent call page, from the mock hub (UrgentCallCenter.showSample); `held`
-        // on hold with Resume.
+        // on hold with Resume. `-showUrgentCallSampleTitle <text>`: its title instead of the mock's (a long one).
         let urgentSampleHeld = d.string(forKey: "showUrgentCallSample") == "held"
         if d.bool(forKey: "showUrgentCallSample") || urgentSampleHeld {
+            let title = d.string(forKey: "showUrgentCallSampleTitle")
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                UrgentCallCenter.shared.showSample(held: urgentSampleHeld)
+                UrgentCallCenter.shared.showSample(held: urgentSampleHeld, title: title)
             }
         }
         // `-openOwnerCall YES`: calls Persona (#9290) once the hub is there, as the main conversation's Call does (on the
@@ -207,12 +216,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 PersonaCalls.shared.hangUp()
             }
         }
-        // `-showCallSample dialing|connecting|connected|muted|held|interrupted|resume|speaker|ended`: the call page's
-        // state, with no system and no audio (PersonaCalls.showSample).
+        // `-showCallSample dialing|connecting|connected|muted|held|interrupted|resume|speaker|ended|speaking|hearing|
+        // thinking|working|asking|mutedSpeaking|paused|…`: the call page's state, with no system and no audio
+        // (PersonaCalls.showSample; a speaking or hearing sample has a made-up voice level). `-showCallSampleName <text>`,
+        // `-showCallSampleCaption <text>`, `-showCallSampleReason <text>`: the name (the page's and the bar's), the latest
+        // words and why it ended, instead of the sample's own (long texts for the screenshots). `-showCallSampleLook
+        // package|uploaded|<id>`: that look's avatar (waits up to 30 s for it to be on the phone; the mock's
+        // MOCK_PERSONAS=builtin MOCK_LOOK=nwverse has a package). `-showCallSampleAgent YES`: a call to an Agent session.
         if let sample = d.string(forKey: "showCallSample").flatMap(PersonaCalls.Sample.init(rawValue:)) {
+            let name = d.string(forKey: "showCallSampleName"), caption = d.string(forKey: "showCallSampleCaption")
+            let reason = d.string(forKey: "showCallSampleReason"), wanted = d.string(forKey: "showCallSampleLook")
+            let agent = d.bool(forKey: "showCallSampleAgent")
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                PersonaCalls.shared.showSample(sample)
+                var look: Persona?
+                if let wanted {
+                    for _ in 0..<60 {
+                        look = PersonaCalls.sampleLook(wanted, model: AppModel.shared)
+                        if look != nil { break }
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                }
+                PersonaCalls.shared.showSample(sample, name: name, caption: caption, reason: reason, look: look, agent: agent)
             }
         }
         #endif
@@ -376,8 +401,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if os(iOS)
         RecordingDayCatchUp.register()
         #endif
+        #if os(iOS)
+        MeetingReplay.shared.clearEnded() // a replayed meeting tape (#10589) left from the last run leaves the recordings
+        #endif
         #if DEBUG
         RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending|overview`
+        #if os(iOS)
+        MeetingReminders.showIfAsked() // `-showMeetingReminder start|open`, after the made-up meetings are cleared
+        #endif
         #if os(iOS)
         Task { await RecordingSamples.installDaySampleIfAsked() } // `-showDaySample today|paused|recap|pending|failed`
         #endif
@@ -385,6 +416,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // `-openDayCatchUp YES`: runs the all-day catch-up now (the simulator never runs background tasks).
         if UserDefaults.standard.bool(forKey: "openDayCatchUp") { Task { _ = await RecordingDayCatchUp.catchUp() } }
         MeetingReplay.startIfAsked() // `-showMeetingReplay <tape>|sample` (#9417)
+        MeetingTapeLibrary.installSampleIfAsked() // `-openMeetingTapes sample|empty` (#10589)
         MeetingTapeRecorder.startIfAsked() // `-openMeetingAudio <file>`: the meeting it records writes a tape
         #endif
         #endif
@@ -392,6 +424,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         AppModel.shared.start()
         AppIconBadgeWatcher.shared.start(AppModel.shared)
         LiveActivityController.shared.start()
+        // A hub that retired this device's push registration answers its writes 409 (#9612): register again, then retry.
+        APIClient.onPushRegistrationRequired = { group in await PushRegistrar.shared.registrationRequired(group: group).value }
         if !automation { PushRegistrar.shared.registerIfPossible() }
         return true
     }
@@ -512,6 +546,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     if opened { MeetingRecorder.openRecordings() }
+                    done()
+                }
+            }
+            return
+        }
+        // A calendar meeting's reminder (MeetingReminders, #8731 G2): Start starts the meeting, a tap opens Meetings.
+        if let meeting = MeetingReminders.meeting(response.notification.request.content.userInfo) {
+            nonisolated(unsafe) let done = completionHandler
+            let action = response.actionIdentifier
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    MeetingReminders.respond(action: action, meeting: meeting)
                     done()
                 }
             }

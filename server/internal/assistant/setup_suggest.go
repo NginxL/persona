@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/deeplink"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -83,9 +84,9 @@ var setupSettings = map[string]string{
 // kinds of task; the background supervisor's purpose is its own page of Model Settings. The others are named in their
 // line (a conversation's menu, asking Persona, the configuration file).
 var setupPages = map[string]string{
-	setupDecide: "/settings?tab=persona", setupAutoContinue: "/settings?tab=persona", setupWake: "/settings?tab=persona",
-	setupStanding: "/settings?tab=persona", setupTrust: "/settings?tab=persona",
-	setupSupervisorTier: "/settings?tab=models&purpose=" + purposeSupervise,
+	setupDecide: deeplink.Settings("persona", ""), setupAutoContinue: deeplink.Settings("persona", ""),
+	setupWake: deeplink.Settings("persona", ""), setupStanding: deeplink.Settings("persona", ""),
+	setupTrust: deeplink.Settings("persona", ""), setupSupervisorTier: deeplink.Settings("models", purposeSupervise),
 }
 
 // setupBook is the setting setupKey: the week whose first briefing reached the owner, and when each mechanism was
@@ -506,7 +507,7 @@ func setupWord(l i18n.Lang, web, id string, c setupNumber) setupSuggestion {
 	}
 	sg.Text = i18n.T(l, "assistant-setup_suggest."+id, args)
 	if page := setupPages[id]; page != "" && web != "" {
-		sg.Link = web + page
+		sg.Link = deeplink.Web(web, page)
 	}
 	return sg
 }

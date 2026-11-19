@@ -185,7 +185,7 @@ func TestAskTodoWaitsInTheBriefingAndTheSnapshot(t *testing.T) {
 	if f.LaterTotal != 1 || len(f.Later) != 1 || f.Later[0].summary != "Merge the release PR now?" {
 		t.Fatalf("can wait: %d %+v", f.LaterTotal, f.Later)
 	}
-	snap := e.s.contextSnapshot(context.Background(), "")
+	snap := e.s.contextSnapshot(context.Background(), "", false)
 	if !strings.Contains(snap, "Merge the release PR now?") || !strings.Contains(snap, todo.ID) {
 		t.Fatalf("the snapshot does not list it:\n%s", snap)
 	}
@@ -194,7 +194,7 @@ func TestAskTodoWaitsInTheBriefingAndTheSnapshot(t *testing.T) {
 		t.Fatalf("a closed one still waits: %+v", f.Later)
 	}
 	e.s.ProfileChanged(context.Background()) // a fresh snapshot
-	if snap := e.s.contextSnapshot(context.Background(), ""); strings.Contains(snap, todo.ID) {
+	if snap := e.s.contextSnapshot(context.Background(), "", false); strings.Contains(snap, todo.ID) {
 		t.Fatalf("a closed one is still in the snapshot:\n%s", snap)
 	}
 }
@@ -301,7 +301,7 @@ func TestAskTodoHandedToAnAgentIsNoTask(t *testing.T) {
 	if kinds := feedKinds(e.s, "c1x1x1"); strings.Contains(kinds, "receipt") {
 		t.Fatalf("a task receipt in the asking conversation: %s", kinds)
 	}
-	if snap := e.s.contextSnapshot(ctx, ""); !strings.Contains(snap, todo.ID) {
+	if snap := e.s.contextSnapshot(ctx, "", false); !strings.Contains(snap, todo.ID) {
 		t.Fatalf("the question no longer waits in the snapshot:\n%s", snap)
 	}
 	e.must("PATCH", "/api/v1/todos/"+todo.ID, `{"done":true}`)
@@ -333,7 +333,7 @@ func TestAskTodoHandledInTheBriefingClosesIt(t *testing.T) {
 		t.Fatalf("told %q, want one dropped notice", got)
 	}
 	e.s.ProfileChanged(ctx) // a fresh snapshot
-	if snap := e.s.contextSnapshot(ctx, ""); strings.Contains(snap, todo.ID) {
+	if snap := e.s.contextSnapshot(ctx, "", false); strings.Contains(snap, todo.ID) {
 		t.Fatalf("the question still waits in the snapshot:\n%s", snap)
 	}
 	if w := e.do("POST", "/api/v1/later/"+row+"/handled", ""); w.Code != http.StatusConflict {

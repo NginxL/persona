@@ -254,7 +254,10 @@ class NewAgentAttachmentsShotsTest {
         show(model, camera, { style }, { dark })
         takePhoto(camera)
         rule.runOnIdle { model.attach(listOf(ComposerAttachment("n", "notes.txt", "content://docs/notes.txt", image = false, size = 4096))) }
-        rule.waitUntil(30_000) { model.state.value.attachments.firstOrNull { it.image }?.path != null }
+        rule.waitUntil(30_000) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            model.state.value.attachments.firstOrNull { it.image }?.path != null
+        }
         assertEquals(R.string.agents_attach_uploading_hold, model.state.value.attachmentsHold?.id)
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             rule.runOnIdle { style = s; dark = d }

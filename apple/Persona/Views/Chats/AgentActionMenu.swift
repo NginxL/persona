@@ -49,9 +49,11 @@ nonisolated struct AgentActionFacts: Equatable, Sendable {
     var phone: Bool
     var paneActions: Bool
 
+    /// From the model: only `AgentActionMenuReader` may, so what the facts read is observed by the menu alone, never
+    /// by a row or a header that holds it (#10231). Elsewhere this does not compile.
     @MainActor
-    init(session: Session, model: AppModel, currentPane: SessionPane = .chat, hosted: Bool = false, showsSpace: Bool = true,
-         sides: SideSessions? = nil) {
+    fileprivate init(session: Session, model: AppModel, currentPane: SessionPane = .chat, hosted: Bool = false,
+                     showsSpace: Bool = true, sides: SideSessions? = nil) {
         self.init(session: session,
                   pinned: model.isPinned(session.key), muted: model.isMuted(session.key),
                   panes: AgentMenuFacts.panes(session, git: AgentMenuRouting.shared.gitStatus(session)),
@@ -227,6 +229,34 @@ final class AgentMenuHandlers {
         self.takeover = takeover
         self.continueInNewSession = continueInNewSession
     }
+}
+
+/// `AgentActionMenu` with its facts read in its own `body`. A menu's content is built with the view that holds it (a
+/// row's `.contextMenu`, the chat header's `Menu`), so facts built there made that view observe what they read of the
+/// model: the machines (whose heartbeat changes on every push of a busy hub), the hub links, pins and side sessions.
+/// Every row of the Agents list was drawn again on each push (#10231). Read here, only this view observes them.
+struct AgentActionMenuReader: View {
+    @Environment(AppModel.self) private var model
+    let session: Session
+    var currentPane: SessionPane = .chat
+    var hosted = false
+    var showsSpace = true
+    var sides: SideSessions?
+    let handlers: AgentMenuHandlers
+
+    var body: some View {
+        AgentActionMenu(facts: AgentActionFacts(session: session, model: model, currentPane: currentPane, hosted: hosted,
+                                                showsSpace: showsSpace, sides: sides),
+                        handlers: handlers)
+            .equatable()
+    }
+
+    #if DEBUG
+    /// The facts this menu shows, for tests. Not for views: built in a body, they make that view observe the model.
+    static func factsForTesting(session: Session, model: AppModel) -> AgentActionFacts {
+        AgentActionFacts(session: session, model: model)
+    }
+    #endif
 }
 
 /// One menu definition and one renderer shared by an Agents row's long press and its detail's More button.

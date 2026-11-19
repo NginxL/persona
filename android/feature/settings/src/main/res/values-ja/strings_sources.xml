@@ -316,6 +316,9 @@
     <string name="settings_src_codex_title">Codexの設定</string>
     <string name="settings_src_codex_demo">体験モードにはコンピューター上のCodexの設定がありません。</string>
     <string name="settings_src_codex_caption">そのマシンの~/.codex/config.tomlのうち、下の項目だけを変更します。ファイル内のほかの設定（モデルプロバイダー、プロジェクトの信頼など）はそのまま残ります。新しいCodexセッションから反映されます。</string>
+    <string name="settings_src_agy_title">Antigravityの設定</string>
+    <string name="settings_src_agy_demo">体験モードにはコンピューター上のAntigravityの設定がありません。</string>
+    <string name="settings_src_agy_caption">そのマシンの~/.gemini/antigravity-cli/settings.jsonのうち、下の項目だけを変更します。新しいAntigravity（agy）セッションから反映されます。</string>
     <string name="settings_src_quota_read_failed">利用枠を読み込めません：%1$s</string>
     <string name="settings_src_quota_title">利用枠</string>
     <string name="settings_src_quota_title_named">利用枠・%1$s</string>

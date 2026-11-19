@@ -1,10 +1,18 @@
 package persona.core.data
 
 import persona.core.contracts.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Ephemeral rows never enter transcript coverage or the disk cache. Callers hold the entry lock. */
 internal class ChatRealtimeState(private val key: SessionKey) {
-    private data class Draft(var item: Item, val after: Item?, var finalId: String? = null)
+    private data class Draft(
+        var item: Item,
+        val after: Item?,
+        var finalId: String? = null,
+        val liveText: MutableStateFlow<String> = MutableStateFlow(item.text.orEmpty()),
+    )
+    private class Projection(val structural: List<Item>, val live: List<Item>)
     private val drafts = mutableListOf<Draft>()
     private var active: Draft? = null
     private var nextId = 0L
@@ -13,12 +21,28 @@ internal class ChatRealtimeState(private val key: SessionKey) {
     private var screen: Item? = null
     private var screenAfter: String? = null
     private var projectedTranscript: List<Item>? = null
-    private var projectedItems: List<Item>? = null
+    private var projectedItems: Projection? = null
+    private var exposedDraft: Draft? = null
+    private var exposedStreamingIds: Set<String> = emptySet()
+    private var exposedLiveText: Map<String, StateFlow<String>> = emptyMap()
+
+    private inner class LiveItemList(
+        private val base: List<Item>,
+        private val transcript: List<Item>,
+    ) : AbstractList<Item>() {
+        override val size: Int get() = base.size
+        override fun get(index: Int): Item {
+            val item = base[index]
+            val draft = active ?: return item
+            if (item.id != draft.item.id) return item
+            val text = draft.shownText(transcript)
+            return if (item.text.orEmpty() == text) item else item.copy(text = text)
+        }
+    }
 
     private fun invalidate() { projectedTranscript = null; projectedItems = null }
 
     fun delta(event: DeltaEvent, items: List<Item>) {
-        invalidate()
         if (event.turnFinished) {
             finish()
             return
@@ -27,6 +51,8 @@ internal class ChatRealtimeState(private val key: SessionKey) {
             nextSeq(items), role = "assistant", kind = "text"), items.lastOrNull()).also {
             drafts += it
             active = it
+            // Only a new row is structural. Later deltas travel through that row's stable live-list view.
+            invalidate()
         }
         draft.item = draft.item.copy(text = event.text)
     }
@@ -60,9 +86,39 @@ internal class ChatRealtimeState(private val key: SessionKey) {
 
     fun canonicalId(id: String): String = aliases.entries.firstOrNull { it.value == id }?.key ?: id
     fun displayId(id: String): String = aliases[id] ?: id
-    fun streamingItemIds(): Set<String> = setOfNotNull(active?.item?.id)
 
-    fun items(transcript: List<Item>): List<Item> {
+    private fun syncExposure() {
+        val draft = active
+        if (exposedDraft === draft) return
+        exposedDraft = draft
+        exposedStreamingIds = setOfNotNull(draft?.item?.id)
+        exposedLiveText = draft?.let { mapOf(it.item.id to it.liveText) } ?: emptyMap()
+    }
+
+    fun streamingItemIds(): Set<String> {
+        syncExposure()
+        return exposedStreamingIds
+    }
+
+    fun liveText(): Map<String, StateFlow<String>> {
+        syncExposure()
+        return exposedLiveText
+    }
+
+    /** The latest arrival for diagnostics; unlike the UI holder, this does not wait for a publish window. */
+    fun currentText(transcript: List<Item>): String? = active?.shownText(transcript)
+
+    /** Advancing holders is deliberately a publish operation, not part of delta arrival. */
+    fun publishLiveText(transcript: List<Item>) {
+        active?.let { draft -> draft.liveText.value = draft.shownText(transcript) }
+    }
+
+    fun items(transcript: List<Item>): List<Item> = projection(transcript).live
+
+    /** Immutable structural rows for a published snapshot; ordinary text stays in the holders/view instead. */
+    fun structuralItems(transcript: List<Item>): List<Item> = projection(transcript).structural
+
+    private fun projection(transcript: List<Item>): Projection {
         if (projectedTranscript === transcript) projectedItems?.let { return it }
         val claimed = aliases.keys.toMutableSet()
         val pending = mutableListOf<Item>()
@@ -100,7 +156,7 @@ internal class ChatRealtimeState(private val key: SessionKey) {
         }
         drafts.clear(); drafts += retained
         if (screenAfter != transcript.lastOrNull()?.id) screen = null
-        val result = (transcript.map { item ->
+        val structural = (transcript.map { item ->
             val tool = item.toolUseId?.let(tools::get).takeIf { item.kind == "tool_use" }
             val mapped = if (tool == null) item else item.copy(toolName = tool.name, toolInput = tool.args)
             overlays[item.id]?.let { mapped.copy(text = it) } ?: mapped
@@ -109,9 +165,16 @@ internal class ChatRealtimeState(private val key: SessionKey) {
                 val id = displayId(item.id)
                 if (id == item.id) item else item.copy(id = id)
             }
+        val result = Projection(structural, LiveItemList(structural, transcript))
         projectedTranscript = transcript
         projectedItems = result
         return result
+    }
+
+    private fun Draft.shownText(transcript: List<Item>): String {
+        val current = item.text.orEmpty()
+        val recorded = finalId?.let { id -> transcript.firstOrNull { it.id == id } }?.text?.orEmpty() ?: return current
+        return if (current.startsWith(recorded) && current.length > recorded.length) current else recorded
     }
 
     private fun nextSeq(items: List<Item>): Int =

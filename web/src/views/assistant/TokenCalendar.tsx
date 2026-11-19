@@ -3,10 +3,15 @@
 // the theme color in four steps by rank. Its line says today's and the last 30 days' tokens; a clicked day (or the
 // arrow keys on the grid) shows that day's tokens and four kinds. Read when the page opens and when the tab comes back
 // to the front, never on a timer. Not on the first screen: a lazy import, its strings the namespace `tokencalendar`.
+// The line opens Token usage (#10042, TokenUsagePage.tsx) in a dialog (a sheet on a phone), in this chunk (a chunk of
+// its own would name itself on the first screen); there the calendar is drawn again with only a picked day's line
+// (`page`).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDate, formatNumber, t } from "../../i18n";
 import { tRich } from "../../i18n/rich";
 import { calendarLayout, dayTotal, fetchUsageDays, lastDays, weeksThatFit, type UsageDay, type UsageDays } from "../../lib/usage-history";
+import { Dialog } from "../../ui/atoms";
+import TokenUsage from "./TokenUsagePage";
 
 // The squares' size and spacing (the iPhone's Theme.Heat, a little smaller for a page's 13 px text), and the theme
 // color's strength at each step above none: inline, so no class is added to the first screen's styles.
@@ -27,9 +32,10 @@ const utc = (date: string) => new Date(`${date}T00:00:00Z`);
 const dayName = (date: string) => formatDate(utc(date), { month: "short", day: "numeric", weekday: "short", timeZone: "UTC" });
 
 /** The days, read on mount and when the tab comes back to the front. */
-function useUsageDays(): UsageDays | null {
+export function useUsageDays(enabled = true): UsageDays | null {
   const [data, setData] = useState<UsageDays | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     const read = () => fetchUsageDays(READ_DAYS).then((u) => live && setData(u), () => {}); // an older hub: no card
     read();
@@ -39,14 +45,16 @@ function useUsageDays(): UsageDays | null {
       live = false;
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [enabled]);
   return data;
 }
 
-export default function TokenCalendar() {
-  const data = useUsageDays();
+export default function TokenCalendar({ days, page }: { days?: UsageDays | null; page?: boolean } = {}) {
+  const own = useUsageDays(days === undefined); // the page reads them for its totals and hands them in
+  const data = days !== undefined ? days : own;
   const [width, setWidth] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
+  const [opened, setOpened] = useState(false);
   // The squares' room, measured where they are drawn: a narrower window shows fewer weeks.
   const measure = useCallback((el: HTMLDivElement | null) => {
     if (!el) return;
@@ -71,7 +79,7 @@ export default function TokenCalendar() {
   };
 
   return (
-    <div className="mt-4 rounded-[10px] px-3 py-3 text-left shadow-hairline" data-token-calendar>
+    <div className={page ? "text-left" : "mt-4 rounded-[10px] px-3 py-3 text-left shadow-hairline"} data-token-calendar>
       <div className="text-meta text-ink-2" aria-live="polite">
         {day && picked ? (
           <>
@@ -80,11 +88,13 @@ export default function TokenCalendar() {
               {t("tokencalendar.kinds", { input: short(day.in ?? 0), output: short(day.out ?? 0), write: short(day.cache_write ?? 0), read: short(day.cache_read ?? 0) })}
             </div>
           </>
-        ) : (
-          tRich("tokencalendar.line", {
-            today: <b className="font-semibold text-ink">{short(lastDays(data.days, 1))}</b>,
-            month: <b className="font-semibold text-ink">{short(lastDays(data.days, 30))}</b>,
-          })
+        ) : page ? null : (
+          <button type="button" onClick={() => setOpened(true)} title={t("tokencalendar.open_page")} aria-haspopup="dialog" className="text-left hover:underline" data-token-calendar-line>
+            {tRich("tokencalendar.line", {
+              today: <b className="font-semibold text-ink">{short(lastDays(data.days, 1))}</b>,
+              month: <b className="font-semibold text-ink">{short(lastDays(data.days, 30))}</b>,
+            })}
+          </button>
         )}
       </div>
       <div className="mt-2 flex gap-1 text-submeta text-ink-3">
@@ -139,6 +149,11 @@ export default function TokenCalendar() {
           </div>
         </div>
       </div>
+      {!page && (
+        <Dialog open={opened} onClose={() => setOpened(false)} title={t("tokencalendar.title")} width={720}>
+          {opened && <TokenUsage />}
+        </Dialog>
+      )}
     </div>
   );
 }

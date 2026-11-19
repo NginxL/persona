@@ -22,6 +22,9 @@ var launcherRepairTimeout = 5 * time.Minute
 // launcherRepair runs one of the fixed repairs for launcher name. A repair that does not apply to the launcher's agent
 // (a Codex launcher, an unknown action) answers Unsupported, not an error.
 func (n *Node) launcherRepair(ctx context.Context, name, action string) (proto.LauncherRepair, error) {
+	if proto.IsExternalLauncher(name) {
+		return proto.LauncherRepair{Unsupported: true}, nil
+	}
 	if action != launcherRepairUpgrade {
 		return proto.LauncherRepair{Unsupported: true, Output: fmt.Sprintf("unknown repair %q", action)}, nil
 	}

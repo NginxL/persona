@@ -276,7 +276,7 @@ func TestBoardOrdersByWaitAndSaysWhoAsked(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"已等 1 小时 20 分", "已等 20 分钟", "已等 2 分钟", "已等 3 天", "来自 Persona", "来自 Agent「登录修复」", "来自某个 Agent",
-		"[打开](" + testWeb + "/persona/asm)", "[打开](" + testWeb + "/s/box/ag1)", "[打开](" + testWeb + "/todos?id=todo_v)"} {
+		"[打开](" + testWeb + "/persona/asm)", "[打开](" + testWeb + "/s/box/ag1)", "[打开](" + testWeb + "/todos/todo_v)"} {
 		index(t, card, want)
 	}
 }

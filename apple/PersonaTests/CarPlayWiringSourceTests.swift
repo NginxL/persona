@@ -101,18 +101,13 @@ struct CarPlayWiringSourceTests {
         #expect(!onMain.contains("car()"), "the route asked on the main actor")
     }
 
-    /// Siri, Shortcuts and Recents close the shell's Settings sheet before the call's page (#9290): the page and a
-    /// refusal's alert go over the app's root, which presents nothing over a sheet. Before a live call is shown too, and
-    /// not for the app's own Call (from the main conversation, nothing is over it).
-    @Test func siriCallsClearSettingsBeforeTheCallPage() throws {
+    /// Siri, Shortcuts and Recents leave the page or sheet the app was on as it is (#9290 follow-up): the call's page and a
+    /// refusal's alert come over it in the call's own window (`CallWindow`), so nothing closes Settings any more.
+    @Test func siriCallsLeaveThePageTheAppWasOn() throws {
         let lines = try Self.code("Persona/Calls/OwnerCall.swift")
         let call = try #require(Self.body(lines, "func callPersona("))
-        let clear = try #require(call.range(of: "if origin != .app { await Self.clearTheWay(model) }"))
-        let shown = try #require(call.range(of: "presented = true"))
-        #expect(clear.upperBound < shown.lowerBound, "Settings closes before the page is asked for")
-        let clearing = try #require(Self.body(lines, "static func clearTheWay("))
-        #expect(clearing.contains("model.shellSettings = false"))
-        #expect(clearing.contains("where rootPresents"), "the page waits for the sheet to have gone")
+        #expect(!call.contains("shellSettings") && !call.contains("clearTheWay"), "the call closes what the owner was doing")
+        #expect(Self.body(lines, "static func clearTheWay(") == nil)
     }
 
     /// CarPlay ignores state switches before the template is on screen: `show` never switches directly.

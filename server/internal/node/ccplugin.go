@@ -422,12 +422,14 @@ func ownerInputExact(params json.RawMessage) bool {
 	return owner && err == io.EOF
 }
 
-// ownerDelivery is where sendOutside says how the owner's message went in, for session.send's answer.
+// ownerDelivery is where the send says how the owner's message went in (a tmux pane, the plugin or the inbox), for
+// session.send's answer.
 type ownerDelivery struct{ as, reason string }
 
 type ownerDeliveryKey struct{}
 
-// withOwnerDelivery marks a send as the owner's own message (owner_input): sendOutside may hand it to the plugin.
+// withOwnerDelivery marks a send as the owner's own message (owner_input): an outside Claude's tmux pane takes it as
+// terminal input; without a pane, sendOutside may hand it to the plugin.
 func withOwnerDelivery(ctx context.Context) (context.Context, *ownerDelivery) {
 	d := new(ownerDelivery)
 	return context.WithValue(ctx, ownerDeliveryKey{}, d), d

@@ -1,7 +1,9 @@
 package persona.feature.inbox
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
@@ -90,6 +92,27 @@ class LarkThreadTest {
         assertEquals(listOf("latest"), loader.state.value.messages.map { it.id })
         assertEquals(2, loader.state.value.revision)
         assertNull(requested.last())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun aRefreshAskedForWhileAnOlderPageIsReadStillRuns() = runTest {
+        var newest = listOf(message("r1"), message("r2"))
+        val older = CompletableDeferred<Unit>()
+        val loader = LarkThreadLoader("root", LarkThreadSource { before ->
+            if (before == null) LarkThreadPage(newest, true, "c1") else { older.await(); LarkThreadPage(listOf(message("r0")), false, null) }
+        })
+        loader.load()
+        val reading = launch { loader.load(older = true) }
+        runCurrent()
+        // The user's reply arrives while the older page is still on its way: the sheet asks for the newest page again.
+        newest = listOf(message("r1"), message("r2"), message("r3"))
+        val refresh = launch { loader.load() }
+        runCurrent()
+        older.complete(Unit)
+        reading.join()
+        refresh.join()
+        assertEquals("r3", loader.state.value.messages.last().id)
+        assertFalse(loader.state.value.loading)
     }
 
     private fun message(id: String, text: String = "回复") = LarkMessage(

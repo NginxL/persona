@@ -14,6 +14,8 @@ nonisolated enum RecordingSpeechError: LocalizedError {
     case unsupportedLanguage
     case noSpeechPermission
     case modelUnavailable
+    /// iOS 18: on-device transcription (SpeechAnalyzer) came with iOS 26 (#6730).
+    case needsNewerSystem
     case empty
 
     var errorDescription: String? {
@@ -21,6 +23,7 @@ nonisolated enum RecordingSpeechError: LocalizedError {
         case .unsupportedLanguage: String(localized: "This device has no on-device transcription model for the selected language")
         case .noSpeechPermission: String(localized: "Speech recognition is off. Allow it for Persona in Settings.")
         case .modelUnavailable: String(localized: "Couldn't download the on-device speech model. Check your network and try again.")
+        case .needsNewerSystem: String(localized: "Transcribing on this device needs iOS 26 or later. You can transcribe recordings on your hub instead.")
         case .empty: String(localized: "No speech was recognized in the recording")
         }
     }
@@ -29,7 +32,7 @@ nonisolated enum RecordingSpeechError: LocalizedError {
     /// file would fail the same way, so all-day recording's lane stops without counting a try against its chunks.
     var isEntryLevel: Bool {
         switch self {
-        case .unsupportedLanguage, .noSpeechPermission, .modelUnavailable: true
+        case .unsupportedLanguage, .noSpeechPermission, .modelUnavailable, .needsNewerSystem: true
         case .empty: false
         }
     }
@@ -39,7 +42,7 @@ nonisolated enum RecordingSpeechError: LocalizedError {
     var isPerLanguage: Bool {
         switch self {
         case .unsupportedLanguage, .modelUnavailable: true
-        case .noSpeechPermission, .empty: false
+        case .noSpeechPermission, .needsNewerSystem, .empty: false
         }
     }
 }

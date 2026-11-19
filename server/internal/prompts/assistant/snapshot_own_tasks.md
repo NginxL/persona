@@ -2,5 +2,5 @@
 {{else if .Omit.Tasks}}{{len .Tasks}} 个，{{template "assistant/snapshot_omitted" "todo_list"}}
 {{else}}
 {{range .Tasks}}{{template "assistant/snapshot_task" .}}
-{{end}}{{end}}{{end}}{{with .OpenTodos}}- 这个对话派出或督办的其他开放任务（{{if $.Omit.OpenTodos}}仅列 ID{{else}}列出 ID 和标题{{end}}）：{{range $i, $t := .}}{{if $i}}；{{end}}{{$t.ID}}{{if not $.Omit.OpenTodos}}「{{$t.Title}}」{{with $t.Link}}（{{.}}）{{end}}{{end}}{{end}}
+{{end}}{{end}}{{end}}{{with .OpenTodos}}- 这个对话派出或督办的其他开放任务（{{if $.Omit.OpenTodos}}仅列 ID{{else}}列出 ID 和标题{{end}}）：{{range $i, $t := .}}{{if $i}}；{{end}}{{$t.ID}}{{if not $.Omit.OpenTodos}}「{{$t.Title}}」{{with $t.Link}}（{{.}}）{{end}}{{end}}{{if $t.Failed}}（没开起来）{{end}}{{end}}
 {{end}}

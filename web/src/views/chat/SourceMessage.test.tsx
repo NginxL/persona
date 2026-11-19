@@ -25,6 +25,34 @@ describe("source messages in the actual transcript renderer", () => {
     expect(host.textContent).toContain("@Build review");
   });
 
+  it("shows each scheduled check as a compact, non-user bubble with a reversible preview", async () => {
+    const prompt = "Check the build & deployment.\nThen read <example> literally.\nThe full instructions stay available.";
+    const scheduled = (seq: number) => ({ ...input(seq, prompt), source: { kind: "scheduled_task" } });
+    const reply: Item = { id: "answer", seq: 2, role: "assistant", kind: "text", text: "心跳检查已完成，无新动态" };
+    const host = render([scheduled(1), reply, scheduled(3)]);
+    await act(async () => {});
+    await vi.waitFor(() => expect(host.querySelectorAll('[data-message-source="scheduled_task"]')).toHaveLength(2));
+    expect(host.querySelector("[data-user-bubble]")).toBeNull();
+    const cards = host.querySelectorAll('[data-message-source="scheduled_task"]');
+    expect(cards).toHaveLength(2);
+    const card = cards[0];
+    expect(card.textContent).toContain("由已安排任务发送");
+    const preview = card.querySelector("[data-scheduled-body]");
+    expect(preview?.textContent).toBe(prompt);
+    expect(preview?.classList.contains("line-clamp-2")).toBe(true);
+    expect(preview?.querySelector("example")).toBeNull();
+    expect(preview?.hasAttribute("data-source-folded")).toBe(true);
+    const toggle = card.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    expect(toggle.textContent).toBe("显示更多");
+    expect(toggle.closest("[data-disclosure-anchor]")?.contains(preview!)).toBe(true);
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(preview?.classList.contains("line-clamp-2")).toBe(false);
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(preview?.hasAttribute("data-source-folded")).toBe(true);
+  });
+
   it("shows the source once for consecutive messages", () => {
     const host = render([input(1, "First report"), input(2, "Second report")]);
     expect(host.querySelectorAll(".chat-source-label")).toHaveLength(1);

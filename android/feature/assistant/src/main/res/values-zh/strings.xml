@@ -94,6 +94,7 @@
     <string name="assistant_full_search_no_results">没有找到“%1$s”</string>
     <string name="assistant_start_main">开始主对话</string>
     <string name="assistant_main_chat">主对话</string>
+    <string name="assistant_main_conversation">主对话</string>
     <!-- The drawer's newest eligible chats, between 常驻 and All chats (#4922, #5196) -->
     <string name="assistant_recent">最近</string>
     <string name="assistant_directions">常驻</string>
@@ -183,6 +184,16 @@
     <string name="assistant_rename_field">会话名</string>
     <string name="assistant_save">保存</string>
     <string name="assistant_renamed">已重命名</string>
+    <string name="assistant_edit_tags_menu">编辑标签…</string>
+    <string name="assistant_tags_title">编辑标签</string>
+    <string name="assistant_tags_filter">按标签筛选</string>
+    <string name="assistant_tags_add">添加</string>
+    <string name="assistant_tags_placeholder">添加标签</string>
+    <string name="assistant_tags_remove">移除 %1$s</string>
+    <string name="assistant_tags_hint">按回车添加。最多 %1$d 个标签，每个不超过 %2$d 个字符。</string>
+    <string name="assistant_tag_too_long">每个标签最多 %1$d 个字符。</string>
+    <string name="assistant_tag_count_limit">一段对话最多 %1$d 个标签。</string>
+    <string name="assistant_tags_saved">已保存「%1$s」的标签</string>
     <string name="assistant_copy_diagnostics">拷贝诊断</string>
     <string name="assistant_diagnostics_copied">已拷贝诊断</string>
     <string name="assistant_end_menu">结束…</string>

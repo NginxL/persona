@@ -49,8 +49,6 @@ data class ChatChromeBindings(
      * it names one; null: paths are not offered.
      */
     val onOpenPath: ((path: String, line: Int?) -> Unit)? = null,
-    /** "Hand to Persona" on a message: hands the given text to the main Persona conversation; null: not offered. */
-    val onHandToPersona: ((String) -> Unit)? = null,
     /** The assistant conversation's tasks (docs/assistant/unified-entry.md); null for an agent's chat. */
     val tasks: persona.core.domain.tasks.TasksStore? = null,
     val onOpenTodo: ((String) -> Unit)? = null,
@@ -65,6 +63,8 @@ data class ChatChromeBindings(
      * [manager]; null: the recommended-setup rows have no button.
      */
     val onOpenSetup: ((page: persona.core.contracts.BriefSetupPage, manager: String?) -> Unit)? = null,
+    /** The manager's main conversation id, when known before [tasks] or [assistantManagement] resolves. */
+    val mainConversation: String? = null,
     /**
      * The hub's leader (direction) conversations for this manager (#6595): their patrol, supervision and relayed
      * rounds fold like the main conversation's. Empty from an older hub or a non-assistant surface.

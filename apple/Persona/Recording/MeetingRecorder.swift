@@ -29,6 +29,8 @@ import UserNotifications
         guard !started else { return }
         started = true
         RecordingActivity.shared.start()
+        // A calendar meeting's reminder a minute before it starts (#8731 G2).
+        MeetingReminders.shared.start()
         MinutesRelay.shared.start()
         capture.onInterruptionNotResumed = { MeetingRecorder.notifyPaused() }
         // However a meeting stops: nothing more is said in it, and its questions go (#2981); its call and Talk end
@@ -79,6 +81,13 @@ import UserNotifications
     /// typed on the quick start (#8731), kept over the calendar's.
     func startMeeting(inForeground: Bool, openPage: Bool? = nil, attendance: RecordingAttendance? = nil,
                       event: RecordingMeeting? = nil, title: String? = nil) async -> Outcome {
+        // A live system call keeps its audio session (docs/apple/calls.md): refused with a note, nothing opens, the call
+        // goes on. The + list, the home screen's menu, Siri and the Control land here; the Recordings page's own start
+        // says it under its button (`RecordingCapture.callGate`).
+        if let refusal = capture.callGate() {
+            if inForeground { AppModel.shared.toast = Toast(refusal) }
+            return .failed(refusal)
+        }
         if openPage ?? inForeground { Self.openRecordings() }
         guard capture.state == .idle else { return .alreadyRecording }
         var meeting: RecordingMeeting
@@ -108,6 +117,8 @@ import UserNotifications
             RecordingSync.shared.attendanceChanged(id)
         }
         RecordingActivity.shared.refresh()
+        // The meeting on now needs no reminder of itself.
+        MeetingReminders.shared.refresh()
         Haptics.success()
         // Not awaited: an intent must not wait on the user answering the calendar prompt.
         if inForeground, meeting.eventID == nil, MeetingCalendar.canAsk {

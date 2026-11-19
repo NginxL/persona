@@ -114,7 +114,7 @@ class LeaderConfirmTest {
         }
         val bindings = AssistantHostBindings(
             identity = "test", management = management, drafts = drafts, coroutineScope = scope,
-            phoneToolsAvailable = false, machines = emptyList(), mainSender = mainSender,
+            phoneToolsAvailable = false, machines = emptyList(), conversations = repository, mainSender = mainSender,
             chatContent = { _, _ -> },
         )
         rule.setContent {

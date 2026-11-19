@@ -1,5 +1,12 @@
 package persona.feature.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,6 +42,7 @@ import persona.core.contracts.WorkArtifact
 import persona.core.designsystem.JCard
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.SharedMotion
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.JButton
 import persona.core.designsystem.JButtonKind
@@ -110,6 +118,14 @@ internal fun CloseoutCard(closeout: Closeout, artifacts: List<WorkArtifact>, ses
     val expanded = stringResource(persona.core.designsystem.R.string.designsystem_expanded)
     val collapsed = stringResource(persona.core.designsystem.R.string.designsystem_collapsed)
     val fieldsMax = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * CloseoutFieldsShare).toDp() }
+    // iOS CloseoutCard.swift:48: withAnimation(Theme.Motion.reveal) { open.toggle() }. The details use the
+    // default .opacity transition, so height and fade both follow Theme.Motion.reveal (`Theme.swift:784`),
+    // opening and closing; not `.unfolding`. Reduce Motion jumps (nil animation).
+    val reduceMotion = PersonaTheme.reduceMotion
+    val enter = if (reduceMotion) EnterTransition.None
+        else fadeIn(SharedMotion.reveal()) + expandVertically(SharedMotion.reveal(), expandFrom = Alignment.Top)
+    val exit = if (reduceMotion) ExitTransition.None
+        else fadeOut(SharedMotion.reveal()) + shrinkVertically(SharedMotion.reveal(), shrinkTowards = Alignment.Top)
     // A neutral card in every style: where it stands is said by the head's mark and words, never by the container.
     JCard(modifier.fillMaxWidth().testTag("closeout-card"), padding = Tokens.Space.m) {
         Row(
@@ -127,21 +143,31 @@ internal fun CloseoutCard(closeout: Closeout, artifacts: List<WorkArtifact>, ses
             }
             if (hasBody) JIcon(if (open) PhIcons.CaretDown else PhIcons.CaretRight, null, size = Tokens.Space.m, tint = palette.ink3, decorative = true)
         }
-        if (hasBody && open) SelectionContainer {
-            Column(Modifier.fillMaxWidth().heightIn(max = fieldsMax).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.xs).testTag("closeout-fields"),
-                verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                if (did.isNotEmpty()) CloseoutField(stringResource(R.string.chat_closeout_did)) {
-                    did.forEach { Text(it, style = type.callout, color = palette.ink) }
-                }
-                if (artifacts.isNotEmpty()) CloseoutField(stringResource(R.string.chat_closeout_artifacts)) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), itemVerticalAlignment = Alignment.CenterVertically) {
-                        artifacts.forEach { CloseoutArtifact(it) }
+        // iOS only animates the user's toggle (`CloseoutCard.swift:48`); body arriving while already open
+        // is not animated. Compose `AnimatedVisibility` skips enter when first composed already visible.
+        if (hasBody) AnimatedVisibility(visible = open, enter = enter, exit = exit) {
+            SelectionContainer {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = fieldsMax).verticalScroll(rememberScrollState())
+                        .padding(top = Tokens.Space.xs).testTag("closeout-fields"),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    if (did.isNotEmpty()) CloseoutField(stringResource(R.string.chat_closeout_did)) {
+                        did.forEach { Text(it, style = type.callout, color = palette.ink) }
                     }
+                    if (artifacts.isNotEmpty()) CloseoutField(stringResource(R.string.chat_closeout_artifacts)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            artifacts.forEach { CloseoutArtifact(it) }
+                        }
+                    }
+                    merged?.let { CloseoutField(stringResource(R.string.chat_closeout_merged)) { ClaimLine(CloseoutSubject.Merged, it) } }
+                    deployed?.let { CloseoutField(stringResource(R.string.chat_closeout_deployed)) { ClaimLine(CloseoutSubject.Deployed, it) } }
+                    verified?.let { CloseoutField(stringResource(R.string.chat_closeout_verified)) { Text(it, style = type.callout, color = palette.ink) } }
+                    missing?.let { CloseoutField(stringResource(R.string.chat_closeout_missing)) { Text(it, style = type.callout, color = palette.ink) } }
                 }
-                merged?.let { CloseoutField(stringResource(R.string.chat_closeout_merged)) { ClaimLine(CloseoutSubject.Merged, it) } }
-                deployed?.let { CloseoutField(stringResource(R.string.chat_closeout_deployed)) { ClaimLine(CloseoutSubject.Deployed, it) } }
-                verified?.let { CloseoutField(stringResource(R.string.chat_closeout_verified)) { Text(it, style = type.callout, color = palette.ink) } }
-                missing?.let { CloseoutField(stringResource(R.string.chat_closeout_missing)) { Text(it, style = type.callout, color = palette.ink) } }
             }
         }
     }

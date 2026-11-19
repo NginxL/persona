@@ -292,6 +292,8 @@ extension MeetingSpeaker.Deps {
              spoken: { id, span in RecordingLibrary.shared.change(id) { entry in entry.attendance?.spoken.append(span) } },
              speaking: { id, on, at, text in MeetingTranscription.shared.speaking(id, voice: .answer, on: on, at: at, text: text) },
              routeToSpeaker: {
+                 // A meeting recording a system call paused: the route is the call's (docs/apple/calls.md).
+                 guard !LiveCallGate.callIsLive else { return false }
                  let session = AVAudioSession.sharedInstance()
                  guard VoiceRoute.output(PhoneVoiceAudio.snapshot(session)).speaker else { return false }
                  do {
@@ -303,7 +305,10 @@ extension MeetingSpeaker.Deps {
                      return false
                  }
              },
-             restoreOutput: { try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.none) })
+             restoreOutput: {
+                 guard !LiveCallGate.callIsLive else { return }
+                 try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
+             })
     }
 }
 

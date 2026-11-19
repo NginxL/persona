@@ -229,7 +229,7 @@ class ChatParityShotsTest {
         var code by mutableStateOf(true)
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
-                MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {}, onHandToPersona = null, onNotice = {},
+                MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {}, onForward = null, onNotice = {},
                     onFork = { forked = it }, rewind = RewindMenu(block, code) { target, restore -> rewound = target.id to restore })
             }
         }

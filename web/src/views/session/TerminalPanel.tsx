@@ -45,6 +45,7 @@ import { FullTerminal, useUnseen } from "./terminal/FullTerminal";
 import { KeyBar } from "./terminal/KeyBar";
 import { KEYBAR_KEY, savedKeyBar } from "./terminal/keybar-pref";
 import { LinkStatus } from "./terminal/LinkStatus";
+import { PaneActions } from "./terminal/PaneActions";
 import { ModeToggle } from "./terminal/ModeToggle";
 import { ShortcutsEditor } from "./terminal/Shortcuts";
 import { Surface } from "./terminal/Surface";
@@ -534,27 +535,12 @@ export function TerminalPanel({
 
   return (
     <div ref={root} className="@container flex min-h-0 flex-1 flex-col">
-      {embedded ? (
-        // the page has its header (title, "Terminal" | "Chat", close): this is a toolbar of the terminal's own controls under it
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
-          {supported && <ModeToggle mode={surfaces.shown} onChange={choose} />}
-          <span className="flex-1" />
-          <span ref={setSlot} className="contents" />
-        </div>
-      ) : (
-        <PanelHeader
-          icon="terminal"
-          title={t("session-terminalpanel.title")}
-          subtitle={subtitle}
-          onClose={onClose}
-          actions={
-            <>
-              {supported && <ModeToggle mode={surfaces.shown} onChange={choose} />}
-              <span ref={setSlot} className="contents" />
-            </>
-          }
-        />
-      )}
+      {!embedded && <PanelHeader icon="terminal" title={t("session-terminalpanel.title")} subtitle={subtitle} onClose={onClose} />}
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1" data-terminal-toolbar>
+        {supported && <ModeToggle mode={surfaces.shown} onChange={choose} />}
+        <PaneActions key={key} mid={mid} sid={sid} fullSupported={supported} onSplit={() => choose("full")} />
+        <span ref={setSlot} className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2" />
+      </div>
       {resumable && <ResumeLine mid={mid} sid={sid} closed={paneOffline} />}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {order.map((mode) => {

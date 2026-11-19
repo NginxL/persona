@@ -202,7 +202,7 @@ class WatcherIntegrationTests(unittest.TestCase):
         self.assertFalse(any(call.get("reviewer") for call in calls))
 
     def test_findings_use_changed_line_and_do_not_merge(self):
-        self.env["FAKE_REVIEW_FINDINGS"] = json.dumps([{"path": "fix.py", "line": 2, "severity": "P1",
+        self.env["FAKE_REVIEW_FINDINGS"] = json.dumps([{"path": "fix.py", "line": 2, "severity": "P0",
                                                         "summary": "Example defect", "suggestion": "Correct it"}])
         calls = self.run_watch()
         review = next(call["review"] for call in calls if call.get("review"))
@@ -214,7 +214,7 @@ class WatcherIntegrationTests(unittest.TestCase):
 
     def test_invalid_inline_anchor_falls_back_to_a_grouped_review(self):
         self.env["FAKE_REJECT_INLINE"] = "1"
-        self.env["FAKE_REVIEW_FINDINGS"] = json.dumps([{"path": "fix.py", "line": 2, "severity": "P1",
+        self.env["FAKE_REVIEW_FINDINGS"] = json.dumps([{"path": "fix.py", "line": 2, "severity": "P0",
                                                         "summary": "Example defect", "suggestion": "Correct it"}])
         calls = self.run_watch()
         review = next(call for call in calls if call.get("argv", [])[:2] == ["pr", "review"])

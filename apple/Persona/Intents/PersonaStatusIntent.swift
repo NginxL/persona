@@ -9,6 +9,7 @@ struct PersonaStatusIntent: AppIntent {
         categoryName: "Status",
         searchKeywords: ["Status", "pending [Persona Status Intent f81ff5]", "pending [Persona Status Intent 999a45]"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     nonisolated init() {}

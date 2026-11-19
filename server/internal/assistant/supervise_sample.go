@@ -154,7 +154,7 @@ func (s *Service) judgeClose(ctx context.Context, t Todo, key, reason string, c 
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	for _, k := range []string{sigReview, sigIdle, sigNeedsYou, sigStalled} {
+	for _, k := range []string{sigReview, sigIdle, sigNeedsYou, sigStalled, sigNoProgress} {
 		delete(b.pending, t.ID+"|"+k)
 	}
 	b.mu.Unlock()

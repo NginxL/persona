@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/aiwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -44,10 +45,11 @@ while [ $# -gt 0 ]; do
   [ "$1" = --settings ] && cat "$2" > `+shellQuote(filepath.Join(out, "settings"))+`
   shift
 done
-printf '{"type":"result","subtype":"success","is_error":false,"result":"pong","modelUsage":{"m-1":{}}}\n'
+printf '{"type":"result","subtype":"success","is_error":false,"result":"pong","modelUsage":{"m-1":{}},"usage":{"input_tokens":14,"output_tokens":7,"cache_read_input_tokens":95,"cache_creation_input_tokens":83}}\n'
 `)
 	got, err := runModel(t, proto.ModelRunParams{Launcher: "claude", Model: "m-1", Effort: "high", System: "be brief", Prompt: "ping"})
-	if a, ok := got.(proto.ModelRunAnswer); err != nil || !ok || a.Text != "pong" || a.Model != "m-1" {
+	usage := aiwire.Usage{InputTokens: 14, OutputTokens: 7, CacheReadInputTokens: 95, CacheCreationInputTokens: 83}
+	if a, ok := got.(proto.ModelRunAnswer); err != nil || !ok || a.Text != "pong" || a.Model != "m-1" || a.Usage != usage {
 		t.Fatalf("answer: %#v %v", got, err)
 	}
 	read := func(name string) string {

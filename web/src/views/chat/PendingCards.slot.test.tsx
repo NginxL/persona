@@ -12,6 +12,9 @@ import { PendingCards } from "./Interactions";
 import { getState, reset } from "../../lib/store";
 import type { AnsweredCard } from "../../lib/store";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -297,6 +297,9 @@ class GroupRoutingTest {
         override suspend fun codexSettings(machineId: String) = emptyList<ClaudeSetting>().also { calls += "codex settings $machineId" }
         override suspend fun setCodexSetting(machineId: String, key: String, value: kotlinx.serialization.json.JsonElement) =
             emptyList<ClaudeSetting>().also { calls += "set codex $machineId $key" }
+        override suspend fun agySettings(machineId: String) = emptyList<ClaudeSetting>().also { calls += "agy settings $machineId" }
+        override suspend fun setAgySetting(machineId: String, key: String, value: kotlinx.serialization.json.JsonElement) =
+            emptyList<ClaudeSetting>().also { calls += "set agy $machineId $key" }
         override suspend fun doctor(machineId: String) =
             persona.core.contracts.api.DoctorReport(dir = hub).also { calls += "doctor $machineId" }
         override suspend fun fixDoctor(machineId: String) =
@@ -328,11 +331,14 @@ class GroupRoutingTest {
         managed.setClaudeSetting("macbook~g0a1b2c3d", "model", kotlinx.serialization.json.JsonPrimitive("opus"))
         managed.codexSettings("macbook~g0a1b2c3d")
         managed.setCodexSetting("macbook~g0a1b2c3d", "model", kotlinx.serialization.json.JsonPrimitive("gpt-5.5"))
+        managed.agySettings("macbook~g0a1b2c3d")
+        managed.setAgySetting("macbook~g0a1b2c3d", "toolPermission", kotlinx.serialization.json.JsonPrimitive("always-proceed"))
         assertEquals(HerdrState(false, false, true), managed.herdr("macbook~g0a1b2c3d"))
         assertEquals(HerdrState(false, true, true), managed.startHerdr("macbook~g0a1b2c3d"))
         val changed = managed.setEngine("macbook~g0a1b2c3d", "orca")
         assertEquals(listOf("reconnect macbook", "deploy macbook", "launchers macbook", "settings macbook",
             "quota macbook cc_main true", "set macbook model", "codex settings macbook", "set codex macbook model",
+            "agy settings macbook", "set agy macbook toolPermission",
             "herdr macbook", "start herdr macbook", "engine macbook orca"), work.calls)
         // the machine it hands back is the merged list's, so the page finds it again
         assertEquals("macbook~g0a1b2c3d", changed.id)

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyDraft, onDraftEvent, parseQuote, replaceNeedsConfirm, sendDraft, splitQuote, storedQuotes, withAppended, withQuote, withQuoteBlock, withUnsent } from "./drafts";
-import { browseTarget, byPrefix, chatFiles, displayTitle, mentionAt, nameMatches, otherSessions, relPath, replaceToken, sessionQuote, workspaceContext, workspaceMatches, workspaceTitle } from "./mentions";
+import { browseTarget, byPrefix, chatFiles, displayTitle, mentionAt, nameMatches, otherSessions, relPath, replaceToken, sessionDetail, sessionQuote, workspaceContext, workspaceMatches, workspaceTitle } from "./mentions";
 import { contextXML } from "./links";
 import type { Workspace } from "./workspace-board";
 import { keepAllBut, moved, movedTo, sameMessage } from "./queue";
@@ -170,6 +170,19 @@ describe("@ mentions", () => {
     expect(otherSessions(all, "m/self", "").map((s) => s.session_id)).toEqual(["b", "a"]);
     expect(otherSessions(all, "m/self", "codex").map((s) => s.session_id)).toEqual(["b"]);
     expect(displayTitle({ title: "Claude Code", cwd: "/x/weather" })).toBe("weather");
+  });
+
+  it("names a Windows computer's folder by its own separator (#9901)", () => {
+    const win = sess("w", { title: "", cwd: "C:\\Users\\me\\code\\app" });
+    expect(displayTitle(win)).toBe("app");
+    expect(sessionDetail(win)).toBe("Claude · app");
+    expect(displayTitle({ title: "Claude Code", cwd: "C:\\Users\\me\\code\\app\\" })).toBe("app");
+    expect(displayTitle({ title: "", cwd: "\\\\server\\share\\app" })).toBe("app");
+    expect(workspaceTitle({ title: "", cwd: "D:\\work\\notes" })).toBe("notes");
+    // elsewhere a backslash is part of a name; no folder, or the root, is still untitled
+    expect(displayTitle({ title: "", cwd: "/code/a\\b" })).toBe("a\\b");
+    expect(displayTitle({ title: "", cwd: "/" })).toBe(displayTitle({ title: "", cwd: "" }));
+    expect(sessionDetail(sess("r", { cwd: "/" }))).toBe("Claude");
   });
 
   it("quotes a session with its folder and last words", () => {

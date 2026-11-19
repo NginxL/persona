@@ -74,6 +74,9 @@ export interface Attachment {
 export interface Outgoing {
   text: string;
   images: { mime: string; data: string }[];
+  /** A real Quote action, not typed Markdown, a comment or an edit's restored quote (#10346): keep an earlier reader's
+   *  place; already at the end, the send follows as usual. UI-only, never part of the hub's wire body. */
+  quoteReply?: boolean;
   /** An edit of the last message, sent after its rewind (#4605): the old prompt, which Claude may have put back in its
    *  box, cleared exactly before typing. A refusal leaves the edit in the box unsent, not as a failed bubble. */
   edit?: { clearDraft: string };
@@ -764,7 +767,9 @@ export const Composer = memo(function Composer({
     // files after the words as <persona-file> tags, the words as typed (with none, a line saying to look at them)
     const said = !text.trim() && !sent.length && sentFiles.length ? t("chat-composer.see_files") : text;
     const body = withFiles(withQuoteBlock(q, said), sentFiles);
-    const ok = await onSend({ text: withContexts(refs, body, sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })), ...(committed ? { edit: committed } : {}) });
+    const quoteReply = !edit && q.some((x) => !x.comment);
+    const ok = await onSend({ text: withContexts(refs, body, sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })),
+      ...(quoteReply ? { quoteReply: true } : {}), ...(committed ? { edit: committed } : {}) });
     if (!canWriteDraft()) { releaseAttachments(sent); return; }
     if (ok) {
       history.record(skillDraft(refs, text));

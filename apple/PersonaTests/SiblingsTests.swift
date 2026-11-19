@@ -96,4 +96,24 @@ struct NamedMachineTests {
         #expect(changed == 1, "a rename")
         #expect(model.namedMachine(box)?.name == "Studio")
     }
+
+    /// A heartbeat tells nobody who read `machines` (#10231). Each reader was fixed on its own before (a chat's subtitle,
+    /// #1337; the Agents list, #1495) until every Agents row read them through its menu and drew again on every push.
+    @Test func aHeartbeatDoesNotTellWhoReadTheMachines() throws {
+        let model = AppModel()
+        let box = MachineRef(id: "box")
+        model.replaceMachines("", [try machine("Box", seen: "2026-11-04T10:00:00Z")])
+        nonisolated(unsafe) var machines = 0
+        nonisolated(unsafe) var seen = 0
+        withObservationTracking { _ = model.machines; _ = model.canShowScreen(box) } onChange: { machines += 1 }
+        withObservationTracking { _ = model.lastSeen(box) } onChange: { seen += 1 }
+        let later = try machine("Box", seen: "2026-11-04T10:00:05Z")
+        model.replaceMachines("", [later])
+        #expect(machines == 0, "a heartbeat")
+        #expect(seen == 1, "what shows when the hub last heard from it is told")
+        #expect(model.machine(box)?.lastSeen == later.lastSeen, "the data is the latest all the same")
+        #expect(model.lastSeen(box) == later.lastSeen)
+        model.replaceMachines("", [try machine("Studio", seen: "2026-11-04T10:00:10Z")])
+        #expect(machines == 1, "a rename")
+    }
 }

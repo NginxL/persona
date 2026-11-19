@@ -16,6 +16,12 @@ type SessionLive struct {
 	Thinking bool `json:"thinking,omitempty"`
 	// ThoughtS: it just thought for this many seconds ("thought for 3s").
 	ThoughtS int `json:"thought_s,omitempty"`
+	// RetryError is the model request error Claude says it is retrying, without its countdown or attempt suffix.
+	RetryError string `json:"retry_error,omitempty"`
+	// RetryAttempt is the current model request attempt, as shown on screen.
+	RetryAttempt int `json:"retry_attempt,omitempty"`
+	// RetryMax is the maximum number of attempts, as shown on screen.
+	RetryMax int `json:"retry_max,omitempty"`
 	// At is when the node read it (RFC 3339).
 	At string `json:"at,omitempty"`
 }

@@ -68,7 +68,7 @@ type Credentials interface {
 ```
 
 - Credentials live on the hub: AES-GCM encryption with `secret.key` (the same master key as launcher keys and `mail` credentials, `internal/secretkey`), in a new Postgres table
-  `connector_accounts(connector, account, config jsonb, secret_enc text, created_at, updated_at)`; check every worktree before selecting a migration number.
+  `connector_accounts(connector, account, config jsonb, secret_enc text, created_at, updated_at)`; its migration is named by the UTC second it is written (`docs/server/server.md` "Migrations").
   Plaintext exists only in memory and is never returned by an API (only "configured" and the account name). A hub.json `<connector>.token_file` (0600) is also available for people who do not want to use the App.
 - States such as `not_signed_in` appear consistently in Settings › Connectors, the `Inbox`'s top `error` bar, and assistant snapshots (it will not call tools when "GitHub is not signed in").
   In the App (`ConnectorText.state` / `tone`), only `error` says "Something went wrong"; red dots are only for `error` and `no_permission`. Disabled ("Off"), unconfigured and unsigned-in states have grey dots;
@@ -314,6 +314,7 @@ Later activity merges into the unresolved item; activity after completion opens 
 
 - **`Conversations`**: one per PR / `issue`, `chats/github-<owner>-<repo>-<number>` (`kind: pr | issue`), description first, then `issue` comments, reviews ("`alice` approved", "bob requested `changes`: …"),
   inline comments (with file:line), chronologically ordered. Bots (`[bot]` accounts, CI comments) are marked as bots and excluded from real people by `HasPeople`.
+  The chat carries the thread's state, and a merge, close or reopen adds one line (`docs/assistant/knowledge.md` "Chat state and finished projects", #9427).
 - **What is collected**: only `threads` "related to me" (seen in notifications + search `involves:@me` updated in the last 30 days), not entire repositories. Cursor uses thread `updated_at`
   + `since` per `comment` type (`StreamSource`); backfill reads all comments on first fetch (like Moments, no `Older` needed).
 - **Repositories link to projects**: project `dirs` (`<machine>:<path>`) are code directories; node `git.status` gains optional `remotes` (skip old nodes without it).
@@ -497,7 +498,7 @@ Implemented (#449): Settings › Connectors › Messages (which Mac, status, ste
 3. **Settings › Connectors status**: below existing "This iPhone / `Mail` / Lark", add rows from `/api/v1/connectors`:
    - GitHub: state, account, pasted token (instructions for methods A / B, `SecureField`, only "Configured" after saving), `base_url`, last sync, remaining rate limit.
    - Messages: source Mac, permissions (step-by-step setup when missing), conversations to collect (contacts only / all), exclusions, retention days.
-   - DEBUG entries `openConnectorGitHub`, `openConnectorMessages` (like `openConnectorFeishu`; names cannot clash with Swift identifiers and must be added to `release.sh`).
+   - DEBUG entries `openConnectorGitHub`, `openConnectorMessages` (like `openConnectorFeishu`; names cannot clash with Swift identifiers and must be added to `scripts/release/debug_switches.txt`).
    - Mock hub (`scripts/mock/mock_hub.py`) adds two connectors and synthetic items; use it for UI tests and dark/light screenshots.
 
 ## VII. Privacy

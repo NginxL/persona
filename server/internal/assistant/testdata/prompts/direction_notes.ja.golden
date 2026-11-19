@@ -1,0 +1,11 @@
+## この方向のメモ
+
+オーナーがこの会話の担当する方向「Weather」のために書いたものです。この方向の仕事と、そのタスクを Agent に渡すときに従ってください。あなたが開始する Agent にも渡されます。これはオーナーの言葉で、タスクではありません。オーナーのメッセージと食い違うときはメッセージが優先です。
+
+ナレッジベースのプロジェクト：Weather app
+目標：Ship on iOS and Android
+
+<direction-notes>
+- Readings: the store build number
+- Never deploy on Fridays
+</direction-notes>

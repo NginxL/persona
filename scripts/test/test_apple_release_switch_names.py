@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Names compiled into the iPhone app must not equal a DEBUG launch switch on release.sh's list.
+"""Names compiled into the iPhone app must not equal a DEBUG launch switch in scripts/release/debug_switches.txt.
 
-release.sh refuses a Release binary whose `strings` has a line equal to one of the DEBUG-only launch switches (its
-`grep -qxE '(…)'` list): such a line means DEBUG code got into the build. A stored property's or an enum case's name
-is a string in the binary too (Swift reflection metadata, SWIFT_REFLECTION_METADATA_LEVEL = all), and so is an `@objc`
-member's name or a string literal: a property called `openAgent` stops the release exactly as the switch `-openAgent`
-would, and only once someone archives (#2179, #8306; docs/lessons/ios.md). This reads the app's sources outside
-`#if DEBUG` for those names, so the collision fails here, before merge.
+release.sh refuses a Release binary whose `strings` has a line equal to one of the DEBUG-only launch switches listed
+there (scripts/release/debug_switches.py): such a line means DEBUG code got into the build. A stored property's or an
+enum case's name is a string in the binary too (Swift reflection metadata, SWIFT_REFLECTION_METADATA_LEVEL = all), and
+so is an `@objc` member's name or a string literal: a property called `openAgent` stops the release exactly as the
+switch `-openAgent` would, and only once someone archives (#2179, #8306; docs/lessons/ios.md). This reads the app's
+sources outside `#if DEBUG` for those names, so the collision fails here, before merge.
 
 Rename the property or case (`on…` / `select…` for closures), or give a new switch a name nothing in the app uses.
 Property wrappers (`@State var showInfo`) are stored as `_showInfo` and never collide.
 """
 import re
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "release"))
+import debug_switches
 APPLE = ROOT / "apple"
 # What goes into the iPhone app's own binary (apple/project.yml, target Persona): its sources and the local packages it
 # links. The watch app and the extensions are other binaries, which release.sh does not check.
@@ -32,9 +35,7 @@ LITERAL = re.compile(r'"([A-Za-z_]\w*)"')
 
 
 def switches() -> set:
-    text = (ROOT / "scripts/release/release.sh").read_text(encoding="utf-8")
-    m = re.search(r"grep -qxE '\(([^']+)\)'", text)
-    return set(m.group(1).split("|")) if m else set()
+    return set(debug_switches.names())
 
 
 # What a condition is in the iPhone app's Release archive: True, False, or None (could be either). The app target sets
@@ -169,8 +170,8 @@ def sources():
 
 class ReleaseSwitchNamesTest(unittest.TestCase):
     def test_list_is_read(self):
-        # A changed release.sh line must not quietly empty the list and pass everything.
-        self.assertGreater(len(switches()), 100, "release.sh's DEBUG switch list was not found")
+        # A broken list file must not quietly empty the list and pass everything.
+        self.assertGreater(len(switches()), 100, "scripts/release/debug_switches.txt lists no DEBUG switches")
 
     def test_no_release_name_equals_a_debug_switch(self):
         names = switches()
@@ -178,9 +179,9 @@ class ReleaseSwitchNamesTest(unittest.TestCase):
         for path in sources():
             for number, name, line in collisions(path.read_text(encoding="utf-8"), names):
                 bad.append(f"{path.relative_to(ROOT)}:{number}: {name}: {line[:100]}")
-        self.assertEqual(bad, [], "these names reach the Release binary and equal a DEBUG launch switch on release.sh's "
-                                  "list, so release.sh refuses the build: rename them (closures: on… / select…), "
-                                  "or move the code into #if DEBUG")
+        self.assertEqual(bad, [], "these names reach the Release binary and equal a DEBUG launch switch in "
+                                  "scripts/release/debug_switches.txt, so release.sh refuses the build: rename them "
+                                  "(closures: on… / select…), or move the code into #if DEBUG")
 
     def test_the_scan_itself(self):
         names = {"openAgent", "showInfo", "openSession"}

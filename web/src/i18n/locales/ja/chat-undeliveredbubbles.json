@@ -1,0 +1,6 @@
+{
+  "waiting": "未送信：{reason}。復旧すると自動で送信されます。",
+  "failed": "未送信：{reason}",
+  "images": "画像：{count} 枚",
+  "action_failed": "うまくいきませんでした：{error}"
+}

@@ -79,7 +79,7 @@ func (n *Node) worktreeAdd(ctx context.Context, kind, cwd, branch, nameHint stri
 		if err := checkBranch(ctx, repo.root, b); err != nil {
 			return res, err
 		}
-		if dest, err = n.checkoutPath(repo.root, dest); err != nil {
+		if dest, err = n.checkoutPath(ctx, repo.root, dest); err != nil {
 			return res, err
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -89,7 +89,7 @@ func (n *Node) worktreeAdd(ctx context.Context, kind, cwd, branch, nameHint stri
 		if exists {
 			args = []string{"worktree", "add", "--", dest, b}
 		}
-		if _, err := gitTimed(ctx, repo.root, 2*time.Minute, args...); err != nil {
+		if err := n.addWorktree(ctx, repo.root, dest, args...); err != nil {
 			return res, refusal("worktree_failed", gitFailure(err), nil)
 		}
 		return proto.WorktreeAdded{Path: dest, Branch: b, Root: repo.root}, nil

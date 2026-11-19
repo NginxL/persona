@@ -53,6 +53,16 @@ func wantCode(t *testing.T, err error, code string) {
 	}
 }
 
+// skipOnRecycleBin skips the rest of a test that puts files in the system's trash and looks for them in its folder. On
+// Windows the trash is the user's own Recycle Bin, which names what it keeps itself; trash_windows_test.go covers it
+// there and puts back all it recycles.
+func skipOnRecycleBin(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the trash is the user's Recycle Bin here (trash_windows_test.go)")
+	}
+}
+
 func notThere(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -191,6 +201,7 @@ func TestMoveFiles(t *testing.T) {
 		t.Fatal("keep did not keep both")
 	}
 
+	skipOnRecycleBin(t)
 	makeFile(t, filepath.Join(home, "proj", "b.txt"), "newer b")
 	if _, err := editCall(t, n, "file.move", map[string]any{"paths": []string{"~/proj/b.txt"}, "dir": "~/dest", "conflict": "replace"}); err != nil {
 		t.Fatal(err)
@@ -222,6 +233,7 @@ func TestMoveFiles(t *testing.T) {
 // A replace whose rename fails (the source went away after the request checked it) puts the destination back instead
 // of leaving it in the trash (#1968).
 func TestReplaceMoveFailureKeepsDestination(t *testing.T) {
+	skipOnRecycleBin(t)
 	t.Setenv("XDG_DATA_HOME", "")
 	n, home := writeNode(t)
 	makeFile(t, filepath.Join(home, "proj", "report.txt"), "new")
@@ -249,6 +261,7 @@ func TestReplaceMoveFailureKeepsDestination(t *testing.T) {
 // Trash and restore round-trip through the id alone (a fresh node puts it back), a name the trash already has gets a
 // number, Linux writes a .trashinfo, and a name taken meanwhile refuses the restore.
 func TestTrashAndRestore(t *testing.T) {
+	skipOnRecycleBin(t)
 	t.Setenv("XDG_DATA_HOME", "")
 	n, home := writeNode(t)
 	makeFile(t, filepath.Join(home, "proj", "a.txt"), "first")
@@ -312,6 +325,7 @@ func TestTrashAndRestore(t *testing.T) {
 
 // A made-up trash id can't take a file out of the trash into a place the guard keeps, or reach outside the trash.
 func TestRestoreChecksTheGuard(t *testing.T) {
+	skipOnRecycleBin(t)
 	t.Setenv("XDG_DATA_HOME", "")
 	n, home := writeNode(t)
 	files, _, _ := n.trashDirs()

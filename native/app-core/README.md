@@ -235,9 +235,13 @@ count; never titles, identifiers, paths, query text or exception messages.
 
 The shared `agents_list` fixture contract remains unchanged. `presentation_rows` is a separate opt-in for the compact By
 Project tab rows (#9292), and the adapter passes the production-prepared parent rows, nested-row counting flags and
-folded-child counts (#9136). A single frozen `now` drives both sides of `since:`; timestamps retain fractional seconds.
-Unsupported grouping, hub/source filters and extended search scopes are explicitly reported, not silently treated as
-parity. The unregistered-machine and matching-parent core discrepancy remains tracked as #9221. This is a DEBUG shadow,
+folded-child counts (#9136). The core applies the production `multiHub` / selected-`hub` setting before counts and quick
+filters, retaining hub-qualified paths when two hubs have the same machine/session short ID. A single frozen `now`
+drives both sides of `since:`; timestamps retain fractional seconds.
+The adapter preserves the production filtered traversal for `unread_shown`, independently of By Project display order.
+Compact presentation rows reuse the computed group order rather than session-ID input order (#9335).
+Unsupported grouping, source filters and extended search scopes are explicitly reported, not silently treated as parity.
+The unregistered-machine and matching-parent core discrepancy remains tracked as #9221. This is a DEBUG shadow,
 not approval to replace Swift with the core.
 
 ## Android Agents-list adapter and sort shadow (#8954)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -29,6 +30,9 @@ import (
 type pending struct {
 	ix   proto.Interaction
 	done chan proto.Resolution
+	// prepared is the authoritative process-local operation behind an assistant-owned approvalops.
+	// Clarification releases only its original caller; the card and this operation stay pending.
+	prepared *preparedApproval
 	// resolved broadcasts a claimed answer to every overlapping resumable waiter.
 	resolved       chan struct{}
 	resolution     *proto.Resolution
@@ -259,7 +263,13 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 // interaction: the wait resumes on it, or returns the answer given meanwhile. One the history has as still pending
 // (the manager restarted with it on the phone) is shown again without a second push.
 func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
+	return s.waitInteractionPrepared(ctx, ix, nil)
+}
+
+func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interaction, prepared *preparedApproval) (proto.Resolution, error) {
 	ix = cleanTitle(ix)
+	// Only an operation registered by this process can advertise clarification.
+	ix.CanClarify = prepared != nil
 	// A Just me turn's card, the node's or the manager's own (ask_user, a confirmation): pushed without its content,
 	// never to Lark or a channel (meeting_justme.go).
 	ix.Private = ix.Private || s.justMeNow(ix.MachineID, ix.SessionID)
@@ -298,20 +308,63 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 	if ix.Kind == proto.IxElicitation && !s.elicitationReachable(ix) {
 		return proto.Resolution{Dismiss: true}, nil
 	}
-	p := &pending{ix: ix, done: make(chan proto.Resolution, 1)}
-	s.fleet.mu.Lock()
-	// A screen interaction for the same session was a premature guess; the hook knows better.
-	// Tell the app now: the wait below can last until the hook times out.
+	p := &pending{ix: ix, done: make(chan proto.Resolution, 1), prepared: prepared}
+	var replaced *pending
 	var dropped []*pending
-	m := s.ixMapLocked()
-	for id, old := range m {
-		if old.ix.Kind == proto.IxScreen && old.ix.MachineID == ix.MachineID && old.ix.SessionID == ix.SessionID {
-			delete(m, id)
-			dropped = append(dropped, old)
+	for {
+		s.fleet.mu.Lock()
+		// A newer equivalent proposal atomically supersedes an older Clarifying
+		// one. An in-flight question finishes first; a final answer already
+		// claimed on the old card wins instead.
+		replaced = nil
+		var attempt *clarifyAttempt
+		if prepared != nil && prepared.op.Replacement != "" {
+			for _, old := range s.fleet.interactions {
+				if old.prepared != nil && old.prepared.clarified && !old.claimed && !old.prepared.terminal &&
+					old.prepared.op.Replacement == prepared.op.Replacement && old.ix.MachineID == ix.MachineID && old.ix.SessionID == ix.SessionID {
+					if old.prepared.attempt != nil {
+						attempt = old.prepared.attempt
+						break
+					}
+					replaced = old
+					old.claimed = true
+					old.prepared.terminal = true
+					old.prepared.reportStatus = "replaced"
+					old.prepared.outcome = approvalops.Outcome{Text: fmt.Sprintf("Newer approval %s replaced this proposal. Nothing changed; a decision on the fresh card is required.", ix.ID)}
+					old.prepared.result = proto.Resolution{Dismiss: true, Reason: "replaced"}
+					old.resolution = &old.prepared.result
+					if old.prepared.decisionTimer != nil {
+						old.prepared.decisionTimer.Stop()
+					}
+					if old.prepared.pauseTimer != nil {
+						old.prepared.pauseTimer.Stop()
+					}
+					break
+				}
+			}
 		}
+		if attempt != nil {
+			s.fleet.mu.Unlock()
+			<-attempt.done
+			continue
+		}
+		// A screen interaction for the same session was a premature guess; the hook knows better.
+		// Tell the app now: the wait below can last until the hook times out.
+		dropped = nil
+		m := s.ixMapLocked()
+		for id, old := range m {
+			if old.ix.Kind == proto.IxScreen && old.ix.MachineID == ix.MachineID && old.ix.SessionID == ix.SessionID {
+				delete(m, id)
+				dropped = append(dropped, old)
+			}
+		}
+		m[ix.ID] = p
+		s.fleet.mu.Unlock()
+		break
 	}
-	m[ix.ID] = p
-	s.fleet.mu.Unlock()
+	if replaced != nil {
+		s.finishPrepared(replaced, "cancelled")
+	}
 	for _, old := range dropped { // as a Codex card withdraws a screen card
 		s.recordEnd(old.ix.ID, "cancelled", nil)
 		s.finished(old)
@@ -328,6 +381,9 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 		s.record(ix)
 		s.announce(ix)
 	}
+	if prepared != nil {
+		s.startPreparedTimer(p)
+	}
 	resume := pushMCPInteraction(ctx, ix)
 	defer resume()
 	return s.await(ctx, p)
@@ -336,6 +392,9 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 // await blocks on a registered interaction. When ctx ends — the node's connection is gone — a resumable
 // interaction stays pending for its hook to claim again.
 func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, error) {
+	if p.prepared != nil {
+		return s.awaitPrepared(ctx, p)
+	}
 	s.fleet.mu.Lock()
 	if p.resolved == nil {
 		p.resolved = make(chan struct{})
@@ -537,11 +596,30 @@ func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bo
 // resolveApproved is resolve for an app's answer the hub relayed, with the device it vouched may approve a hand-off
 // card (nil: none). Only this way does a hand-off card take more than a no (secret_handoff.go).
 func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
+	s.fleet.mu.Lock()
+	prepared := s.fleet.interactions[id]
+	ownerSession := ""
+	if prepared != nil && prepared.prepared != nil && !r.Cancel {
+		ownerSession = prepared.ix.SessionID
+	}
+	s.fleet.mu.Unlock()
+	if ownerSession != "" {
+		// The web route resolves prepared cards directly instead of through Action;
+		// preserve the same owner-activity notification as every other answer path.
+		s.ownerHeard(ownerSession)
+	}
 	return s.resolveAnswer(ctx, id, r, true, nil, approver)
 }
 
 func (s *Service) resolveAnswer(ctx context.Context, id string, r proto.Resolution, remember bool, authorization *standingResolution,
 	approver *assistantwire.HandoffApprover) error {
+	s.fleet.mu.Lock()
+	prepared := s.fleet.interactions[id]
+	isPrepared := prepared != nil && prepared.prepared != nil
+	s.fleet.mu.Unlock()
+	if isPrepared {
+		return s.resolvePreparedAnswer(ctx, prepared, r, remember, authorization)
+	}
 	// A manager work card is answered in the manager, not by the stopped agent. Its local dismiss/defer choices remain
 	// valid, but an answer that would send text must be refused before the card is claimed and its answer is retried.
 	if ix, ok := s.pendingIx(id); ok && ix.ToolName == workCardTool && workResolutionSends(ix, r) {
@@ -843,6 +921,22 @@ func (s *Service) pendingCards() ([]proto.Interaction, map[string]bool) {
 	return out, told
 }
 
+// pendingOf are the pending interactions of the sessions in want (by computer, the session ids), by computer and
+// session, as they are held, in no order: without the task each agent works for (withTask), which a to-do's view
+// does not read. A list read copies only its runs' few cards this way, never the whole fleet's.
+func (s *Service) pendingOf(want map[string]map[string]bool) map[[2]string][]proto.Interaction {
+	out := map[[2]string][]proto.Interaction{}
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	for _, p := range s.fleet.interactions {
+		if want[p.ix.MachineID][p.ix.SessionID] {
+			k := [2]string{p.ix.MachineID, p.ix.SessionID}
+			out[k] = append(out[k], p.ix)
+		}
+	}
+	return out
+}
+
 // pendingIx is one pending interaction; false when it is not pending.
 func (s *Service) pendingIx(id string) (proto.Interaction, bool) {
 	s.fleet.mu.Lock()
@@ -967,7 +1061,13 @@ func (s *Service) ixInAssistant(ctx context.Context, ix proto.Interaction) bool 
 
 // honest is r without an Always the card does not keep (AlwaysHonored false): an older app, or one that does not
 // read the field, may still send it, and the answer's history must not say "always allowed" for a grant no one keeps.
+// An approved plan likewise uses the mode its start recorded, not an older client's hard-coded mode.
 func honest(ix proto.Interaction, r proto.Resolution) proto.Resolution {
+	if ix.Kind == proto.IxPlan && r.Approve != nil && *r.Approve {
+		if mode := proto.PlanAfterMode(ix.PlanThen); mode != "" {
+			r.Mode = mode
+		}
+	}
 	if ix.AlwaysHonored != nil && !*ix.AlwaysHonored {
 		r.Always = false
 	}
@@ -1005,6 +1105,7 @@ func toolTitle(l i18n.Lang, tool string) string {
 // search"), any other "Persona · agent read". "" for every other tool: the apps name those themselves. Without input,
 // the tool alone ("Report to supervisor"; Interaction.ToolNameTitle).
 func personaToolTitle(l i18n.Lang, name string, input json.RawMessage) string {
+	name = compat.CanonicalMCPToolName(name)
 	rest, ok := strings.CutPrefix(name, "mcp__")
 	i := strings.LastIndex(rest, "__")
 	if !ok || i <= 0 || !compat.IsMCPServer(strings.TrimPrefix(rest[:i], "plugin_")) || rest[i+2:] == "" {
@@ -1123,6 +1224,9 @@ func (s *Service) cancelMachineInteractions(machineID string) {
 	s.fleet.mu.Unlock()
 	s.feishuDetach(ids)
 	for _, id := range ids {
+		if s.endPreparedByID(id, "cancelled", "The computer that owned this approval disconnected; nothing changed.") {
+			continue
+		}
 		s.finishInteraction(id)
 	}
 }

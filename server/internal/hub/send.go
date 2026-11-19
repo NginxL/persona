@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -32,6 +31,9 @@ const (
 	sendDelivered = "delivered"
 	sendUnknown   = "unknown"
 	sendSending   = "sending"
+	// sendLater: nothing was typed, and the conversation's manager keeps the message and sends it again by itself
+	// (#10194, keepUndelivered): a retry of the id is answered as kept, never sent from here.
+	sendLater = "later"
 )
 
 type sendLog struct {
@@ -128,15 +130,8 @@ func sendTimingOf(ctx context.Context) *sendTiming {
 
 func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	started := time.Now()
-	p := map[string]any{}
-	if r.ContentLength != 0 {
-		if err := decodeJSONBody(w, r, &p, 32<<20); err != nil && !errors.Is(err, io.EOF) {
-			writeBodyErr(w, err, err)
-			return
-		}
-	}
-	if p == nil {
-		writeErr(w, http.StatusBadRequest, errors.New("request body must be a JSON object"))
+	p, ok := optionalObject(w, r, 32<<20)
+	if !ok {
 		return
 	}
 	if id, _ := p["client_msg_id"].(string); strings.HasPrefix(id, assistantwire.FirstMessageIDPrefix) {
@@ -221,6 +216,8 @@ func (h *Hub) messageSendState(mid, sid, id string, status int, body []byte) str
 	_ = json.Unmarshal(body, &out)
 	if status == http.StatusOK {
 		state = proto.MessageSendDelivered
+	} else if status == http.StatusAccepted && out.Delivered == sendLater {
+		state = proto.MessageSendKept
 	} else if out.Delivered == sendUnknown {
 		state = proto.MessageSendUnknown
 	}
@@ -283,14 +280,23 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 	s, known := m.session(sid)
 	picked := "" // a model picked in the chat's chip that the message runs on (#1644)
 	assistantConv := false
-	note := "" // the main chat runs on another launcher than configured (#4659): told in a delivered send's answer
+	var asSent map[string]any // the app's message as it came, kept when it cannot go in (keepUndelivered)
+	note := ""                // the main chat runs on another launcher than configured (#4659): told in a delivered send's answer
 	if h.isMainOn(m.cfg.ID, sid) || (known && (s.Assistant || m.isAssistant(s))) {
 		assistantConv = true
 		// One of the assistant's conversations: it says what the message runs on (and, the first one to a new main
 		// conversation started empty, what the old one left before it).
 		asked, _ := p["model"].(string)
+		asSent = keepableMessage(p)
 		var err error
 		if note, err = h.assistantSend(r.Context(), m, sid, p); err != nil {
+			// Older owner messages to it are kept undelivered: this one is kept behind them, never sent first.
+			if id, _ := asSent["client_msg_id"].(string); id != "" && rpcCodeOf(err) == assistantwire.CodeUndeliveredAhead {
+				if status, body, ok := h.keepUndelivered(r.Context(), m, sid, asSent, assistantwire.CodeUndeliveredAhead, ""); ok {
+					writeRaw(w, status, body)
+					return
+				}
+			}
 			writeAssistantErr(w, err)
 			return
 		}
@@ -365,12 +371,25 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		f.status, f.body = http.StatusOK, withLauncherNote(http.StatusOK, []byte("{}\n"), note)
 	case sendSending, sendUnknown: // an earlier hub or connection was sending it and never learned the outcome
 		f.status, f.body = callErrBytes(l, unknownDelivery(l, "hub-send.lost_before"))
+	case sendLater: // its manager keeps it and sends it by itself
+		f.status, f.body = laterBody(nil)
 	default:
 		var outcome string
 		f.status, f.body, outcome = h.deliverOnce(ctx, m, p)
 		f.body = withLauncherNote(f.status, f.body, note)
 		if assistantConv {
 			h.conversationSent(m.cfg.ID, sid, f.status, f.body, outcome)
+		}
+		if assistantConv && (outcome == sendUnknown || f.status >= http.StatusInternalServerError) && asSent != nil {
+			// Nothing was typed, or the connection ended before the outcome was known: the manager keeps the message and
+			// sends it again only after its landed-check, and the app is told it is kept (#10194, #10503).
+			keepCode := errorCodeOf(f.body)
+			if outcome == sendUnknown {
+				keepCode = assistantwire.CodeDeliveryUnknown
+			}
+			if status, body, ok := h.keepUndelivered(context.WithoutCancel(ctx), m, sid, asSent, keepCode, apierr.Reason(f.body)); ok {
+				f.status, f.body, outcome = status, body, sendLater
+			}
 		}
 		if h.store != nil {
 			if err := h.store.SettleSend(context.WithoutCancel(ctx), id, outcome); err != nil {
@@ -518,4 +537,68 @@ func writeRaw(w http.ResponseWriter, status int, body []byte) {
 func resumesWithoutLauncher(s proto.Session) bool {
 	return s.Status == proto.StatusOffline && s.Launcher == "" && !s.Assistant && s.SourceKind == "" &&
 		(s.Agent == "" || s.Agent == "claude")
+}
+
+// keepableMessage is the app's message as it came, for keepUndelivered: what a later send runs SendParams on again.
+func keepableMessage(p map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, k := range []string{"text", "images", "launcher", "model", "effort", "client_msg_id"} {
+		if v, ok := p[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// keepUndelivered hands the owner's message to conversation sid that could not go in to the conversation's manager,
+// which keeps it and sends it again by itself (assistant.keep_undelivered, #10194), and makes the app's answer: 202
+// {"delivered":"later","undelivered":{…}}. False when the manager did not keep it (away, an older one, refused): the
+// app then gets the failure as before.
+func (h *Hub) keepUndelivered(ctx context.Context, m *Machine, sid string, msg map[string]any, code, why string) (int, []byte, bool) {
+	kctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var res struct {
+		Undelivered *proto.UndeliveredMessage `json:"undelivered"`
+	}
+	tried := time.Time{}
+	if code == assistantwire.CodeDeliveryUnknown {
+		tried = sendTimingOf(ctx).start
+	}
+	err := h.asstOf(h.sessionOwner(m.cfg.ID, sid)).call(kctx, assistantwire.MethodKeepUndelivered, assistantwire.KeepUndeliveredParams{
+		MachineID: m.cfg.ID, SessionID: sid, Params: msg, Human: personSent(ctx), Lang: string(h.contextLang(ctx)), Code: code, Error: why, TriedAt: tried,
+	}, &res)
+	if err != nil || res.Undelivered == nil {
+		h.logf("send to %s/%s: not kept for later: %v", m.cfg.ID, sid, err)
+		return 0, nil, false
+	}
+	status, body := laterBody(res.Undelivered)
+	return status, body, true
+}
+
+// laterBody is the answer to a message its manager keeps to send later; kept is nil for a retry answered from the
+// send record (the row's undelivered list says the rest).
+func laterBody(kept *proto.UndeliveredMessage) (int, []byte) {
+	out := map[string]any{"delivered": sendLater}
+	if kept != nil {
+		out["undelivered"] = kept
+	}
+	b, _ := json.Marshal(out)
+	return http.StatusAccepted, append(b, '\n')
+}
+
+func rpcCodeOf(err error) string {
+	var re *rpc.Error
+	if errors.As(err, &re) {
+		return re.Code
+	}
+	return ""
+}
+
+// errorCodeOf is an error answer's code ("" for none).
+func errorCodeOf(body []byte) string {
+	var e struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &e)
+	return e.Code
 }

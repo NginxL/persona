@@ -238,6 +238,7 @@ struct CompatibleAskAssistantIntent: AppIntent {
     nonisolated static let persistentIdentifier = "AskPersonaIntent"
     nonisolated static let title: LocalizedStringResource = "Ask Persona"
     nonisolated static let isDiscoverable = false
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
     @Parameter(title: "Question [Ask Persona Intent 33a861]", requestValueDialog: "What do you want to ask Persona?")
     var question: String
@@ -258,6 +259,7 @@ struct CompatibleAssistantStatusIntent: AppIntent {
     nonisolated static let persistentIdentifier = "PersonaStatusIntent"
     nonisolated static let title: LocalizedStringResource = "Persona Status"
     nonisolated static let isDiscoverable = false
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
     nonisolated init() {}
     nonisolated func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
@@ -276,7 +278,10 @@ struct CompatibleOpenAssistantIntent: AppIntent {
     nonisolated static let persistentIdentifier = "OpenPersonaAssistantIntent"
     nonisolated static let title: LocalizedStringResource = "Open Persona Assistant"
     nonisolated static let isDiscoverable = false
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
     nonisolated init() {}
     nonisolated func perform() async throws -> some IntentResult { try await OpenPersonaAssistantIntent().perform() }
 }
@@ -285,7 +290,10 @@ struct CompatibleOpenAgentsIntent: AppIntent {
     nonisolated static let persistentIdentifier = "OpenPersonaAgentsIntent"
     nonisolated static let title: LocalizedStringResource = "Open Persona Agents"
     nonisolated static let isDiscoverable = false
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
     nonisolated init() {}
     nonisolated func perform() async throws -> some IntentResult { try await OpenPersonaAgentsIntent().perform() }
 }

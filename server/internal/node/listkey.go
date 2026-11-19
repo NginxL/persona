@@ -132,6 +132,12 @@ func listKeySized(list []proto.Session, size int) string {
 			w.str(t.ID, ',')
 		}
 		w.str(strconv.FormatBool(s.BackgroundWaiting), '\n')
+		for _, t := range s.BackgroundEnded() {
+			w.b.WriteString("ended:")
+			w.str(t.ID, '/')
+			w.str(t.Status, '/')
+			w.int(unixOf(t.EndedAt), '\n')
+		}
 		// Workflow journals advance without changing the main transcript's rev, and so do its agents: each one's
 		// latest tool call (its name, and its calls to tell one Read from the next) goes out as often as the
 		// workflow cache reads them (workflowReadInterval). Tokens and the last text ride along. Each agent's id too:

@@ -62,7 +62,7 @@ func TestTaskDoneIsReportedInFeishu(t *testing.T) {
 	waitFor(t, "the report", func() bool { return len(posts()) == 1 })
 	card := posts()[0]
 	for _, want := range []string{"修登录崩溃", "✅开发", "🔵**合入**", "⚪部署", "已合并",
-		"https://hub.example.com/todos?id=" + todo.ID, "https://github.com/o/r/pull/901", "https://hub.example.com/s/box/s1"} {
+		"https://hub.example.com/todos/" + todo.ID, "https://github.com/o/r/pull/901", "https://hub.example.com/s/box/s1"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("card lacks %q:\n%s", want, card)
 		}

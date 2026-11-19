@@ -101,7 +101,7 @@ Removing `tags` from packages and indexes must wait longer, until the marketplac
 
 ## Extension points
 
-What an extension contributes where is written in the manifest's `contributes`: keys are extension points, values are lists of contributions, and each item has an `id` (globally unique within that extension point; a clash with another extension or with the hub itself means it can't be installed).
+What an extension contributes where is written in the manifest's `contributes`: keys are extension points, values are lists of contributions, and each item has an `id`. IDs must be unique within that extension point across installed extensions, except for `ui`: a UI ID belongs to its extension, so `volc/status` and `example/status` can coexist whether either extension is enabled or disabled. A duplicate UI ID inside one manifest is still refused. Other contribution points and the hub's reserved IDs keep their existing conflict checks, both in preview and when committing an install or upgrade.
 
 | Extension point | Namespace (method prefix) | Fields per item | Requirements | Wired to |
 | --- | --- | --- | --- | --- |
@@ -133,6 +133,7 @@ What an extension contributes where is written in the manifest's `contributes`: 
 | `error_reports` (version 1, #5533) | `error_reports.` | `id`, `sources?` (`hub` / `manager` / `web` / `android` / `ios` / `mac` / `watch` / `vision`; omitted means all) | Process speaks the protocol, `on_startup`, permission `error_reports` | The hub's and the devices' errors and crashes, scrubbed, given to the program as `error_reports.deliver`; see "Error reports" below |
 | `auth_relay` (version 1, #5644) | `auth_relay.` | `id`, `name?`, `hosts` (exact lowercase host names, 1–16), `paths` (exact paths, 1–16; a trailing `/` is ignored) | Process speaks the protocol, permission `auth_relay`; **starts off** at install and when an upgrade adds it, whatever `off_by_default` says | Authorization links the user's Agents stop at, on these hosts and paths and printed by the Agent's own command, handed to the program as `auth_relay.complete` to complete with the account it is signed in with; see [auth-relay.md](../operations/auth-relay.md) |
 | `secret_providers` (version 1, #3962) | `secrets.` | `id`, `name` (1–80 characters: the settings say "From <name>"), `schemes` (1–4 of `^[a-z][a-z0-9+.-]{0,15}$`, not `http`, `https`, `file`, `data`, `persona`, `about`, `javascript`) | Process speaks the protocol; a scheme another installed extension claims fails the install | Values for references of its schemes (`op://vault/item/field`), asked by the manager only (`secrets.describe`, `secrets.resolve`, the event `secrets.used`), each resolution recorded on it; see [secret-providers.md](secret-providers.md) |
+| `repository_providers` (version 1, #10330) | `repo.` | `id`, `name` (1–80 characters: what the catalog and a to-do's repositories call the source), `hosts` (1–16 exact lowercase host names, no IP address; not `github.com`, `gitlab.com` or the other hosts the built-in providers read), `link_kinds?` (`[{kind: issue / pull_request, label}]`, each kind once, a label of 1–24 characters; only relabels) | Process speaks the protocol; a host another installed extension claims (even one that is off), or one host in two items, fails the install | A code-hosting source for **Settings › Repositories** and a to-do's repositories and links on its hosts, asked by the manager only (`repo.parse`, `repo.check`, `repo.link`, the optional `repo.describe`; `schema/extension/repository.schema.json`), each answer re-checked; the install page lists its hosts, and they are in the permission digest |
 
 Extension points the hub doesn't know: the extension still installs (it may be written for a newer hub), that item has no effect, and the preview and list show a warning. When adding extension points later (knowledge base sources, link recognition…), add a row to this table.
 
@@ -441,7 +442,7 @@ To call the hub's HTTP API, an extension lists the scopes it uses in `permission
 | `machines.read` | See your computers | `GET /api/v1/machines`, `/machines/{id}/metrics`, `/machines/{mid}/stat` |
 | `notify` | Send notifications to your devices | `POST /api/v1/notify` (see "Sending notifications") |
 | `assistant.ask` | Start chats with Persona and read chat activity | `GET /api/v1/assistant`, `POST /api/v1/assistant/conversations`, `GET …/conversations/{id}/feed` |
-| `todos.read` | See to-dos | `GET /api/v1/todos`, `GET /api/v1/todos/{id}/decisions`, `GET /api/v1/todos/{id}/repositories` |
+| `todos.read` | See to-dos | `GET /api/v1/todos`, `GET /api/v1/todos/{id}`, `GET /api/v1/todos/places`, `GET /api/v1/todos/{id}/decisions`, `GET /api/v1/todos/{id}/repositories` |
 | `leaders.read` | See leader conversations (directions) and what they report | `GET /api/v1/assistant/leaders`; the events `leader.changed` and `leader.report` (see "Leader events") |
 | `assistant.dispatch_policy` | Read and change the assistant dispatch policy | `GET` / `PUT /api/v1/assistant/dispatch-policy`; a policy written by an extension must expire within one hour (see "Dispatch policy") |
 | `assistant.start_defaults` | Read the Agent presets and set the defaults task Agents start with | `GET /api/v1/assistant/worker-presets`, `GET` / `PUT /api/v1/assistant/start-defaults`; a policy written by an extension must expire within one hour ([assistant.md](../assistant/assistant.md) "Start defaults"). Not covered by the legacy `hub_api` full access: it can raise what task Agents spend (a preset, effort `max`, ultracode), so an extension gets it only by naming it, as `agents.permission_mode` |
@@ -541,6 +542,7 @@ The locked fields it writes become its own with `evidence` (`[{chat, day, n?, no
 `before` is each written field's previous value (`null` when unset, the old `summary` text), for the extension's undo. Rules and how this sits with the built-in pipeline: [Knowledge base](../assistant/knowledge.md#who-holds-a-field-6100).
 
 The update fields follow the existing knowledge base update API, plus `pinned`, `lock` and `remove_people/remove_chats/remove_aliases/remove_projects`.
+A link the user removed (`excluded` in the entity's meta, `removed` in `kb.get`) is not made again: it is dropped from `people` / `chats` / `projects` and named in `ignored`, and the rest applies ("Removed links" in `docs/assistant/knowledge.md`).
 Each kind takes only the fields it uses ("Fields each kind takes" in `docs/assistant/knowledge.md`); the others are not applied, and the answer names them in `ignored: [{field, reason}]`, so nothing is dropped silently (a person's `summary` and `log`, for one).
 
 **A person's profile** (`profile`, people only): what the extension knows of the person, in four parts kept apart: `facts`, the user's own words about them (`views`), `inferences` (each with its `basis`, shown as only a hint), and `commitments` either way (`owes: user | them`, `due?`, `done?`). Every item needs `sources`.
@@ -575,7 +577,7 @@ which follows "Knowledge base" (`kb`) until the user picks another connection or
 
 | Method | Parameters | Returns | Scope |
 | --- | --- | --- | --- |
-| `model.complete` | `{system?, messages: [{role: user\|assistant, content}], max_tokens?, json_schema?, timeout_seconds?, label?}` | `{text, json?, model, stop_reason, usage}` | `models` |
+| `model.complete` | `{system?, messages: [{role: user\|assistant, content}], max_tokens?, json_schema?, timeout_seconds?, label?, models?}` | `{text, json?, model, stop_reason, usage, candidate?, attempts?}` | `models` |
 
 The schema is `schema/extension/models.schema.json`; the Go SDK has it as `ext.Hub.ModelComplete`.
 
@@ -585,11 +587,28 @@ The schema is `schema/extension/models.schema.json`; the Go SDK has it as `ext.H
   checks it against the schema and asks once more with what was wrong (`tools/json_schema_retry.md`). The result's `json` is the decoded value; a second miss is `invalid_output` with `{problem, text, usage}`.
   It works the same on every connection (no vendor structured-output feature is needed). Checked keywords: `type`, `enum`, `const`, `properties`, `required`, `additionalProperties`, `items`, `prefixItems`,
   `minItems`/`maxItems`, `minLength`/`maxLength`, `minimum`/`maximum` and the exclusive ones, `allOf`/`anyOf`/`oneOf` (taken as `anyOf`), local `$ref`; others (`format`, `pattern`…) are left to the extension. At most 64 KiB.
-- **No budget and no cap** (the user's decision): there is no daily limit and no fallback model. `usage` is what the call spent, every request of it together (`input_tokens`, `output_tokens`,
+- **No budget and no cap** (the user's decision): there is no daily limit. Without `models` there is no fallback model. `usage` is what the call spent, every request of it together (`input_tokens`, `output_tokens`,
   `cache_read_input_tokens`, `cache_creation_input_tokens`, `requests`); the manager logs one line per call with the extension, `label`, model and usage. Keep it in the extension's own report if the user should see it.
+- **Candidate models** (#10398): `models` is an optional ordered list of 1 to 8 distinct model IDs. Each candidate is a whole call of its own (the same prompt, `max_tokens` and
+  `json_schema` with its one retry); the next one is tried when a candidate fails (`model_failed`, `model_refused`, `model_paused`), runs past `timeout_seconds` (which then bounds
+  each candidate; the whole call stops at 600 seconds), answers with no text (`model_failed`, "the reply was empty") or still does not match `json_schema` (`invalid_output`).
+  The extension only names models: each runs on a provider the user configured in Settings › Model providers that the hub calls directly (a direct API provider, or a Persona-managed
+  Messages launcher with an address and a key; not hidden) that offers it (#10657): first the purpose's own provider when it lists the model (its default, tier, small, subagent or custom model,
+  or its model list) or the purpose is bound to that model there, then direct API providers, then launchers that list it, in their order; failing those, the purpose's own provider when it
+  declares no model list (it has not said what it serves, so its gateway is asked; one that does not serve the model fails like any candidate). Other providers without a list are never tried.
+  A model nothing offers is skipped as `model_unavailable` (data `{model}`) without a request.
+  The result adds `candidate` (the entry of `models` that answered; `model` stays what the upstream says) and `attempts`, the candidates that failed before it (`{model, code, message, until?, seconds, usage}`);
+  `usage` covers every attempt. A single candidate that fails answers with its own code and data, exactly as a call without candidates would, so an extension that sends one model per call and
+  counts failures itself keeps its existing error handling. When two or more all fail the error is `model_candidates_failed`, its message naming each candidate and how it failed, its data `{attempts, usage}`.
+  Pick the list per call, for example a short-text chain and a long-text chain chosen by the input's length.
+  The manager logs a line per attempt (`candidate i/n <model> via <provider>: <outcome>`) and one for the outcome (`answered by candidate <model> (<upstream model>) after <n> failed`, or `every candidate failed`).
+  The user keeps control on the extension's purpose in Settings › Model configuration (docs/assistant/model-config.md "Extensions' own purposes"): the lists the extension sent are shown there,
+  and the user can switch them off (every call runs on the purpose's model, and the result has no `candidate`) or replace them with a list of their own (`candidate` then names the user's model).
+  Without `models` (and without a list of the user's) the call is exactly as before. A hub older than this field answers `invalid_params` (`unknown field "models"`): send the call again without it.
 - **A held connection**: when the connection is out of quota or busy (docs/assistant/model-config.md "Upstream rate limits") nothing is sent and the answer is `model_paused` with `{reason, until}`; try again after `until`.
 - **Errors**: `permission_denied` (`{scope: "models"}`), `invalid_params`, `assistant_offline`, `model_unavailable` (nothing callable for this extension: the user sets one up in Settings › Model configuration),
-  `model_paused`, `model_failed` (the upstream failed: an error status, a dropped connection, a selected model that is missing / unavailable to this key, or input over the model's context; the message distinguishes the cause), `model_refused`, `timeout`, `invalid_output`.
+  `model_paused`, `model_failed` (the upstream failed: an error status, a dropped connection, a selected model that is missing / unavailable to this key, or input over the model's context; the message distinguishes the cause), `model_refused`, `timeout`, `invalid_output`,
+  `model_candidates_failed` (with candidates, every one failed).
 - **A declined input**: when the model declines to answer (the Messages API's `stop_reason: "refusal"`, a Responses API refusal part, a Chat Completions refusal, or a response stopped by a `content_filter`)
   the answer is `model_refused` with `{stop_reason, usage}`; `usage` is what the declined call spent. Sending the same input again gets the same answer: split it into smaller pieces, drop
   a part or report which input was declined. Match the code, never the message, which is for people and may change. Hubs older than this code answer `model_failed`
@@ -599,6 +618,20 @@ The schema is `schema/extension/models.schema.json`; the Go SDK has it as `ext.H
 
 ```json
 {"permissions":{"hub":["kb.read","kb.write","models"]}}
+```
+
+A call with candidates and an answer from the second one:
+
+```json
+{"system": "...", "messages": [{"role": "user", "content": "..."}], "json_schema": {"type": "object"},
+ "timeout_seconds": 90, "label": "curate", "models": ["fast-model", "strong-model", "small-model"]}
+```
+
+```json
+{"text": "{...}", "json": {}, "model": "strong-model", "candidate": "strong-model",
+ "attempts": [{"model": "fast-model", "code": "timeout", "message": "model.complete: timed out", "seconds": 90,
+               "usage": {"input_tokens": 0, "output_tokens": 0, "requests": 0}}],
+ "stop_reason": "end_turn", "usage": {"input_tokens": 1200, "output_tokens": 300, "requests": 1}}
 ```
 
 ### Transcription for extensions (#8485)
@@ -1093,6 +1126,9 @@ Besides the whole extension's toggle, **each contribution** (`<extension point>/
 - Ids that are off still belong to this extension: other extensions can't take them by installing; permissions, the permission summary and upgrade comparisons all use the full manifest, so turning off contributions doesn't make the extension "ask for fewer permissions".
 - A **connector**'s toggle is the connector's own toggle (already used by **Settings › Connectors**, the Inbox and the knowledge base); this is just another entry point to the same toggle. **Channels** bound to a connector follow that connector.
   In the list they are `via: "connector"`, `can_disable: false`, and changes go through the connector's toggle (409 `not_running` when the connector hasn't started yet).
+  Whichever entry point is used, a change of that toggle restarts the extension that contributes the connector, once, like the other toggles (#10467): its new `initialize`'s
+  `active.connectors` lists only the connectors that are on, so a program that works for a connector on its own (a live listener, replies) knows to leave a switched-off one alone.
+  A toggle set to what it already was, and the hub's own connectors, restart nothing; an extension that is off has no program to restart and reads the toggle at its next start.
 - Extensions from manager.json can't have individual contributions turned off (change manager.json instead).
 - Stored in `plugins.disabled_contributions` (migration `0363`, `["ui/usage", …]`); kept across upgrades and rollbacks (if the new version no longer has that item, it has no effect).
 - **Off by default** (#2829): the manifest's `off_by_default: ["<extension point>/<id>", …]` lists contributions that start off when installed, e.g. the extension's existing features are on at install while a newly added sidebar page waits for the user to turn it on.
@@ -1699,7 +1735,12 @@ manifest can ask for four things. A hub from before them refuses the manifest, s
       proxy and reaches only the saved addresses, as before.
     - The Go SDK's `ext.SettingsCheckClient(params)` is an HTTP client through `proxy` (an ordinary one without it); in
       another language, use `proxy` as the proxy of the check's requests.
-    - Source runtimes get none yet: their fetches go through the runtime's broker (#1180).
+    - A source runtime uses that same credential through its fixed runtime broker, not a direct proxy connection. The
+      TypeScript SDK's `settingsCheckFetch(params)` returns a fetch for this one check: its requests and every redirect
+      carry the credential to the broker, while ordinary global `fetch` calls and overlapping checks keep their own
+      targets. The broker derives candidate targets from the owner-approved `config:` entries, applies the same DNS,
+      protected-target, redirect, body, deadline and concurrency rules, and accepts no target list or extension identity
+      from the guest. An older hub sends no `proxy`, and the helper behaves like ordinary `fetch`.
   - A refusal saves nothing and is not audited. The route answers 400 `check_failed` with the extension's words.
   - Before the words go back, every secret handed to the check is replaced by `***`: whole, and any prefix or suffix of
     6 characters or more. The words are cut to 300 characters.
@@ -1958,6 +1999,11 @@ The open-source repo ships no quota extension for any particular gateway.
 > that other thing uses the gateway's own admin key and is a very small built-in source in the hub (`usage.sources[]` in the manager's `manager.json`); for the trade-offs see `docs/server/usage-windows.md` ("Account-pool gateways").
 
 ## Declarative UI
+
+Each UI contribution is identified by its extension ID and its local UI ID together. The API already uses
+`/api/v1/extensions/{id}/-/ui/{ui}`, and discovery returns both `extension` and `id`. Page state, badges,
+contribution switches and `opens` references stay within that extension. Sharing a local ID with another
+extension needs no prefix, rename or migration; existing page links and saved switches keep their identities.
 
 Extensions **do not run code in the app**: they return a View (a few fixed kinds of items), which iOS, Mac, Android and web each draw with their own design system (correct in every interface style and in light and dark),
 and button actions go back to the extension. Views and components are defined in `schema/extension/view.schema.json` (the types on all four clients are generated from it, see [schema/extension/README.md](../../schema/extension/README.md));
@@ -3312,7 +3358,8 @@ events `{"event","params"}`. Hub-started extensions use stdin / stdout, remote o
 ```
 
 `active` lists contributions used in this run, one entry per extension point (disabled connectors and individually disabled contributions omitted; see "Contribution switches"); extensions exporting points also get `contributions_to_me` (see "Dependencies, exports and bundles"). `hub.role` (#1503) is this hub's role in its linked-hub group: `center` (alone or primary hub: serving apps, driving computers), or
-`member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`.
+`member` (another hub is primary: group work such as reacting to chat-service events, running /agent and full crawling is handed to the primary). Role changes restart extensions contributing `connectors` or `api`;
+switching one of an extension's connectors on or off restarts that extension, so `active` is never older than the toggles.
 `hub.timezone` is the user's time zone (IANA, as reported by devices), used for displayed times ("today", message timestamps); empty when only the hub's own clock is known, read at each start.
 `hub.locale` is the user's language (`zh-Hans` / `en` / `ja`, `docs/protocol/i18n.md` ("Protocol")); extensions use it for human-facing text (status, sign-in prompts, bot replies), read at each start, defaulting to `zh-Hans` if absent.
 `hub.capabilities` (#1680) lists what this hub can do so extensions can adapt: `inbox_group` (associate batches of new connector messages with Inbox events, `docs/assistant/inbox.md` ("Event grouping")); `inbox_group_state` (a grouping connector may report the events the user read or replied to in the source, and its fallback plan may assign messages to an already handled event, which the hub accepts and reopens; `docs/assistant/inbox.md` ("Following up")); `tool_images` (a connector's `tools.call` answer may carry pictures for the model, `docs/protocol/connector-protocol.md` ("Pictures in a tool's answer"), #8484).

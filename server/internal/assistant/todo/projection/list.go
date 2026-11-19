@@ -1,0 +1,203 @@
+package projection
+
+import (
+	"cmp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+)
+
+// What the projection works out over a whole list: the rows' order within each section (rank), the counts, and the
+// places (proposal 3.3, 3.4, 3.7; spec/fixtures/todo-counts/README.md).
+
+// Views is the view of every to-do of list at now, in the list's order: each related to the rest of the list (its
+// steps, a superseded failed start), then ranked within its section.
+func Views(list []Facts, now time.Time) []assistantwire.TodoSummary {
+	related := relate(list)
+	placed := make([]placement, len(related))
+	for i := range related {
+		placed[i] = place(&related[i], now)
+	}
+	rank(related, placed, now)
+	views := make([]assistantwire.TodoSummary, len(placed))
+	for i := range placed {
+		views[i] = placed[i].TodoSummary
+	}
+	return views
+}
+
+// rank sets each placement's rank: its place among the rows of the same section, 0 first, by its section's rule
+// (proposal 3.4 "Within a section"); placed[i] is list[i]'s, list related (its steps attached). Every to-do of the list
+// is ranked, a step its parent carries too, and ties go by id, so the order never depends on the list's.
+//
+//   - Needs you and Can wait: the soonest deadline first (the earlier of the decisions' deadlines on the row, a carried
+//     step's included, and the to-do's due), then the oldest ask (since).
+//   - Working: the latest activity first, its steps' included.
+//   - Waiting: the soonest wake first (a park's end, a usage limit's reset and its grace, the hub's next wake of a run
+//     that waits on another Agent or an outside event, a carried step's), rows with none last, then the longest
+//     waiting.
+//   - To do: by due (overdue, today, later), then priority (high, normal, low), then the newest.
+//   - Just finished and Done: the newest first.
+//   - Someday: the soonest back first, then the newest.
+func rank(list []Facts, placed []placement, now time.Time) {
+	bySection := map[string][]int{}
+	for i := range placed {
+		bySection[placed[i].Section] = append(bySection[placed[i].Section], i)
+	}
+	for section, rows := range bySection {
+		keys := make(map[int]rankKey, len(rows))
+		for _, i := range rows {
+			keys[i] = rankKeyOf(&list[i], &placed[i], now)
+		}
+		slices.SortFunc(rows, func(a, b int) int {
+			return cmp.Or(compareRank(section, keys[a], keys[b]), strings.Compare(list[a].ID, list[b].ID))
+		})
+		for n, i := range rows {
+			placed[i].Rank = n
+		}
+	}
+}
+
+// rankKey is what a section's rule compares; a zero time is "none", which goes last where a time leads.
+type rankKey struct {
+	deadline, since, activity, wake, due, back, created time.Time
+	priority                                            int
+}
+
+func rankKeyOf(f *Facts, p *placement, now time.Time) rankKey {
+	k := rankKey{since: p.Since, wake: p.wake, back: p.back, created: f.CreatedAt, activity: lastActivity(f, now)}
+	for i := range f.Steps {
+		k.activity = latest(k.activity, lastActivity(&f.Steps[i], now))
+	}
+	if due, ok := dueEnd(f); ok {
+		k.due = due
+	}
+	k.deadline = earliest(p.deadline, k.due)
+	switch f.Priority {
+	case priorityHigh:
+		k.priority = -1
+	case priorityLow:
+		k.priority = 1
+	}
+	return k
+}
+
+// soonest compares two times where the earlier leads and none goes last.
+func soonest(a, b time.Time) int {
+	switch {
+	case a.IsZero() && b.IsZero():
+		return 0
+	case a.IsZero():
+		return 1
+	case b.IsZero():
+		return -1
+	}
+	return a.Compare(b)
+}
+
+// compareRank orders two rows of section by its rule.
+func compareRank(section string, a, b rankKey) int {
+	switch section {
+	case assistantwire.TodoListSectionNeedsYou, assistantwire.TodoListSectionCanWait:
+		return cmp.Or(soonest(a.deadline, b.deadline), soonest(a.since, b.since))
+	case assistantwire.TodoListSectionWorking:
+		return b.activity.Compare(a.activity)
+	case assistantwire.TodoListSectionWaiting:
+		return cmp.Or(soonest(a.wake, b.wake), soonest(a.since, b.since))
+	case assistantwire.TodoListSectionTodo:
+		return cmp.Or(soonest(a.due, b.due), cmp.Compare(a.priority, b.priority), b.created.Compare(a.created))
+	case assistantwire.TodoListSectionJustFinished, assistantwire.TodoListSectionDone:
+		return b.since.Compare(a.since)
+	case assistantwire.TodoListSectionSomeday:
+		return cmp.Or(soonest(a.back, b.back), b.created.Compare(a.created))
+	}
+	return 0
+}
+
+// carried says, for each to-do of list, whether it is a step its parent carries: its part_of names a to-do of the
+// list that is open. Such a step is no row of its own in the counts (its parent counts once, proposal 3.4 "Steps roll
+// up"); a step whose parent is closed or not listed counts as a row.
+func carried(list []Facts, views []assistantwire.TodoSummary) []bool {
+	open := map[string]bool{}
+	for i := range list {
+		open[list[i].ID] = views[i].Phase != assistantwire.TodoPhaseDone
+	}
+	out := make([]bool, len(list))
+	for i, f := range list {
+		out[i] = f.PartOf != "" && f.PartOf != f.ID && open[f.PartOf]
+	}
+	return out
+}
+
+// isOpen: not closed and not put off (the counts' open).
+func isOpen(v assistantwire.TodoSummary) bool {
+	return v.Phase != assistantwire.TodoPhaseDone && v.Section != assistantwire.TodoListSectionSomeday
+}
+
+// Counts are the list's numbers (proposal 3.7, #10226): open, every to-do that is not closed, in any section but
+// Someday; needs_you, the to-dos in Needs you, quiet tasks left out as the badge leaves them out; in_progress, the rows
+// of Working and Waiting; and the rows of each section, every section named. A step its parent carries is counted
+// with its parent only. views[i] is list[i]'s.
+func Counts(list []Facts, views []assistantwire.TodoSummary) assistantwire.TodoCounts {
+	c := assistantwire.TodoCounts{Sections: make(map[string]int, len(assistantwire.TodoListSections))}
+	for _, s := range assistantwire.TodoListSections {
+		c.Sections[s] = 0
+	}
+	for i, skip := range carried(list, views) {
+		v := views[i]
+		if skip {
+			continue
+		}
+		c.Sections[v.Section]++
+		if isOpen(v) {
+			c.Open++
+		}
+		if v.Section == assistantwire.TodoListSectionNeedsYou && !list[i].Quiet {
+			c.NeedsYou++
+		}
+		if v.Section == assistantwire.TodoListSectionWorking || v.Section == assistantwire.TodoListSectionWaiting {
+			c.InProgress++
+		}
+	}
+	return c
+}
+
+// Places are the To-dos sidebar's places (proposal 3.3): All To-dos with N, Today and Upcoming (0: they draw no count
+// yet), then each project with an open to-do, by slug (bytes), with its part of N. titles are the knowledge base's
+// project titles by slug; a project it does not name is titled by its slug. views[i] is list[i]'s.
+func Places(list []Facts, views []assistantwire.TodoSummary, titles map[string]string) assistantwire.TodoPlaces {
+	counts := Counts(list, views)
+	out := assistantwire.TodoPlaces{Counts: counts, Places: []assistantwire.TodoPlace{
+		{ID: assistantwire.TodoPlaceKindAll, Kind: assistantwire.TodoPlaceKindAll, NeedsYou: counts.NeedsYou},
+		{ID: assistantwire.TodoPlaceKindToday, Kind: assistantwire.TodoPlaceKindToday},
+		{ID: assistantwire.TodoPlaceKindUpcoming, Kind: assistantwire.TodoPlaceKindUpcoming},
+	}}
+	needsYou := map[string]int{}
+	for i, skip := range carried(list, views) {
+		f, v := &list[i], views[i]
+		if skip || f.Project == "" || !isOpen(v) {
+			continue
+		}
+		n := needsYou[f.Project]
+		if v.Section == assistantwire.TodoListSectionNeedsYou && !f.Quiet {
+			n++
+		}
+		needsYou[f.Project] = n
+	}
+	slugs := make([]string, 0, len(needsYou))
+	for slug := range needsYou {
+		slugs = append(slugs, slug)
+	}
+	slices.Sort(slugs)
+	for _, slug := range slugs {
+		title := titles[slug]
+		if title == "" {
+			title = slug
+		}
+		out.Places = append(out.Places, assistantwire.TodoPlace{ID: "project:" + slug, Kind: assistantwire.TodoPlaceKindProject,
+			Title: title, Project: slug, NeedsYou: needsYou[slug]})
+	}
+	return out
+}

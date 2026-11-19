@@ -45,10 +45,28 @@ extension AppModel {
         throw APIError(status: 0, message: String(localized: "A hub is being disconnected. Pair again when it's done."))
     }
 
+    /// Why disconnecting `hubs` (`scope`) waits, or nil when it may go ahead: a live system call talks through one of
+    /// them (docs/apple/calls.md, "Nothing in the app ends a call"). Revoking the credential and forgetting the hub would
+    /// end it with no word, so nothing is revoked or forgotten until the call ends (`LiveCallGate.disconnectRefusal`).
+    func disconnectRefusal(_ hubs: [PairedHub], scope: HubSignOutScope) -> String? {
+        var groups = Set(hubs.map(\.group))
+        switch scope {
+        case .all: return LiveCallGate.disconnectRefusal(nil)
+        case .group(let group): groups.insert(group)
+        case .hub: break
+        }
+        return LiveCallGate.disconnectRefusal(groups)
+    }
+
     /// Signs out of `hubs`, then runs the local cleanup. A second one while one runs does nothing; the entries that
-    /// start one are disabled meanwhile (`hubSignOut`).
+    /// start one are disabled meanwhile (`hubSignOut`). Refused with a toast, touching nothing, while a live call talks
+    /// through one of them (`disconnectRefusal`).
     private func signingOut(_ hubs: [PairedHub], scope: HubSignOutScope, then forget: (AppModel) -> Void) async {
         guard hubSignOut == nil else { return }
+        if let refusal = disconnectRefusal(hubs, scope: scope) {
+            toast = Toast(refusal, style: .error)
+            return
+        }
         hubSignOut = scope
         defer { hubSignOut = nil }
         let traded = tradedTokens

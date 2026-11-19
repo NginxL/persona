@@ -139,6 +139,39 @@ class ChatDeltaPublishTest {
         assertEquals("较短", h.seen.last().items.last().text)
     }
 
+    @Test fun appendOnlyDeltasHaveOneStructuralEmissionAndCurrentLiveText() = runTest {
+        val h = harness(window = 50)
+        val structural = mutableListOf<ChatSnapshot>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            h.repository.observeStructure(key).collect { structural += it }
+        }
+        runCurrent()
+        structural.clear() // History is already loaded; count this reply's structural rows.
+        var expectedText = ""
+        for (n in 1..200) {
+            expectedText = "示例回复 ".repeat(1600).take(n * 40)
+            delta(h, expectedText)
+            assertEquals("latest live text at chunk $n", expectedText, h.repository.liveText(key))
+            assertEquals("structural emissions at chunk $n", 1, structural.size)
+            assertEquals(201, structural.single().items.size)
+            advanceTimeBy(80); runCurrent()
+        }
+        assertEquals(201, structural.sumOf { it.items.size })
+        assertEquals(200, h.seen.size)
+        assertEquals(40_200, h.seen.sumOf { it.items.size })
+        assertEquals(8_000, expectedText.length)
+        assertEquals(expectedText, h.seen.last().items.last().text)
+        val completePublishes = h.seen.size
+        delta(h, "")
+        assertEquals(completePublishes + 1, h.seen.size)
+        assertEquals(expectedText, h.seen.last().items.last().text)
+        assertTrue(h.seen.last().streamingItemIds.isEmpty())
+        assertEquals("turn end is the only later structural event", 2, structural.size)
+        assertEquals(402, structural.sumOf { it.items.size })
+        advanceTimeBy(100); runCurrent()
+        assertEquals(completePublishes + 1, h.seen.size)
+    }
+
     @Test fun measurementOfAReplyOf200Chunks() = runTest {
         for (window in listOf(50L, 100L)) for (gap in listOf(0L, 80L)) {
             val h = harness(window)

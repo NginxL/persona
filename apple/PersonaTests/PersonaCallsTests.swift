@@ -7,7 +7,12 @@ import Testing
 @MainActor final class FakeCallSystem: CallSystem {
     weak var handler: (any CallSystemHandler)?
     private(set) var starts: [UUID] = []
-    private(set) var rings: [(id: UUID, name: String)] = []
+    /// The handle's value of each Start (the assistant's name).
+    var startNames: [String] { startHandles.map(\.value) }
+    /// The handle of each Start.
+    private(set) var startHandles: [CallHandle] = []
+    /// Each ring: the handle's value (the assistant's name) and the call's own name (the display name only).
+    private(set) var rings: [(id: UUID, name: String, title: String)] = []
     private(set) var requests: [CallRequest] = []
     private(set) var reports: [CallReport] = []
     private(set) var fulfilled: [CallSystemAction] = []
@@ -25,14 +30,15 @@ import Testing
     var ringError: (any Error)?
     var activates = true
 
-    func start(_ id: UUID) async throws {
+    func start(_ id: UUID, handle: CallHandle) async throws {
         starts.append(id)
+        startHandles.append(handle)
         if !startErrors.isEmpty { throw startErrors.removeFirst() }
         if knowsAtOnce { known.insert(id) }
     }
 
-    func reportIncoming(_ id: UUID, name: String) async throws {
-        rings.append((id, name))
+    func reportIncoming(_ id: UUID, name: String, title: String) async throws {
+        rings.append((id, name, title))
         if let ringError { throw ringError }
         known.insert(id)
     }
@@ -72,14 +78,36 @@ import Testing
     private(set) var left: [String] = []
     /// How many times a call's audio category was set (`PersonaCalls.prepareAudio`).
     private(set) var categories = 0
+    /// The assistant's name a new call carries (`PersonaCalls.assistant`: the persona on screen, here named so).
+    var assistant = "Persona"
+    /// The persona on screen, when a test gives a whole one (its look and name): else the built-in named `assistant`.
+    var persona: Persona?
+    /// The name the main conversation's top bar says when it is not the look's (a hub with several assistants: the current
+    /// one's, `AppModel.assistantShownName`, #9887).
+    var shownName: String?
+    /// Whose main conversation a new call is to: the hub and the assistant picked there (`PersonaCalls.assistantOwner`).
+    var owner = CallAssistant.Owner(group: "g", manager: nil)
+    /// Developing Persona's Call handle (#9887).
+    var handleKind: CallHandleKind = .generic
+    /// What happened before the system's side was made, in order: "prepared" (`PersonaCalls.readySystem`), "made".
+    private(set) var systemSteps: [String] = []
     private(set) lazy var calls: PersonaCalls = {
-        let calls = PersonaCalls(system: { [system] in system }, clock: voice.clock, voiceCalls: voiceCalls,
+        let calls = PersonaCalls(system: { [weak self, system] in
+            self?.systemSteps.append("made")
+            return system
+        }, clock: voice.clock, voiceCalls: voiceCalls,
                                  ownerAudio: { [voice] in voice.audio }, ownerDeps: { [voice] _, audio, events in
             var deps = voice.deps
             deps.audio = { audio }
             deps.callEvents = events
             return deps
-        }, callCategory: { [weak self] in self?.categories += 1 })
+        }, callCategory: { [weak self] in self?.categories += 1 }, assistant: { [weak self] in
+            self?.persona ?? CallRig.persona(named: self?.assistant ?? "")
+        }, assistantName: { [weak self] in
+            self?.shownName ?? self?.persona?.name ?? self?.assistant ?? ""
+        }, assistantOwner: { [weak self] in
+            self?.owner ?? CallAssistant.Owner(group: "g", manager: nil)
+        }, prepareSystem: { [weak self] in self?.systemSteps.append("prepared") }, handleKind: { [weak self] in self?.handleKind ?? .generic })
         calls.callLeft = { [weak self] in self?.left.append($0) }
         return calls
     }()
@@ -114,6 +142,13 @@ import Testing
     }
 
     func settle() async { for _ in 0..<20 { await Task.yield() } }
+
+    /// The built-in look under another name.
+    static func persona(named name: String) -> Persona {
+        var persona = Persona.builtin
+        persona.name = name
+        return persona
+    }
 }
 
 /// The app's one call manager (#9290): the system's actions reach the call by its id, the machine says what to do and
@@ -128,7 +163,7 @@ struct PersonaCallsTests {
         rig.system.act(.start, call.id)
         #expect(rig.system.fulfilled == [.start])
         #expect(call.phase == .connecting)
-        #expect(rig.system.reports.prefix(2).map { if case .startedConnecting = $0 { "connecting" } else { "\($0)" } } == ["connecting", "pausable"])
+        #expect(rig.system.reports.prefix(2).map { if case .startedConnecting = $0 { "connecting" } else { "\($0)" } } == ["members", "connecting"])
         await rig.voice.waitUntil { rig.voice.socket != nil }
         let socket = try #require(rig.voice.socket)
         #expect(socket.start?["surface"] as? String == "call")
@@ -149,7 +184,7 @@ struct PersonaCallsTests {
         rig.system.act(.start, call.id)
         #expect(rig.system.reports.isEmpty, "dropped by a system that does not have it yet")
         rig.calls.system(changed: call.id, state: .idle)
-        #expect(rig.system.reports == [.startedConnecting(rig.voice.clock.now), .pausable])
+        #expect(rig.system.reports == [.members, .startedConnecting(rig.voice.clock.now)])
     }
 
     @Test func theBackgroundAnotherPageOrTheLockNeverEndTheCall() async {
@@ -198,15 +233,24 @@ struct PersonaCallsTests {
         #expect(idle.system.ended == [.remoteEnded])
     }
 
-    /// Another chat's Voice Chat, CarPlay's Talk to Persona: the call to Persona is hung up through the system, and the
-    /// new voice's audio opens only once the system let the call's audio go (LiveCommunicationKit releases it late, and
-    /// its deactivation would stop the new audio), whichever entry asked (`VoiceCalls.endSystemCall`).
-    @Test func anotherVoiceEndsTheCallAndWaitsForTheSystemToLetItsAudioGo() async {
+    /// Nothing in the app ends a live call by itself (#9290 follow-up): another chat's Voice Chat or CarPlay's Talk to
+    /// Persona is refused while a call to Persona is on, touching nothing (no hang-up, no socket, no audio). With the
+    /// user's yes (End Call and Start: `endingCall`) the call is hung up through the system, and the new voice's audio
+    /// opens only once the system let the call's audio go (LiveCommunicationKit releases it late, and its deactivation
+    /// would stop the new audio), whichever entry asked (`VoiceCalls.endSystemCall`).
+    @Test func anotherVoiceAsksFirstThenEndsTheCallAndWaitsForItsAudio() async {
         for surface in [VoiceSurface.phone, .carPlay] {
             let rig = CallRig()
-            let (call, _) = await rig.connected()
+            rig.assistant = "Mochi"
+            let (call, socket) = await rig.connected()
             let other = SessionKey(group: rig.voice.key.group, machineID: "m2", sessionID: "s2")
-            let starting = Task { await rig.voiceCalls.start(other, extensionID: "voice", surface: surface, deps: rig.voice.deps) }
+            #expect(await rig.voiceCalls.start(other, extensionID: "voice", surface: surface, deps: rig.voice.deps) == .systemCallOn("Mochi"))
+            await rig.settle()
+            #expect(rig.system.requests.isEmpty && call.phase.isLive && !socket.closed, "\(surface): the call was touched")
+            #expect(rig.voice.sockets.count == 1 && rig.voiceCalls.current === call.voice, "\(surface)")
+            let starting = Task {
+                await rig.voiceCalls.start(other, extensionID: "voice", surface: surface, deps: rig.voice.deps, endingCall: true)
+            }
             await rig.voice.waitUntil { rig.system.requests.contains(.end) }
             try? await Task.sleep(for: .milliseconds(150))
             #expect(rig.voice.sockets.count == 1 && rig.voiceCalls.current === call.voice, "\(surface): the new voice waits")
@@ -439,11 +483,14 @@ struct PersonaCallsTests {
 
     // MARK: Urgent calls
 
-    @Test func anUrgentCallRingsWithPersonasHandleAndIsRefusedNothing() async throws {
+    /// The ring's handle is the assistant's name (what the system shows and Recents keeps); the call's own name only its
+    /// display name.
+    @Test func anUrgentCallRingsWithTheAssistantsHandleAndIsRefusedNothing() async throws {
         let rig = CallRig()
+        rig.assistant = "Mochi"
         let id = UUID()
         try await rig.calls.ring(id, callID: "call_1", name: "Urgent: billing")
-        #expect(rig.system.rings.map(\.name) == ["Urgent: billing"])
+        #expect(rig.system.rings.map(\.name) == ["Mochi"] && rig.system.rings.map(\.title) == ["Urgent: billing"])
         #expect(rig.calls.urgentInProgress && rig.calls.call(id)?.phase == .ringing)
         rig.system.act(.join, id)
         #expect(rig.system.fulfilled == [.join] && rig.calls.call(id)?.connectedSince != nil)

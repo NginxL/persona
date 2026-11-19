@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { PanelProvider } from "../../lib/model-panel";
 import { requestModelPicker } from "../../lib/model-switch";
+import { sessionSwitches } from "../../lib/session-models";
 import { setToken } from "../../lib/api";
 import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
 import { getSession, getState, upsertSession } from "../../lib/store";
@@ -40,16 +41,17 @@ const markup = (node: React.ReactElement) => renderToStaticMarkup(node);
 const classOf = (html: string, attr: string) => new RegExp(`<[^>]*${attr}[^>]*class="([^"]*)"`).exec(html)?.[1] ?? new RegExp(`<[^>]*class="([^"]*)"[^>]*${attr}`).exec(html)?.[1] ?? "";
 
 describe("the pill's states", () => {
-  it("normal: provider tile, model, engine mark, effort, chevron; the tooltip and name say it all", () => {
+  it("normal: the engine's mark first, then model, effort, chevron; the tooltip and name say it all", () => {
     const html = markup(<ModelPill current={opus} onOpen={() => {}} />);
     expect(html).toMatch(/^<button type="button" data-model-pill="ready" aria-haspopup="listbox" aria-expanded="false"/);
     expect(html).toContain(`aria-label="${t("chat-modelpill.aria_effort", { model: "Opus 5.5", effort: "高" })}"`);
     expect(html).toContain('title="Claude Code · Opus 5.5 · gateway · 高"');
-    // in this order: the tile's letter, the name, the engine (no "·" before it), the effort, then the chevron
+    // in this order: the engine's mark (#5497: no letter tile, drawn once), the name, the effort, then the chevron
     const text = html.replace(/<[^>]+>/g, "|").split("|").filter(Boolean);
-    expect(text).toEqual(["G", "Opus 5.5", "高"]);
-    expect(html.indexOf('data-pill-engine="claude"')).toBeGreaterThan(html.indexOf("Opus 5.5"));
-    expect(html.indexOf("data-pill-effort")).toBeGreaterThan(html.indexOf('data-pill-engine="claude"'));
+    expect(text).toEqual(["Opus 5.5", "高"]);
+    expect(html.match(/data-agent-mark=/g)).toHaveLength(1);
+    expect(html.indexOf('data-agent-mark="claude"')).toBeLessThan(html.indexOf('<span title="Opus 5.5"'));
+    expect(html.indexOf("data-pill-effort")).toBeGreaterThan(html.indexOf('<span title="Opus 5.5"'));
     expect(html).not.toContain("·</span>");
     // bare at rest, a capsule on hover and while open
     expect(html).toContain("border-transparent");
@@ -57,7 +59,7 @@ describe("the pill's states", () => {
     expect(html).toContain("aria-expanded:bg-hover");
   });
 
-  it("takes the composer card's widths: its words' width under 600, a step smaller under 520, the tile and chevron alone under 420", () => {
+  it("takes the composer card's widths: its words' width under 600, a step smaller under 520, the mark and chevron alone under 420", () => {
     const html = markup(<ModelPill current={opus} onOpen={() => {}} />);
     const root = /^<button[^>]*class="([^"]*)"/.exec(html)![1];
     expect(root).toContain("max-w-[min(320px,100%)]");
@@ -71,7 +73,8 @@ describe("the pill's states", () => {
     expect(name).toContain("@max-[600px]/composer:max-w-[108px]");
     expect(name).toContain("@max-[420px]/composer:hidden");
     expect(name).toContain("shrink-[1000]"); // the name gives way before the effort
-    expect(classOf(html, 'data-pill-engine="claude"')).toContain("@max-[420px]/composer:hidden");
+    // the engine's mark stays under 420 px, with the chevron
+    expect(classOf(html, 'data-pill-engine="claude"')).not.toContain("@max-[420px]/composer:hidden");
     // narrow, the effort may truncate (the engine and effort stay; the name gives way first)
     expect(classOf(html, "data-pill-effort")).toContain("@max-[600px]/composer:truncate");
   });
@@ -140,27 +143,28 @@ describe("the pill's states", () => {
     expect(none).toContain("text-red");
     const known = markup(<ModelPill current={opus} failed onOpen={() => {}} />);
     expect(known).toContain(`title="Claude Code · Opus 5.5 · gateway · 高 · ${t("chat-modelpill.failed")}"`);
-    expect(known.match(/text-red/g)!.length).toBe(2); // the tile and the warning after the effort
+    expect(known.match(/text-red/g)!.length).toBe(2); // the mark and the warning after the effort
   });
 
   it("pending (#5035): a clock first, the next engine named, both setups in the tooltip", () => {
     const next = { engine: "codex", provider: "cx", model: "5.5", effort: "low" };
     const html = markup(<ModelPill current={opus} pending={next} onOpen={() => {}} />);
     expect(html).toContain('data-model-pill="pending"');
-    expect(html.indexOf("<svg")).toBeLessThan(html.indexOf(">C<")); // the clock before the tile
+    expect(html.indexOf("<svg")).toBeLessThan(html.indexOf('data-agent-mark="codex"')); // the clock before the target's mark
     // the target's engine before the name, gone when the pill is narrow
-    expect(html).toContain('<span data-pill-target="true" class="max-w-[96px] shrink-0 truncate text-ink-3 @max-[600px]/composer:hidden">Codex</span>');
+    expect(html).toMatch(/data-pill-target[^>]*>Codex<\/span>/);
+    expect(classOf(html, "data-pill-target")).toContain("@max-[600px]/composer:hidden");
     expect(html).toContain('data-pill-engine="codex"');
     expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · 高", next: "Codex · 5.5 · cx · 低" })}"`);
     expect(html).toContain(`aria-label="${t("chat-modelpill.aria_pending_effort", { agent: "Codex", model: "5.5", effort: "低" })}"`);
   });
 
-  it("pending on another launcher of the same engine: that launcher named and drawn before the model", () => {
+  it("pending on another launcher of the same engine: that launcher named before the model", () => {
     const next = { engine: "claude", provider: "work", model: "GLM 5.3", effort: "high" };
     const html = markup(<ModelPill current={opus} pending={next} onOpen={() => {}} />);
     expect(html).toMatch(/data-pill-target[^>]*>work<\/span>/);
-    expect(html).toContain(">W<"); // the target's tile
-    // under 420 px the clock, the tile and the chevron: wider than the plain pill's 64 px
+    expect(html).toContain('data-agent-mark="claude"'); // the target's engine
+    // under 420 px the clock, the mark and the chevron: wider than the plain pill's 64 px
     expect(html).toContain("@max-[420px]/composer:w-auto");
     expect(html).not.toContain("@max-[420px]/composer:w-[64px]");
     expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · 高", next: "Claude Code · GLM 5.3 · work · 高" })}"`);
@@ -208,6 +212,7 @@ let quotaAnswer: () => Response;
 // lists answer once this settles (a test that wants to see what shows while one is read holds it)
 let hold: Promise<unknown>;
 let machine = 0;
+let namedLauncher = false;
 
 const agent = (x: Partial<Session> = {}): Session =>
   ({ machine_id: `mac-${machine}`, session_id: "s1", title: "整理发布说明", cwd: "/code", status: "idle", state: "idle", agent: "claude", launcher: "gateway", model: "claude-opus-5-5", effort: "high", pane_id: "p1", ...x }) as Session;
@@ -215,6 +220,7 @@ const agent = (x: Partial<Session> = {}): Session =>
 beforeEach(() => {
   resetManagerChoice();
   machine++;
+  namedLauncher = false;
   panel.props = null;
   toast.mockClear();
   Object.assign(getState(), { features: [], sessions: {} });
@@ -231,7 +237,10 @@ beforeEach(() => {
     if (url.includes("/models/custom")) return forgetAnswer();
     if (url.includes("/quota")) return quotaAnswer();
     if (url.includes("/models")) return hold.then(() => listAnswer(url));
-    if (/\/launchers(\?|$)/.test(url)) return json({ launchers: [{ name: "claude" }, { name: "gateway" }, { name: "cx", agent: "codex" }] });
+    if (/\/launchers(\?|$)/.test(url)) return json({ launchers: [
+      { name: "claude" }, { name: "gateway" }, { name: "cx", agent: "codex" },
+      ...(namedLauncher ? [{ name: "team-relay", display_name: "Team Relay" }] : []),
+    ] });
     if (url.endsWith("/modes")) return modesAnswer(body);
     return json({});
   }));
@@ -263,6 +272,46 @@ const modes = () => calls.filter((c) => c.url.endsWith("/modes")).map((c) => c.b
 const provider = (id: string) => panel.props!.providers.find((p: PanelProvider) => p.id === id)!;
 
 describe("an Agent's pill", () => {
+  it("names same-model launchers exactly as the panel, without changing the model or effort", async () => {
+    await show(agent());
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("gateway");
+    expect(pill()!.getAttribute("aria-label")).toContain("gateway · Opus 5.5");
+    await open();
+    expect(provider("gateway").name).toBe(pill()!.querySelector("[data-pill-target]")?.textContent);
+    await show(agent({ launcher: "claude" }));
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("claude");
+    expect(pill()!.textContent).toContain("Opus 5.5");
+    expect(pill()!.querySelector("[data-pill-effort]")?.textContent).toBe("高");
+    expect(modes()).toEqual([]);
+  });
+
+  it("uses the launcher's display name in the pill, tooltip and panel", async () => {
+    namedLauncher = true;
+    await show(agent({ launcher: "team-relay" }));
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("Team Relay");
+    expect(pill()!.title).toContain("Team Relay");
+    expect(pill()!.getAttribute("aria-label")).toContain("Team Relay");
+    await open();
+    expect(provider("team-relay").name).toBe("Team Relay");
+    await show(agent({ launcher: "team-relay", pending_switch: { launcher: "gateway", model: "haiku" } }));
+    expect(pill()!.title).toContain("Team Relay");
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("gateway");
+  });
+
+  it("keeps a model-only label when the launcher is unknown, but names a queued target", async () => {
+    await show(agent({ launcher: undefined }));
+    expect(pill()!.querySelector("[data-pill-target]")).toBeNull();
+    expect(pill()!.getAttribute("aria-label")).not.toContain("claude ·");
+    await show(agent({ pending_switch: { launcher: "cx", agent: "codex", model: "gpt-5.5" } }));
+    expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("cx");
+    expect(pill()!.dataset.modelPill).toBe("pending");
+    expect(pill()!.title).toContain("gateway");
+    expect(pill()!.title).toContain("cx");
+    expect(pill()!.getAttribute("aria-label")).toContain("cx");
+    expect(pill()!.querySelector("[data-pill-engine]")?.getAttribute("data-pill-engine")).toBe("codex");
+    expect(modes()).toEqual([]);
+  });
+
   it("reloads when the default manager becomes known or the credential owner changes", async () => {
     await show(agent());
     expect(calls.filter((c) => c.url.includes("/models"))).toHaveLength(1);
@@ -395,6 +444,21 @@ describe("an Agent's pill", () => {
     expect(modes()).toEqual([{ service_tier: "default" }]);
   });
 
+  it("a Codex terminal Agent that switches neither model nor effort: its mark first and once, and the pill opens the panel that says why (#5497, #6962)", async () => {
+    const codex = agent({ agent: "codex", launcher: "cx", model: "gpt-5.5", effort: undefined });
+    expect(sessionSwitches(codex)).toEqual({ model: false, effort: false });
+    await show(codex);
+    const button = pill()!;
+    expect(button).not.toBeNull(); // a button, not a label: Codex explains
+    expect(button.querySelectorAll("[data-agent-mark]")).toHaveLength(1);
+    expect(button.querySelector("[data-agent-mark]")!.getAttribute("data-agent-mark")).toBe("codex");
+    expect(button.querySelector("[data-pill-engine]")).toBe(button.firstElementChild!.firstElementChild);
+    expect(button.querySelector('[data-agent-mark="letter"], [data-provider-mark]')).toBeNull();
+    await open();
+    expect(host.querySelector('[data-testid="panel"]')).not.toBeNull();
+    expect(provider("cx").unavailable).toBeTruthy();
+  });
+
   it("switches to another launcher with the next message on a hub that does it: pending at once, said, put back on a refusal (#5035)", async () => {
     Object.assign(getState(), { features: ["launcher_switch"] });
     const s = agent();
@@ -437,7 +501,7 @@ describe("an Agent's pill", () => {
     await show(agent({ status: "offline", state: "offline" }));
     expect(pill()).toBeNull();
     expect(host.querySelector('[data-model-pill="label"]')!.textContent).toContain("opus 5.5");
-    expect(calls).toEqual([]); // nothing to open, nothing read
+    expect(calls.map((c) => c.url)).toEqual([expect.stringContaining("/launchers?")]); // a label needs only the launcher's title
     await show(agent({ status: "offline", state: "offline", model: undefined }));
     expect(host.innerHTML).toBe("");
   });

@@ -12,18 +12,26 @@ import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.JsonElement
 
 /**
- * Which agent's settings the page edits (iOS `AgentSettingsKind`): Claude Code's `~/.claude/settings.json` or Codex's
- * `~/.codex/config.toml`. The node keeps a whitelist of each (claudeconfig.go / codexconfig.go) in the same shape.
+ * Which agent's settings the page edits (iOS `AgentSettingsKind`): Claude Code's `~/.claude/settings.json`, Codex's
+ * `~/.codex/config.toml`, or Antigravity's `~/.gemini/antigravity-cli/settings.json`. The node keeps a whitelist of each
+ * (claudeconfig.go / codexconfig.go / agyompconfig.go) in the same shape.
  */
 internal enum class AgentSettingsKind(val title: Int, val demo: Int, val caption: Int) {
     Claude(R.string.settings_src_claude_title, R.string.settings_src_claude_demo, R.string.settings_src_claude_caption),
-    Codex(R.string.settings_src_codex_title, R.string.settings_src_codex_demo, R.string.settings_src_codex_caption);
+    Codex(R.string.settings_src_codex_title, R.string.settings_src_codex_demo, R.string.settings_src_codex_caption),
+    Agy(R.string.settings_src_agy_title, R.string.settings_src_agy_demo, R.string.settings_src_agy_caption);
 
-    suspend fun read(api: MachineManagement, machineId: String): List<ClaudeSetting> =
-        if (this == Claude) api.claudeSettings(machineId) else api.codexSettings(machineId)
+    suspend fun read(api: MachineManagement, machineId: String): List<ClaudeSetting> = when (this) {
+        Claude -> api.claudeSettings(machineId)
+        Codex -> api.codexSettings(machineId)
+        Agy -> api.agySettings(machineId)
+    }
 
-    suspend fun write(api: MachineManagement, machineId: String, key: String, value: JsonElement): List<ClaudeSetting> =
-        if (this == Claude) api.setClaudeSetting(machineId, key, value) else api.setCodexSetting(machineId, key, value)
+    suspend fun write(api: MachineManagement, machineId: String, key: String, value: JsonElement): List<ClaudeSetting> = when (this) {
+        Claude -> api.setClaudeSetting(machineId, key, value)
+        Codex -> api.setCodexSetting(machineId, key, value)
+        Agy -> api.setAgySetting(machineId, key, value)
+    }
 }
 
 /** The machine last looked at and whether changes go to every online machine; kept on this phone, shared by both kinds like iOS. */

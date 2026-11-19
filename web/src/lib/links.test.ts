@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 // router.ts listens to popstate at load (no window in node); links.ts only needs navigate from it.
-vi.mock("./router", () => ({ navigate: vi.fn(), routeAt: () => null }));
+vi.mock("./router", async (importOriginal) => {
+  const router = await importOriginal<typeof import("./router")>();
+  return { parse: router.parse, routePath: router.routePath, navigate: vi.fn(), routeAt: () => null };
+});
 vi.mock("./api", () => ({ api: vi.fn(), enc: encodeURIComponent, getToken: () => "tok", ApiError: class extends Error {} }));
 
 import { api } from "./api";
@@ -87,11 +90,22 @@ describe("where a link opens", () => {
       expect(linkHref(`${scheme}://session/mac%20book/abc-1`)).toBe("/s/mac%20book/abc-1");
       expect(opensInApp(`${scheme}://session/macbook/abc-1`)).toBe(true);
       expect(linkRoute(`${scheme}://pair?token=x`).kind).toBe("none");
-      expect(linkRoute(`${scheme}://session/macbook`).kind).toBe("none");
+      expect(linkRoute(`${scheme}://session/macbook`).kind).toBe("app"); // read when opened: it names no page, so nothing opens
     }
     expect(linkRoute("other://session/macbook/abc-1").kind).toBe("none");
     expect(linkHref("https://example.com/a")).toBe("https://example.com/a");
     expect(linkRoute("persona://pair?token=x").kind).toBe("none");
+  });
+
+  it("opens app links to every page of the route table (docs/protocol/deep-links.md, #9930)", () => {
+    // an Agent's as persona://session links always did; the table's other forms are read when opened (lib/deep-links.ts)
+    for (const app of ["persona://open/inbox/i-1", "persona://session/m/s?at=m1", "persona://task/t-1", "persona://kb/docs/a", "persona://settings/extensions/gh", "persona://extension/w/today"]) {
+      expect(linkRoute(app), app).toEqual({ kind: "app", url: app });
+      expect(opensInApp(app), app).toBe(true);
+    }
+    for (const none of ["persona://pair?url=x", "persona://ask?text=hi", "persona://link?code=x"]) {
+      expect(linkRoute(none).kind, none).toBe("none");
+    }
   });
 
   it("knows this hub's own agent and task pages, and only this hub's", () => {
@@ -100,21 +114,27 @@ describe("where a link opens", () => {
     expect(linkRoute(`${hub}/s/mac%20book/abc-1?view=chat`, false, hub)).toEqual({ kind: "agent", mid: "mac book", sid: "abc-1" });
     expect(linkRoute(`${hub}/todos?id=todo_1`, false, hub)).toEqual({ kind: "task", id: "todo_1" });
     expect(linkRoute(`${hub}/todos/todo_1`, false, hub)).toEqual({ kind: "task", id: "todo_1" });
-    // the same paths elsewhere, other pages of the hub, and what does not name one stay web pages
+    // the same paths elsewhere, and what does not name a page, stay web pages
     expect(linkRoute("https://other.example.com/s/m1/abc-1", false, hub).kind).toBe("web");
     expect(linkRoute("http://hub.example.com/s/m1/abc-1", false, hub).kind).toBe("web");
     expect(linkRoute(`${hub}/s/m1/abc-1`, false, "").kind).toBe("web");
     expect(linkRoute(`${hub}/s/m1`, false, hub).kind).toBe("web");
-    expect(linkRoute(`${hub}/s/m1/abc-1/more`, false, hub).kind).toBe("web");
-    expect(linkRoute(`${hub}/todos`, false, hub).kind).toBe("web");
-    expect(linkRoute(`${hub}/inbox`, false, hub).kind).toBe("web");
+    expect(linkRoute(`${hub}/s/m1/abc-1/more`, false, hub).kind).toBe("page"); // the router draws its agent
+    expect(linkRoute(`${hub}/admin`, false, hub).kind).toBe("web");
+    expect(linkRoute(`${hub}/share/abc`, false, hub).kind).toBe("web");
+    expect(linkRoute(`https://user:pw@hub.example.com/s/m1/abc-1`, false, hub).kind).toBe("web");
+    // the app's other pages (the Inbox, settings, knowledge…) open in place (docs/protocol/deep-links.md, #9930)
+    for (const path of ["/todos", "/inbox", "/inbox/assistant%3A9f?manager=m2", "/settings?tab=extensions&extension=gh", "/overview", "/persona", "/persona/new", "/kb/spells/x"]) {
+      expect(linkRoute(`${hub}${path}`, false, hub), path).toEqual({ kind: "page", path });
+    }
+    // one message of an agent's conversation
+    expect(linkRoute(`${hub}/s/m1/abc-1?at=msg%231`, false, hub)).toEqual({ kind: "page", path: "/s/m1/abc-1?at=msg%231" });
+    expect(linkRoute(`${hub}/persona/c-1?at=m1`, false, hub)).toEqual({ kind: "page", path: "/persona/c-1?at=m1" });
     expect(linkRoute(`${hub}/s/m1/%E0%A4%A`, false, hub).kind).toBe("web");
-    // its conversations, but not /persona/new (a fresh one) or the main conversation's bare /j
+    // its conversations; /persona/new and the main page are pages of the table, in place
     expect(linkRoute(`${hub}/persona/conv-1`, false, hub)).toEqual({ kind: "conversation", sid: "conv-1" });
     expect(linkRoute(`${hub}/persona/conv-1?x=1#y`, false, hub)).toEqual({ kind: "conversation", sid: "conv-1" });
-    expect(linkRoute(`${hub}/persona/new`, false, hub).kind).toBe("web");
-    expect(linkRoute(`${hub}/persona`, false, hub).kind).toBe("web");
-    expect(linkRoute(`${hub}/persona/conv-1/more`, false, hub).kind).toBe("web");
+    expect(linkRoute(`${hub}/persona/conv-1/more`, false, hub).kind).toBe("page");
     // the hub's advertised addresses are its own too, whichever one this page was opened at
     const lan = "http://192.0.2.10:18660";
     expect(linkRoute(`${hub}/s/m1/abc-1`, false, [lan, hub])).toEqual({ kind: "agent", mid: "m1", sid: "abc-1" });

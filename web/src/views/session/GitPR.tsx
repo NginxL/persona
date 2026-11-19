@@ -20,21 +20,28 @@ import { t } from "../../i18n";
 
 /** The branch's pull request, read when the panel opens and again when what was pushed changes; and its writes. */
 export function useGitPR(base: string, cwd: string, s: GitStatus | null, on: boolean) {
-  const [answer, setAnswer] = useState<GitPRAnswer | null>(null);
+  // An answer belongs to the branch it was read (or written) for: after a switch, the previous branch's pull request is
+  // not this one's, while the new one is read or when a write for the old one answers late (#9940).
+  const [answer, setAnswer] = useState<{ branch: string; answer: GitPRAnswer } | null>(null);
   const [failed, setFailed] = useState<{ code: string; detail: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<GitRefusal | null>(null);
   const [reads, setReads] = useState(0);
+  const branch = s?.is_repo && s.branch ? s.branch : "";
+  const checkedOut = useRef(branch);
+  useEffect(() => {
+    checkedOut.current = branch;
+  }, [branch]);
   // gh asks GitHub each time: read again only when the branch, its upstream or what is on it moved
-  const pushed = s?.is_repo && s.branch ? `${s.branch}|${s.upstream ?? ""}|${s.gone ? "gone" : ""}|${s.ahead ?? 0}|${s.head?.hash ?? ""}` : "";
+  const pushed = branch ? `${branch}|${s?.upstream ?? ""}|${s?.gone ? "gone" : ""}|${s?.ahead ?? 0}|${s?.head?.hash ?? ""}` : "";
   useEffect(() => {
     if (!on || !pushed) return;
     const ac = new AbortController();
     setLoading(true);
     gitPR(base, cwd, ac.signal)
       .then((a) => {
-        setAnswer(a);
+        setAnswer({ branch, answer: a });
         setFailed(null);
       })
       .catch((e) => {
@@ -43,15 +50,19 @@ export function useGitPR(base: string, cwd: string, s: GitStatus | null, on: boo
       })
       .finally(() => !ac.signal.aborted && setLoading(false));
     return () => ac.abort();
-  }, [base, cwd, on, pushed, reads]);
+  }, [base, cwd, on, pushed, branch, reads]);
   const reload = useCallback(() => setReads((n) => n + 1), []);
   const run = async (what: string, call: () => Promise<GitPRAnswer>, done?: string) => {
     if (busy) return null;
     setBusy(what);
+    const asked = branch;
     try {
       const a = await call();
-      setAnswer(a);
-      setFailed(null);
+      // the branch moved while it ran: the new branch's own read is what the card shows
+      if (checkedOut.current === asked) {
+        setAnswer({ branch: asked, answer: a });
+        setFailed(null);
+      }
       if (done) toast(done, "ok");
       return a;
     } catch (e) {
@@ -66,7 +77,7 @@ export function useGitPR(base: string, cwd: string, s: GitStatus | null, on: boo
   const merge = (pr: GitPR, how: { method?: MergeMethod; auto?: boolean; auto_off?: boolean }, done: string) =>
     run(how.auto_off ? "auto_off" : how.auto ? "auto" : "merge", () => gitPRMerge(base, { cwd, number: pr.number, ...how }), done);
   const dialog = <RefusalDialog refusal={refusal} onClose={() => setRefusal(null)} />;
-  return { answer: on && pushed ? answer : null, failed: on && pushed ? failed : null, loading, busy, reload, create, merge, dialog };
+  return { answer: on && pushed && answer?.branch === branch ? answer.answer : null, failed: on && pushed ? failed : null, loading, busy, reload, create, merge, dialog };
 }
 
 export type GitPRState = ReturnType<typeof useGitPR>;

@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 from tag_release import ConfigError, is_beta_tag, read_receipt, resolve_tag, verify_remote_assets
 
@@ -22,6 +23,34 @@ BETA = re.compile(r"0|[1-9][0-9]*")
 
 def get_json(gh, path):
     return json.loads(subprocess.check_output([gh, "api", path], text=True, timeout=60))
+
+
+def previous_source(repo, repository, pointer, gh):
+    """Authenticate the pointer's current index before following its immutable source to a newer beta."""
+    if pointer.get("draft") or not pointer.get("prerelease") or pointer.get("tag_name") != POINTER:
+        raise ConfigError("beta-channel must be a prerelease, never a stable Release")
+    assets = pointer.get("assets", [])
+    if not assets and pointer.get("target_commitish") in ("", None):
+        return None, None  # the pointer Release has just been created; its first index establishes the source
+    latest = next((item for item in assets if item.get("name") == "latest.json"), None)
+    if not isinstance(latest, dict):
+        raise ConfigError("the existing beta pointer has no latest.json to authenticate")
+    with tempfile.TemporaryDirectory(prefix="persona-beta-previous-") as directory:
+        path = Path(directory) / "latest.json"
+        subprocess.run([gh, "release", "download", POINTER, "--repo", repository,
+                        "--pattern", "latest.json", "--output", str(path)], check=True, timeout=120)
+        if latest.get("digest") and latest["digest"] != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():
+            raise ConfigError("the existing beta pointer index differs from its listed digest")
+        manifest = json.loads(path.read_text())
+    tag = "v" + str(manifest.get("version", ""))
+    if not is_beta_tag(tag) or manifest.get("channel") != "beta" or not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("commit", ""))):
+        raise ConfigError("the existing beta pointer does not identify an immutable beta")
+    previous = resolve_tag(repo, repository, tag)
+    if previous != manifest["commit"]:
+        raise ConfigError("the existing beta pointer source does not match its immutable tag")
+    if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", previous, "origin/main"]).returncode != 0:
+        raise ConfigError("the existing beta pointer source is not on origin/main")
+    return previous, tag
 
 
 def main():
@@ -40,8 +69,8 @@ def main():
     if "latest.json" not in index:
         raise ConfigError("beta pointer needs the verified tag's latest.json")
     manifest = json.loads(index["latest.json"].read_text())
-    if manifest.get("channel") != "beta" or manifest.get("version") != args.tag[1:]:
-        raise ConfigError("latest.json is not this beta version's beta-channel manifest")
+    if manifest.get("channel") != "beta" or manifest.get("version") != args.tag[1:] or manifest.get("commit") != commit:
+        raise ConfigError("latest.json is not this beta version's beta-channel manifest and immutable commit")
     # The pointer may copy only the indexes, never binaries from another tag.
     for name in ("latest.json", "android.json"):
         if name not in index:
@@ -61,21 +90,36 @@ def main():
         subprocess.run([args.gh, "release", "create", POINTER, "--repo", args.repository,
                         "--prerelease", "--title", "Persona beta updates",
                         "--notes", "The beta-channel pointer only. Binaries remain on immutable versioned prereleases."], check=True)
-    if pointer is not None and pointer.get("target_commitish") not in ("", commit):
-        raise ConfigError("beta pointer is owned by another immutable source; reconcile it explicitly")
+    if pointer is not None:
+        previous, tag = previous_source(args.repo, args.repository, pointer, args.gh)
+        if previous is not None and previous != commit:
+            # An ordinary new beta has a new source. Authenticate the old pointer first, then permit only forward
+            # ancestry; a different branch, an older release or a substituted old index must never move it.
+            if subprocess.run(["git", "-C", str(args.repo), "merge-base", "--is-ancestor", previous, commit]).returncode != 0:
+                raise ConfigError(f"beta pointer cannot move from {tag} to an unrelated or older immutable source")
     remote = get_json(args.gh, f"repos/{args.repository}/releases/tags/{POINTER}")
     existing = {asset["name"]: asset for asset in remote.get("assets", [])}
     pointers = []
+    same = True
     for name in ("latest.json", "android.json"):
         if name not in index:
             continue
-        item = {"path": str(index[name]), "name": name}
+        item = next(item for item in assets if item["name"] == name)
         if name in existing:
-            verify_remote_assets(args.repository, POINTER, [item], remote.get("assets", []), args.gh)
-            print(f"Beta pointer {name} already has the verified digest; keeping it")
+            try:
+                verify_remote_assets(args.repository, POINTER, [item], remote.get("assets", []), args.gh)
+                print(f"Beta pointer {name} already has the verified digest; keeping it")
+            except ConfigError as error:
+                # A normal advance intentionally replaces the previous beta's index with this tag's verified bytes.
+                # The old pointer was authenticated above; this expected digest change is not artifact substitution.
+                if not str(error).startswith("another artifact already owns Release asset name:"):
+                    raise
+                same = False
+                pointers.append(item)
         else:
+            same = False
             pointers.append(item)
-    if not pointers:
+    if same:
         print(f"Beta pointer {POINTER} already describes {args.tag} ({commit})")
         return
     subprocess.run([args.gh, "release", "edit", POINTER, "--repo", args.repository,

@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 /** One status, three uses: the dot or holder, text in that colour, and a soft tint behind it. */
 @Immutable
@@ -84,6 +85,9 @@ data class PersonaPalette(
     /** Words on the accent are white, as on iOS (Glass); otherwise whichever of black and white reads better. */
     val whiteOnAccent: Boolean = false,
 ) {
+    /** The reply's inline code ink, at the same step toward secondary text as on the web. */
+    val replyCodeInk: Color get() = lerp(ink, ink2, 0.45f)
+
     /** Strings in a Lark code block (#934): the style's added-line green, so it follows light / dark and the style. */
     val codeString: Color get() = codeStringOverride ?: diffAdd
     /** Numbers in a Lark code block (#934): the style's caution text, so it follows light / dark, the style and theme packages. */

@@ -112,6 +112,8 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 		if err := runtimes.Listen(ctx); err != nil {
 			logf("runtime socket: %v", err)
 			runtimes = nil // each connection's Node opens its own, as without a resident node
+		} else {
+			defer runtimes.setAgyBridge(false)
 		}
 	}
 	relayed := make(chan net.Conn)

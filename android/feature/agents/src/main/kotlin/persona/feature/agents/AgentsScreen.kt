@@ -132,6 +132,9 @@ internal fun AgentsScreen(
     var menu by remember { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     val homeChrome = LocalHomeChrome.current != null
+    val layout = LocalWindowLayout.current
+    val optionsInSelectedTab = homeChrome && PersonaTheme.style == AppStyle.Glass && !layout.expanded && !layout.tabletop &&
+        connection == ConnectionState.Online
     val firstPageIncomplete = !page.loaded && page.list.groups.isEmpty()
     var newAgent by rememberSaveable { mutableStateOf(false) }
     var historyMachine by rememberSaveable { mutableStateOf<String?>(null) }
@@ -267,7 +270,8 @@ internal fun AgentsScreen(
     // In the list the space menu also opens the space page; the space page itself puts it in its bar.
     val spaceMenu: @Composable (AgentSpace, Boolean) -> Unit = { space, inList ->
         val session = space.members.first().session
-        val unread = space.members.filter { it.state == AgentState.Unread }
+        // Mark all as read: the finished ones nobody has seen, Just finished ones too (#9786)
+        val unread = space.members.filter { it.unseen }
         // A whole project on a to-do (#1616, iOS SpaceTodoMenu): only a herdr space the hub can name, on a hub that knows projects.
         val todoSpace = session.todoSpaceName?.takeIf { model.tasks?.spacesSupported == true }
         val linked = todoSpace?.let { todos.forSpace(session.machineId, it) }
@@ -287,7 +291,7 @@ internal fun AgentsScreen(
         val space = page.spacesById[repo.id]
         if (space != null) {
             val session = space.members.first().session
-            val unread = space.members.filter { it.state == AgentState.Unread }
+            val unread = space.members.filter { it.unseen }
             val todoSpace = session.todoSpaceName?.takeIf { model.tasks?.spacesSupported == true }
             val linked = todoSpace?.let { todos.forSpace(session.machineId, it) }
             agentSpaceActions(session, space.preferenceKey in page.preferences.pins.spaces, space.preferenceKey in page.preferences.mutes.spaces,
@@ -303,7 +307,7 @@ internal fun AgentsScreen(
                         onClick = { navigator.navigate(persona.core.navigation.TodoDetailRoute(todo.id)) })
                 })
         } else {
-            val unread = (repo.rows + page.list.groups.filter { it.under == repo.id }.flatMap { it.rows }).filter { it.state == AgentState.Unread }
+            val unread = (repo.rows + page.list.groups.filter { it.under == repo.id }.flatMap { it.rows }).filter { it.unseen }
             listOfNotNull(JAction(stringResource(R.string.agents_mark_all_read), PhIcons.Check, onClick = { confirmRead = unread })
                 .takeIf { unread.isNotEmpty() })
         }
@@ -404,10 +408,12 @@ internal fun AgentsScreen(
             listScroll = listTapScroll(listTapMotion),
             actions = {
                 if (LocalHomeChrome.current == null) JIconButton(PhIcons.ListChecks, stringResource(R.string.agents_action_todos), { navigator.navigate(persona.core.navigation.TodosRoute) })
-                JIconButton(if (homeChrome) PhIcons.NotePencil else PhIcons.Plus, stringResource(R.string.agents_action_new_session), { newSession() })
+                JIconButton(if (homeChrome) PhIcons.NotePencil else PhIcons.Plus, stringResource(R.string.agents_action_new_session), { newSession() },
+                    expandOnHomePress = optionsInSelectedTab)
                 if (LocalHomeChrome.current == null) JIconButton(PhIcons.SlidersHorizontal, stringResource(R.string.agents_action_list_settings), { menu = true })
-                // With the home chrome the grouping pill picks only the grouping; the rest of the list's settings sit behind ⋯.
-                else JIconButton(PersonaIcons.moreMenu, stringResource(R.string.agents_action_list_settings), { menu = true })
+                // On the compact Glass home the selected tab opens list settings. While offline the tab explains the connection.
+                else if (!optionsInSelectedTab) JIconButton(PersonaIcons.moreMenu, stringResource(R.string.agents_action_list_settings), { menu = true },
+                    expandOnHomePress = false)
             },
         ) {
             val tapScope = ListTapLazyScope(this, listTapMotion, listState, page.tapEpoch)
@@ -1220,7 +1226,7 @@ internal fun AgentSessionMenuItems(
         if (session.canRename) add(JAction(stringResource(R.string.agents_action_rename), PhIcons.NotePencil, enabled = !busy, onClick = onRename))
         if (session.loop != null && session.canSend) add(JAction(stringResource(R.string.agents_action_stop_loop), enabled = !busy, onClick = onStopLoop))
         add(JAction(stringResource(R.string.agents_action_handoff), onClick = onHandoff))
-        if (row.state == AgentState.Unread) add(JAction(stringResource(R.string.agents_action_mark_read), PhIcons.Check, onClick = onRead))
+        if (row.unseen) add(JAction(stringResource(R.string.agents_action_mark_read), PhIcons.Check, onClick = onRead))
         // Only a session in a terminal resumes there; a Codex thread by its own thread id.
         session.resumeCommand()?.let { command -> add(JAction(stringResource(R.string.agents_action_copy_resume), onClick = { copy(command, null) })) }
         add(JAction(stringResource(R.string.agents_action_copy_directory), enabled = session.cwd.isNotBlank(), onClick = { copy(session.cwd, null) }))
@@ -1311,13 +1317,16 @@ internal val AgentState.designStatus: Status get() = when (this) {
 }
 internal val AgentState.label: String @Composable get() = designStatus.localizedLabel
 
-/** A row's state colour: Awaiting Reply (#5096) takes Unread's, since it waits on the user as much; a muted one is just Seen. */
-internal fun AgentSession.rowStatus(muted: Boolean): Status = if (asksYou && !muted) Status.Unread else state.designStatus
+/**
+ * A row's state colour: Awaiting Reply (#5096) and Just finished (#9786) take Unread's, since they wait on the user as
+ * much; a muted one is just Seen.
+ */
+internal fun AgentSession.rowStatus(muted: Boolean): Status = if ((asksYou || showsJustFinished) && !muted) Status.Unread else state.designStatus
 
 /**
  * The row's state in words, as iOS's default row (#4338 A9, `rowStateWord`): only what its dot does not say alone, Needs
- * you (unless muted), Awaiting reply and Waiting in the background. Working, Unread and the rest are the dot's; TalkBack
- * still hears the state ([AgentRow]).
+ * you (unless muted), Awaiting reply, Just finished and Waiting in the background. Working, Unread and the rest are the
+ * dot's; TalkBack still hears the state ([AgentRow]).
  */
 @Composable
 internal fun AgentSession.rowStatusText(muted: Boolean): String? = rowStateWord(muted)?.text()

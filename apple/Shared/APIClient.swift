@@ -203,6 +203,14 @@ nonisolated struct APIClient: Sendable {
     var clientMetadata: RequestClientMetadata = .current
     /// Answers the demo config's requests (DemoHub registers it at launch); every endpoint goes through `request`.
     nonisolated(unsafe) static var local: (@Sendable (LocalRequest) async throws -> Data)?
+    /// The app's answer to a hub that retired this device's push registration (#9612): registers with the group again
+    /// and says whether that reached its hub. Set once at launch (`PushRegistrar`); nil in the extensions and the watch.
+    nonisolated(unsafe) static var onPushRegistrationRequired: (@Sendable (_ group: String) async -> Bool)?
+    /// This client's own answer in place of `onPushRegistrationRequired`: a test's.
+    var registerPush: (@Sendable (_ group: String) async -> Bool)?
+    /// A write for this device (`/api/v1/devices/{id}/…`: notification settings, Live Activity tokens) whose push
+    /// registration the hub retired (docs/protocol/protocol.md devices).
+    static let pushRegistrationRequired = "push_registration_required"
 
     /// For bytes the app caches itself (chat images, Feishu media): through `.shared` the system's URLCache kept a
     /// second copy of every one of them.
@@ -317,9 +325,35 @@ nonisolated struct APIClient: Sendable {
     /// it arrives. A repeat it cannot answer yet comes back `202 {"state":"pending" | "unknown"}`: thrown as an
     /// APIError with `OpReceipt.pendingCode` / `unknownCode`, so no caller takes it for done.
     /// `extraHeaders`: what this one request says besides (a hand-off card's approval declares its feature).
+    /// A request about the replayed meeting (`ReplayedMeeting`, #10589) never leaves the phone: it ends here, as an error
+    /// with the code `replayed_meeting`, whatever route it was for.
+    static func refuseReplayed(_ path: String, _ query: [String: String]) throws {
+        guard ReplayedMeeting.refuses(path, query: query) else { return }
+        var error = APIError(status: 409, message: String(localized: "A replayed meeting stays on this iPhone."),
+                             fields: ["code": ReplayedMeeting.refusal])
+        error.requestPath = path
+        throw error
+    }
+
     func request(_ method: String, _ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], body: (any Encodable)? = nil,
                  timeout: TimeInterval = 30, opID: UUID? = nil, extraHeaders: [String: String] = [:]) async throws -> Data {
+        func send() async throws -> Data {
+            try await sendRequest(method, path, query: query, repeated: repeated, body: body, timeout: timeout, opID: opID, extraHeaders: extraHeaders)
+        }
+        do {
+            return try await send()
+        } catch let e as APIError where e.status == 409 && e.code == Self.pushRegistrationRequired && path.hasPrefix("/api/v1/devices/") {
+            // The hub retired this device's push registration (#9611): register again, then this write once more. A
+            // registration that didn't reach the hub (or one the hub just took and refuses again) leaves the 409.
+            guard let register = registerPush ?? Self.onPushRegistrationRequired, await register(group) else { throw e }
+            return try await send()
+        }
+    }
+
+    private func sendRequest(_ method: String, _ path: String, query: [String: String], repeated: [URLQueryItem], body: (any Encodable)?,
+                             timeout: TimeInterval, opID: UUID?, extraHeaders: [String: String]) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         let headers = clientMetadata.headers.merging(opID.map(HubNaming.operationHeaders) ?? [:]) { _, operation in operation }
             .merging(routing(path, query)) { _, manager in manager }
             .merging(extraHeaders) { _, extra in extra }
@@ -385,6 +419,7 @@ nonisolated struct APIClient: Sendable {
     /// (`If-None-Match`), else the new bytes and their tag. The fake transport has no headers: the tag rides in the query
     /// as `If-None-Match` and a 304 is an APIError with that status.
     func conditionalGet(_ path: String, query: [String: String], etag: String?) async throws -> (data: Data?, etag: String?) {
+        try Self.refuseReplayed(path, query)
         if transport != nil || config.isDemo {
             var q = query
             if let etag { q["If-None-Match"] = etag }
@@ -409,6 +444,7 @@ nonisolated struct APIClient: Sendable {
     /// Neither the fake transport nor Demo Mode streams: it throws there, and callers do what they do without it.
     func streamed(_ method: String, _ path: String, body: (any Encodable)? = nil,
                   timeout: TimeInterval = 30) async throws -> (HTTPURLResponse, URLSession.AsyncBytes) {
+        try Self.refuseReplayed(path, [:])
         if transport != nil || config.isDemo { throw APIError(status: 501, message: "Streaming isn't available here") }
         var req = URLRequest(url: url(path, query: [:]), timeoutInterval: timeout)
         req.httpMethod = method
@@ -441,6 +477,7 @@ nonisolated struct APIClient: Sendable {
     func putBytes(_ path: String, query: [String: String] = [:], data: Data, timeout: TimeInterval = 120,
                   wifiOnly: Bool = false) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if config.isDemo { throw APIError(status: 403, message: DemoText.notSent) }
         let headers = clientMetadata.headers.merging(routing(path, query)) { _, manager in manager }
         if let transport {
@@ -469,6 +506,7 @@ nonisolated struct APIClient: Sendable {
     /// A bounded, staged attachment sent from disk. The fake transport reads it only in tests.
     func uploadBytes(file: URL, path: String, query: [String: String], timeout: TimeInterval = 180) async throws -> Data {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if config.isDemo { throw APIError(status: 403, message: DemoText.notSent) }
         if let transport {
             return try await transport(LocalRequest(method: "POST", path: path, query: query, body: Data(contentsOf: file),
@@ -523,6 +561,7 @@ nonisolated struct APIClient: Sendable {
     func download(_ path: String, query: [String: String], to destination: URL,
                   progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
         let query = larkScoped(path, query)
+        try Self.refuseReplayed(path, query)
         if transport != nil || config.isDemo {
             let data = try await request("GET", path, query: query)
             try Task.checkCancellation()
@@ -1102,14 +1141,41 @@ nonisolated struct APIClient: Sendable {
     @discardableResult
     func send(_ k: SessionKey, text: String, images: [ImagePayload] = [], launcher: String? = nil, model: String? = nil,
               clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil) async throws -> Bool {
+        try await sendReply(k, text: text, images: images, launcher: launcher, model: model, clientMsgID: clientMsgID,
+                            clearDraft: clearDraft, todoID: todoID, via: via, opID: opID).waitsOnComputer == true
+    }
+
+    /// The hub's answer to a message it took: whether it waits behind a question on the computer (#5890), or that it
+    /// did not go in and the assistant keeps it to send by itself (`delivered` "later", `undelivered`: #10194).
+    nonisolated struct SendReply: Decodable, Sendable {
+        var waitsOnComputer: Bool?
+        var delivered: String?
+        var undelivered: UndeliveredMessage?
+        var kept: Bool { delivered == "later" }
+        enum CodingKeys: String, CodingKey { case waitsOnComputer = "waits_on_computer", delivered, undelivered }
+    }
+
+    /// `send`, with the whole answer (`SendReply`).
+    func sendReply(_ k: SessionKey, text: String, images: [ImagePayload] = [], launcher: String? = nil, model: String? = nil,
+                   clientMsgID: String? = nil, clearDraft: String? = nil, todoID: String? = nil, via: MessageVia? = nil, opID: UUID? = nil) async throws -> SendReply {
         let data = try await post(sp(k) + "/messages", body: SendBody(text: HubNaming.outbound(text, canonical: personaNaming), images: images.isEmpty ? nil : images, launcher: launcher,
                                                                       model: model, clientMsgID: clientMsgID, clearDraft: clearDraft, todoID: todoID, via: via),
                                   timeout: 100, opID: opID)
-        struct Answer: Decodable {
-            var waitsOnComputer: Bool?
-            enum CodingKeys: String, CodingKey { case waitsOnComputer = "waits_on_computer" }
-        }
-        return (try? JSON.decoder.decode(Answer.self, from: data))?.waitsOnComputer == true
+        return (try? JSON.decoder.decode(SendReply.self, from: data)) ?? SendReply()
+    }
+
+    /// Retry on a kept message that gave up (#10194): the assistant tries it again from now.
+    func retryUndelivered(conversation: String, id: String) async throws {
+        try await post("/api/v1/assistant/conversations/\(Self.pathPart(conversation))/undelivered/\(Self.pathPart(id))/retry", body: [String: String]())
+    }
+
+    /// Delete on a kept message (#10194): it is never sent.
+    func deleteUndelivered(conversation: String, id: String) async throws {
+        try await delete("/api/v1/assistant/conversations/\(Self.pathPart(conversation))/undelivered/\(Self.pathPart(id))")
+    }
+
+    private nonisolated static func pathPart(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
     }
     func interrupt(_ k: SessionKey) async throws { try await post(sp(k) + "/interrupt") }
     func attach(_ k: SessionKey) async throws { try await post(sp(k) + "/attach") }
@@ -1291,6 +1357,32 @@ nonisolated struct APIClient: Sendable {
     }
     func sessionInfo(_ k: SessionKey) async throws -> SessionInfo { try await get(sp(k) + "/info") }
 
+    /// A session's permission mode changes the hub recorded, oldest first (#10297, docs/protocol/protocol.md「Session
+    /// mode changes」): each change made through /modes, and what became of a queued restart into Allow Everything.
+    nonisolated struct ModeChange: Decodable, Hashable, Sendable {
+        /// "set", "restart_done", "restart_failed" or "restart_dropped".
+        var kind: String
+        var from: String?
+        var to: String?
+        /// For "set": "now", or "restart" for a restart into it that waits for the turn to end; empty from an older node.
+        var applied: String?
+        /// Who asked: "device", "hub" (the hub's own token), "extension".
+        var actorKind: String?
+        var deviceName: String?
+        /// What became of a restart, why: a code ("process_exited", "replaced"…).
+        var reason: String?
+        var at: Date
+        enum CodingKeys: String, CodingKey {
+            case kind, from, to, applied, reason, at
+            case actorKind = "actor_kind", deviceName = "device_name"
+        }
+    }
+    private struct ModeChanges: Decodable, Sendable { var changes: [ModeChange]? }
+    /// Off the main actor (`docs/apple/performance.md` P1): a chat opening reads it.
+    func modeChanges(_ k: SessionKey) async throws -> [ModeChange] {
+        try await getDecodedOffMain(sp(k) + "/mode-changes", as: ModeChanges.self).changes ?? []
+    }
+
     struct ModesBody: Encodable {
         var permissionMode: String?
         var effort: String?
@@ -1420,6 +1512,8 @@ nonisolated struct APIClient: Sendable {
         var taskWorkspacePreference: String?
         /// Every Agent Persona starts gets a quiet, supervised task (#3617). Off by default.
         var agentTasks: Bool?
+        /// Close an Agent's terminal tab when its session ends (#10355). Off by default.
+        var closeEndedTerminals: Bool?
         /// Hours an idle Agent Persona started runs before it is stopped, its terminal kept (#4754): 0 is never, at
         /// most 8760; 12 by default.
         var idleCloseHours: Int?
@@ -1444,6 +1538,7 @@ nonisolated struct APIClient: Sendable {
             case nextSuggestions = "next_suggestions", kbTopics = "kb_topics"
             case startRequestedTasks = "start_requested_tasks", taskWorkspacePreference = "task_workspace_preference"
             case agentTasks = "agent_tasks", idleCloseHours = "idle_close_hours", archiveClosedDays = "archive_closed_days"
+            case closeEndedTerminals = "close_ended_terminals"
             case agentAutoNaming = "agent_auto_naming", agentAutoNamingMax = "agent_auto_naming_max"
             case agentAutoNamingIntervalHours = "agent_auto_naming_interval_hours"
         }
@@ -1548,6 +1643,7 @@ nonisolated struct APIClient: Sendable {
         var startRequestedTasks: Bool?
         var taskWorkspacePreference: String?
         var agentTasks: Bool?
+        var closeEndedTerminals: Bool?
         var idleCloseHours: Int?
         var archiveClosedDays: Int?
         var agentAutoNaming: Bool?
@@ -1564,6 +1660,7 @@ nonisolated struct APIClient: Sendable {
             case nextSuggestions = "next_suggestions", kbTopics = "kb_topics"
             case startRequestedTasks = "start_requested_tasks", taskWorkspacePreference = "task_workspace_preference"
             case agentTasks = "agent_tasks", idleCloseHours = "idle_close_hours", archiveClosedDays = "archive_closed_days"
+            case closeEndedTerminals = "close_ended_terminals"
             case agentAutoNaming = "agent_auto_naming", agentAutoNamingMax = "agent_auto_naming_max"
             case agentAutoNamingIntervalHours = "agent_auto_naming_interval_hours"
         }
@@ -1974,6 +2071,14 @@ nonisolated struct APIClient: Sendable {
     }
     func setCodexSetting(machine: String, key: String, value: JSONValue) async throws -> [ClaudeSetting] {
         try JSON.decoder.decode(ClaudeSettingsResponse.self, from: try await request("PUT", "/api/v1/machines/\(machine)/codex-settings",
+            body: SetSetting(key: key, value: value))).settings
+    }
+    /// Antigravity's options (~/.gemini/antigravity-cli/settings.json), the same shape as Claude's.
+    func agySettings(machine: String) async throws -> [ClaudeSetting] {
+        try await get("/api/v1/machines/\(machine)/agy-settings", as: ClaudeSettingsResponse.self).settings
+    }
+    func setAgySetting(machine: String, key: String, value: JSONValue) async throws -> [ClaudeSetting] {
+        try JSON.decoder.decode(ClaudeSettingsResponse.self, from: try await request("PUT", "/api/v1/machines/\(machine)/agy-settings",
             body: SetSetting(key: key, value: value))).settings
     }
     struct SetSetting: Encodable { var key: String; var value: JSONValue }

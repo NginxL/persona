@@ -732,6 +732,15 @@ var Points = map[string]Point{
 		}
 		return p.ID, nil
 	}},
+	// repository_providers: a code-hosting source for the repository catalog and a to-do's repositories and links on the
+	// exact hosts it names (repo.parse / repo.check / repo.link / repo.describe, docs/extensions/repository-providers.md).
+	"repository_providers": {Name: "repository_providers", Namespace: "repo", Version: 1, NeedsRPC: true, Item: func(raw json.RawMessage) (string, error) {
+		var p RepositoryProviderItem
+		if err := strict(raw, &p); err != nil {
+			return "", err
+		}
+		return p.ID, checkRepositoryProvider(p)
+	}},
 	"voice": {Name: "voice", Namespace: "voice", Version: 1, NeedsHTTP: true, Item: func(raw json.RawMessage) (string, error) {
 		var v VoiceItem
 		if err := strict(raw, &v); err != nil {

@@ -57,6 +57,15 @@ nonisolated enum MeetingCalendar {
         await Task.detached { upcoming(at: date, limit: limit) }.value
     }
 
+    /// Every event between `from` and `to` (#8731 G2, the reminders), off the main thread; none without access.
+    static func eventsOffMain(from: Date, to: Date) async -> [Candidate] {
+        await Task.detached {
+            guard canRead else { return [] }
+            let store = EKEventStore()
+            return store.events(matching: store.predicateForEvents(withStart: from, end: to, calendars: nil)).map(Candidate.init)
+        }.value
+    }
+
     /// Of `events`, the ones `pick` would count (not all-day, declined or untitled) that have not ended at `date` and start
     /// before `dayEnd`, earliest first (by start, then end), at most `limit`.
     static func upcoming(_ events: [Candidate], at date: Date, dayEnd: Date, limit: Int) -> [Candidate] {

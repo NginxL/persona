@@ -1,17 +1,19 @@
-// The inbox list (docs/assistant/inbox.md"App"): filters by source and kind, search, then Needs you (agents waiting on you first),
-// FYI, Collapsed and Done, each a section that opens / closes from its title.
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+// The inbox list (docs/assistant/inbox.md"App"): the section bar on top (Needs you, In progress, FYI, Done or All;
+// "Section bar", #9053), filters by source and kind, search, then the section chosen; under All every section stacked,
+// Needs you (agents waiting on you first), In progress, FYI, Collapsed and Done, each opening / closing from its title.
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { agentDraft, agentWorking, conversationRoute, fromLine, interactionAsk, interactionTitle, isDone, isLark, itemKey, itemRoute, muteItem, sameItem, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS, useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup } from "../../lib/inbox";
 import { lineSummary, markdownInSummary, withoutMarks } from "../../lib/inbox-markdown";
 import { repeatsSummary, interactionAgentTitle, listInboxMutes, muteLine, muteShortName, muteTitle, policyMenuTitle, unmuteInbox, BULK_CONFIRM_AT, bulkScope, bulkScopeName, mailShort } from "../../lib/inbox-page";
 import { nowText, rowMeta } from "../../lib/inbox-now";
 import { dayGroupCounts, doneGroups, groupBySource, groupByTime, openAtFirst, sortTimeKeys, timeRange, timeTitle, type Grouping, type InboxGroup } from "../../lib/inbox-groups";
+import { barLanding, barRows, barSectionOf, barStep, inboxBar, searching, type BarChoice } from "../../lib/inbox-bar";
 import { useMailAccounts } from "../../lib/mail";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
 import { machineWithHub } from "../../lib/mesh";
 import { href, navigate, onLinkClick } from "../../lib/router";
-import { openedItemState } from "../../lib/inbox-nav";
-import { useInboxListScroll, useInboxView } from "../../lib/inbox-view-memory";
+import { openedInInbox, openedItemState } from "../../lib/inbox-nav";
+import { restoreListScroll, useInboxListScroll, useInboxView } from "../../lib/inbox-view-memory";
 import { useInboxSources } from "../../lib/inbox-sources";
 import { subscriptionsHref, useInboxSourcesShown, useSubscriptionsShown } from "../../lib/subscriptions";
 import { type Manager } from "../../lib/managers";
@@ -40,6 +42,8 @@ import { FolderBar, FolderLine, FolderSettingsDialog, openFolderDialog, useFolde
 import { folderCrumbs, UNFILED } from "../../lib/inbox-folders";
 import { AgentWorking, Chip, Count, DraftCard, Glyph, ItemAvatar, Spark, StatusMenu, Tag, type GlyphName } from "./InboxParts";
 import { CheckMark } from "../settings/ProviderFields";
+import { InboxBar } from "./InboxBar";
+import { groupClear, type GroupClear } from "./group-clear";
 import { OfflineState, useShownOffline } from "../ManagerParts";
 
 function useStored(key: string): [string, (v: string) => void] {
@@ -71,11 +75,22 @@ function useFolds(): [Record<string, boolean>, (key: string, open: boolean) => v
 /** The sections open at first (in every manager's group): Needs you and FYI. */
 const OPEN_AT_FIRST = new Set(["action", "fyi"]);
 
+/** What a choice with nothing in it says, while other sections have rows (#9053). */
+const SECTION_EMPTY: Record<Exclude<BarChoice, "all">, string> = {
+  action: "inbox-inboxlist.empty_action",
+  working: "inbox-inboxlist.empty_working",
+  fyi: "inbox-inboxlist.empty_fyi",
+  done: "inbox-inboxlist.empty_done",
+};
+
 /** Selecting (#2059): the picked items' keys (itemKey), null when not selecting. */
 type Picked = Set<string> | null;
+const alwaysBeside = () => true;
 
-/** `selected`: the item opened (its id and manager). `picked` / `onPicked`: selecting, from the page's "Select". */
-export function InboxList({ selected, picked = null, onPicked }: { selected?: { id: string; manager?: string }; picked?: Picked; onPicked?: Dispatch<SetStateAction<Picked>> }) {
+/** `selected`: the item opened (its id and manager); `routed`: that item, once the list or the hub has it. `picked` /
+ *  `onPicked`: selecting, from the page's "Select". `listBeside`: whether the list is drawn beside an opened item (a wide
+ *  page) rather than hidden under it; a list on its own is in sight. */
+export function InboxList({ selected, routed, picked = null, onPicked, listBeside = alwaysBeside }: { selected?: { id: string; manager?: string }; routed?: InboxItem; picked?: Picked; onPicked?: Dispatch<SetStateAction<Picked>>; listBeside?: () => boolean }) {
   const view = useInboxView();
   // with several assistants the list is the current one's (docs/assistant/managers.md "Clients"); one: every item
   const mine = useScope();
@@ -103,9 +118,23 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const groupComplete = useInbox((st) => st.groupComplete);
   const [storedFolder, setFolder] = useStored("inbox.folder");
   const [query, setQueryState] = useState(() => view.listQuery());
+  // The section bar's choice (#9053), kept with this history entry as the search is: each visit opens on Needs you,
+  // and it stays while the Inbox is open (an item opened and closed, a refresh, a filter).
+  const [bar, setBar] = useState(() => view.listBar());
+  useEffect(() => view.setListBar(bar), [view, bar]);
+  const choice = bar.chosen;
   const setQuery = (value: string) => {
     setQueryState(value);
     view.setListQuery(value);
+    // a search looks through the whole Inbox: its text shows All, and clearing it brings back the choice put aside. It
+    // takes over from an opened item's way back (below): what it puts aside is the choice the reader had before that item
+    // moved the list, and closing the item then leaves the search where it is
+    setBar((b) => {
+      const next = barStep({ ...b, query }, { query: value });
+      if (next.chosen === b.chosen && next.saved === b.saved) return b;
+      return { chosen: next.chosen, saved: b.landedFrom && searching(value) ? b.landedFrom : next.saved, landedFrom: null };
+    });
+    if (searching(value) !== searching(query)) setLanding(null);
   };
   const foldersShown = useFoldersShown(items);
   // folders hidden (turned off, nothing filed): a folder picked before does not filter what can't be seen
@@ -133,11 +162,12 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   // history entry's own scroll position is being put back.
   const selectedKey = selected ? itemKey(selected) : "";
   const listBox = useRef<HTMLDivElement>(null);
-  useInboxListScroll(listBox, view, selectedKey, loaded, storeLoaded, () => {
+  const showSelected = () => {
     if (!selected) return;
     const rows = [...document.querySelectorAll<HTMLElement>(`[data-item="${CSS.escape(selected.id)}"]`)];
     (rows.find((el) => sameItem({ id: selected.id, manager: el.dataset.manager }, selected)) ?? rows[0])?.scrollIntoView({ block: "nearest" });
-  });
+  };
+  useInboxListScroll(listBox, view, selectedKey, loaded, storeLoaded, showSelected);
 
   const s = useMemo(() => sections(items, { source, kind, query, folder }), [items, source, kind, query, folder]);
   // what the folder bar counts: the items the other filters leave
@@ -191,7 +221,16 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const now = useMemo(() => Date.now(), [items, history]);
   const order = ["lark", ...chips.map((a) => `mail:${a.id}`), ...connectors.map((c) => `c:${c.id}`)];
   const mailName = (account: string) => chips.find((a) => a.id === account)?.email ?? account;
-  const groupOpen = (group: string, section: string, key: string) => folds[`${group}|${section}|${key}`] ?? openAtFirst(section, key);
+  // the group an opened item's landing opened (below) is open until it is folded or the list goes back
+  const [landOpen, setLandOpen] = useState("");
+  const groupOpen = (group: string, section: string, key: string) => {
+    const id = `${group}|${section}|${key}`;
+    return id === landOpen || (folds[id] ?? openAtFirst(section, key));
+  };
+  const putGroupFold = (id: string, open: boolean) => {
+    if (id === landOpen) setLandOpen("");
+    putFold(id, open);
+  };
   // Done's groups (#2969). With the hub's day counts (#2967) every group they name is listed with its count, loaded or not,
   // and loads its own items when it opens; filtered or searched, the counts are of what is loaded ("n+" until the group
   // is complete). Without them, as before: what the history has loaded, "n+" on the last group while there is more.
@@ -225,14 +264,31 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     const done = doneWithHistory(sec.done, scoped(history, mine), { source, kind, query, folder });
     const group = manager?.id ?? "";
     const { groups: dg, next } = doneGroupsOf(group, done);
-    return { manager, group, tiers, done, doneGroups: dg, doneNext: next };
+    return { manager, group, sec, ags, tiers, done, doneGroups: dg, doneNext: next };
   });
-  // the open items in sight: in sections and groups shown open (In progress is always open)
-  const shownOpen = kind === "agent" ? [] : layout.flatMap(({ group, tiers }) => tiers.filter(({ tier }) => tier.key === "working" || isOpen(group, tier.key))
+  // The section bar (#9053), over the list's one group (the current assistant's, or every item's): each section's rows
+  // under the filters and the search (Needs you's with the agents waiting, as its title counts them; Done's loaded, and
+  // the hub's day counts while nothing narrows the list), the sections the choice draws, and why it draws nothing.
+  const here = layout[0]!;
+  const hereDays = doneDays[here.group];
+  const sectionBar = inboxBar({
+    rows: barRows(here.sec, here.ags.length, here.done.length),
+    chosen: choice,
+    chips: chipsOn,
+    search: searching(query),
+    doneDays: hereDays ? Object.values(hereDays).reduce((n, c) => n + c, 0) : undefined,
+  });
+  // a section drawn open: under a choice, the one chosen, which doesn't fold; under All, as its title left it (In
+  // progress is always open)
+  const sectionOpen = (group: string, k: SectionKey | "done") => (choice === "all" ? k === "working" || isOpen(group, k) : k === choice);
+  // the open items in sight: in sections and groups shown open
+  const shownOpen = kind === "agent" ? [] : layout.flatMap(({ group, tiers }) => tiers.filter(({ tier }) => sectionOpen(group, tier.key))
     .flatMap(({ tier, list, groups, titled }) => (titled ? groups.filter((g) => groupOpen(group, tier.key, g.key)).flatMap((g) => g.items) : list)));
   const chosen = picking ? openInView.filter((it) => picked.has(itemKey(it))) : [];
   const shownKeys = new Set(shownOpen.map(itemKey));
   const chosenFolded = chosen.filter((it) => !shownKeys.has(itemKey(it))).length;
+  // picked rows under another choice are out of sight as a folded group's are; the bar says so in other words
+  const chosenElsewhere = choice === "all" ? 0 : chosen.filter((it) => barSectionOf(it) !== choice).length;
   // a group's check: picks all of it, folded or not, or unpicks all of it when all are picked
   const pickGroup = (list: InboxItem[]) => onPicked?.((p) => {
     if (!p) return p;
@@ -260,7 +316,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const autoLoaded = useRef(new Set<string>());
   useEffect(() => {
     for (const { manager, group, doneGroups: dg } of layout) {
-      if (!doneDays[group] || !isOpen(group, "done")) continue;
+      if (!doneDays[group] || !sectionOpen(group, "done")) continue;
       for (const g of dg) {
         const id = `${group}|${g.key}`;
         if (!g.more || !groupOpen(group, "done", g.key) || autoLoaded.current.has(id)) continue;
@@ -270,7 +326,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     }
   });
   const jumpTo = (group: string, key: string) => {
-    if (!isOpen(group, "done")) toggle(group, "done");
+    if (!sectionOpen(group, "done")) toggle(group, "done");
     putFold(`${group}|done|${key}`, true);
     requestAnimationFrame(() => scrollListTo(document.querySelector(`[data-group="${CSS.escape(`${group}|done|${key}`)}"]`)));
   };
@@ -307,6 +363,87 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     setToggled(n);
     view.setListToggled(n);
   };
+  // A choice in the bar shows that section from its top; a search's choice put aside stays for when it is cleared.
+  const pickChoice = (c: BarChoice) => {
+    if (c === choice) return;
+    setBar((b) => {
+      const next = barStep({ ...b, query }, { pick: c });
+      return { chosen: next.chosen, saved: next.saved, landedFrom: null };
+    });
+    setLanding(null);
+    if (listBox.current) listBox.current.scrollTop = 0;
+  };
+  // An item the list doesn't show lands the list on its choice (docs/assistant/inbox.md "Section bar"): Done for a done
+  // one, All with Collapsed open for a collapsed one; a folded group it is in opens. Opened from outside the Inbox (a
+  // link, ⌘K, a Needs-you line elsewhere), that is where the list stays when the item closes, so a link lands where its
+  // item lives. Opened from inside (another item's chain or relations), only a list beside the item moves, and closing
+  // the item goes back to where the list was: the choice it moved from, Collapsed folded again, the same scroll; a list
+  // hidden under the item is left as it is. Once per item opened, so an item marked done from its own page doesn't take
+  // the list along to Done; a returned entry keeps the choice it had.
+  const [landedFor, setLandedFor] = useState(() => (view.restored ? selectedKey : ""));
+  const [landings, setLandings] = useState(0);
+  // what inside landings changed besides the choice, to put back with it: the list's scroll before them, Collapsed opened
+  const [landing, setLanding] = useState<{ top: number; noise: boolean } | null>(null);
+  // the scroll to put back once the list has gone back
+  const [goneBack, setGoneBack] = useState<{ top: number } | null>(null);
+  // the folded group the item is in, by its fold's id; "" when it is in none
+  const foldOf = (it: InboxItem) => {
+    const section = barSectionOf(it);
+    const groups = section === "done" ? (here.doneGroups.length > 1 ? here.doneGroups : []) : here.tiers.find((x) => x.tier.key === section && x.titled)?.groups ?? [];
+    const g = groups.find((x) => x.items.some((y) => sameItem(y, it)));
+    return g && !groupOpen(here.group, section, g.key) ? `${here.group}|${section}|${g.key}` : "";
+  };
+  if (landedFor !== selectedKey && (!selectedKey || (ready && routed))) {
+    setLandedFor(selectedKey);
+    const group = here.group;
+    if (!selectedKey) {
+      // an outside landing has nothing to go back to: the list stays where the item lives, its group open
+      if (bar.landedFrom) setBar({ ...bar, chosen: bar.landedFrom, landedFrom: null });
+      if (landing?.noise && isOpen(group, "noise")) toggle(group, "noise");
+      if (landing || bar.landedFrom) {
+        setGoneBack({ top: landing?.top ?? 0 });
+        setLandOpen("");
+      }
+      setLanding(null);
+    } else if (routed) {
+      const shows = sectionOpen(group, barSectionOf(routed));
+      const outside = !openedInInbox(window.history.state); // the browser's: `history` in this list is Done's
+      const moves = !shows && (outside || listBeside());
+      if (moves) {
+        const land = barLanding(routed);
+        const noise = land.openCollapsed && !isOpen(group, "noise");
+        if (noise) toggle(group, "noise");
+        if (outside) {
+          // for good, over any way back an earlier item left
+          if (land.choice !== choice || bar.landedFrom) setBar({ ...bar, chosen: land.choice, landedFrom: null });
+          setLanding(null);
+        } else {
+          if (land.choice !== choice) setBar({ ...bar, chosen: land.choice, landedFrom: bar.landedFrom ?? choice });
+          setLanding({ top: landing?.top ?? view.listScroll(), noise: noise || Boolean(landing?.noise) });
+        }
+      } else if (shows && (bar.landedFrom || landing)) {
+        // opened from the list under the choice it moved to: that is where the reader is now
+        if (bar.landedFrom) setBar({ ...bar, landedFrom: null });
+        setLanding(null);
+      }
+      const fold = shows || moves ? foldOf(routed) : "";
+      if (fold) setLandOpen(fold);
+      if (moves || fold) setLandings((n) => n + 1);
+    }
+  }
+  // the list moved to it: its row in sight, as when it is opened from the list (a row that came later, read by id), and
+  // again once a group opened in place has unfolded
+  useEffect(() => {
+    if (!landings) return;
+    showSelected();
+    const again = setTimeout(showSelected, 350);
+    return () => clearTimeout(again);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [landings]);
+  // gone back: the list where it was before the item moved it, as its rows come in
+  useLayoutEffect(() => {
+    if (goneBack && listBox.current) return restoreListScroll(listBox.current, goneBack.top);
+  }, [goneBack]);
   // Agents have no source: picking one leaves the Agent filter, and the Agent filter leaves the source.
   const pickSource = (v: string) => {
     setSource(source === v ? "" : v);
@@ -317,13 +454,26 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     if (v === "agent") setSource("");
   };
 
+  // why the list draws nothing under the choice; the whole Inbox's own states (a failed read, the assistant offline,
+  // nothing connected) take the place of any of them, as before the bar
+  const emptyKind = ready ? sectionBar.empty : null;
+  const whole = ready && empty && (failed || away || Boolean(unconnected));
+  const emptyCleared = emptyKind === "filtered" || emptyKind === "no_match";
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+    {/* the section bar stays in sight over the list's scroller, with the counts of the choices not shown, in the list's
+        own side padding (its trailing grouping button's mark, not its box, lines up with the search field's end) */}
+    <div className="shrink-0 px-3 pt-3 sm:px-4">
+      <div className="mx-auto max-w-[760px]">
+        <InboxBar entries={sectionBar.bar} chosen={choice} onPick={pickChoice} grouping={grouping} groupable={choice !== "done" && choice !== "working"} onGrouping={(g) => setGrouping(g === "source" ? "" : g)} />
+      </div>
+    </div>
     {/* `overflow-y-auto` alone makes this a scroll container on both axes, so a row or a long chip (a connector's name)
         wider than the 380px column let the whole list scroll sideways and cut off every card (#3262); `overflow-x-clip`
         clips that overflow instead, and is not a scroll container, so `scrollIntoView` above cannot shift it either. */}
     <div ref={listBox} className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined} data-inbox-list-scroll>
-      <div className="mx-auto max-w-[760px] px-3 pt-3 pb-16 sm:px-4">
+      <div className="mx-auto max-w-[760px] px-3 pt-2.5 pb-16 sm:px-4">
         <label className="flex h-8 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
           <Icon name="search" size={13} stroke={2} className="shrink-0 text-ink-3" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("inbox-inboxlist.search_placeholder")} aria-label={t("inbox-inboxlist.search_label")} className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3" />
@@ -358,15 +508,6 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
           </button>
         </div>
         <IconButton icon="more" label={t("inbox-inboxlist.more")} onClick={more.open} active={Boolean(more.anchor)} />
-        </div>
-        <div role="radiogroup" aria-label={t("inbox-inboxlist.grouping")} className="mt-2.5 flex w-fit gap-0.5 rounded-full bg-inset p-0.5 shadow-hairline">
-          {(["source", "time"] as const).map((g) => (
-            <button key={g} type="button" role="radio" aria-checked={grouping === g} onClick={() => setGrouping(g === "source" ? "" : g)}
-              className={cx("touch-hit relative z-10 flex h-6 items-center justify-center whitespace-nowrap rounded-full px-2.5 text-[11.5px] transition-[background-color,color,box-shadow] duration-150",
-                grouping === g ? "bg-surface font-medium text-ink shadow-btn" : "text-ink-2 hover:bg-hover hover:text-ink")}>
-              {g === "source" ? t("inbox-inboxlist.by_source") : t("inbox-inboxlist.by_time")}
-            </button>
-          ))}
         </div>
         {more.anchor && (
           <Menu anchor={more.anchor} onClose={more.close} align="right" width={240}
@@ -431,16 +572,18 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
           </div>
         )}
         {/* nothing open: the green "All caught up", or, where the chips, a folder or the search point, a neutral mark that
-            says so and the way back (the Inbox outside the filters may still hold plenty, audit item 15); one block, so
-            both keep the same type */}
-        {ready && empty && !failed && !away && !unconnected && (
-          <div className="mt-10 flex flex-col items-center gap-2 text-center" data-inbox-filtered-empty={filtered ? "" : undefined}>
-            <span className={cx("flex size-10 items-center justify-center rounded-full", filtered ? "bg-field text-ink-3" : "bg-green-tint text-green")}>
-              {filtered ? <Icon name={chipsOn ? "filter" : "search"} size={17} /> : <Icon name="check" size={17} stroke={2.6} />}
+            says so and the way back (the Inbox outside the filters may still hold plenty, audit item 15); a choice with
+            nothing in it while other sections have rows says so in its own words, under the bar that counts them. One
+            block, so all keep the same type */}
+        {emptyKind && !whole && (
+          <div className="mt-10 flex flex-col items-center gap-2 text-center" data-inbox-filtered-empty={emptyCleared ? "" : undefined} data-inbox-section-empty={emptyKind === "section" ? choice : undefined}>
+            <span className={cx("flex size-10 items-center justify-center rounded-full", emptyKind === "caught_up" ? "bg-green-tint text-green" : "bg-field text-ink-3")}>
+              {emptyKind === "caught_up" ? <Icon name="check" size={17} stroke={2.6} /> : <Icon name={emptyKind === "filtered" ? "filter" : emptyKind === "no_match" ? "search" : "inbox"} size={17} />}
             </span>
-            <p className="text-[13.5px] font-medium text-ink">{t(!filtered ? "inbox-inboxlist.empty_all_done" : chipsOn ? "inbox-inboxlist.empty_filtered" : "inbox-inboxlist.empty_no_match")}</p>
-            <p className={cx("text-[12.5px] text-ink-3", filtered && "max-w-80")}>{t(!filtered ? "inbox-inboxlist.empty_all_done_hint" : chipsOn ? "inbox-inboxlist.empty_filtered_hint" : "inbox-inboxlist.empty_no_match_hint")}</p>
-            {filtered && <Button tone="secondary" onClick={clearFilters} className="mt-2 touch-hit">{t(chipsOn ? "inbox-inboxlist.clear_filters" : "inbox-inboxlist.clear_search")}</Button>}
+            <p className="text-[13.5px] font-medium text-ink">{emptyKind === "section" ? choice !== "all" && t(SECTION_EMPTY[choice]) : t(emptyKind === "caught_up" ? "inbox-inboxlist.empty_all_done" : emptyKind === "filtered" ? "inbox-inboxlist.empty_filtered" : "inbox-inboxlist.empty_no_match")}</p>
+            {/* a chosen section's: where the rest are, or (Done) what comes to it */}
+            {(emptyKind !== "section" || choice !== "all") && <p className={cx("text-[12.5px] text-ink-3", emptyKind !== "caught_up" && "max-w-80")} data-inbox-empty-hint>{t(emptyKind === "section" ? (choice === "done" ? "inbox-inboxlist.empty_done_hint" : "inbox-inboxlist.empty_section_hint") : emptyKind === "caught_up" ? "inbox-inboxlist.empty_all_done_hint" : emptyKind === "filtered" ? "inbox-inboxlist.empty_filtered_hint" : "inbox-inboxlist.empty_no_match_hint")}</p>}
+            {emptyCleared && <Button tone="secondary" onClick={clearFilters} className="mt-2 touch-hit">{t(emptyKind === "filtered" ? "inbox-inboxlist.clear_filters" : "inbox-inboxlist.clear_search")}</Button>}
           </div>
         )}
 
@@ -455,12 +598,12 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
           );
           const openRow = (it: InboxItem) => row(it);
           const doneRow = (it: InboxItem) => row(it, true);
-          const groupOf = (section: string, g: { key: string; title: string; items: InboxItem[] }, body: React.ReactNode, opts: { more?: boolean; pickable?: boolean; count?: number } = {}) => {
+          const groupOf = (section: string, g: { key: string; title: string; items: InboxItem[] }, body: React.ReactNode, opts: { more?: boolean; pickable?: boolean; count?: number; clear?: GroupClear } = {}) => {
             const id = `${group}|${section}|${g.key}`;
             const n = picking && opts.pickable ? g.items.filter((it) => picked.has(itemKey(it))).length : 0;
             return (
-              <Group key={id} id={id} title={g.title} count={opts.count ?? g.items.length} more={opts.more} open={groupOpen(group, section, g.key)} onToggle={(open) => putFold(id, open)}
-                pick={picking && opts.pickable ? { state: n === 0 ? "none" : n === g.items.length ? "all" : "some", picked: n, run: () => pickGroup(g.items) } : undefined}>
+              <Group key={id} id={id} title={g.title} count={opts.count ?? g.items.length} more={opts.more} open={groupOpen(group, section, g.key)} onToggle={(open) => putGroupFold(id, open)}
+                pick={picking && opts.pickable ? { state: n === 0 ? "none" : n === g.items.length ? "all" : "some", picked: n, run: () => pickGroup(g.items) } : undefined} clear={picking ? undefined : opts.clear}>
                 {body}
               </Group>
             );
@@ -468,16 +611,18 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
           return (
             <Fragment key={group}>
               {ready && tiers.map(({ tier, list, waiting, groups, titled }) => {
-                if (!list.length && !waiting.length) return null;
+                if (!sectionBar.shown.includes(tier.key)) return null;
                 const clear = tier.key === "fyi" ? t("inbox-inboxlist.clear_fyi") : tier.key === "noise" ? t("inbox-inboxlist.clear_noise") : undefined;
                 const agentRows = waiting.map((ix) => <AgentRow key={ix.id} ix={ix} off={picking} />);
+                // under a choice its title stays as a heading that doesn't fold, as In progress's always is
+                const folds = choice === "all" && tier.key !== "working";
                 return (
-                  <Section key={tier.key} k={tier.key} title={tier.title} count={sectionCount(list.length, waiting.length)} open={tier.key === "working" || isOpen(group, tier.key)} onToggle={tier.key === "working" ? undefined : () => toggle(group, tier.key)}
+                  <Section key={tier.key} k={tier.key} title={tier.title} count={sectionCount(list.length, waiting.length)} open={sectionOpen(group, tier.key)} onToggle={folds ? () => toggle(group, tier.key) : undefined}
                     action={clear && list.length && !picking ? { label: clear, run: () => setAllDone(list, true) } : undefined}>
                     {titled ? (
                       <>
                         {waiting.length > 0 && groupOf(tier.key, { key: "agents", title: t("lib-inbox-groups.group_agents"), items: [] }, agentRows, { count: waiting.length })}
-                        {groups.map((g) => groupOf(tier.key, g, <Rows items={g.items} row={openRow} keep={isSelected} all={view.restored} />, { pickable: true }))}
+                        {groups.map((g) => groupOf(tier.key, g, <Rows items={g.items} row={openRow} keep={isSelected} all={view.restored} />, { pickable: true, clear: groupClear(tier.key, tier.title, g, list, filtered ? bulkScopeName(filterNames, query) : undefined) }))}
                       </>
                     ) : (
                       <>
@@ -488,11 +633,11 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
                   </Section>
                 );
               })}
-              {ready && doneCount > 0 && (
-                <Section k="done" title={t("inbox-inboxlist.done")} count={more ? { text: `${doneCount}+`, label: `${doneCount}+` } : sectionCount(doneCount, 0)} open={isOpen(group, "done")} onToggle={() => toggle(group, "done")}
+              {ready && sectionBar.shown.includes("done") && (
+                <Section k="done" title={t("inbox-inboxlist.done")} count={more ? { text: `${doneCount}+`, label: `${doneCount}+` } : sectionCount(doneCount, 0)} open={sectionOpen(group, "done")} onToggle={choice === "all" ? () => toggle(group, "done") : undefined}
                   menu={dg.length > 1 ? [
                     ...dg.map((g) => ({ key: `jump:${g.key}`, label: g.title, hint: g.plus ? `${g.count}+` : String(g.count), onSelect: () => jumpTo(group, g.key) })),
-                    { key: "fold-all", label: t("inbox-inboxlist.fold_all"), divider: true, onSelect: () => dg.forEach((g) => putFold(`${group}|done|${g.key}`, false)) },
+                    { key: "fold-all", label: t("inbox-inboxlist.fold_all"), divider: true, onSelect: () => dg.forEach((g) => putGroupFold(`${group}|done|${g.key}`, false)) },
                     { key: "unfold-all", label: t("inbox-inboxlist.unfold_all"), onSelect: () => dg.forEach((g) => putFold(`${group}|done|${g.key}`, true)) },
                   ] : undefined}>
                   {dg.length > 1 ? dg.map((g) => {
@@ -519,7 +664,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
       <div role="toolbar" aria-label={t("inbox-inboxlist.selection")} data-pick-bar className="shrink-0 border-t border-line bg-inset px-3 py-2.5 sm:px-4 max-sm:pb-[calc(10px+env(safe-area-inset-bottom))]">
         <div className="mx-auto flex max-w-[760px] items-center gap-2">
           <Button tone="quiet" onClick={pickAll} disabled={!shownOpen.length}>{allChosen ? t("inbox-inboxlist.deselect_all") : t("inbox-inboxlist.select_all")}</Button>
-          <span className="min-w-0 flex-1 truncate text-label text-ink-3 tabular-nums" aria-live="polite">{chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
+          <span className="min-w-0 flex-1 truncate text-label text-ink-3 tabular-nums" aria-live="polite">{chosenElsewhere ? t("inbox-inboxlist.picked_hidden", { count: chosen.length, hidden: chosenFolded }) : chosenFolded ? t("inbox-inboxlist.picked_folded", { count: chosen.length, folded: chosenFolded }) : t("inbox-inboxlist.selected_count", { count: chosen.length })}</span>
           {/* Merge and Add to to-dos: a label on a wide bar, only the icon on a phone */}
           <Button tone="secondary" icon="merge" disabled={!mergeable} onClick={mergeChosen} className="max-sm:hidden">{t("inbox-inboxlist.merge")}</Button>
           <IconButton icon="merge" label={t("inbox-inboxlist.merge")} disabled={!mergeable} onClick={mergeChosen} size={32} className="sm:hidden" />
@@ -652,7 +797,7 @@ function GroupTick({ state }: { state: "none" | "some" | "all" }) {
  * A group inside a section (#2059): its title sticks to the top while its rows scroll by, and folds it to the title and
  * count. Selecting, its tick picks or unpicks all of it, folded or not; "n selected" says what is picked in it.
  */
-function Group({ id, title, count, more, open, onToggle, pick, children }: { id: string; title: string; count: number; more?: boolean; open: boolean; onToggle: (open: boolean) => void; pick?: { state: "none" | "some" | "all"; picked: number; run: () => void }; children: React.ReactNode }) {
+function Group({ id, title, count, more, open, onToggle, pick, clear, children }: { id: string; title: string; count: number; more?: boolean; open: boolean; onToggle: (open: boolean) => void; pick?: { state: "none" | "some" | "all"; picked: number; run: () => void }; /** FYI's / Collapsed's pull-down for the group or the whole section (#10422). */ clear?: GroupClear; children: React.ReactNode }) {
   return (
     <div data-group={id}>
       <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1.5 bg-canvas/95 px-2 pt-2 pb-0.5 backdrop-blur-sm">
@@ -668,6 +813,7 @@ function Group({ id, title, count, more, open, onToggle, pick, children }: { id:
           <span className="shrink-0 text-ink-3 tabular-nums">{more ? `${count}+` : count}</span>
         </button>
         {pick && pick.picked > 0 && <span className="shrink-0 text-[11px] text-accent-ink tabular-nums">{t("inbox-inboxlist.group_picked", { count: pick.picked })}</span>}
+        {clear && <GroupClearMenu clear={clear} />}
       </div>
       {/* the same 2px of room as the section's (#2703), so a selected card's ring isn't cut inside a group; the header's
           bottom padding gives up those 2px to keep its 4px */}
@@ -675,6 +821,26 @@ function Group({ id, title, count, more, open, onToggle, pick, children }: { id:
         <div inert={!open} className="flex flex-col gap-1.5 pb-1">{children}</div>
       </Collapse>
     </div>
+  );
+}
+
+/**
+ * A group title's "Mark all seen ⌄" (#10422): the group's items or the whole section's, each filed at once with Undo on
+ * the toast, as the section's own button. With a filter, a folder or a search on, each choice says what "all" covers.
+ */
+function GroupClearMenu({ clear }: { clear: GroupClear }) {
+  const menu = useMenu();
+  return (
+    <>
+      <button type="button" onClick={menu.open} aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} data-group-clear className="touch-hit inline-flex h-6 shrink-0 items-center gap-0.5 rounded-[6px] px-1.5 text-submeta whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink">
+        {clear.label}
+        <Icon name="chevron" size={10} stroke={2.4} />
+      </button>
+      {menu.anchor && (
+        <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={288}
+          items={clear.choices.map((c) => ({ key: c.key, label: c.label, detail: clear.scope, onSelect: () => void setAllDone(c.items, true) }))} />
+      )}
+    </>
   );
 }
 

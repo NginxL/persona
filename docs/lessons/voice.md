@@ -359,6 +359,8 @@ Other values: allowing 450 tokens per append (500-token limit, rejection observe
     and Retry, and Retry ends the same way at once; no crash report. To drive the real socket and UI there, use `-openVoice silent`
     (`VoiceSample.SilentAudio`: no microphone and no speaker, it reports playing for as long as the received PCM lasts). Audio itself can only be checked
     on a device, or on a simulator whose Mac lets it record.
+    `CallScreenTests`' three walks are such a check (#10553): on a Mac with no audio input at all (a Mac Studio with no microphone
+    attached) every call there ends this way, from `main` and from the commit that added them alike, and the tests say so.
   - **Reading it**: the app's own log is in the simulator (`xcrun simctl spawn <udid> log show --predicate 'process == "Persona"'`); the TCC and
     `coreaudiod` side is in the Mac's (`log show --predicate 'process == "tccd" AND eventMessage CONTAINS "kTCCServiceMicrophone"'`).
 - **The voice bar was squeezed when cards were up**: the cards and the composer share the footer's height; offered too little, the bar shrank 在听 with

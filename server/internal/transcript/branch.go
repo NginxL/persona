@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -61,6 +62,7 @@ type treeLine struct {
 // treeRec is a line with a uuid, as the tree keeps it: prompt says it is one of the user's own messages, reply that it
 // is the assistant's, system that it is a system line and turnEnd a turn_duration one. raw is the parsed record to
 // replay when it remains visible; hasOutcome is false for a structural-only skipped tool result or compact summary.
+// round: it is a supervision message sent as a round of the background supervisor (prompts.IsSuperviseRound, #7315).
 type treeRec struct {
 	uuid, parent string
 	prompt       bool
@@ -72,12 +74,14 @@ type treeRec struct {
 	raw          []byte
 	errorLine    string
 	hasOutcome   bool
+	round        bool
 }
 
 // branchTree tracks the lines read so far (file order) and which of them lie on abandoned branches.
 type branchTree struct {
 	recs    []treeRec
 	replies map[string]bool     // lines that are the assistant's
+	rounds  map[string]bool     // the background supervisor's rounds (treeRec.round)
 	ends    map[string]bool     // turn_duration lines
 	kids    map[string][]string // parent → the lines hanging from it
 	last    map[string]string   // parent → the latest message of the user's hanging from it
@@ -97,7 +101,7 @@ type branchTree struct {
 func (t *branchTree) init() {
 	if t.kids == nil {
 		t.kids, t.last, t.hidden, t.roots = map[string][]string{}, map[string]string{}, map[string]bool{}, map[string]bool{}
-		t.replies, t.ends, t.up = map[string]bool{}, map[string]bool{}, map[string]string{}
+		t.replies, t.ends, t.up, t.rounds = map[string]bool{}, map[string]bool{}, map[string]string{}, map[string]bool{}
 	}
 }
 
@@ -116,6 +120,9 @@ func (t *branchTree) add(r treeRec) (drop bool, newly []string) {
 	}
 	if r.turnEnd {
 		t.ends[r.uuid] = true
+	}
+	if r.round {
+		t.rounds[r.uuid] = true
 	}
 	if t.hidden[r.uuid] {
 		return true, nil // a line repeated in the file (a resume copies lines)
@@ -140,6 +147,12 @@ func (t *branchTree) add(r treeRec) (drop bool, newly []string) {
 		t.last[r.parent] = r.uuid
 	}
 	if prev == "" || prev == r.uuid || t.hidden[prev] {
+		return false, nil
+	}
+	if r.round || t.rounds[prev] {
+		// The background supervisor's rounds all resume at the end of its first turn (#7315): each hangs from that line
+		// beside the ones before it on purpose, and none was gone back over. Neither a round nor what comes beside one
+		// (a later round, a recap written there) takes the one before for abandoned.
 		return false, nil
 	}
 	if answered, ended := t.answered(prev); !answered || !r.prompt && !ended {
@@ -330,7 +343,20 @@ func trackLine(t *branchTree, meta *Meta, items []proto.Item, kept, sent *[]prot
 }
 
 func (tl treeLine) rec(items []proto.Item) treeRec {
-	return treeRec{uuid: tl.uuid, parent: tl.parent, prompt: isMessage(items), reply: tl.assistant, system: tl.system, turnEnd: tl.turnEnd, raw: tl.raw}
+	prompt := isMessage(items)
+	return treeRec{uuid: tl.uuid, parent: tl.parent, prompt: prompt, reply: tl.assistant, system: tl.system, turnEnd: tl.turnEnd, raw: tl.raw,
+		round: prompt && isSuperviseRound(items)}
+}
+
+// isSuperviseRound says the items of a message are a supervision message sent as a round of the background supervisor
+// (prompts.SuperviseRoundMarker): a round, not a rewind (branchTree.add).
+func isSuperviseRound(items []proto.Item) bool {
+	for _, it := range items {
+		if it.Role == "user" && it.Kind == proto.KindText && prompts.IsSuperviseRound(it.Text) {
+			return true
+		}
+	}
+	return false
 }
 
 // Tail follows the tree over lines read one at a time with ParseLine outside a File (the node's quick read of a

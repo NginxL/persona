@@ -112,10 +112,13 @@ else
   GETTING_STARTED=$(python3 ../scripts/persona_config.py get publish.getting_started_url 2>/dev/null || true)
 fi
 [ -f local.properties ] || echo "sdk.dir=$SDK" > local.properties
+# Gradle runs in a machine-wide gradle slot, so parallel worktrees queue instead of thrashing
+# (docs/operations/testing.md "Heavy build slots").
+gradlew() { python3 ../scripts/heavy_slot.py run --kind gradle -- ./gradlew "$@"; }
 case "$COMMAND" in
-  test) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" test ;;
-  lint) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" lint ;;
-  apk) ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug && ls -la app/build/outputs/apk/debug/app-debug.apk ;;
+  test) gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" test ;;
+  lint) gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" lint ;;
+  apk) gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug && ls -la app/build/outputs/apk/debug/app-debug.apk ;;
   release)
     config() { python3 ../scripts/persona_config.py get "$1" 2>/dev/null || true; }
     # || true: with no build-tools ls fails, and under pipefail the script would stop here without the message below
@@ -146,7 +149,7 @@ case "$COMMAND" in
     # About shows the commit this APK is built from: this repository's HEAD, passed explicitly (unknown when it cannot be read).
     BUILD_COMMIT=$(git -C .. rev-parse HEAD 2>/dev/null || true)
     [[ $BUILD_COMMIT =~ ^[0-9a-f]{40}$ ]] || BUILD_COMMIT=unknown
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -PpersonaBuildCommit="$BUILD_COMMIT" :app:assembleRelease
+    gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -PpersonaBuildCommit="$BUILD_COMMIT" :app:assembleRelease
     UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
     SIGNED=app/build/outputs/apk/release/app-release.apk
     python3 ../scripts/release/check_android_shrink.py "$UNSIGNED" app/build/outputs/mapping/release --build-tools "$TOOLS"
@@ -164,11 +167,11 @@ case "$COMMAND" in
       "$ADB" -s "$SERIAL" shell am start -n "$APP_ID/persona.android.MainActivity" >/dev/null
     fi ;;
   install)
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug
+    gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" :app:assembleDebug
     "$ADB" ${ADB_ARGS[@]+"${ADB_ARGS[@]}"} install -r app/build/outputs/apk/debug/app-debug.apk
     "$ADB" ${ADB_ARGS[@]+"${ADB_ARGS[@]}"} shell am start -n "$APP_ID/persona.android.MainActivity" >/dev/null ;;
   shots|shots-live)
-    ./gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
+    gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
     "$ADB" -s "$SERIAL" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null
     "$ADB" -s "$SERIAL" shell pm clear "$APP_ID" >/dev/null
     MOCK_PID=""

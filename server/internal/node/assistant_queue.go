@@ -40,40 +40,53 @@ type assistantInput struct {
 // or one that started it before saying anything) is remembered; one it queued is kept until it says more.
 const assistantInputKeep = time.Minute
 
-// writeInput writes in as a user message with a new id and remembers it until Claude says what became of it.
+// writeInput writes in as a user message with a new id and remembers it until Claude says what became of it. It is
+// remembered before it is written: Claude Code says it queued it within a millisecond (measured on 2.1.322), and the
+// reader drops a lifecycle line of an id it does not know. A message whose write failed is forgotten again.
 func (p *assistantProc) writeInput(in assistantInput) error {
 	in.id, in.queued, in.at = newUUID(), false, time.Now()
 	line, _ := json.Marshal(map[string]any{"type": "user", "uuid": in.id,
 		"message": map[string]any{"role": "user", "content": in.content}})
-	if err := p.write(line); err != nil {
-		return err
-	}
 	p.mu.Lock()
 	p.written = slices.DeleteFunc(p.written, func(w assistantInput) bool { return !w.queued && time.Since(w.at) > assistantInputKeep })
 	p.written = append(p.written, in)
 	p.mu.Unlock()
+	if err := p.write(line); err != nil {
+		p.mu.Lock()
+		p.written = slices.DeleteFunc(p.written, func(w assistantInput) bool { return w.id == in.id })
+		p.mu.Unlock()
+		return err
+	}
 	return nil
 }
 
 // commandLifecycle applies a command_lifecycle line: queued marks the message as waiting, any later state forgets
-// it. True when the queue changed.
+// it, and started makes the process busy, also for a message it no longer knows (one written over
+// assistantInputKeep ago): a turn starts either way. True when the queue or busy changed.
 func (p *assistantProc) commandLifecycle(id, state string) bool {
 	if id == "" {
 		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	i := slices.IndexFunc(p.written, func(w assistantInput) bool { return w.id == id })
-	if i < 0 {
-		return false
+	p.lifecycle = true
+	was := false
+	if i := slices.IndexFunc(p.written, func(w assistantInput) bool { return w.id == id }); i >= 0 {
+		if state == "queued" {
+			changed := !p.written[i].queued
+			p.written[i].queued = true
+			return changed
+		}
+		was = p.written[i].queued
+		p.written = slices.Delete(p.written, i, i+1)
 	}
-	if state == "queued" {
-		changed := !p.written[i].queued
-		p.written[i].queued = true
-		return changed
+	if state == "started" && !p.busy {
+		// A message queued behind a turn starts its own once that turn's result cleared busy (measured on 2.1.322:
+		// started 3 ms after the result, the model's first token seconds later). Its turn is under way from here: the
+		// next result ends it, and one taken into a turn still running finds busy set already.
+		p.busy, p.lastActive = true, time.Now()
+		return true
 	}
-	was := p.written[i].queued
-	p.written = slices.Delete(p.written, i, i+1)
 	return was
 }
 
@@ -125,6 +138,10 @@ func (n *Node) assistantQueueProc(id string) (*assistantProc, error) {
 // and when it was one to take out the answer is a refusal (it went to Persona).
 func (n *Node) assistantEditQueue(ctx context.Context, id string, keep []int) (assistantQueueEdit, error) {
 	defer n.typing.lock(id)() // not while a message is on its way in
+	// Nor while the process is taken or let go (assistantLife: a round's process retiring, assistant_round.go
+	// roundSettled): between the last cancel and the first write again nothing is queued and it may look settled, and
+	// the messages cancelled would be written into a process let go.
+	defer n.assistantLife.lock(id)()
 	p, err := n.assistantQueueProc(id)
 	if err != nil {
 		return assistantQueueEdit{}, err

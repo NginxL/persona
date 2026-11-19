@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -43,6 +44,11 @@ type briefBody struct {
 	// Progress are the tasks being worked on, the longest running first (at most 8); stage is plan / develop / review / merge / deploy / verify, "" when not known.
 	Progress      []briefBodyProgress `json:"progress"`
 	ProgressTotal int                 `json:"progress_total"`
+	// Directions and DisabledRoutines are the deterministic per-direction facts, already folded as the card is.
+	// Older clients ignore them. Notice is the first line of a model-failure fallback item, already localized.
+	Directions       []prompts.BriefDirection       `json:"directions,omitempty"`
+	DisabledRoutines []prompts.BriefDisabledRoutine `json:"disabled_routines,omitempty"`
+	Notice           string                         `json:"notice,omitempty"`
 	// Setup is the recommended-setup block (setup_suggest.go): which mechanism that is off would have removed how many
 	// of the last 7 days' asks or background rounds. Only on the first briefing of a week, and only when it names
 	// something; left out otherwise (a client that does not draw it skips it).
@@ -102,7 +108,8 @@ type briefBodyProgress struct {
 // body is the facts as a `brief` item's body.
 func (f *briefFacts) body(s *Service, title string) briefBody {
 	b := briefBody{Confirmations: f.Confirmations, Title: title, At: f.At, Hours: int(briefWindow / time.Hour), WaitingUnknown: f.WaitingUnknown, DoneTotal: f.DoneTotal,
-		Failed: f.Failed, FailedTotal: f.FailedTotal, Waiting: []briefBodyRow{}, Done: []briefBodyDone{}, Accept: []briefBodyRow{}, ProgressTotal: f.ProgressTotal, Progress: []briefBodyProgress{}}
+		Failed: f.Failed, FailedTotal: f.FailedTotal, Waiting: []briefBodyRow{}, Done: []briefBodyDone{}, Accept: []briefBodyRow{}, ProgressTotal: f.ProgressTotal, Progress: []briefBodyProgress{},
+		Directions: f.Directions, DisabledRoutines: f.DisabledRoutines}
 	if b.Failed == nil {
 		b.Failed = []todayFailed{}
 	}

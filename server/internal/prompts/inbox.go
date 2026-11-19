@@ -9,9 +9,20 @@ type InboxItem struct {
 	// Described is what the item's kind is, as a plugin's connector says (its kind_descriptions); "" otherwise.
 	Described string
 	Context   string
+	// Latest is the newest Lark DM's preview, separate from the older conversation; "" for other sources.
+	Latest string
 }
 
 func RenderInboxItem(it InboxItem) string { return render("inbox/item", it) }
+
+// LarkCLIInboxContext separates the incoming batch from older conversation context.
+type LarkCLIInboxContext struct {
+	Current, History string
+}
+
+func RenderLarkCLIInboxContext(c LarkCLIInboxContext) string {
+	return render("inbox/larkcli_context", c)
+}
 
 // InboxTriage is the system prompt that sorts an item into "Needs You" / "FYI" / "Noise" (inbox/triage).
 type InboxTriage struct {

@@ -112,7 +112,7 @@ import PersonaWire
         model.assistantManagerID == nil ? total : (0, false)
     }
 
-    static func key(_ p: ExtensionUIPlace) -> String { p.owner + "/" + p.id }
+    static func key(_ p: ExtensionUIPlace) -> String { p.scopedID }
 
     /// What the lists depend on: which hub (paired again with another, or another group picked) and whether it has slots.
     nonisolated struct Source: Hashable, Sendable {
@@ -202,7 +202,7 @@ struct ExtensionSlotsSettingsSection: View {
             if !slots.pages.isEmpty {
                 Section {
                     Group {
-                        ForEach(slots.pages) { page in
+                        ForEach(slots.pages, id: \.scopedID) { page in
                             NavigationLink(value: SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title, manager: slots.manager)) {
                                 ExtensionNavRow(place: page)
                             }
@@ -251,7 +251,7 @@ struct ExtensionCardsSection: View {
     var slots: ExtensionSlots = .shared
 
     var body: some View {
-        ForEach(slots.cards) { card in
+        ForEach(slots.cards, id: \.scopedID) { card in
             Section {
                 ExtensionCard(card: card, model: slots.model(for: card), link: $link) {
                     if let (ui, title) = slots.opened(by: card) {
@@ -358,7 +358,7 @@ struct ExtensionMachineSections: View {
     @Binding var link: LinkTarget?
 
     var body: some View {
-        ForEach(page.places) { place in
+        ForEach(page.places, id: \.scopedID) { place in
             if let m = page.models[ExtensionSlots.key(place)], !m.unsupported {
                 ExtensionMachineSection(place: place, model: m, link: $link)
             }

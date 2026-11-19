@@ -230,7 +230,8 @@ switch the detail without a push when a sidebar item is chosen; only drilling do
   a machine pushes with Back; Machines keeps that page while the conversation is in front; Machines in front picked again goes
   to its root; an edge swipe at a root stays on it; an Agent's chat picked in the sidebar has the sidebar's button and no ‹,
   pushed from a page it has ‹ (`testTheLeadingButtonFollowsHowThePageWasReached`); in the Separate layout's Agents tab an
-  Agent and then another replace the root with no transition (`testTheAgentsTabSwitchesItsRootWithoutAPush`). Run on the iPad, the open Duo upright and
+  Agent and then another replace the root with no transition (`testTheAgentsTabSwitchesItsRootWithoutAPush`). A task's card in the
+  conversation pushes its Agent's chat with Back, the root staying the conversation (#9971, `SecondaryPageBackTests`). Run on the iPad, the open Duo upright and
   on its side, and an iPhone.
 
 **Android** (#9667). A regular window — the sidebar column beside the page, or over it — follows this section. `SidebarPageRoots`

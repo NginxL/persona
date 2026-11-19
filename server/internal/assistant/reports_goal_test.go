@@ -71,7 +71,7 @@ func TestGoalReportsStuckSaysGoalNowEvidence(t *testing.T) {
 	waitFor(t, "the stuck card", func() bool { return len(posts()) == 1 })
 	card := posts()[0]
 	for _, want := range []string{"🎯 1 件事的目标卡住了", "**🎯 目标**：修登录崩溃", "**现在**：⚠️ 卡住了，没开起来",
-		"**证据**：那台电脑离线 [去看看](https://hub.example.com/todos?id=" + todo.ID + ")"} {
+		"**证据**：那台电脑离线 [去看看](https://hub.example.com/todos/" + todo.ID + ")"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("card lacks %q:\n%s", want, card)
 		}

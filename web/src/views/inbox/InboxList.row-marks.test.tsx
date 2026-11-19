@@ -61,6 +61,8 @@ beforeEach(async () => {
   root = createRoot(host);
   act(() => root.render(<InboxList />));
   await flush();
+  // the section bar opens on 需要你 (#9053): these rows are in every section, 全部
+  act(() => host.querySelector<HTMLButtonElement>('[data-bar-choice="all"]')!.click());
 });
 
 afterEach(() => {

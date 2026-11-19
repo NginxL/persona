@@ -18,6 +18,9 @@ import { AttachmentTray } from "../../ui/AttachmentTray";
 import { parseAPIError } from "../../lib/api-errors";
 import { ErrorBanner } from "./Lines";
 import { setSideFold } from "../../lib/side-fold";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 // stores without a server snapshot: renderToStaticMarkup needs one
 vi.mock("../../lib/links", async (orig) => ({ ...(await orig<typeof import("../../lib/links")>()), useContexts: () => [] }));
@@ -118,19 +121,20 @@ describe("Header", () => {
     expect(header({ session: quiet, siblings: [quiet, calm] })).not.toContain("bg-attention");
   });
 
-  it("puts the loop mark before the Agent's mark and a Background tasks button at the right end (#5421)", () => {
+  it("puts the loop mark before the Agent and reports background work on the overview toggle", () => {
     const looping = { ...session, loop: { kind: "interval", interval_seconds: 1800, prompt: "/loop check CI" } } as Session;
-    const html = bare(header({ session: looping }));
+    const overview = { id: "overview", open: false, toggle: () => {} };
+    const html = bare(header({ session: looping, overview }));
     const loop = html.indexOf("data-loop-mark");
     expect(loop).toBeGreaterThan(-1);
     expect(loop).toBeLessThan(html.indexOf("data-agent-device"));
     expect(html).toMatch(/aria-label="循环 · 每 30 分钟"/);
-    expect(html).toMatch(/<button[^>]*aria-label="后台任务"/);
-    expect(bare(header())).not.toContain('aria-label="后台任务');
+    expect(html).toMatch(/<button[^>]*aria-label="会话概览"/);
+    expect(bare(header({ overview }))).toContain('aria-label="会话概览"');
     // a running background task: the button counts it
     const busy = { ...session, background: [{ id: "b1", kind: "bash", command: "npm test" }] } as Session;
-    const counted = bare(header({ session: busy }));
-    expect(counted).toMatch(/aria-label="后台任务，1 个在运行"/);
+    const counted = bare(header({ session: busy, overview }));
+    expect(counted).toMatch(/aria-description="后台任务，1 个在运行"/);
     expect(counted).toMatch(/data-background-count="true"[^>]*>1</);
   });
 
@@ -484,10 +488,17 @@ describe("QueuePanel (#5327, cindy's pending queue)", () => {
     expect(html).toContain("现在就把排队的消息全部发给 Nova");
     // collapsed: no relayed row markup yet, just the summary line
     expect(html).not.toContain("data-queue-relayed-list");
-    expect(html).toContain("还有 1 条别的对话在排队");
+    expect(html).toContain("1 条消息来自其他对话");
+    expect(html).toContain("对话空闲后送达");
+    // an own row sits above it, so the group has its hairline
+    expect(html).toMatch(/data-queue-relayed-group="true" class="[^"]*border-t border-line/);
     expect(html).toContain("data-queue-relayed-summary");
     // relayed ones alone: nothing to send now
-    expect(panel({ session: { ...persona, queued_relayed: 2 }, persona: "Nova" })).not.toContain("data-send-now");
+    const onlyRelayed = panel({ session: { ...persona, queued_relayed: 2 }, persona: "Nova" });
+    expect(onlyRelayed).not.toContain("data-send-now");
+    // no own rows: no own list and no hairline on the relayed group
+    expect(onlyRelayed).not.toContain("px-1 pt-1.5");
+    expect(onlyRelayed).not.toMatch(/data-queue-relayed-group="true" class="[^"]*border-t/);
   });
 
   it("marks the photos a Persona chat's queued message went with when this browser sent it (#4342)", () => {

@@ -14,7 +14,17 @@ from pathlib import Path
 import re
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _source_root():
+    configured = os.environ.get("PERSONA_CI_SOURCE_ROOT")
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("PERSONA_CI_SOURCE_ROOT must be absolute")
+        return Path(configured)
+    return Path(__file__).resolve().parents[2]
+
+
+ROOT = _source_root()
 SOURCE = "server/internal/prompts"
 BASELINE = "scripts/ci/prompt_language_baseline.json"
 CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")

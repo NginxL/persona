@@ -14,6 +14,22 @@ import sys
 import threading
 
 
+class Lines:
+    """The whole lines in what is fed, until done or 1 MiB without a newline (frames, not lines): then none."""
+
+    def __init__(self):
+        self.buf, self.done = b"", False
+
+    def feed(self, chunk):
+        if self.done:
+            return []
+        self.buf += chunk
+        *lines, self.buf = self.buf.split(b"\n")
+        if len(self.buf) > 1 << 20:
+            self.buf, self.done = b"", True
+        return lines
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary", required=True)
@@ -35,16 +51,22 @@ def main():
     lock = threading.Lock()
 
     def incoming():
+        # Bytes go on as they come: once both ends switch to lane frames (docs/protocol/protocol.md "Lanes") the
+        # stream is binary, and waiting for a newline would hold a frame back. Lines are only looked into until the
+        # handshake, which comes before any switch.
+        pending = Lines()
         try:
-            for line in sys.stdin.buffer:
-                try:
-                    frame = json.loads(line)
-                    if frame.get("method") == "node.info":
-                        with lock:
-                            request_ids.add(frame.get("id"))
-                except (ValueError, TypeError):
-                    pass
-                child.stdin.write(line)
+            while chunk := os.read(sys.stdin.fileno(), 65536):
+                for line in pending.feed(chunk):
+                    try:
+                        frame = json.loads(line)
+                        if frame.get("method") == "node.info":
+                            with lock:
+                                request_ids.add(frame.get("id"))
+                            pending.done = True
+                    except (ValueError, TypeError, AttributeError):
+                        pass
+                child.stdin.write(chunk)
                 child.stdin.flush()
         except (OSError, BrokenPipeError):
             pass
@@ -61,20 +83,23 @@ def main():
     threading.Thread(target=incoming, daemon=True).start()
     result = 1
     try:
-        for line in child.stdout:
-            try:
-                frame = json.loads(line)
-                with lock:
-                    known = frame.get("id") in request_ids
-                if known and "result" in frame:
-                    # Only the node handshake is retained, not requests, secrets
-                    # or arbitrary transcript/phone data.
-                    with open(a.handshake_log, "w", encoding="utf-8") as f:
-                        json.dump(frame["result"], f)
-                    os.chmod(a.handshake_log, 0o600)
-            except (ValueError, TypeError):
-                pass
-            sys.stdout.buffer.write(line)
+        pending = Lines()
+        while chunk := os.read(child.stdout.fileno(), 65536):
+            for line in pending.feed(chunk):
+                try:
+                    frame = json.loads(line)
+                    with lock:
+                        known = frame.get("id") in request_ids
+                    if known and "result" in frame:
+                        # Only the node handshake is retained, not requests, secrets
+                        # or arbitrary transcript/phone data.
+                        with open(a.handshake_log, "w", encoding="utf-8") as f:
+                            json.dump(frame["result"], f)
+                        os.chmod(a.handshake_log, 0o600)
+                        pending.done = True
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
         result = child.wait(timeout=10)
     except (KeyboardInterrupt, OSError, subprocess.TimeoutExpired):

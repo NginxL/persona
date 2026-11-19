@@ -27,7 +27,7 @@ class ScriptLayoutTests(unittest.TestCase):
     def test_top_level_contains_only_shared_tools_and_generic_relocation_entries(self):
         files = {p.name for p in SCRIPTS.iterdir() if p.is_file()}
         self.assertEqual(files, {"README.md", "persona_config.py", "persona_identity.py", "privacy_check.py",
-                                 "compatibility-identifiers.json", "jarvis_config.py", *ALIASES})
+                                 "heavy_slot.py", "compatibility-identifiers.json", "jarvis_config.py", *ALIASES})
         directories = {p.name for p in SCRIPTS.iterdir() if p.is_dir() and p.name != "__pycache__"}
         self.assertEqual(directories, {"app", "assets", "ci", "deploy", "diag", "gen", "hooks", "i18n", "migrate", "mock", "operations", "release", "test"})
         self.assertEqual(os.readlink(SCRIPTS / "jarvis_config.py"), "persona_config.py")

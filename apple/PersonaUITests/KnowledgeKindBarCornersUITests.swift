@@ -9,7 +9,8 @@ import XCTest
 /// (PERSONA_SHOTS_PHASE names the run).
 final class KnowledgeKindBarCornersUITests: XCTestCase {
     private var hub = ""
-    private static let kinds = ["projects", "topics", "chats", "people", "docs", "meetings", "events", "recordings"]
+    /// The kinds Knowledge lists (`KBKind.listed`): recordings are under Meetings since #8976 (#8731).
+    private static let kinds = ["projects", "topics", "chats", "people", "docs", "meetings", "events"]
 
     override func setUpWithError() throws {
         continueAfterFailure = false

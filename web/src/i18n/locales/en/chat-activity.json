@@ -13,5 +13,16 @@
   "output_not_running": "Not listed as running",
   "output_failed": "Couldn't load output",
   "open_output_file": "Open as file",
+  "command_status": "Status",
+  "command_runtime": "Runtime",
+  "command_started": "Started",
+  "command": "Command",
+  "command_show_more": "Show full command",
+  "command_show_less": "Show less",
+  "output": "Output",
+  "output_lines_one": "{count} line",
+  "output_lines_other": "{count} lines",
+  "output_tail_lines_one": "Last {count} line",
+  "output_tail_lines_other": "Last {count} lines",
   "output_tail": "Earlier output is omitted. Open as file to view more."
 }

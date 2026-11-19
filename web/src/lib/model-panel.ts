@@ -26,6 +26,9 @@ export interface PanelModel {
   description?: string;
   /** The concrete model an alias stands for under this provider. */
   resolved?: string;
+  /** The other spellings the hub folded into this row (lib/launcher-models.ts AgentModel.aliases): a saved setup naming
+   *  one is this row's, and a search finds it by them. */
+  aliases?: string[];
   /** Thinking efforts it takes, weakest first (lib/session-actions.ts EFFORTS / CODEX_EFFORTS ids); empty: no effort control. */
   efforts: string[];
   /** The running session cannot change effort here; keep its actual value visible and explain why. */
@@ -57,6 +60,11 @@ export interface PanelProvider {
   /** What the engine is called when the app has no name of its own for it: the session's own provider's label ("Grok",
    *  the row's agent_label); its mark and its name on the rows and in the flyout. */
   engineLabel?: string;
+  /** Known launcher default for its collapsed summary; never inferred from list order. */
+  defaultModel?: string;
+  isDefault?: boolean;
+  /** Existing launcher check result; descriptive only, never changes selection policy. */
+  status?: string;
   /** null: not read yet. */
   models: PanelModel[] | null;
   loading?: boolean;
@@ -185,8 +193,8 @@ export function resetOverride(all: PanelOverrides, provider: string, model: stri
 
 /** Whether `model` of `provider` runs now: the row named exactly what runs when the list has one (so a typed ID and the
  *  default entry that stands for the same model are never both lit, as the pill names that one), else a row whose
- *  concrete model it is (lib/model-switch.ts isCurrentModel: an alias standing for it). */
-function runsNow(provider: Pick<PanelProvider, "id" | "models">, model: Pick<PanelModel, "id" | "resolved">, current: PanelConfig | null | undefined): boolean {
+ *  concrete model it is (lib/model-switch.ts isCurrentModel: an alias standing for it, or one folded into it). */
+function runsNow(provider: Pick<PanelProvider, "id" | "models">, model: Pick<PanelModel, "id" | "resolved" | "aliases">, current: PanelConfig | null | undefined): boolean {
   if (!current || current.provider !== provider.id) return false;
   const want = current.model.toLowerCase();
   if (provider.models?.some((m) => m.id.toLowerCase() === want)) return model.id.toLowerCase() === want;
@@ -242,9 +250,10 @@ export function rowCustomizable(row: Pick<PanelRow, "kind" | "current" | "provid
   return !rowBlock(row.provider, state);
 }
 
-/** The search (every word, any case): the model's name, id, the model it stands for, its description, the provider's name. */
-export function matchesQuery(provider: Pick<PanelProvider, "name">, model: Pick<PanelModel, "id" | "name" | "resolved" | "description">, query: string): boolean {
-  return matches([model.name, model.id, model.resolved, model.description, provider.name], query);
+/** The search (every word, any case): the model's name, id, the model it stands for, the spellings folded into it, its
+ *  description, the provider's name. */
+export function matchesQuery(provider: Pick<PanelProvider, "name">, model: Pick<PanelModel, "id" | "name" | "resolved" | "aliases" | "description">, query: string): boolean {
+  return matches([model.name, model.id, model.resolved, ...(model.aliases ?? []), model.description, provider.name], query);
 }
 
 /** What the list shows: one rail cell's view. A search shows "all" whatever cell is on. */
@@ -317,6 +326,8 @@ export interface SectionsInput {
   presets?: PanelPreset[];
   /** Families the user unfolded (PanelBlock keys); the others keep their older versions folded. */
   openFamilies?: ReadonlySet<string>;
+  /** Flat launcher search keeps the real session setup without a Recommended projection. */
+  promote?: boolean;
 }
 
 /** A saved copy's model among the providers: undefined when its provider is gone, or its list is read and lacks it
@@ -343,7 +354,7 @@ function resolveCopy(providers: PanelProvider[], copy: PanelConfig): { provider:
  * the older versions folded unless unfolded (`openFamilies`), searched for or in use (lib/model-families.ts); the
  * ALL_GROUP_MAX cut counts the rows shown.
  */
-export function panelSections({ providers, state, view: chosen, query, favorites, recent, overrides, presets, openFamilies }: SectionsInput): PanelSection[] {
+export function panelSections({ providers, state, view: chosen, query, favorites, recent, overrides, presets, openFamilies, promote = true }: SectionsInput): PanelSection[] {
   const q = query.trim();
   const open = openFamilies ?? NONE_OPEN;
   // an older version the user is using never folds away: the one that runs or waits, a favorite's, a recent setup's,
@@ -399,7 +410,7 @@ export function panelSections({ providers, state, view: chosen, query, favorites
     }));
   }
 
-  if (view.kind === "all" && !state.starting) {
+  if (view.kind === "all" && !state.starting && promote) {
     const promoted: PanelRow[] = [];
     const now = state.current ? groups.get(state.current.provider)?.find((r) => r.current) : undefined;
     if (now) promoted.push(now);

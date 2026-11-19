@@ -25,7 +25,7 @@ import (
 func launchHerdrServer(ctx context.Context, bin, sock string) (<-chan error, error) {
 	shell := userShell()
 	session := herdr.Session()
-	env := withHerdrSession(herdrServerEnv(os.Environ(), shell), session)
+	env := withHerdrSession(herdrServerEnv(os.Environ(), shell, herdrToolDirs(homeDir())), session)
 	argv := herdrServerArgv(shell, bin, env)
 	sd, viaSystemd := systemdRun()
 	if viaSystemd {

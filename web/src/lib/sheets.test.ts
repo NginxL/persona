@@ -163,6 +163,43 @@ describe("selection", () => {
     expect(rangeSummary([["10%", "(5)"]], { r0: 0, c0: 0, r1: 0, c1: 1 }).sum).toBeCloseTo(-4.9);
   });
 
+  it.each([
+    ["(5%)", 0.05],
+    [" (5.0%) ", 0.05],
+    ["(0%)", 0.1],
+    ["5%", 0.15],
+    ["-5%", 0.05],
+    ["(5)", -4.9],
+    ["5", 5.1],
+  ] as const)("keeps the percent scale when summarizing %j", (value, sum) => {
+    const rows = [["10%", value]];
+    const range = { r0: 0, c0: 0, r1: 0, c1: 1 };
+    const summary = rangeSummary(rows, range);
+    expect(summary.count).toBe(2);
+    expect(summary.sum).toBeCloseTo(sum);
+    expect(summary.avg).toBeCloseTo(sum / 2);
+    expect(rangeTSV(rows, range)).toBe(`10%\t${value}`);
+  });
+
+  it("summarizes the displayed accounting percentages from a real workbook", () => {
+    const source = XLSX.utils.aoa_to_sheet([[0.1, -0.05]]);
+    source.A1.z = source.B1.z = "0.0%;(0.0%)";
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, source, "Rates");
+    const bytes = XLSX.write(book, { type: "array", bookType: "xlsx" });
+    const sheet = workbookSheets(XLSX, XLSX.read(bytes, { type: "array", dense: true, cellStyles: true }))[0];
+    expect(sheet.rows).toEqual([["10.0%", "(5.0%)"]]);
+    const summary = rangeSummary(sheet.rows, { r0: 0, c0: 0, r1: 0, c1: 1 });
+    expect(summary.sum).toBeCloseTo(0.05);
+    expect(summary.avg).toBeCloseTo(0.025);
+  });
+
+  it("preserves nonnumeric counts, single-number and large-selection summaries", () => {
+    expect(rangeSummary([["(5%)", "note", ""]], { r0: 0, c0: 0, r1: 0, c1: 2 })).toEqual({ count: 2 });
+    expect(rangeSummary([["a", "b"]], { r0: 0, c0: 0, r1: 0, c1: 1 })).toEqual({ count: 2 });
+    expect(rangeSummary([["(5%)"]], { r0: 0, c0: 0, r1: 200_000, c1: 0 })).toEqual({ count: 200_001 });
+  });
+
   it("grows a selection over the merges it touches", () => {
     const merges = [
       { r0: 0, c0: 0, r1: 0, c1: 4 },

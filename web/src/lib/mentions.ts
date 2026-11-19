@@ -5,7 +5,7 @@
 // <persona-context> before the message). No DOM here.
 
 import { t } from "../i18n";
-import { shortPath } from "./format";
+import { baseName, shortPath } from "./format";
 import type { Item, Session } from "./types";
 import { byTime } from "./times";
 import type { Workspace } from "./workspace-board";
@@ -96,9 +96,10 @@ export function agentLabel(s: Pick<Session, "agent" | "agent_label" | "source_ki
   return s.agent_label || s.agent;
 }
 
-function folderName(cwd?: string): string {
-  const parts = (cwd ?? "").replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || "";
+/** A session's folder by its name: "app" for /home/me/code/app, and for C:\Users\me\code\app, a Windows computer's path
+ *  read by its own separator (`baseName`, #9901); "" for none or the root. */
+export function folderName(cwd?: string): string {
+  return /[^\\/]/.test(cwd ?? "") ? baseName(cwd) : "";
 }
 
 /** A session's title as the @ menu shows it (Session.displayTitle). */

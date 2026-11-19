@@ -15,7 +15,7 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 | `test/` | Server, protocol, source and script regression checks | `test/check-fast.sh`, `test/test-server.sh`, `test/test_doc_paths.py`, `test/isolation-lint.sh` (blocking calls on the main actor in `apple/`; its SwiftSyntax package is `test/isolation-lint/`) |
 | `hooks/` | Privacy hooks, the trusted Deno adapter check and PR merging | `hooks/merge-pr.sh`, `hooks/check-deno-adapter.sh` |
 | `operations/` | Maintainer automation, including semantic PR review and exact-head merging | `operations/pr_watch.py`, `operations/pr_watch_merge.py`; [configuration](../docs/operations/pr-review-automation.md) |
-| `gen/` | Generated extension wire types and SDK bundles | `gen/extension_schema.py`, `gen/sdk_bundle.py`, `gen/sync-sdk.sh` |
+| `gen/` | Generated extension and hub wire types (`schema/extension`, `schema/wire`) and SDK bundles | `gen/extension_schema.py`, `gen/sdk_bundle.py`, `gen/sync-sdk.sh` |
 | `i18n/` | Localization checks and catalog synchronization | `i18n/apple_l10n.py`, `i18n/apple_l10n.py check` |
 
 ## Shared tools
@@ -24,6 +24,7 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 - `persona_config.py` reads private build/deploy configuration and generates Xcode settings without changing registered app IDs.
 - `persona_identity.py --service hub|node|link` resolves only a matching canonical service's root. It honors unit resets, ordered drop-ins, XDG paths, HOME-only environment files and unset rules; it never executes configuration or exposes other credentials. `--prepare` creates only the selected directory, with no directory aliases. `--prefix` resolves remote paths using the remote HOME.
 - `privacy_check.py` scans repository/staged content. Git hooks, web builds and CI use it.
+- `heavy_slot.py run --kind xcode|gradle|go|web -- <command>` runs a heavy build in one of a few machine-wide slots of its kind, so parallel worktrees queue instead of thrashing; `sim.sh`, `android.sh` and `check-fast.sh` use it, and `PERSONA_HEAVY_SLOTS=0` turns it off ([heavy build slots](../docs/operations/testing.md#heavy-build-slots)).
 - Existing non-brand shell shortcuts (`sim.sh`, `android.sh`, `deploy.sh`, `release.sh` and others) only forward arguments/environment/stdin/exit status to their grouped implementation. Repository examples use grouped paths. Python tools have only their canonical entry points.
 
 ## Verification

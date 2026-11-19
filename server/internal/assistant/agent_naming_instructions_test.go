@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -103,5 +105,65 @@ func TestAgentNameFailureLogsStaticReason(t *testing.T) {
 			}
 			t.Log(log)
 		})
+	}
+}
+
+// No model set up is said once by the background naming, not for every session it tries; each session still records
+// the failure. A model that answers (here with a failure of its own) makes the next missing model worth a line again.
+func TestAgentNameNoModelLogsOnce(t *testing.T) {
+	var failing atomic.Bool
+	s, f, _ := namingFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if failing.Load() {
+			w.WriteHeader(502)
+			return
+		}
+		namingReply(w, "Fix export")
+	})
+	var lines []string
+	s.logf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+	f.mu.Lock()
+	models := f.hello.Models
+	f.mu.Unlock()
+	setModel := func(on bool) {
+		f.mu.Lock()
+		f.hello.Models = models
+		if !on {
+			f.hello.Models.AI, f.hello.Models.TriageAI = ai.Config{}, nil
+		}
+		f.mu.Unlock()
+		s.settingsChanged(context.Background())
+	}
+	base := f.sessions["server"][0]
+	sessions := make([]proto.Session, 4)
+	for i := range sessions {
+		sessions[i] = base
+		sessions[i].SessionID = fmt.Sprintf("s%d", i+1)
+	}
+	f.setSessions("server", sessions...)
+	count := func() int { return strings.Count(strings.Join(lines, "\n"), "reason=model_not_configured") }
+
+	setModel(false)
+	for _, c := range sessions[:2] {
+		if !s.tryAgentName(context.Background(), "server", c, time.Now()) {
+			t.Fatalf("%s: naming not attempted", c.SessionID)
+		}
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("no model, two sessions: %d model_not_configured line(s), want 1:\n%s", n, strings.Join(lines, "\n"))
+	}
+	s.agentNames.mu.Lock()
+	rec := s.agentNames.records[agentNameKey("server", "s2")]
+	s.agentNames.mu.Unlock()
+	if rec.Failures != 1 || rec.LastFailure != "model_not_configured" {
+		t.Fatalf("the second session's failure not recorded: %+v", rec)
+	}
+
+	setModel(true)
+	failing.Store(true)
+	s.tryAgentName(context.Background(), "server", sessions[2], time.Now())
+	setModel(false)
+	s.tryAgentName(context.Background(), "server", sessions[3], time.Now())
+	if log := strings.Join(lines, "\n"); count() != 2 || !strings.Contains(log, `"s3" reason=model_call_failed`) || !strings.Contains(log, `"s4" reason=model_not_configured`) {
+		t.Fatalf("after a model answered:\n%s", log)
 	}
 }

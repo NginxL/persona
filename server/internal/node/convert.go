@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,7 +111,7 @@ func (n *Node) convertFile(ctx context.Context, p proto.FileConvertRequest) (*pr
 	}
 	ctx, cancel := context.WithTimeout(ctx, convertTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, soffice, "-env:UserInstallation=file://"+filepath.ToSlash(filepath.Join(work, "profile")),
+	cmd := exec.CommandContext(ctx, soffice, "-env:UserInstallation="+fileURL(filepath.Join(work, "profile"), runtime.GOOS == "windows"),
 		"--headless", "--norestore", "--nologo", "--convert-to", "pdf", "--outdir", work, in)
 	cmd.WaitDelay = 2 * time.Second
 	if msg, err := cmd.CombinedOutput(); err != nil {
@@ -136,6 +137,24 @@ func (n *Node) convertFile(ctx context.Context, p proto.FileConvertRequest) (*pr
 		}
 	}
 	return &proto.FileConverted{Path: out, Size: got.Size(), Mime: "application/pdf"}, nil
+}
+
+// fileURL is the absolute path p as a file URL, the form LibreOffice takes its profile in (-env:UserInstallation):
+// file:///tmp/x on macOS and Linux. On Windows the drive is the path's first segment, file:///C:/Users/x, because
+// whatever follows "file://" is the host (file://C:/x names a host "C:"), and \\server\share\x is file://server/share/x.
+// What a URL can't carry as it is (a space, %, #) is escaped. windows is a parameter so tests check both shapes.
+func fileURL(p string, windows bool) string {
+	u := url.URL{Scheme: "file", Path: p}
+	if windows {
+		p = strings.ReplaceAll(p, `\`, "/") // filepath.ToSlash converts nothing when this runs elsewhere
+		if unc, ok := strings.CutPrefix(p, "//"); ok {
+			host, rest, _ := strings.Cut(unc, "/")
+			u.Host, u.Path = host, "/"+rest
+		} else {
+			u.Path = "/" + p
+		}
+	}
+	return u.String()
 }
 
 func copyFile(from, to string) error {

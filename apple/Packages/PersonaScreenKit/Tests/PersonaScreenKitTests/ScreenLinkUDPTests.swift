@@ -187,6 +187,9 @@ final class UDPRouteNode: @unchecked Sendable {
         return out
     }
 
+    /// The node's reset on the flow: the stream goes on at `off`.
+    func flowReset(_ ch: UInt8, at off: UInt64) { send(.reset(channel: ch, offset: off)) }
+
     func tlsMessages() -> [ScreenLinkMessage] { lock.withLock { tlsSeen } }
     func udpMessages() -> [ScreenUDPMessage] { lock.withLock { udpSeen } }
     func usedOnTLS(_ ch: UInt8) -> UInt64? {
@@ -248,6 +251,24 @@ final class ScreenLinkUDPTests: XCTestCase {
             await s.addFlow(phoneU, route: "lan:a")
         }
         return Rig(s: s, events: events, route: route, video: video, videoNode: vnode)
+    }
+
+    /// What a channel end hands on, read in the background so a test waits for it with a deadline rather than forever.
+    private final class Received: @unchecked Sendable {
+        private let lock = NSLock()
+        private var got = Data()
+        init(_ end: ScreenLinkChannelEnd) {
+            Task { while let d = try? await end.receive() { self.lock.withLock { self.got += d } } }
+        }
+        var data: Data { lock.withLock { got } }
+    }
+
+    private func acked(_ ms: [ScreenLinkMessage], _ off: UInt64) -> Bool {
+        ms.contains { if case .ack(2, off) = $0 { true } else { false } }
+    }
+
+    private func acked(_ ms: [ScreenUDPMessage], _ off: UInt64) -> Bool {
+        ms.contains { if case .ack(2, off) = $0 { true } else { false } }
     }
 
     private func frame(_ n: Int, size: Int) -> Data {
@@ -342,6 +363,88 @@ final class ScreenLinkUDPTests: XCTestCase {
         r.route.video(c, ch: 2, at: r.route.resetTo)
         let next = try await r.video.receive()
         XCTAssertEqual(next, c, "the stream goes on at the reset")
+    }
+
+    /// #10005 over TCP: a reset the node owes again goes out on the new route, and its copy on the route the channel
+    /// left can come later, in the middle of the keyframe that follows it. That copy is at or behind the receiver and
+    /// changes nothing: the keyframe completes. Between whole messages it is as before, and a reset ahead of the receiver
+    /// still drops a partial message.
+    func testALateResetFromTheOldRouteKeepsAHalfReceivedMessage() async throws {
+        let r = try await rig(udp: false)
+        await until("the video on the direct route") { r.route.usedOnTLS(2) != nil }
+        let got = Received(r.video)
+        let jump: UInt64 = 1000
+        let key = frame(1, size: 3000), half = 1200
+        // The new route: the reset, then the keyframe's first bytes.
+        try await r.route.say(.reset(channel: 2, offset: jump))
+        try await r.route.say(.data(channel: 2, offset: jump, bytes: key.prefix(half)))
+        await until("the first part taken") { self.acked(r.route.tlsMessages(), jump + UInt64(half)) }
+        // The old route's copy of the same reset, late.
+        try await r.videoNode.say(.reset(channel: 2, offset: jump))
+        let late = try await relayAck(r.videoNode)
+        XCTAssertEqual(late, jump + UInt64(half), "the late copy moves nothing")
+        try await r.route.say(.data(channel: 2, offset: jump + UInt64(half), bytes: key.dropFirst(half)))
+        await until("the keyframe whole", timeout: 3) { got.data == key }
+
+        // A late copy between whole messages, as before.
+        var off = jump + UInt64(key.count)
+        try await r.videoNode.say(.reset(channel: 2, offset: jump))
+        let between = try await relayAck(r.videoNode)
+        XCTAssertEqual(between, off)
+        let next = frame(2, size: 400)
+        try await r.route.say(.data(channel: 2, offset: off, bytes: next))
+        await until("the next frame", timeout: 3) { got.data == key + next }
+
+        // A reset ahead of the receiver: the node dropped the rest of a message, and the part the phone has goes too.
+        off += UInt64(next.count)
+        try await r.route.say(.data(channel: 2, offset: off, bytes: frame(3, size: 2000).prefix(500)))
+        await until("the partial taken") { self.acked(r.route.tlsMessages(), off + 500) }
+        let ahead = off + 5000, after = frame(4, size: 600)
+        try await r.route.say(.reset(channel: 2, offset: ahead))
+        try await r.route.say(.data(channel: 2, offset: ahead, bytes: after))
+        await until("the frame after the reset, whole", timeout: 3) { got.data == key + next + after }
+    }
+
+    /// The phone's next acknowledgement of the video on a route the test node doesn't otherwise read.
+    private func relayAck(_ n: FakeNode) async throws -> UInt64 {
+        while true {
+            if case let .ack(2, o) = try await n.next(skippingAcks: false) { return o }
+        }
+    }
+
+    /// #10005 on a UDP flow: a reset at or behind the receiver leaves a message the phone has in part, and one ahead of
+    /// it drops it. A node sends a flow whole messages, so a late reset finds no partial one in the assembler there; the
+    /// test node sends the keyframe in two parts to put its first part where a TCP route leaves it.
+    func testALateResetOnTheFlowKeepsAHalfReceivedMessage() async throws {
+        let r = try await rig()
+        await until("the video on the flow") { r.route.usedOnUDP() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let got = Received(r.video)
+        let jump: UInt64 = 1000
+        let key = frame(1, size: 3000), half = 1200
+        r.route.flowReset(2, at: jump)
+        r.route.video(key.prefix(half), ch: 2, at: jump)
+        await until("the first part taken") { self.acked(r.route.udpMessages(), jump + UInt64(half)) }
+        r.route.flowReset(2, at: jump) // the late copy
+        r.route.video(key.dropFirst(half), ch: 2, at: jump + UInt64(half))
+        await until("the keyframe whole", timeout: 3) { got.data == key }
+
+        // A late copy between whole messages, as before.
+        var off = jump + UInt64(key.count)
+        r.route.flowReset(2, at: jump)
+        let next = frame(2, size: 400)
+        r.route.video(next, ch: 2, at: off)
+        await until("the next frame", timeout: 3) { got.data == key + next }
+
+        // A reset ahead of the receiver drops the part the phone has.
+        off += UInt64(next.count)
+        r.route.video(frame(3, size: 2000).prefix(500), ch: 2, at: off)
+        await until("the partial taken") { self.acked(r.route.udpMessages(), off + 500) }
+        let ahead = off + 5000, after = frame(4, size: 600)
+        r.route.flowReset(2, at: ahead)
+        r.route.video(after, ch: 2, at: ahead)
+        await until("the frame after the reset, whole", timeout: 3) { got.data == key + next + after }
+        XCTAssertTrue(r.events.moves().allSatisfy { $0.reason != .lost }, "the flow was never left")
     }
 
     /// On cellular (the route's interface, or the phone's path under Tailscale) no flow is asked for; back on Wi-Fi one is.

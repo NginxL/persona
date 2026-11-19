@@ -161,6 +161,57 @@ func TestReadCodexComposerWithAdjacentFooter(t *testing.T) {
 	}
 }
 
+// A status row wider than the pane wraps onto indented rows above the shortcuts hint (#9977); all of them are footer.
+func TestReadCodexComposerWithWrappedStatus(t *testing.T) {
+	for _, f := range []struct{ name, footer string }{
+		{"title wrapped", "  GPT-6.1-Sol max Fast · /home/me/work/example-project · Read the integration\n" +
+			"  plan · Main [default]\n" +
+			"  ← for agents · ? for shortcuts\n"},
+		{"wrapped twice", "  GPT-6.1-Sol max Fast · /home/me/work/example-project\n" +
+			"  · Read the integration plan for the example\n" +
+			"  project · Main [default]\n" +
+			"  ? for shortcuts\n"},
+		{"wrapped before the path", "  GPT-6.1-Sol max Fast ·\n" +
+			"  /home/me/work/a-very-long-worktree-path/example-project · Review · Main [default]\n" +
+			"  ← for agents · ? for shortcuts\n"},
+	} {
+		for _, tc := range []struct{ name, composer, want string }{
+			{"empty", "› Ask Codex to do anything\n", ""},
+			{"typed", "› check the build\n", "check the build"},
+			{"multiline", "› check the build\n  and keep my changes\n", "check the build\nand keep my changes"},
+			{"colored empty", "› \x1b[2mAsk Codex to do anything\x1b[0m\n", ""},
+		} {
+			t.Run(f.name+"/"+tc.name, func(t *testing.T) {
+				s := ReadCodex("• Done.\n\n" + tc.composer + f.footer)
+				if s.View != CodexComposer || s.Draft != tc.want {
+					t.Fatalf("view %q draft %q, want composer draft %q", s.View, s.Draft, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// Indented rows above a shortcuts hint with no status row among the last few are a draft and stay protected.
+func TestReadCodexDraftAboveHintWithoutStatus(t *testing.T) {
+	for _, tc := range []struct{ name, screen, want string }{
+		{"no status", "› keep this text\n  plan · Main [default]\n  ← for agents · ? for shortcuts\n",
+			"keep this text\nplan · Main [default]\n← for agents · ? for shortcuts"},
+		{"separator continuation", "› keep this\n  · /work/example\n  ? for shortcuts\n",
+			"keep this\n· /work/example\n? for shortcuts"},
+		{"text above a separator continuation", "› keep this\n  some text\n  · /work/example\n  ? for shortcuts\n",
+			"keep this\nsome text\n· /work/example\n? for shortcuts"},
+		{"status too far up", "› keep\n  GPT-6.1-Sol xhigh · /work/example\n  a\n  b\n  c\n  d\n  ? for shortcuts\n",
+			"keep\nGPT-6.1-Sol xhigh · /work/example\na\nb\nc\nd\n? for shortcuts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ReadCodex("• Done.\n\n" + tc.screen)
+			if s.View != CodexComposer || s.Draft != tc.want {
+				t.Fatalf("view %q draft %q, want composer draft %q", s.View, s.Draft, tc.want)
+			}
+		})
+	}
+}
+
 // 0.166 can place the status and warning on one row, without a shortcuts row.
 func TestReadCodexComposerWithSingleRowFooter(t *testing.T) {
 	footer := "  GPT-6-Astra high Fast · ~/project · Review project                 ⚠ 1 warning · f2 to view\n"

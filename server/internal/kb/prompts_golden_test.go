@@ -156,7 +156,14 @@ func TestGoldenProject(t *testing.T) {
 				if i == 1 {
 					sum = long
 				}
-				_ = e.Store.PutChat(&Chat{ID: id})
+				c := &Chat{ID: id}
+				switch i { // a state the source reported (#9427): with its day, and without one
+				case 0:
+					c.State, c.StateAt = "merged", at
+				case 2:
+					c.State = "open"
+				}
+				_ = e.Store.PutChat(c)
 				_ = e.Store.PutSummary(KindChat, id, sum)
 			}
 			p.Chats = append(p.Chats, "lark-none")

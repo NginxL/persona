@@ -2,3 +2,52 @@
 harmony/native/ssh/licenses/** -text -whitespace
 harmony/entry/src/main/resources/rawfile/native-ssh-licenses.html -text -whitespace
 native/app-core/licenses/** -text -whitespace
+
+# Union merge: lists of one entry a line that many PRs append to at once. Git keeps both sides' lines instead of a
+# conflict, without sorting them or dropping a duplicate or a line one side deleted, so a list goes here only when a
+# test compares its entries exactly and fails on such an entry. Comment lines are not all checked: one that a side
+# reworded can keep its old wording next to the new. Name that test right above the list's line ("# guarded by <test>
+# (<its file>)"), and rerun it after merging main. Only merges and rebases on your machine use this; GitHub's merge
+# ignores it and still reports the conflict. One file a line, no patterns; scripts/test/test_gitattributes.py checks
+# this block. How to merge both kinds of file here:
+# docs/operations/collaboration.md, "Merging main: union-merged lists and generated files".
+# guarded by TestRouteScopes (server/internal/hub/route_scopes_test.go)
+server/internal/hub/testdata/route_scopes.txt merge=union
+# guarded by TestHubAnswersOnlyItsOwnRoutes (server/internal/hub/architecture_guard_test.go)
+server/internal/hub/testdata/hub_routes_allowed.txt merge=union
+# guarded by TestHubStoreStaysSmall (server/internal/hub/architecture_guard_test.go)
+server/internal/hub/testdata/hub_store_methods.txt merge=union
+# guarded by test_the_list_is_sorted_unique_and_well_formed (scripts/release/test_debug_switches.py)
+scripts/release/debug_switches.txt merge=union
+
+# Generated outputs: GitHub folds their diffs. Resolve a conflict in one by rerunning its generator, never by hand. Only
+# files a generator in this repository rewrites from the checkout belong here, each pattern matching a tracked file.
+# scripts/gen/extension_schema.py (it also runs scripts/gen/sdk_bundle.py)
+sdk/go/wire/wire_gen.go linguist-generated=true
+sdk/go/wire/schema/*.schema.json linguist-generated=true
+sdk/go/bundle/sdk.tar.gz linguist-generated=true
+sdk/ts/src/wire.ts linguist-generated=true
+web/src/lib/extension-wire.ts linguist-generated=true
+web/src/lib/recents-wire.ts linguist-generated=true
+web/src/lib/todo-view-wire.ts linguist-generated=true
+apple/Packages/PersonaWire/Sources/PersonaWire/ExtensionWire.swift linguist-generated=true
+apple/Packages/PersonaWire/Sources/PersonaWire/RecentsWire.swift linguist-generated=true
+apple/Packages/PersonaWire/Sources/PersonaWire/TodoViewWire.swift linguist-generated=true
+android/core/contracts/src/main/kotlin/persona/core/contracts/generated/ExtensionWire.kt linguist-generated=true
+android/core/contracts/src/main/kotlin/persona/core/contracts/generated/TodoViewWire.kt linguist-generated=true
+server/internal/assistantwire/todo_view_gen.go linguist-generated=true
+# persona-core-typegen (cargo run -p persona-core-typegen in native/app-core)
+android/core/rustcore/src/main/kotlin/persona/core/rustcore/wire/** linguist-generated=true
+android/core/rustcore/src/main/kotlin/com/novi/** linguist-generated=true
+apple/Packages/PersonaCore/Sources/PersonaCoreWire/** linguist-generated=true
+apple/Packages/PersonaCore/Sources/Serde/** linguist-generated=true
+harmony/entry/src/main/ets/core/rustcore/Wire.ts linguist-generated=true
+# scripts/gen/deno_adapter.sh
+server/internal/extension/denohost/adapter.mjs linguist-generated=true
+# scripts/assets/gen_tokens.py --kotlin <this path>, from the repository root (as scripts/ci/android.sh checks it)
+android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt linguist-generated=true
+# scripts/assets/gen_icon_meanings.py (PhIcons.kt stays unmarked: its generator needs a Phosphor Icons checkout)
+android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/PersonaIcons.kt linguist-generated=true
+# scripts/mock/make_demo_data.py, then android/core/demo/tools/export_data.py for Android's copy
+apple/Persona/Resources/Demo.json linguist-generated=true
+android/core/demo/src/main/assets/demo/Demo.json linguist-generated=true

@@ -70,9 +70,11 @@ internal fun mergeAssistantSearch(local: List<Session>, answer: AssistantSearchA
  */
 internal fun shownSearchRows(
     query: String, enabled: Boolean, local: List<Session>, known: List<Session>, answer: AssistantSearchAnswer?,
+    activeTag: String? = null,
 ): List<FoundChat>? {
     if (!enabled || query.trim().isEmpty()) return null
     return mergeAssistantSearch(local, answer, known)
+        .filter { activeTag.isNullOrEmpty() || it.session.tags?.contains(activeTag) == true }
 }
 
 /**
@@ -163,10 +165,13 @@ internal class AssistantChatSearch {
 @Composable
 internal fun rememberFoundChats(
     query: String, local: List<Session>, known: List<Session>, enabled: Boolean, api: AssistantManagement?, hubKey: String,
+    activeTag: String? = null,
 ): Pair<List<FoundChat>?, Boolean> {
     val search = rememberAssistantSearch(query, enabled, api, hubKey)
     val answer = search.current(query)
-    val found = remember(query, enabled, local, answer, known) { shownSearchRows(query, enabled, local, known, answer) }
+    val found = remember(query, enabled, local, answer, known, activeTag) {
+        shownSearchRows(query, enabled, local, known, answer, activeTag)
+    }
     return found to (answer?.partial == true)
 }
 

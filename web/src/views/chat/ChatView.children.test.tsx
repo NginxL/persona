@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Interaction, Item, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -24,6 +25,8 @@ const { ChatView } = await import("./ChatView");
 const { getState, reset, upsertSession } = await import("../../lib/store");
 const { followChildSession, useSubagentLink } = await import("../../lib/subagent-link");
 const { forgetExpanded } = await import("./expanded");
+// The cards' chunks are loaded before the first synchronous render.
+await loadPages();
 // the cards' own chunk (lazy, like a subagent's): in before the first chat opens its work
 await import("./ChildSessionCard");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

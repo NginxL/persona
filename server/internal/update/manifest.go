@@ -301,14 +301,21 @@ func CheckNext(served *Manifest, build int64, commit string, isAncestor func(old
 	return nil
 }
 
-// NodeFile is the download of a node that runs program on plat ("linux-amd64"): program's own (Nodes) when the
-// release has it, else personad's (personad runs every node). program is "" or personad for personad's.
 // HelperFile is helper's download for plat ("darwin-arm64"), if the release has one.
 func (m *Manifest) HelperFile(helper, plat string) (File, bool) {
 	f, ok := m.Helpers[helper][plat]
 	return f, ok && f.Name != ""
 }
 
+// LinkFile is the persona-link connector's download for plat ("linux-amd64"; a Windows one is listed without its
+// .exe, "windows-amd64"), if the release has one.
+func (m *Manifest) LinkFile(plat string) (File, bool) {
+	f, ok := m.Links[plat]
+	return f, ok && f.Name != ""
+}
+
+// NodeFile is the download of a node that runs program on plat ("linux-amd64"): program's own (Nodes) when the
+// release has it, else personad's (personad runs every node). program is "" or personad for personad's.
 func (m *Manifest) NodeFile(program, plat string) (File, bool) {
 	if f, ok := m.Nodes[program][plat]; ok && program != "" {
 		return f, true

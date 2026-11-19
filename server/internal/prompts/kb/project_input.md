@@ -14,7 +14,8 @@
 # 相关会话
 {{range .Chats}}
 ## {{.ID}}
-{{.Summary}}
+{{if .State}}状态（来源记录的事实）：{{if eq .State "merged"}}已合并{{else if eq .State "closed"}}已关闭{{else}}进行中{{end}}{{with .StateAt}}（{{.}}）{{end}}
+{{end}}{{.Summary}}
 {{end}}{{with .Moments}}
 # 相关公司圈
 {{range .}}

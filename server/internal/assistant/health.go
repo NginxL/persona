@@ -79,6 +79,11 @@ func (s *Service) inHealth(ctx context.Context, self string) bool {
 	return space == SpaceHealth
 }
 
+// todoInHealth applies the health space's existing outbound privacy rule to a task opened from one of its conversations.
+func (s *Service) todoInHealth(ctx context.Context, t Todo) bool {
+	return t.Origin != "" && s.inHealth(ctx, t.Origin)
+}
+
 // ixInHealth: interaction ix belongs to a health conversation (its directory, else its conversation's space). A
 // directory inside the space counts (identity.InHealthSpace): this only hides, so a `cd` that left the hook in a
 // subfolder must not show the card (#2368). spaceOf, which classifies, stays exact.

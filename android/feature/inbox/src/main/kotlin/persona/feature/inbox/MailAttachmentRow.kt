@@ -14,12 +14,16 @@ import persona.core.designsystem.icons.PhIcons
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Sizes people read: bytes below 1 KB, then KB and MB. */
+/**
+ * Sizes people read: bytes below 1 KB, then KB and MB. The unit is picked after rounding, as the machine pages'
+ * `MetricFormat.bytes`: 1023.5 KB and up rounds to 1,024 KB, which reads 1.0 MB (#9890).
+ */
 internal fun readableSize(res: Resources, bytes: Long): String {
     val value = bytes.coerceAtLeast(0)
+    val kb = (value + 512) / 1024
     return when {
         value < 1024 -> res.getQuantityString(R.plurals.inbox_mail_bytes, value.toInt(), value.toInt())
-        value < 1024 * 1024 -> "${LocalizedFormats.number((value + 512) / 1024, res.mailLocale)} KB"
+        kb < 1024 -> "${LocalizedFormats.number(kb, res.mailLocale)} KB"
         else -> java.lang.String.format(res.mailLocale, "%.1f MB", value / 1048576.0)
     }
 }

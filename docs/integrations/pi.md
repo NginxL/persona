@@ -150,6 +150,11 @@ Persona's own health check runs `pi -p … --no-session` in an empty temporary d
 - Interrupt: inside pi-web through pi-web's own Stop (`POST /api/agent/<id> {type: "abort"}`: it also cancels the dialogs extensions have open and takes back what was queued for the turn), elsewhere `ctx.abort()`; `ask_user` gives up on the turn's abort signal. The interrupt then waits up to 10 seconds for `agent_settled` and answers `settled`, or fails with `interrupt_timeout` (#8097). Rename uses `pi.setSessionName`.
   A given `client_msg_id` is sent only once.
 
+## Token usage
+
+The node meters pi's token usage from its session files (`$PI_CODING_AGENT_DIR` or `~/.pi/agent`), whether or not Persona started the session: each assistant message's
+usage, cache warming's `usage` entries and the compaction and branch summaries' calls, under the agent `pi` on the token calendar (`docs/server/machines.md`, "Token usage").
+
 ## Limitations
 
 - Only sessions running in pi processes with this extension installed are visible, plus on-disk sessions from the last 7 days (with the companion). Without pi-web running, non-running sessions can be viewed but not messaged.

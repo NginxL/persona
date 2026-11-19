@@ -95,6 +95,8 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
     const followed = followedBinding(l.name, configured);
     // one of Paseo's providers is its own engine, by its name: its mark where the app has one (#8142)
     const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: agentId(providerAgent(agent, l.name)), models: null };
+    p.defaultModel = l.model;
+    p.isDefault = Boolean(configured?.provider === `launcher.${l.name}`);
     const idNote = providerIdNote(l);
     if (idNote) p.idNote = idNote;
     if (l.pi) p.alsoNote = t("lib-new-agent-panel.pi_too"); // docs/integrations/pi.md "Persona's model providers"
@@ -120,6 +122,7 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
     // the Default row: what runs with no model sent, in its name (the model settings' model, the model the default entry
     // stands for, the launcher's own --model when it fixes it); a launcher that fixes it says why under it
     const runsModel = defaultRuns(l, list, followed);
+    p.defaultModel = runsModel;
     const first: PanelModel = {
       id: DEFAULT_ROW,
       name: runsModel ? t("lib-launcher-models.default_named", { name: runsModel }) : t("lib-launcher-models.default"),
@@ -139,6 +142,7 @@ export function newAgentPanel({ launchers, listOf, choice, configured, runs, tie
         const row: PanelModel = { id: m.id, name: modelName(m), efforts: effortsOf(m) };
         if (m.description) row.description = m.description;
         if (m.resolved) row.resolved = m.resolved;
+        if (m.aliases?.length) row.aliases = m.aliases;
         if (m.default_effort) row.defaultEffort = m.default_effort;
         if (m.custom) row.custom = true;
         models.push(row);

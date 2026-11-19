@@ -1,0 +1,7 @@
+{
+  "send": "Ask",
+  "placeholder": "Ask without approving or denying…",
+  "pending_note": "The approval stays pending while the assistant answers.",
+  "sent_pending": "Question sent. The original approval is still pending.",
+  "too_long": "Keep the question to 1,000 characters or fewer."
+}

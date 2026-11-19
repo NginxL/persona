@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -276,15 +277,33 @@ internal fun InteractionForm(
                 }
             }
             "plan" -> {
-                DecisionButtons(
-                    primary = JAction(stringResource(R.string.chat_plan_approve_edits), enabled = enabled(AnswerAction.ApproveEdits)) { act(AnswerAction.ApproveEdits) },
-                    secondary = JAction(stringResource(R.string.chat_plan_reject), enabled = enabled(AnswerAction.Reject)) { act(AnswerAction.Reject) },
-                    // Web's three ways to approve (Interactions.tsx MODES): "Confirm each step" keeps Claude asking before each edit.
-                    more = listOf(JAction(stringResource(R.string.chat_plan_approve_all), enabled = enabled(AnswerAction.ApproveAll)) { act(AnswerAction.ApproveAll) },
-                        JAction(stringResource(R.string.chat_plan_approve_stepwise), enabled = enabled(AnswerAction.ApproveStepwise)) { act(AnswerAction.ApproveStepwise) }),
-                )
-                Text(stringResource(if (planRead) R.string.chat_plan_approve_all_note else R.string.chat_plan_read_first_note),
-                    style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                val recordedApproval = when (val mode = interaction.recordedPlanThen) {
+                    "default" -> mode to AnswerAction.ApproveStepwise
+                    "acceptEdits", "auto" -> mode to AnswerAction.ApproveEdits
+                    SessionModes.BYPASS -> mode to AnswerAction.ApproveAll
+                    else -> null
+                }
+                if (recordedApproval != null) {
+                    val (mode, action) = recordedApproval
+                    val modeLabel = SessionModes.modeLabel(mode, LocalResources.current) ?: mode
+                    Text(modeLabel, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                    DecisionButtons(
+                        primary = JAction(stringResource(R.string.chat_tray_approve), enabled = enabled(action)) { act(action) },
+                        secondary = JAction(stringResource(R.string.chat_plan_reject), enabled = enabled(AnswerAction.Reject)) { act(AnswerAction.Reject) },
+                    )
+                } else {
+                    DecisionButtons(
+                        primary = JAction(stringResource(R.string.chat_plan_approve_edits), enabled = enabled(AnswerAction.ApproveEdits)) { act(AnswerAction.ApproveEdits) },
+                        secondary = JAction(stringResource(R.string.chat_plan_reject), enabled = enabled(AnswerAction.Reject)) { act(AnswerAction.Reject) },
+                        // Web's three ways to approve (Interactions.tsx MODES): "Confirm each step" keeps Claude asking before each edit.
+                        more = listOf(JAction(stringResource(R.string.chat_plan_approve_all), enabled = enabled(AnswerAction.ApproveAll)) { act(AnswerAction.ApproveAll) },
+                            JAction(stringResource(R.string.chat_plan_approve_stepwise), enabled = enabled(AnswerAction.ApproveStepwise)) { act(AnswerAction.ApproveStepwise) }),
+                    )
+                }
+                if (recordedApproval == null || recordedApproval.first == SessionModes.BYPASS) {
+                    Text(stringResource(if (planRead) R.string.chat_plan_approve_all_note else R.string.chat_plan_read_first_note),
+                        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                }
             }
             "question" -> if (question != null) {
                 // As on iOS (needsFooter): one single-choice question is answered by tapping an option, so it has no

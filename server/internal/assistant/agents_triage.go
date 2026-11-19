@@ -203,7 +203,7 @@ func (s *Service) projectsFor(ctx context.Context, machine, cwd string) []string
 func triageWork(out triageOut, others map[string]proto.WorkAgent, now time.Time, lang i18n.Lang) *proto.WorkState {
 	w := &proto.WorkState{Line: clip(oneLine(out.Line), 60)}
 	for _, a := range first(out.Artifacts, 5) {
-		if k := strings.ToLower(strings.TrimSpace(a.Kind)); slices.Contains([]string{"pr", "commit", "doc", "build", "url"}, k) && strings.TrimSpace(a.Ref) != "" {
+		if k := strings.ToLower(strings.TrimSpace(a.Kind)); slices.Contains([]string{"pr", "commit", "doc", "build", "url", "file"}, k) && strings.TrimSpace(a.Ref) != "" {
 			w.Artifacts = append(w.Artifacts, proto.WorkArtifact{Kind: k, Ref: clip(strings.TrimSpace(a.Ref), 300)})
 		}
 	}

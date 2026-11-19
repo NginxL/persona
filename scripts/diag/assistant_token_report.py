@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Where the assistant's tokens go: model usage per round kind, from Claude Code and Codex transcripts.
 
-    scripts/diag/assistant_token_report.py [--since 2026-11-01] [--json] [path ...]
+    scripts/diag/assistant_token_report.py [--since 2026-11-01] [--json] [--request-breakdown] [path ...]
 
 A round starts with a message typed into a conversation: the owner's, or one Persona sends (a supervision event, a
 follow-up or scheduled run, a task notice, another conversation's message...). Every model call until the next such
@@ -14,12 +14,16 @@ is unknown rather than zero. If an aggregate includes unknown values, it and its
 It also sizes each supervision event's text and the part of it that is the general handling manual (#5665).
 
 Prints counts and sizes only, never message content, so the output can be pasted into an issue.
+--request-breakdown adds source byte inventories and explicit local request exports; see
+docs/assistant/assistant.md, "Local request source diagnostics" for boundaries and unknowns.
 """
 import argparse
 import collections
 import glob
+import importlib.util
 import json
 import os
+from pathlib import Path
 import re
 import sys
 
@@ -136,7 +140,7 @@ def classify(text):
 
 
 class Report:
-    def __init__(self, since=None):
+    def __init__(self, since=None, request_breakdown=False):
         self.since = since
         self.kinds = collections.defaultdict(lambda: collections.Counter())
         self.conversations = collections.defaultdict(lambda: collections.Counter())
@@ -144,6 +148,13 @@ class Report:
         self.sidechain = collections.Counter()
         self.files = 0
         self.unknown = collections.defaultdict(set)
+        self.breakdown = None
+        if request_breakdown:
+            # The report can also be loaded directly by file path, without this directory on sys.path.
+            spec = importlib.util.spec_from_file_location("request_breakdown", Path(__file__).with_name("request_breakdown.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.breakdown = module.Breakdown(since)
 
     def add_round(self, kind, text, rest, counted):
         if not counted:
@@ -157,6 +168,8 @@ class Report:
             self.events.append((len(text.encode()), len(body), manual))
 
     def add_file(self, path):
+        if self.breakdown is not None:
+            self.breakdown.add_file(path)
         with open(path, errors="replace") as f:
             try:
                 first = json.loads(f.readline())
@@ -171,7 +184,7 @@ class Report:
         # line per content block. Lines before --since still keep this state and the round kind, but count nothing.
         seen = {}
         with open(path, errors="replace") as f:
-            for line in f:
+            for line_number, line in enumerate(f):
                 try:
                     e = json.loads(line)
                 except ValueError:
@@ -194,7 +207,7 @@ class Report:
                     continue
                 # A line without a message id is a response of its own: gateways can leave the id empty, and one
                 # requestId can then cover several responses (transcript.RequestUsage counts them the same way).
-                key = msg.get("id") or ("line", e.get("uuid") or id(e))
+                key = msg.get("id") or ("line", e.get("uuid") or line_number)
                 prev = seen.get(key)
                 target = self.sidechain if e.get("isSidechain") else self.kinds[kind]
                 if prev is None:
@@ -348,8 +361,11 @@ class Report:
             # No category's share of an unknown total can be calculated.
             for row in kinds.values():
                 row[key + "_share"] = None
-        return {"files": self.files, "conversations": len(self.conversations), "total": dict(total),
-                "by_kind": kinds, "supervision_events": ev, "sidechain": dict(self.sidechain)}
+        result = {"files": self.files, "conversations": len(self.conversations), "total": dict(total),
+                  "by_kind": kinds, "supervision_events": ev, "sidechain": dict(self.sidechain)}
+        if self.breakdown is not None:
+            result["request_breakdown"] = self.breakdown.summary()
+        return result
 
 
 def print_text(s):
@@ -377,6 +393,16 @@ def print_text(s):
     if ev["count"]:
         print(f"supervision events: {ev['count']}, median {ev['median_bytes']} B, largest {ev['max_bytes']} B; "
               f"{ev['with_manual']} carry the handling manual, {ev['manual_share_of_body']:.0%} of their text after the context blocks")
+    if "request_breakdown" in s:
+        print("Request source sizes (UTF-8 content / canonical JSON bytes; ? = unavailable):")
+        for index, row in enumerate(s["request_breakdown"]["rows"], 1):
+            print(f"  {index}: {row['boundary']} / {row['lifecycle']}")
+            print("    " + ", ".join(f"{key}={value['bytes'] if value['bytes'] is not None else '?'}"
+                                       for key, value in row["sources"].items()))
+            print(f"    observed content={row['observed_content_bytes']}; largest tool result={row['largest_tool_result']}")
+            if "provider_usage" in row:
+                print("    observed provider usage: " + json.dumps(row["provider_usage"], sort_keys=True))
+        print("  Limits: " + "; ".join(s["request_breakdown"]["limits"]))
 
 
 def main(argv=None):
@@ -384,12 +410,14 @@ def main(argv=None):
     ap.add_argument("paths", nargs="*", help="transcript files or directories (default: the assistant directory's projects)")
     ap.add_argument("--since", help="only lines at or after this ISO time, e.g. 2026-11-01")
     ap.add_argument("--json", action="store_true", help="print JSON")
+    ap.add_argument("--request-breakdown", action="store_true",
+                    help="include local source byte inventories and explicit request exports; unknowns are not zero")
     args = ap.parse_args(argv)
     paths = args.paths or [*default_paths(), *default_codex_files()]
     if not paths:
         print("no assistant transcripts found; pass a directory", file=sys.stderr)
         return 1
-    r = Report(args.since)
+    r = Report(args.since, request_breakdown=args.request_breakdown)
     for path in transcript_files(paths):
         r.add_file(path)
     s = r.summary()

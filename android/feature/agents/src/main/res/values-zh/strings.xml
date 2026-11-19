@@ -31,7 +31,7 @@
     </plurals>
     <string name="agents_summary_quiet">都安静着</string>
     <plurals name="agents_subtitle_unread">
-        <item quantity="other">%1$d 个刚做完</item>
+        <item quantity="other">%1$d 个完成未看</item>
     </plurals>
     <string name="agents_subtitle_one">%1$s。</string>
     <string name="agents_subtitle_two">%1$s，%2$s。</string>

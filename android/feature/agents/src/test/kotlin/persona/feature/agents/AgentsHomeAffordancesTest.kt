@@ -9,6 +9,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -34,7 +36,6 @@ import org.robolectric.annotation.Config
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
-import persona.core.designsystem.HomeChrome
 import persona.core.designsystem.LocalHomeChrome
 import persona.core.designsystem.PersonaTheme
 import persona.core.navigation.AppTab
@@ -47,8 +48,8 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import java.io.File
 
 /**
- * Home grouping opens a menu, and the requests and their history are a page in ⋯ on Glass. A row under "Subtasks"
- * offers no Pin (#4494).
+ * Home grouping opens a menu. On compact Glass, reselecting Agents opens list settings and its requests page.
+ * A row under "Subtasks" offers no Pin (#4494).
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "en-w400dp-h900dp")
@@ -65,14 +66,15 @@ class AgentsHomeAffordancesTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
             .assertHasClickAction()
         rule.onAllNodes(
-            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and
+            hasAnyAncestor(hasTestTag("agents-status-scroll")) and
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and
                 SemanticsMatcher.expectValue(SemanticsProperties.Selected, true),
         ).assertCountEquals(1)
         grouping.performClick()
         rule.onNode(isPopup()).assertIsDisplayed()
         rule.onNodeWithText("By status").assertIsDisplayed()
         rule.onNodeWithText("By Machine").assertIsDisplayed()
-        rule.onAllNodesWithText("All machines").assertCountEquals(0) // the computers are behind ⋯, not in the picker
+        rule.onAllNodesWithText("All machines").assertCountEquals(0) // The computers are in list settings.
     }
 
     // #4338 A3, iOS's "Only <computer>": a chosen computer shows on the page, and a tap shows every computer again.
@@ -99,10 +101,11 @@ class AgentsHomeAffordancesTest {
             .outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    // With the home chrome, the rest of the list's settings (computers, range, sort, display) are behind ⋯ (#4338 A4).
-    @Test fun moreOpensTheRestOfTheListSettings() {
+    // The grouping picker leaves computers, range, sort and display in list settings (#4338 A4).
+    @Test fun selectedAgentsTabOpensTheRestOfTheListSettings() {
         showScreen()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.onNodeWithContentDescription("List settings").assertDoesNotExist()
+        rule.reselectAgentsTab()
         rule.onNodeWithText("All machines").assertIsDisplayed()
         rule.onAllNodesWithText("By status").assertCountEquals(0)
     }
@@ -110,7 +113,7 @@ class AgentsHomeAffordancesTest {
     // #4338 A11, as iOS's list menu: Sort is not offered under By Status, whose sections are the states.
     @Test fun sortIsOfferedUnderOtherGroupings() {
         showScreen()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.onAllNodes(androidx.compose.ui.test.hasText("Sort:", substring = true)).assertCountEquals(2)
     }
 
@@ -118,7 +121,7 @@ class AgentsHomeAffordancesTest {
         val model = showScreen()
         rule.runOnIdle { model.grouping(persona.core.domain.sort.AgentGrouping.State) }
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.onNodeWithText("All machines").assertIsDisplayed()
         rule.onAllNodes(androidx.compose.ui.test.hasText("Sort:", substring = true)).assertCountEquals(0)
     }
@@ -128,7 +131,7 @@ class AgentsHomeAffordancesTest {
         val model = showScreen()
         rule.runOnIdle { model.grouping(persona.core.domain.sort.AgentGrouping.App) }
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.onNodeWithText("All machines").assertIsDisplayed()
         rule.onAllNodes(androidx.compose.ui.test.hasText("Sort:", substring = true)).assertCountEquals(0)
     }
@@ -137,7 +140,7 @@ class AgentsHomeAffordancesTest {
         val model = showScreen()
         rule.runOnIdle { model.grouping(persona.core.domain.sort.AgentGrouping.Recent) }
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.onNodeWithText("All machines").assertIsDisplayed()
         rule.onAllNodes(androidx.compose.ui.test.hasText("Sort:", substring = true)).assertCountEquals(0)
     }
@@ -146,7 +149,7 @@ class AgentsHomeAffordancesTest {
         val model = showScreen()
         rule.runOnIdle { model.grouping(persona.core.domain.sort.AgentGrouping.Recent) }
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.onNodeWithText("All machines").assertIsDisplayed()
         rule.onAllNodesWithText("Collapse all").assertCountEquals(0)
         rule.onAllNodesWithText("Expand all").assertCountEquals(0)
@@ -201,13 +204,12 @@ class AgentsHomeAffordancesTest {
         save("picker", popup = true)
     }
 
-    // #4338 A1: on Glass the requests and their history are a page at the end of ⋯, after Machines, where iOS keeps its
-    // pages; the list has no row for them.
-    @Test fun requestsAndHistoryAreUnderMoreOnGlass() {
+    // #4338 A1: on Glass the requests and their history are a page in list settings, after Machines.
+    @Test fun requestsAndHistoryAreInListSettingsOnGlass() {
         showScreen()
         rule.onAllNodesWithText("Requests and history").assertCountEquals(0)
-        rule.onNodeWithContentDescription("List settings").performClick()
-        // Glass's ⋯ holds Display's four choices too (#4338 A9): its end is a scroll away in a 900dp window.
+        rule.reselectAgentsTab()
+        // Display's four choices put the end of the sheet below the fold in a 900dp window (#4338 A9).
         rule.onNodeWithText("Machine monitor").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Requests and history")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).performScrollTo().performClick()
@@ -295,7 +297,7 @@ class AgentsHomeAffordancesTest {
         }))
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
-                CompositionLocalProvider(LocalHomeChrome provides HomeChrome(emptyList(), "Agents", onSelect = {}, leading = {})) {
+                CompositionLocalProvider(LocalHomeChrome provides agentsHomeChrome) {
                     AgentsScreen(model, Nowhere, AgentsMetadata())
                 }
             }

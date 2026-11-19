@@ -90,7 +90,7 @@ struct LarkChatPinsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("The message stays in the chat.") }
-            .task {
+            .tabActiveTask {
                 let changes = LarkSync.shared.changes(of: feed)
                 await pins.refresh()
                 for await _ in changes { await pins.refresh() }

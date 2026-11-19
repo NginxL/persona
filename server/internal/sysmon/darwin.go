@@ -164,11 +164,14 @@ func (l *modelLookup) find() string {
 type darwinCollector struct {
 	cancel context.CancelFunc
 
-	mu   sync.Mutex
-	busy *float64
-	vm   *vmStat
-	page uint64
-	net  netCounters
+	mu           sync.Mutex
+	busy         *float64
+	vm           *vmStat
+	page         uint64
+	net          netCounters
+	battAt       time.Time
+	battPct      *float64
+	battCharging *bool
 }
 
 func NewCollector(ctx context.Context) Collector {
@@ -253,7 +256,30 @@ func (c *darwinCollector) Sample(now time.Time) proto.MetricSample {
 	if v := Volumes(); len(v) > 0 {
 		s.DiskUsed, s.DiskTotal = v[0].Used, v[0].Total
 	}
+	s.BatteryPercent, s.BatteryCharging = c.readBattery(now)
 	return s
+}
+
+func (c *darwinCollector) readBattery(now time.Time) (*float64, *bool) {
+	c.mu.Lock()
+	due := c.battAt.IsZero() || now.Sub(c.battAt) >= listEvery || now.Before(c.battAt)
+	pct, chg := c.battPct, c.battCharging
+	c.mu.Unlock()
+	if !due {
+		return pct, chg
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	out, err := exec.CommandContext(ctx, "pmset", "-g", "batt").Output()
+	cancel()
+	if err == nil {
+		pct, chg = parsePmsetBatt(out)
+	} else {
+		pct, chg = nil, nil
+	}
+	c.mu.Lock()
+	c.battAt, c.battPct, c.battCharging = now, pct, chg
+	c.mu.Unlock()
+	return pct, chg
 }
 
 // Volumes is the data volume ("/" is the sealed system snapshot, a few GB; what fills up is the data volume), or "/"

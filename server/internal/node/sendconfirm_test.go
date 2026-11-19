@@ -128,6 +128,80 @@ func TestSendAPromptStuckInTheBoxIsNotReportedDelivered(t *testing.T) {
 	}
 }
 
+// A message of one picture and no words, sent from the web: Claude Code left it in its box, the picture's chip and
+// then the <attached_images> block with the path: line of the photo this send had just saved. The transcript never
+// got it, no Enter was pressed (there were no words to tell the prompt by), the send answered 200 when the window
+// ended, and the box refused every later send to the pane as a draft until Enter was pressed at the computer. The
+// photo's own upload path in the box makes the prompt this send's: Enter goes in once, and the send succeeds only when
+// the transcript then has it; still in the box at the end of the window, it fails with delivered "unknown".
+func TestSendAPictureOnlyPromptLeftInTheBoxGetsEnter(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		enterTakes bool
+	}{
+		{"Enter takes it", true},
+		{"still in the box after Enter", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			n, f, home, cwd := guideNode(t, true)
+			withSubmitWindow(t, 400*time.Millisecond, 20*time.Millisecond)
+			empty := screenFixture(t, "claude-2.1.312-empty-162.txt")
+			emptyANSI := screenFixture(t, "claude-2.1.312-empty-162.ansi")
+			typed := screenFixture(t, "claude-2.1.312-typed-162.txt") // the box shows "fix the flaky test"
+			typedANSI := screenFixture(t, "claude-2.1.312-typed-162.ansi")
+			f.setScreens("w1:p1", empty, emptyANSI)
+			var mu sync.Mutex
+			pasted, box, enters := "", "", 0
+			f.after(func(call herdrCall) {
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case call.Method == "agent.prompt":
+					// What Claude Code (2.1.316) makes of the paste: the photo's bare path line becomes its chip, the
+					// path: line stays, and the box shows it all, one row per line.
+					pasted = str(call.Params["text"])
+					kept, attached := claudePaste(pasted)
+					if len(attached) != 1 {
+						t.Errorf("Claude attaches %v from %q, want the one photo", attached, pasted)
+					}
+					box = "[Image #1]" + kept
+					f.setScreens("w1:p1",
+						strings.Replace(typed, "fix the flaky test", strings.ReplaceAll(box, "\n", "\n  "), 1),
+						strings.Replace(typedANSI, "fix the flaky test", strings.ReplaceAll(box, "\n", "\r\n  "), 1))
+				case isKeys("enter")(call):
+					enters++
+					if c.enterTakes {
+						f.setScreens("w1:p1", empty, emptyANSI)
+						appendTranscript(t, home, cwd, sidA, promptLine(cwd, "", 64))
+					}
+				}
+			})
+			png := map[string]any{"mime": "image/png", "data": "iVBORw0KGgo="}
+			_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "", "images": []map[string]any{png}})
+			mu.Lock()
+			defer mu.Unlock()
+			if photos := appPhotos(pasted); len(photos) != 1 || !strings.Contains(box, imagePathLine+photos[0]) {
+				t.Fatalf("the box %q does not show the saved photo's path (typed %q)", box, pasted)
+			}
+			if enters != 1 {
+				t.Errorf("Enter pressed %d times for the picture-only prompt left in the box, want once", enters)
+			}
+			if c.enterTakes {
+				if err != nil {
+					t.Fatalf("send: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("send answered success for a picture-only prompt still in the box")
+			}
+			if _, data := refusalOf(t, err); data["delivered"] != deliveredUnknown {
+				t.Fatalf("delivered %v: %v", data["delivered"], err)
+			}
+		})
+	}
+}
+
 // While Claude works, the prompt goes into its queue: the transcript's enqueue of it confirms it at once, with no
 // Enter and without waiting out the window.
 func TestSendConfirmedByClaudesQueue(t *testing.T) {

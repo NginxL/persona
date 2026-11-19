@@ -1,0 +1,21 @@
+{
+  "changed_from": "{who}が権限モードを「{from}」から「{to}」に変更しました",
+  "changed_to": "{who}が権限モードを「{to}」に変更しました",
+  "restart_queued": "{who}が「{to}」を選びました。このターンが終わるとセッションを再起動して切り替えます",
+  "restart_done": "「{to}」で再起動しました",
+  "restart_already": "すでに「{to}」です。再起動は不要です",
+  "restart_failed": "「{to}」で再起動できませんでした",
+  "restart_failed_why": "「{to}」で再起動できませんでした：{why}",
+  "restart_dropped": "取り消しました。「{to}」では再起動しません",
+  "restart_dropped_why": "取り消しました。「{to}」では再起動しません：{why}",
+  "why_replaced": "別の切り替えに置き換えられました",
+  "why_process_exited": "元のプロセスが終了しました",
+  "why_process_replaced": "セッションが別のプロセスに変わりました",
+  "why_process_unknown": "どのプロセスを再起動するか分かりませんでした",
+  "why_expired": "2時間以上待ちました",
+  "why_not_stopped": "元のプロセスが終了しませんでした",
+  "why_start_failed": "新しいプロセスが起動せず、セッションは元のモードのまま続いています",
+  "why_stopped": "新しいプロセスが起動せず、セッションは停止しました",
+  "by_hub": "ハブ",
+  "by_unknown": "デバイス"
+}

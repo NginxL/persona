@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarLayout, dayTotal, heatLevels, lastDays, weeksThatFit, type UsageDay } from "./usage-history";
+import { calendarLayout, dayTotal, heatLevels, hourLayout, lastDays, weeksThatFit, type UsageDay } from "./usage-history";
 
 const days = (list: [string, number][]): UsageDay[] => list.map(([date, n]) => ({ date, cache_read: n }));
 
@@ -54,5 +54,29 @@ describe("sums and widths", () => {
     expect(weeksThatFit(301, 13, 3)).toBe(19);
     expect(weeksThatFit(40, 13, 3)).toBe(8);
     expect(weeksThatFit(5000, 13, 3)).toBe(53);
+  });
+});
+
+describe("hourLayout", () => {
+  const h = (date: string, hour: number, out: number) => ({ t: 0, date, hour, out });
+  it("a row a day, a column an hour; today's hours to come are -1; the hour that comes twice adds up", () => {
+    const hours = [
+      ...Array.from({ length: 24 }, (_, i) => h("2026-11-16", i, i === 9 ? 100 : 0)),
+      h("2026-11-16", 1, 5), // the clocks went back: 1 a.m. twice
+      h("2026-11-17", 0, 1),
+      h("2026-11-17", 1, 0),
+      h("2026-11-17", 2, 50), // the hour under way
+    ];
+    const l = hourLayout(hours);
+    expect(l.dates).toEqual(["2026-11-16", "2026-11-17"]);
+    expect(l.tokens[0][1]).toBe(5);
+    expect(l.levels[0][9]).toBe(4); // the largest is the last step
+    expect(l.levels[0][0]).toBe(0);
+    expect(l.levels[1].slice(0, 3).every((v) => v >= 0)).toBe(true);
+    expect(l.levels[1].slice(3)).toEqual(Array(21).fill(-1));
+  });
+
+  it("has nothing for no hours", () => {
+    expect(hourLayout([])).toEqual({ dates: [], levels: [], tokens: [] });
   });
 });

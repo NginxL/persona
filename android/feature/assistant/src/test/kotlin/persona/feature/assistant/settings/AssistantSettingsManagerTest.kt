@@ -28,7 +28,7 @@ class AssistantSettingsManagerTest {
         override suspend fun updateConfig(update: AssistantConfigUpdate): AssistantConfig {
             val previous = values.getValue(owner)
             return previous.copy(defaultPermissionMode = update.defaultPermissionMode ?: previous.defaultPermissionMode,
-                timezone = update.timezone ?: previous.timezone).also { values[owner] = it }
+                timezone = update.timezone ?: previous.timezone, recentTaskChats = update.recentTaskChats ?: previous.recentTaskChats).also { values[owner] = it }
         }
         override suspend fun memory() = emptyList<MemoryFile>()
         override suspend fun warm() {}

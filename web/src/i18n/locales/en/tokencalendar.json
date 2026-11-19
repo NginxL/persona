@@ -1,7 +1,26 @@
 {
+  "title": "Token usage",
   "line": "Today {today} tokens · Last 30 days {month}",
   "day_line": "{day} · {tokens} tokens",
   "kinds": "Input {input} · Output {output} · Cache write {write} · Cache read {read}",
   "grid": "Tokens a day. Arrow keys pick a day.",
-  "read_day": "{day}: {tokens} tokens"
+  "read_day": "{day}: {tokens} tokens",
+  "open_page": "Open Token usage",
+  "today": "Today",
+  "last_7": "Last 7 days",
+  "last_30": "Last 30 days",
+  "each_day": "Each day",
+  "by_hour": "Last 7 days by the hour",
+  "by_computer": "By computer · Last 7 days",
+  "by_agent": "By agent · Last 7 days",
+  "by_kind": "By kind · Last 7 days",
+  "removed_computer": "Removed computer",
+  "not_split": "Not split (before the update)",
+  "less": "Less",
+  "more": "More",
+  "hour_note": "Each square is an hour in your time zone, shaded by where it ranks among the week's hours.",
+  "hour_grid": "Tokens by the hour, the last 7 days. Arrow keys pick an hour.",
+  "hour_line": "{day} {hour} · {tokens} tokens",
+  "count_note": "Input, output, cache write and cache read added up: the same count as Today on the Machines page.",
+  "failed": "Can't reach the hub. This refreshes automatically once it's back."
 }

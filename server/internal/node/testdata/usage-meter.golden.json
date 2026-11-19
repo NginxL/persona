@@ -1,0 +1,523 @@
+{
+ "files": 24,
+ "meter": [
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5",
+   "launcher": "launcher-of-claude-compact",
+   "agent": "claude",
+   "in": 4,
+   "cache_write": 1457,
+   "cache_read": 1158432,
+   "out": 2769,
+   "req": 2
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-api-errors-fork",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 1299,
+   "cache_read": 369402,
+   "out": 765,
+   "req": 1
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-session",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 21987,
+   "out": 278,
+   "req": 1
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-subagent",
+   "agent": "claude",
+   "in": 10,
+   "cache_write": 19814,
+   "cache_read": 66257,
+   "out": 3568,
+   "req": 5
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-synthetic",
+   "agent": "claude",
+   "in": 10,
+   "out": 3,
+   "req": 1
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-test",
+   "launcher": "launcher-of-claude-paseo",
+   "agent": "claude",
+   "in": 70,
+   "cache_read": 7000,
+   "out": 140,
+   "req": 7
+  },
+  {
+   "minute": 1767225600,
+   "model": "gpt-5-codex",
+   "launcher": "launcher-of-0199a213-81c0-7800-8aa1-000000000015",
+   "agent": "codex",
+   "in": 52590,
+   "cache_read": 138880,
+   "out": 1218,
+   "req": 5
+  },
+  {
+   "minute": 1767225660,
+   "model": "claude-opus-5",
+   "launcher": "launcher-of-claude-compact",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 2345,
+   "cache_read": 580287,
+   "out": 266,
+   "req": 1
+  },
+  {
+   "minute": 1767225660,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-subagent",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 2751,
+   "cache_read": 19814,
+   "out": 2719,
+   "req": 1
+  },
+  {
+   "minute": 1767225660,
+   "model": "gpt-5-codex",
+   "launcher": "launcher-of-0199a213-81c0-7800-8aa1-000000000015",
+   "agent": "codex",
+   "in": 383,
+   "cache_read": 51712,
+   "out": 1004,
+   "req": 1
+  },
+  {
+   "minute": 1767226380,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-session",
+   "agent": "claude",
+   "in": 4,
+   "cache_write": 3045,
+   "cache_read": 73458,
+   "out": 794,
+   "req": 1
+  },
+  {
+   "minute": 1767227340,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-session",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 423,
+   "cache_read": 89914,
+   "out": 1454,
+   "req": 1
+  },
+  {
+   "minute": 1767228000,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-session",
+   "agent": "claude",
+   "in": 8,
+   "cache_write": 5448,
+   "cache_read": 369941,
+   "out": 2774,
+   "req": 4
+  },
+  {
+   "minute": 1767237660,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-session",
+   "agent": "claude",
+   "in": 4,
+   "cache_write": 92,
+   "cache_read": 224395,
+   "out": 93,
+   "req": 1
+  },
+  {
+   "minute": 1767258000,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-api-errors-fork",
+   "agent": "claude",
+   "in": 6,
+   "cache_write": 1200,
+   "cache_read": 30000,
+   "out": 80,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 88,
+   "cache_read": 20442,
+   "out": 610,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "jky-5.3",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 6353,
+   "cache_read": 1180416,
+   "out": 7544,
+   "req": 7
+  },
+  {
+   "minute": 1767261600,
+   "model": "lktvnn/fivduw-noqw-5-5-suvav-xdtk",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 62048,
+   "out": 35,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.7-hyssf",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 18122,
+   "cache_read": 308653,
+   "out": 577,
+   "req": 3
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.7-hyssf-gtv-h",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 147116,
+   "out": 71,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.8-hyssf-i",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 2966,
+   "cache_read": 256494,
+   "out": 110,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "zdhx-3.7-hyssf",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 100578,
+   "out": 95,
+   "req": 1
+  },
+  {
+   "minute": 1767261660,
+   "model": "jky-5.3",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 4658,
+   "cache_read": 226624,
+   "out": 2002,
+   "req": 2
+  },
+  {
+   "minute": 1767261660,
+   "model": "lktvnn/fivduw-noqw-5-5-suvav-xdtk",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 455103,
+   "out": 88,
+   "req": 1
+  },
+  {
+   "minute": 1767261660,
+   "model": "otdjqe-3.7-hyssf",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 9223,
+   "cache_read": 85524,
+   "out": 36,
+   "req": 1
+  },
+  {
+   "minute": 1767261660,
+   "model": "otdjqe-3.7-hyssf-nuxfmd-sn",
+   "launcher": "launcher-of-claude-tool-outcomes",
+   "agent": "claude",
+   "in": 4297,
+   "cache_read": 93482,
+   "out": 717,
+   "req": 1
+  },
+  {
+   "minute": 1767269640,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-usage-limit",
+   "agent": "claude",
+   "in": 6,
+   "cache_write": 1200,
+   "cache_read": 30000,
+   "out": 80,
+   "req": 1
+  },
+  {
+   "minute": 1767284460,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-usage-limit",
+   "agent": "claude",
+   "in": 12,
+   "cache_write": 2400,
+   "cache_read": 60000,
+   "out": 160,
+   "req": 2
+  },
+  {
+   "minute": 1767307740,
+   "model": "gpt-5-codex",
+   "launcher": "launcher-of-0199a213-81c0-7800-8aa1-000000000015",
+   "agent": "codex",
+   "in": 2643,
+   "cache_read": 154496,
+   "out": 304,
+   "req": 2
+  },
+  {
+   "minute": 1767311040,
+   "model": "gpt-5-codex",
+   "launcher": "launcher-of-0199a213-81c0-7800-8aa1-000000000015",
+   "agent": "codex",
+   "in": 3193,
+   "cache_read": 353536,
+   "out": 234,
+   "req": 1
+  },
+  {
+   "minute": 1767311340,
+   "model": "gpt-5-codex",
+   "launcher": "launcher-of-0199a213-81c0-7800-8aa1-000000000015",
+   "agent": "codex",
+   "in": 496,
+   "cache_read": 82944,
+   "out": 85,
+   "req": 1
+  },
+  {
+   "minute": 1767788640,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-api-errors-fork",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 675,
+   "cache_read": 134867,
+   "out": 483,
+   "req": 1
+  },
+  {
+   "minute": 1767788700,
+   "model": "claude-opus-5-5",
+   "launcher": "launcher-of-claude-api-errors-fork",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 1322,
+   "cache_read": 143017,
+   "out": 452,
+   "req": 1
+  }
+ ],
+ "backfill": [
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5",
+   "agent": "claude",
+   "in": 6,
+   "cache_write": 3802,
+   "cache_read": 1738719,
+   "out": 3035,
+   "req": 3
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 40,
+   "cache_write": 54767,
+   "cache_read": 988786,
+   "out": 12355,
+   "req": 15
+  },
+  {
+   "minute": 1767225600,
+   "model": "claude-test",
+   "agent": "claude",
+   "in": 70,
+   "cache_read": 7000,
+   "out": 140,
+   "req": 7
+  },
+  {
+   "minute": 1767225600,
+   "model": "gpt-5-codex",
+   "agent": "codex",
+   "in": 52973,
+   "cache_read": 190592,
+   "out": 2222,
+   "req": 6
+  },
+  {
+   "minute": 1767236400,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 4,
+   "cache_write": 92,
+   "cache_read": 224395,
+   "out": 93,
+   "req": 1
+  },
+  {
+   "minute": 1767258000,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 6,
+   "cache_write": 1200,
+   "cache_read": 30000,
+   "out": 80,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 2,
+   "cache_write": 88,
+   "cache_read": 20442,
+   "out": 610,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "jky-5.3",
+   "agent": "claude",
+   "in": 11011,
+   "cache_read": 1407040,
+   "out": 9546,
+   "req": 9
+  },
+  {
+   "minute": 1767261600,
+   "model": "lktvnn/fivduw-noqw-5-5-suvav-xdtk",
+   "agent": "claude",
+   "in": 517151,
+   "out": 123,
+   "req": 2
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.7-hyssf",
+   "agent": "claude",
+   "in": 27345,
+   "cache_read": 394177,
+   "out": 613,
+   "req": 4
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.7-hyssf-gtv-h",
+   "agent": "claude",
+   "in": 147116,
+   "out": 71,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.7-hyssf-nuxfmd-sn",
+   "agent": "claude",
+   "in": 4297,
+   "cache_read": 93482,
+   "out": 717,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "otdjqe-3.8-hyssf-i",
+   "agent": "claude",
+   "in": 2966,
+   "cache_read": 256494,
+   "out": 110,
+   "req": 1
+  },
+  {
+   "minute": 1767261600,
+   "model": "zdhx-3.7-hyssf",
+   "agent": "claude",
+   "in": 100578,
+   "out": 95,
+   "req": 1
+  },
+  {
+   "minute": 1767268800,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 6,
+   "cache_write": 1200,
+   "cache_read": 30000,
+   "out": 80,
+   "req": 1
+  },
+  {
+   "minute": 1767283200,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 12,
+   "cache_write": 2400,
+   "cache_read": 60000,
+   "out": 160,
+   "req": 2
+  },
+  {
+   "minute": 1767304800,
+   "model": "gpt-5-codex",
+   "agent": "codex",
+   "in": 2643,
+   "cache_read": 154496,
+   "out": 304,
+   "req": 2
+  },
+  {
+   "minute": 1767308400,
+   "model": "gpt-5-codex",
+   "agent": "codex",
+   "in": 3689,
+   "cache_read": 436480,
+   "out": 319,
+   "req": 2
+  },
+  {
+   "minute": 1767787200,
+   "model": "claude-opus-5-5",
+   "agent": "claude",
+   "in": 4,
+   "cache_write": 1997,
+   "cache_read": 277884,
+   "out": 935,
+   "req": 2
+  }
+ ]
+}

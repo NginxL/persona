@@ -11,9 +11,11 @@ import { api, errorText, sessionPath } from "../../lib/api";
 import { assistantPickKey, assistantSetup, ASSISTANT_START_SERVICE_TIER_FEATURE, type AssistantChat, type AssistantSetup } from "../../lib/assistant-models";
 import { assistantPanel, assistantPickOf } from "../../lib/assistant-panel";
 import { pickEffort, pickFast, pickLauncher, pickModel } from "../../lib/assistant-chat";
+import { conversationModelPath, dropConversationPick } from "../../lib/assistant-pick";
 import { modelSupportsFast } from "../../lib/launcher-models";
 import { useChosenManager } from "../../lib/manager-choice";
 import type { PanelConfig } from "../../lib/model-panel";
+import { usePanelQuotas } from "../../lib/panel-quotas";
 import { TYPED_MODELS_FEATURE } from "../../lib/model-id";
 import { providerTitle } from "../../lib/provider-names";
 import { speedStep } from "../../lib/session-panel";
@@ -24,8 +26,6 @@ import { toast } from "../../ui/atoms";
 import { ModelPanel } from "../../ui/model-panel/ModelPanel";
 import { setServiceTier } from "./SessionDialogs";
 
-const conversationModel = (s: Session) => `/assistant/conversations/${encodeURIComponent(s.session_id)}/model`;
-
 /** PUT …/model {launcher, model?, effort?, machine_id}: kept for the conversation. Drawn at once; put back, with the hub's
  *  words (out of the computer's scope, gone, another engine than the chat runs, can't run assistant chats…), if it says
  *  no. */
@@ -33,21 +33,7 @@ async function keepPick(s: Session, pick: ModelPick): Promise<boolean> {
   const before = s.model_pick;
   upsertSession({ ...s, model_pick: pick });
   try {
-    await api(conversationModel(s), { method: "PUT", json: { ...pick, machine_id: s.machine_id } });
-    return true;
-  } catch (e) {
-    upsertSession({ ...(getSession(s.machine_id, s.session_id) ?? s), model_pick: before });
-    toast(t("chat-sessiondialogs.change_failed", { error: errorText(e) }), "error");
-    return false;
-  }
-}
-
-/** DELETE …/model: the conversation follows the default again (another chat: keeps what it runs). */
-async function dropPick(s: Session): Promise<boolean> {
-  const before = s.model_pick;
-  upsertSession({ ...s, model_pick: undefined });
-  try {
-    await api(conversationModel(s), { method: "DELETE" });
+    await api(conversationModelPath(s), { method: "PUT", json: { ...pick, machine_id: s.machine_id } });
     return true;
   } catch (e) {
     upsertSession({ ...(getSession(s.machine_id, s.session_id) ?? s), model_pick: before });
@@ -178,7 +164,7 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   };
   const back = () => {
     const s = latest();
-    if (s && chat.kept) void dropPick(s);
+    if (s && chat.kept) void dropConversationPick(s);
     else {
       pickLauncher(key, undefined);
       pickEffort(key, undefined);
@@ -193,6 +179,8 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   const row = providers.find((p) => p.id === setup.provider)?.models?.find((m) => m.id === state.current?.model);
   const named = [launcher ? providerTitle(launcher) : setup.provider, row?.name].filter(Boolean).join(" · ");
 
+  const quotas = usePanelQuotas(mid, providers, info?.launchers);
+
   return (
     <ModelPanel
       anchor={anchor}
@@ -200,6 +188,7 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
       providers={providers}
       state={state}
       scope="assistant"
+      quotas={quotas}
       onPick={onPick}
       onApplyCurrent={onApplyCurrent}
       onReload={onReload}

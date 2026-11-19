@@ -203,3 +203,9 @@ For people comfortable with the command line. The commands and files behind each
 - A freshly installed hub only opens its TLS port on LAN IPv4; to connect directly from outside too, rerun `personad hub setup --outside`, see [network.md](network.md).
 - If you already run claude through aliases or functions in `~/.zshrc` or `~/.bashrc`, they're still discovered and selectable, and **Import** beside **Add provider** in **Settings › Model Providers** turns a computer's aliases into providers, keeping their settings; see [launchers.md](../integrations/launchers.md).
 - The APIs for main chat readiness and error codes are in [protocol.md](../protocol/protocol.md) ("Main chat readiness"); design and future plans are in [onboarding.md](../assistant/onboarding.md).
+
+### Sign in to a browser with your phone
+
+On the browser's sign-in page, open **Scan a code with Persona on your phone**. In Persona on your iPhone or Android phone, go to **Settings › Devices › Scan browser sign-in code** and scan the code. The phone shows the browser's name, which network the request came from, and that the browser gets full access. Tap **Allow sign-in** only if you are signing in to that browser yourself, right now. The phone then shows a two-digit number: type it in the browser, and the browser signs in with its own credential, which you can revoke any time in **Settings › Devices**.
+
+Never tell anyone that number. A wrong number cancels the sign-in; refresh the code to start again. A code lasts five minutes. The browser's name is whatever the browser called itself, so a request from the internet gets a warning on the phone. It needs a recent Persona app: an older iPhone app has no such item, and an older Android app asks you to update it. Pairing links and password sign-in still work as before. The protocol is in [protocol.md](../protocol/protocol.md) ("Browser QR sign-in").

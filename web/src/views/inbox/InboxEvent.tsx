@@ -605,8 +605,9 @@ function ChainRow({ item, e, tap, onTap, agentState }: { item: InboxItem; e: Cha
           {goes && <Icon name="chevronRight" size={11} stroke={2.4} className="shrink-0 text-ink-3" />}
           {!goes && expandable && <Icon name="chevronRight" size={11} stroke={2.4} className="shrink-0 text-ink-3 transition-transform duration-200" style={{ transform: open ? "rotate(90deg)" : undefined }} />}
         </button>
-        {/* an entry that goes somewhere and also has words to read: those open beside it */}
-        {goes && expandable && (
+        {/* an entry that goes somewhere and also has words to read: those open beside it; an assistant row's received
+            message is its text, drawn in full above (#9041): that entry only goes to the conversation, one arrow (#9930) */}
+        {goes && expandable && !(item.source === "assistant" && e.kind === "received") && (
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={open ? t("inbox-inboxevent.entry_collapse") : t("inbox-inboxevent.entry_expand")} title={open ? t("inbox-inboxevent.entry_collapse") : t("inbox-inboxevent.entry_expand")} className="touch-hit flex size-7 shrink-0 items-center justify-center rounded-[8px] text-ink-3 transition-colors hover:bg-hover hover:text-ink">
             <Icon name="chevron" size={12} stroke={2.4} className="transition-transform duration-200" style={{ transform: open ? "rotate(180deg)" : undefined }} />
           </button>

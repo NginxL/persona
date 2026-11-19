@@ -120,8 +120,9 @@ describe("familyBlocks", () => {
   it("keeps every row of the newest version (its 1M-context one too) and marks none latest when nothing is older", () => {
     const p: PanelProvider = { ...max, models: [{ id: "claude-opus-5-5", name: "Opus 5.5", efforts: [] }, { id: "claude-opus-5-5[1m]", name: "Opus 5.5 (1M)", efforts: [] }, { id: "claude-opus-5", name: "Opus 5", efforts: [] }] };
     expect(draw(p)).toEqual(["Claude Opus: claude-opus-5-5^, claude-opus-5-5[1m]^ (+1)"]);
-    const same: PanelProvider = { ...max, models: [{ id: "opus", name: "Sonnet 5.5", resolved: "claude-sonnet-5-5", efforts: [] }, { id: "sonnet", name: "Sonnet 5.5", resolved: "claude-sonnet-5-5", efforts: [] }] };
-    expect(draw(same)).toEqual(["Claude Sonnet: opus, sonnet"]);
+    // two aliases of one model come from the hub as one row, the other spelling among its aliases (#10365)
+    const same: PanelProvider = { ...max, models: [{ id: "opus", name: "Sonnet 5.5", resolved: "claude-sonnet-5-5", aliases: ["sonnet"], efforts: [] }, { id: "claude-sonnet-5", name: "Sonnet 5", efforts: [] }] };
+    expect(draw(same)).toEqual(["Claude Sonnet: opus^ (+1)"]);
   });
 
   it("no family with two rows: no blocks, the list stays as given", () => {
@@ -180,6 +181,39 @@ describe("families in the panel's sections", () => {
     const s = section({ state: { current: { provider: "claude-max", model: "claude-opus-5" }, recommended: ["claude-max"] } }, "recommended");
     expect(s?.blocks?.map((b) => b.family?.label ?? b.key)).toEqual(["recommended\nnow", "recommended\nlead", "Claude Fable", "Claude Opus", "Claude Sonnet", "Claude Haiku"]);
     expect(s?.rows.map((r) => r.model.id)).toEqual(["claude-opus-5", "default", "fable", "opus", "sonnet", "haiku"]);
+  });
+});
+
+// A gateway provider's list as the hub folds it (#10365): Claude Code listed opus, fable, sonnet and haiku there, all
+// "Opus 5.5" for the one model every tier names, and the gateway's other route of it read "Opus 5.5" too (captured
+// 2026-11-18); the hub sends the concrete model's row with the aliases, and the route's row says its route.
+const gatewayApi: PanelProvider = {
+  id: "gateway-api",
+  name: "Gateway API",
+  engine: "claude",
+  models: [
+    { id: "default", name: "Default (recommended)", resolved: "claude-opus-5-5", efforts: [] },
+    { id: "claude-opus-5-5", name: "Opus 5.5", description: "Custom Opus model (claude-opus-5-5)", aliases: ["opus", "fable", "sonnet", "haiku"], efforts: [] },
+    { id: "kiro/claude-opus-5-5", name: "Opus 5.5 (kiro)", description: "From gateway", efforts: [] },
+  ],
+};
+
+describe("a gateway's folded list", () => {
+  it("one Opus 5.5 row, the route's own beside it, Default apart; Latest once an older version is listed", () => {
+    expect(draw(gatewayApi)).toEqual(["-: default", "Claude Opus: claude-opus-5-5, kiro/claude-opus-5-5"]);
+    const names = familyBlocks(rowsOf(gatewayApi), opts())!.flatMap((b) => b.rows).map((r) => r.model.name);
+    expect(names.filter((n) => n === "Opus 5.5")).toHaveLength(1);
+    const older: PanelProvider = { ...gatewayApi, models: [...gatewayApi.models!, { id: "claude-opus-5", name: "Opus 5", efforts: [] }] };
+    expect(draw(older)).toEqual(["-: default", "Claude Opus: claude-opus-5-5^, kiro/claude-opus-5-5^ (+1)"]);
+  });
+
+  it("a setup saved with an alias is that row's: it runs, never folds, and a search for the alias finds it without a typed row", () => {
+    const providers = [{ ...gatewayApi, typable: true }];
+    const all = (o: Partial<SectionsInput>) => panelSections({ ...input(o), providers });
+    const lit = all({ state: { current: { provider: "gateway-api", model: "sonnet" }, recommended: [] } }).flatMap((s) => s.rows).filter((r) => r.current);
+    expect(lit.map((r) => r.model.id)).toEqual(["claude-opus-5-5"]);
+    const found = all({ query: "haiku" }).flatMap((s) => s.rows);
+    expect(found.map((r) => `${r.kind}:${r.model.id}`)).toEqual(["model:claude-opus-5-5"]);
   });
 });
 

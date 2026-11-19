@@ -353,6 +353,7 @@
     <string name="chat_tasks_interrupt_cause_auth">Sign-in or key refused</string>
     <string name="chat_tasks_interrupt_cause_model_route">Unknown model</string>
     <string name="chat_tasks_interrupt_cause_no_output">Turns with no output</string>
+    <string name="chat_tasks_interrupt_cause_stopped">Stopped with their conversation</string>
     <string name="chat_tasks_interrupt_batch">%1$s: %2$d tasks interrupted</string>
     <string name="chat_tasks_interrupt_batch_on">%1$s on %2$s: %3$d tasks interrupted</string>
     <string name="chat_tasks_interrupt_counts">→ %1$d handled / %2$d pending</string>

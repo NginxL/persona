@@ -3,11 +3,11 @@ package assistant
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/deeplink"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/textfmt"
 )
@@ -52,7 +52,7 @@ func transcriptText(head, link string, items []proto.Item) string {
 			fmt.Fprintf(&b, "%s: %s\n\n", who, clip(text, 4000))
 		case proto.KindThinking:
 			if t := strings.TrimSpace(it.Text); t != "" {
-				fmt.Fprintf(&b, "(agent, between tools) %s\n", clip(oneLine(t), 400))
+				fmt.Fprintf(&b, "(agent, progress summary) %s\n", clip(oneLine(t), 400))
 			}
 		case proto.KindToolUse:
 			fmt.Fprintf(&b, "→ %s %s\n", it.ToolName, clip(oneLine(toolSummary(it.ToolName, it.ToolInput)), 200))
@@ -97,5 +97,5 @@ func itemLink(link, id string) string {
 	if link == "" || id == "" {
 		return ""
 	}
-	return link + "?at=" + url.QueryEscape(id)
+	return deeplink.At(link, id)
 }

@@ -217,6 +217,11 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		// A guest's (its MCP server says so, or this node knows it is one): the hub gives it only its own tools.
 		guest := req.Guest || n.guestOf(session) != nil
 		params := mcpToolsParams(req.Input, session, assistant, guest)
+		// A supervision round's process asks for its narrower set (assistant_round.go); a manager that does not know
+		// it gives the whole list.
+		if req.ToolSet != "" {
+			params["tool_set"] = req.ToolSet
+		}
 		if err := n.peer.Call(ctx, "mcp.tools", params, &res); err != nil {
 			resp = map[string]any{"tools": []proto.Tool{}, "error": err.Error()}
 		} else {
@@ -238,6 +243,9 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		}
 		params := map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
 			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}
+		if origin := n.assistantOrigin(sid); origin != "" {
+			params["origin"] = origin
+		}
 		if req.WaitUpdates {
 			waitID, wait = n.beginMCPWait(c)
 			if wait != nil {
@@ -495,7 +503,7 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 			Plan string `json:"plan"`
 		}
 		_ = json.Unmarshal(in.ToolInput, &p)
-		ix.Kind, ix.Plan = proto.IxPlan, p.Plan
+		ix.Kind, ix.Plan, ix.PlanThen = proto.IxPlan, p.Plan, n.planThen(in.SessionID)
 		// The terminal's own dialog may decide the plan while the card still waits (the card is not always
 		// withdrawn then): the footer is watched from now, until the card is answered.
 		decided := &terminalDecided{}
@@ -517,10 +525,7 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 			}
 			return permissionDecision(map[string]any{"behavior": "deny", "message": msg}), nil
 		}
-		mode := res.Mode
-		if mode == "" {
-			mode = cmp.Or(n.planThen(in.SessionID), "bypassPermissions")
-		}
+		mode := cmp.Or(proto.PlanAfterMode(ix.PlanThen), res.Mode, proto.ModeBypass)
 		var input map[string]any
 		_ = json.Unmarshal(in.ToolInput, &input)
 		// A bare allow does not close the plan dialog; it needs updatedInput plus a setMode update (2.1.310).

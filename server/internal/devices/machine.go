@@ -59,6 +59,8 @@ type MachineConfig struct {
 	ClaudeGlobalHooks bool `json:"claude_global_hooks,omitempty"`
 	// UsageWindows false: the node does not read the agents' subscription rate-limit windows (hub/config.go, #2432).
 	UsageWindows *bool `json:"usage_windows,omitempty"`
+	// ExtraPath are directories in front of the node's PATH (hub/config.go, #10127).
+	ExtraPath []string `json:"extra_path,omitempty"`
 }
 
 // Machine is the manager's connection to one node: a local subprocess, `ssh host personad node --stdio`, a tailcat
@@ -85,9 +87,10 @@ type Machine struct {
 	peer *rpc.Peer
 	info proto.NodeInfo
 	// pingPeer is the connection measureNodes' last ping went on, pingMisses how many pings in a row it left
-	// unanswered there (paths_view.go).
+	// unanswered there, pingJudged when the last of them was counted (paths_view.go).
 	pingPeer   *rpc.Peer
 	pingMisses int
+	pingJudged time.Time
 	// online: shown online (its node answered on the current connection, or warm); connectedAt: when the node's
 	// current connection began.
 	online      bool
@@ -149,8 +152,14 @@ type Machine struct {
 	firstOnce sync.Once
 	// pending counts the node's questions waiting on the phone (interaction.create): no switching paths meanwhile.
 	pending int
-	// notes are the hub's one-way events waiting for the node (notes.go; their own lock, not m.mu).
-	notes nodeNotes
+	// notes are the hub's one-way events waiting for the node, bulkNotes a forwarded port's bytes (notes.go; their own
+	// locks, not m.mu).
+	notes, bulkNotes nodeNotes
+	noteBytes        atomic.Int64 // what both hold together (maxNoteBytes)
+	// frameFails are when recent connections ended on malformed frames; lanesOffUntil, until when lanes are not asked
+	// for (conn.go noteFrameFailure). Under mu.
+	frameFails    []time.Time
+	lanesOffUntil time.Time
 	// opened is what the hub has open on the node through the bus connection of the moment (hubopen.go).
 	opened hubOpened
 	// claudeDirsMu serializes the read-modify-writes of the remembered and blocked Claude config dirs (claudedirs.go).
@@ -225,9 +234,9 @@ func (m *Machine) snapshot() proto.Machine {
 	d := m.d
 	engine := d.engineOf(m.cfg.ID) // before m.mu: it may read settings
 	choice := d.engineChoiceOf(m.cfg.ID)
-	m.mu.Lock()
-	info := m.info
-	m.mu.Unlock()
+	info, online, deploying := m.linkSwitchFacts()
+	// Switching to Persona Link (link_switch.go): before m.mu, as it reads the hub's handover.
+	linkSwitch := d.linkSwitchView(m, info, online, deploying)
 	// The build its platform resolves to (packages.go: the hub's own, or the newest release this manager drives), and
 	// why none can be sent; before m.mu, as they read the hub's handover.
 	version, noPackage := d.hubVersion(), error(nil)
@@ -255,6 +264,10 @@ func (m *Machine) snapshot() proto.Machine {
 		icon = "laptop"
 	}
 	blocked := m.canDeployLocked()
+	if blocked == nil && linkSwitch != nil && linkSwitch.Reason == proto.LinkSwitchReasonInProgress {
+		blocked = errLinkSwitchDeploy
+	}
+	onlyPackage := blocked == nil && noPackage != nil // the node could take an update; the hub has none for it
 	if blocked == nil {
 		blocked = noPackage
 	}
@@ -283,13 +296,14 @@ func (m *Machine) snapshot() proto.Machine {
 		NodeVersion: m.info.Version, NodeMismatch: m.online && nodeMismatch(version, m.info),
 		NodeProtocol: m.info.Protocol, NodeIncompatible: incompatible,
 		Deploying: m.deploying, DeployError: deployErr,
-		CanDeploy: &canDeploy, DeployReason: deployReason, DeployPhase: m.deployPhase,
+		CanDeploy: &canDeploy, DeployReason: deployReason, DeployNoPackage: onlyPackage, DeployPhase: m.deployPhase,
 		Transport: m.via, TailcatPath: m.path, Tailcat: m.cfg.TailcatAddr != "",
 		Engine: engine, Engines: engines, EngineHosts: choice.Hosts, EngineDefault: choice.Default,
 		EngineSuggested: suggested, EngineSetsUnsupported: setsUnsupported, Link: link, System: d.metrics.system(m.cfg.ID),
 		Clipboard:    m.clipboardStateLocked(clipboardOn),
 		FileTransfer: m.fileTransferState(fileTransferOn),
 		ClaudePlugin: m.info.ClaudePlugin,
+		LinkSwitch:   linkSwitch,
 	}
 }
 
@@ -317,6 +331,9 @@ func (m *Machine) reconnect() {
 	}
 }
 
+// defaultRemoteBin is the program an ssh machine's node runs when its entry names none (remote_bin).
+const defaultRemoteBin = "~/.persona/bin/personad"
+
 func (m *Machine) command(ctx context.Context) *exec.Cmd {
 	if m.nodeCmd != nil {
 		return m.nodeCmd(ctx)
@@ -327,7 +344,7 @@ func (m *Machine) command(ctx context.Context) *exec.Cmd {
 	}
 	bin := m.cfg.RemoteBin
 	if bin == "" {
-		bin = "~/.persona/bin/personad"
+		bin = defaultRemoteBin
 	}
 	host := m.cfg.SSHHost
 	if host == "" {
@@ -875,6 +892,9 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", "store_unavailable")
 		}
 		return // the manager's alone
+	case proto.EventModeRestart: // what became of a queued restart into a mode (mode_changes.go)
+		m.onModeRestart(params)
+		return // the manager's alone
 	case "claude.dirs":
 		m.rememberClaudeDirs(params)
 	case "claude.plugin": // the Persona plugin for Claude Code there changed (node/claudeplugin.go)
@@ -950,7 +970,7 @@ func (m *Machine) onRequest(ctx context.Context, method string, params json.RawM
 		}
 		return map[string]any{"sessions": out}, nil
 	case "usage.backfill.status": // the token usage backfill (usage_backfill.go)
-		return m.d.usageBackfillStatus(ctx, m.cfg.ID, time.Now())
+		return m.d.usageBackfillStatus(ctx, m.cfg.ID, params, time.Now())
 	case "usage.backfill":
 		sctx, cancel := m.storeCtx()
 		defer cancel()

@@ -63,6 +63,19 @@ func MCPAllowedToolNames(tools []string, legacy bool) []string {
 	return out
 }
 
+var agyPersonaMCPTool = lazy(`^mcp_(?:persona|` + MCPServer + `)(?:_[0-9a-fA-F]{8,16})?_([a-z][a-z0-9_]*)$`)
+
+// CanonicalMCPToolName normalizes Antigravity's single-underscore Persona MCP names
+// (mcp_persona_<tool>, mcp_persona_<hex>_<tool> and their legacy alias) to mcp__persona__<tool>.
+func CanonicalMCPToolName(name string) string {
+	if strings.HasPrefix(name, "mcp_") && !strings.HasPrefix(name, "mcp__") {
+		if m := agyPersonaMCPTool().FindStringSubmatch(name); m != nil {
+			return "mcp__persona__" + m[1]
+		}
+	}
+	return name
+}
+
 func CodexMCPAliases(args []string) []string {
 	out := append([]string(nil), args...)
 	for i := 0; i+1 < len(args); i++ {

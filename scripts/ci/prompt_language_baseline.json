@@ -169,11 +169,10 @@
     ]
   },
   "mcp/agents": {
-    "count": 13,
+    "count": 12,
     "files": [
       "mcp/agents/agent_send.md",
       "mcp/agents/agent_start.md",
-      "mcp/agents/agent_supervise.md",
       "mcp/agents/ask_escalate.md",
       "mcp/agents/direction_name.md",
       "mcp/agents/interaction_answer.md",
@@ -187,11 +186,10 @@
     ]
   },
   "mcp/assistant": {
-    "count": 4,
+    "count": 3,
     "files": [
       "mcp/assistant/conversation_archive.md",
       "mcp/assistant/conversation_rename.md",
-      "mcp/assistant/conversations_list.md",
       "mcp/assistant/persona_settings.md"
     ]
   },
@@ -231,26 +229,4 @@
       "shared/user_rules.md"
     ]
   },
-  "todo": {
-    "count": 7,
-    "files": [
-      "todo/decisions.md",
-      "todo/outcome.md",
-      "todo/outcome_input.md",
-      "todo/project.md",
-      "todo/thread_open.md",
-      "todo/thread_reply.md",
-      "todo/title_input.md"
-    ]
-  },
-  "tools": {
-    "count": 5,
-    "files": [
-      "tools/session_title_input.md",
-      "tools/translate.md",
-      "tools/translate_mail.md",
-      "tools/translate_mail_input.md",
-      "tools/translate_texts.md"
-    ]
-  }
 }

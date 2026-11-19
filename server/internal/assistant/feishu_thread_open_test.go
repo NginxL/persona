@@ -81,7 +81,7 @@ func TestTopicRootOpensATodo(t *testing.T) {
 	}
 
 	notes := topicNotes(e.f)
-	want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos?id=" + todo.ID
+	want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos/" + todo.ID
 	if len(notes) != 1 || notes[0]["text"] != want || notes[0]["chat_id"] != testChat || notes[0]["in_thread"] != true || notes[0]["reply_to"] != "om_r1" {
 		t.Fatalf("notes %v, want %q into the topic as a reply", notes, want)
 	}
@@ -479,7 +479,7 @@ func TestOpenedLineLinksOnlyWithAWebAddress(t *testing.T) {
 			line := e.said("thread_open_done", i18n.Args{"title": "发版"})
 			want := line
 			if c.wantLink {
-				want += "\n" + strings.TrimRight(c.url, "/") + "/todos?id=" + todo.ID
+				want += "\n" + strings.TrimRight(c.url, "/") + "/todos/" + todo.ID
 			}
 			if got := lastNote(t, e.f); got != want {
 				t.Fatalf("note %q, want %q", got, want)

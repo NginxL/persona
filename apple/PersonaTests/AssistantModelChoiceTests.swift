@@ -212,6 +212,18 @@ struct AssistantModelChoiceTests {
         #expect(AssistantModelChoice.displayName(unknown, response: r) == "team-api")
     }
 
+    @Test func anOlderNodesDefaultPlaceholderIsNoExplicitModel() {
+        let legacy = Launcher(name: "claude", model: "默认")
+        let empty = Launcher(name: "claude")
+        #expect(AssistantModelChoice.configuredFallback(legacy, models: [], locked: nil) ==
+                AssistantModelChoice.configuredFallback(empty, models: [], locked: nil))
+
+        let effective = AssistantModelChoice.Effective(launcher: "claude", model: nil, effort: nil, source: .defaultValue)
+        let oldWords = AssistantModelChoice.displayName(effective, response: response(launchers: [legacy]))
+        #expect(oldWords == AssistantModelChoice.displayName(effective, response: response(launchers: [empty])))
+        #expect(oldWords != "默认")
+    }
+
     // MARK: Wire decoding
 
     @Test func sessionDecodesModelPick() throws {
@@ -344,6 +356,8 @@ struct AssistantModelChoiceTests {
         #expect(Launcher(name: "shell-claude", agent: "claude", source: "zshrc").runsAssistant)
         #expect(Launcher(name: "managed-claude", agent: "claude", source: "persona").runsAssistant)
         #expect(!Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
+        #expect(!Launcher(name: "agy", agent: "agy", source: "zshrc").runsAssistant)
+        #expect(Launcher(name: "agy", agent: "agy", assistant: true, source: "agy").runsAssistant)
         #expect(!Launcher(name: "runtime-codex", agent: "codex", source: "paseo").runsAssistant)
         #expect(!Launcher(name: "runtime-claude", agent: "claude", source: "paseo").runsAssistant)
     }

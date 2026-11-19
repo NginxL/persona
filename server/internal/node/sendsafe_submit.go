@@ -170,37 +170,39 @@ const stuckPromptMessage = "消息已经打进电脑上 Claude 的输入框，�
 const guideTries = 2
 
 // afterPrompt follows a prompt typed into Claude in pane at typedAt: ensureSubmitted, then the guide check above.
-// watch reads the transcript from where it ended before the typing (nil: nothing to watch).
-func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt time.Time, watch *promptWatch) error {
+// watch reads the transcript from where it ended before the typing (nil: nothing to watch). The result reports whether
+// the final watch, including a guide retry's, actually saw the prompt; ordinary pane sends retain their legacy nil-error
+// outcomes without it, while a route that requires proof of user input can insist on it (#5965).
+func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt time.Time, watch *promptWatch) (bool, error) {
 	for try := 1; ; try++ {
 		s, err := n.ensureSubmitted(ctx, pane, text, typedAt, watch)
 		if err != nil {
-			return err
+			return false, err
 		}
 		plain := screen.Plain(s) // no screen: as before, nothing says it was lost
 		guide := screen.Guide(plain)
 		if guide == "" {
-			return nil
+			return watch.took(), nil
 		}
 		head := screen.DialogHead(plain)
 		if n.logger != nil {
 			n.logger.Printf("a guide opened in %s as a message was submitted, declining it: %s", pane, head)
 		}
 		if err := n.declineGuide(ctx, pane); err != nil {
-			return uncertain(fmt.Errorf(guideStuckMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideStuckMessage, clipDialog(head, 120)))
 		}
 		if watch.took() {
-			return nil // it went in before the guide opened
+			return true, nil // it went in before the guide opened
 		}
 		if n.transcriptPath(id) == "" || try == guideTries {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
 		}
 		s, err = n.readPaneANSI(ctx, pane, "visible", 60)
 		if err != nil {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
 		}
 		if code, _ := screen.CheckClaude(s); code != "" {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120))) // the box is not empty: not typed again
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120))) // the box is not empty: not typed again
 		}
 		if n.logger != nil {
 			n.logger.Printf("the message did not reach the transcript of %s, typing it again", id)
@@ -209,9 +211,9 @@ func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt t
 		typedAt = time.Now()
 		if err := n.prompt(ctx, pane, text); err != nil {
 			if r := deliveryRefusal(err); r != nil {
-				return r
+				return false, r
 			}
-			return uncertain(err)
+			return false, uncertain(err)
 		}
 		n.typing.typed(pane, text)
 	}
@@ -389,7 +391,32 @@ func longPaste(text string) bool {
 // ownership of an arbitrary draft. A short prompt cannot own a long-paste placeholder.
 func pendingPrompt(box, prompted string) bool {
 	return stillPrompted(box, prompted) || longPaste(prompted) && pastePlaceholder.MatchString(box) &&
-		strings.TrimSpace(boxChips.ReplaceAllString(box, "")) == ""
+		strings.TrimSpace(boxChips.ReplaceAllString(box, "")) == "" || ownPictures(box, prompted)
+}
+
+// ownPictures: a prompt of pictures only (no words outside its <attached_images> block) still in the box (#10179). It
+// has no words to compare, but Claude Code (2.1.316 and later) keeps each photo's path: line in the box
+// (keepImagePaths), and that path is the upload the send just saved under a fresh random name, which nobody else
+// types. So the box is the prompt's when, chips left out, it starts with the block and shows one of those path: lines.
+// A chip alone is still nothing to tell by: Claude Code before 2.1.316 drops the path: lines, and that box is not
+// covered.
+func ownPictures(box, prompted string) bool {
+	block := attachedNote.FindString(prompted)
+	if block == "" || strings.TrimSpace(attachedNote.ReplaceAllString(prompted, "")) != "" {
+		return false
+	}
+	squash := func(s string) string { return strings.Join(strings.Fields(s), "") }
+	b := squash(boxChips.ReplaceAllString(box, ""))
+	if !strings.HasPrefix(b, "<attached_images>") {
+		return false
+	}
+	for _, l := range strings.Split(block, "\n") {
+		p, ok := strings.CutPrefix(strings.TrimSpace(l), imagePathLine)
+		if ok && strings.TrimSpace(p) != "" && strings.Contains(b, imagePathLine+squash(p)) {
+			return true
+		}
+	}
+	return false
 }
 
 // stillPrompted: the input box shows the start of what was prompted. Claude turns an image path into an `[Image #n]`

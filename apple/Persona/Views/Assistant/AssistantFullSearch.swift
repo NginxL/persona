@@ -194,7 +194,8 @@ struct AssistantFullSearch: View {
 
     /// `said`: the message a search found it by (#6284): its sentence in place of the last message, and opened at.
     private func row(_ s: Session, said: AssistantSearchAnswer.Hit? = nil) -> some View {
-        let title = s.key == model.assistantMain ? AssistantSidebar.mainDisplayName(model)
+        let isMain = s.key == model.assistantMain
+        let title = isMain ? String(localized: "Main Chat")
             : s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title
         let preview = s.lastText.map { Fmt.plain($0).replacingOccurrences(of: "\n", with: " ") } ?? ""
         return Button {
@@ -202,7 +203,7 @@ struct AssistantFullSearch: View {
             open(s.key)
         } label: {
             HStack(spacing: Theme.Space.m) {
-                ThemedIcon(Theme.Icon.conversation)
+                ThemedIcon(isMain ? Theme.Icon.home : Theme.Icon.conversation) // the main conversation's own, as its sidebar row (#9973)
                     .font(Theme.Font.body)
                     .foregroundStyle(.secondary)
                     .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)

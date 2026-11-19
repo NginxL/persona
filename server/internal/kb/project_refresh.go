@@ -192,7 +192,14 @@ func (e *Engine) projectInput(p *Project) prompts.KBProjectInput {
 		if r := []rune(sum); len(r) > 1500 {
 			sum = string(r[:1500]) + "…"
 		}
-		in.Chats = append(in.Chats, prompts.KBProjectChat{ID: cid, Summary: sum})
+		pc := prompts.KBProjectChat{ID: cid, Summary: sum}
+		if c, ok := e.Store.Chat(cid); ok && c.State != "" { // the source's fact, so the rewrite need not guess it (#9427)
+			pc.State = c.State
+			if !c.StateAt.IsZero() {
+				pc.StateAt = c.StateAt.In(e.Store.Zone()).Format("2006-01-02")
+			}
+		}
+		in.Chats = append(in.Chats, pc)
 	}
 	in.Moments = e.projectMomentsForPrompt(p, 5)
 	return in

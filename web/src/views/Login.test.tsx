@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fake = vi.hoisted(() => ({ pair: vi.fn<(tok: string) => Promise<void>>() }));
 vi.mock("../lib/auth", () => ({ pair: (tok: string) => fake.pair(tok) }));
 vi.mock("../lib/hubs", () => ({ here: () => "", rememberHub: () => {} }));
+const qr = vi.hoisted(() => ({ mounted: 0 }));
+vi.mock("./BrowserLoginQR", () => ({ BrowserLoginQR: () => { qr.mounted++; return null; } }));
 vi.mock("./Hubs", () => ({ OtherHubs: () => null }));
 
 import { t } from "../i18n";
@@ -144,5 +146,18 @@ describe("Login", () => {
     expect(alert("link")).toBe(t("login.invalid_link"));
     type(link, "https://hub.example/#token=jp_abd");
     expect(alert("link")).toBe("");
+  });
+});
+
+describe("scanning a code with Persona on a phone (#10291)", () => {
+  it("starts folded, below the phone steps, and makes no code until it is opened", async () => {
+    qr.mounted = 0;
+    await act(async () => root.render(<Login onDone={() => {}} />));
+    expect(host.querySelector("#login-phone")).not.toBeNull(); // the phone steps lead, as before #6862
+    expect(qr.mounted).toBe(0);
+    const toggle = host.querySelector<HTMLButtonElement>('button[aria-controls="login-qr"]')!;
+    expect(toggle.textContent).toContain(t("login.qr_open"));
+    await act(async () => toggle.click());
+    expect(qr.mounted).toBeGreaterThan(0);
   });
 });

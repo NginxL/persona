@@ -424,7 +424,7 @@ func (s *Session) udpMessage(t *transport, f *udpFlow, kind byte, b []byte) {
 			if ch == nil || ch.finished || !ch.video() || t.dead {
 				continue // RFB never rides UDP
 			}
-			if !s.moveLocked(ch, t, off) {
+			if !s.movePhoneLocked(ch, t, off) {
 				continue
 			}
 			if len(ch.buf) > 0 && len(ch.marks) > 0 && ch.marks[0].off != ch.base {
@@ -447,7 +447,7 @@ func (s *Session) udpMessage(t *transport, f *udpFlow, kind byte, b []byte) {
 			return
 		}
 		if kind == udpAck {
-			s.ackedLocked(ch, off)
+			s.phoneAckedLocked(ch, off)
 			return
 		}
 		if ch.active != t {
@@ -455,7 +455,7 @@ func (s *Session) udpMessage(t *transport, f *udpFlow, kind byte, b []byte) {
 		}
 		if off < ch.base {
 			ch.reset = true // gave up something already dropped: the reset was lost, say it again
-		} else if s.ackedLocked(ch, off) {
+		} else if s.phoneAckedLocked(ch, off) {
 			s.skipBacklogLocked(ch)
 		}
 		s.cond.Broadcast()
@@ -479,6 +479,7 @@ func (s *Session) udpMessage(t *transport, f *udpFlow, kind byte, b []byte) {
 		from, to := binary.BigEndian.Uint64(b[1:]), binary.BigEndian.Uint64(b[9:])
 		s.mu.Lock()
 		if ch := s.chans[b[0]]; ch != nil && ch.active == t && ch.video() {
+			s.confirmJumpLocked(ch, from)
 			if from < ch.base {
 				ch.reset = true // the phone missed where the stream went on
 			}
@@ -497,6 +498,18 @@ func (s *Session) udpMessage(t *transport, f *udpFlow, kind byte, b []byte) {
 // on after a reset at a keyframe the helper is asked for, and the backlog's other messages (format, encoding, …) still
 // go out after the reset, so that keyframe decodes. Like dropBacklogLocked, which a move with an old backlog uses.
 func (s *Session) skipBacklogLocked(ch *channel) {
+	s.dropFramesLocked(ch, "the phone gave a frame up")
+}
+
+// dropFramesLocked drops frames to the buffer's end but keeps its whole non-frame messages after the new jump. A
+// handoff whose old reset may be unsafe uses the same boundary without losing decoder state the helper will not repeat.
+func (s *Session) dropFramesLocked(ch *channel, reason string) {
+	if ch.sentClose {
+		// The stream has ended and a close has gone out; retained messages must not move the end beyond it.
+		s.dropBacklogLocked(ch)
+		return
+	}
+	// No close has gone out here, so this jump has no close to owe again.
 	var keep [][]byte
 	end := ch.base + uint64(len(ch.buf))
 	for i, mk := range ch.marks {
@@ -517,12 +530,14 @@ func (s *Session) skipBacklogLocked(ch *channel) {
 	ch.sent = end
 	ch.buf, ch.marks = nil, nil
 	ch.reset, ch.keyWait = true, true
+	ch.resetOut = false // this is a new jump; its reset has not been handed out yet
+	ch.jumpOff, ch.jumpValid, ch.jumpConfirmed, ch.jumpData = ch.base, true, false, false
 	now := s.now()
 	for _, m := range keep {
 		ch.marks = append(ch.marks, mark{off: ch.base + uint64(len(ch.buf)), at: now})
 		ch.buf = append(ch.buf, m...)
 	}
-	s.logf("screenlink: the phone gave a frame up: %d bytes dropped for a keyframe", dropped)
+	s.logf("screenlink: %s: %d bytes dropped for a keyframe", reason, dropped)
 	go ch.upstream.inject(ch, keyframeRequest)
 }
 
@@ -630,6 +645,10 @@ func (s *Session) nextUDPLocked(t *transport) (udpJob, bool) {
 	}
 	if ch.reset {
 		ch.reset = false
+		ch.resetOut, ch.resetOff = true, ch.base
+		if ch.sent == ch.base {
+			ch.progress = s.now() // an outstanding reset starts the stall clock just like the first byte
+		}
 		return udpJob{ctl: chanOffsetBody(udpReset, ch.id, ch.base)}, true
 	}
 	for len(t.resend) > 0 {
@@ -649,6 +668,7 @@ func (s *Session) nextUDPLocked(t *transport) (udpJob, bool) {
 				t.resend = t.resend[1:]
 			}
 		}
+		s.noteJumpDataLocked(ch, job.off)
 		return job, true
 	}
 	end := ch.base + uint64(len(ch.buf))
@@ -659,12 +679,13 @@ func (s *Session) nextUDPLocked(t *transport) (udpJob, bool) {
 			s.dropBacklogLocked(ch)
 			return s.nextUDPLocked(t)
 		}
-		if ch.sent == ch.base {
+		if ch.sent == ch.base && !ch.resetOut {
 			ch.progress = s.now() // the first byte the phone hasn't acknowledged goes out: the stall clock starts
 		}
 		off := ch.sent
 		ch.sent += uint64(len(msg))
 		t.sentAt, t.probes = time.Now(), 0
+		s.noteJumpDataLocked(ch, off)
 		return udpJob{ch: ch.id, off: off, msg: msg}, true
 	}
 	if due, ok := s.probeDue(t, ch); ok && !time.Now().Before(due) {
@@ -680,11 +701,13 @@ func (s *Session) nextUDPLocked(t *transport) (udpJob, bool) {
 			t.probes++
 			blocks := udpBlocks(len(msg))
 			b := blocks[len(blocks)-1]
+			s.noteJumpDataLocked(ch, last)
 			return udpJob{ch: ch.id, off: last, msg: msg, resent: true,
 				shards: []udpResend{{off: last, block: uint16(len(blocks) - 1), index: uint16(b.Data - 1)}}}, true
 		}
 	}
-	if ch.eof && !ch.sentClose {
+	if ch.eof && !ch.sentClose && (!ch.jumpValid || ch.jumpConfirmed) {
+		// As on TCP, a final close follows the phone's confirmation; reset alone does not complete an earlier close.
 		// The helper's stream ended: the close goes on the flow's TLS connection, in order after what it sent.
 		if p := t.parent; p != nil && !p.dead {
 			ch.sentClose = true

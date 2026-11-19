@@ -78,6 +78,10 @@ type briefFacts struct {
 	Asks map[string]acceptAsk
 	// Leaders: one line per current leader (direction_progress.go briefLeaders), for the model only.
 	Leaders []prompts.BriefLeader
+	// Directions: main and every leader, with deterministic stopped-work rows; DisabledRoutines are the daily reports
+	// and patrols currently off. Unlike Leaders, these are also fixed card/feed facts and survive a model failure.
+	Directions       []prompts.BriefDirection
+	DisabledRoutines []prompts.BriefDisabledRoutine
 	// InboxWaiting are matters waiting on the other side for over a day; InboxDue are matters to look at again today,
 	// for the model only. Each list has at most briefFollowingMax rows.
 	InboxWaiting, InboxDue []prompts.BriefFollow
@@ -140,6 +144,7 @@ func (s *Service) briefFactsAt(ctx context.Context, now time.Time, self string) 
 	f.Confirmations = s.briefConfirmationsAt(ctx, now, loc)
 	f.ConfirmationLines = s.confirmationLines(l, f.Confirmations)
 	f.Leaders = s.briefLeaders(ctx, now)
+	f.Directions, f.DisabledRoutines = s.briefDirections(ctx, now, l, web)
 	f.InboxWaiting, f.InboxDue = briefFollowing(s.followingInboxItems(ctx), now, loc)
 	if self == "evening" { // the day's recap was written for it, 30 minutes before (kb_day.go)
 		f.Day = s.briefDay(ctx, now, loc)
@@ -257,10 +262,11 @@ type briefProgress struct{ ID, Title, Stage, StageKind string }
 // briefRun is the facts of one run of a routine, kept until its turn has been mirrored and pushed: they are computed when
 // the run starts and said when it ends, so the card and the push say what the run was given.
 type briefRun struct {
-	facts    *briefFacts
-	label    string // the routine's name
-	mirrored bool   // the card was sent (or sending it was given up)
-	pushed   bool   // the push text was used
+	facts        *briefFacts
+	label        string // the routine's name
+	fallbackOnly bool   // a Report's facts exist only for a model-failure card; normal success behaves as before
+	mirrorTurn   string // the turn owning this card, including a pending send or retry
+	pushed       bool   // the push text was used
 }
 
 // briefBook holds the facts of the runs under way: by task from the start of the run, by conversation once it is sent.
@@ -307,7 +313,7 @@ func (s *Service) briefSent(id, session string, retried bool) {
 	if run == nil {
 		return
 	}
-	if !retried {
+	if !retried && !run.fallbackOnly {
 		s.briefFeed(session, id, run.label, run.facts)
 	}
 }
@@ -346,30 +352,49 @@ func (s *Service) briefOf(session string) *briefRun {
 	return run
 }
 
-// briefClaim is the facts of the run that conversation session is on, once, for the turn that ended: asked is the message
-// that started it and cut whether it was cut off by an error. Only the turn of the run itself (the ⏰ message of
-// taskPrompt) that ended normally gets the card; a message the owner sends into the conversation later, or a turn that
-// failed (the run is tried again with new facts), is answered as any other. A second turn end of the same run does not
-// make another card (a retry of the mirror is not one).
-func (s *Service) briefClaim(session, asked string, cut bool) *briefRun {
-	run := s.briefOf(session)
+// briefOfTask is the snapshot after runFacts but before briefSent attaches it to a conversation. Model resolution and
+// conversation-start failures use it: there is no new session to look up yet.
+func (s *Service) briefOfTask(id string) *briefRun {
 	b := &s.brief
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if run == nil || run.mirrored || cut || !strings.HasPrefix(strings.TrimSpace(stripContext(asked)), "⏰") {
+	run := b.byTask[id]
+	if run == nil || time.Since(run.facts.At) > briefKeep {
 		return nil
 	}
-	run.mirrored = true
 	return run
 }
 
-// briefMirror sends the card of a routine with facts in place of its answer's cards (feishuMirror): the model's answer on
-// top, the facts under it, one card; sent again when its first post did not get out, as any mirrored answer is.
+// briefClaim takes the facts for the routine's own successful turn once. The second result says this retained turn
+// already owns its briefing send, so a repeated completion must not fall back to an ordinary mirrored card. Other
+// turns, failed runs and expired unclaimed facts keep the ordinary answer path. Report snapshots are fallback-only.
+func (s *Service) briefClaim(session, asked, turn string, cut bool) (*briefRun, bool) {
+	b := &s.brief
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	run := b.bySession[session]
+	if run == nil {
+		return nil, false
+	}
+	if run.mirrorTurn != "" {
+		return nil, run.mirrorTurn == turn
+	}
+	if run.fallbackOnly || cut || time.Since(run.facts.At) > briefKeep || !strings.HasPrefix(strings.TrimSpace(stripContext(asked)), "⏰") {
+		return nil, false
+	}
+	run.mirrorTurn = turn
+	return run, false
+}
+
+// briefMirror sends the cards of a routine with facts in place of its answer's cards (feishuMirror): the model's answer
+// on top, the facts under it. Required owner waits continue onto more cards rather than crossing Feishu's physical
+// budget. mirrorSend's per-index key makes every continuation retry independently and idempotently.
 func (s *Service) briefMirror(ctx context.Context, machine, session, label string, run *briefRun, answer, turn string) {
 	card, fallback, shown := s.briefCard(run.facts, run.label, answer)
 	card.Buttons(s.openButton(ctx, machine, session))
+	cards := splitBriefAnswerCards(card, fallback, run.label)
 	sum := sha256.Sum256([]byte("brief\x00" + machine + "\x00" + session + "\x00" + turn + "\x00" + answer))
-	m := &mirrorSend{l: run.facts.l, cards: []botAnswerCard{{card: card, fallback: fallback}},
+	m := &mirrorSend{l: run.facts.l, cards: cards,
 		target: botTarget{Kind: targetPersona, MachineID: machine, SessionID: session}, label: label,
 		answer: answer, turn: turn, key: "b" + hex.EncodeToString(sum[:8]),
 		sent: func() { s.briefAsked(run.facts, shown) }}
@@ -470,6 +495,7 @@ func (f *briefFacts) modelText() string {
 	b.ConfirmationSummary = f.Confirmations.summary(f.l)
 	b.Confirmations = f.ConfirmationLines
 	b.ProgressTotal, b.Leaders = f.ProgressTotal, f.Leaders
+	b.Directions, b.DisabledRoutines = f.Directions, f.DisabledRoutines
 	b.InboxWaiting, b.InboxDue = f.InboxWaiting, f.InboxDue
 	b.Briefs, b.BriefsDone, b.Day = f.Briefs, f.BriefsDone, f.Day
 	b.Setup = f.Setup.lines()
@@ -492,7 +518,7 @@ func (s *Service) briefPush(session string, l i18n.Lang, report bool) string {
 	run := s.briefOf(session)
 	b := &s.brief
 	b.mu.Lock()
-	if !report || run == nil || run.pushed {
+	if !report || run == nil || run.fallbackOnly || run.pushed {
 		b.mu.Unlock()
 		return ""
 	}

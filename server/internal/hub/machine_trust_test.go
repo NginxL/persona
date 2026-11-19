@@ -259,6 +259,9 @@ func TestMachineErrorCode(t *testing.T) {
 		{"online", proto.Machine{Online: true}, kindLink, ""},
 		{"online, another build it can update", proto.Machine{Online: true, NodeMismatch: true, CanDeploy: &yes}, kindLink, ""},
 		{"online, too old to update from here", proto.Machine{Online: true, NodeMismatch: true, CanDeploy: &no}, kindLink, errCodeNodeOutdated},
+		{"online, the hub has no build for it", proto.Machine{Online: true, NodeMismatch: true, CanDeploy: &no, DeployNoPackage: true}, kindLink, ""}, // #10566
+		{"online, incompatible, no build for it", proto.Machine{Online: true, NodeMismatch: true, CanDeploy: &no, DeployNoPackage: true,
+			NodeIncompatible: "node_protocol_old"}, kindLink, errCodeNodeOutdated},
 		{"the hub's own machine", proto.Machine{Online: true, NodeMismatch: true, CanDeploy: &no}, "local", ""},
 		{"node service down", proto.Machine{Error: "Persona Link: 本机的常驻 node 没在运行（/home/u/.persona/node-attach.sock 连不上）：persona-link node install",
 			LastSeen: seen}, kindLink, errCodeNodeServiceDown},

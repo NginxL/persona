@@ -66,6 +66,14 @@ func startTestManager(t *testing.T, h *Hub, srv *httptest.Server, nodes map[stri
 func startTestManagerWith(t *testing.T, h *Hub, srv *httptest.Server, nodes map[string]func(context.Context) (net.Conn, error),
 	configFile string) *testManager {
 	t.Helper()
+	return startTestManagerDialing(t, h, srv, func(id string) func(context.Context) (net.Conn, error) { return nodes[id] }, configFile)
+}
+
+// startTestManagerDialing is startTestManagerWith with dial asked for each machine as the manager makes it (nil: the
+// machine's own way, a link's).
+func startTestManagerDialing(t *testing.T, h *Hub, srv *httptest.Server, dial func(id string) func(context.Context) (net.Conn, error),
+	configFile string) *testManager {
+	t.Helper()
 	if h.busStore() == nil {
 		h.bus.idents = &memIdents{}
 	}
@@ -112,12 +120,7 @@ func startTestManagerWith(t *testing.T, h *Hub, srv *httptest.Server, nodes map[
 			return bus.DialAt(ctx, srv.URL, tok, srv.Client(), devicewire.RelayPath, query)
 		},
 		Connected: func() bool { c := host.client(); return c != nil && c.Peer() != nil },
-		DialNode: func(id string) func(context.Context) (net.Conn, error) {
-			if f, ok := nodes[id]; ok {
-				return f
-			}
-			return nil
-		}})
+		DialNode:  dial})
 	a := dialAssistant(t, h, srv.URL, false, func(o *assistant.BusOptions) {
 		o.Devices, o.HTTPClient, o.Logf = d, srv.Client(), logf
 	})

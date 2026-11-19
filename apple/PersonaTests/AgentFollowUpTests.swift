@@ -10,7 +10,7 @@ struct AgentFollowUpTests {
     private static let state = #"""
     {"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[],"manager":"assistant",
      "start_requested_tasks":true,"task_workspace_preference":"prefer-existing","main_supervises_own_tasks":false,
-     "agent_tasks":false,"idle_close_hours":12,"archive_closed_days":3,
+     "agent_tasks":false,"close_ended_terminals":false,"idle_close_hours":12,"archive_closed_days":3,
      "agent_auto_naming":true,"agent_auto_naming_max":1,"agent_auto_naming_interval_hours":0}
     """#
     private static let old = #"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[]}"#
@@ -47,6 +47,7 @@ struct AgentFollowUpTests {
         await page.load()
         let s = try #require(page.state)
         #expect(s.startRequestedTasks == true && s.taskWorkspacePreference == "prefer-existing" && s.agentTasks == false)
+        #expect(s.closeEndedTerminals == false, "close-on-end is off by default (#10355)")
         #expect(s.idleCloseHours == 12 && s.archiveClosedDays == 3 && s.agentAutoNaming == true && s.agentAutoNamingMax == 1)
         #expect(s.agentAutoNamingIntervalHours == 0 && s.manager == "assistant" && page.namesShown)
         #expect(AgentFollowUpModel.offered(s))
@@ -70,6 +71,7 @@ struct AgentFollowUpTests {
         let cases: [(AgentFollowUpModel.Change, String, Any)] = [
             (.startRequested(false), "start_requested_tasks", false), (.workspace("prefer-new"), "task_workspace_preference", "prefer-new"),
             (.mainSupervises(true), "main_supervises_own_tasks", true), (.agentTasks(true), "agent_tasks", true),
+            (.closeEndedTerminals(true), "close_ended_terminals", true),
             (.idleHours(0), "idle_close_hours", 0), (.archiveDays(30), "archive_closed_days", 30),
             (.naming(false), "agent_auto_naming", false), (.namingMax(1000), "agent_auto_naming_max", 1000),
             (.namingInterval(24), "agent_auto_naming_interval_hours", 24),

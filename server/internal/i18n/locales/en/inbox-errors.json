@@ -30,6 +30,7 @@
   "mail_target_changed": "mail reply target changed",
   "mail_target_required": "account_id and uid are required",
   "translation_empty": "the model returned no translation",
+  "translation_message_size": "A reply must contain 1 to {max} characters to translate.",
   "mail_unconfigured": "mail is not set up",
   "not_processing": "this conversation was not started for an inbox item",
   "translation_target": "unknown target language {target}",

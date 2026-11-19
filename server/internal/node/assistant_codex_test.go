@@ -177,6 +177,20 @@ type fakeHub struct {
 	mcp       []map[string]any      // the mcp.tools / mcp.call params relayed ("method" says which)
 	onModel   func()                // called as assistant.model is asked, before it answers (model_restore_test.go)
 	onContext func(context.Context) // optional isolated snapshot delay (assistant_send_latency_test.go)
+	pushed    map[string][]pushRow  // each row the node pushed (sessions.changed), by session id
+}
+
+// pushRow is a row's status in one sessions.changed push, and when it came.
+type pushRow struct {
+	status string
+	at     time.Time
+}
+
+// rows are conversation id's rows in the node's pushes so far, in order.
+func (h *fakeHub) rows(id string) []pushRow {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]pushRow(nil), h.pushed[id]...)
 }
 
 func (h *fakeHub) interactions() []proto.Interaction {
@@ -267,6 +281,21 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 		return map[string]any{}, nil
 	}
 	hub.OnEvent = func(event string, params json.RawMessage) {
+		if event == "sessions.changed" {
+			var p struct {
+				Sessions []proto.Session `json:"sessions"`
+			}
+			_ = json.Unmarshal(params, &p)
+			fh.mu.Lock()
+			if fh.pushed == nil {
+				fh.pushed = map[string][]pushRow{}
+			}
+			for _, s := range p.Sessions {
+				fh.pushed[s.SessionID] = append(fh.pushed[s.SessionID], pushRow{s.Status, time.Now()})
+			}
+			fh.mu.Unlock()
+			return
+		}
 		if event != "session.delta" {
 			return
 		}
@@ -669,6 +698,20 @@ func TestCodexSharesTheAssistantMemory(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(codexArgs("/bin/personad", "k"), " "), "features.memories=false") {
 		t.Fatal("Codex's own memories not turned off")
+	}
+}
+
+// The ChatGPT apps of the machine's Codex sign-in are declared in full in every request (#10275): the assistant's
+// Codex starts without them, whichever MCP namespaces and compaction window it gets.
+func TestCodexAssistantStartsWithoutChatGPTApps(t *testing.T) {
+	for _, args := range [][]string{
+		codexArgs("/bin/personad", "k"),
+		codexArgs("/bin/personad", "k", 400000),
+		codexArgsForHome("/bin/personad", "k", "/home/me/.persona", false),
+	} {
+		if !slices.Contains(args, "features.apps=false") {
+			t.Fatalf("ChatGPT apps not turned off: %q", args)
+		}
 	}
 }
 

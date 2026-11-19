@@ -293,8 +293,10 @@ internal class HistoryHub(main: Session, vararg chats: Session) : AssistantRepos
     val archived = mutableListOf<SessionKey>()
     val unarchived = mutableListOf<SessionKey>()
     val renamed = mutableListOf<Pair<SessionKey, String>>()
+    val tagWrites = mutableListOf<Pair<SessionKey, List<String>>>()
     var archivedList: List<Session> = emptyList()
     var refuseRename = false
+    var refuseTags = false
     override suspend fun archiveConversation(session: SessionKey) {
         archived += session
         archivedList = listOf(assistant.value.conversations.first { it.key == session }.copy(archived = true)) + archivedList
@@ -306,6 +308,14 @@ internal class HistoryHub(main: Session, vararg chats: Session) : AssistantRepos
         assistant.value = assistant.value.copy(conversations = assistant.value.conversations + back.copy(archived = false))
     }
     override suspend fun archivedConversations(): List<Session> = archivedList
+    override suspend fun setConversationTags(session: SessionKey, tags: List<String>) {
+        tagWrites += session to tags
+        if (refuseTags) throw UnsupportedOperationException("Tags unavailable on this hub")
+        assistant.value = assistant.value.copy(conversations = assistant.value.conversations.map {
+            if (it.key == session) it.copy(tags = tags) else it
+        })
+        archivedList = archivedList.map { if (it.key == session) it.copy(tags = tags) else it }
+    }
     override suspend fun renameConversation(session: SessionKey, title: String) {
         check(!refuseRename) { "改名失败" }
         renamed += session to title

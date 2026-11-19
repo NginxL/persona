@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { closePalette, openPalette, registerContextCommands, setPaletteQuery } from "../lib/palette";
@@ -139,6 +140,17 @@ describe("a page's words", () => {
 // A Persona chat's line under its title said "Persona · ~/.persona/assistant", the same folder for every chat and an
 // engineering path besides: it says what was said last, as the chats list does.
 describe("a Persona chat in the search", () => {
+  it("calls the main conversation Main chat and uses its home symbol", () => {
+    const kept = getState().assistant;
+    Object.assign(getState(), { assistant: { machine_id: "m1", main: "main", conversations: [{ machine_id: "m1", session_id: "main", title: "Assistant name", assistant: true, cwd: "/", status: "idle" }] } });
+    try {
+      const html = render("");
+      expect(html).toContain(t("sidebar.main_chat"));
+      expect(html).not.toContain(">Assistant name</span>");
+      expect(html).toContain('M3 10.5 12 3l9 7.5');
+      expect(render(t("sidebar.main_chat"))).toContain(t("sidebar.main_chat"));
+    } finally { Object.assign(getState(), { assistant: kept }); }
+  });
   it("says what was said last, without the assistant's folder", () => {
     const kept = getState().assistant;
     Object.assign(getState(), {

@@ -454,8 +454,12 @@ fields, including a subscription reset timestamp supplied in native quota metada
 that result. Rejected ACP prompts also publish their failure through the session's error state.
 The history token includes the error format so connected clients refresh items cached before this representation.
 
-The implemented integration is for the **Antigravity CLI (`agy`)**, not the Antigravity desktop app. With the node running,
-start `node integrations/antigravity/companion.mjs` from the repository root, or install into the runtime package store
+The implemented integration is for the **Antigravity CLI (`agy`)**, not the Antigravity desktop app. When `personad node`
+runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`
+runtime is connected on `runtime.sock`, the node automatically writes out the embedded `persona-antigravity-runtime`
+package and supervises `antigravity/companion.mjs` (passing `--no-update --parent-stdin`), yielding whenever an external
+`agy` runtime connects (`server/internal/node/agybridge.go`). You can also start
+`node integrations/antigravity/companion.mjs` manually from the repository root, or install into the runtime package store
 with `node integrations/antigravity/install.mjs` and supervise
 `node ~/.persona/runtime-packages/persona-antigravity-runtime/current/antigravity/companion.mjs` under launchd / systemd.
 When run from that store without `--no-update`, the companion reports `persona-antigravity-runtime` in `runtime.hello`,
@@ -464,14 +468,24 @@ availability probes, rewinds and phone permission cards to finish, then stops `a
 it on the new code; direct launches outside the store leave self-update off. The companion connects to the node's runtime
 socket, lists CLI transcripts, and uses `agy acp` for terminal-less session creation, sending and interruption. It can also
 serve as an assistant backend through the optional assistant contract above. It requires an installed, authenticated `agy`
-with ACP support; `--agy-bin`, `--agy-dir`, `--socket` and `--no-update` override the executable, CLI data directory, node
-socket and automatic updates.
+with ACP support; `--agy-bin`, `--agy-dir`, `--socket`, `--no-update` and `--parent-stdin` override the executable, CLI data
+directory, node socket, automatic updates and parent-pipe shutdown.
 Models come from authenticated `agy models` discovery and ACP session metadata. The companion refreshes the catalog every
 five minutes, and the picker's refresh requests a fresh catalog through optional `models({launcher, refresh})`
 (`caps.models`, `launchers.models`). Discovery never sends a prompt. The native settings file determines the advertised
 default. New sessions and availability checks explicitly apply that model through ACP, since ACP may ignore the
 settings file when choosing its initial model. An explicit caller model takes precedence, and resumed sessions retain
 their native selection. An unavailable catalog returns the native error instead of advertising a built-in model list.
+One `agy acp` process can keep the model list it had when the account's plan lapsed or the CLI signed out (#10368), so
+a session's model list replaces the catalog only when its ACP process started after the latest successful discovery
+began. When ACP rejects a model as unknown and a fresh discovery lists it, the companion replaces the ACP process and
+runs the start, model change or availability check once more. Every runtime call, turn and native read that uses ACP
+holds a lease for its whole run, and the process is replaced only when no lease other than the caller's, ACP request
+or permission card is open. That last check and the replacement run without an await between them, and calls that
+arrive during a replacement wait for the old process to exit and start on the new one. A replacement that rejects the
+same model is not replaced again while the catalog stays the same. A successful discovery after one that found the CLI
+signed out replaces the ACP process the same way: at once when nothing uses it, otherwise before the next start, send,
+model change or check that finds it idle.
 
 Idle sessions can switch model, thinking level and permission mode through ACP. Native configuration updates determine
 the displayed model and effort. Each accepted field is published even if another field fails, and failures reach the caller.
@@ -515,6 +529,16 @@ normal page limits to complete native records and serves larger items through th
 scope includes `:full` to invalidate previously cached compact pages. Parsed files are cached by file identity, size
 and nanosecond modification/change times, bounded to 16 files and 64 MiB of source data. Files modified within the
 last second bypass the cache because rapid same-size writes can share a filesystem timestamp tick.
+
+### Runtime token usage
+
+For an agent without local token records, call `rt.usage({session_id, ts, model, request_id?, input, output, cache_read, cache_write, reasoning?})` once per completed model request. `ts` is an RFC3339 timestamp; counts are nonnegative safe integers. Input excludes cache reads and writes; output already includes reasoning. Reasoning is an optional part of output, never added again. All-zero reports are ignored.
+
+The node advertises `usage` in hello features. The SDK returns false while disconnected, without a hub or with an older node; it does not queue or replay reports. A true result means the event was written, not acknowledged or durably saved. Reports can be lost during a reconnect, node restart or storage failure; there is no backfill. Upgrade the Hub storage support before using the new node feature.
+
+Only currently listed, owned sessions count. The row's agent must match the runtime's registered default agent or an advertised launcher agent. The node supplies the recorded launcher name. Claude Code, Codex, traex, pi, omp and opencode remain metered from their local records, including when hosted in Paseo. For other agents, a nonempty request ID deduplicates within one runtime connection and session for 30 minutes. Without an ID each report counts. The cache retains at most 65,536 request IDs and evicts its oldest entry when full. Reports outside the last 26 hours of minute buckets, more than a minute in the future, or with any token count over 1,000,000,000 are rejected. The file meter's 10-second tick sends the buffered per-minute totals. The manager restores persisted runtime minute buckets at startup.
+
+Daemon links allow the same event and prefix its session ID as usual. Runtime usage goes to the same token totals and agent buckets as file usage. It is added, rather than replacing a minute's total, and full file scans preserve these unreconstructable buckets.
 
 ### Shared runtime behavior
 

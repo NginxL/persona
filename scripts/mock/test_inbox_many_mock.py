@@ -63,6 +63,16 @@ class ManyPairsTests(unittest.TestCase):
                 at = datetime.fromisoformat(item["done_at"].replace("Z", "+00:00"))
                 self.assertLess(now - at, timedelta(days=3))
 
+    def test_the_first_needs_you_item_relates_to_a_done_and_a_collapsed_one(self):
+        first = next(x for x in self.items if x["id"] == "many:action:0")
+        self.assertEqual([r["id"] for r in first["related"]], ["many:done:0", "many:noise:0"])
+        by_id = {x["id"]: x for x in self.items}
+        for r in first["related"]:
+            self.assertEqual(r["title"], by_id[r["id"]]["title"])
+        self.assertEqual([x["id"] for x in many(self.items) if x.get("related")], ["many:action:0"])
+        # an event (it has a chain), so its page draws the Related line
+        self.assertEqual([c["kind"] for c in first["chain"]], ["received"])
+
     def test_ids_are_unique(self):
         ids = [x["id"] for x in self.items]
         self.assertEqual(len(ids), len(set(ids)))

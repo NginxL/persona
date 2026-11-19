@@ -224,7 +224,7 @@ func (s *Service) kbOpenLocked(ctx context.Context, set assistantwire.KBSettings
 	s.kbRezone(k.store, loc)
 	// The models are counted per lane run (kb_lanes.go: kbCounted, through the run's context).
 	// Retries: the steps' backoffs carry over to the engine after this one (the hub's settings changed; #4247).
-	e := &kb.Engine{Store: k.store, Retries: &k.retries, Model: kbCounted(s.kbModel("inbox.triage")), ModelFor: func(id string) kb.Model { return kbCounted(s.kbModel(id)) },
+	e := &kb.Engine{Store: k.store, Retries: &k.retries, Model: kbCounted("inbox.triage", s.kbModel("inbox.triage")), ModelFor: func(id string) kb.Model { return kbCounted(id, s.kbModel(id)) },
 		Owner: s.owner(ctx), Logf: s.logf, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, HandleKey: k.key, Index: s.kbIndexEntity, Unindex: s.kbUnindex, RecordingDaysFunc: s.recordingDaysNow, MinutesDaysFunc: s.minutesDaysNow, MinutesWritten: s.minutesWritten, LiveChanged: s.meetingKick, MeetingChanged: s.meetingLiveChanged, TranscriptionReady: s.transcriptionReadyCached, EarlierMeetingsInAnswers: true, Changed: s.kbChanged, MineObserved: s.kbObserveOwner,
 		Selection: s.kbSelectionNow, TopicsOn: s.kbTopicsNow,
 		// All-day recordings (kb_day.go): the recap time from the evening routine's, their names; the day's push below
@@ -516,7 +516,7 @@ func (s *Service) kbArchiveLane(ctx context.Context, e *kb.Engine, r *kbRounds) 
 				break
 			}
 			if err := e.Compress(ctx, c); err != nil {
-				if ai.IsPaused(err) { // the chats stay due: compressed once the connection is back
+				if ai.IsPaused(err) || ai.IsNotConfigured(err) { // the chats stay due: compressed once the connection or a model is back (the lane says it has none)
 					break
 				}
 				s.logf("kb: compress %s: %v", c.ID, err)
@@ -524,6 +524,13 @@ func (s *Service) kbArchiveLane(ctx context.Context, e *kb.Engine, r *kbRounds) 
 		}
 	})
 	s.kbRun(ctx, func() { e.RefreshProjects(ctx, 3) })
+	// Projects whose chats have all ended at their source (pull requests merged or closed) and stayed quiet are finished,
+	// without a model (#9427, kb/chat_state.go); one with an unfinished to-do filed under it stays.
+	s.kbRun(ctx, func() {
+		if done := e.FinishProjects(time.Now(), s.kbProjectBusy(ctx, e)); len(done) > 0 {
+			s.logf("kb: finished %d project(s) whose chats have all ended: %s", len(done), strings.Join(done, ", "))
+		}
+	})
 	// Recordings: those past recording_days go, or keep only their minutes until minutes_days (every run: a setting may
 	// just have shortened), complete ones get their summary (their minutes are the minutes lane's).
 	s.kbRun(ctx, func() {
@@ -603,4 +610,38 @@ func (s *Service) kbExtraDirs(ctx context.Context) []string {
 		return set.ExtraDirs
 	}
 	return nil
+}
+
+// kbProjectBusy is FinishProjects' busy: whether an unfinished to-do is filed under a project. A to-do keeps the slug it
+// was filed under when that project is merged into another, so each is resolved as ownProject does (FindProject follows
+// MergedInto) and the live project it lands on is busy; the slug as written stays busy too, and when it resolves to
+// nothing live every project it was merged into along the way is busy, so none is finished on a guess. While the to-dos
+// can't be read every project counts as busy.
+func (s *Service) kbProjectBusy(ctx context.Context, e *kb.Engine) func(slug string) bool {
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return func(string) bool { return true }
+	}
+	var filed []string
+	s.todos.mu.RLock()
+	for _, t := range s.todos.todos {
+		if t.DoneAt == nil && t.Project != "" {
+			filed = append(filed, t.Project)
+		}
+	}
+	s.todos.mu.RUnlock()
+	open := map[string]bool{}
+	for _, slug := range filed {
+		open[slug] = true
+		if e == nil {
+			continue
+		}
+		if p := e.FindProject(slug); p != nil {
+			open[p.Slug] = true
+			continue
+		}
+		for p, ok := e.Store.Project(slug); ok && p.MergedInto != "" && !open[p.MergedInto]; p, ok = e.Store.Project(p.MergedInto) {
+			open[p.MergedInto] = true
+		}
+	}
+	return func(slug string) bool { return open[slug] }
 }

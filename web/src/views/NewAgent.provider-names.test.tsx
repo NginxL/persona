@@ -56,6 +56,10 @@ const row = (key: string) => rows().find((r) => r.dataset.panelRow === key)!;
 const group = (name: string) => [...document.body.querySelectorAll<HTMLElement>("[data-panel-section]")].find((g) => g.getAttribute("aria-label") === name);
 async function openPanel() {
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
+  await flush();
+  // These caller tests inspect model actions; disclose the catalog first.
+  for (const header of document.body.querySelectorAll<HTMLButtonElement>('[data-panel-launcher][aria-expanded="false"]')) act(() => header.click());
   await flush();
 }
 
@@ -101,8 +105,8 @@ describe("New agent: provider display names (#5029)", () => {
     expect(pill().title).toContain("我的中转 站");
     expect(pill().title).not.toContain("relay-example-com");
     await openPanel();
-    const cells = [...document.body.querySelectorAll<HTMLElement>("[data-rail-cell]")].filter((c) => !["recent", "favorites", "all"].includes(c.dataset.railCell!));
-    expect(cells.map((c) => [c.dataset.railCell, c.getAttribute("aria-label")])).toEqual([
+    const cells = [...document.body.querySelectorAll<HTMLElement>("[data-panel-launcher]")].filter((c) => !["recent", "favorites", "all"].includes(c.dataset.panelLauncher!));
+    expect(cells.map((c) => [c.dataset.panelLauncher, c.getAttribute("aria-label")])).toEqual([
       ["relay-example-com", "我的中转 站"],
       ["cc_glm", "cc_glm"],
       ["team-relay", "Team relay"],
@@ -112,8 +116,8 @@ describe("New agent: provider display names (#5029)", () => {
     expect(group("我的中转 站")).toBeDefined();
     expect(group("cc_glm")).toBeDefined();
     expect(group("relay-example-com")).toBeUndefined();
-    // a row's second line is its provider, by its title
-    expect(row("model:cc_glm\ndefault").textContent).toContain("cc_glm");
+    // The model stays beneath the named launcher, rather than repeating the heading on each row.
+    expect(row("model:cc_glm\ndefault").closest("[data-panel-section]")?.getAttribute("aria-label")).toBe("cc_glm");
   });
 
   // The "Default: …" chip went with the chips, and its ID tooltip with it: the follow row says the provider by its title.
@@ -121,7 +125,7 @@ describe("New agent: provider display names (#5029)", () => {
     await flush();
     await openPanel();
     const follow = q("[data-follow-row]")!;
-    expect(follow.getAttribute("aria-selected")).toBe("true");
+    expect(follow.getAttribute("aria-pressed")).toBe("true");
     expect(follow.textContent).toBe("跟随模型配置我的中转 站 · glm-5");
   });
 

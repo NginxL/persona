@@ -437,6 +437,13 @@ func (h *Manager) bindChannel(ctx context.Context, id, step string, values map[s
 		if err := h.setConnectorEnabled(ctx, pc.item.Connector, true); err != nil {
 			return connector.Prompt{}, err
 		}
+		// Switched on, its extension restarted (setConnectorEnabled): the connector is the new program's.
+		if c = h.connectors.Get(pc.item.Connector); c == nil {
+			return connector.Prompt{}, errors.New(i18n.T(lang, "hub-channels.not_running_open", i18n.Args{"name": v.Name}))
+		}
+		if l, ok = connector.As[connector.Login](c); !ok {
+			return connector.Prompt{}, errors.New(i18n.T(lang, "hub-channels.no_binding_step", i18n.Args{"name": v.Name}))
+		}
 	}
 	return h.connectorLoginStep(ctx, pc.item.Connector, l, step, values)
 }

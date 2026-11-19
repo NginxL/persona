@@ -46,5 +46,15 @@
   "cron_never": "{cron} never runs: no date in the next 5 years matches it.",
   "run_if_approval": "Allow this command to run on the routine’s computer before each scheduled run?",
   "run_if_skipped": "The pre-run command asked to skip this run.",
-  "run_if_failed": "Pre-run check failed: {error}"
+  "run_if_failed": "Pre-run check failed: {error}",
+  "todo_no_evidence": "No new Agent answer, acceptance-criterion state change or explicit progress report was observed.",
+  "todo_stalled": "{name}: {count} recurring checks without observable progress. Last run: {reason}",
+  "todo_decide": "No progress: {reason} Change approach or keep waiting?",
+  "todo_unknown": "Progress could not be assessed because the baseline or Agent evidence was unreadable. Run summary: {reason}",
+  "todo_save_failed": "Could not save progress for {name}. Its no-progress count and escalation may be incomplete. Error: {error}",
+  "todo_change": "Change approach",
+  "todo_wait": "Keep waiting",
+  "todo_wait_cost": "Another scheduled window may pass without advancing the task.",
+  "todo_change_result": "Ask the supervisor to propose another approach within the existing permissions.",
+  "todo_wait_result": "Keep the approved approach and wait for the next scheduled check."
 }

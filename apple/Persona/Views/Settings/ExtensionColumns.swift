@@ -386,6 +386,7 @@ struct ExtensionSectionCard: View {
         // its rows equal shares and a row's title (`minimumScaleFactor`) scales down to fit one.
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .environment(\.extensionCardInset, CardStyle.padding)
         .card()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("extension-columns-card-" + (section.key ?? String(index)))

@@ -8,7 +8,7 @@ import persona.core.navigation.SettingsPage
 internal fun settingsFormerEntryAliases(resources: Resources, page: SettingsPage): String {
     val names = when (page) {
         SettingsPage.ModelConfig -> listOf(R.string.settings_providers_title, R.string.settings_row_models, R.string.settings_src_model_title)
-        SettingsPage.AgentSettings -> listOf(R.string.settings_row_claude, R.string.settings_row_codex, R.string.settings_triage_title)
+        SettingsPage.AgentSettings -> listOf(R.string.settings_row_claude, R.string.settings_row_codex, R.string.settings_row_agy, R.string.settings_triage_title)
         SettingsPage.NotificationBackground -> listOf(R.string.settings_ready_notifications, R.string.settings_capsule_title,
             R.string.settings_row_background, R.string.settings_desktops_banner, R.string.settings_desktops_mute)
         SettingsPage.About -> listOf(R.string.settings_section_about, R.string.settings_about_persona, R.string.settings_update_check)

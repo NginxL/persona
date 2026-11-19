@@ -22,6 +22,7 @@ import (
 
 type Hub struct {
 	passwordLogin passwordLoginState
+	browserLogin  browserLoginState
 	// errs: the hub's own error reports on their way to the managers (error_reports.go).
 	errs hubErrors
 
@@ -70,6 +71,8 @@ type Hub struct {
 	trust   machineTrust // the computers waiting to be confirmed (machine_trust.go)
 	// machineAdd: one computer is added for a pairing code at a time (machines_add.go), so two get different ids.
 	machineAdd sync.Mutex
+	// linkSwitch: the switches of ssh computers to Persona Link under way (link_switch.go).
+	linkSwitch linkSwitches
 
 	// handedOver: the managers' pushes and outbox items delivered lately, so one sent again is delivered once
 	// (outbox_relay.go).
@@ -132,6 +135,8 @@ type Hub struct {
 
 	// askVia replaces fleet.ask in tests that play the manager (waitInteraction).
 	askVia func(context.Context, proto.Interaction) (proto.Resolution, error)
+	// prepared owns hub-side retained settings handles (prepared_settings.go).
+	prepared preparedSettings
 	// reported is what the manager told of the nodes' interactions and the fleet (fleet_link.go).
 	reported fleetCache
 
@@ -225,6 +230,10 @@ type Store interface {
 	CreatePairToken(ctx context.Context, hash string, expiresAt time.Time, machine string) error
 	PairTokenByHash(ctx context.Context, hash string) (*db.PairToken, error)
 	RedeemPairToken(ctx context.Context, pairHash string, device db.DeviceToken, tokenHash string) (bool, error)
+	// A switch of an ssh computer to Persona Link (link_switch.go): whether it has a link already, and undoing exactly
+	// the code a switch made and the credential it became.
+	MachineLinkInUse(ctx context.Context, machine string) (bool, error)
+	RevokeLinkPair(ctx context.Context, hash, machine string) (credentialID string, found bool, err error)
 }
 
 func Run(ctx context.Context, b update.Build) error {

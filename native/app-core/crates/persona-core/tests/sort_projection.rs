@@ -231,6 +231,110 @@ fn multi_hub_preferences_scoped_pin_mute_and_order_match_ios() {
     );
 }
 
+fn hub_selection_input(multi_hub: bool, hub_filter: &str, quick: &str) -> Input {
+    serde_json::from_value(serde_json::json!({
+        "sessions": [
+            {"machine_id": "shared", "session_id": "default", "app_hub_group": "", "title": "needle", "state": "needs_you"},
+            {"machine_id": "shared", "session_id": "same", "app_hub_group": "hub-a", "title": "needle", "state": "working"},
+            {"machine_id": "shared", "session_id": "same", "app_hub_group": "hub-b", "title": "needle", "state": "unread"},
+        ],
+        "machines": [
+            {"id": "shared", "name": "Fixture"},
+            {"id": "shared", "name": "Fixture", "group": "hub-a"},
+            {"id": "shared", "name": "Fixture", "group": "hub-b"},
+        ],
+        "pins": {}, "mutes": {},
+        "settings": {"grouping": "state", "quick": quick, "multi_hub": multi_hub, "hub_filter": hub_filter},
+    }))
+    .expect("hub selection input")
+}
+
+fn all_hubs_projection_expectation() -> Value {
+    serde_json::json!({
+        "counts": {"needsYou": 1, "working": 1, "unread": 1, "backgroundWaiting": 0},
+        "groups": [
+            {"id": "state/needs", "title": "需要你", "rows": ["shared/default"], "visible_rows": ["shared/default"], "folded": false},
+            {"id": "state/unread", "title": "完成未看", "rows": ["hub-b|shared/same"], "visible_rows": ["hub-b|shared/same"], "folded": false},
+            {"id": "state/working", "title": "工作中", "rows": ["hub-a|shared/same"], "visible_rows": ["hub-a|shared/same"], "folded": false},
+        ],
+        "unread_shown": ["hub-b|shared/same"],
+    })
+}
+
+#[test]
+fn selected_hub_scopes_counts_groups_and_unread_match_ios() {
+    let input = hub_selection_input(true, "=hub-a", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("selected hub projection");
+    // HubFilter.matches("=hub-a", group) admits only hub-a before any of these outputs are derived.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 0, "working": 1, "unread": 0, "backgroundWaiting": 0},
+            "groups": [
+                {"id": "state/working", "title": "工作中", "rows": ["hub-a|shared/same"], "visible_rows": ["hub-a|shared/same"], "folded": false},
+            ],
+            "unread_shown": [],
+        }),
+        "the selected non-default hub retains its full path without admitting the default or hub-b rows"
+    );
+}
+
+#[test]
+fn selected_hub_filter_precedes_quick_filter_match_ios() {
+    let input = hub_selection_input(true, "=hub-a", "unread");
+    let actual =
+        serde_json::to_value(persona_core::sort::project(&input)).expect("selected hub quick-filter projection");
+    // iOS counts the selected hub's base first, then applies Unread. hub-b's matching unread row is already absent.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 0, "working": 1, "unread": 0, "backgroundWaiting": 0},
+            "groups": [],
+            "unread_shown": [],
+        }),
+        "another hub's unread session must not satisfy the selected hub's quick filter"
+    );
+}
+
+#[test]
+fn empty_hub_filter_selects_all_hubs_with_distinct_full_paths() {
+    let input = hub_selection_input(true, "", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("all-hubs projection");
+    assert_eq!(
+        actual,
+        all_hubs_projection_expectation(),
+        "the empty HubFilter selects every group and identical short IDs remain distinct by full path"
+    );
+}
+
+#[test]
+fn default_hub_filter_selects_only_the_empty_group() {
+    let input = hub_selection_input(true, "=", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("default hub projection");
+    // HubFilter.value("") is "=", which selects the default empty group rather than every group.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 1, "working": 0, "unread": 0, "backgroundWaiting": 0},
+            "groups": [
+                {"id": "state/needs", "title": "需要你", "rows": ["shared/default"], "visible_rows": ["shared/default"], "folded": false},
+            ],
+            "unread_shown": [],
+        })
+    );
+}
+
+#[test]
+fn legacy_multi_hub_false_ignores_hub_filter() {
+    let input = hub_selection_input(false, "=hub-a", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("legacy multi-hub projection");
+    assert_eq!(
+        actual,
+        all_hubs_projection_expectation(),
+        "without multiHub, iOS does not apply HubFilter even when a selected value is present"
+    );
+}
+
 #[test]
 fn awaiting_reply_is_not_folded_like_plain_idle() {
     let document: Value =

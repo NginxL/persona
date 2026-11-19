@@ -1,6 +1,7 @@
 package persona.feature.assistant
 
 import persona.core.contracts.Session
+import persona.feature.chat.ChatLinkContext
 import persona.core.contracts.api.AssistantSnapshot
 import persona.core.contracts.Direction
 import persona.core.contracts.DirectionCounts
@@ -24,6 +25,18 @@ class AssistantTest {
     private val resources get() = ApplicationProvider.getApplicationContext<android.content.Context>().resources
     private val words get() = ConversationWords(resources.getString(R.string.assistant_untitled),
         resources.getString(R.string.assistant_handoff), resources.getString(R.string.assistant_handoff_named))
+
+    /** A failed send puts back the forwards it carried, once: one the outbox already took stays taken. */
+    @Test fun aFailedSendPutsItsForwardsBackOnce() {
+        fun ref(id: String) = persona.feature.chat.ChatLinkContext(kind = "forward", title = "Persona", url = "", text = id, id = id)
+        val one = ref("one")
+        val two = ref("two")
+        assertEquals(listOf(one, two), restoreForwards(listOf(one, two), emptyList()))
+        // Already over the composer (a retry): no second copy; what still shows comes first.
+        assertEquals(listOf(two, one), restoreForwards(listOf(two), listOf(one)))
+        // One the outbox took stays out of the restored list.
+        assertEquals(listOf(one), restoreForwards(listOf(one), listOf(one).filterNot { it.id == "one" }))
+    }
 
     @Test fun searchFindsEveryChatAndKeepsTheMainOneOnce() {
         val main = Session(machineId = "demo", sessionId = "main", title = "主对话")
@@ -92,6 +105,10 @@ class AssistantTest {
         val escaped = Session(machineId = "m", sessionId = "z", title = "<persona-context kind=\"context\" title=\"飞书 · a&quot;b &lt;c&gt; &amp;amp;\" url=\"\">")
         assertEquals("交给 Persona：飞书 · a\"b <c> &amp;", escaped.conversationTitle(words))
         assertEquals("早报", Session(machineId = "m", sessionId = "y", title = "早报").conversationTitle(words))
+        // A forwarded message (#3901) is named by its own heading, not as a hand-off.
+        val forwarded = Session(machineId = "m", sessionId = "f",
+            title = "<persona-context kind=\"forward\" title=\"转发自 Claude · 博客迁移到 Astro\" url=\"persona://session/mbp/s1?at=a%231\">")
+        assertEquals("转发自 Claude · 博客迁移到 Astro", forwarded.conversationTitle(words))
         // No title on the tag, or an empty one: still a hand-off, not the raw tag.
         assertEquals("交给 Persona", Session(machineId = "m", sessionId = "a", title = "<persona-context kind=\"context\">").conversationTitle(words))
         assertEquals("交给 Persona", Session(machineId = "m", sessionId = "b", title = "<persona-context title=\"\" url=\"\">").conversationTitle(words))
@@ -234,6 +251,12 @@ class AssistantTest {
         // The task chat would be the newest one: it still leaves Recent, and the next eligible chat takes its place.
         val taskFirst = AssistantSnapshot(main.key, listOf(main, chat("task", 1, "task"), chat("mine", 2, "user"), chat("inbox", 3, "inbox")))
         assertEquals(listOf("mine", "inbox"), recentConversations(taskFirst).map { it.sessionId })
+        assertEquals("the field being absent and false keeps today's list", recentConversations(taskFirst), recentConversations(taskFirst.copy(recentTaskChats = false)))
+        assertEquals("opting in brings the task chat back by activity", listOf("task", "mine", "inbox"),
+            recentConversations(taskFirst.copy(recentTaskChats = true)).map { it.sessionId })
+        assertEquals("the background supervisor follows the same opt-in", listOf("background", "mine"),
+            recentConversations(AssistantSnapshot(main.key, listOf(main, chat("background", 0, "task"), chat("mine", 1, "user")),
+                backgroundSupervisor = "background", recentTaskChats = true)).map { it.sessionId })
         assertEquals("ending the leader lets it back in", "lead", recentConversations(snapshot.copy(leaders = emptyList())).first().sessionId)
         val groups = conversationGroups(snapshot, "", words)
         assertEquals(listOf("ext", "future", "inbox", "lark", "spawned"), groups.recent.map { it.sessionId })
@@ -250,5 +273,15 @@ class AssistantTest {
         assertEquals(AssistantConversationOrigin.entries.toList(), origins.map { automaticConversationOrigin(it) })
         assertEquals(listOf("收件箱", "定时任务", "来自 飞书 /agent", "对话派生", "来自扩展", "其他"),
             AssistantConversationOrigin.entries.map { it.accessibilityLabel(resources) })
+    }
+    /** A forward goes back over the composer after a send that never reached the outbox, and never twice. */
+    @Test fun aForwardThatNeverReachedTheOutboxGoesBackOnce() {
+        val a = ChatLinkContext("forward", "A", "", "a")
+        val b = ChatLinkContext("forward", "B", "", "b")
+        assertEquals(listOf(a, b), restoreForwards(listOf(a, b), emptyList()))
+        // One the outbox already took is not placed again.
+        assertEquals(listOf(a, b), restoreForwards(listOf(a), listOf(a, b)))
+        // What went first stands first.
+        assertEquals(listOf(a, b), restoreForwards(listOf(a), listOf(b)))
     }
 }

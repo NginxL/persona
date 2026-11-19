@@ -178,6 +178,14 @@ EOF
 - `Fixes #N` / `Closes #N`: GitHub closes the issue automatically after merging. `Refs #N`: links without closing (an issue split into several PRs, or only partly fixed).
 - PR titles and bodies are in English (after a squash merge they are the commit on `main`); issues and comments are also in English.
 
+## Merging main: union-merged lists and generated files
+
+`.gitattributes` tells git how to merge two kinds of file that many open PRs change at once. `scripts/test/test_gitattributes.py` keeps its lines true.
+
+- **Union-merged lists** (`merge=union`), such as `server/internal/hub/testdata/route_scopes.txt`: one entry a line, and a test compares the entries exactly (`route_scopes.txt` byte for byte). When your branch and `main` both add lines, git keeps both sides' lines and reports no conflict, but it doesn't sort them, drop a duplicate or notice a line one side deleted. So after merging `main`, rerun the test named in the `# guarded by` comment above the file's line in `.gitattributes`, and fix or regenerate the list when it fails (for the routes, `PERSONA_UPDATE_ROUTE_SCOPES=1 go test ./internal/hub -run TestRouteScopes` in `server/`). In the hand-edited hub allowlists the tests catch a comment line only when it appears twice word for word, so also look for a comment one side reworded that kept its old wording next to the new one. A list joins only when such a test exists. Lists that only shrink stay out, since a union of two neighboring deletions brings both lines back.
+- **Only local merges use `merge=union`**: git applies it when you merge `main` into your branch or rebase on your machine. GitHub's own merge and conflict check ignore it, and so do the **Update branch** button and the web conflict editor, so the PR still shows the conflict. Merge `main` on your machine, rerun the guarding test and push.
+- **Generated files** (`linguist-generated=true`), such as `sdk/go/wire/wire_gen.go`: GitHub folds their diffs, and `.gitattributes` names each one's generator. Only files a generator in this repository writes from the checkout alone are marked. Resolve a conflict in one by regenerating, never by hand: take either side (`git checkout --theirs <file>`), finish merging the sources it is generated from, rerun the generator (for the wire types `python3 scripts/gen/extension_schema.py`) and commit what it writes. Golden files that tests rewrite stay unmarked, since a reviewer reads their diff.
+
 ## Screenshots in PRs
 
 Screenshots taken to review a change (light and dark, before and after, UI test captures) belong to the PR, not to the repository:

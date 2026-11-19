@@ -200,6 +200,63 @@ func TestStandingAuthorizationStaleApprovalCannotRestoreRevocation(t *testing.T)
 	}
 }
 
+func TestStandingAuthorizationConflictReportsDefinitelyNotApplied(t *testing.T) {
+	ctx := context.Background()
+	s := newServiceOn(t, newFakeHub().withMachine(), taskRecoveryDatabase(t))
+	first, err := s.setStandingAuthorizations(ctx, standingJSON(t, StandingAuthorizations{Authorizations: []StandingAuthorization{standingRegistryGrant()}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.apply(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.standingAuthorizations(ctx)
+	next := standingRegistryGrant()
+	next.Directory = "/code/another"
+	pending := before
+	pending.Authorizations = append(append([]StandingAuthorization(nil), before.Authorizations...), next)
+	var setting ownSetting
+	for _, o := range s.ownSettings() {
+		if o.Key == standingAuthorizationsKey {
+			setting = o
+		}
+	}
+	done := make(chan struct {
+		text string
+		err  error
+	}, 1)
+	go func() {
+		text, err := s.ownSettingAction(ctx, ToolCall{MachineID: "server", SessionID: "main-1"}, setting, "set", standingJSON(t, pending))
+		done <- struct {
+			text string
+			err  error
+		}{text, err}
+	}()
+	card, ok := awaitCard(s)
+	if !ok {
+		t.Fatal("the standing authorization change did not wait for approval")
+	}
+	if w := serve(s, "DELETE", "/api/v1/assistant/standing-authorizations/"+before.Authorizations[0].ID, ""); w.Code != 200 {
+		t.Fatalf("revoke while the card waits: %d %s", w.Code, w.Body)
+	}
+	allow := true
+	if _, err := s.Action(ctx, Action{Op: "answer", InteractionID: card.ID, Answer: standingJSON(t, proto.Resolution{Allow: &allow})}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || !strings.Contains(got.text, "Nothing was applied") || strings.Contains(got.text, "uncertain") {
+			t.Fatalf("stale standing authorization outcome = %q, %v", got.text, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stale standing authorization approval did not finish")
+	}
+	list, _ := s.standingAuthorizations(ctx)
+	if len(list.Authorizations) != 0 || list.Revision != 2 {
+		t.Fatalf("stale approval restored a revoked grant: %+v", list)
+	}
+}
+
 func TestStandingAuthorizationRejectsBroadOrMutatedGrants(t *testing.T) {
 	for _, dir := range []string{"/", "/code", "~/code/example", "relative/path", "/code/*", "/code/app/../other", "/code/example/"} {
 		grant := standingRegistryGrant()

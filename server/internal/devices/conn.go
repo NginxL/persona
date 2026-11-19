@@ -89,8 +89,11 @@ func (m *Machine) run(ctx context.Context) {
 		next := m.takeNext()
 		planned := next != nil
 		lasted := time.Since(start)
-		m.d.logf("[%s] connection ended: via=%s lasted=%s planned=%t restarting=%t reason=%q", m.cfg.ID, conn.via,
-			lasted.Round(time.Second), planned, conn.restarting.Load(), dropReason(err))
+		m.d.logf("[%s] connection ended: via=%s lasted=%s planned=%t restarting=%t reason=%q %s", m.cfg.ID, conn.via,
+			lasted.Round(time.Second), planned, conn.restarting.Load(), dropReason(err), conn.peer.LaneStats())
+		if errors.Is(err, rpc.ErrFrame) {
+			m.noteFrameFailure(err)
+		}
 		m.d.pathEnded(conn.path, true, err, lasted, planned || conn.restarting.Load())
 		conn.close()
 		m.eventRetire.Lock()
@@ -250,6 +253,9 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 		return nil, err
 	}
 	peer := rpc.New("h", l.w)
+	// Lanes are asked for below, once node.info says the node has them; until then (and with an older node for good)
+	// the connection is JSON lines.
+	peer.EnableLanes(nodeproto.ControlLane, nodeproto.BulkLane)
 	// Stop these operations on the node when the manager stops waiting (an older node ignores it).
 	peer.Cancels = map[string]bool{
 		proto.MethodModelHTTP:    true,
@@ -301,6 +307,13 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 		}
 		m.onEvent(event, params)
 	}
+	// The node's answer to rpc.lanes can come after the wait for it ran out: the switch happens then, said here.
+	var lanesLate atomic.Int32 // 1: the wait ran out; 2: said
+	peer.OnLanes = func() {
+		if lanesLate.CompareAndSwap(1, 2) {
+			m.d.logf("[%s] lanes over %s: on after all (the node's answer came after the wait)", m.cfg.ID, via)
+		}
+	}
 	go func() { c.served <- peer.Serve(cctx, l.r) }()
 
 	ictx, icancel := context.WithTimeout(cctx, wait)
@@ -308,6 +321,26 @@ func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string,
 	err = m.useEngine(ictx, peer)
 	if !handshakeInterrupted(err) {
 		err = peer.Call(ictx, "node.info", map[string]any{}, &c.info)
+	}
+	if off := m.lanesOff(); err == nil && nodeHas(c.info, nodeproto.NodeLanes) && !off.IsZero() {
+		m.d.logf("[%s] lanes over %s: not asked until %s (frames broke this computer's connections)", m.cfg.ID, via, off.Format(time.TimeOnly))
+	} else if err == nil && nodeHas(c.info, nodeproto.NodeLanes) {
+		// Before anything else goes out, so nothing large is on its way while the two sides switch, and within a wait of
+		// its own: the handshake is done. A refusal leaves lines, the connection working as with an older node; an
+		// answer later than the wait still switches both sides when it comes (OnLanes above says so).
+		lctx, lcancel := context.WithTimeout(ictx, lanesWait)
+		if lerr := peer.UpgradeLanes(lctx); lerr != nil {
+			if lctx.Err() != nil {
+				lanesLate.Store(1)
+				m.d.logf("[%s] lanes over %s: %v (lines unless the node's answer still comes)", m.cfg.ID, via, lerr)
+				if peer.Framed() && lanesLate.CompareAndSwap(1, 2) {
+					m.d.logf("[%s] lanes over %s: on after all (the node's answer came after the wait)", m.cfg.ID, via)
+				}
+			} else {
+				m.d.logf("[%s] lanes over %s: %v (staying with lines)", m.cfg.ID, via, lerr)
+			}
+		}
+		lcancel()
 	}
 	icancel()
 	if err != nil {
@@ -376,7 +409,7 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	if trigger == "" {
 		trigger = "first"
 	}
-	m.d.logf("[%s] connected over %s: %s %s/%s herdr %s claude %s (trigger: %s)", m.cfg.ID, where, info.Hostname, info.OS, info.Arch, info.HerdrVersion, info.ClaudeVersion, trigger)
+	m.d.logf("[%s] connected over %s: %s %s/%s herdr %s claude %s (trigger: %s) lanes=%s", m.cfg.ID, where, info.Hostname, info.OS, info.Arch, info.HerdrVersion, info.ClaudeVersion, trigger, onOff(c.peer.Framed()))
 	m.tellLinks(true, "")
 	compat := compatOf(info)
 	if compat.Incompatible != "" {
@@ -589,6 +622,58 @@ func (m *Machine) watchPaths(ctx, runCtx context.Context, c *nodeConn) {
 		c.peer.Close(errSwitched)
 		return
 	}
+}
+
+// lanesWait bounds the wait for the node's answer to rpc.lanes.
+var lanesWait = 10 * time.Second
+
+// A computer whose framed connections end on malformed frames (rpc.ErrFrame) lanesFailLimit times in lanesFailWithin
+// is not asked for lanes for lanesOffFor: something between the two ends changes the bytes, and with lines that
+// computer at least stays connected. Vars so tests change them.
+var (
+	lanesFailLimit  = 3
+	lanesFailWithin = 10 * time.Minute
+	lanesOffFor     = time.Hour
+)
+
+// noteFrameFailure counts a connection that ended on frames, and turns lanes off for the computer once there are
+// lanesFailLimit of them close together.
+func (m *Machine) noteFrameFailure(err error) {
+	now := time.Now()
+	m.mu.Lock()
+	recent := m.frameFails[:0]
+	for _, at := range m.frameFails {
+		if now.Sub(at) < lanesFailWithin {
+			recent = append(recent, at)
+		}
+	}
+	m.frameFails = append(recent, now)
+	off := len(m.frameFails) >= lanesFailLimit
+	if off {
+		m.lanesOffUntil, m.frameFails = now.Add(lanesOffFor), nil
+	}
+	m.mu.Unlock()
+	if off {
+		m.d.logf("[%s] %d connections in %s ended on malformed frames (last: %v): lanes off for %s", m.cfg.ID, lanesFailLimit,
+			lanesFailWithin, oneLineErr(err), lanesOffFor)
+	}
+}
+
+// lanesOff is until when lanes are not asked for; zero when they are.
+func (m *Machine) lanesOff() time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if time.Now().Before(m.lanesOffUntil) {
+		return m.lanesOffUntil
+	}
+	return time.Time{}
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 func pathName(d *Devices, p *nodePath) string {

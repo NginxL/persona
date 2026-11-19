@@ -8,7 +8,7 @@
   "choose": "为「{title}」选「{option}」",
   "choose_recommended": "为「{title}」选推荐的「{option}」",
   "another": "其他…",
-  "another_row": "打开「{title}」用别的方式回答",
+  "another_row": "用自己的话回答「{title}」",
   "more": "更多回答",
   "decide_yourself": "你来定",
   "decide_yourself_detail": "Persona 自己决定，并记下它的假设。",

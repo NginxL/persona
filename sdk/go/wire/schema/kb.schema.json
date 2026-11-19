@@ -101,8 +101,9 @@
         "tags": {"type": "array", "items": {"type": "string"}},
         "updated": {"type": "string", "format": "date-time"},
         "extra": {"type": "string", "description": "A project's short / long · status, a chat's dm / group…"},
-        "source": {"type": "string", "description": "A chat's source (lark, mail, wechat, github…)."},
-        "recording_kind": {"type": "string", "description": "A recording's kind: meeting, note or day (#8870); absent on other kinds and from an older hub."}
+        "source": {"type": "string", "description": "A chat's source (lark, mail, wechat, github…); a document's, meeting's or event's connector (#8872)."},
+        "recording_kind": {"type": "string", "description": "A recording's kind: meeting, note or day (#8870); absent on other kinds and from an older hub."},
+        "meeting_id": {"type": "string", "description": "A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872); absent on other kinds, before a match and from an older hub."}
       },
       "required": ["kind", "id", "name", "relevance", "updated"]
     },
@@ -157,6 +158,7 @@
         "log": {"type": "array", "items": {"type": "string"}},
         "recent": {"type": "string"},
         "links": {"type": "array", "items": {"$ref": "#/$defs/KBEntry"}},
+        "removed": {"type": "array", "items": {"$ref": "#/$defs/KBEntry"}, "description": "The links the user removed by hand (meta's excluded), named as links are; automatic organizing and extensions leave them out until the user links them again (docs/assistant/knowledge.md \"Removed links\")."},
         "moments": {"type": "array", "items": {"$ref": "#/$defs/KBMomentRef"}},
         "segments": {"type": "array", "items": {"$ref": "#/$defs/KBRecordingSegment"}},
         "minutes": {"description": "A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them."},
@@ -367,7 +369,7 @@
       "properties": {
         "id": {"type": "string"},
         "before": {"type": "object", "additionalProperties": {}, "description": "The previous value of each field written (null when unset; summary is the old text, profile this extension's own profile before), for the extension's own undo."},
-        "ignored": {"type": "array", "items": {"$ref": "#/$defs/KBIgnoredField"}, "description": "Fields the update carried that its kind does not use (a person's summary and log, for one): not applied, each with why."}
+        "ignored": {"type": "array", "items": {"$ref": "#/$defs/KBIgnoredField"}, "description": "Fields the update carried that its kind does not use (a person's summary and log, for one), and links to make that the user removed: not applied, each with why."}
       },
       "required": ["id"]
     },

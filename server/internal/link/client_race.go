@@ -120,10 +120,15 @@ func kindText(l i18n.Lang, kind string) string {
 		return i18n.T(l, "link-errors.kind_ipv4")
 	case KindSSH:
 		return "SSH"
+	case KindProxy:
+		return i18n.T(l, "link-errors.kind_proxy")
 	default:
 		return i18n.T(l, "link-errors.kind_address")
 	}
 }
+
+// textKinds are the kinds kindText names ("other" for the rest).
+var textKinds = []string{"lan", "ipv6", "name", "ipv4", KindSSH, KindProxy, "other"}
 
 // summary says in one line why the link failed, in the canonical language saved for other processes.
 func summary(err error) string { return summaryText(i18n.Default, err) }
@@ -163,7 +168,10 @@ func describe(err error) string { return describeText(i18n.Default, err) }
 func describeText(l i18n.Lang, err error) string {
 	var he *httpError
 	var ne net.Error
+	var pe *proxyError
 	switch {
+	case errors.As(err, &pe): // before the network's words: the proxy, not the hub, failed
+		return pe.Text(l)
 	case errors.As(err, &he):
 		return i18n.T(l, "link-errors.http_response", i18n.Args{"error": he.Error()})
 	case errors.Is(err, errPin):
@@ -197,6 +205,12 @@ var statusTemplateKeys = []string{
 	"link-errors.node_how_linux",
 	"link-errors.node_how_other",
 	"link-errors.pin_mismatch",
+	"link-errors.proxy_invalid",
+	"link-errors.proxy_unreachable",
+	"link-errors.proxy_tls_failed",
+	"link-errors.proxy_tls_handshake",
+	"link-errors.proxy_connect_failed",
+	"link-errors.proxy_rejected",
 	"link-errors.manual_reconnect",
 	"link-errors.repaired",
 	"link-errors.direct_ready",
@@ -270,7 +284,7 @@ type statusTemplate struct {
 
 var statusTemplates = sync.OnceValue(func() []statusTemplate {
 	kinds := []string{}
-	for _, kind := range []string{"lan", "ipv6", "name", "ipv4", KindSSH, "other"} {
+	for _, kind := range textKinds {
 		kinds = append(kinds, regexp.QuoteMeta(kindText(i18n.Default, kind)))
 	}
 	out := []statusTemplate{}
@@ -414,7 +428,7 @@ func listenErrorText(l i18n.Lang, text string) (string, bool) {
 }
 
 func localizedKindName(l i18n.Lang, canonical string) string {
-	for _, kind := range []string{"lan", "ipv6", "name", "ipv4", KindSSH, "other"} {
+	for _, kind := range textKinds {
 		if canonical == kindText(i18n.Default, kind) {
 			return kindText(l, kind)
 		}

@@ -85,6 +85,11 @@ func (s *Service) retryAcceptance(now time.Time) {
 			b.mu.Unlock()
 			continue
 		}
+		if ok && ownerDecisionReturned(t.Supervision) {
+			// The stored round stays as facts for the supervisor, but no new card goes out until it is re-issued.
+			b.mu.Unlock()
+			continue
+		}
 		if !ok || acceptAskEnded(a, t) || acceptAskStale(a, t) {
 			// The todo is gone, it ended without the hub's auto-judge, or the ask is from before its latest reopen: it
 			// can never be passed, so its card is not posted and the ask is dropped (as remindAcceptance does).
@@ -277,6 +282,9 @@ func (s *Service) snapshotUnaccepted(ctx context.Context, loc *time.Location) ([
 		}
 		if !ok {
 			continue
+		}
+		if !x.a.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision) {
+			continue // back with the supervisor: keep the stored facts, but do not present them to the owner again
 		}
 		if acceptAskEnded(&x.a, t) || acceptAskStale(&x.a, t) {
 			ended = append(ended, x) // closed by the owner or a review, or asked before the todo's latest reopen

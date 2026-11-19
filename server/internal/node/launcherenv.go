@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -59,6 +60,9 @@ func envClearFor(l proto.ManagedLauncher) []string {
 				clear = append(clear, k)
 			}
 		}
+	}
+	if l.AgentType() == "codex" && !slices.Contains(clear, openCodeSessionEnv) {
+		clear = append(clear, openCodeSessionEnv)
 	}
 	return clear
 }
@@ -258,14 +262,136 @@ func isTierAlias(m string) bool {
 }
 
 // resolveTier is m with a tier alias (opus, sonnet, haiku, fable) replaced by the model its tier variable names (get),
-// when that is no alias itself; otherwise m.
+// when that is no alias itself; otherwise m. An alias asked for with [1m] keeps it (withMarker), as Claude Code
+// resolves one.
 func resolveTier(m string, get func(string) string) string {
 	if k, ok := tierAliasVars[strings.ToLower(strings.TrimSuffix(m, oneMillionSuffix))]; ok {
 		if v := get(k); v != "" && !isTierAlias(v) {
-			return v
+			return withMarker(m, v)
 		}
 	}
 	return m
+}
+
+// withMarker is model, the one a tier alias asked for (alias) stands for, with alias's [1m] when it has none: Claude
+// Code runs `opus[1m]` as its Opus tier's model with the 1M window, whatever window that model is declared with, and
+// a mapped --model without it would run in 200K (#10365).
+func withMarker(alias, model string) string {
+	if strings.HasSuffix(alias, oneMillionSuffix) && model != "" && !strings.HasSuffix(model, oneMillionSuffix) {
+		return model + oneMillionSuffix
+	}
+	return model
+}
+
+// managedBaseURL is the Base URL claude runs provider l against: the one its own environment sets, else the stored one
+// (LaunchBaseURL); "" is Anthropic's own API.
+func managedBaseURL(l proto.ManagedLauncher) string {
+	base := l.LaunchBaseURL()
+	for _, kv := range launcherEnvVars(l.Env) {
+		if kv[0] == "ANTHROPIC_BASE_URL" {
+			base = kv[1]
+		}
+	}
+	return base
+}
+
+// anthropicEndpoint: base, an ANTHROPIC_BASE_URL ("" none), is Anthropic's own API, as Claude Code tells it (the host
+// api.anthropic.com, proto.AnthropicAPI). Anything else is a gateway, a relay or another vendor.
+func anthropicEndpoint(base string) bool {
+	return strings.TrimSpace(base) == "" || proto.AnthropicAPI(base)
+}
+
+// tierAliasFields are the provider's own field for each tier alias (#10365): opus, best and opusplan run the Opus
+// tier, haiku the Haiku one (else the small model, as providerEnv's Haiku tier), default and inherit none.
+func tierAliasFields(l proto.ManagedLauncher, alias string) []string {
+	switch strings.ToLower(strings.TrimSuffix(alias, oneMillionSuffix)) {
+	case "opus", "best", "opusplan":
+		return []string{l.OpusModel}
+	case "sonnet":
+		return []string{l.SonnetModel}
+	case "haiku":
+		return []string{l.HaikuModel, l.SmallModel}
+	case "fable":
+		return []string{l.FableModel}
+	}
+	return nil
+}
+
+// providerAliasModel is m for provider l behind a gateway (#10365): a model ID as it is; a tier alias (opus, sonnet…),
+// which Claude Code would send to the gateway as the model's name once its tier variable holds no ID, is the
+// provider's model for that tier, else its default model, else "" (none: the variables stay unset), with the alias's
+// [1m] (withMarker). A field that holds an alias itself counts as empty; default and inherit are the provider's default
+// model.
+func providerAliasModel(l proto.ManagedLauncher, m string) string {
+	if !isTierAlias(m) {
+		return m
+	}
+	for _, f := range append(tierAliasFields(l, m), l.Model) {
+		if f != "" && !isTierAlias(f) {
+			return withMarker(m, f)
+		}
+	}
+	return ""
+}
+
+// tierModelVars are the variables Claude Code sends as a model's name without resolving them again (a tier's
+// model), then those it resolves a tier alias in through them: the order withoutTierAliases mends them in.
+var tierModelVars = []string{"ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"}
+
+// withoutTierAliases mends env, a gateway provider's, where its own environment named a model variable by a tier
+// alias (#10365): the alias's model through the tier variables, else what providerEnv worked out (ours), else unset.
+// Claude Code 2.1.291 sends a tier variable's value as the model's name (ANTHROPIC_DEFAULT_OPUS_MODEL=opus asks the
+// gateway for "opus", which answers 404).
+func withoutTierAliases(env, ours map[string]string) {
+	for _, k := range tierModelVars {
+		v, ok := env[k]
+		if !ok || !isTierAlias(v) {
+			continue
+		}
+		switch r := resolveTier(v, func(t string) string { return env[t] }); {
+		case !isTierAlias(r):
+			env[k] = r
+		case ours[k] != "" && !isTierAlias(ours[k]):
+			env[k] = ours[k]
+		default:
+			delete(env, k)
+		}
+	}
+}
+
+// providerModelArg is the --model a claude start of provider l passes for model (#10365): model as it is, but behind a
+// gateway a tier alias is the model the provider's environment gives that tier (resolveTier; opusplan the Opus tier's,
+// as providerEnv reads it), or "" (no --model: the provider's default) when it gives none, default and inherit
+// included. Anthropic's own API keeps the alias: Claude Code resolves it to a model that API serves.
+func providerModelArg(l proto.ManagedLauncher, model string) string {
+	if !isTierAlias(model) || l.AgentType() != "claude" || anthropicEndpoint(managedBaseURL(l)) {
+		return model
+	}
+	env := providerEnv(l, "", "", false)
+	if r := resolveTier(planTier(model), func(k string) string { return env[k] }); !isTierAlias(r) {
+		return r
+	}
+	return ""
+}
+
+// planTier is m with opusplan (Opus in plan mode, Sonnet otherwise) read as the Opus tier, [1m] kept: a gateway
+// provider's process runs one model for it (providerAliasModel).
+func planTier(m string) string {
+	if strings.EqualFold(strings.TrimSuffix(m, oneMillionSuffix), "opusplan") {
+		return withMarker(m, "opus")
+	}
+	return m
+}
+
+// claudeModelArg is providerModelArg for launcher by name: the --model every claude start passes (an assistant
+// conversation, a terminal Agent, a check, a typed /model). A launcher Persona does not manage (plain claude, a shell
+// launcher) keeps model as it is: its own environment resolves the alias.
+func (n *Node) claudeModelArg(launcher, model string) string {
+	if l, ok := n.managedLauncher(launcher); ok {
+		return providerModelArg(l, model)
+	}
+	return model
 }
 
 // outputTokens is CLAUDE_CODE_MAX_OUTPUT_TOKENS for a process with env's models (#8798), limit giving what a model
@@ -511,15 +637,7 @@ func providerShaped(l proto.ManagedLauncher) bool {
 func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation bool) map[string]string {
 	// The provider's own environment replaces the endpoint below: fallback policy belongs to that effective gateway,
 	// not the stored one. An empty override means the official default, not a custom gateway with no models declared.
-	effectiveBaseURL := l.LaunchBaseURL()
-	for _, kv := range launcherEnvVars(l.Env) {
-		if kv[0] == "ANTHROPIC_BASE_URL" {
-			effectiveBaseURL = kv[1]
-		}
-	}
-	if effectiveBaseURL == "" {
-		effectiveBaseURL = "https://" + proto.AnthropicAPIHost
-	}
+	gateway := !anthropicEndpoint(managedBaseURL(l))
 	// Claude Code adds /v1/messages: a provider stored with a trailing /v1, from a hub before it dropped it, would
 	// otherwise call /v1/v1/messages though Test connection passed.
 	env := map[string]string{"ANTHROPIC_BASE_URL": l.LaunchBaseURL()}
@@ -531,7 +649,7 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 		// (#7319). Off when the launcher's model list shows the gateway lacks one: the turn then ends on its refusal,
 		// which the assistant's recovery reads (assistant_recovery.go). A launcher that declares no list, or one with
 		// them all, keeps Claude Code's fallback; the launcher's own environment, applied below, wins either way.
-		if !proto.AnthropicAPI(effectiveBaseURL) && lacksRefusalFallback(l) {
+		if gateway && lacksRefusalFallback(l) {
 			env["CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK"] = "1"
 		}
 	} else if l.TimeoutMS > 0 {
@@ -550,12 +668,18 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 		}
 	}
 	m := cmp.Or(model, l.Model)
+	if gateway {
+		m = providerAliasModel(l, m) // a tier alias is the provider's own model for it, or none (#10365)
+	}
 	pm, _ := providerModel(l, m)
 	run := sdkModel(m, pm)
 	// A tier, the small model or the subagent model set explicitly runs by its own window, else as the session's model.
+	// Behind a gateway a tier alias in one of them counts as unset: Claude Code would send it as the model's name.
 	tier := func(explicit ...string) string {
-		if e := cmp.Or(explicit...); e != "" {
-			return tierModel(l, e)
+		for _, e := range explicit {
+			if e != "" && !(gateway && isTierAlias(e)) {
+				return tierModel(l, e)
+			}
 		}
 		return run
 	}
@@ -585,7 +709,22 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 	// Claude Code puts CLAUDE_CODE_EFFORT_LEVEL above --effort and /effort, which would override the caller's
 	// choice and lock the session's effort control (#2307). A default effort goes to the command line (--effort)
 	// instead, and the environment variable is set only when the provider's own env sets it explicitly.
-	set("ANTHROPIC_CUSTOM_HEADERS", l.Headers)
+	baseURL := l.LaunchBaseURL()
+	for _, kv := range launcherEnvVars(l.Env) {
+		if kv[0] == "ANTHROPIC_BASE_URL" {
+			baseURL = kv[1]
+		}
+	}
+	headers := l.Headers
+	if modelhttp.OpenCodeGo(baseURL) && !modelhttp.HasOpenCodeSessionHeader(headers) {
+		line := modelhttp.OpenCodeSessionHeader + ": " + modelhttp.OpenCodeSessionID("launcher:"+cmp.Or(l.Name, baseURL))
+		if strings.TrimSpace(headers) == "" {
+			headers = line
+		} else {
+			headers = strings.TrimRight(headers, "\n") + "\n" + line
+		}
+	}
+	set("ANTHROPIC_CUSTOM_HEADERS", headers)
 	// Both spellings: Node's fetch reads the lower-case one first, so an upper-case value alone would lose to a lower-case
 	// one in the user's settings env.
 	if l.Proxy != "" {
@@ -607,6 +746,15 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 	}
 	k, v, _ := strings.Cut(artifactsOff, "=")
 	env[k] = v
+	// Claude Code keeps tool search off behind a Base URL that is not Anthropic's API, but any ENABLE_TOOL_SEARCH
+	// value lifts that rule, and the assistant's own processes carry one: deferred tools, tool_reference blocks and
+	// the ToolSearch tool then reach a gateway that may not represent them (400, #10365). Off here, every tool loaded
+	// up front; the provider's own environment, applied below, opts in with ENABLE_TOOL_SEARCH=true.
+	var ours map[string]string // what Persona worked out, for a tier alias in the launcher's own environment
+	if gateway {
+		env[toolSearchEnv] = "false"
+		ours = maps.Clone(env)
+	}
 	// The launcher's own environment last: it wins over all of the above (#5953); an empty value sets the variable
 	// empty. A proxy variable goes in both spellings unless both are given, or the shell's other spelling would still
 	// count. Not for an assistant conversation the thinking level, which it switches while it runs.
@@ -625,6 +773,9 @@ func providerEnv(l proto.ManagedLauncher, model, effort string, mainConversation
 				env[o] = kv[1]
 			}
 		}
+	}
+	if gateway {
+		withoutTierAliases(env, ours)
 	}
 	// The reply limit by the models the process ends up with (the launcher's own environment may name one), unless
 	// that environment sets it itself (empty: Claude Code's own limit).

@@ -46,5 +46,15 @@
   "cron_never": "{cron} 永远不会运行：未来 5 年里没有符合的日期。",
   "run_if_approval": "允许在每次定时运行前，在任务电脑上执行此命令吗？",
   "run_if_skipped": "运行前检查要求跳过本次运行。",
-  "run_if_failed": "运行前检查失败：{error}"
+  "run_if_failed": "运行前检查失败：{error}",
+  "todo_no_evidence": "未观察到 Agent 新答复、验收项状态变化或显式进展上报。",
+  "todo_stalled": "{name}：连续 {count} 次定时检查没有可观察的进展。上次运行：{reason}",
+  "todo_decide": "无进展原因：{reason}。换做法，还是继续等？",
+  "todo_unknown": "基线或 Agent 证据无法读取，尚不能判断有无进展。运行小结：{reason}",
+  "todo_save_failed": "无法保存「{name}」的进展，无进展计数和升级提醒可能不完整。错误：{error}",
+  "todo_change": "换做法",
+  "todo_wait": "继续等",
+  "todo_wait_cost": "可能再过一个定时窗口，任务仍没有推进。",
+  "todo_change_result": "请督办在现有授权范围内提出另一种做法。",
+  "todo_wait_result": "保留已经确认的做法，等下一次定时检查。"
 }

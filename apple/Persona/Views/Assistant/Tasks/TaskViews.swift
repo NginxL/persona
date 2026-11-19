@@ -808,15 +808,31 @@ struct MessageCard: View {
 
 /// What the conversation's tasks are asking, at the bottom where the user is: the oldest question under its task's
 /// name, answered where it is; the next comes up when it is done (「还有 N 件」 counts them).
+///
+/// Capped as the cards' stack is (#9392): alone it may take the room a lone question takes (`FooterRoom.cardsRoom`,
+/// never less than half the page), beside the conversation's own cards half of that room, as Android's question does.
+/// Its card fits itself to the cap and scrolls inside. It had no cap: its form's scroll area, offered no height, took all
+/// the page had, the conversation got none (nothing left to scroll) and the card's top, with its fold, went under the
+/// page's top bar.
 struct TaskQuestions: View {
     var conversation: String
+    var room: FooterRoom
     private var store: TasksStore { .shared }
+    @State private var labelHeight: CGFloat = 0
+    @State private var shown: CGFloat = 0
+    /// What the footer holds besides both places of cards, held as `PendingCards.footerRest` is (#1580).
+    @State private var footerRest: CGFloat = 0
+    /// The page's (or column's) length, for the card's form (`cardRoom`).
+    @State private var containerLength: CGFloat = 0
 
     var body: some View {
         let asks = store.tasks(of: conversation)
             .flatMap { todo in store.interactions(todo).map { (todo: todo, ix: $0) } }
             .sorted { ($0.ix.createdAt ?? .distantPast) < ($1.ix.createdAt ?? .distantPast) }
         if let first = asks.first {
+            let cap = cap
+            let keyboard = keyboardRoom
+            let area = cap > 0 ? max(cap - labelHeight - Theme.Space.xs, Theme.Size.tapTarget) : 0
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 HStack(spacing: Theme.Space.s) {
                     Label(first.todo.title, systemImage: Theme.Icon.askFirst).lineLimit(1)
@@ -826,11 +842,47 @@ struct TaskQuestions: View {
                 .font(Theme.Font.captionStrong)
                 .foregroundStyle(AgentState.needsYou.tone.text)
                 .padding(.horizontal, Theme.Space.xs)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                    if abs(h - labelHeight) >= 1 { labelHeight = h }
+                }
                 InteractionPanel(interaction: first.ix)
+                    .environment(\.cardRoom, containerLength)
+                    .environment(\.cardArea, area)
+                    .environment(\.cardFits, keyboard ? area - Theme.Space.l : 0)
+                    // Alone, the cap is its only one (a lone question past half the page, #6277).
+                    .environment(\.cardTakesArea, !sharesRoom)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("task-question")
             .id(first.ix.id)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                shown = h
+                if abs(room.taskShown - h) >= 1 { room.taskShown = h }
+            }
+            .onChange(of: room.footer - shown - room.stackShown, initial: true) { _, o in
+                if abs(o - footerRest) >= 1 { footerRest = o }
+            }
+            .onDisappear { room.taskShown = 0 }
+            .background {
+                Color.clear.containerRelativeFrame(.vertical)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { containerLength = $0 }
+                    .hidden()
+            }
         }
+    }
+
+    private var keyboardRoom: Bool { KeyboardState.shared.isUp && room.footer > 0 }
+    /// The conversation's own cards are on screen under the entries: half the room each (#9392).
+    private var sharesRoom: Bool { room.stackShown > 0 }
+
+    /// How tall the question with its task's name may be; 0 before the page is measured (no cap yet).
+    private var cap: CGFloat {
+        guard room.height > 0, room.footer > 0 else { return 0 }
+        let rest = footerRest > 0 ? footerRest : room.footer - shown - room.stackShown
+        let whole = room.cardsRoom(rest: rest, keyboard: keyboardRoom)
+        if sharesRoom { return max(Theme.Size.tapTarget, whole / 2) }
+        return keyboardRoom ? max(Theme.Size.tapTarget, whole) : max(room.height / 2, whole)
     }
 }
 

@@ -3,6 +3,7 @@ import { currentHeaders, noteItemManager } from "./manager-choice";
 import { acceptanceStands, reviewState, type Supervision } from "./supervision";
 import type { LineageStep, TaskBrief } from "./brief";
 import type { RuleSuggestion } from "./rule-suggestion";
+import type { TodoSummary } from "./todo-view-wire";
 import { api, ApiError, enc } from "./api";
 import { contextBody } from "./context-body";
 import { parseAPIError, retryable } from "./api-errors";
@@ -118,6 +119,13 @@ export interface Todo {
    *  docs/assistant/unified-entry.md "Briefs"); unset for a to-do that is no task, and from hubs before briefs. */
   brief?: TaskBrief;
   lineage?: LineageStep[];
+  /** The owner's latest restore of it, and until when they put it off (Someday; a far date means no date), as the hub
+   *  keeps them (docs/assistant/todos.md "Restores and Someday"); unset when never, and from hubs before them. */
+  restored_at?: string | null;
+  someday_until?: string | null;
+  /** The hub's view of the row (#10226, docs/assistant/todo-status-sop.md "The hub's view"): read only behind
+   *  Developing Persona's switches for now (features/todos/model). Unset from managers without `todo_view`. */
+  view?: TodoSummary;
 }
 
 /** "Nobody is working on this" and why ("closed after an error"), for an open to-do the hub found orphaned; undefined
@@ -431,10 +439,16 @@ export function interruptedAgent(s?: Session): boolean {
   return st === "unread" || st === "idle";
 }
 
+/** The hub's own word on a turn that had no output at all (#10187): `no_output` (the model service answered nothing) or
+ *  `stopped` (Persona's Stop interrupted it with its conversation). Not a model API error: its turn_error is a sentence
+ *  in the user's language, said as it is. */
+const SILENT_TURN_KINDS: ReadonlySet<string> = new Set(["no_output", "stopped"]);
+
 /** Why the model service cut the agent off (#1516), in words, and whether "Continue" can help (a login or a bad request is
- *  not fixed by going on); undefined when it was not cut off. */
+ *  not fixed by going on); undefined when it was not cut off. A turn with no output says the hub's sentence for it. */
 export function interruption(s?: Session): { reason: string; canContinue: boolean } | undefined {
   if (!interruptedAgent(s)) return undefined;
+  if (SILENT_TURN_KINDS.has(s?.turn_error_kind ?? "")) return { reason: s!.turn_error!.trim(), canContinue: true };
   const info = parseAPIError(s?.turn_error);
   return { reason: info?.reason ?? t("lib-todos.model_request_failed"), canContinue: !info || retryable(info) };
 }
@@ -694,20 +708,6 @@ export interface TodoDecision {
   created_at: string;
   /** Completion time for an outcome written by Persona, which may be recorded later. */
   phase_completed_at?: string;
-}
-
-/** Where a decision came from, as the detail page says it: the agent that asked, by its title when known. */
-export function decisionSourceLabel(d: TodoDecision, todo: Todo, lookup: ReturnType<typeof makeSessionLookup>): string {
-  if (d.source === "outcome") return t("lib-todos.decision_outcome");
-  if (d.source === "agent") return t("lib-todos.decision_by_agent");
-  if (d.source === "thread") return t("lib-todos.decision_by_thread");
-  if (d.source !== "card") return t("lib-todos.decision_manual");
-  const title = lookup(d.source_machine, d.source_session)?.title
-    || todo.agents?.find((a) => a.machine_id === d.source_machine && a.session_id === d.source_session)?.title;
-  if (!title) return t("lib-todos.decision_agent_question");
-  // A session's title is often its first message: keep the label to a glance.
-  const short = [...title.trim()].length > 24 ? `${[...title.trim()].slice(0, 24).join("")}…` : title.trim();
-  return t("lib-todos.decision_in_question", { title: short });
 }
 
 /** How a to-do's Decisions list is shown (#6447, docs/assistant/todos.md "Decision records"): the first few, the

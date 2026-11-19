@@ -35,8 +35,9 @@ func (n *Node) statDetail(asked, cwd string) PathStat {
 	if p == "" {
 		return s
 	}
+	p = absPath(p) // its own name spelled out too, not only its folder's (a Windows short name, #9891)
 	// The link itself: its folder through the guard, its own name not followed.
-	dir, err := n.realPath(absPath(filepath.Dir(p)))
+	dir, err := n.realPath(filepath.Dir(p))
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			s.Kind = "denied"

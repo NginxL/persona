@@ -171,6 +171,38 @@ func TestDecodeJSONBodyTooLarge(t *testing.T) {
 	}
 }
 
+func TestOptionalObject(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		message    string
+	}{
+		{"empty", "", http.StatusOK, ""},
+		{"object", `{"x":1}`, http.StatusOK, ""},
+		{"null", "null", http.StatusBadRequest, "request body must be a JSON object"},
+		{"array", "[]", http.StatusBadRequest, ""},
+		{"malformed", "{", http.StatusBadRequest, ""},
+		{"oversized", `{"x":"` + strings.Repeat("x", 64) + `"}`, http.StatusRequestEntityTooLarge, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			p, ok := optionalObject(w, httptest.NewRequest("POST", "/", strings.NewReader(tc.body)), 32)
+			if w.Code != tc.status || ok != (tc.status == http.StatusOK) {
+				t.Fatalf("got %d, ok=%v, body=%s", w.Code, ok, w.Body.String())
+			}
+			if ok && p == nil {
+				t.Fatal("accepted a nil object")
+			}
+			if tc.message != "" && !strings.Contains(w.Body.String(), tc.message) {
+				t.Fatalf("body %s does not contain %q", w.Body.String(), tc.message)
+			}
+			if tc.status == http.StatusRequestEntityTooLarge && !strings.Contains(w.Body.String(), `"code":"too_large"`) {
+				t.Fatalf("missing too_large: %s", w.Body.String())
+			}
+		})
+	}
+}
+
 // The app API handlers that cap their body answer an oversized one with 413 too_large (docs/protocol/protocol.md) after
 // reading about the cap, not 400 with Go's "request body too large"; a small malformed body is still 400.
 func TestAppHandlersBodyLimitTooLarge(t *testing.T) {
@@ -189,6 +221,7 @@ func TestAppHandlersBodyLimitTooLarge(t *testing.T) {
 		{"POST", "/api/v1/sessions/m1/s1/keys", "", 32 << 20},
 		{"POST", "/api/v1/sessions/m1/s1/rename", "", 1 << 20},
 		{"POST", "/api/v1/sessions/m1/s1/rewind", "", rewindMaxPrompt + 4<<10},
+		{"POST", "/api/v1/machines/m1/preview/start", "", 64 << 10},
 		{"POST", "/api/v1/sessions", "", 4 << 20},
 		{"POST", "/api/v1/notify", "", 16 << 10},
 		// (/api/v1/agents/… are the manager's: extmgr TestAgentRoutesBodyLimitTooLarge.)

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"strings"
 	"time"
@@ -55,7 +56,9 @@ func (s *Service) taskTarget(ctx context.Context, t Task, mainLauncher string) (
 }
 
 // readyFor reports whether the run of t can go by the readiness r: false, with the step, when a step that keeps the
-// main conversation from answering is one the run needs too.
+// main conversation from answering is one the run needs too. A step of Claude Code or the model is of its launcher:
+// the main conversation's next turn's, which is its kept pick's when that is on another launcher than Main chat's
+// (readinessTurnLauncher), and a run on another launcher does not wait on it.
 func (s *Service) readyFor(ctx context.Context, t Task, r Readiness) (bool, ReadinessStep) {
 	if r.Mode == ReadinessFull {
 		return true, ReadinessStep{}
@@ -69,7 +72,7 @@ func (s *Service) readyFor(ctx context.Context, t Task, r Readiness) (bool, Read
 		switch {
 		case st.ID == StepComputer && (own || onMain):
 			return false, st // with no computer at all the task's own conversation has nowhere to start
-		case st.ID != StepComputer && onMain && launcher == r.Launcher:
+		case st.ID != StepComputer && onMain && launcher == cmp.Or(st.Launcher, r.Launcher):
 			return false, st
 		}
 	}

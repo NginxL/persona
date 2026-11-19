@@ -348,6 +348,29 @@ class HttpMachineManagementTest {
         machines.setCodexSetting("mac", "model", JsonNull)
         assertEquals("""{"key":"model","value":null}""", (server.takeRequest().body.readUtf8()).zhAny())
     }
+
+    @Test fun agySettingsUseTheirOwnPathAndTheSameBody() = withHub { server, machines ->
+        val table = """{"settings":[{"key":"toolPermission","title":"工具权限","detail":"调用工具前要不要问你","type":"enum",
+            "options":["ask","always-proceed"],"default":"ask","value":"ask"},
+            {"key":"showFeedbackSurvey","type":"bool","default":true,"value":null}]}"""
+        server.enqueue(MockResponse().setBody(table))
+        val read = machines.agySettings("mac")
+        assertEquals("/api/v1/machines/mac/agy-settings", (server.takeRequest().path).zhAny())
+        assertEquals(listOf("ask", ""), (read.map { it.stringValue }).zhAny())
+        assertTrue(read[1].isDefault)
+        assertEquals(listOf("ask", "always-proceed"), (read[0].options).zhAny())
+
+        server.enqueue(MockResponse().setBody(table))
+        machines.setAgySetting("mac", "toolPermission", JsonPrimitive("always-proceed"))
+        server.takeRequest().let {
+            assertEquals("PUT", (it.method).zhAny())
+            assertEquals("/api/v1/machines/mac/agy-settings", (it.path).zhAny())
+            assertEquals("""{"key":"toolPermission","value":"always-proceed"}""", (it.body.readUtf8()).zhAny())
+        }
+        server.enqueue(MockResponse().setBody(table))
+        machines.setAgySetting("mac", "model", JsonNull)
+        assertEquals("""{"key":"model","value":null}""", (server.takeRequest().body.readUtf8()).zhAny())
+    }
 }
 
 class HttpModelConfigurationTest {

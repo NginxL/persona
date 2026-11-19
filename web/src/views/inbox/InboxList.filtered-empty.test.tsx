@@ -47,7 +47,10 @@ let root: Root;
 const flush = async () => {
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 };
-const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+// the list's buttons, not the section bar's choices (its All is a choice of sections, not the chips' All)
+const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button:not([data-bar-choice])")].find((b) => b.textContent?.trim() === text);
+// the section bar opens on Needs you (#9053): these cases are about the whole list, All
+const showAll = () => act(() => host.querySelector<HTMLButtonElement>('[data-bar-choice="all"]')!.click());
 const cleanAll = () => host.querySelector<HTMLButtonElement>("[data-clean-all]")!;
 const rows = () => [...host.querySelectorAll("[data-item]")].map((r) => r.getAttribute("data-item"));
 const typeSearch = async (text: string) => {
@@ -87,6 +90,7 @@ describe("a list emptied by its filters (audit item 15)", () => {
     localStorage.setItem("inbox.kind", "mail");
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     const empty = host.querySelector("[data-inbox-filtered-empty]");
     expect(empty?.textContent).toContain("没有符合筛选的未处理条目");
     expect(host.textContent).not.toContain("都处理完了");
@@ -115,6 +119,7 @@ describe("a list emptied by its filters (audit item 15)", () => {
   it("a search with no hit keeps 没有匹配的, without the green check, and Clear search empties the field", async () => {
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     await typeSearch("zzzz");
     const empty = host.querySelector("[data-inbox-filtered-empty]");
     expect(empty?.textContent).toContain("没有匹配的");

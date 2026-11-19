@@ -151,8 +151,11 @@ func Digest(m *Manifest) string {
 		// SecretSchemes: supplying secret values is agreed to like a permission (empty for any other extension, so
 		// their digests are what they were).
 		SecretSchemes []string `json:"secret_schemes,omitempty"`
+		// RepositoryHosts: being asked about the repositories and links on these hosts is agreed to like a permission
+		// (empty for any other extension, so their digests are what they were).
+		RepositoryHosts []string `json:"repository_hosts,omitempty"`
 	}{m.Runtime != nil, m.Permissions.normalized(), m.Topics(), m.Surfaces(), m.NodeProgram().consent(), m.ToolsConsent(), sendsAsUserIDs(m),
-		hostIntegrationConsent(m), sortedSchemes(m)})
+		hostIntegrationConsent(m), sortedSchemes(m), sortedRepositoryHosts(m)})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -173,6 +176,27 @@ func sortedSchemes(m *Manifest) []string {
 	out := slices.Clone(m.Schemes())
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// sortedRepositoryHosts are the hosts m's repository_providers claim, sorted: what the digest holds of them.
+func sortedRepositoryHosts(m *Manifest) []string {
+	out := slices.Clone(m.RepositoryHosts())
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// newRepositoryHosts are the hosts m's repository_providers claim that old's did not (old nil: all of them).
+func newRepositoryHosts(old, m *Manifest) []string {
+	var had, out []string
+	if old != nil {
+		had = old.RepositoryHosts()
+	}
+	for _, h := range m.RepositoryHosts() {
+		if !slices.Contains(had, h) && !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // sendsAsUserIDs are the ids of m's connectors that send as the user, sorted: what the digest holds of them.
@@ -267,6 +291,14 @@ func secretProviderLine(l i18n.Lang, title string, schemes []string) PermissionL
 	}
 	return PermissionLine{Key: "secret_provider", Title: permissionText(l, title),
 		Detail: permissionText(l, "secret_provider_detail", i18n.Args{"schemes": strings.Join(shown, permissionText(l, "list_separator"))})}
+}
+
+// repositoryProviderLine is the line for an extension that is a code-hosting source on these hosts
+// (repository_providers): Persona asks it about the addresses, repositories and links there, so it learns which ones
+// the user adds.
+func repositoryProviderLine(l i18n.Lang, title string, hosts []string) PermissionLine {
+	return PermissionLine{Key: "repository_provider", Title: permissionText(l, title),
+		Detail: permissionText(l, "repository_provider_detail", i18n.Args{"hosts": strings.Join(hosts, permissionText(l, "list_separator"))})}
 }
 
 // nodeRunsCode is the line for a program that runs on the computers the user picks.
@@ -375,6 +407,9 @@ func ExplainWith(l i18n.Lang, m *Manifest, config json.RawMessage) []PermissionL
 	}
 	if schemes := m.Schemes(); len(schemes) > 0 {
 		out = append(out, secretProviderLine(l, "secret_provider_title", schemes))
+	}
+	if hosts := newRepositoryHosts(nil, m); len(hosts) > 0 {
+		out = append(out, repositoryProviderLine(l, "repository_provider_title", hosts))
 	}
 	if to := m.ContributesTo(); len(to) > 0 {
 		out = append(out, PermissionLine{Key: "contributes_to", Title: permissionText(l, "contributes_title"),
@@ -528,6 +563,9 @@ func AddedWith(l i18n.Lang, old, m *Manifest, config json.RawMessage) []Permissi
 	}
 	if len(schemes) > 0 {
 		out = append(out, secretProviderLine(l, "secret_provider_more_title", schemes))
+	}
+	if hosts := newRepositoryHosts(old, m); len(hosts) > 0 {
+		out = append(out, repositoryProviderLine(l, "repository_provider_more_title", hosts))
 	}
 	var to []string
 	for _, owner := range m.ContributesTo() {

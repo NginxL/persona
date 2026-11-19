@@ -59,7 +59,7 @@ func TestAppStartThatTheTerminalCannotRunCountsForLauncherHealth(t *testing.T) {
 	mux := h.routes()
 	code, out := call(t, mux, "POST", "/api/v1/sessions", h.cfg.Token, `{"machine_id":"box","cwd":"/code","launcher":"work","prompt":"x"}`)
 	text, _ := out["error"].(string)
-	if code != 409 || out["code"] != proto.CodeLauncherMissing || out["action"] != "connect_model" || out["where"] != "terminal" ||
+	if code != 409 || out["code"] != proto.CodeLauncherMissing || out["action"] != "switch_launcher" || out["where"] != "terminal" ||
 		!strings.Contains(text, "示例电脑 上新开的终端标签页（bash）里没有「work」") || !strings.Contains(text, "zsh（~/.zshrc）") ||
 		!strings.Contains(out["detail"].(string), "bash: work: command not found") {
 		t.Fatalf("start: %d %v", code, out)

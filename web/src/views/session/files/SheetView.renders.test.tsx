@@ -6,6 +6,7 @@ import { act, Profiler } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { delimitedSheet, type Sheet } from "../../../lib/sheets";
+import { t } from "../../../i18n";
 import { SheetView } from "./SheetView";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -139,4 +140,21 @@ describe("SheetView inferred CSV cells", () => {
       else Reflect.deleteProperty(navigator, "clipboard");
     }
   });
+});
+
+it("shows the correct sum and average without changing accounting percentage cells", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  try {
+    act(() => root.render(<SheetView key="rates" sheets={[delimitedSheet("rates.tsv", "10%\t(5%)")]} />));
+    act(() => { grid().dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true })); });
+    expect(host.textContent).toContain(t("session-files-sheetview.sum", { n: "0.05" }));
+    expect(host.textContent).toContain(t("session-files-sheetview.average", { n: "0.025" }));
+    await act(async () => { grid().dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true })); });
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("10%\t(5%)");
+  } finally {
+    if (original) Object.defineProperty(navigator, "clipboard", original);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  }
 });

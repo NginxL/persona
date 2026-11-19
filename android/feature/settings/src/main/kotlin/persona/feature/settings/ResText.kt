@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalResources
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.UiText
 
@@ -43,7 +44,7 @@ internal fun ResText.text(): String = resolve(LocalResources.current)
 
 /**
  * "Just now", "3 minutes ago", "5 hours ago", then the day (Nov 2) or, with [days], "2 days ago" - how settings say when
- * something last happened.
+ * something last happened. Days count the midnights in [zone], not 24-hour spans, as [SentText.ago] and the web's `ago` (#9889).
  */
 internal fun agoText(res: Resources, at: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault(), days: Boolean = false): String {
     val gap = Duration.between(at, now)
@@ -51,7 +52,9 @@ internal fun agoText(res: Resources, at: Instant, now: Instant = Instant.now(), 
         gap.isNegative || gap < Duration.ofMinutes(1) -> res.getString(R.string.settings_src_just_now)
         gap < Duration.ofHours(1) -> gap.toMinutes().toInt().let { res.getQuantityString(R.plurals.settings_src_minutes_ago, it, it) }
         gap < Duration.ofDays(1) -> gap.toHours().toInt().let { res.getQuantityString(R.plurals.settings_src_hours_ago, it, it) }
-        days -> gap.toDays().toInt().let { res.getQuantityString(R.plurals.settings_src_days_ago, it, it) }
+        // At least 1: a 25-hour day can leave a whole day's gap on one date.
+        days -> ChronoUnit.DAYS.between(at.atZone(zone).toLocalDate(), now.atZone(zone).toLocalDate()).coerceAtLeast(1).toInt()
+            .let { res.getQuantityString(R.plurals.settings_src_days_ago, it, it) }
         else -> LocalizedFormats.format(at, LocalizedFormats.MONTH_DAY, res.configuration.locales[0], zone)
     }
 }

@@ -1,9 +1,17 @@
-Set up a recurring routine: at a time every day (or selected weekdays), Persona starts a new conversation with `prompt`, you do the work, and the user gets a push with your answer (with `push: "asked"`, only what you send with notify_user). For times a time of day and weekdays can't say, pass `cron` instead of `time` / `weekdays`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, `0 9 * * 1,3,5`), or @hourly / @daily / @weekly / @monthly / @yearly. Day of week 0 and 7 are Sunday; restricted day fields match either. Runs are at least 5 minutes apart; seconds, @every and TZ= are refused. A bad expression is refused and the reply lists the next runs, so check them. Pass `id` (from list_followups) to change an existing routine: only fields given change; `enabled: false` pauses it. A routine can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns it off and records a skipped run. Omit `until` to keep an existing end time; null clears it. Times use the user's zone. The routine runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` / `effort`; an empty `launcher` returns to Main chat. Omit these to keep what the routine has. `inbox` (off / worthy / every) is the user's Inbox setting: pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.
+Create a recurring routine, or pass `id` from list_followups to edit only the fields supplied. `enabled: false` pauses it. Use `time` with optional `weekdays`, or `cron` instead. Times use the user's zone; cron has 5 fields, runs at least 5m apart, supports the listed aliases, treats 0/7 as Sunday and restricted day fields as either. Seconds, @every and TZ= are refused; inspect the reply's next runs. `until` cannot be a bare clock time.
+
+Runs inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.
+
+For approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; "" clears it. Persona checks Agent answers, criterion-state changes and changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.
 
 ```json
 {
   "type": "object",
   "properties": {
+    "todo_id": {
+      "type": "string",
+      "description": "explicit supervised to-do this routine advances; empty clears the association"
+    },
     "fresh_each_run": { "type": "boolean" },
     "id": {
       "type": "string",

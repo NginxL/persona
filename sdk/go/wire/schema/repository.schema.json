@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "repository.schema.json",
+  "title": "Repository provider protocol",
+  "description": "The repository_providers extension point's calls (version 1, #10330): the manager asks a provider's program about addresses, repositories and links on the hosts its contribution claims, for the repository catalog and a to-do's repositories and links. Only the manager calls, each call bounded in time; every answer is re-checked (an https instance on one of the contribution's hosts, a path of plain segments, canonical_url = instance_url/path, a link under the repository's canonical_url) and one that does not hold is refused. Every params object carries contribution, the repository_providers item's id. Errors are the base ErrorCode or RepoErrorCode, with a one-line message for people. repo.describe is optional: a program without it answers unknown_method and links keep the title they have. Plugin-side: only the hub and the program speak it.",
+  "x-side": "plugin",
+  "x-methods": {
+    "repo.parse": {"from": "hub", "params": "RepoParseParams", "result": "RepoParseResult"},
+    "repo.check": {"from": "hub", "params": "RepoCheckParams", "result": "Empty"},
+    "repo.link": {"from": "hub", "params": "RepoLinkParams", "result": "RepoLinkResult"},
+    "repo.describe": {"from": "hub", "params": "RepoDescribeParams", "result": "RepoDescribeResult"}
+  },
+  "$defs": {
+    "RepoErrorCode": {
+      "description": "error.code a provider answers besides the base ErrorCode: not_found (no such repository or link, or the account it uses cannot see it), not_signed_in (the user has to sign in to the source first), refused (the source said no: say why in message), failed (anything else, say why in message). The manager shows the message on one line, clipped.",
+      "type": "string",
+      "enum": ["not_found", "not_signed_in", "refused", "failed"]
+    },
+    "RepoParseParams": {
+      "description": "repo.parse: what repository an address on one of the contribution's hosts names (a web address, an https clone address, ssh://git@host/... or git@host:...). Answer only from the address when it can; the manager asks repo.check before it saves one.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The repository_providers item's id."},
+        "url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "The address as the user or an Agent wrote it (an Agent's may be any page on the contribution's hosts)."}
+      },
+      "required": ["contribution", "url"]
+    },
+    "RepoParseResult": {
+      "description": "The repository the address names. instance_url is exactly https://<host> or https://<host>:<port>, a lowercase host the contribution claims and nothing after it; the default port is left out (https://code.acme.test, never https://code.acme.test:443, which is refused), path its plain segments without a leading or trailing / (acme/tools), canonical_url exactly instance_url + \"/\" + path.",
+      "type": "object",
+      "properties": {
+        "instance_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "clone_url": {"type": "string", "maxLength": 2048, "description": "How to clone it when that is not canonical_url: https or ssh on one of the contribution's hosts, no credentials, query or fragment."},
+        "display_name": {"type": "string", "maxLength": 80, "description": "A name for people (Acme Tools): the catalog's default name for it."}
+      },
+      "required": ["instance_url", "path", "canonical_url"]
+    },
+    "RepoCheckParams": {
+      "description": "repo.check: whether the repository exists and the account the program uses can see it, before the manager saves it. Answered with Empty, or not_found / not_signed_in / refused / failed.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The repository_providers item's id."},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "The repository's canonical_url as repo.parse answered it."}
+      },
+      "required": ["contribution", "canonical_url"]
+    },
+    "RepoIdentity": {
+      "description": "A saved repository of the provider's, as repo.parse answered it.",
+      "type": "object",
+      "properties": {
+        "instance_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048}
+      },
+      "required": ["instance_url", "path", "canonical_url"]
+    },
+    "RepoLinkParams": {
+      "description": "repo.link: one of the repository's issues or pull requests for a to-do, named by an address (url) or by kind and number. The manager asks only for a link it has not stored yet.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The repository_providers item's id."},
+        "repo": {"$ref": "#/$defs/RepoIdentity"},
+        "url": {"type": "string", "maxLength": 2048, "description": "The link's address as the user or an Agent wrote it; empty when kind and number name it. The hub only checks that the answer is under repo, so answer the link this address names, or an error when it names none."},
+        "kind": {"$ref": "manifest.schema.json#/$defs/RepositoryLinkKind", "description": "With number, when there is no url: the answer must be this kind."},
+        "number": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "With kind: the answer must have this number."}
+      },
+      "required": ["contribution", "repo"]
+    },
+    "RepoLinkResult": {
+      "description": "The link: its kind and number, and its canonical address under the repository's canonical_url (https, no credentials, query or fragment).",
+      "type": "object",
+      "properties": {
+        "kind": {"$ref": "manifest.schema.json#/$defs/RepositoryLinkKind"},
+        "number": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "title": {"type": "string", "maxLength": 1024, "description": "Its title when the program knows it; kept on one line."}
+      },
+      "required": ["kind", "number", "canonical_url"]
+    },
+    "RepoDescribeParams": {
+      "description": "repo.describe (optional): the title and state of a link the manager has stored, by its canonical address.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The repository_providers item's id."},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "The link's canonical_url as repo.link answered it."}
+      },
+      "required": ["contribution", "canonical_url"]
+    },
+    "RepoDescribeResult": {
+      "description": "What the link is called and where it stands.",
+      "type": "object",
+      "properties": {
+        "title": {"type": "string", "maxLength": 1024, "description": "Kept on one line."},
+        "state": {"type": "string", "enum": ["open", "closed", "merged"], "description": "Left out when the source has no such word for it."}
+      },
+      "required": ["title"]
+    }
+  }
+}

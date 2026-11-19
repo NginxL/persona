@@ -291,7 +291,7 @@ export function rangeSummary(rows: string[][], r: Range): { count: number; sum?:
         const neg = /^\(.*\)$/.test(v.trim()) || v.trim().startsWith("-");
         const x = parseFloat(v.replace(/[^\d.eE+-]/g, "").replace(/^[-+]/, ""));
         if (Number.isFinite(x)) {
-          sum += (neg ? -x : x) / (v.trim().endsWith("%") ? 100 : 1);
+          sum += (neg ? -x : x) / (v.trim().replace(/^\((.*)\)$/, "$1").endsWith("%") ? 100 : 1);
           nums++;
         }
       }

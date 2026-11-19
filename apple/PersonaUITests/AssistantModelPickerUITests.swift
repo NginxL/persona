@@ -82,12 +82,70 @@ final class AssistantModelPickerUITests: XCTestCase {
         }
     }
 
+    /// MOCK_ASSISTANT_LAUNCHER_FIXTURE=1: the shared candidates in an English existing-conversation sheet, at the
+    /// default and largest accessibility text sizes, light and dark. A team-api pick keeps the conversation's
+    /// scope visible when the sheet reopens; no older-node placeholder or one-off label appears.
+    @MainActor func testSharedLauncherChoicesInEnglishAtDefaultAndLargestText() throws {
+        let sizes = [
+            ("default", [String]()),
+            ("largest", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
+        ]
+        for (size, sizeArgs) in sizes {
+            for scheme in ["light", "dark"] {
+                _ = try mock("model_pick?reset=1")
+                let app = launch(scheme, ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + sizeArgs)
+                let modes = modelButton(app, scheme)
+                let change = changeModel(app)
+                var listed = false
+                for attempt in 0..<2 where !listed {
+                    if attempt > 0 {
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+                        sleep(2)
+                    }
+                    modes.tap()
+                    listed = change.waitForExistence(timeout: 5)
+                }
+                XCTAssertTrue(listed, "\(size)/\(scheme): no Change Model…:\n\(app.debugDescription)")
+                change.tap()
+
+                let runtime = app.buttons["assistantModel.runtime.default"].firstMatch
+                XCTAssertTrue(runtime.waitForExistence(timeout: 15),
+                              "\(size)/\(scheme): runtime missing; needs MOCK_ASSISTANT_LAUNCHER_FIXTURE=1:\n\(app.debugDescription)")
+                reveal(runtime, app)
+                XCTAssertTrue(runtime.isEnabled, "\(size)/\(scheme): runtime is not eligible")
+                let team = app.buttons["assistantModel.team-api.claude-sonnet-4-5"].firstMatch
+                XCTAssertTrue(team.waitForExistence(timeout: 5), "\(size)/\(scheme): team-api missing:\n\(app.debugDescription)")
+                reveal(team, app)
+                XCTAssertTrue(team.isEnabled, "\(size)/\(scheme): team-api is not eligible")
+                let codex = app.descendants(matching: .any)["assistantModel.unavailable.codex-gw"].firstMatch
+                XCTAssertTrue(codex.waitForExistence(timeout: 5), "\(size)/\(scheme): codex-gw missing:\n\(app.debugDescription)")
+                for words in ["默认", "This time only", "Just Once"] {
+                    let match = app.descendants(matching: .any).matching(NSPredicate(
+                        format: "label CONTAINS %@ OR value CONTAINS %@", words, words)).firstMatch
+                    XCTAssertFalse(match.exists, "\(size)/\(scheme): legacy or one-off wording \(words):\n\(app.debugDescription)")
+                }
+
+                team.tap()
+                XCTAssertTrue(team.waitForNonExistence(timeout: 10), "\(size)/\(scheme): team-api pick did not close the sheet")
+                modes.tap()
+                XCTAssertTrue(change.waitForExistence(timeout: 5), "\(size)/\(scheme): cannot reopen the model sheet")
+                change.tap()
+                let scope = "This conversation has its own model. Following the default makes its next messages use Model configuration › Main chat again."
+                XCTAssertTrue(app.staticTexts[scope].waitForExistence(timeout: 10),
+                              "\(size)/\(scheme): persistent scope wording missing:\n\(app.debugDescription)")
+                sleep(1)
+                try shot(app, scheme, "5-shared-\(size)")
+                app.terminate()
+            }
+        }
+    }
+
     /// The main conversation in `scheme` (`light` / `dark`), paired with the mock hub.
-    @MainActor private func launch(_ scheme: String) -> XCUIApplication {
+    @MainActor private func launch(_ scheme: String, _ additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         let url = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", url, "-tab", "assistant", "-dev.openChat", "", "-ui.scheme", scheme,
-                               "-openAssistant", "server/" + Self.session, "-openDraftsFresh", "YES"]
+                               "-openAssistant", "server/" + Self.session, "-openDraftsFresh", "YES"] + additionalArguments
         app.launchEnvironment["PERSONA_UI_TEST_SESSION"] = "1" // the chat title's value names the open session
         app.launchPinned()
         closeSystemAlert(timeout: 3)
@@ -130,11 +188,11 @@ final class AssistantModelPickerUITests: XCTestCase {
         }
     }
 
-    /// The menu's Change Model…, by its identifier or, as a menu's item may carry none, by the title the tests' Chinese
-    /// interface gives it.
+    /// The menu's Change Model…, by its identifier or, as a menu's item may carry none, by its English or Chinese title.
     @MainActor private func changeModel(_ app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@",
-                                                             "sessionModes.assistantModel", "更改模型")) // i18n-ignore: zh-Hans menu title
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+            "sessionModes.assistantModel", "Change Model", "更改模型")) // i18n-ignore: en/zh-Hans menu titles
             .firstMatch
     }
 

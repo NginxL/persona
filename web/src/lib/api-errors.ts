@@ -13,8 +13,8 @@ export interface APIErrorInfo {
   transient?: boolean;
   requestId?: string;
   session?: string;
-  /** What to fix, when the words say (not_logged_in / auth_failed / model_route): the hub's turn_error_code for the
-   *  same turn wins over it. */
+  /** What to fix, when the words say (not_logged_in / auth_failed / model_route / tool_search_unsupported): the hub's
+   *  turn_error_code for the same turn wins over it. */
   code?: string;
   raw: string;
 }
@@ -28,8 +28,14 @@ export function errorSignature(e: APIErrorInfo): string {
  *  APIErrorMarkers): the turn did not run. */
 const MODEL_MARKERS = ["There's an issue with the selected model", "Failed to authenticate", "OAuth token has expired", "Invalid API key", "Not logged in ·"];
 
+/** What a gateway that can't take Claude Code's on-demand tool loading names in its 400 (the hub's
+ *  tool_search_unsupported, read here too for an older hub). */
+const TOOL_SEARCH = ["toolsearch", "tool_search", "tool search", "defer_loading", "tool_reference"];
+const STATUS_400 = /^\s*400\b/;
+
 function fixCode(s: string): string | undefined {
   if (s.includes("safeguards flagged this message") || s.includes("[frontier_llm]")) return "safeguards";
+  if ((STATUS_400.test(s) || s.includes("not representable")) && TOOL_SEARCH.some((m) => s.includes(m))) return "tool_search_unsupported";
   if (s.trimStart().startsWith("not logged in")) return "not_logged_in";
   if (s.includes("issue with the selected model")) return "model_route";
   if (s.includes("invalid api key") || s.includes("failed to authenticate") || s.includes("oauth token has expired")) return "auth_failed";
@@ -61,6 +67,16 @@ export function parseAPIError(text?: string): APIErrorInfo | null {
     code: fixCode(body.toLowerCase()),
     raw: t,
   };
+}
+
+/** A retry banner carries the same error without Claude's final-answer prefix. Normalize only that new input shape;
+ * keep the observed text as the detail and leave final-answer parsing unchanged. */
+export function parseRetryAPIError(text?: string): APIErrorInfo | null {
+  const raw = (text ?? "").trim();
+  if (!raw) return null;
+  const normalized = raw.startsWith("API Error:") ? raw : raw === "API Error" ? "API Error:" : `API Error: ${raw}`;
+  const info = parseAPIError(normalized);
+  return info ? { ...info, raw } : null;
 }
 
 function explain(s: string, status?: number): [string, boolean | undefined] {

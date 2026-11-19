@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -21,15 +20,8 @@ import (
 // silently ignore it and claim success. Dismissing a resume-loss notice uses the same new RPC without changing
 // the switch: {"ultracode_dismiss_lost":true} becomes {"dismiss_lost":true}.
 func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
-	p := map[string]any{}
-	if r.ContentLength != 0 {
-		if err := decodeJSONBody(w, r, &p, 32<<20); err != nil && !errors.Is(err, io.EOF) {
-			writeBodyErr(w, err, err)
-			return
-		}
-	}
-	if p == nil {
-		writeErr(w, http.StatusBadRequest, errors.New("request body must be a JSON object"))
+	p, ok := optionalObject(w, r, 32<<20)
+	if !ok {
 		return
 	}
 	if pr := principalOf(r.Context()); pr.Role == roleExtension { // extension_modes.go
@@ -45,16 +37,8 @@ func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
 			writeErr(w, http.StatusBadRequest, errors.New("service_tier must be a nonempty string in a separate request"))
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer cancel()
-		var out json.RawMessage
-		if err := m.call(ctx, "session.speed", map[string]any{"session_id": r.PathValue("sid"), "service_tier": tier}, &out); err != nil {
-			var re *rpc.Error
-			if errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method") {
-				writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "rpc-errors.node_outdated"), nil)
-				return
-			}
-			callErr(w, err)
+		out, ok := h.callNode(w, r, m, "session.speed", map[string]any{"session_id": r.PathValue("sid"), "service_tier": tier}, 30*time.Second, "rpc-errors.node_outdated", nil)
+		if !ok {
 			return
 		}
 		writeJSON(w, out)
@@ -89,14 +73,19 @@ func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
 	p["session_id"] = r.PathValue("sid")
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
+	// Both node calls share the original 90-second deadline.
+	r = r.WithContext(ctx)
 	var out json.RawMessage
 	if len(p) > 1 || len(ultra) == 1 {
-		if err := m.call(ctx, "session.modes", p, &out); err != nil {
+		var ok bool
+		out, ok = h.callNode(w, r, m, "session.modes", p, 90*time.Second, "", nil, func(err error) bool {
 			if m.oldEngineRefusal(r.PathValue("sid"), p, err) {
 				writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-machine.node_no_engine_switch"), nil)
-				return
+				return true
 			}
-			callErr(w, err)
+			return false
+		})
+		if !ok {
 			return
 		}
 		if model, _ := p["model"].(string); strings.TrimSpace(model) != "" { // switched (the node read it back), or picked with a launcher
@@ -106,21 +95,18 @@ func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
 		}
 	}
 	if len(ultra) > 1 {
-		if err := m.call(ctx, "session.ultracode", ultra, &out); err != nil {
-			var re *rpc.Error
-			if errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method") {
-				writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, i18n.T(h.requestLang(r), "hub-ultracode.node_outdated"), nil)
-				return
-			}
-			callErr(w, err)
+		next, ok := h.callNode(w, r, m, "session.ultracode", ultra, 90*time.Second, "hub-ultracode.node_outdated", nil)
+		if !ok {
 			return
+		}
+		if len(next) > 0 {
+			out = next
 		}
 	}
 	if len(out) == 0 {
 		out = json.RawMessage(`{}`)
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(out)
+	writeRawJSON(w, out)
 }
 
 // modesLauncher is the launcher a model in a POST …/modes body p runs on: the launcher it names (a switch, #5035),

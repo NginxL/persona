@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -71,7 +72,19 @@ type codexRemote struct {
 	ready      bool
 	// models: the efforts each model takes, from model/list (codex_effort.go); nil until read.
 	models map[string]codexModelEfforts
+	// slow: loaded threads whose last thread/read timed out; read again only after codexRetryWait (codex_backoff.go).
+	slow map[string]codexRetry
+	// readWait, refreshWait: one thread/read's timeout and a whole refresh's; 0 is codexReadWait, codexRefreshWait.
+	readWait, refreshWait time.Duration
 }
+
+// A refresh reads the loaded threads a few at a time, each read with its own timeout inside the refresh's: one slow
+// thread neither uses up the others' time nor fails them with it.
+const (
+	codexRefreshWait = 20 * time.Second
+	codexReadWait    = 5 * time.Second
+	codexReadWorkers = 4
+)
 
 func (n *Node) ensureCodexRemote(ctx context.Context, spec proto.CodexServer) {
 	r := n.codices
@@ -351,7 +364,10 @@ type remoteThreadData struct {
 }
 
 func (c *codexRemote) refresh() error {
-	ctx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
+	c.mu.Lock()
+	wait, budget := cmp.Or(c.readWait, codexReadWait), cmp.Or(c.refreshWait, codexRefreshWait)
+	c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(c.ctx, budget)
 	defer cancel()
 	ids, err := c.loaded(ctx)
 	if err != nil {
@@ -359,26 +375,92 @@ func (c *codexRemote) refresh() error {
 	}
 	seenRevision := map[string]uint64{}
 	next := map[string]remoteThread{}
+	known := map[string]remoteThread{}
+	var reads []string
+	waiting := 0
+	now := time.Now()
+	c.mu.Lock()
 	for _, raw := range ids {
-		if !validID(raw) {
+		if _, dup := known[raw]; dup || !validID(raw) {
 			continue
 		}
-		c.mu.Lock()
 		t := c.threads[raw]
-		seenRevision[raw] = t.revision
-		c.mu.Unlock()
-		var reply struct {
-			Thread remoteThreadData `json:"thread"`
+		known[raw], seenRevision[raw] = t, t.revision
+		if b, ok := c.slow[raw]; ok && now.Sub(b.at) < codexRetryWait(b.fails)-codexRetrySlack {
+			// Timed out lately: keep the last copy until its next read is due.
+			if t.id != "" {
+				next[raw] = t
+			}
+			waiting++
+			continue
 		}
-		if err := c.wire.call(ctx, "thread/read", map[string]any{"threadId": raw, "includeTurns": false}, &reply); err != nil {
+		reads = append(reads, raw)
+	}
+	c.mu.Unlock()
+	type read struct {
+		data remoteThreadData
+		err  error
+		// cut: not asked, or not answered before the refresh's own time ran out; says nothing about the thread.
+		cut bool
+	}
+	results := make([]read, len(reads))
+	for i := range results {
+		results[i].cut = true
+	}
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range min(codexReadWorkers, len(reads)) {
+		wg.Go(func() {
+			for i := range work {
+				if ctx.Err() != nil {
+					continue
+				}
+				var reply struct {
+					Thread remoteThreadData `json:"thread"`
+				}
+				rctx, rcancel := context.WithTimeout(ctx, wait)
+				err := c.wire.call(rctx, "thread/read", map[string]any{"threadId": reads[i], "includeTurns": false}, &reply)
+				rcancel()
+				results[i] = read{data: reply.Thread, err: err, cut: err != nil && ctx.Err() != nil}
+			}
+		})
+	}
+dispatch:
+	for i := range reads {
+		select {
+		case work <- i:
+		case <-ctx.Done():
+			break dispatch
+		}
+	}
+	close(work)
+	wg.Wait()
+	// Backoff counts from when the reads ended: a refresh that waited out a slow read is followed by the next at once.
+	ended := time.Now()
+	failed, cut, timedOut, settled := 0, 0, map[string]bool{}, map[string]bool{}
+	var firstErr error
+	for i, raw := range reads {
+		t := known[raw]
+		r := results[i]
+		if r.cut || r.err != nil {
 			// Still loaded, just not read this time (a slow or failed call): keep the last copy and its asks.
-			c.n.logf("codex %s: read %s: %v", c.spec.ID, raw, err)
+			if r.cut {
+				cut++
+			} else {
+				if failed == 0 {
+					firstErr = r.err
+				}
+				failed++
+				timedOut[raw] = errors.Is(r.err, context.DeadlineExceeded)
+				settled[raw] = !timedOut[raw]
+			}
 			if t.id != "" {
 				next[raw] = t
 			}
 			continue
 		}
-		d := reply.Thread
+		settled[raw] = true
+		d := r.data
 		// Ephemeral threads are Codex's own background jobs (a title, say): no rollout, never resumable, and they stay
 		// loaded as "active" after they finish. Not a conversation, so not a session.
 		if d.ID != raw || d.Status.Type == "notLoaded" || d.Ephemeral {
@@ -420,7 +502,26 @@ func (c *codexRemote) refresh() error {
 		}
 		next[raw] = t
 	}
+	if failed > 0 || cut > 0 {
+		timeouts := 0
+		for _, ok := range timedOut {
+			if ok {
+				timeouts++
+			}
+		}
+		c.n.logf("codex %s: thread/read failed for %d of %d threads (%d timed out, %d not read in time, %d waiting after a timeout): %v", c.spec.ID, failed, len(reads), timeouts, cut, waiting, cmp.Or(firstErr, ctx.Err()))
+	}
 	c.mu.Lock()
+	slow := map[string]codexRetry{}
+	for raw := range known { // threads no longer loaded are forgotten
+		if b, ok := c.slow[raw]; timedOut[raw] {
+			b.at, b.fails = ended, b.fails+1
+			slow[raw] = b
+		} else if ok && !settled[raw] {
+			slow[raw] = b // still waiting, or its read was cut short
+		}
+	}
+	c.slow = slow
 	// Preserve events that arrived during metadata RPCs; metadata never overwrites a joined thread's current turn.
 	for raw, t := range next {
 		if old, ok := c.threads[raw]; ok && old.revision != seenRevision[raw] {
@@ -594,6 +695,9 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	}
 	if err = c.join(ctx, id, true); err != nil {
 		return refusal("codex_read_only", err.Error(), nil)
+	}
+	if codexCompactCommand(text, images) { // Codex's own command, not words for the model (codex_remote_compact.go)
+		return n.compactCodex(ctx, id)
 	}
 	if len(selected) > 0 {
 		selected, err = n.sessionSelectedSkills(ctx, id, text)

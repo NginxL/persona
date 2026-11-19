@@ -41,5 +41,8 @@
   "network_last_hour": "Network over the last hour: download (orange), upload (purple)",
   "view_label": "View",
   "view_cards": "Cards",
-  "view_capabilities": "Capabilities"
+  "view_capabilities": "Capabilities",
+  "battery": "Battery",
+  "charging": "charging",
+  "temperature": "Temp"
 }

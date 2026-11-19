@@ -2,6 +2,10 @@ package persona.android.di
 
 import persona.android.AppText
 import persona.android.R
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.SystemClock
 import persona.android.PersonaApp
 import persona.android.data.ApiClient
@@ -88,6 +92,22 @@ class GroupRuntime internal constructor(
     val connectionOrNull: OkHttpHubConnection? get() = live
     val active: Boolean get() = job.isActive && data?.coroutineScope?.coroutineContext?.get(Job)?.isActive == true
 
+    /** Android already knows the active network; do not make the first route selection wait for a callback. */
+    private fun initialNetwork(): HubNetwork {
+        val manager = app.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork
+        val capabilities = network?.let(manager::getNetworkCapabilities)
+        val transport = when {
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> HubNetworkTransport.Wifi
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> HubNetworkTransport.Cellular
+            else -> HubNetworkTransport.Other
+        }
+        val needsPermission = Build.VERSION.SDK_INT >= 37 && app.applicationInfo.targetSdkVersion >= 37
+        val granted = !needsPermission || app.checkSelfPermission(ConnectionRuntime.LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        return HubNetwork(network?.toString() ?: "offline", available = network != null, homeWifi = needsPermission,
+            localNetworkPermissionGranted = granted, transport = transport)
+    }
+
     /** Called by HubDataStore.openGroup (its transport factory): builds the group's one connection. */
     fun createTransport(storage: HubScope, credentials: HubCredentials, members: List<HubMember>,
         tunnels: List<HubTunnel> = emptyList()): MessageTransport {
@@ -102,7 +122,7 @@ class GroupRuntime internal constructor(
                 clientFeatures = setOf("lock_test", "extension_operations", "extension_auth", "managers"), build = settings.build, os = settings.os,
                 heartbeatPolicy = settings.heartbeatPolicy, members = members, center = isCenter, centerHubId = group.centerHubId,
                 tunnels = tunnels),
-            HubNetwork("initial", available = false),
+            initialNetwork(),
             onReady = { readyConnection ->
                 reconciliationJob?.cancelAndJoin()
                 reconciling.value = true
@@ -129,6 +149,7 @@ class GroupRuntime internal constructor(
             onMemberRevoked = { hubId, ownToken -> listener.onMemberRevoked(this, hubId, ownToken) },
             ways = ways,
             access = listener::access,
+            connectOnCreation = false,
         )
         live = connection
         connection.setForeground(foreground)
@@ -186,9 +207,10 @@ class GroupRuntime internal constructor(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             connection.tunnel.collect { if (live === connection) mutableTunnel.value = it }
         }
-        // Before the network is known, so the first route selection already honours the stored route choices.
+        // Before the first dial, so the first route selection already honours the stored route choices and data reconciliation.
         mutableEndpointSettings.value = HubEndpointSettings(connection, data.endpoints.value, data.endpoints::update,
             scope, SystemClock::elapsedRealtime, System::currentTimeMillis)
+        connection.reconnect()
     }
 
     /** A new registry entry for the same group: names, mesh hubs and the other paired hubs. */

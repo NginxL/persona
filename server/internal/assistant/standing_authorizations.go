@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -209,12 +210,15 @@ func (s *Service) setStandingAuthorizations(ctx context.Context, value json.RawM
 	}
 	oldJSON, _ := json.MarshalIndent(before, "", "  ")
 	newJSON, _ := json.MarshalIndent(after, "", "  ")
-	return &ownChange{cardText: func(l i18n.Lang) string {
+	return &ownChange{applyChecksProposal: true, cardText: func(l i18n.Lang) string {
 		return i18n.T(l, "assistant-standing_authorizations.change", i18n.Args{"before": string(oldJSON), "after": string(newJSON)})
 	}, apply: func(ctx context.Context) (string, error) {
 		s.standingMu.Lock()
 		defer s.standingMu.Unlock()
 		if err := s.saveStandingAuthorizations(ctx, before.Revision, after); err != nil {
+			if errors.Is(err, errStandingConflict) {
+				return "", fmt.Errorf("%w: %w", approvalops.ErrStale, err)
+			}
 			return "", err
 		}
 		return s.getStandingAuthorizations(ctx)

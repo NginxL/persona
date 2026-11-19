@@ -124,7 +124,7 @@ func (s *Service) finishExternalPlan(p *pending) {
 		p.orphaned.Stop()
 	}
 	s.fleet.mu.Unlock()
-	s.recordEnd(p.ix.ID, "dismissed", nil)
+	s.recordEnd(p.ix.ID, "dismissed", &proto.Resolution{Dismiss: true, AnsweredBy: proto.AnsweredByTerminal})
 	select {
 	case p.done <- proto.Resolution{Dismiss: true}:
 	default:

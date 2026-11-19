@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame · To-dos prototypes</title>
+<!-- kit -->
+<link rel="stylesheet" href="kit/tokens.css">
+<link rel="stylesheet" href="kit/devices.css">
+<link rel="stylesheet" href="kit/components.css">
+<link rel="stylesheet" href="kit/gallery.css">
+<!-- variants' own styles (scope them to [data-variant="V1"] …) -->
+<link rel="stylesheet" href="v1/screens.css">
+<link rel="stylesheet" href="v2/screens.css">
+<link rel="stylesheet" href="v3/screens.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- Same load order in index.html: kit, data, variants, then the page script. -->
+<script src="kit/icons.js"></script>
+<script src="kit/kit.js"></script>
+<script src="kit/components.js"></script>
+<script src="data/todos.js"></script>
+<script src="v0/demo.js"></script>
+<script src="v1/screens.js"></script>
+<script src="v2/screens.js"></script>
+<script src="v3/screens.js"></script>
+<script src="kit/frame-page.js"></script>
+</body>
+</html>

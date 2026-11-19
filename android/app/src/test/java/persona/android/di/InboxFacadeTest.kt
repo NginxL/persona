@@ -85,6 +85,33 @@ class InboxFacadeTest {
     }
 
     @Test
+    fun assistantFacadesForwardRecentTaskChats() {
+        val moduleFile = facadeSource(File("."))
+        assertNotNull("InboxModule.kt must exist in the current checkout", moduleFile)
+
+        val facadeBlock = requireNotNull(moduleFile).readText()
+            .substringAfter("val assistant = object : AssistantConversations {")
+        assertTrue(
+            "The app facade must update Recent through the active scoped repository",
+            facadeBlock.contains("override suspend fun updateRecentTaskChats(value: Boolean?) = use { it.assistant.updateRecentTaskChats(value) }")
+        )
+        assertTrue(
+            "The app facade must capture one write's original scoped repository",
+            facadeBlock.contains("override suspend fun recentTaskChatsUpdater() = use { it.assistant.recentTaskChatsUpdater() }")
+        )
+        val groupBlock = File(moduleFile.parentFile, "GroupTranslation.kt").readText()
+            .substringAfter("internal fun AssistantConversations.inGroup")
+        assertTrue(
+            "The group facade must not fall back to the interface's no-op",
+            groupBlock.contains("override suspend fun updateRecentTaskChats(value: Boolean?) = source.updateRecentTaskChats(value)")
+        )
+        assertTrue(
+            "The group facade must preserve the captured write scope",
+            groupBlock.contains("override suspend fun recentTaskChatsUpdater() = source.recentTaskChatsUpdater()")
+        )
+    }
+
+    @Test
     fun facadeSourceSupportsRepositoryAndroidAndAppWorkingDirectories() {
         val root = Files.createTempDirectory("inbox-facade-source-").toFile().canonicalFile
         try {

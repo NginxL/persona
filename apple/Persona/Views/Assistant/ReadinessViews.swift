@@ -38,7 +38,10 @@ enum ReadinessRoute: Identifiable, Hashable {
         case "add_computer": return model.canAddComputer ? .addComputer : .machines
         case "confirm_computer": return model.pendingToConfirm().map { model.canConfirmComputer($0.group) } == true ? .confirmComputer : .machines
         case "wake_computer", "install_claude", "login_claude": return .help(action, machine: machine)
-        case "connect_model": return .providerWizard
+        case "connect_model":
+            let launcher = launcher?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let launcher, !launcher.isEmpty { return .provider(launcher) }
+            return .providerWizard
         case "edit_provider": return .provider(launcher)
         case "enable_tls", "open_admin":
             return model.config.map { .link($0.url.appending(path: "admin")) }

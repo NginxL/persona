@@ -238,7 +238,10 @@ class StandaloneFilterTests(MockCase):
             for k in MESH_KEYS:
                 self.assertNotIn(k, m)
         self.assertNotIn("hub_name", self.hub.get("/api/v1/health"))
-        self.assertEqual([m["machine_id"] for m in self.hub.get("/api/v1/metrics")["machines"]], ["server", "macbook"])
+        default = self.hub.get("/api/v1/metrics")["machines"]
+        work = self.hub.get("/api/v1/metrics?manager=m-3fa21c")["machines"]
+        self.assertEqual([m["machine_id"] for m in default], ["server"])
+        self.assertEqual([m["machine_id"] for m in work], ["macbook"])
 
     def test_sessions_and_interactions(self):
         sessions = self.hub.get("/api/v1/sessions")["sessions"]

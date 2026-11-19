@@ -17,6 +17,9 @@ import { PendingCards } from "./Interactions";
 import { getState, reset, upsertSession, useStore } from "../../lib/store";
 import { t } from "../../i18n";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -97,13 +97,21 @@ func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 				return src.path
 			}
 		}
-		if p := rolloutPath(src.home, src.thread); p != "" {
+		if p := rolloutPathIn(src.home, src.thread, pass); p != "" {
 			return p
 		}
 		return n.codexAppHistoryPath(src, pass) // the App's chat with no rollout: its history as written (codex_apphistory.go)
 	}
 	if strings.HasPrefix(id, "c0de-") {
 		return n.oldCodexTranscript(id)
+	}
+	// A migrated compatible-CLI conversation may retain its old rollout. Its paginated history is authoritative,
+	// even when a reader cached the rollout before migration; followCopy will relocate that reader too.
+	if _, ok := n.traexThread(id); ok {
+		if p := n.traexPath(id); p != "" {
+			n.setPath(id, p)
+			return p
+		}
 	}
 	n.mu.Lock()
 	p := n.paths[id]

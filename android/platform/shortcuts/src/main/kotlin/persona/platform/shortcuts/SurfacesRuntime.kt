@@ -13,6 +13,7 @@ import persona.core.contracts.api.PairingService
 import persona.core.contracts.api.SessionsRepository
 import persona.platform.notify.FleetFeed
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +27,7 @@ import javax.inject.Singleton
 /**
  * Keeps the surfaces outside the app in step with the pairing: the widget and the tile redraw when the fleet changes,
  * the launcher's recent agents follow the session list, and all of it empties when the hub is unpaired.
- * Start it once from Application.onCreate, after the pairing is restored.
+ * Start it once from Application.onCreate; its first reads wait for the pairing restore.
  */
 @Singleton
 @OptIn(FlowPreview::class)
@@ -43,14 +44,16 @@ class SurfacesRuntime @Inject constructor(
         started = true
         fleet.start()
         ShortcutPublisher.publishFixed(context)
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fleet.settled()
             combine(fleet.state, fleet.paired) { state, paired -> state to paired }.distinctUntilChanged().debounce(REDRAW_DEBOUNCE_MILLIS)
                 .collect {
                     PersonaWidget.refresh(context)
                     PersonaTileService.refresh(context)
                 }
         }
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fleet.settled()
             combine(sessions.sessions, fleet.paired) { list, paired ->
                 if (paired) list.groupBy { GroupKeys.namespaceOf(it.machineId) }.values.flatMap { rows ->
                     RecentAgents.pick(rows, sessions.supportsFeature(rows.first().machineId, "sessions_hierarchy"))

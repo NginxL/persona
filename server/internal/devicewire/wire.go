@@ -212,6 +212,9 @@ type Config struct {
 	// PendingUnknown: the hub could not read which machines wait (its database did not answer); until a handover
 	// without it, the manager treats every machine as not confirmed yet.
 	PendingUnknown bool `json:"pending_unknown,omitempty"`
+	// LinkSwitch: this hub answers devices.link_switch.* (link_switch.go) and takes Persona Link now (its TLS port or
+	// an https public_url); an older hub, or one no Persona Link can reach, leaves it out and no switch is offered.
+	LinkSwitch bool `json:"link_switch,omitempty"`
 }
 
 // LinkEndpoint is one address Persona Link may use (internal/link.Endpoint).
@@ -345,6 +348,18 @@ type NodeCall struct {
 	// Fallback (a connection's calls only): sent instead when the node answers unknown method, a node from before
 	// Method (launchers.catalog falls back to launchers.managed).
 	Fallback *NodeCall `json:"fallback,omitempty"`
+	// Actor says who asked for a session.modes call the manager keeps a record of (#10297): display only, never
+	// trusted for access (the hub checked the request already). Nil from an older hub and on every other call.
+	Actor *Actor `json:"actor,omitempty"`
+}
+
+// Actor is who asked the hub for a call (NodeCall.Actor): the kind of token ("device", "hub" for the hub's own
+// token, "extension") and, for a device, its id and name as the hub knows them; an extension's id. Display only.
+type Actor struct {
+	Kind       string `json:"kind"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
+	Extension  string `json:"extension,omitempty"`
 }
 
 // RequestEnd is devices.request_end's params.
@@ -387,6 +402,9 @@ type PairConnector struct {
 // assistant's): its own settings of each machine and what only it can do.
 var Routes = []string{
 	"GET /api/v1/sessions/{mid}/{sid}/skills",
+	"GET /api/v1/sessions/{mid}/{sid}/mode-changes",
+	// The answer to a start's startup question, from a full device (#10365, internal/devices start_continue.go).
+	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",
@@ -399,6 +417,9 @@ var Routes = []string{
 	"GET /api/v1/machines/{mid}/health/reports",
 	"DELETE /api/v1/machines/{mid}/health/reports/{name}",
 	"POST /api/v1/machines/{mid}/deploy",
+	// Switching an ssh computer to Persona Link (#10662, internal/devices link_switch.go); the admin page's twin is
+	// the hub's POST /api/v1/admin/machines/{mid}/link-switch, relayed to the same handler.
+	"POST /api/v1/machines/{mid}/link-switch",
 	// A computer's diagnosis and cache cleanup (#8037, internal/devices diagnosis.go).
 	"GET /api/v1/machines/{mid}/diagnosis",
 	"POST /api/v1/machines/{mid}/cleanup",

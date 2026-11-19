@@ -25,8 +25,10 @@ struct TalkToPersonaIntent: AppIntent {
     #endif
     #if os(iOS)
     // In the background for CarPlay (the phone may stay locked in the car); in front only for the call on the phone.
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
     #else
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
     #endif
 
@@ -37,7 +39,15 @@ struct TalkToPersonaIntent: AppIntent {
         // Connected is not enough: the voice screen must be the one in the car while the microphone is on. And no scene of
         // Persona's is not no car: the audio route says whether the phone is in one (`talkNow`).
         let talk = await CarPlayVoicePresence.talkNow()
+        // A call to Persona already on the phone goes on: in the car, the car's voice chat would end it, so the car is
+        // told where it is (#9290 follow-up); without a car, the call screen shows it (`callPersona` shows a live call).
+        if !talk.callsOnThePhone, let onPhone = await MainActor.run(body: { CarPlayVoiceSession.onPhoneCall() }) {
+            return .result(dialog: IntentSupport.dialog(onPhone))
+        }
         if talk.callsOnThePhone {
+            // iOS 18 cannot bring the app forward from here (#6730): what it said before the call (#9290); Call Persona
+            // opens the app and calls.
+            guard #available(iOS 26.0, *) else { return .result(dialog: IntentSupport.dialog(talk.sentence)) }
             // The system takes a call's Start only from an app in front; the call's page shows there.
             try await continueInForeground(alwaysConfirm: false)
             await MainActor.run { CallPersonaIntent.place() }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -201,5 +202,45 @@ func TestNonDecisionSupervisionStillQueuesBehindWorkingSupervisor(t *testing.T) 
 	dispatchSupervisionNow(t, s, g)
 	if s.queuedFor("conv1") != 1 || f.sent() != before {
 		t.Fatalf("ordinary signal bypassed the running turn: queued=%d sends=%d before=%d", s.queuedFor("conv1"), f.sent(), before)
+	}
+}
+
+// A conversation reserved for its replacement (supervise_round.go backgroundOutgrown) takes nothing straight, a decision
+// reply's interjection included: it would run in a conversation archived moments later.
+func TestDecisionReplyInterjectRespectsAReplacement(t *testing.T) {
+	s, f, todo := decisionAgentReplyService(t)
+	g := pendingDecisionReply(t, s, todo)
+	s.relays.mu.Lock()
+	s.relayLocked(context.Background())
+	s.relays.replacing["conv1"] = true
+	s.relays.mu.Unlock()
+	before := f.sent()
+	dispatchSupervisionNow(t, s, g)
+	if got := f.sent(); got != before {
+		t.Fatalf("%d assistant messages went into a conversation being replaced", got-before)
+	}
+}
+
+// A decision reply's entry carries the task's last review, the needs_user that put the decision to the owner, which a
+// Fresh message (a background round, supervise_round.go) shows and any other leaves out as before.
+func TestFreshDecisionReplyShowsTheLastReview(t *testing.T) {
+	s, _, todo := decisionAgentReplyService(t)
+	g := pendingDecisionReply(t, s, todo)
+	e, ok := s.digestEntry(context.Background(), g, "")
+	if !ok || e.Kind != sigDecisionReply || e.AgentReply == nil {
+		t.Fatalf("the decision reply's entry: %+v %v", e, ok)
+	}
+	if e.LastReview == nil || e.LastReview.Verdict != reviewNeedsUser {
+		t.Fatalf("the entry's last review: %+v", e.LastReview)
+	}
+	last := "上次结论（" + e.LastReview.At + "）：" + reviewNeedsUser // i18n-ignore: the supervision message's own words
+	render := func(fresh bool) string {
+		return prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{e}, Leader: fresh, Background: fresh, Fresh: fresh})
+	}
+	if text := render(true); !strings.Contains(text, last) || !strings.Contains(text, "task_decided") {
+		t.Fatalf("a Fresh decision reply lacks its last review %q:\n%s", last, text)
+	}
+	if text := render(false); strings.Contains(text, "上次结论") { // i18n-ignore: the supervision message's own words
+		t.Fatalf("a decision reply that is not Fresh shows a last review:\n%s", text)
 	}
 }

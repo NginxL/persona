@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n";
 import { setToken } from "../../lib/api";
 import type { Session } from "../../lib/types";
-import { RenameDialog, RenameSpaceDialog } from "./SessionDialogs";
+import { RenameDialog, RenameSpaceDialog } from "./SessionMenuDialogs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 type Request = { url: string; init: RequestInit; resolve: (value: Response) => void };

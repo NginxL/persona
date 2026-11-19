@@ -6,6 +6,9 @@ import { setToken } from "../lib/api";
 import { getState, refresh, reset } from "../lib/store";
 import { RequestPage } from "./RequestPage";
 import type { Interaction } from "../lib/types";
+import { loadPages } from "../lib/lazy-page";
+
+await loadPages();
 
 let cards: Interaction[];
 let writes: { url: string; body: unknown }[];

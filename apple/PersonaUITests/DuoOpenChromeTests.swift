@@ -1,8 +1,8 @@
 import XCTest
 
 /// iPhone Duo open, the inner screen, in the Separate layout's new look (#4206; it replaced #2623's switch on the page):
-/// - the Duo's tab bar in the system's tab bar's place (#4231, `DuoTabSwitchTests`): down the side column on its side,
-///   along the foot upright; no switch drawn on the page's top;
+/// - the system's tab bar on the tabs: iOS puts it down the side column on its side and along the foot upright; no
+///   switch drawn on the page's top and none over the tabs;
 /// - each tab its part of the one sidebar's column: its fold at the head, New Chat, Search and Settings at the foot;
 /// - Search and Settings over the window, and the iPhone's new conversation with Needs You (#3680);
 /// - an Agent asked for from outside on the Agents tab.
@@ -14,8 +14,9 @@ import XCTest
 /// TEST_RUNNER_PERSONA_HOLD=<seconds> holds each state, named in an activity `duo-shot <name>`, for
 /// `simctl io --display=3 screenshot`; XCUITest's own screenshot captures the dark outer screen.
 final class DuoOpenChromeTests: XCTestCase {
-    /// A tab item is about 44 pt wide; a heading or a row is wider.
-    private static let tabItemWidth: CGFloat = 60
+    /// A tab item is at most about 100 pt wide (wider along the foot upright, where it has its name beside it room);
+    /// a heading or a row is wider.
+    private static let tabItemWidth: CGFloat = 120
 
     private var app: XCUIApplication!
 
@@ -40,15 +41,15 @@ final class DuoOpenChromeTests: XCTestCase {
 
     @MainActor private func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
-    /// The system tab bar's item, were it there: a button of that name a tab item wide, not the column's heading of the
-    /// same name. The bar itself is not a `TabBar` to XCUITest there.
+    /// The system tab bar's item: a button of that name a tab item wide, not the column's heading of the same name. The
+    /// bar itself is not a `TabBar` to XCUITest there.
     @MainActor private func systemTab(_ label: String) -> XCUIElement {
         let narrow = NSPredicate { item, _ in ((item as? XCUIElementAttributes)?.frame.width ?? .infinity) <= Self.tabItemWidth }
         return app.buttons.matching(NSPredicate(format: "label == %@", label)).matching(narrow).firstMatch
     }
 
-    /// The Duo's tab bar's item for a tab (#4231): `shell-assistant`, `shell-agents`.
-    @MainActor private func tab(_ id: String) -> XCUIElement { element(id) }
+    /// The tab bar's item for a tab: the system's, by the tab's name.
+    @MainActor private func tab(_ id: String) -> XCUIElement { systemTab(id == "shell-agents" ? "Agents" : "Persona") }
 
     @MainActor private func shot(_ name: String) {
         XCTContext.runActivity(named: "duo-shot \(name)") { _ in
@@ -56,21 +57,21 @@ final class DuoOpenChromeTests: XCTestCase {
         }
     }
 
-    /// The Duo's tab bar in the system's tab bar's place (#4231), none drawn on the page's top (#4206, the new look of
-    /// the Separate layout): the column's head has its fold, its foot Search; the page has its face, and its sidebar
-    /// button only while the column is away.
+    /// The system's tab bar on the tabs, no switch drawn on the page's top (#4206, the new look of the Separate layout)
+    /// and none over the tabs: the column's head has its fold, its foot Search; the page has its menu (the name pill beside the
+    /// column, whose head shows the face, #9973), and its sidebar button only while the column is away.
     @MainActor func testTheTabSwitchAndTheColumnsFold() {
         let main = element("sidebar-main"), fold = element("sidebar-fold-column"), search = element("sidebar-search")
         XCTAssertTrue(main.waitForExistence(timeout: 20), "no column:\n\(app.debugDescription)")
-        XCTAssertTrue(tab("shell-assistant").exists && tab("shell-agents").exists, "no tabs' switch:\n\(app.debugDescription)")
-        XCTAssertFalse(systemTab("Persona").exists, "the system's tab bar is still there:\n\(app.debugDescription)")
+        XCTAssertTrue(tab("shell-assistant").exists && tab("shell-agents").exists, "no system tab bar:\n\(app.debugDescription)")
+        XCTAssertFalse(element("tab-switch").exists, "a tab bar drawn over the system's:\n\(app.debugDescription)")
         XCTAssertFalse(element("page-tab-switch").exists, "a switch drawn on the page")
-        XCTAssertGreaterThan(tab("shell-agents").frame.minY, app.windows.firstMatch.frame.midY, "the switch is not low in the window")
+        XCTAssertGreaterThan(tab("shell-agents").frame.minY, app.windows.firstMatch.frame.midY, "the tab bar is not low in the window")
         XCTAssertTrue(fold.exists && search.exists, "no fold or Search:\n\(app.debugDescription)")
         XCTAssertLessThan(fold.frame.maxY, main.frame.minY, "the fold is not at the column's head")
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(search.frame.minY, window.maxY - 160, "Search is not at the column's foot")
-        XCTAssertTrue(element("persona-avatar").exists, "no face on the page")
+        XCTAssertTrue(element("persona-avatar").exists, "no menu on the page")
         let back = element("assistant-sidebar-button")
         XCTAssertFalse(back.exists && back.isHittable, "the page's sidebar button shows beside the column")
         shot("chrome")

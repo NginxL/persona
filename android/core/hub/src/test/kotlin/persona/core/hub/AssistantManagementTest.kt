@@ -113,6 +113,24 @@ class AssistantManagementTest {
         }
     }
 
+    @Test fun conversationTagsReplaceTheWholeSetOnTheHub() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient()).forManager("work")
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api.setConversationTags(SessionKey("hub", "side-1"), listOf("planning", "trip"))
+            val update = server.takeRequest()
+            assertEquals("PUT", update.method)
+            assertEquals("/api/v1/assistant/conversations/side-1/tags", update.requestUrl?.encodedPath)
+            assertEquals("work", update.requestUrl?.queryParameter(ManagerQuery))
+            assertEquals("work", update.getHeader(ManagerHeader))
+            assertEquals("""{"tags":["planning","trip"]}""", update.body.readUtf8())
+
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api.setConversationTags(SessionKey("hub", "side-1"), emptyList())
+            assertEquals("""{"tags":[]}""", server.takeRequest().body.readUtf8())
+        }
+    }
+
     /**
      * #5055: a Persona chat's pick is kept with `PUT …/model` (the launcher, the model unless it is the default entry, the
      * effort, the chat's computer) and dropped with `DELETE`; a refusal keeps the hub's words. The panel's providers come

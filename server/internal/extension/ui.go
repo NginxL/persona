@@ -241,6 +241,14 @@ type AuthRelayItem = wire.AuthRelayItem
 // (docs/extensions/secret-providers.md).
 type SecretProviderItem = wire.SecretProviderItem
 
+// RepositoryProviderItem is a contribution to repository_providers: a code-hosting source on the exact hosts it names
+// (docs/extensions/repository-providers.md).
+type RepositoryProviderItem = wire.RepositoryProviderItem
+
+// RepositoryLinkLabel is what a repository provider calls one kind of its links (wire.RepositoryLinkKinds), "MR" for a
+// pull_request: it only relabels.
+type RepositoryLinkLabel = wire.RepositoryLinkLabel
+
 // Events this hub has.
 var (
 	// EventTopics are the events by topic; how the install screen says each is extension-permissions.event_<topic with

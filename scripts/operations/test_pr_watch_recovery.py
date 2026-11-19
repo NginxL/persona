@@ -13,6 +13,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import pr_watch_common
 import pr_watch_recovery
+import pr_watch_repair
 
 
 class RecoveryIntegrationTests(unittest.TestCase):
@@ -315,12 +316,46 @@ class RecoveryIntegrationTests(unittest.TestCase):
             if argv[:2] == ["git", "ls-remote"]:
                 return subprocess.CompletedProcess(argv, 0, sha + "\trefs/heads/main\n", "")
             return original_run(argv, **kwargs)
-        with patch.object(pr_watch_common, "run", side_effect=controlled):
-            self.assertEqual(pr_watch_common.checked(["git", "fetch", "-q", "origin", "refs/heads/main"],
-                                                    cwd=linked), sha + "\n")
-        self.assertEqual(subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"],
-                                                cwd=linked, env=env, text=True).strip(), sha)
-        self.assertTrue(destination.is_file())
+        # The repair helpers' empty-refmap fetch (#10584) takes the same recovery.
+        for argv in (["git", "fetch", "-q", "origin", "refs/heads/main"], pr_watch_repair.fetch_branch("main")):
+            with self.subTest(argv=argv):
+                destination.unlink(missing_ok=True)
+                with patch.object(pr_watch_common, "run", side_effect=controlled):
+                    self.assertEqual(pr_watch_common.checked(argv, cwd=linked), sha + "\n")
+                self.assertEqual(subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"],
+                                                        cwd=linked, env=env, text=True).strip(), sha)
+                self.assertTrue(destination.is_file())
+
+    def test_repair_fetch_leaves_the_shared_tracking_ref_alone(self):
+        # Worktrees share the checkout's refs; concurrent repair fetches must not
+        # race to update refs/remotes/origin/main (#10584).
+        env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                   GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
+                   GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
+        def git(*args, cwd=self.checkout):
+            return subprocess.run(["git", *args], cwd=cwd, env=env, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        upstream = self.root / "upstream.git"
+        git("init", "-q", "--bare", "-b", "main", str(upstream), cwd=self.root)
+        git("commit", "-q", "--allow-empty", "-m", "base")
+        base = git("rev-parse", "HEAD")
+        git("remote", "add", "origin", str(upstream))
+        git("push", "-q", "origin", "HEAD:refs/heads/main")
+        git("fetch", "-q", "origin")
+        self.assertEqual(git("rev-parse", "refs/remotes/origin/main"), base)
+        git("commit", "-q", "--allow-empty", "-m", "later")
+        later = git("rev-parse", "HEAD")
+        git("push", "-q", "origin", "HEAD:refs/heads/main")
+        # A push updates the tracking ref itself; start from the stale value.
+        git("update-ref", "refs/remotes/origin/main", base)
+        linked = self.root / "linked"
+        git("worktree", "add", "-q", "--detach", str(linked), base)
+        self.addCleanup(lambda: subprocess.run(["git", "worktree", "remove", "--force", str(linked)],
+                                              cwd=self.checkout, env=env, capture_output=True))
+        with patch.dict(os.environ, {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}):
+            tip = pr_watch_repair.fetch_current_main({"baseRefName": "main"}, str(linked), base)
+        self.assertEqual(tip, later)
+        self.assertEqual(git("rev-parse", "refs/remotes/origin/main"), base)
 
     def test_repair_commit_message_has_no_tool_attribution(self):
         source = (HERE / "pr_watch_repair.py").read_text()

@@ -65,7 +65,7 @@ func TestSnapshotSlowReadsDoNotHoldTheMessage(t *testing.T) {
 	s, _, logged := snapshotWaitTest(t, slow, 10*time.Minute, slow, "fresh-chat")
 	ctx := context.Background()
 	start := time.Now()
-	got := s.contextSnapshot(ctx, "")
+	got := s.contextSnapshot(ctx, "", false)
 	if d := time.Since(start); d > snapshotWait/3 {
 		t.Fatalf("waited %v for a read slower than snapshotWait", d)
 	}
@@ -73,7 +73,7 @@ func TestSnapshotSlowReadsDoNotHoldTheMessage(t *testing.T) {
 		t.Fatalf("the message did not go with the last snapshot:\n%s", got)
 	}
 	readIn(t, s)
-	if got := s.contextSnapshot(ctx, ""); !strings.Contains(got, "fresh-chat") {
+	if got := s.contextSnapshot(ctx, "", false); !strings.Contains(got, "fresh-chat") {
 		t.Fatalf("the read the message started was not there for the next one:\n%s", got)
 	}
 	if lines := logged(); len(lines) != 1 || !strings.Contains(lines[0], "live snapshot: the read took") || !strings.Contains(lines[0], "(connectors ") {
@@ -87,7 +87,7 @@ func TestSnapshotStillWaitsWhenItShould(t *testing.T) {
 	ctx := context.Background()
 	t.Run("last read quick", func(t *testing.T) {
 		s, _, logged := snapshotWaitTest(t, 50*time.Millisecond, 10*time.Minute, 300*time.Millisecond, "fresh-chat")
-		if got := s.contextSnapshot(ctx, ""); !strings.Contains(got, "fresh-chat") {
+		if got := s.contextSnapshot(ctx, "", false); !strings.Contains(got, "fresh-chat") {
 			t.Fatalf("a message did not wait for a read quicker than snapshotWait:\n%s", got)
 		}
 		if lines := logged(); len(lines) != 0 {
@@ -100,7 +100,7 @@ func TestSnapshotStillWaitsWhenItShould(t *testing.T) {
 			if name == "none" {
 				s.live.snap = nil
 			}
-			if got := s.contextSnapshot(ctx, ""); !strings.Contains(got, "fresh-chat") {
+			if got := s.contextSnapshot(ctx, "", false); !strings.Contains(got, "fresh-chat") {
 				t.Fatalf("%s: a message went without waiting for the only usable snapshot:\n%s", name, got)
 			}
 		}

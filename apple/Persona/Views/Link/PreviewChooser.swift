@@ -36,7 +36,7 @@ struct PreviewChooser: View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Preview"))
-                .navigationSubtitle(machineName + " · " + Fmt.path(preview.cwd, home: machine?.home))
+                .navigationSubtitleWhenSupported(machineName + " · " + Fmt.path(preview.cwd, home: machine?.home))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     SheetClose(id: "preview-close") { dismiss() }

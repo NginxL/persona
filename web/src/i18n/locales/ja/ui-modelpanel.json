@@ -1,13 +1,6 @@
 {
   "search": "モデルを検索…",
   "list": "モデル",
-  "views": "モデルの表示",
-  "recent": "最近",
-  "favorites": "お気に入り",
-  "all": "すべて",
-  "recommended": "おすすめ",
-  "recent_empty": "最近使ったモデルはまだありません — モデルを選ぶとここに表示されます",
-  "favorites_empty": "お気に入りはまだありません — モデルにポインタを合わせて ☆ を押すとここに保存されます",
   "no_match": "一致するモデルはありません",
   "save_favorite": "お気に入りに保存",
   "remove_favorite": "お気に入りから削除",
@@ -41,10 +34,14 @@
   "how_to_fix": "直し方",
   "engine_via": "{provider} で実行",
   "effort_unset": "モデルのデフォルト",
-  "show_all": "{count} 件をすべて表示",
   "older": "以前のバージョン · {count}",
   "older_of": "{family}：以前のバージョン {count} 件を表示",
   "hide_older": "以前のバージョンを隠す",
   "hide_older_of": "{family}：以前のバージョンを隠す",
-  "latest": "最新"
+  "latest": "最新",
+  "model_count": "{count} モデル",
+  "current_launcher": "現在",
+  "default_launcher": "デフォルト",
+  "quick_picks": "最近とお気に入り",
+  "recommended": "おすすめ"
 }

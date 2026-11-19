@@ -14,6 +14,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	adapter "github.com/nwverse/persona/server/internal/larkcli"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 const (
@@ -35,6 +36,15 @@ const (
 	inboxDirectChats      = 10
 	inboxDirectCandidates = 50
 	inboxDirectLookback   = 2 * time.Hour
+	// The context the models read (contextFor): the current batch and recent background. Keep the background from
+	// contextHistory before the first new message, at most contextEarlier messages, but always the last
+	// contextEarlierKeep however old (a short answer keeps its question). The chat's page of 40 brought weeks-old
+	// messages and cards of thousands of characters into every triage of a quiet chat.
+	contextHistory      = 24 * time.Hour
+	contextEarlier      = 10
+	contextEarlierKeep  = 3
+	contextEarlierRunes = 300
+	contextNewRunes     = 2000
 )
 
 // StateStore is the small part of the manager's Postgres-backed settings store
@@ -197,10 +207,10 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 				newest = t
 			}
 			if message.MessageID != "" {
-				if isBoundAppMessage(message, auth.AppID) {
+				if !conversationMessage(message) || isBoundAppMessage(message, auth.AppID) {
 					// The app bound to lark-cli is Persona's own bot in the
-					// recommended setup. Consume its messages so they cannot form a
-					// feedback loop, while still advancing the cursor and seen ledger.
+					// recommended setup. Consume its messages and non-conversation
+					// events without waking Inbox, but keep cursor/seen progress.
 					c.markSeen(message.MessageID)
 					continue
 				}
@@ -217,12 +227,12 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	}
 
 	// Search results are normally newest first, but ordering is not part of
-	// the shortcut contract. Sort before applying the consecutive grouping rule.
+	// the shortcut contract. Sort before grouping each conversation's incoming batch.
 	// Direct chats read from their own history: what search has not indexed yet still comes in. A failed sweep
 	// doesn't lose what search found; the round keeps it and reports the error at the end.
 	direct, directErr := c.sweepDirectChats(ctx)
 	for _, message := range direct {
-		if isBoundAppMessage(message, auth.AppID) {
+		if !conversationMessage(message) || isBoundAppMessage(message, auth.AppID) {
 			c.markSeen(message.MessageID)
 			continue
 		}
@@ -634,7 +644,6 @@ func (c *Connector) groupMessages(messages []adapter.Message, me string, knownTo
 	}
 	c.inboxMu.Unlock()
 	var out []*inboxGroup
-	var current *inboxGroup
 	byKey := map[string]*inboxGroup{}
 	for _, message := range messages {
 		key := messageKey(message)
@@ -670,10 +679,10 @@ func (c *Connector) groupMessages(messages []adapter.Message, me string, knownTo
 			keep = true
 		}
 		if !keep {
-			current = nil
 			continue
 		}
-		if current == nil || current.key != key {
+		current := byKey[key]
+		if current == nil {
 			current = &inboxGroup{key: key, chatID: message.ChatID, threadID: topicID(message), chatName: message.ChatName}
 			out = append(out, current)
 			byKey[key] = current
@@ -695,16 +704,37 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 	if page, err := c.runner.ListMessages(ctx, group.chatID, group.threadID, "", 40); err == nil && len(page.Messages) > 0 {
 		contextMessages = mergeMessages(page.Messages, group.messages)
 	}
+	visible := contextMessages[:0]
+	for _, message := range contextMessages {
+		if conversationMessage(message) && messageKey(message) == group.key {
+			visible = append(visible, message)
+		}
+	}
+	contextMessages = visible
+	currentMessages := append([]adapter.Message(nil), group.messages...)
+	currentIDs := make(map[string]int, len(currentMessages))
+	for i, message := range currentMessages {
+		currentIDs[message.MessageID] = i
+	}
 	// History can already contain a follow-up which search has not indexed. Only
-	// eligible incoming activity in this chat/topic can supersede the search hit.
+	// unseen eligible activity in this chat/topic can supersede the search hit.
 	c.inboxMu.Lock()
 	_, allChat := c.inboxAllChats[group.chatID]
 	c.inboxMu.Unlock()
 	for _, message := range contextMessages {
+		if _, incoming := currentIDs[message.MessageID]; incoming {
+			continue // History metadata cannot change an incoming message's identity or freshness.
+		}
 		if message.Deleted || messageKey(message) != group.key || message.Sender.ID == me || !after(message, latest) {
 			continue
 		}
 		if latest.ChatType != "p2p" && group.threadID == "" && !allChat && !messageMentions(message, me) {
+			continue
+		}
+		c.inboxMu.Lock()
+		_, seen := c.inboxSeen[message.MessageID]
+		c.inboxMu.Unlock()
+		if seen {
 			continue
 		}
 		message.ChatType = firstNonEmpty(message.ChatType, latest.ChatType)
@@ -712,6 +742,8 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 			message.ChatPartner = latest.ChatPartner
 		}
 		latest = message
+		currentIDs[message.MessageID] = len(currentMessages)
+		currentMessages = append(currentMessages, message)
 		group.replied = false
 		group.mentioned = group.mentioned || messageMentions(message, me)
 	}
@@ -720,7 +752,6 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 			group.replied = true
 		}
 	}
-	text := messageText(latest)
 	thread := "larkcli:chat:" + group.chatID
 	if group.threadID != "" {
 		thread += ":thread:" + group.threadID
@@ -755,14 +786,28 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 	if senderTag, ok := latestSenderTag(contextMessages, me); ok {
 		tags = append(tags, senderTag)
 	}
+	var history []adapter.Message
+	for _, message := range contextMessages {
+		i, current := currentIDs[message.MessageID]
+		if !current {
+			history = append(history, message)
+		} else if currentMessages[i].MessagePosition == "" {
+			// Search may omit positions. Use the chat's position for display order
+			// without replacing the incoming message or its reply metadata.
+			currentMessages[i].MessagePosition = message.MessagePosition
+		}
+	}
+	sort.SliceStable(currentMessages, func(i, j int) bool {
+		return messageLess(currentMessages[i], currentMessages[j])
+	})
 	thing := connector.InboxThing{
 		Thread:   thread,
 		Kind:     kind,
 		Label:    label,
 		Title:    title,
 		Sender:   latest.Sender.Name,
-		Preview:  firstLine(text),
-		Context:  contextText(contextMessages, me),
+		Preview:  firstLine(inboxMessageText(latest, lang)),
+		Context:  contextFor(currentMessages, history, me),
 		At:       messageTime(latest),
 		Last:     latest.MessageID,
 		ReplyTo:  replyTo(lang, name, group.threadID != ""),
@@ -946,6 +991,13 @@ func isBoundAppMessage(message adapter.Message, appID string) bool {
 	return senderIsBot(message.Sender)
 }
 
+// System events are not new conversation requests. Keep real attachments and bot
+// notifications even when their body has no extractable text.
+func conversationMessage(message adapter.Message) bool {
+	return !message.Deleted && !strings.EqualFold(strings.TrimSpace(message.MsgType), "system") &&
+		firstNonEmpty(message.Sender.ID, message.Sender.AppID, message.Sender.OpenBotID) != ""
+}
+
 func (c *Connector) inboxStateForTests() persistedInboxState {
 	c.inboxMu.Lock()
 	defer c.inboxMu.Unlock()
@@ -1086,6 +1138,30 @@ func messageText(message adapter.Message) string {
 	return cardText(rawText(message.Content))
 }
 
+func inboxMessageText(message adapter.Message, lang i18n.Lang) string {
+	if text := strings.TrimSpace(messageText(message)); text != "" {
+		return text
+	}
+	key := "hub-connectors.larkcli_placeholder_message"
+	switch strings.ToLower(strings.TrimSpace(message.MsgType)) {
+	case "":
+		return ""
+	case "image":
+		key = "hub-connectors.larkcli_placeholder_image"
+	case "file":
+		key = "hub-connectors.larkcli_placeholder_file"
+	case "audio":
+		key = "hub-connectors.larkcli_placeholder_audio"
+	case "media", "video":
+		key = "hub-connectors.larkcli_placeholder_video"
+	case "sticker":
+		key = "hub-connectors.larkcli_placeholder_sticker"
+	case "interactive":
+		key = "hub-connectors.larkcli_placeholder_card"
+	}
+	return "[" + i18n.T(lang, key) + "]"
+}
+
 var (
 	cardOpen  = lazyre.New(`<card(?:\s+title="([^"]*)")?\s*>`)
 	cardClose = lazyre.New(`</card>`)
@@ -1153,17 +1229,42 @@ const (
 	markAll   = "（@所有人）" // i18n-ignore: the tier criteria's mark, read by the model
 )
 
-// contextText is the conversation as the models read it, a line a message: "<sender><marks>: <text>", the marks from
-// the message's structured mentions (both when it @'s the owner and everyone). me is the owner's id.
-func contextText(messages []adapter.Message, me string) string {
+// contextFor renders the incoming batch and bounded background, each in time order.
+func contextFor(current, history []adapter.Message, me string) string {
+	from := max(len(history)-contextEarlier, 0)
+	if first := messageTime(current[0]); !first.IsZero() {
+		for from < len(history)-contextEarlierKeep {
+			if at := messageTime(history[from]); !at.IsZero() && first.Sub(at) <= contextHistory {
+				break
+			}
+			from++
+		}
+	}
+	return prompts.RenderLarkCLIInboxContext(prompts.LarkCLIInboxContext{
+		Current: contextLines(current, me, contextNewRunes),
+		History: contextLines(history[from:], me, contextEarlierRunes),
+	})
+}
+
+// contextLines writes one line per message with its timestamp and structured mention marks.
+// The text is limited to runes (0: whole). me is the owner's id.
+func contextLines(messages []adapter.Message, me string, runes int) string {
 	var b strings.Builder
 	for _, message := range messages {
-		text := strings.TrimSpace(messageText(message))
+		text := inboxMessageText(message, i18n.En)
 		if text == "" {
 			continue
 		}
+		if r := []rune(text); runes > 0 && len(r) > runes {
+			text = string(r[:runes]) + "…"
+		}
 		if b.Len() > 0 {
 			b.WriteString("\n")
+		}
+		if at := messageTime(message); !at.IsZero() {
+			b.WriteString("[")
+			b.WriteString(at.Format(time.RFC3339))
+			b.WriteString("] ")
 		}
 		start := b.Len()
 		name := message.Sender.Name

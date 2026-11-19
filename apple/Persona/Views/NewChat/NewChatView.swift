@@ -961,7 +961,7 @@ struct NewChatView: View {
             }
         } else if let c = modelChoice, c.canPick {
             NavigationLink {
-                LauncherModelPicker(choice: c, picked: $pickedModel, refresh: { await loadModels(refresh: true) }, offersTyping: true,
+                LauncherModelPicker(choice: c, picked: $pickedModel, refresh: { await loadModels(refresh: true) }, owner: runLauncher, offersTyping: true,
                                     forget: { id in await modelList.forget(id, machine: ref, launcher: runLauncher) },
                                     forgetError: modelList.forgetError,
                                     defaultFooter: c.configured.isEmpty ? String(localized: "No model chosen: runs with the launcher's own settings.")

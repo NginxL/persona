@@ -738,7 +738,7 @@ minutes ready. It needs DEBUG-only members on `RecordingCapture` (a sample level
 flag, the expected segments and calls `onStopping` and `onSaved`), listed in the PR (section 1, exception 3). The user's real Stop
 button cannot drive the flow without a writer. Ask is shown through the existing `answered` samples, which bypass the hub: with no writer
 `MeetingAsk`'s heard and flush hooks do nothing, so a live ask through the mock hub is not part of `flow`. A launch argument name never equals a Swift identifier
-and is added to `scripts/release/release.sh` where the strings check asks.
+and is added to `scripts/release/debug_switches.txt`, the list the release's strings check reads.
 
 **Screenshots and video, light and dark, default and the largest accessibility size, on a simulator booted by `scripts/app/sim-boot.sh`:**
 idle, preparing, live (recording, paused, paused by a call, Persona listening, taking part, an answer), Jump to Latest, the Stop

@@ -810,11 +810,12 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
     public var errorReports: [ExtensionErrorReportsItem]?
     public var authRelay: [ExtensionAuthRelayItem]?
     public var secretProviders: [ExtensionSecretProviderItem]?
+    public var repositoryProviders: [ExtensionRepositoryProviderItem]?
     public var messaging: [ExtensionMessagingItem]?
     /// Extra keys stay at this object's level on the wire; declared fields always win.
     public var additionalProperties: [String: JSONValue]
 
-    public init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, speech: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
+    public init(connectors: [ExtensionConnectorItem]? = nil, voice: [ExtensionNamedItem]? = nil, transcription: [ExtensionNamedItem]? = nil, speech: [ExtensionNamedItem]? = nil, computer: [ExtensionNamedItem]? = nil, browser: [ExtensionNamedItem]? = nil, iphone: [ExtensionNamedItem]? = nil, quota: [ExtensionQuotaItem]? = nil, providers: [ExtensionProviderItem]? = nil, api: [ExtensionAPIItem]? = nil, assistant: [ExtensionAssistantItem]? = nil, mcpServers: [ExtensionMCPServerItem]? = nil, ui: [ExtensionUIItem]? = nil, agentSources: [ExtensionAgentSourceItem]? = nil, channel: [ExtensionChannelItem]? = nil, events: [ExtensionEventsItem]? = nil, shortcuts: [ExtensionShortcutItem]? = nil, skills: [ExtensionSkillItem]? = nil, prompts: [ExtensionPromptItem]? = nil, themes: [ExtensionThemeItem]? = nil, looks: [ExtensionLookItem]? = nil, triageTemplates: [ExtensionTriageTemplateItem]? = nil, agentFilters: [ExtensionAgentFilterItem]? = nil, tunnels: [ExtensionTunnelItem]? = nil, errorReports: [ExtensionErrorReportsItem]? = nil, authRelay: [ExtensionAuthRelayItem]? = nil, secretProviders: [ExtensionSecretProviderItem]? = nil, repositoryProviders: [ExtensionRepositoryProviderItem]? = nil, messaging: [ExtensionMessagingItem]? = nil, additionalProperties: [String: JSONValue] = [:]) {
         self.connectors = connectors
         self.voice = voice
         self.transcription = transcription
@@ -842,6 +843,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         self.errorReports = errorReports
         self.authRelay = authRelay
         self.secretProviders = secretProviders
+        self.repositoryProviders = repositoryProviders
         self.messaging = messaging
         self.additionalProperties = additionalProperties
     }
@@ -874,6 +876,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         case errorReports = "error_reports"
         case authRelay = "auth_relay"
         case secretProviders = "secret_providers"
+        case repositoryProviders = "repository_providers"
         case messaging
     }
 
@@ -906,13 +909,14 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         self.errorReports = ExtensionWireJSON.decode([ExtensionErrorReportsItem].self, from: raw["error_reports"])
         self.authRelay = ExtensionWireJSON.decode([ExtensionAuthRelayItem].self, from: raw["auth_relay"])
         self.secretProviders = ExtensionWireJSON.decode([ExtensionSecretProviderItem].self, from: raw["secret_providers"])
+        self.repositoryProviders = ExtensionWireJSON.decode([ExtensionRepositoryProviderItem].self, from: raw["repository_providers"])
         self.messaging = ExtensionWireJSON.decode([ExtensionMessagingItem].self, from: raw["messaging"])
-        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"]
         additionalProperties = raw.filter { !known.contains($0.key) }
     }
 
     public func encode(to encoder: Encoder) throws {
-        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging"]
+        let known: Set<String> = ["connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"]
         var fields = additionalProperties.filter { !known.contains($0.key) }
         if let value = connectors { fields["connectors"] = try ExtensionWireJSON.encode(value) }
         if let value = voice { fields["voice"] = try ExtensionWireJSON.encode(value) }
@@ -941,6 +945,7 @@ public nonisolated struct ExtensionContributes: Codable, Hashable, Sendable {
         if let value = errorReports { fields["error_reports"] = try ExtensionWireJSON.encode(value) }
         if let value = authRelay { fields["auth_relay"] = try ExtensionWireJSON.encode(value) }
         if let value = secretProviders { fields["secret_providers"] = try ExtensionWireJSON.encode(value) }
+        if let value = repositoryProviders { fields["repository_providers"] = try ExtensionWireJSON.encode(value) }
         if let value = messaging { fields["messaging"] = try ExtensionWireJSON.encode(value) }
         var container = encoder.singleValueContainer()
         try container.encode(fields)
@@ -1471,6 +1476,75 @@ public nonisolated struct ExtensionSecretProviderItem: Codable, Hashable, Sendab
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.schemes = (try? c.decodeIfPresent([String].self, forKey: .schemes)) ?? []
     }
+}
+
+/// A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's repositories and links
+/// there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe; repository.schema.json) and
+/// re-checks every answer. Needs the program to speak the protocol. A host another installed extension claims, on or
+/// off, fails the install, and so does one host in two items.
+public nonisolated struct ExtensionRepositoryProviderItem: Codable, Hashable, Sendable {
+    public var id: String
+    /// What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no
+    /// control characters.
+    public var name: String
+    /// The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or
+    /// wildcard, not an IP address, and not a host the built-in GitHub and GitLab read.
+    public var hosts: [String]
+    /// What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels:
+    /// the kinds stay issue and pull_request.
+    public var linkKinds: [ExtensionRepositoryLinkLabel]?
+
+    public init(id: String = "", name: String = "", hosts: [String] = [], linkKinds: [ExtensionRepositoryLinkLabel]? = nil) {
+        self.id = id
+        self.name = name
+        self.hosts = hosts
+        self.linkKinds = linkKinds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case hosts
+        case linkKinds = "link_kinds"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        self.hosts = (try? c.decodeIfPresent([String].self, forKey: .hosts)) ?? []
+        self.linkKinds = try? c.decodeIfPresent([ExtensionRepositoryLinkLabel].self, forKey: .linkKinds)
+    }
+}
+
+/// The word a repository provider shows for one kind of its links (MR for a pull_request).
+public nonisolated struct ExtensionRepositoryLinkLabel: Codable, Hashable, Sendable {
+    public var kind: String
+    /// Not only spaces, no control characters.
+    public var label: String
+
+    public init(kind: String = "", label: String = "") {
+        self.kind = kind
+        self.label = label
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case label
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
+        self.label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? ""
+    }
+}
+
+/// The kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).
+public nonisolated enum ExtensionRepositoryLinkKind {
+    public static let issue = "issue"
+    public static let pullRequest = "pull_request"
+    public static let all = ["issue", "pull_request"]
 }
 
 /// It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the

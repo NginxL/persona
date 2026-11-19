@@ -8,6 +8,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -64,7 +66,7 @@ class ChatOutboxBubbleTest {
     @Test fun theLongPressSaysDontSendOnGlass() {
         val waiting = MessageTarget("m1", "words", true, "words", DeliveryState.WaitingForNetwork)
         fun last(extras: MessageExtras, target: MessageTarget = waiting) =
-            messageMenuActions(target, writes = true, handOff = false, res, extras) {}.last().label
+            messageMenuActions(target, writes = true, forward = false, res, extras) {}.last().label
         assertEquals("Don't send", last(MessageExtras(delete = true, dontSend = true)))
         assertEquals("Cancel send", last(MessageExtras(delete = true)))
         assertEquals("Delete", last(MessageExtras(delete = true, dontSend = true), waiting.copy(pending = DeliveryState.Refused)))
@@ -127,9 +129,26 @@ class ChatOutboxBubbleTest {
         rule.onNodeWithText("Delete").performClick()
         assertEquals(listOf(DeliveryAction.Delete), done)
         val labels = messageMenuActions(MessageTarget("m2", "Refused words", true, "Refused words", DeliveryState.Refused),
-            writes = false, handOff = false, res, MessageExtras(delete = true)) {}.map { it.label }
+            writes = false, forward = false, res, MessageExtras(delete = true)) {}.map { it.label }
         assertTrue(labels.contains("Copy"))
         assertFalse(labels.contains("Edit"))
+    }
+
+    /** A pending message carries everything a sent one does: the forward's card, the other contexts, the files, the note. */
+    @Test fun aWaitingMessageKeepsItsForwardAndItsOtherContextsAndFiles() {
+        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"jarvis://session/m/s?at=x%230\"" +
+            " msg=\"x#0\" role=\"persona\" author=\"Persona\" chat=\"Persona\">\n原文\n</persona-context>"
+        val context = "<persona-context kind=\"context\" title=\"修复登录\" url=\"\">\n页面原文\n</persona-context>"
+        val file = "<persona-file kind=\"file\" path=\"/up/a.txt\" name=\"a.txt\" size=\"10\"/>"
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                PendingForwardBubble(listOf(forward, context, file).joinToString("\n") + "\n\n看这个", "p1")
+            }
+        }
+        rule.onNodeWithText("原文", substring = true).assertExists()
+        rule.onNodeWithText("修复登录", substring = true).assertExists()
+        rule.onAllNodesWithText("a.txt", substring = true).onFirst().assertExists()
+        rule.onNodeWithText("看这个", substring = true).assertExists()
     }
 
     @Test fun aStoppedChatsStatusOffersDeleteWithoutRetryOrEdit() {

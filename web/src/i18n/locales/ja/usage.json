@@ -20,5 +20,13 @@
   "problem_rejected": "ゲートウェイがキーを拒否しました。管理画面 → 使用量ソースで更新してください。前回の数値を表示しています",
   "problem_failed": "ゲートウェイを読み取れませんでした。前回の数値を表示しています",
   "problem_error": "ゲートウェイがこのアカウントを読めませんでした。保存済みの数値を表示しています",
-  "window_model_label": "{name} {window}（{model}）：{percent}使用済み"
+  "window_model_label": "{name} {window}（{model}）：{percent}使用済み",
+  "not_connected": "未設定",
+  "connect_action": "アシスタントで設定",
+  "connect_hint_claude": "利用量データが未連携です。statusLine またはゲートウェイの設定を依頼できます",
+  "connect_hint_agy": "CLI はローカルで利用率を返しません。プールゲートウェイ利用時は連携を依頼できます",
+  "connect_hint_other": "利用量データが未連携です。ゲートウェイまたはスクリプトの連携を依頼できます",
+  "connect_prompt_claude": "このマシンの Claude Code（{id}）の利用量を Persona 左下の利用上限バーに連携してください。現在の設定を確認し、公式サブスクリプションなら既存の statusLine を保ったまま Persona データディレクトリの usage/claude.json に書き出すラッパーを設定し、ゲートウェイ経由なら使用量ソースまたはクォータ拡張の接続方法を案内してください。",
+  "connect_prompt_agy": "このマシンの Antigravity（{id}）の利用量を Persona 左下の利用上限バーに連携できるか（generic 使用量ソースやローカルスクリプト経由など）確認して設定を手伝ってください。",
+  "connect_prompt_other": "プロバイダー「{name}」（ランチャー {id}）の利用量を Persona 左下の利用上限バーに連携できるよう、ゲートウェイの使用量ソースまたはクォータ拡張への対応を確認して設定を手伝ってください。"
 }

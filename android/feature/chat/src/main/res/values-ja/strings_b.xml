@@ -93,6 +93,7 @@
     <string name="chat_composer_attachment_gone">添付ファイルが無効になったか、読み取り権限がなくなりました。削除してもう一度選んでください</string>
     <string name="chat_composer_upload_failed">アップロードに失敗しました。もう一度お試しください。入力内容は残っています</string>
     <string name="chat_composer_add">添付ファイルとクイックメッセージを追加</string>
+    <string name="chat_composer_hide_keyboard">キーボードを閉じる</string>
     <string name="chat_composer_dictate">音声入力</string>
     <string name="chat_composer_interrupt_requested">中断をリクエストしました。待機中のメッセージは残ります</string>
     <string name="chat_composer_interrupt_unknown">中断の結果を確認中です。ターミナルを確認してから操作してください</string>
@@ -248,10 +249,8 @@
     <string name="chat_menu_select">選択</string>
     <string name="chat_menu_quote">引用</string>
     <string name="chat_menu_share">共有</string>
-    <string name="chat_menu_hand_to_persona">Personaに任せる</string>
     <string name="chat_menu_context">コンテキストにする</string>
     <string name="chat_menu_edit">編集</string>
-    <string name="chat_menu_handoff_ask">このメッセージを見て、どう対応すればよいか教えてください。</string>
     <string name="chat_menu_context_title">%1$s · メッセージ</string>
     <string name="chat_draft_read_failed">下書きを読み込めませんでした。入力内容はこのページに一時的に残ります</string>
     <string name="chat_draft_save_failed">下書きを保存できませんでした。入力内容はこのページに残っています。アプリを終了しないでください</string>
@@ -261,6 +260,7 @@
     <string name="chat_source_conversation">会話</string>
     <string name="chat_source_patrol">定期チェック</string>
     <string name="chat_source_followup">フォローアップ</string>
+    <string name="chat_source_scheduled_task">定期タスクから送信</string>
     <string name="chat_source_supervision">進捗確認</string>
     <string name="chat_source_unknown">送信元</string>
     <string name="chat_source_expand">もっと見る</string>
@@ -476,10 +476,13 @@
     <string name="chat_doc_pdf">PDF 書類</string>
     <string name="chat_doc_other">書類</string>
     <string name="chat_turn_fix_not_logged_in">モデル未接続：Claude Code CLI にログインしていません</string>
+    <string name="chat_turn_fix_not_logged_in_launcher">%1$sにログインしてください</string>
     <string name="chat_turn_fix_not_logged_in_detail">Claude デスクトップアプリのログインはこれに含まれません。そのコンピュータのターミナルで claude auth login を実行するか、代わりに API キーを使ってください。</string>
     <string name="chat_turn_fix_auth_failed">モデル未接続：キーが正しくありません</string>
+    <string name="chat_turn_fix_auth_failed_launcher">%1$sのキーが無効です</string>
     <string name="chat_turn_fix_auth_failed_detail">キーが正しくないか期限切れです。使えるキーに変えてください。</string>
     <string name="chat_turn_fix_model_route">モデル未接続：このモデルは使えません</string>
+    <string name="chat_turn_fix_model_route_launcher">%1$sでモデルを使えません</string>
     <string name="chat_turn_fix_model_route_detail">モデル名が正しくないか、このモデルは今使えません。別のモデルを試してください。</string>
     <string name="chat_turn_fix_action">直す</string>
 </resources>

@@ -1,4 +1,4 @@
-Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; don't notify for ordinary replies (they get one automatically). In the hub's low-distraction mode, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.
+Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; ordinary replies already notify. In the hub's low-distraction mode, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.
 
 ```json
 {

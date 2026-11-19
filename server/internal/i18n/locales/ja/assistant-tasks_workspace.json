@@ -12,5 +12,10 @@
   "machine_local": "タスクワークスペースは {from} で準備済みのため、{to} には移動できません",
   "create": "新しいタスクワークスペースを作成できませんでした。Agent は開始していません",
   "no_commits": "{machine} の {path} にはまだコミットがないため、新しいタスクワークスペースを作成できません。一度コミットするか、既存のワークスペースを選んでください。Agent は開始していません",
-  "busy_no_commits": "{machine} のフォルダ {path} はタスク {id}（{title}）が使用中で、コミットもないため新しいワークスペースを作成できません。そのタスクを完了するか、別のフォルダでこのタスクを開始してください"
+  "busy_no_commits": "{machine} のフォルダ {path} はタスク {id}（{title}）が使用中で、コミットもないため新しいワークスペースを作成できません。そのタスクを完了するか、別のフォルダでこのタスクを開始してください",
+  "own_checkout_elsewhere": "この ToDo のブランチ {branch} は {path} でチェックアウト済みですが、タスク用チェックアウトのフォルダ外にあるため Persona は引き継ぎません。そこで続けるには workspace {\"existing\": \"{path}\"} でタスクを計画し直してください",
+  "own_checkout_dirty": "この ToDo の以前のチェックアウト {path}（ブランチ {branch}）には未コミットの変更があるため、Persona は自動では再利用しません。そこで続けるには workspace {\"existing\": \"{path}\"} でタスクを計画し直すか、変更を別の場所に保存してからそのチェックアウトを削除してください",
+  "own_checkout_in_use": "この ToDo の以前のチェックアウト {path}（ブランチ {branch}）は Agent {owner} が使用中です。その Agent の終了を待つか停止してから、もう一度開始してください",
+  "own_checkout_unverified": "{path} がこの ToDo のブランチ {branch} のクリーンなチェックアウトのままか確認できません。確認したうえで workspace {\"existing\": \"{path}\"} でタスクを計画し直してそこで続けるか、削除してください",
+  "own_path_taken": "このタスクのチェックアウト用フォルダ {path} にはすでにファイルがあるため、新しいチェックアウトは作成していません。この ToDo の以前の作業であれば、workspace {\"existing\": \"{path}\"} でタスクを計画し直してそこで続けるか、削除してください"
 }

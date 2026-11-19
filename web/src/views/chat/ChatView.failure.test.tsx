@@ -88,6 +88,23 @@ vi.mock("../../lib/ultracode", async (importOriginal) => ({
   ultracodeQueueDone: () => new Promise<boolean>((resolve) => (ultra.release = resolve)),
 }));
 
+// The kept message's status line, Retry and Delete are a chunk of their own (#10357): held back until a test lets it in,
+// to see what is drawn meanwhile.
+const keptChunk = vi.hoisted(() => {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  return { gate, open };
+});
+vi.mock("./UndeliveredBubbles", async (importOriginal) => {
+  await keptChunk.gate;
+  return importOriginal<typeof import("./UndeliveredBubbles")>();
+});
+// lets the chunk in and waits until it is loaded, so the next flush draws it
+const letKeptChunkIn = async () => {
+  keptChunk.open();
+  await import("./UndeliveredBubbles");
+};
+
 // what Delete's toast offers (#4626): no toast stack is drawn here
 vi.mock("../../ui/atoms", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../ui/atoms")>(),
@@ -1038,5 +1055,61 @@ describe("sending in order, and with no row yet", () => {
     } finally {
       transcript.firstRead = true;
     }
+  });
+});
+
+// The assistant could not start (#10194): the hub answers 202 delivered "later" and the manager keeps the message. The
+// page drops its own sending bubble and draws the row's kept message, on this device as on any other, marked not
+// delivered and sent by itself; a bare operation receipt (202 {"state":"unknown"}) is no delivery and stays in doubt.
+describe("a message the assistant keeps after it could not go in", () => {
+  const kept = { id: "k1", text: "Synthetic kept message", at: "2026-11-17T10:00:00Z", state: "waiting" as const, attempts: 1, error: "The assistant could not start" };
+  it("shows as not delivered, sent by itself, with Delete, and leaves nothing in the outbox", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Persona", cwd: "/code", state: "idle", status: "offline", assistant: true } as Session;
+    reply = () => json({ delivered: "later", undelivered: kept }, 202);
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />)); await flush();
+    let sent!: Promise<boolean>;
+    act(() => { sent = captured.onSend!({ text: "Synthetic kept message", images: [] }); }); await flush();
+    await act(async () => void (await sent)); await flush();
+    expect(Object.values(getState().outbox).flat()).toHaveLength(0);
+    expect(host.querySelector("[data-outbox]")).toBeNull();
+    captured.session = { ...captured.session!, undelivered: [kept] };
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />)); await flush();
+    // until the bubble's chunk is in, the message shows as the owner's failed bubble alone: it never blinks out
+    expect(host.querySelector('[data-undelivered="k1"]')).toBeNull();
+    expect(host.querySelector('[data-user-bubble][data-send-state="failed"]')?.textContent).toContain("Synthetic kept message");
+    await letKeptChunkIn(); await flush();
+    const bubble = host.querySelector('[data-undelivered="k1"]');
+    expect(bubble?.getAttribute("data-undelivered-state")).toBe("waiting");
+    expect(bubble?.textContent).toContain("Synthetic kept message");
+    expect(host.querySelectorAll("[data-user-bubble]")).toHaveLength(1);
+    expect(bubble?.textContent).toContain(t("chat-undeliveredbubbles.waiting", { reason: kept.error }));
+    expect(bubble?.querySelector('[role="status"]')).not.toBeNull();
+    expect([...bubble!.querySelectorAll('[role="status"] button')].map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.delete")]);
+  });
+  it("one that gave up offers Retry and Delete, and hides once the transcript has it", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Persona", cwd: "/code", state: "idle", status: "idle", assistant: true,
+      undelivered: [{ ...kept, state: "failed" }] } as Session;
+    await letKeptChunkIn();
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />)); await flush();
+    const bubble = host.querySelector('[data-undelivered="k1"]');
+    expect(bubble?.querySelector('[role="alert"]')?.textContent).toContain(t("chat-undeliveredbubbles.failed", { reason: kept.error }));
+    expect([...bubble!.querySelectorAll('[role="alert"] button')].map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.retry"), t("chat-outboxbubbles.delete")]);
+    const previous = transcript.items;
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Synthetic kept message", client_msg_id: "k1", ts: "2026-11-17T10:05:00Z" }];
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c2" assistant />)); await flush();
+      act(() => root.render(<ChatView mid="hub" sid="c1" assistant />)); await flush();
+      expect(host.querySelector('[data-undelivered="k1"]')).toBeNull();
+    } finally { transcript.items = previous; }
+  });
+  it("a bare operation receipt is no delivery: the bubble stays, in doubt", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Persona", cwd: "/code", state: "idle", status: "offline", assistant: true } as Session;
+    reply = () => json({ state: "unknown" }, 202);
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />)); await flush();
+    let sent!: Promise<boolean>;
+    act(() => { sent = captured.onSend!({ text: "Synthetic replayed message", images: [] }); }); await flush();
+    await act(async () => void (await sent)); await flush();
+    expect(host.querySelector("[data-outbox] [data-in-doubt]")?.getAttribute("data-in-doubt")).toBe("unknown");
+    expect(host.textContent).toContain("Synthetic replayed message");
   });
 });

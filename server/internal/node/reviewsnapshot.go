@@ -68,14 +68,14 @@ func (n *Node) worktreeSnapshot(ctx context.Context, kind, cwd, nameHint string)
 	if dest == "" {
 		return res, refusal("worktree_failed", "no free folder for the review copy", nil)
 	}
-	if dest, err = n.checkoutPath(repo.root, dest); err != nil {
+	if dest, err = n.checkoutPath(ctx, repo.root, dest); err != nil {
 		return res, err
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return res, err
 	}
 	head = strings.TrimSpace(head)
-	if _, err := gitTimed(ctx, repo.root, 2*time.Minute, "worktree", "add", "--detach", "--", dest, head); err != nil {
+	if err := n.addWorktree(ctx, repo.root, dest, "worktree", "add", "--detach", "--", dest, head); err != nil {
 		return res, refusal("worktree_failed", gitFailure(err), nil)
 	}
 	res = proto.WorktreeSnapshot{Path: dest, Root: repo.root, Head: head}

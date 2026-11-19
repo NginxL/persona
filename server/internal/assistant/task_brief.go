@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -62,6 +61,10 @@ type BriefRequest struct {
 	At           time.Time `json:"at"`
 	Conversation string    `json:"conversation,omitempty"`
 	MessageID    string    `json:"message_id,omitempty"`
+	// Via: the conversations that passed it on with conversation_send / conversation_new before the work was handed
+	// out (the first is where the owner wrote it), oldest first; empty when the owner spoke in the conversation that
+	// handed it out (relay_quote.go, #3822). Relayed words are the owner's request, never their approval of a step.
+	Via []string `json:"via,omitempty"`
 }
 
 // BriefEvent is one entry of a brief's log. A scope change (Kind scope): what changed and why, as the supervisor said
@@ -740,11 +743,7 @@ func (s *Service) briefOrigin(ctx context.Context, machine, conversation string)
 			if text == "" {
 				continue // only context: not what led to anything
 			}
-			req := &BriefRequest{Text: text, At: it.TS.UTC(), Conversation: conversation, MessageID: it.ID}
-			if utf8.RuneCountInString(text) > briefRequestMax {
-				req.Text, req.Truncated = string([]rune(text)[:briefRequestMax]), true
-			}
-			rec.Request, rec.StartedBy = req, briefByOwner
+			rec.Request, rec.StartedBy = ownerRequest(text, it.TS, conversation, it.ID), briefByOwner
 			return rec
 		}
 		rec.StartedBy = briefByAssistant
@@ -764,6 +763,8 @@ func (s *Service) briefOrigin(ctx context.Context, machine, conversation string)
 			rec.Trigger = "supervision"
 		case src.Kind == proto.SourceConversation:
 			rec.Trigger, rec.TriggerTitle = "conversation", src.Title
+			// The owner's words it carried, as the hub verified them when it was sent (relay_quote.go).
+			rec.Request = s.receivedQuote(ctx, it, src)
 		case src.Kind == proto.SourceMeeting:
 			rec.Trigger, rec.TriggerTitle = "meeting", src.Title
 		default:

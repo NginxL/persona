@@ -19,6 +19,7 @@
 // state it knew, its clock stands still (nothing new can have arrived) and it shows no speed.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useSessionLive } from "../../lib/live";
+import { parseRetryAPIError } from "../../lib/api-errors";
 import type { RunStep } from "../../lib/run-step";
 import { useStore } from "../../lib/store";
 import { compactTokens } from "../../lib/tokens";
@@ -32,7 +33,7 @@ import { Icon, type IconName } from "../../ui/icons";
 import { FADE_OUT_MS, LINGER_MS, useBreath, useCountUp } from "../../ui/motion";
 import { Rolling } from "../../ui/Rolling";
 import "../../ui/stream/stream.css";
-import { t } from "../../i18n";
+import { t, formatNumber } from "../../i18n";
 
 // The speed (its history, the button and its card) loads once an Agent's turn runs, off the chat's first screen: a
 // speed shows only once one is measured, seconds in, and until then the time and the tokens stand as they are.
@@ -157,7 +158,7 @@ export function WaitingView({ wait, offline }: { wait: WaitLine; offline?: boole
  *  background_working) a workflow runs and no turn of the agent's own shows: no status line, no live work line
  *  ticking in the chat (`clock`) and no call it waits on (a subagent launched in the foreground, say). */
 function inBackground(background: BackgroundLine | null | undefined, live: SessionLive | null, clock: boolean, step: RunStep | undefined): background is BackgroundLine {
-  return Boolean(background && (!background.guessed || (clock && !(live?.verb || live?.thinking) && step?.kind !== "tool")));
+  return Boolean(background && (!background.guessed || (!live?.retry_error && clock && !(live?.verb || live?.thinking) && step?.kind !== "tool")));
 }
 
 /** The words for it: "Background workflow · Verify · 169/185+ · 1 more". Only the words before the count shrink (the
@@ -208,6 +209,10 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
   wasWorking.current = working;
   const kept = working ? { live, background, clock, subtasks, command, step } : last.current;
   const shown = kept.live;
+  // Retry text is transient: never resurrect it from `last` after a null, normal-work or turn-end update.
+  const retry = working && live?.retry_error && (live.retry_attempt ?? 0) > 0 && (live.retry_max ?? 0) > 0
+    ? { error: live.retry_error, attempt: live.retry_attempt!, max: live.retry_max!, info: parseRetryAPIError(live.retry_error) }
+    : null;
   const bg = kept.background;
   const behind = inBackground(bg, shown, kept.clock, kept.step);
   // the turn is over and background subagents run on: neither the turn's time nor its tokens say anything of them
@@ -232,8 +237,8 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
   const done = !working && Boolean(finished) && !behind && !usage && !task;
   const state = statusWords(shown, kept.step, plain);
   const commandWords = task ? [t("chat-runningstatusbar.background_task"), task.what, task.more > 0 ? t("chat-runningstatusbar.more_waits", { count: task.more }) : ""].filter(Boolean).join(" · ") : "";
-  const words = behind ? "" : usage ? t("chat-runningstatusbar.background_subtasks") : task ? commandWords : done ? t("chat-runningstatusbar.done") : state.text;
-  const compacting = !behind && !usage && !task && !done && state.compacting;
+  const words = retry ? t("chat-runningstatusbar.retrying", { attempt: formatNumber(retry.attempt), max: formatNumber(retry.max), reason: retry.info?.reason ?? t("lib-api-errors.failed") }) : behind ? "" : usage ? t("chat-runningstatusbar.background_subtasks") : task ? commandWords : done ? t("chat-runningstatusbar.done") : state.text;
+  const compacting = !retry && !behind && !usage && !task && !done && state.compacting;
   const breath = useBreath(useMoves(`${words}\n${shown?.tokens_down ?? ""}`), phase === "on");
   const onPinned = useCallback((p: boolean) => setPinned(p), []);
   const SpeedView = useSpeed(working && own);
@@ -266,7 +271,12 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
       >
         <Icon name={icon} size={14} stroke={done ? 2.5 : undefined} className={`shrink-0 ${done ? "" : "-translate-y-px"}`} />
         {offline && <Disconnected />}
-        {behind ? <BackgroundWords line={bg} /> : task ? <BackgroundCommandWords line={task} /> : <span className="truncate" data-running-verb>{words}</span>}
+        {behind ? <BackgroundWords line={bg} /> : task ? <BackgroundCommandWords line={task} /> : retry ? (
+          <span className="flex min-w-0 flex-col" data-running-verb>
+            <span className="truncate">{words}</span>
+            <span className="truncate text-ink-3 font-normal" data-running-retry-detail>{retry.error}</span>
+          </span>
+        ) : <span className="truncate" data-running-verb>{words}</span>}
       </div>
       <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-ink-3 tabular-nums" style={pinned ? undefined : fade}>
         {usage || (task && !commandTimed) ? null : own && SpeedView ? (

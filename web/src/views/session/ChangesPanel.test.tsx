@@ -93,6 +93,7 @@ async function click(selector: string) {
 beforeEach(() => {
   sequence = 0;
   holder.features = [];
+  localStorage.removeItem("persona.changesTreeWidth");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -103,9 +104,57 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("ChangesPanel", () => {
+  it("resizes the edited-file tree with keys, remembers it on reopen and resets it", async () => {
+    transcript([user("u1"), ...edit("e1", `${CWD}/a.ts`, "old", "new")]);
+    render();
+    const handle = () => host.querySelector<HTMLElement>('[data-changes-panel] [role="separator"]')!;
+    expect(handle()).not.toBeNull();
+    expect(handle().getAttribute("aria-valuenow")).toBe("192");
+    const key = async (value: string) => act(async () => {
+      handle().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true }));
+    });
+    await key("ArrowRight");
+    expect(handle().getAttribute("aria-valuenow")).toBe("208");
+    expect(localStorage.getItem("persona.changesTreeWidth")).toBe("208");
+    act(() => closePanel());
+    render();
+    expect(handle().getAttribute("aria-valuenow")).toBe("208");
+    expect(document.getElementById(handle().getAttribute("aria-controls")!)).not.toBeNull();
+    await key("Home");
+    expect(handle().getAttribute("aria-valuenow")).toBe("160");
+    await key("Enter");
+    expect(handle().getAttribute("aria-valuenow")).toBe("192");
+    expect(localStorage.getItem("persona.changesTreeWidth")).toBeNull();
+  });
+
+  it("fits the tree to the panel without losing its remembered width", async () => {
+    let room = 600;
+    let changed = () => {};
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ width: room }) as DOMRect);
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { changed = callback; }
+      observe() {} disconnect() {}
+    });
+    localStorage.setItem("persona.changesTreeWidth", "320");
+    transcript([user("u1"), ...edit("e1", `${CWD}/a.ts`, "old", "new")]);
+    render();
+    const handle = () => host.querySelector<HTMLElement>('[data-changes-panel] [role="separator"]')!;
+    expect(handle()).not.toBeNull();
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+    room = 360;
+    act(() => changed());
+    expect(handle().getAttribute("aria-valuenow")).toBe("200");
+    expect(localStorage.getItem("persona.changesTreeWidth")).toBe("320");
+    room = 600;
+    act(() => changed());
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+    vi.unstubAllGlobals();
+  });
+
   it("shows this exchange without Git, selects another file and opens it", async () => {
     transcript([user("u1"), ...edit("e1", `${CWD}/a.ts`, "old a", "new a"), ...edit("e2", `${CWD}/b.ts`, "old b", "new b")]);
     render();

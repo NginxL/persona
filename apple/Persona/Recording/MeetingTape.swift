@@ -1,17 +1,18 @@
-#if DEBUG && os(iOS)
+#if os(iOS)
 import Foundation
 import Observation
 import OSLog
 
-// A meeting's tape and its replay, for development and tests only (#9417; docs/apple/recording.md "A meeting's tape and
-// its replay"). While a meeting records from an audio file (`-openMeetingAudio`, `RecordingFileInput`), the app writes
-// down everything the meeting room is shown, as it arrives: the hub's captions and lines, the room's state, its topics
-// (the map) and its highlights, then the minutes. `-showMeetingReplay <tape>` plays a tape back in the meeting room at
-// its own pace, with no hub, so the live transcript, the highlights and the map can be looked at again and again.
+// A meeting's tape (#9417; docs/apple/recording.md "A meeting's tape and its replay"). While a meeting records from an
+// audio file (DEBUG: `-openMeetingAudio`, `RecordingFileInput`), the app writes down everything the meeting room is
+// shown, as it arrives: the hub's captions and lines, the room's state, its topics (the map) and its highlights, then the
+// minutes (`MeetingTapeRecorder`, DEBUG). `MeetingReplay` plays a tape back in the meeting room at its own pace, with no
+// hub, so the live transcript, the highlights and the map can be looked at again and again: in DEBUG from a launch
+// argument, on any build from Settings › About › Developing Persona (#10589, `MeetingTapesPage`).
 
 /// A meeting as the app was shown it, in the order it came (`MeetingTapeRecorder` writes it, `MeetingReplay` plays it).
-/// JSON, keys as below; times in seconds. A tape lives in the app's Documents/meeting-tapes/<recording id>.json, the
-/// audio beside it when a script copies it there (`audio`).
+/// JSON, keys as below; times in seconds. A DEBUG run writes it to the app's Documents/meeting-tapes/<recording id>.json;
+/// a tape to replay is a folder holding it as tape.json with the audio it names beside it (`MeetingTapeLibrary`).
 nonisolated struct MeetingTape: Codable, Equatable, Sendable {
     static let formatName = "persona-meeting-tape"
     static let currentVersion = 1
@@ -166,8 +167,29 @@ nonisolated struct MeetingTape: Codable, Equatable, Sendable {
         return e
     }
 
-    /// Where the app keeps the tapes it writes.
-    static var folder: URL { URL.documentsDirectory.appending(path: "meeting-tapes") }
+    /// What a list shows of a tape: its title, length, how many lines, map changes and highlights came, and whether its
+    /// audio is named.
+    var summary: Summary {
+        Summary(title: finalTitle?.isEmpty == false ? finalTitle! : title, length: length,
+                lines: Set(events.compactMap { $0.kind == .line ? $0.n : nil }).count,
+                topics: events.filter { $0.kind == .topics }.count, highlights: events.filter { $0.kind == .highlights }.count,
+                audio: audio)
+    }
+
+    nonisolated struct Summary: Equatable, Sendable {
+        var title: String
+        var length: Double
+        var lines: Int
+        var topics: Int
+        var highlights: Int
+        var audio: String?
+    }
+}
+
+#if DEBUG
+extension MeetingTape {
+    /// Where a DEBUG run keeps the tapes it writes.
+    nonisolated static var folder: URL { URL.documentsDirectory.appending(path: "meeting-tapes") }
 }
 
 // MARK: - Writing a tape
@@ -222,7 +244,8 @@ nonisolated struct MeetingTape: Codable, Equatable, Sendable {
     private func look() -> [MeetingTape.Event] {
         let capture = RecordingCapture.shared
         let state = capture.state
-        if id == nil, state == .recording, let recording = capture.recordingID,
+        // Never a replay's (`ReplayedMeeting`): its minutes are no hub's to wait for.
+        if id == nil, state == .recording, let recording = capture.recordingID, !ReplayedMeeting.holds(recording),
            let entry = RecordingLibrary.shared.entry(recording), entry.isMeeting {
             begin(entry)
         }
@@ -355,157 +378,5 @@ nonisolated struct MeetingTape: Codable, Equatable, Sendable {
         }
     }
 }
-
-// MARK: - Playing a tape
-
-/// `-showMeetingReplay <tape>` (an absolute path, a name in Documents/meeting-tapes, or `sample` for the made-up one in
-/// `MeetingTapeSample`), `-showMeetingReplaySpeed 1|2|4`, `-showMeetingReplayEnd YES`: a made-up room meeting (Persona
-/// answering on screen, the live view and the highlights) records itself with no microphone while the tape's events
-/// reach the meeting room's stores at their times, divided by the speed: the hub's captions and lines in
-/// `MeetingTranscription` (as hub transcription shows them), the room, its topics and highlights in
-/// `MeetingConversation`. Nothing goes to a hub: the replayed meeting is never uploaded, its `…/live` is never read and
-/// it opens no audio socket (`holds`). At the tape's end the meeting goes on, silent, until End, or ends by itself with
-/// `-showMeetingReplayEnd YES`; its minutes are the tape's (`minutes(for:)`).
-@MainActor enum MeetingReplay {
-    static let key = "showMeetingReplay"
-    static let speedKey = "showMeetingReplaySpeed"
-    static let endKey = "showMeetingReplayEnd"
-    /// The replayed meeting's recording.
-    nonisolated static let id = UUID(uuidString: "00000000-0000-0000-0000-000000009417")!
-
-    /// Whether `recording` is the replayed meeting: kept away from every hub.
-    nonisolated static func holds(_ recording: UUID) -> Bool { recording == id }
-
-    nonisolated static func clampedSpeed(_ speed: Double) -> Double {
-        speed.isFinite && speed > 0 ? min(16, max(0.25, speed)) : 1
-    }
-
-    private(set) static var tape: MeetingTape?
-    private static var task: Task<Void, Never>?
-    nonisolated private static let log = Logger(subsystem: "persona", category: "recording")
-
-    /// The tape's minutes, for the replayed meeting once it ended.
-    static func minutes(for recording: UUID) -> RecordingMinutes? { holds(recording) ? tape?.minutes : nil }
-
-    /// The tape `value` names: `sample`, an absolute path, or a name in `MeetingTape.folder` (with or without `.json`).
-    /// Reads a file: off the main actor.
-    nonisolated static func load(_ value: String) -> MeetingTape? {
-        if value == "sample" { return MeetingTapeSample.tape }
-        let url: URL
-        if value.hasPrefix("/") {
-            url = URL(fileURLWithPath: value)
-        } else {
-            url = MeetingTape.folder.appending(path: value.hasSuffix(".json") ? value : value + ".json")
-        }
-        // A folder holds the tape as tape.json.
-        let file = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true ? url.appending(path: "tape.json") : url
-        do {
-            return try MeetingTape.decode(Data(contentsOf: file))
-        } catch {
-            log.error("replay: can't read the tape \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
-
-    /// At launch, with the other made-up meetings.
-    static func startIfAsked() {
-        let defaults = UserDefaults.standard
-        guard let value = defaults.string(forKey: key) else {
-            if RecordingLibrary.shared.entry(id) != nil { try? RecordingLibrary.shared.remove(id) }
-            return
-        }
-        let speed = clampedSpeed(defaults.double(forKey: speedKey) == 0 ? 1 : defaults.double(forKey: speedKey))
-        let ends = defaults.bool(forKey: endKey)
-        Task { @MainActor in
-            guard let tape = await Task.detached(priority: .userInitiated, operation: { load(value) }).value else { return }
-            play(tape, speed: speed, ends: ends)
-        }
-    }
-
-    static func play(_ tape: MeetingTape, speed: Double, ends: Bool) {
-        self.tape = tape
-        let library = RecordingLibrary.shared
-        library.restore(id)
-        var entry = RecordingEntry(id: id, createdAt: .now, source: .phone, title: tape.title, active: true)
-        entry.meeting = RecordingMeeting(eventID: "replay", title: tape.title, start: .now, end: .now.addingTimeInterval(max(60, tape.length)),
-                                         location: nil, attendees: [])
-        entry.attendance = RecordingAttendance.room(.listener, private: false, photos: false, liveView: true, highlights: true)
-        try? library.save(entry)
-        let capture = RecordingCapture.shared
-        capture.showSample(id, elapsed: 0)
-        MeetingTranscription.shared.showReplay(id, frame: MeetingTape.Frame())
-        MeetingConversation.shared.showReplay(id, frame: MeetingTape.Frame())
-        let schedule = tape.schedule(speed: speed)
-        let length = tape.length / speed
-        log.notice("replay: \(schedule.count, privacy: .public) events over \(Int(length), privacy: .public) s at \(speed, privacy: .public)x")
-        task?.cancel()
-        task = Task { @MainActor in
-            let begin = ContinuousClock.now
-            var frame = MeetingTape.Frame()
-            var next = 0
-            var lastSpeech = -Double.infinity
-            while !Task.isCancelled, capture.recordingID == id {
-                try? await Task.sleep(for: .milliseconds(100))
-                let now = (ContinuousClock.now - begin) / .seconds(1)
-                var hubChanged = false, roomChanged = false
-                while next < schedule.count, schedule[next].at <= now {
-                    let event = schedule[next].event
-                    frame.apply(event)
-                    switch event.kind {
-                    case .interim, .line:
-                        hubChanged = true
-                        lastSpeech = now
-                    case .problem: hubChanged = true
-                    case .topics, .highlights, .room: roomChanged = true
-                    }
-                    next += 1
-                }
-                if hubChanged { MeetingTranscription.shared.showReplay(id, frame: frame) }
-                if roomChanged { MeetingConversation.shared.showReplay(id, frame: frame) }
-                guard capture.state == .recording else { continue }
-                // The meter: speech-like while lines come, quiet in between.
-                let tapeNow = now * speed
-                let speaking = now - lastSpeech < 3 / speed || frame.interim != nil
-                let level = speaking ? min(1, 0.1 + 0.6 * max(0, sin(tapeNow * 0.9)) * (0.5 + 0.5 * sin(tapeNow * 9))) : 0.02
-                capture.advanceSample(elapsed: tapeNow, level: level)
-                if ends, next >= schedule.count, now >= length {
-                    log.notice("replay: the tape ended; ending the meeting")
-                    MeetingRecorder.shared.stop(recordingID: nil)
-                    return
-                }
-            }
-        }
-    }
-}
-
-extension MeetingTranscription {
-    /// The replayed meeting (`MeetingReplay`): hub transcription in effect with its socket up, holding `frame`'s caption,
-    /// lines and problem.
-    func showReplay(_ id: UUID, frame: MeetingTape.Frame) {
-        var m = meeting(id)
-        m.asked = .hub
-        m.decided = MeetingTranscriptionRule.Decided(mode: .hub, olderManager: false)
-        m.socket = .ready
-        m.everUp = true
-        m.lines = frame.lines
-        m.interim = frame.interim
-        m.problem = frame.problem
-        replace(id, m)
-    }
-}
-
-extension MeetingConversation {
-    /// The replayed meeting (`MeetingReplay`): the room as `frame` has it (its state only: the room's conversation isn't
-    /// on any hub), its topics and highlights.
-    func showReplay(_ id: UUID, frame: MeetingTape.Frame) {
-        var m = meeting(id)
-        m.room = MeetingRoom(state: frame.room?.state ?? MeetingRoom.State.ready.rawValue, problem: frame.room?.problem)
-        m.topics = frame.topics
-        m.highlights = Array(frame.highlights.prefix(Self.maxHighlights))
-        m.privateMark = false
-        m.privateRead = true
-        m.loaded = true
-        replace(id, m)
-    }
-}
+#endif
 #endif

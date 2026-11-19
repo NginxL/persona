@@ -315,6 +315,18 @@ describe("收件箱事件：详情", () => {
     expect(host.querySelector("[data-event-text] strong")?.textContent).toBe("Briefing · Mon");
     expect(host.querySelector('[data-chain-id="c1"] [data-chain-detail]')?.textContent).toBe("Briefing · Mon Today: one tutorial. Classes Tut…");
   });
+  it("gives an assistant row's received entry one arrow: it goes to the conversation, its text is above (#9930)", () => {
+    const assistant: InboxItem = {
+      ...plain(reply), id: "assistant:s4", source: "assistant", kind: "assistant_post", handling: undefined, suggestion: undefined, now: undefined, recap: undefined,
+      body: "Today: one tutorial.",
+      chain: [{ id: "c1", kind: "received", text: "1 new message", count: 1, link: { type: "source", url: "https://hub.example.com/persona/c-1" }, messages: [{ text: "Today: one tutorial." }] }],
+    };
+    act(() => root.render(<EventBody item={assistant} onSource={() => {}} />));
+    expect(host.querySelectorAll('[data-chain-id="c1"] button')).toHaveLength(1);
+    // another source's entry that goes somewhere keeps its messages, opened beside it
+    act(() => root.render(<EventBody item={{ ...assistant, source: "github" }} onSource={() => {}} />));
+    expect(host.querySelectorAll('[data-chain-id="c1"] button')).toHaveLength(2);
+  });
   it("labels each kind's buttons", () => {
     act(() => root.render(<EventBody item={agentSuggestion} onSource={() => {}} />));
     expect(buttons()).toEqual(expect.arrayContaining(["驳回", "修改", "开始"]));
@@ -537,10 +549,13 @@ describe("收件箱事件：已处理", () => {
 });
 
 describe("收件箱事件：列表", () => {
+  // the section bar opens on 需要你 (#9053): these cases read every section, 全部
+  const showAll = () => act(() => host.querySelector<HTMLButtonElement>('[data-bar-choice="all"]')!.click());
   it("has 进行中 between 需要你 and 知悉即可, marks the rows, and draws a suggestion instead of the draft", async () => {
     calls.items = fixture.items;
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     const titles = [...host.querySelectorAll("[data-section-title]")].map((s) => s.textContent);
     expect(titles).toEqual(["需要你", "进行中", "知悉即可", "已折叠", "已处理"]);
     const row = (id: string) => host.querySelector(`[data-item="${id}"]`)!;
@@ -561,6 +576,7 @@ describe("收件箱事件：列表", () => {
     calls.items = showcase.items;
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     const mark = (id: string) => host.querySelector(`[data-item="${id}"] [data-event-mark="now"]`)!;
     expect(mark("sc-1").getAttribute("data-event-icon")).toBe("clock");
     expect(mark("sc-1").textContent).toContain("等张三确认新报价");
@@ -578,6 +594,7 @@ describe("收件箱事件：列表", () => {
     calls.items = fixture.items.map(legacy);
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     const titles = [...host.querySelectorAll("[data-section-title]")].map((s) => s.textContent);
     expect(titles).toEqual(["需要你", "知悉即可", "已折叠", "已处理"]);
     expect(host.querySelector("[data-event-mark]")).toBeNull();

@@ -516,7 +516,7 @@ private fun TaskCard(todo: Todo, host: AssistantTaskHost) {
     val asks = remember(card) { card?.askLine() }
     val now = when {
         state == TaskState.NeedsYou -> asks?.text() ?: stringResource(R.string.chat_tasks_now_needs_you)
-        cut != null -> stringResource(R.string.chat_tasks_now_cut, cut.reason)
+        cut != null -> if (cut.plain) cut.reason.text() else stringResource(R.string.chat_tasks_now_cut, cut.reason)
         state == TaskState.Failed -> stringResource(R.string.chat_tasks_now_failed, todo.startError.orEmpty().trim())
         progress != null -> progress.text
         todo.agents.any { !it.startError.isNullOrBlank() } ->
@@ -662,7 +662,12 @@ private fun InterruptedReceipt(item: FeedItem, host: AssistantTaskHost, todos: L
     val todo = todos.firstOrNull { it.id == item.ref }
     val title = receiptTitle(item, todo) ?: stringResource(R.string.chat_tasks_default_title)
     val state = todo?.let { host.tasks.stateOf(it, host.sessions) }
-    if (todo != null && state != TaskState.Interrupted) {
+    // A turn with no output the hub still has pending (#10187): the hub's resolution says when it went on (it is sent
+    // again then), so its own sentence stands, not "resumed", unless the task is seen working or done here. The rows of
+    // the task's other Agents (or an offline stand-in for a missing one) say nothing of it.
+    val pendingSilent = todo != null && item.field("resolution") == "pending" && item.field("cause") in silentCauses &&
+        state != TaskState.Working && state != TaskState.Done
+    if (todo != null && state != TaskState.Interrupted && !pendingSilent) {
         Row(Modifier.clip(PersonaTheme.shapes.controlShape).clickable { openTask(host, todo) }.padding(vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             JIcon(if (state == TaskState.Done) PhIcons.Check else PhIcons.ArrowClockwise, decorative = true, size = Tokens.Space.m,
@@ -675,13 +680,16 @@ private fun InterruptedReceipt(item: FeedItem, host: AssistantTaskHost, todos: L
     val busy by host.tasks.busy.collectAsStateWithLifecycle()
     val cut = todo?.let { Interruption.of(host.tasks.lead(it, host.sessions)) }
     val reason = cut?.reason ?: ApiErrorInfo.parse(item.field("error") ?: item.field("summary"))?.reason
+    // A turn with no output (#10187): the hub's own sentence, from the lead's row, or the receipt's (its cause says so)
+    // when the row is not at hand: never "Model service error".
+    val plain = cut?.takeIf { it.plain }?.reason?.text() ?: item.field("error")?.takeIf { item.field("cause") in silentCauses }
     val tone = PersonaTheme.palette.danger
     Row(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.statusSurface).padding(Tokens.Space.l),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
         JIcon(PhIcons.WarningCircle, decorative = true, tint = tone.dot)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             Text(stringResource(R.string.chat_tasks_interrupted_title, title), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
-            Text(if (reason != null) stringResource(R.string.chat_tasks_now_cut, reason) else stringResource(R.string.chat_tasks_now_cut_plain), style = PersonaTheme.type.callout,
+            Text(plain ?: if (reason != null) stringResource(R.string.chat_tasks_now_cut, reason) else stringResource(R.string.chat_tasks_now_cut_plain), style = PersonaTheme.type.callout,
                 color = PersonaTheme.palette.ink2, maxLines = 4, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 if (todo != null && cut?.canContinue != false) JButton(stringResource(R.string.chat_tasks_continue), { host.tasks.retryTask(todo, host.onError) },
@@ -703,6 +711,9 @@ private fun resolutionLabel(r: InterruptResolution): String = stringResource(whe
     InterruptResolution.Done -> R.string.chat_tasks_interrupt_done
 })
 
+/** The receipt causes of a turn with no output (#10187), whose `error` is the hub's own sentence for it. */
+private val silentCauses = setOf("no_output", "stopped")
+
 /** What cut a batch off (the hub's `cause`); one this build doesn't know reads as a model service error. */
 @Composable
 private fun causeLabel(cause: String): String = stringResource(when (cause) {
@@ -710,6 +721,7 @@ private fun causeLabel(cause: String): String = stringResource(when (cause) {
     "auth" -> R.string.chat_tasks_interrupt_cause_auth
     "model_route" -> R.string.chat_tasks_interrupt_cause_model_route
     "no_output" -> R.string.chat_tasks_interrupt_cause_no_output
+    "stopped" -> R.string.chat_tasks_interrupt_cause_stopped
     else -> R.string.chat_tasks_interrupt_cause_model_error
 })
 

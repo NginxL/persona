@@ -83,7 +83,7 @@ import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
 import { SearchField } from "../../ui/SearchField";
 import { Icon, type IconName } from "../../ui/icons";
 import { Segmented } from "../assistant/parts";
-import { InstallClaudeHelp } from "../assistant/Readiness";
+import { InstallClaudeHelp } from "../assistant/ReadinessHelp";
 import { Pill, Switch } from "./SettingsParts";
 import { AUTO_TEST_MS, BusyLine, CheckMark, Disclosure, FIELD, INPUT, KeyField, Labelled, LineAction, SecretField, SMALL, TextField } from "./ProviderFields";
 import { ProviderPaste } from "./ProviderPaste";

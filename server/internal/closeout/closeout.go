@@ -21,7 +21,7 @@ var (
 // Example is the form an agent is asked to write, as the prompts show it.
 const Example = `<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
-artifact: <pr|commit|branch|doc|build|url> <reference>
+artifact: <pr|commit|branch|doc|build|url|file> <reference>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>
@@ -140,7 +140,7 @@ func yesNo(v string) string {
 
 func isKind(k string) bool {
 	switch k {
-	case "pr", "commit", "branch", "doc", "build", "url":
+	case "pr", "commit", "branch", "doc", "build", "url", "file":
 		return true
 	}
 	return false

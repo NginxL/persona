@@ -1,0 +1,9 @@
+<persona-context kind="context" title="Direction · Weather · notes" url="">
+This work belongs to the direction "Weather". Its owner wrote the notes below for every task in it: follow them. When they conflict with your task's own instructions, the task wins.
+
+Knowledge-base project: Weather app
+Goal: Ship on iOS and Android
+
+- Readings: the store build number
+- Never deploy on Fridays
+</persona-context>

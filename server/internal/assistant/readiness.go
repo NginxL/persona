@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -134,7 +135,7 @@ type ReadinessSuggestion struct {
 type readinessRecord struct {
 	Dismissed   bool       `json:"dismissed"`
 	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
-	// Probe is the last probe's result, for the machine and launcher it ran with.
+	// Probe is the last probe's result, for the machine, launcher and model it ran with.
 	Probe *readinessProbe `json:"probe,omitempty"`
 	// Success is completed main-chat evidence, independent of the process remaining online.
 	Success *readinessSuccess `json:"success,omitempty"`
@@ -150,8 +151,13 @@ type readinessRecord struct {
 }
 
 type readinessProbe struct {
-	Machine  string              `json:"machine"`
-	Launcher string              `json:"launcher"`
+	Machine  string `json:"machine"`
+	Launcher string `json:"launcher"`
+	// Model and Effort are what the main conversation's next turn ran with ("" the launcher's default); Targeted says
+	// the probe checked that turn (readiness_probe_target.go), not the launcher's default of an older manager.
+	Model    string              `json:"model,omitempty"`
+	Effort   string              `json:"effort,omitempty"`
+	Targeted bool                `json:"targeted,omitempty"`
 	At       time.Time           `json:"at"`
 	Check    proto.LauncherCheck `json:"check"`
 }
@@ -355,15 +361,18 @@ func (s *Service) readiness(ctx context.Context, probe bool, wait time.Duration)
 			out.Steps = append(out.Steps, ReadinessStep{ID: id, State: StepUnknown})
 		}
 	} else {
-		s.askAhead(d.ID, launcher)
+		// The steps after the computer are of the launcher the main conversation's next turn runs: its kept pick's
+		// when that is on another launcher than Main chat's, which "Try it" checks too (readinessTurnLauncher).
+		turn := s.readinessTurnLauncher(ctx, d.ID, launcher)
+		s.askAhead(d.ID, turn)
 		if probe {
-			out.Probe = s.readinessProbe(ctx, d.ID, launcher)
+			out.Probe = s.readinessProbe(ctx, d.ID, v)
 		}
 		deadline := time.Now().Add(wait) // the node's two answers are waited for together, not one after the other
 		rec := s.readinessRecordNow(ctx)
 		main, hasMain := s.readinessMain(ctx, d.ID, v.Main)
-		auth, _ := s.claudeAuthStatus(ctx, d.ID, launcher, time.Until(deadline))
-		model, modelOK := s.readinessModel(ctx, lang, d, launcher, rec, main, hasMain, auth)
+		auth, _ := s.claudeAuthStatus(ctx, d.ID, turn, time.Until(deadline))
+		model, modelOK := s.readinessModel(ctx, lang, d, launcher, turn, rec, main, hasMain, auth)
 		first := s.readinessFirst(ctx, lang, d, rec, v, main, hasMain)
 		// One button for the try: the first message's step offers it, and every client shows the try's spinner and
 		// answer there, so an unverified model step that would offer the same leaves it to that step (#6317). Once the
@@ -371,7 +380,7 @@ func (s *Service) readiness(ctx context.Context, probe bool, wait time.Duration)
 		if model.Action != nil && model.Action.ID == "test_assistant" && first.Action != nil && first.Action.ID == "test_assistant" {
 			model.Action = nil
 		}
-		out.Steps = append(out.Steps, s.readinessClaude(ctx, lang, d, launcher, rec, modelOK, time.Until(deadline)), model, first)
+		out.Steps = append(out.Steps, s.readinessClaude(ctx, lang, d, turn, rec, modelOK, time.Until(deadline)), model, first)
 	}
 
 	out.Mode = ReadinessFull
@@ -430,7 +439,8 @@ func readinessBlocks(st ReadinessStep) bool {
 	case StepTodo:
 		return true
 	case StepProblem:
-		return st.Code != proto.TurnErrorRateLimited && st.Code != proto.TurnErrorModelFallbackUnavailable
+		return st.Code != proto.TurnErrorRateLimited && st.Code != proto.TurnErrorModelFallbackUnavailable &&
+			st.Code != proto.TurnErrorToolSearchUnsupported // the node already loads every tool there: a retry works
 	}
 	return false
 }
@@ -489,22 +499,28 @@ func answeredWell(sess proto.Session) bool {
 		strings.TrimSpace(sess.LastText) != ""
 }
 
-// readinessModel is the model step from the newest of what is known: the last probe, the main conversation's last
-// turn, the launcher's health record, Claude Code's sign-in status. ok reports that the newest said it answered (or
-// that Claude Code is signed in to claude.ai). Signed in with a key or a gateway's token says nothing of whether the
-// key works: no evidence, but an unknown step says what it runs on.
-func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, launcher string, rec readinessRecord,
+// readinessModel is the model step of launcher, the one the main conversation's next turn runs (readinessTurnLauncher;
+// Main chat's is mainLauncher), from the newest of what is known: the last probe of that turn, the main
+// conversation's last turn, the launcher's health record, Claude Code's sign-in status. ok reports that the newest said
+// it answered (or that Claude Code is signed in to claude.ai). Signed in with a key or a gateway's token says nothing
+// of whether the key works: no evidence, but an unknown step says what it runs on. The conversation's last turn counts
+// on launcher, and on Main chat's launcher it ran on before a pick moved it to launcher: that failure stands, as one on
+// the pick's own launcher does, until a newer pass of what the next turn runs.
+func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, mainLauncher, launcher string, rec readinessRecord,
 	main proto.Session, hasMain bool, auth claudeAuth) (ReadinessStep, bool) {
 	var ev []readinessEvidence
 	binding, fingerprint := s.readinessModelScope(ctx, launcher)
+	hasMain = hasMain && (main.Launcher == "" || main.Launcher == launcher || main.Launcher == mainLauncher)
 	if success := rec.Success; success != nil && success.Machine == d.ID && success.Launcher == launcher &&
 		fingerprint != "" && success.Fingerprint == fingerprint {
 		ev = append(ev, readinessEvidence{at: success.At, ok: true})
 	}
-	if p := rec.Probe; p != nil && p.Machine == d.ID && p.Launcher == launcher {
-		ev = append(ev, readinessEvidence{at: p.At, ok: p.Check.OK, text: p.Check.Error})
+	if p := rec.Probe; p != nil {
+		if e, ok := s.readinessProbeEvidence(ctx, *p, d.ID, launcher, binding, hasMain && main.TurnError != ""); ok {
+			ev = append(ev, e)
+		}
 	}
-	if hasMain && (main.Launcher == "" || main.Launcher == launcher) {
+	if hasMain {
 		switch {
 		case main.TurnError != "":
 			ev = append(ev, readinessEvidence{at: main.UpdatedAt, text: main.TurnError, code: sessionTurnErrorCode(main)})
@@ -579,14 +595,16 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 				alt = "test_assistant"
 			case proto.TurnErrorModelFallbackUnavailable:
 				action = "" // recovery is a new conversation or the TUI's /model, neither is a model-settings action
+			case proto.TurnErrorToolSearchUnsupported:
+				action = "test_assistant" // nothing to set up: try again (toolSearchWords)
 			}
-			st := s.readinessStep(lang, StepModel, StepProblem, code, d.Name, launcher, action)
+			st := s.toolSearchWords(lang, d, s.readinessStep(lang, StepModel, StepProblem, code, d.Name, launcher, action))
 			if code == proto.TurnErrorRateLimited {
 				st.Occurrence = newest.occurrence
 				if st.Occurrence == "" {
 					st.Occurrence = newest.at.UTC().Format(time.RFC3339Nano)
 				}
-				if hasMain && (main.Launcher == "" || main.Launcher == launcher) && !main.UpdatedAt.IsZero() {
+				if hasMain && !main.UpdatedAt.IsZero() {
 					if reset, ok := usageLimitReset(main); ok && st.Occurrence == reset.UTC().Format(time.RFC3339Nano) {
 						// A newer health record can be this same turn settled. Keep the turn's identity so another turn
 						// within one reset window is still a new failure; health-only evidence keeps the reset identity.
@@ -721,9 +739,23 @@ func (s *Service) readinessFirst(ctx context.Context, lang i18n.Lang, d Device, 
 		if main.TurnErrorCode == proto.TurnErrorModelFallbackUnavailable {
 			action = ""
 		}
-		return s.readinessStep(lang, StepFirstMessage, StepProblem, main.TurnErrorCode, d.Name, "", action)
+		return s.toolSearchWords(lang, d, s.readinessStep(lang, StepFirstMessage, StepProblem, main.TurnErrorCode, d.Name, "", action))
 	}
 	return s.readinessStep(lang, StepFirstMessage, StepTodo, codeNeverTried, d.Name, "", "test_assistant")
+}
+
+// toolSearchWords is st, when it is a tool_search_unsupported step of computer d, in the words for what d's node does
+// (#10365): one that announces assistant_tool_search_fallback has resent the turn with every tool loaded and sends
+// every tool to that gateway from now on, which the step says; any other (an older node, which keeps tool search on, or
+// one the manager cannot ask now) keeps the plain advice to try again, which promises nothing.
+func (s *Service) toolSearchWords(lang i18n.Lang, d Device, st ReadinessStep) ReadinessStep {
+	if st.Code != proto.TurnErrorToolSearchUnsupported {
+		return st
+	}
+	if nodes, ok := s.devs.(nodeAnnouncer); ok && nodes.NodeAnnounced(d.ID, nodeproto.AssistantToolSearchFallback) {
+		st.Detail = i18n.T(lang, "assistant-readiness.tool_search_unsupported_fallback_detail")
+	}
+	return st
 }
 
 // readinessStep is a step with its code's words in lang and its action.
@@ -732,8 +764,15 @@ func (s *Service) readinessStep(lang i18n.Lang, id, state, code, machine, launch
 	if machine == "" {
 		args["machine"] = i18n.T(lang, "assistant-readiness.this_computer")
 	}
+	titleCode := code
+	if id == StepModel && launcher != "" {
+		switch code {
+		case proto.TurnErrorNotLoggedIn, proto.TurnErrorAuthFailed, proto.TurnErrorModelRoute:
+			titleCode += "_launcher"
+		}
+	}
 	st := ReadinessStep{ID: id, State: state, Code: code, Launcher: launcher,
-		Title: i18n.T(lang, "assistant-readiness."+code+"_title", args), Detail: i18n.T(lang, "assistant-readiness."+code+"_detail", args)}
+		Title: i18n.T(lang, "assistant-readiness."+titleCode+"_title", args), Detail: i18n.T(lang, "assistant-readiness."+code+"_detail", args)}
 	if id == StepComputer || id == StepFirstMessage {
 		st.Launcher = ""
 	}
@@ -759,14 +798,25 @@ func readinessSuggestions(lang i18n.Lang, mode string) []ReadinessSuggestion {
 
 // ---- what it asks ----
 
-// readinessProbe runs the one-word check of launcher on machine (launchers.check, what "Test" runs), or answers
-// the last one's result when it ran this launcher there within readinessProbeReuse; one at a time.
-func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) *proto.LauncherCheck {
+// readinessProbe runs the one-word check of the main conversation's next turn on machine (launchers.check shaped as
+// that turn, readiness_probe_target.go), or answers the last one's result when it checked the same launcher and model
+// there within readinessProbeReuse; one at a time. A turn that would be refused is the answer, with nothing run.
+func (s *Service) readinessProbe(ctx context.Context, machine string, v Settings) *proto.LauncherCheck {
+	t, err := s.readinessProbeTarget(ctx, machine, v)
+	if err != nil {
+		return &proto.LauncherCheck{Error: i18n.Localize(err, s.requestCtxLang(ctx))} // the message's refusal: said, not kept
+	}
+	if proto.IsExternalLauncher(t.launcher) {
+		// An external adapter's launcher runs only through the adapter, and the node refuses to check one
+		// (adapter_probe_unsupported): there is nothing to try. Said, not kept: a failure would count against a chat that
+		// works, and the first message stays unanswered until it is.
+		return &proto.LauncherCheck{Error: i18n.T(s.requestCtxLang(ctx), "assistant-readiness.probe_external")}
+	}
 	b := &s.ready
 	for {
 		b.mu.Lock()
 		s.readinessLoadLocked(ctx)
-		if p := b.rec.Probe; p != nil && p.Machine == machine && p.Launcher == launcher && time.Since(p.At) < readinessProbeReuse {
+		if p := b.rec.Probe; p != nil && p.checks(machine, t) && time.Since(p.At) < readinessProbeReuse {
 			c := p.Check
 			b.mu.Unlock()
 			return &c
@@ -796,7 +846,7 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 	cctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 	var res proto.LauncherCheck
-	if err := s.call(cctx, machine, assistantwire.DeviceLaunchersCheck, map[string]any{"name": launcher, "purpose": "assistant"}, &res); err != nil {
+	if err := s.call(cctx, machine, assistantwire.DeviceLaunchersCheck, t.params(), &res); err != nil {
 		// Not the model's answer (the machine could not be asked): said, not kept.
 		return &proto.LauncherCheck{Error: i18n.Localize(err, s.requestCtxLang(ctx))}
 	}
@@ -806,7 +856,7 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 	defer wcancel()
 	if err := s.readinessUpdate(wctx, func(r *readinessRecord) {
 		now := time.Now().UTC()
-		r.Probe = &readinessProbe{Machine: machine, Launcher: launcher, At: now, Check: res}
+		r.Probe = &readinessProbe{Machine: machine, Launcher: t.launcher, Model: t.model, Effort: t.effort, Targeted: true, At: now, Check: res}
 		if res.OK && r.AnsweredAt == nil {
 			r.AnsweredAt = &now
 		}

@@ -44,6 +44,7 @@ const (
 	causeAuth        = "auth"         // not signed in, or the key was refused
 	causeModelRoute  = "model_route"  // the model name is not one the service knows
 	causeNoOutput    = "no_output"    // the turn answered nothing (#2349)
+	causeStopped     = "stopped"      // Persona's Stop interrupted it before it had any output, with its conversation (#10187)
 )
 
 // interruptCause is the cause of a cut-off turn by its error text (silent: the turn had no output at all).
@@ -134,10 +135,14 @@ func (b *interruptBook) follow(conv string, at time.Time) {
 	}
 }
 
-// appendInterrupted writes an interrupted receipt for task t: its cause, and the batch it joins when another receipt
-// in the same conversation with the same cause began one less than interruptBatchWindow ago.
-func (s *Service) appendInterrupted(ctx context.Context, t Todo, body receiptBody, silent bool) {
-	body.Cause = interruptCause(body.Error, silent)
+// appendInterrupted writes an interrupted receipt for task t's turn on run, which its body names (#10465): its cause
+// (one the caller knows, such as causeStopped, stands), and the batch it joins when another receipt in the same
+// conversation with the same cause began one less than interruptBatchWindow ago.
+func (s *Service) appendInterrupted(ctx context.Context, t Todo, run SessionRef, body receiptBody, silent bool) {
+	body.MachineID, body.SessionID = run.MachineID, run.SessionID
+	if body.Cause == "" { // one the caller knows (causeStopped) stands
+		body.Cause = interruptCause(body.Error, silent)
+	}
 	body.Resolution = resolutionPending
 	b := &s.interrupts
 	b.appendMu.Lock()

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // claudeReplyLine is one content block of a reply as Claude Code writes it: a line of its own, repeating the request's
@@ -290,22 +291,23 @@ func TestClaudeUsageSeedHugeLines(t *testing.T) {
 		name  string
 		lines []string
 		id    string
-		got   proto.TokenUsage
+		got   tokenuse.Tokens
 	}{
-		{"request blob", []string{small, blob}, "msg_1", proto.TokenUsage{Input: 2, Output: 9}},
-		{"sidechain line", []string{small, side}, "msg_1", proto.TokenUsage{Input: 2, Output: 9}},
-		{"huge reply", []string{small, huge}, "msg_2", saturated},
+		{"request blob", []string{small, blob}, "msg_1", tokenuse.Tokens{Input: 2, Output: 9}},
+		{"sidechain line", []string{small, side}, "msg_1", tokenuse.Tokens{Input: 2, Output: 9}},
+		{"huge reply", []string{small, huge}, "msg_2", tokenuse.Saturated("msg_2").Got()},
 	} {
 		s := newSeedFixture(c.lines...)
 		req, _ := (&File{}).seedUsage(s.reader(), 3, false)
-		if req.id != c.id || req.got != c.got {
-			t.Errorf("%s: seed %q %+v, want %q %+v", c.name, req.id, req.got, c.id, c.got)
+		if req.ID() != c.id || req.Got() != c.got {
+			t.Errorf("%s: seed %q %+v, want %q %+v", c.name, req.ID(), req.Got(), c.id, c.got)
 		}
 		if slices.Contains(s.whole, 2) || !reflect.DeepEqual(s.headsOf, []int{2}) {
 			t.Errorf("%s: line 2 read whole %v, only its head %v", c.name, s.whole, s.headsOf)
 		}
 	}
-	if _, ok := (&RequestUsage{id: "msg_2", got: saturated}).Add("msg_2", proto.TokenUsage{Input: 1000, Output: 9000}); ok {
+	sat := tokenuse.Saturated("msg_2")
+	if _, ok := sat.Add("msg_2", tokenuse.Tokens{Input: 1000, Output: 9000}); ok {
 		t.Fatal("a saturated request still adds")
 	}
 }
@@ -586,7 +588,7 @@ func TestFoldSumsUsage(t *testing.T) {
 	}
 }
 
-// ReplyUsage reads a line as the node reads a subagent's transcript: sidechain lines like any other, Claude Code's own
+// tokenuse.ClaudeReply reads a line as the node reads a subagent's transcript: sidechain lines like any other, Claude Code's own
 // error lines and zeros not at all.
 func TestReplyUsage(t *testing.T) {
 	for _, c := range []struct {
@@ -601,8 +603,8 @@ func TestReplyUsage(t *testing.T) {
 		{claudeReplyLine("a5", "msg_5", "claude-opus-5-5", textBlock, ""), "", false},
 		{claudeToolResultLine("r1", "toolu_1"), "", false},
 	} {
-		id, u, ok := ReplyUsage([]byte(c.line))
-		if ok != c.ok || ok && (id != c.id || u.Input != 2 || u.Output != 9 || !u.Fast || u.Model != "claude-opus-5-5") {
+		_, id, model, u, fast, ok := tokenuse.ClaudeReply([]byte(c.line))
+		if ok != c.ok || ok && (id != c.id || u.Input != 2 || u.Output != 9 || !fast || model != "claude-opus-5-5") {
 			t.Errorf("%s: %q %+v %v", c.line, id, u, ok)
 		}
 	}

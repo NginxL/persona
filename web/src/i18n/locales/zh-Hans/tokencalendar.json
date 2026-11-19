@@ -1,7 +1,26 @@
 {
+  "title": "Token 用量",
   "line": "今天 {today} token · 近 30 天 {month}",
   "day_line": "{day} · {tokens} token",
   "kinds": "输入 {input} · 输出 {output} · 缓存写 {write} · 缓存读 {read}",
   "grid": "每天的 token 用量。用方向键选一天。",
-  "read_day": "{day}：{tokens} token"
+  "read_day": "{day}：{tokens} token",
+  "open_page": "打开 Token 用量",
+  "today": "今天",
+  "last_7": "近 7 天",
+  "last_30": "近 30 天",
+  "each_day": "每天",
+  "by_hour": "最近 7 天 · 每小时",
+  "by_computer": "按电脑 · 最近 7 天",
+  "by_agent": "按 Agent · 最近 7 天",
+  "by_kind": "按类别 · 最近 7 天",
+  "removed_computer": "已移除的电脑",
+  "not_split": "未区分（更新前）",
+  "less": "少",
+  "more": "多",
+  "hour_note": "每格是你所在时区的一小时，颜色深浅按它在这 7 天所有小时里的排位。",
+  "hour_grid": "最近 7 天每小时的 token 用量。方向键选一个小时。",
+  "hour_line": "{day} {hour} · {tokens} token",
+  "count_note": "输入、输出、缓存写、缓存读四项相加，和「机器」页的「今天」是同一个数。",
+  "failed": "连不上 hub。连上后这里会自动刷新。"
 }

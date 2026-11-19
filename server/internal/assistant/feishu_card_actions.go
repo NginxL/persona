@@ -216,6 +216,64 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 			Card: s.answeredCard(ctx, ix, ended).Raw()}
 	}
 	ix := got.Interaction
+	type outcome struct {
+		ok  bool
+		err error
+	}
+	if a.Str("clarify") == "1" {
+		question := a.Form("question")
+		if !ix.CanClarify || ix.Private {
+			return toast("error", i18n.T(l, "assistant-feishu_cards.unknown_action"))
+		}
+		if err := validateClarifyQuestion(question); err != nil {
+			return toast("warning", err.Error())
+		}
+		// The callback token identifies this form delivery. Replaying it uses the
+		// same owner-message ID, while a later deliberate press gets a fresh one.
+		// Older callbacks without a token still have their one-use owner action;
+		// never collapse every tokenless question on this card into one delivery.
+		delivery := strings.TrimSpace(a.Token)
+		if delivery == "" {
+			delivery = strings.TrimSpace(action)
+		}
+		if delivery == "" {
+			delivery = randomHex(8)
+		}
+		clientMsgID := channel.ClientMsgID(channel.Feishu, "approval-"+delivery)
+		done := make(chan outcome, 1)
+		go func() {
+			rctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			ok, err := s.clarifyInteraction(rctx, channel.Feishu, id, question, clientMsgID, action, a.Context.ChatID, a.Context.MessageID)
+			done <- outcome{ok, err}
+		}()
+		select {
+		case o := <-done:
+			if o.err != nil {
+				return toast("error", clip(oneLine(o.err.Error()), 120))
+			}
+			if !o.ok {
+				return toast("info", i18n.T(l, "assistant-feishu_cards.already_handled"))
+			}
+			return toast("success", i18n.T(l, "assistant-feishu_cards.question_sent_pending"))
+		case <-time.After(cardAnswerWait):
+			msg := a.Context.MessageID
+			go func() {
+				o := <-done
+				if msg == "" {
+					return
+				}
+				nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				if o.err != nil {
+					s.botNote(nctx, msg, i18n.T(l, "assistant-feishu_cards.press_not_sent", i18n.Args{"error": clip(oneLine(o.err.Error()), 200)}))
+				} else if o.ok {
+					s.botNote(nctx, msg, i18n.T(l, "assistant-feishu_cards.question_sent_pending"))
+				}
+			}()
+			return toast("info", i18n.T(l, "assistant-feishu_cards.working_on_it"))
+		}
+	}
 	yes, no := true, false
 	var r proto.Resolution
 	switch {
@@ -287,10 +345,6 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 		return false
 	}
 	how := resolutionText(l, ix, r)
-	type outcome struct {
-		ok  bool
-		err error
-	}
 	// Screen and Codex cards act on the terminal and can take a few seconds; Feishu waits 3 s for this answer.
 	done := make(chan outcome, 1)
 	go func() {

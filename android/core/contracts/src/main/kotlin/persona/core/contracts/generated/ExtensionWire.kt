@@ -415,6 +415,7 @@ data class ExtensionContributes(
     @SerialName("error_reports") val errorReports: List<ExtensionErrorReportsItem>? = null,
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
+    @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
     /** Extra keys stay at this object's level on the wire; declared fields always win. */
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
@@ -449,12 +450,13 @@ private data class ExtensionContributesKnown(
     @SerialName("error_reports") val errorReports: List<ExtensionErrorReportsItem>? = null,
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
+    @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
 )
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -490,6 +492,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             errorReports = fields.errorReports,
             authRelay = fields.authRelay,
             secretProviders = fields.secretProviders,
+            repositoryProviders = fields.repositoryProviders,
             messaging = fields.messaging,
             additionalProperties = obj.filterKeys { it !in keys },
         )
@@ -525,6 +528,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             errorReports = value.errorReports,
             authRelay = value.authRelay,
             secretProviders = value.secretProviders,
+            repositoryProviders = value.repositoryProviders,
             messaging = value.messaging,
         )
         val obj = output.json.encodeToJsonElement(known, fields) as JsonObject
@@ -824,6 +828,53 @@ data class ExtensionSecretProviderItem(
      */
     val schemes: List<String> = emptyList(),
 )
+
+/**
+ * A code-hosting source on the exact hosts it names, for the repository catalog and a to-do's repositories and links
+ * there: the manager asks the program (repo.parse, repo.check, repo.link, repo.describe; repository.schema.json) and
+ * re-checks every answer. Needs the program to speak the protocol. A host another installed extension claims, on or
+ * off, fails the install, and so does one host in two items.
+ */
+@Serializable
+data class ExtensionRepositoryProviderItem(
+    val id: String = "",
+    /**
+     * What the source is called (Acme Code): the catalog and a to-do's repositories show it. Not only spaces, no
+     * control characters.
+     */
+    val name: String = "",
+    /**
+     * The exact host names whose addresses it reads (code.example.com): lowercase, no scheme, port, path or wildcard,
+     * not an IP address, and not a host the built-in GitHub and GitLab read.
+     */
+    val hosts: List<String> = emptyList(),
+    /**
+     * What it calls the link kinds it names (each at most once; the others keep their usual words). Only relabels:
+     * the kinds stay issue and pull_request.
+     */
+    @SerialName("link_kinds") val linkKinds: List<ExtensionRepositoryLinkLabel>? = null,
+)
+
+/**
+ * The word a repository provider shows for one kind of its links (MR for a pull_request).
+ */
+@Serializable
+data class ExtensionRepositoryLinkLabel(
+    val kind: String = "",
+    /**
+     * Not only spaces, no control characters.
+     */
+    val label: String = "",
+)
+
+/**
+ * The kinds of a to-do's links to a repository: an issue, or a pull request (a merge request).
+ */
+object ExtensionRepositoryLinkKind {
+    const val ISSUE = "issue"
+    const val PULL_REQUEST = "pull_request"
+    val ALL = listOf("issue", "pull_request")
+}
 
 /**
  * It is given the error and crash reports of the hub and the user's devices (error_reports.deliver): needs the

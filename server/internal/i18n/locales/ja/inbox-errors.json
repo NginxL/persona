@@ -30,6 +30,7 @@
   "mail_target_changed": "メールの返信先が変わりました。更新してもう一度お試しください。",
   "mail_target_required": "メールアカウントとメールのUIDを指定してください。",
   "translation_empty": "モデルが翻訳を返しませんでした。もう一度お試しください。",
+  "translation_message_size": "翻訳する返信は1〜{max}文字にしてください。",
   "mail_unconfigured": "メールがまだ設定されていません。",
   "not_processing": "この会話は受信トレイの項目に関連付けられていません。",
   "translation_target": "対象言語{target}はサポートされていません。",

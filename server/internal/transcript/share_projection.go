@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 const ShareSourceLimit = 16 << 20
@@ -186,7 +187,11 @@ func projectShareBytes(ctx context.Context, data []byte, source, incarnation str
 				prompt = false
 			}
 		}
-		tree.add(treeRec{uuid: id, parent: e.ParentUUID, prompt: prompt, reply: e.Type == "assistant" && !e.IsSidechain, system: e.Type == "system", turnEnd: e.Type == "system" && e.Subtype == "turn_duration"})
+		round := false // a round of the background supervisor (branchTree.add, #7315)
+		for _, b := range blocks {
+			round = round || prompt && b.Type == "text" && prompts.IsSuperviseRound(b.Text)
+		}
+		tree.add(treeRec{uuid: id, parent: e.ParentUUID, prompt: prompt, reply: e.Type == "assistant" && !e.IsSidechain, system: e.Type == "system", turnEnd: e.Type == "system" && e.Subtype == "turn_duration", round: round})
 		records = append(records, shareRecord{entry: e, start: int64(start), end: int64(end), id: id, blocks: blocks, human: human})
 		start = end
 		if len(records) > 100000 {

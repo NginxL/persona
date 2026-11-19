@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -22,18 +23,51 @@ var testLimits = Limits{
 	Tick:         10 * time.Millisecond,
 }
 
-// phone is the phone's end of a session as the app keeps it: per channel, the bytes received in order (copies that
-// came twice trimmed), and every other message in arrival order.
+// phone is the phone's end of a session as the app keeps it: per channel, an ordered receiver that trims copies and
+// rejects gaps, and a video message assembler that a reset ahead of the receiver starts over. Complete messages
+// received in order are in got; failures are kept for a test to inspect.
 type phone struct {
 	t   *testing.T
 	ack bool // acknowledge what arrives
 
-	mu       sync.Mutex
-	got      map[byte][]byte
-	recv     map[byte]uint64
-	msgs     chan msg
-	carriers []*carrier
+	mu          sync.Mutex
+	got         map[byte][]byte
+	recv        map[byte]uint64
+	tcpData     map[byte]int // every TCP data payload, before deduplication or assembly
+	parsers     map[byte]*phoneVideoParser
+	closeAt     map[byte]uint64
+	ended       map[byte]bool
+	drops       map[byte]bool // data that the network loses before the phone sees it
+	resetDrops  map[byte]bool // resets lost the same way
+	flowTCP     bool          // released phone: while a UDP flow carries a channel, ignore its TCP data
+	flowParents map[byte]*carrier
+	failures    []error
+	resets      int
+	msgs        chan msg
+	carriers    []*carrier
 }
+
+// phoneVideoParser is the released app's VideoMessageAssembler: only whole video wire messages come out.
+type phoneVideoParser struct{ pending []byte }
+
+func (p *phoneVideoParser) push(b []byte) ([]byte, error) {
+	p.pending = append(p.pending, b...)
+	var out []byte
+	for len(p.pending) >= 4 {
+		n := binary.BigEndian.Uint32(p.pending)
+		if n < 1 || n > maxVideoMessage {
+			return out, fmt.Errorf("video message length %d is invalid", n)
+		}
+		if len(p.pending) < 4+int(n) {
+			break
+		}
+		out = append(out, p.pending[:4+n]...)
+		p.pending = p.pending[4+int(n):]
+	}
+	return out, nil
+}
+
+func (p *phoneVideoParser) reset() { p.pending = nil }
 
 type msg struct {
 	typ  byte
@@ -50,7 +84,9 @@ type carrier struct {
 }
 
 func newPhone(t *testing.T, ack bool) *phone {
-	return &phone{t: t, ack: ack, got: map[byte][]byte{}, recv: map[byte]uint64{}, msgs: make(chan msg, 1024)}
+	return &phone{t: t, ack: ack, got: map[byte][]byte{}, recv: map[byte]uint64{}, tcpData: map[byte]int{},
+		parsers: map[byte]*phoneVideoParser{}, closeAt: map[byte]uint64{}, ended: map[byte]bool{},
+		drops: map[byte]bool{}, resetDrops: map[byte]bool{}, flowParents: map[byte]*carrier{}, msgs: make(chan msg, 1024)}
 }
 
 func (p *phone) carry(conn io.ReadWriteCloser) *carrier {
@@ -66,26 +102,40 @@ func (p *phone) carry(conn io.ReadWriteCloser) *carrier {
 				return
 			}
 			body = append([]byte(nil), body...)
+			p.mu.Lock()
+			drop := (typ == TypeData && p.drops[body[0]]) || (typ == TypeReset && p.resetDrops[body[0]])
+			p.mu.Unlock()
+			if drop {
+				continue
+			}
 			switch typ {
 			case TypeData:
 				id, off, data, _ := readChanOffset(body)
 				p.mu.Lock()
-				have := p.recv[id]
-				if off <= have && off+uint64(len(data)) > have {
-					p.got[id] = append(p.got[id], data[have-off:]...)
-					p.recv[id] = off + uint64(len(data))
-				}
-				recv := p.recv[id]
+				p.tcpData[id] += len(data)
+				ignore := p.flowTCP && p.flowParents[id] != nil
 				p.mu.Unlock()
-				if p.ack {
+				if ignore {
+					continue // the released phone applies only TCP reset and close while a flow carries this channel
+				}
+				recv, err := p.accept(id, off, data)
+				if err == nil && p.ack {
 					c.send(TypeAck, chanOffset(id, recv))
 				}
 			case TypeAck:
 				// The node acknowledging the phone's bytes: a real phone frees them; nothing to check here.
 			case TypeReset:
 				id, off, _, _ := readChanOffset(body)
+				recv := p.reset(id, off)
+				if p.ack {
+					c.send(TypeAck, chanOffset(id, recv))
+				}
+				p.msgs <- msg{typ, body, c}
+			case TypeClose:
+				id, off, _, _ := readChanOffset(body)
 				p.mu.Lock()
-				p.recv[id] = off
+				p.closeAt[id] = off
+				p.finishIfClosedLocked(id)
 				p.mu.Unlock()
 				p.msgs <- msg{typ, body, c}
 			default:
@@ -102,16 +152,184 @@ func (c *carrier) send(typ byte, parts ...[]byte) {
 	_, _ = c.conn.Write(frame(typ, parts...))
 }
 
+// accept is LinkReceiver.accept plus the video assembler. It returns the phone's offset after the message.
+func (p *phone) accept(id byte, off uint64, data []byte) (uint64, error) {
+	return p.acceptOrdered(id, off, data, true)
+}
+
+// acceptUDP shares the receiver and assembler without counting the bytes as TCP arrivals in received.
+func (p *phone) acceptUDP(id byte, off uint64, data []byte) (uint64, error) {
+	return p.acceptOrdered(id, off, data, false)
+}
+
+func (p *phone) acceptOrdered(id byte, off uint64, data []byte, tcp bool) (uint64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	have := p.recv[id]
+	if off > have {
+		err := fmt.Errorf("channel %d: gap: next %d, data at %d", id, have, off)
+		p.failures = append(p.failures, err)
+		return have, err
+	}
+	fresh := data
+	if skip := have - off; skip < uint64(len(data)) {
+		fresh = data[skip:]
+	} else {
+		fresh = nil
+	}
+	var failure error
+	if id >= FirstVideo && len(fresh) > 0 {
+		parser := p.parsers[id]
+		if parser == nil {
+			parser = &phoneVideoParser{}
+			p.parsers[id] = parser
+		}
+		whole, err := parser.push(fresh)
+		if tcp {
+			p.got[id] = append(p.got[id], whole...)
+		}
+		if err != nil {
+			failure = fmt.Errorf("channel %d: %v", id, err)
+			p.failures = append(p.failures, failure)
+		}
+	} else if tcp {
+		p.got[id] = append(p.got[id], fresh...)
+	}
+	p.recv[id] = have + uint64(len(fresh))
+	if failure == nil {
+		p.finishIfClosedLocked(id)
+	}
+	return p.recv[id], failure
+}
+
+// finishIfClosedLocked models the released phone's close/data completion check. Reset deliberately does not call it:
+// released TCP reset and flowReset acknowledge the new offset without waking a receive already waiting for closeAt.
+func (p *phone) finishIfClosedLocked(id byte) {
+	if off, ok := p.closeAt[id]; ok && p.recv[id] >= off {
+		p.ended[id] = true
+	}
+}
+
+// reset is the app's handling on either TCP or UDP: a reset ahead of the receiver moves it and starts the assembler
+// over; one at or behind it, a late copy from a route the channel left, changes neither (#10005). It does not re-check
+// closeAt; only close and data do that.
+func (p *phone) reset(id byte, off uint64) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resets++
+	if off <= p.recv[id] {
+		return p.recv[id]
+	}
+	p.recv[id] = off
+	if parser := p.parsers[id]; parser != nil {
+		parser.reset()
+	}
+	return p.recv[id]
+}
+
+// rewind models the phone starting UDP at the beginning of its partial message.
+func (p *phone) rewind(id byte, off uint64) {
+	p.mu.Lock()
+	if off < p.recv[id] {
+		p.recv[id] = off
+	}
+	if parser := p.parsers[id]; parser != nil {
+		parser.reset()
+	}
+	p.mu.Unlock()
+}
+
+// enableFlowTCP applies the released phone's flow rule in reset-delivery tests; main's fixtures leave it off.
+func (p *phone) enableFlowTCP() {
+	p.mu.Lock()
+	p.flowTCP = true
+	p.mu.Unlock()
+}
+
+// startFlow records the parent a UDP flow carries the channel for. TCP reset and close still apply; data does not.
+func (p *phone) startFlow(id byte, parent *carrier) {
+	p.mu.Lock()
+	p.flowParents[id] = parent
+	p.mu.Unlock()
+}
+
+// leaveFlow models the released phone leaving a dead UDP path: it sends use on the parent with its ordered offset.
+func (p *phone) leaveFlow(id byte) {
+	p.mu.Lock()
+	parent := p.flowParents[id]
+	delete(p.flowParents, id)
+	off := p.recv[id]
+	p.mu.Unlock()
+	if parent != nil {
+		parent.send(TypeUse, chanOffset(id, off))
+	}
+}
+
 func (p *phone) received(id byte) []byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]byte(nil), p.got[id]...)
 }
 
+func (p *phone) rawTCPData(id byte) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tcpData[id]
+}
+
 func (p *phone) offset(id byte) uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.recv[id]
+}
+
+func (p *phone) endedAtClose(id byte) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ended[id]
+}
+
+// dropData simulates network loss before the phone's receiver, independently of the node's successful writes.
+func (p *phone) dropData(id byte, drop bool) {
+	p.mu.Lock()
+	p.drops[id] = drop
+	p.mu.Unlock()
+}
+
+func (p *phone) dropResets(id byte, drop bool) {
+	p.mu.Lock()
+	p.resetDrops[id] = drop
+	p.mu.Unlock()
+}
+
+func (p *phone) failed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.failures) > 0
+}
+
+func (p *phone) resetCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.resets
+}
+
+func (p *phone) pendingVideo(id byte) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if parser := p.parsers[id]; parser != nil {
+		return len(parser.pending)
+	}
+	return 0
+}
+
+func (p *phone) checkHealthy() {
+	p.t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.failures) > 0 {
+		p.t.Fatalf("the released phone rejected the stream: %v", p.failures[0])
+	}
 }
 
 // next is the next non-data message, failing the test after a second.
@@ -127,6 +345,33 @@ func (p *phone) next(want byte) msg {
 		p.t.Fatalf("no message %d", want)
 	}
 	return msg{}
+}
+
+// nextOf is the next non-data message of kind, skipping other control messages.
+func (p *phone) nextOf(want byte) msg {
+	p.t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case m := <-p.msgs:
+			if m.typ == want {
+				return m
+			}
+		case <-deadline:
+			p.t.Fatalf("no message %d", want)
+		}
+	}
+}
+
+func (p *phone) waitReceived(id byte, want []byte) {
+	p.t.Helper()
+	waitFor(p.t, fmt.Sprintf("%d bytes on channel %d", len(want), id), func() bool {
+		return len(p.received(id)) >= len(want) || p.failed()
+	})
+	p.checkHealthy()
+	if got := p.received(id); !bytes.Equal(got, want) {
+		p.t.Fatalf("channel %d received %d bytes, want %d", id, len(got), len(want))
+	}
 }
 
 // waitFor polls cond for up to two seconds.

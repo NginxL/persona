@@ -13,7 +13,9 @@ data class AgentSpace(val id: String, val name: String, val members: List<AgentS
      * (iOS `AgentListOrder.isQuiet`). Idle-row visibility is separately [AgentSession.stays].
      * Ordinary pinned sessions already keep their row visible; they do not by themselves promote a quiet space.
      */
-    fun quiet(mutes: AgentPreferences): Boolean = members.none { !it.isQuiet || it.isWaiting || it.awaitsReply(mutes) || it.heldInList }
+    fun quiet(mutes: AgentPreferences): Boolean = members.none {
+        !it.isQuiet || it.isWaiting || it.awaitsReply(mutes) || it.justFinished(mutes) || it.heldInList
+    }
 }
 
 fun agentSpaces(sessions: List<AgentSession>): List<AgentSpace> = sessions

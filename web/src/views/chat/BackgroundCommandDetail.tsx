@@ -1,15 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { t } from "../../i18n";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { formatDate, t } from "../../i18n";
 import { apiBlob, credentialOwner, enc, errorText, getToken, isAbort, subscribeCredentialOwner } from "../../lib/api";
 import { boundedBlobReader } from "../../lib/bounded-blob";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { composing } from "../../lib/send-history";
 import { getSession, useStore } from "../../lib/store";
-import { backgroundTitle } from "../../lib/tasks";
+import { backgroundDurationMs, backgroundStatus, backgroundTitle } from "../../lib/tasks";
 import type { BackgroundTask } from "../../lib/types";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
 import { workDuration } from "../../lib/work-groups";
-import { Button, copyText, IconButton, useNow } from "../../ui/atoms";
+import { Button, copyText, cx, IconButton, useNow } from "../../ui/atoms";
+import { taskStatusWord } from "./TaskCard";
 
 const TAIL_BYTES = 65_536;
 const POLL_MS = 2000;
@@ -65,7 +66,12 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
   const scopeCurrent = () => credentialOwner() === owner && Boolean(getSession(mid, sid)) && getSession(mid, sid)?.manager === manager;
   const current = liveOwner === owner && sameManager;
   const started = Date.parse(task.started_at ?? "");
-  const now = useNow(1000, current && running && Number.isFinite(started));
+  const status = backgroundStatus(task, running);
+  const active = status === "running";
+  const now = useNow(1000, current && active && Number.isFinite(started));
+  const duration = backgroundDurationMs(task, active, now);
+  const commandId = useId();
+  const [fullCommand, setFullCommand] = useState(false);
   const key = JSON.stringify([mid, sid, cwd, task.id, task.output_file, owner, manager]);
   const [output, setOutput] = useState<Output>({ key });
   const [retry, setRetry] = useState(0);
@@ -74,6 +80,7 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
   const follows = useRef(true);
   const abort = useRef<AbortController | null>(null);
   const shown = current && output.key === key ? output : { key };
+  const outputLines = shown.text === undefined ? undefined : shown.text ? shown.text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n").length : 0;
   const back = () => { abort.current?.abort(); onBack(); };
 
   useEffect(() => {
@@ -87,26 +94,26 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
     const token = getToken();
     abort.current = ac;
     let live = true, busy = false;
-    const active = () => live && !ac.signal.aborted && credentialOwner() === owner
+    const requestActive = () => live && !ac.signal.aborted && credentialOwner() === owner
       && Boolean(getSession(mid, sid)) && getSession(mid, sid)?.manager === manager;
     const read = async () => {
-      if (busy || !active()) return;
+      if (busy || !requestActive()) return;
       busy = true;
       setOutput(old => ({ ...(old.key === key ? old : { key }), loading: true }));
       try {
         const path = `/machines/${enc(mid)}/file/download?path=${enc(task.output_file!)}&cwd=${enc(cwd ?? "")}`;
-        const value = await readTail(path, ac.signal, manager, token, owner, active);
-        if (active()) setOutput({ key, ...value, loading: false });
+        const value = await readTail(path, ac.signal, manager, token, owner, requestActive);
+        if (requestActive()) setOutput({ key, ...value, loading: false });
       } catch (error) {
-        if (active() && !isAbort(error)) setOutput(old => ({ ...(old.key === key ? old : { key }), error: errorText(error), loading: false }));
+        if (requestActive() && !isAbort(error)) setOutput(old => ({ ...(old.key === key ? old : { key }), error: errorText(error), loading: false }));
       } finally { busy = false; }
     };
     // Ending a task starts a fresh effect and one final read, even if its previous read was still in flight.
-    const stop = visiblePoll(() => { void read(); }, running ? POLL_MS : 0, documentPage);
+    const stop = visiblePoll(() => { void read(); }, active ? POLL_MS : 0, documentPage);
     return () => { live = false; stop(); ac.abort(); };
     // The key contains every request primitive; object identity updates must not restart polling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, current, running, retry]);
+  }, [key, current, active, retry]);
   useLayoutEffect(() => {
     follows.current = true;
   }, [key]);
@@ -124,17 +131,50 @@ export function BackgroundCommandDetail({ mid, sid, cwd, task, running, focus, o
       <div ref={bar} className="flex shrink-0 items-center gap-1.5 border-b border-line px-2 py-1.5">
         <IconButton icon="arrowLeft" label={t("chat-activity.back")} size={24} iconSize={14} onClick={back} />
         <h3 className="min-w-0 flex-1 truncate text-meta font-medium text-ink">{backgroundTitle(task)}</h3>
-        {task.command && <IconButton icon="copy" label={t("chat-activity.copy_command")} size={24} iconSize={14} onClick={() => { if (scopeCurrent()) void copyText(task.command!); }} />}
         <Button tone="quiet" size="sm" data-bg-open-file onClick={() => { if (scopeCurrent()) onOpenFile(); }}>{t("chat-activity.open_output_file")}</Button>
       </div>
-      <div className="flex items-center gap-1 px-3 py-2 text-label text-ink-3"><span role="status">{t(running ? "lib-tasks.loop_running_short" : "chat-activity.output_not_running")}</span>{running && Number.isFinite(started) && <> · <span data-command-elapsed>{workDuration(Math.max(0, now - started))}</span></>}</div>
+      <dl className="shrink-0 space-y-2 border-b border-line px-3 py-3 text-label">
+        <div className="flex items-start gap-3">
+          <dt className="w-16 shrink-0 text-ink-3">{t("chat-activity.command_status")}</dt>
+          <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span role="status" data-command-status={status} className={cx(status === "failed" ? "text-red" : status === "completed" ? "text-green" : status === "running" ? "text-orange" : "text-ink-2")}>
+              {status ? taskStatusWord(status) : t("chat-activity.output_not_running")}
+            </span>
+            {!active && task.exit_code !== undefined && <span className="text-ink-2" data-command-exit-code>{t("lib-tasks.exit_code", { code: task.exit_code })}</span>}
+          </dd>
+        </div>
+        <div className="flex items-start gap-3">
+          <dt className="w-16 shrink-0 text-ink-3">{t("chat-activity.command_runtime")}</dt>
+          <dd className="min-w-0 flex-1 tabular-nums text-ink" data-command-runtime>{duration === null ? "—" : workDuration(duration)}</dd>
+        </div>
+        {Number.isFinite(started) && <div className="flex items-start gap-3">
+          <dt className="w-16 shrink-0 text-ink-3">{t("chat-activity.command_started")}</dt>
+          <dd className="min-w-0 flex-1 text-ink" data-command-started>{formatDate(started, { dateStyle: "medium", timeStyle: "short" })}</dd>
+        </div>}
+        {task.command && <div className="flex items-start gap-3">
+          <dt className="w-16 shrink-0 text-ink-3">{t("chat-activity.command")}</dt>
+          <dd className="min-w-0 flex-1">
+            <div className="flex items-start gap-1">
+              <code id={commandId} data-command-full className={cx("min-w-0 flex-1 font-mono whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-ink", fullCommand ? "max-h-48 overflow-y-auto" : "line-clamp-3")}>{task.command}</code>
+              <IconButton className="-mt-1 shrink-0" icon="copy" label={t("chat-activity.copy_command")} size={20} iconSize={12} onClick={() => { if (scopeCurrent()) void copyText(task.command!); }} />
+            </div>
+            <Button tone="quiet" size="sm" className="touch-hit -ml-2" expanded={fullCommand} aria-controls={commandId} onClick={() => setFullCommand(value => !value)}>
+              {t(fullCommand ? "chat-activity.command_show_less" : "chat-activity.command_show_more")}
+            </Button>
+          </dd>
+        </div>}
+      </dl>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-2 text-label">
+        <h4 className="font-medium text-ink">{t("chat-activity.output")}</h4>
+        {outputLines !== undefined && <span className="text-ink-3" data-command-lines>{t(shown.tail ? "chat-activity.output_tail_lines" : "chat-activity.output_lines", { count: outputLines })}</span>}
+      </div>
       {shown.error && <div role="alert" className="flex items-center gap-2 px-3 py-2 text-label text-red"><span>{shown.error}</span><Button tone="quiet" size="sm" busy={shown.loading} onClick={() => { if (!shown.loading) { setOutput(old => ({ ...old, loading: true })); setRetry(n => n + 1); } }}>{t("app.retry")}</Button></div>}
-      {shown.tail && <p className="px-3 pb-2 text-label text-ink-3">{t("chat-activity.output_tail")}</p>}
-      <div ref={body} className="min-h-0 flex-1 overflow-auto px-3 pb-3" data-command-output onScroll={() => {
+      {shown.tail && <p className="px-3 pt-1 text-label text-ink-3">{t("chat-activity.output_tail")}</p>}
+      <div ref={body} className="min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3" data-command-output onScroll={() => {
         const el = body.current!; follows.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
       }}>
         {shown.text ? <pre className="font-mono text-label whitespace-pre-wrap break-words text-ink">{shown.text}</pre>
-          : !shown.error && <p className="text-label text-ink-3">{t(shown.text === undefined ? "chat-activity.output_loading" : running ? "chat-activity.output_empty_running" : "chat-activity.output_empty_ended")}</p>}
+          : !shown.error && <p className="text-label text-ink-3">{t(shown.text === undefined ? "chat-activity.output_loading" : active ? "chat-activity.output_empty_running" : "chat-activity.output_empty_ended")}</p>}
       </div>
     </div>
   );

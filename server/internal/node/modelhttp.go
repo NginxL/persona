@@ -63,6 +63,7 @@ func modelHTTP(ctx context.Context, params json.RawMessage) (any, error) {
 		req.Header = http.Header(p.Header)
 	}
 	modelhttp.SetDefaultUserAgent(req.Header)
+	modelhttp.SetOpenCodeSession(req.Header, u.String(), "")
 	resp, err := modelHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("model.http: %w", err)

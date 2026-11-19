@@ -1,21 +1,9 @@
-// The unified model panel (#5032, after Cindy's UnifiedModelPanel): search on top, a rail on the left (Recent, Favorites,
-// All, one cell per provider), two-line model rows on the right, "Configure models" at the bottom; a row's Customize opens
-// its setup flyout. Opens above its anchor (the composer's model pill), right edges aligned. docs/web/web.md "Model pill
-// and model panel"; spec of record: Cindy's model-selector-unified.md as recorded in docs/design/DESIGN_SYSTEM.md.
-//
-// It grows out of the pill (a clip from the pill's shape, the content fading in after it), as wide as its widest row
-// within 300–460 px and never narrower during one opening; its body (rail and list) is 428 px tall, less only when the
-// window or, on a phone, the part the keyboard leaves has no room. The list opens on All with the model that runs now at
-// about a third of its height. Keys: the search has the focus (with a precise pointer); Tab or ↓ goes to the rows, ↑↓
-// move between them, Enter or Space picks, ← opens a row's flyout, Esc closes the flyout and then the panel. A pick
-// waits for `onPick`: applied, the setup goes into Recent and the panel closes; refused, it stays as it was. While the
-// caller asks about a pick in a dialog of its own (`held`: an Agent's "Switch Agent?", #5054) the panel stays open under
-// it, dimmed with the page, and leaves the keys and clicks to it.
+// Shared launcher-first model column (#10249). Selection and setup controls stay in Row and Flyout.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import "./ModelPanel.css";
 import { t } from "../../i18n";
 import {
-  alignedScrollTop,
   engineChoices,
   engineSetup,
   panelSections,
@@ -27,10 +15,9 @@ import {
   type PanelProvider,
   type PanelRow,
   type PanelScope,
-  type PanelSection,
   type PanelState,
-  type PanelView,
 } from "../../lib/model-panel";
+import { launcherSections, launcherSearch, quickPicks } from "../../lib/launcher-column";
 import { navigate } from "../../lib/router";
 import type { LauncherQuotaAnswer } from "../../lib/quota";
 import { hasFinePointer, keyboardFrame } from "../../lib/viewport";
@@ -39,7 +26,7 @@ import { cx, Spinner } from "../atoms";
 import { Icon } from "../icons";
 import { NARROW_QUERY, returnFocus, SHEET_QUERY, useMedia } from "../overlay";
 import { Flyout, type FlyoutMode } from "./Flyout";
-import { Rail } from "./Rail";
+import { LauncherRow } from "./LauncherRow";
 import { Row } from "./Row";
 import { usePanelStore } from "./store";
 
@@ -67,7 +54,13 @@ export interface ModelPanelProps {
   header?: ReactNode;
   /** A row on top of the list, in no group (Cindy's "follow" row): following a default instead of a model of one's own
    *  (New Agent: Model settings › New agent). Checked while `active`; a click applies it, and the panel closes once it did. */
-  follow?: { active: boolean; label: string; detail?: string; warning?: string; onFollow: () => boolean | Promise<boolean> };
+  follow?: {
+    active: boolean;
+    label: string;
+    detail?: string;
+    warning?: string;
+    onFollow: () => boolean | Promise<boolean>;
+  };
   /** Ready-made setups listed as a group after the favorites (New Agent's presets); a pick of one goes to `onPreset`. */
   presets?: PanelPreset[];
   onPreset?: (key: string) => boolean | Promise<boolean>;
@@ -81,9 +74,6 @@ export interface ModelPanelProps {
    *  doesn't close on its clicks, focus or Escape (they are the dialog's). */
   held?: boolean;
 }
-
-/** The headers of the groups that are not a provider's. */
-const GROUP_LABELS = { favorites: "ui-modelpanel.favorites", recent: "ui-modelpanel.recent", recommended: "ui-modelpanel.recommended", presets: "ui-modelpanel.presets" } as const;
 
 /** The body's height (rail and list) when the window has room; the panel's own cap (Cindy's max-h). */
 const BODY = 428;
@@ -103,28 +93,58 @@ interface Geometry {
   shift?: number;
 }
 
-const rowsOf = (list: HTMLElement | null) => (list ? [...list.querySelectorAll<HTMLElement>("[data-panel-row]")] : []);
+const rowsOf = (list: HTMLElement | null) => (list ? [...list.querySelectorAll<HTMLElement>("[data-panel-row], [data-panel-launcher]")] : []);
 
 export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, onApplyCurrent, onReload, onForget, quotas, currentExtra, header, follow, presets, onPreset, engines, onHelp, onConfigure, held }: ModelPanelProps): ReactNode {
   const store = usePanelStore(scope);
   const listId = useId();
-  const [view, setView] = useState<PanelView>({ kind: "all" });
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(state.current ? [state.current.provider] : []));
   const [query, setQuery] = useState("");
   // families unfolded during this opening ("Earlier versions"); a new opening starts folded again
   const [openFamilies, setOpenFamilies] = useState<ReadonlySet<string>>(() => new Set());
   const searching = query.trim() !== "";
-  const shown: PanelView = searching ? { kind: "all" } : view;
-  const sections = useMemo(
-    () => panelSections({ providers, state, view, query, favorites: store.favorites, recent: store.recent, overrides: store.overrides, presets, openFamilies }),
-    [providers, state, view, query, store.favorites, store.recent, store.overrides, presets, openFamilies],
+  const input = useMemo(
+    () => ({
+      providers,
+      state,
+      query,
+      favorites: store.favorites,
+      recent: store.recent,
+      overrides: store.overrides,
+      presets,
+      openFamilies,
+    }),
+    [providers, state, query, store.favorites, store.recent, store.overrides, presets, openFamilies],
   );
+  const sections = useMemo(() => launcherSections(input), [input]);
+  const quick = useMemo(() => quickPicks(input), [input]);
+  const found = useMemo(() => (searching ? launcherSearch(input) : []), [input, searching]);
+  const presetSections = useMemo(() => panelSections({ ...input, view: { kind: "all" } }).filter((s) => s.kind === "presets"), [input]);
+  const matches = providers.filter((p) =>
+    query
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .every((word) => [p.name, p.id, p.engineLabel].some((value) => value?.toLowerCase().includes(word))),
+  );
+  const toggleLauncher = (id: string) => {
+    setFly(null);
+    setExpanded((now) => {
+      const next = new Set(now);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  };
   const toggleFamily = (key: string) =>
     setOpenFamilies((now) => {
       const next = new Set(now);
       if (!next.delete(key)) next.add(key);
       return next;
     });
-  const rows = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
+  const rows = useMemo(
+    () => (searching ? found : [...quick, ...presetSections.flatMap((s) => s.rows), ...sections.filter((s) => expanded.has(s.provider!.id)).flatMap((s) => s.rows)]),
+    [searching, found, quick, presetSections, sections, expanded],
+  );
 
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -137,8 +157,15 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
 
   // a pick on its way (everything waits); a flyout edit of the model that runs now on its way (its new value shows)
   const [picking, setPicking] = useState(false);
-  const [applying, setApplying] = useState<{ key: string; patch: PanelOverride } | null>(null);
-  const [fly, setFly] = useState<{ key: string; el: HTMLElement; keyboard: boolean } | null>(null);
+  const [applying, setApplying] = useState<{
+    key: string;
+    patch: PanelOverride;
+  } | null>(null);
+  const [fly, setFly] = useState<{
+    key: string;
+    el: HTMLElement;
+    keyboard: boolean;
+  } | null>(null);
   const [flash, setFlash] = useState("");
   const closeFly = useCallback(() => setFly(null), []);
   const mounted = useRef(true);
@@ -199,7 +226,13 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
       const ib = inset(top + shift + h - a.bottom, h - it);
       const il = inset(a.left - left, w);
       const ir = inset(left + w - a.right, w - il);
-      return { left, top, body: bodyH, shift, from: `inset(${it}px ${ir}px ${ib}px ${il}px round ${Math.round(a.height / 2)}px)` };
+      return {
+        left,
+        top,
+        body: bodyH,
+        shift,
+        from: `inset(${it}px ${ir}px ${ib}px ${il}px round ${Math.round(a.height / 2)}px)`,
+      };
     });
   });
 
@@ -264,32 +297,11 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     if (placed && hasFinePointer()) search.current?.focus({ preventScroll: true });
   }, [placed]);
 
-  // ── the row that runs now, at about a third of the list's height, on opening and on another view ──
-  const align = useRef(true);
-  const scripted = useRef(false);
-  const viewKey = `${shown.kind}:${shown.kind === "provider" ? shown.provider : ""}:${query.trim().toLowerCase()}`;
-  const lastView = useRef(viewKey);
+  // Keep the follow row and launcher summaries visible on opening; a new search starts at the top.
+  const viewKey = query.trim().toLowerCase();
   useLayoutEffect(() => {
-    const el = list.current;
-    if (!el) return;
-    if (lastView.current !== viewKey) {
-      lastView.current = viewKey;
-      align.current = true;
-      if (el.scrollTop !== 0) {
-        scripted.current = true;
-        el.scrollTop = 0;
-      }
-    }
-    if (!align.current || el.clientHeight < 1) return;
-    const row = el.querySelector<HTMLElement>("[data-current]");
-    if (!row) return;
-    align.current = false;
-    const top = alignedScrollTop({ clientHeight: el.clientHeight, scrollHeight: el.scrollHeight, rowTop: row.offsetTop, rowBottom: row.offsetTop + row.offsetHeight });
-    if (Math.abs(el.scrollTop - top) > 1) {
-      scripted.current = true;
-      el.scrollTop = top;
-    }
-  }, [viewKey, sections, geo?.body]);
+    if (list.current) list.current.scrollTop = 0;
+  }, [viewKey]);
 
   // ── the hover that glides from row to row ──
   const hot = useRef<HTMLElement | null>(null);
@@ -427,19 +439,12 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     focusRow(all[Math.max(0, Math.min(all.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]);
   };
 
-  const chooseView = (v: PanelView) => {
-    setFly(null);
-    setQuery("");
-    setView(v);
-  };
-
-  const label = (s: PanelSection) => (s.kind === "provider" ? (s.provider?.name ?? "") : t(GROUP_LABELS[s.kind]));
-
   const second = (row: PanelRow): { text: string; describes?: boolean } => {
-    if (row.kind === "typed") return { text: t("ui-modelpanel.use_typed_note") };
-    if (row.kind === "preset") return { text: row.preset?.description || `${row.provider.name} · ${row.model.name}` };
-    if (row.model.custom) return { text: t("ui-modelpanel.typed_before") };
-    if (shown.kind === "provider") return { text: row.model.description ?? "", describes: true };
+    if (row.kind === "typed") return { text: `${row.provider.name} · ${t("ui-modelpanel.use_typed_note")}` };
+    if (row.kind === "preset") return { text: `${row.provider.name} · ${row.preset?.description || row.model.name}` };
+    if (row.model.custom) return { text: `${row.provider.name} · ${t("ui-modelpanel.typed_before")}` };
+    if (!searching && row.kind === "model" && providers.some((p) => p.id !== row.provider.id && p.models?.some((m) => m.name === row.model.name))) return { text: row.provider.name };
+    if (!searching && row.kind === "model") return { text: row.model.description ?? "", describes: true };
     return { text: row.provider.name };
   };
 
@@ -451,7 +456,9 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
       <Row
         key={row.key}
         row={row}
+        asButton
         second={two.text}
+        keepSecond={searching || row.kind === "recent" || row.kind === "favorite"}
         describes={two.describes || row.kind === "preset"}
         blocked={rowBlock(row.provider, state, row.current)}
         customizable={customizable}
@@ -468,8 +475,24 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
     );
   };
   const flyMode = (row: PanelRow): FlyoutMode => (row.kind === "favorite" ? "favorite" : row.customized ? "customized" : "recommended");
-  const empty = !sections.length;
-  const notes = [state.busy && { icon: "info" as const, text: state.busy, tone: "text-ink-3" }, state.note && { icon: "warning" as const, text: state.note, tone: "text-orange" }].filter(Boolean) as { icon: "info" | "warning"; text: string; tone: string }[];
+  const loading = sections.some((s) => s.loading);
+  const empty = searching ? !found.length && !matches.length && !loading : !sections.length;
+  const notes = [
+    state.busy && {
+      icon: "info" as const,
+      text: state.busy,
+      tone: "text-ink-3",
+    },
+    state.note && {
+      icon: "warning" as const,
+      text: state.note,
+      tone: "text-orange",
+    },
+  ].filter(Boolean) as {
+    icon: "info" | "warning";
+    text: string;
+    tone: string;
+  }[];
 
   const room = phone ? "calc(100vw - 16px)" : "calc(100vw - 48px)";
   const style: CSSProperties & Record<string, string | number | undefined> = {
@@ -486,8 +509,21 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
   return createPortal(
     <>
       {/* under a dialog's backdrop (z-40) while one asks about the pick, above the page otherwise */}
-      <div ref={panel} role="dialog" aria-label={t("ui-modelpanel.list")} data-model-panel data-held={held || undefined} className={cx("fixed flex w-max min-w-[300px] flex-col overflow-hidden rounded-[12px] bg-surface text-ink shadow-overlay", held ? "z-30" : "z-50")} style={style}>
-        <div className="flex min-h-0 flex-col" style={{ animation: geo ? "model-panel-content var(--model-panel-fade) var(--model-panel-ease) var(--model-panel-fade-delay) backwards" : undefined }}>
+      <div
+        ref={panel}
+        role="dialog"
+        aria-label={t("ui-modelpanel.list")}
+        data-model-panel
+        data-held={held || undefined}
+        className={cx("fixed flex w-max min-w-[300px] flex-col overflow-hidden rounded-[12px] bg-surface text-ink shadow-overlay", held ? "z-30" : "z-50")}
+        style={style}
+      >
+        <div
+          className="flex min-h-0 flex-col"
+          style={{
+            animation: geo ? "model-panel-content var(--model-panel-fade) var(--model-panel-ease) var(--model-panel-fade-delay) backwards" : undefined,
+          }}
+        >
           {header && <div className="shrink-0">{header}</div>}
           <div className="flex shrink-0 items-center gap-2 border-b border-line px-3.5 py-3 text-ink-3">
             <Icon name="search" size={14} className="shrink-0" />
@@ -509,19 +545,14 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
             />
           </div>
           <div ref={body} className="flex min-h-0 min-w-0 shrink" style={{ height: geo?.body ?? BODY }}>
-            <Rail providers={providers} view={shown} onView={chooseView} disabled={picking} quotas={quotas} />
             <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <div
                 ref={list}
                 id={listId}
-                role="listbox"
+                role="group"
                 aria-label={t("ui-modelpanel.list")}
                 aria-busy={picking || undefined}
                 onKeyDown={listKey}
-                onScroll={() => {
-                  if (scripted.current) scripted.current = false;
-                  else align.current = false;
-                }}
                 onPointerMove={(e) => {
                   const row = (e.target as Element).closest?.<HTMLElement>("[data-panel-row]");
                   if (row && row === hot.current) return;
@@ -544,67 +575,111 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                   </div>
                 ))}
                 {empty ? (
-                  <div className="w-0 min-w-full px-3 py-6 text-center text-[13px] text-ink-3">
-                    {shown.kind === "favorites" ? t("ui-modelpanel.favorites_empty") : shown.kind === "recent" ? t("ui-modelpanel.recent_empty") : t("ui-modelpanel.no_match")}
-                  </div>
+                  <div className="w-0 min-w-full px-3 py-6 text-center text-[13px] text-ink-3">{t("ui-modelpanel.no_match")}</div>
                 ) : (
-                  sections.map((s) => (
-                    <div key={s.key} role="group" aria-label={label(s)} data-panel-section={s.kind}>
-                      {/* the group's name is its aria-label: the heading is for the eye only */}
-                      <div aria-hidden className="truncate px-2.5 pt-2 pb-1 text-[12px] leading-[1.33] font-medium text-ink-2">
-                        {label(s)}
-                        {s.kind === "provider" && s.provider?.idNote && <span className="ml-1.5 font-mono text-[11px] font-normal text-ink-3">{s.provider.idNote}</span>}
-                        {s.kind === "provider" && s.provider?.alsoNote && <span className="ml-1.5 text-submeta font-normal text-ink-3">{s.provider.alsoNote}</span>}
+                  <>
+                    {!searching && quick.length > 0 && (
+                      <div role="group" aria-label={t("ui-modelpanel.quick_picks")} data-panel-quick className="relative mb-1 border-b border-line pb-1">
+                        {quick.map(renderRow)}
                       </div>
-                      {s.kind === "provider" && s.provider && <GroupNotes provider={s.provider} onReload={onReload} onHelp={onHelp} />}
-                      {s.loading && (
-                        <div role="status" className="flex items-center gap-2 px-3 py-2 text-[12px] text-ink-3">
-                          <Spinner size={12} />
-                          {t("ui-modelpanel.loading")}
+                    )}
+                    {!searching &&
+                      presetSections.map((s) => (
+                        <div key={s.key} role="group" aria-label={t("ui-modelpanel.presets")} data-panel-section="presets">
+                          {s.rows.map(renderRow)}
                         </div>
-                      )}
-                      {s.blocks
-                        ? s.blocks.map((b) =>
-                            b.family ? (
-                              <div key={b.key} role="group" aria-label={b.family.label} data-panel-family={b.family.key}>
-                                <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 pb-0.5">
-                                  <span aria-hidden className="min-w-0 truncate text-submeta leading-[1.4] text-ink-3">{b.family.label}</span>
-                                  {b.older > 0 && (
-                                    <button
-                                      type="button"
-                                      aria-expanded={Boolean(b.open)}
-                                      aria-label={b.open ? t("ui-modelpanel.hide_older_of", { family: b.family.label }) : t("ui-modelpanel.older_of", { family: b.family.label, count: b.older })}
-                                      data-panel-fold={b.key}
-                                      disabled={picking}
-                                      onClick={() => toggleFamily(b.key)}
-                                      className="ml-auto flex shrink-0 items-center gap-0.5 rounded-control px-1.5 py-0.5 text-submeta leading-[1.4] whitespace-nowrap text-ink-3 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
-                                    >
-                                      {b.open ? t("ui-modelpanel.hide_older") : t("ui-modelpanel.older", { count: b.older })}
-                                      <Icon name="chevron" size={11} className={cx("shrink-0 transition-transform duration-150", b.open && "rotate-180")} />
-                                    </button>
-                                  )}
+                      ))}
+                    {searching ? (
+                      <>
+                        {matches.map((p) => (
+                          <LauncherRow
+                            key={p.id}
+                            provider={p}
+                            state={state}
+                            quota={quotas?.[p.id]}
+                            expanded={false}
+                            frozen={picking}
+                            onToggle={() => {
+                              setQuery("");
+                              setExpanded((now) => new Set([...now, p.id]));
+                            }}
+                            onReload={onReload}
+                            onHelp={onHelp}
+                          />
+                        ))}
+                        {found.map(renderRow)}
+                        {loading && <div role="status" className="flex items-center gap-2 px-3 py-2 text-label text-ink-3"><Spinner size={12} />{t("ui-modelpanel.loading")}</div>}
+                      </>
+                    ) : (
+                      sections.map((s) => (
+                        <div key={s.key} role="group" aria-label={s.provider!.name} data-panel-section="provider">
+                          <LauncherRow
+                            provider={s.provider!}
+                            state={state}
+                            quota={quotas?.[s.provider!.id]}
+                            expanded={expanded.has(s.provider!.id)}
+                            frozen={picking}
+                            onToggle={() => toggleLauncher(s.provider!.id)}
+                            onReload={onReload}
+                            onHelp={onHelp}
+                          />
+                          {expanded.has(s.provider!.id) && (
+                            <div className="ml-2 border-l border-line pl-1">
+                              {s.loading && (
+                                <div role="status" className="flex items-center gap-2 px-3 py-2 text-[12px] text-ink-3">
+                                  <Spinner size={12} />
+                                  {t("ui-modelpanel.loading")}
                                 </div>
-                                {b.rows.map(renderRow)}
-                              </div>
-                            ) : (
-                              <div key={b.key}>{b.rows.map(renderRow)}</div>
-                            ),
-                          )
-                        : s.rows.map(renderRow)}
-                      {s.total && s.provider && (
-                        <button
-                          type="button"
-                          disabled={picking}
-                          data-panel-more={s.provider.id}
-                          onClick={() => s.provider && chooseView({ kind: "provider", provider: s.provider.id })}
-                          className="mt-1 flex w-full items-center gap-1.5 rounded-control px-3 py-1.5 text-left text-label text-ink-2 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
-                        >
-                          <span className="min-w-0 truncate">{t("ui-modelpanel.show_all", { count: s.total })}</span>
-                          <Icon name="chevronRight" size={12} className="shrink-0" />
-                        </button>
-                      )}
-                    </div>
-                  ))
+                              )}
+                              {s.blocks
+                                ? s.blocks.map((b) =>
+                                    b.family ? (
+                                      <div key={b.key} role="group" aria-label={b.family.label} data-panel-family={b.family.key}>
+                                        <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 pb-0.5">
+                                          <span aria-hidden className="min-w-0 truncate text-submeta leading-[1.4] text-ink-3">
+                                            {b.family.label}
+                                          </span>
+                                          {b.older > 0 && (
+                                            <button
+                                              type="button"
+                                              aria-expanded={Boolean(b.open)}
+                                              aria-label={
+                                                b.open
+                                                  ? t("ui-modelpanel.hide_older_of", {
+                                                      family: b.family.label,
+                                                    })
+                                                  : t("ui-modelpanel.older_of", {
+                                                      family: b.family.label,
+                                                      count: b.older,
+                                                    })
+                                              }
+                                              data-panel-fold={b.key}
+                                              disabled={picking}
+                                              onClick={() => toggleFamily(b.key)}
+                                              className="ml-auto flex shrink-0 items-center gap-0.5 rounded-control px-1.5 py-0.5 text-submeta leading-[1.4] whitespace-nowrap text-ink-3 transition-colors duration-150 outline-none enabled:hover:bg-hover-2 enabled:hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
+                                            >
+                                              {b.open
+                                                ? t("ui-modelpanel.hide_older")
+                                                : t("ui-modelpanel.older", {
+                                                    count: b.older,
+                                                  })}
+                                              <Icon name="chevron" size={11} className={cx("shrink-0 transition-transform duration-150", b.open && "rotate-180")} />
+                                            </button>
+                                          )}
+                                        </div>
+                                        {b.rows.map(renderRow)}
+                                      </div>
+                                    ) : (
+                                      <div key={b.key}>{b.rows.map(renderRow)}</div>
+                                    ),
+                                  )
+                                : s.rows.map(renderRow)}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -654,46 +729,14 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
   );
 }
 
-/** Under a provider's header: why its rows can't be picked here (once, with "How to fix" where there is one), or why its
- *  list couldn't be read, with Retry. */
-function GroupNotes({ provider, onReload, onHelp }: { provider: PanelProvider; onReload?: (provider: string) => void; onHelp?: (provider: string) => void }) {
-  const why = provider.unavailable || provider.locked;
-  const help = provider.unavailable && onHelp;
-  return (
-    <>
-      {why && (
-        <div className="flex w-0 min-w-full flex-wrap items-baseline gap-x-2 px-2.5 pb-1 text-[11px] leading-[1.45] text-ink-3">
-          <span className="min-w-0 break-words">{why}</span>
-          {help && (
-            <button type="button" onClick={() => onHelp(provider.id)} className="shrink-0 font-medium whitespace-nowrap text-accent-ink hover:underline">
-              {t("ui-modelpanel.how_to_fix")}
-            </button>
-          )}
-        </div>
-      )}
-      {provider.error && (
-        <div role="alert" className="flex w-0 min-w-full flex-wrap items-baseline gap-x-2 px-2.5 pb-1 text-[11px] leading-[1.45] text-ink-3">
-          <span className="min-w-0 break-words">{provider.error}</span>
-          {onReload && (
-            <button type="button" onClick={() => onReload(provider.id)} className="shrink-0 font-medium whitespace-nowrap text-accent-ink hover:underline">
-              {t("ui-modelpanel.retry")}
-            </button>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
-
 /** The follow row (Cindy's "follow session" row): on top of the list in no group, its label and, under it, what the
  *  default runs; checked while it is followed. A row like the model rows for the keys (↑↓, Enter). */
 function FollowRow({ follow, frozen, onPick }: { follow: NonNullable<ModelPanelProps["follow"]>; frozen: boolean; onPick: () => void }) {
   return (
     <>
       <div
-        role="option"
-        aria-selected={follow.active}
+        role="button"
+        aria-pressed={follow.active}
         aria-disabled={frozen || undefined}
         tabIndex={0}
         data-panel-row="follow"

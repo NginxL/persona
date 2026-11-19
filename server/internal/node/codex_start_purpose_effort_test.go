@@ -52,6 +52,7 @@ func TestCodexStartLeavesOutAnEffortCodexAlreadyRuns(t *testing.T) {
 			n, _, cwd, _ := codexStartHerdr(t, 0)
 			t.Setenv("HOME", n.home)
 			t.Setenv("ZDOTDIR", n.home)
+			codexOnPath(t, n.home)
 			writeFile(t, filepath.Join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n")
 			writeFile(t, filepath.Join(n.codexHome(), "config.toml"), "model = \"gpt-6\"\nmodel_reasoning_effort = \"high\"\n\n[features]\nhooks = true\n")
 			_, err := request(t, n, "session.start", map[string]any{"cwd": "~/proj", "launcher": "codex", "prompt": "hello", "effort": tc.effort, "model": tc.model})
@@ -126,7 +127,7 @@ func TestCodexEffortInheritedKeepsTheFlagWhenShellResolutionIsUncertain(t *testi
 			if tc.cancel {
 				cancel()
 			}
-			if n.codexEffortInherited(ctx, []string{"codex"}, cwd, "high") {
+			if n.codexEffortInherited(ctx, []string{"codex"}, nil, cwd, "high") {
 				t.Fatal("uncertain shell resolution dropped the tier effort")
 			}
 		})
@@ -150,13 +151,14 @@ if [ "${PERSONA_TEST_CODEX_FUNCTION-}" = yes ] && [ "$PWD" = "$HOME/repo" ]; the
 fi
 `)
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_reasoning_effort = \"high\"\n")
+	codexOnPath(t, home)
 	cwd := mkdir(t, filepath.Join(home, "repo"))
 	for _, on := range []bool{false, true} {
 		argv := []string{"codex"}
 		if on {
 			argv = append([]string{"PERSONA_TEST_CODEX_FUNCTION=yes"}, argv...)
 		}
-		if inherited := n.codexEffortInherited(context.Background(), argv, cwd, "high"); inherited == on {
+		if inherited := n.codexEffortInherited(context.Background(), argv, nil, cwd, "high"); inherited == on {
 			t.Fatalf("function enabled %v: inherited %v", on, inherited)
 		}
 	}
@@ -177,7 +179,7 @@ func TestCodexEffortInherited(t *testing.T) {
 	}{
 		{name: "plain codex", argv: []string{"codex"}, user: high, inherit: true},
 		{name: "an alias with a model and its environment", argv: []string{"HTTPS_PROXY=http://proxy.example:8080", "codex", "--model", "gpt-6"}, user: high, inherit: true},
-		{name: "codex by its path", argv: []string{"/usr/local/bin/codex"}, user: high, inherit: true},
+		{name: "codex by its path", argv: []string{"<native>"}, user: high, inherit: true},
 		{name: "a project config without an effort", argv: []string{"codex"}, user: high, files: map[string]string{"repo/.codex/config.toml": "[features]\nhooks = true\n"}, inherit: true},
 		{name: "a config above the project's root", argv: []string{"codex"}, user: high, cwd: "outer/repo2",
 			files: map[string]string{"outer/.codex/config.toml": "model_reasoning_effort = \"low\"\n", "outer/repo2/.git": "gitdir: /elsewhere\n"}, inherit: true},
@@ -209,6 +211,10 @@ func TestCodexEffortInherited(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("ZDOTDIR", home)
 			writeFile(t, filepath.Join(home, "repo", ".git", "HEAD"), "ref: refs/heads/main\n")
+			native := codexOnPath(t, home)
+			if len(tc.argv) == 1 && tc.argv[0] == "<native>" {
+				tc.argv = []string{native}
+			}
 			if tc.user != "-" {
 				writeFile(t, filepath.Join(home, ".codex", "config.toml"), tc.user)
 			}
@@ -219,7 +225,7 @@ func TestCodexEffortInherited(t *testing.T) {
 			if tc.cwd != "" {
 				cwd = mkdir(t, filepath.Join(home, tc.cwd))
 			}
-			if got := n.codexEffortInherited(context.Background(), tc.argv, cwd, "high"); got != tc.inherit {
+			if got := n.codexEffortInherited(context.Background(), tc.argv, nil, cwd, "high"); got != tc.inherit {
 				t.Fatalf("inherited %v, want %v", got, tc.inherit)
 			}
 		})
@@ -234,7 +240,7 @@ func TestCodexEffortInheritedWithoutAProjectRoot(t *testing.T) {
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_reasoning_effort = \"high\"\n")
 	writeFile(t, filepath.Join(home, "loose", ".codex", "config.toml"), "model_reasoning_effort = \"low\"\n")
 	cwd := mkdir(t, filepath.Join(home, "loose", "dir"))
-	if n.codexEffortInherited(context.Background(), []string{"codex"}, cwd, "high") {
+	if n.codexEffortInherited(context.Background(), []string{"codex"}, nil, cwd, "high") {
 		t.Fatal("a parent's effort did not keep the flag")
 	}
 }

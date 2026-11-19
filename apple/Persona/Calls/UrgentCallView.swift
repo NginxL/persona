@@ -3,7 +3,9 @@ import SwiftUI
 
 /// The urgent call page (docs/assistant/urgent-call.md): over everything while a call is answered. What the call is
 /// about and why Persona called, the card it needs answered with its options to tap, the read-back waiting for Confirm,
-/// what was said, and Hang Up. The voice runs the call (`UrgentCallSession`); every choice can also be tapped.
+/// what was said, and Hang Up. The voice runs the call (`UrgentCallSession`); every choice can also be tapped. Every
+/// word of it wraps whole (#9887 polish): the header stays, everything from the title down scrolls between it and the
+/// controls.
 struct UrgentCallView: View {
     let session: UrgentCallSession
 
@@ -12,6 +14,7 @@ struct UrgentCallView: View {
             UrgentCallHeader(session: session)
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.section) {
+                    UrgentCallTitle(session: session)
                     UrgentCallMatter(session: session)
                     UrgentCallCard(session: session)
                     UrgentCallCaptions(session: session)
@@ -27,23 +30,50 @@ struct UrgentCallView: View {
     }
 }
 
-/// "Urgent call", how long it has lasted, and the title the lock screen showed.
+/// Who is calling, as on the call screen: the assistant's small face and its name (the call's own, taken as it rang, as
+/// its handle says it: `PersonaCalls.urgentCallerName`, #9887 one name), "Urgent Call" under the name, and how long it has
+/// lasted. The name wraps whole, as every word of the page.
 private struct UrgentCallHeader: View {
+    let session: UrgentCallSession
+    @State private var calls = PersonaCalls.shared
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            // The call's own assistant (its look when it rang), else the one on screen.
+            if let assistant = calls.urgentCall(session.id)?.assistant {
+                CallAssistantFace(assistant: assistant, size: Theme.Size.callBarAvatar * Theme.sizeScale(typeSize))
+            } else {
+                PersonaAvatar(size: Theme.Size.callBarAvatar * Theme.sizeScale(typeSize))
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: calls.urgentCallerName(session.id))
+                    .font(Theme.Font.heading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Urgent Call").font(Theme.Font.secondaryStrong).foregroundStyle(Theme.danger)
+            }
+            Spacer(minLength: Theme.Space.s)
+            if let answered = session.answeredAt {
+                Text(answered, style: .timer).font(Theme.Font.secondary.monospacedDigit()).foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("urgentCall.header")
+    }
+}
+
+/// The title the lock screen showed, whole: the first thing the page scrolls, so a long one never pushes the card off
+/// (it was three lines, cut, at the larger text sizes).
+private struct UrgentCallTitle: View {
     let session: UrgentCallSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(spacing: Theme.Space.s) {
-                ThemedIcon(Theme.Icon.voiceChannel).foregroundStyle(Theme.danger)
-                Text("Urgent Call").font(Theme.Font.heading).foregroundStyle(Theme.danger)
-                Spacer(minLength: Theme.Space.s)
-                if let answered = session.answeredAt {
-                    Text(answered, style: .timer).font(Theme.Font.secondary.monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
-            Text(session.info?.title ?? session.ring.title).font(Theme.Font.title).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
+        Text(session.info?.title ?? session.ring.title)
+            .font(Theme.Font.title)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("urgentCall.title")
     }
 }
 
@@ -90,15 +120,21 @@ private struct UrgentCallCard: View {
                 case .question:
                     if let q = card.questions?.first {
                         Text(q.question).font(Theme.Font.bodyStrong)
+                        // An option wraps whole (an answer read out to choose from), centred in its button.
                         ForEach(q.options, id: \.label) { option in
                             Button { session.choose(option.label) } label: {
-                                Text(QuestionOption.display(option.label).0).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+                                Text(QuestionOption.display(option.label).0)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity)
                             }
                             .themedButton()
                         }
                     }
                 case .permission, .plan:
-                    if let summary = card.summary ?? card.toolDisplayName { Text(summary).font(Theme.Font.body).lineLimit(4) }
+                    if let summary = card.summary ?? card.toolDisplayName {
+                        Text(summary).font(Theme.Font.body).fixedSize(horizontal: false, vertical: true)
+                    }
                     HStack(spacing: Theme.Space.m) {
                         Button { session.decide(allow: true) } label: {
                             Text("Approve").lineLimit(1).frame(maxWidth: .infinity)
@@ -152,7 +188,8 @@ private struct UrgentCallFooter: View {
         let held = call?.held ?? session.held
         VStack(spacing: Theme.Space.l) {
             line(held: held, muted: muted)
-                .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+                .font(Theme.Font.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("urgentCall.state")
             // One row while the controls fit it (four with Resume, at a large text size, do not): else Mute and Speaker
             // over Resume and Hang Up.

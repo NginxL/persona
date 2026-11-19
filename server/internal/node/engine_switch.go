@@ -790,7 +790,7 @@ func (n *Node) resumeParkedCodex(ctx context.Context, c *engineCarry, prompt str
 	if path := n.codexPath(id); path != "" && n.codices != nil && n.codexHeldNow(path) {
 		return errors.New("a Codex has the thread open")
 	}
-	launch, argv, err := n.codexResumeArgv(ctx, ps.Launcher, c.mode, p.resume)
+	launch, argv, err := n.codexResumeArgv(ctx, ps.Launcher, c.mode, p.parkedCwd, p.resume)
 	if err != nil {
 		return err
 	}
@@ -807,7 +807,7 @@ func (n *Node) resumeParkedCodex(ctx context.Context, c *engineCarry, prompt str
 	}
 	codexResumes.Delete(id)
 	st := sessionState{Pane: p.a.PaneID, Launcher: ps.Launcher, Cwd: p.parkedCwd, StartedAt: time.Now().UTC(), Model: p.resume.Model,
-		EngineHistory: c.legs}
+		ModelEffort: p.resume.Effort, EngineHistory: c.legs}
 	if had && !prev.StartedAt.IsZero() {
 		st.StartedAt = prev.StartedAt
 	}
@@ -821,7 +821,7 @@ func (n *Node) resumeParkedCodex(ctx context.Context, c *engineCarry, prompt str
 // comeBack resumes session id on its own launcher in the switch's pane after the other engine did not come up, with
 // no message (it is refused, its words kept): a Claude Code agent as #5035 brings it back (the model it last switched
 // to, its modes; the record put back as it was), a Codex one with `codex resume <id>` through its launcher with its
-// record's model and mode.
+// record's model, effort and mode.
 func (n *Node) comeBack(ctx context.Context, c *engineCarry, shells []string, dir string) error {
 	p := c.plan
 	sctx, cancel := switchStartCtx(ctx, p.a, p.h, p.ref, shells, dir, p.cwd)
@@ -832,7 +832,7 @@ func (n *Node) comeBack(ctx context.Context, c *engineCarry, shells []string, di
 		n.state.restoreLaunch(c.id, c.prev, c.had, p.own) // the start wrote a new record, whether it came up or not
 		return err
 	}
-	launch, argv, err := n.codexResumeArgv(sctx, p.own, c.prev.AppMode, modelExecution{Model: c.prev.Model})
+	launch, argv, err := n.codexResumeArgv(sctx, p.own, c.prev.AppMode, p.cwd, modelExecution{Model: c.prev.Model, Effort: c.prev.ModelEffort})
 	if err != nil {
 		return err
 	}
@@ -841,8 +841,8 @@ func (n *Node) comeBack(ctx context.Context, c *engineCarry, shells []string, di
 
 // codexResumeArgv is the host a resume of a Codex thread starts on (ctx's) and the words it runs through launcher
 // (resumeCodex adds `resume <id>`): in permission mode mode (plan read-only, bypassPermissions without approvals or
-// sandbox) with model execution e.
-func (n *Node) codexResumeArgv(ctx context.Context, launcher, mode string, e modelExecution) (host.Launcher, []string, error) {
+// sandbox) with model execution e, less an effort Codex's config already runs in cwd (codexOwnEffort).
+func (n *Node) codexResumeArgv(ctx context.Context, launcher, mode, cwd string, e modelExecution) (host.Launcher, []string, error) {
 	launch, err := n.launcherFor(n.startKind(ctx))
 	if err != nil {
 		return nil, nil, err
@@ -854,6 +854,7 @@ func (n *Node) codexResumeArgv(ctx context.Context, launcher, mode string, e mod
 	if argv, err = n.codexReadonlyArgs(launcher, argv, mode); err != nil {
 		return nil, nil, err
 	}
+	e = n.codexOwnEffort(ctx, argv, codexPaneEnv(launch), cwd, e)
 	if mode == proto.ModeBypass {
 		argv = n.codexBypassArgv(launcher, argv)
 	}
@@ -894,6 +895,9 @@ func (n *Node) engineSwitchedTo(ctx context.Context, c *engineCarry, newID strin
 		if p.to == "codex" && c.ps.Model != "" && v.Model == "" {
 			v.Model = c.ps.Model // what a Resume of it runs (resumeOtherWith)
 		}
+		if p.to == "codex" && v.ModelEffort == "" {
+			v.ModelEffort = p.fresh.Effort
+		}
 		return true
 	})
 	if !recorded {
@@ -904,7 +908,7 @@ func (n *Node) engineSwitchedTo(ctx context.Context, c *engineCarry, newID strin
 			st.Cwd = p.parkedCwd
 		}
 		if p.to == "codex" {
-			st.Model = c.ps.Model
+			st.Model, st.ModelEffort = c.ps.Model, p.fresh.Effort
 			if c.mode == "plan" {
 				st.AppMode = c.mode
 			}

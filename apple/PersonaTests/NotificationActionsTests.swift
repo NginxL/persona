@@ -4,11 +4,13 @@ import UserNotifications
 @testable import Persona
 
 struct NotificationActionsTests {
-    /// The hub names categories "INTERACTION_" + upper-cased kind (push.go); every kind must have one registered.
+    /// The hub names categories "INTERACTION_" + upper-cased kind (push.go); every kind must have one registered, beside
+    /// the app's own calendar meeting reminder (#8731 G2).
     @Test func categoriesMatchWhatTheHubSends() {
         let ids = Set(NotificationActions.categories.map(\.identifier))
         #expect(ids == ["INTERACTION_PERMISSION", "INTERACTION_PLAN", "INTERACTION_QUESTION", "INTERACTION_SCREEN",
-                        "INTERACTION_ELICITATION", "SESSION_DONE", "TODO_DECIDE", "pair_receipt", "computer_joining"])
+                        "INTERACTION_ELICITATION", "SESSION_DONE", "TODO_DECIDE", "pair_receipt", "computer_joining",
+                        "MEETING_REMINDER"])
     }
 
     /// A decision's push (#2056) has one button, Take Recommendation, unlocked first: it answers the to-do's round.

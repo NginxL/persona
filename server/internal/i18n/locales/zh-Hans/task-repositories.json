@@ -9,5 +9,12 @@
   "duplicate_repo": "每个仓库只能选择一次。",
   "duplicate_alias": "请为各仓库选择不同的目录名。",
   "duplicate_link": "此 Issue 或 PR 已关联。",
-  "link_repository_mismatch": "请使用属于此仓库的 Issue 或 PR 链接。"
+  "link_repository_mismatch": "请使用属于此仓库的 Issue 或 PR 链接。",
+  "no_provider": "{provider} 没有安装。已保存的链接会保留；到「设置 › 扩展」安装后才能添加新链接。",
+  "provider_off": "{provider} 已关闭或没在运行。已保存的链接会保留；到「设置 › 扩展」打开后才能添加新链接。",
+  "provider_not_found": "{provider} 找不到这个 Issue 或 PR。请检查链接。",
+  "provider_not_signed_in": "{provider} 没有登录。请到「设置 › 扩展」检查它的设置。",
+  "provider_refused": "{provider} 拒绝了：{why}",
+  "provider_failed": "{provider} 无法查询这个链接：{why}",
+  "providers_starting": "扩展还在启动中，暂时无法查询新链接。已保存的链接会保留，请稍后重试。"
 }

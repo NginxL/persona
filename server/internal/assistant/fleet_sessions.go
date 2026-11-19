@@ -27,7 +27,15 @@ import (
 func (s *Service) setSessions(machine string, list []proto.Session) {
 	list = s.deletionRows(context.Background(), machine, list, false)
 	list = slices.DeleteFunc(list, func(row proto.Session) bool { return row.IsDeleted() })
-	before := s.fleetPrevious(machine)
+	before, beforeConn := s.fleetPrevious(machine), s.fleetPreviousConn(machine)
+	var connected time.Time
+	if s.devs != nil {
+		connected = s.devs.ConnectedAt(machine)
+	}
+	// The first list of a new connection after one with a list: a node that started again (an ssh node whose link
+	// dropped) can list a turn still running as stopped. Its transcript says whether such a stop ended the turn.
+	reconnected := len(before) > 0 && !connected.Equal(beforeConn)
+	var unsure []proto.Session
 	now := time.Now()
 	for i := range list {
 		list[i].MachineID = machine
@@ -62,19 +70,12 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			s.replyWorked(machine, sess.SessionID) // answered: a question it asks next is a new one (agents_reply.go)
 			ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
 			s.inOrder(func() { s.turnStartedObserved(context.Background(), ref, newTurn) }) // after the items that came before it
+		case prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) && reconnected:
+			unsure = append(unsure, sess) // reconnectedTurnEnd, once the list is kept
 		case prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle):
-			ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
 			// After its finished push is decided against the mark; held while its background work runs.
 			defer s.justMeEnded(machine, sess.SessionID, backgroundRunning(sess))
-			if s.meetingTurnEnded(machine, sess.SessionID) { // no finished push, and the other turns' stay as they were
-				s.inOrder(func() { go s.turnEnded(context.Background(), ref, true) })
-				break
-			}
-			s.notifyFinished(machine, sess.SessionID, s.turnsBook().ended(key, now, backgroundRunning(sess)))
-			s.suggestTurnEnded(machine, sess) // the next message, when nothing else suggests it (suggest_next.go)
-			// A new assistant conversation is named after its first turn; a task from one may be done. After the
-			// items of the turn (a channel's answer is read from them).
-			s.inOrder(func() { go s.TurnEnded(context.Background(), ref) })
+			s.turnEndSeen(machine, sess, now)
 		case (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) &&
 			(sess.Status != prev || sess.Rev != was.Rev || sess.LastText != was.LastText || !sess.UpdatedAt.Equal(was.UpdatedAt)) &&
 			s.takeTaskAnswerRetry(machine, sess.SessionID):
@@ -93,18 +94,50 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		}
 	}
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
-	s.fleetKeepPrevious(machine, list)
+	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
+	s.fleetKeep(machine, list, connected, unsure)
+	for _, sess := range unsure {
+		go s.reconnectedTurnEnd(machine, sess)
+	}
 	s.roundsSeen(list)      // whose round each conversation is on (owner_preempt.go)
 	s.ownerRoundsSeen(list) // the owner-turn gates end with their rounds (relay_presence.go, #6394)
 	s.sessionsChanged(machine)
 	s.searchWake() // the chat search index reads what changed (search_index.go)
 	// Messages from other conversations, for those no longer running; the todos' links and herdr marks.
-	var connected time.Time
-	if s.devs != nil {
-		connected = s.devs.ConnectedAt(machine)
-	}
 	d := DeviceSessions{MachineID: machine, Sessions: list, Connected: connected}
 	s.inOrder(func() { s.SessionsChanged(context.Background(), d) })
+}
+
+// turnEndSeen is what a working → stopped edge of sess starts: its finished push, the next message's suggestion and
+// the turn's end for the conversations and tasks (TurnEnded). The caller ends a "just me" mark after it (justMeEnded).
+func (s *Service) turnEndSeen(machine string, sess proto.Session, now time.Time) {
+	ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
+	if s.meetingTurnEnded(machine, sess.SessionID) { // no finished push, and the other turns' stay as they were
+		s.inOrder(func() { go s.turnEnded(context.Background(), ref, true) })
+		return
+	}
+	s.notifyFinished(machine, sess.SessionID, s.turnsBook().ended(machine+"/"+sess.SessionID, now, backgroundRunning(sess)))
+	s.suggestTurnEnded(machine, sess) // the next message, when nothing else suggests it (suggest_next.go)
+	// A new assistant conversation is named after its first turn; a task from one may be done. After the items of the
+	// turn (a channel's answer is read from them).
+	s.inOrder(func() { go s.TurnEnded(context.Background(), ref) })
+}
+
+// reconnectedTurnEnd is sess's stop in the first list of its node's new connection, taken as the end of its turn only
+// once its transcript shows that turn closed (turnEndOf): a node that started again may not know yet that a turn still
+// runs. Not closed or not read: no end. The next working → stopped edge is its end then, or the supervision sweep
+// takes up one that ended unheard (task_turns.go).
+func (s *Service) reconnectedTurnEnd(machine string, sess proto.Session) {
+	items, read := s.lastTurnItems(context.Background(), machine, sess.SessionID)
+	if _, closed := turnEndOf(items); !read || !closed {
+		s.logf("agent %s/%s listed stopped as its node connected again, with no turn end in its transcript: not taken as one", machine, short(sess.SessionID))
+		return
+	}
+	if p, ok := s.fleetPrevious(machine)[sess.SessionID]; !ok || p.Status == proto.StatusWorking {
+		return // no longer listed, or working again: that is its turn now
+	}
+	s.turnEndSeen(machine, sess, time.Now())
+	s.justMeEnded(machine, sess.SessionID, backgroundRunning(sess))
 }
 
 // turnPrev is what setSessions reads of a session's previous row: the turn's starts and ends are against it. Only
@@ -127,21 +160,43 @@ func (s *Service) fleetPrevious(machine string) map[string]turnPrev {
 	return s.fleet.prev[machine]
 }
 
+// fleetPreviousConn is the node connection the machine's previous list came on (zero: none, or no devices).
+func (s *Service) fleetPreviousConn(machine string) time.Time {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	return s.fleet.prevConn[machine]
+}
+
 // fleetKeepPrevious keeps what setSessions reads of list for the machine's next one. A session id listed twice keeps
 // its later row.
 func (s *Service) fleetKeepPrevious(machine string, list []proto.Session) {
+	s.fleetKeep(machine, list, time.Time{}, nil)
+}
+
+// fleetKeep is fleetKeepPrevious for a list that came on the node connection conn. The rows of unsure are kept as
+// unknown: a stop not taken as the end of a turn, so its working again is no new turn either.
+func (s *Service) fleetKeep(machine string, list []proto.Session, conn time.Time, unsure []proto.Session) {
 	next := make(map[string]turnPrev, len(list))
 	for i := range list { // by index: a range value copies every (large) session it passes
 		sess := &list[i]
 		next[sess.SessionID] = turnPrev{Status: sess.Status, WokeByTask: sess.WokeByTask, Rev: sess.Rev,
 			LastText: sess.LastText, UpdatedAt: sess.UpdatedAt, Launcher: sess.Launcher}
 	}
+	for i := range unsure {
+		p := next[unsure[i].SessionID]
+		p.Status = proto.StatusUnknown
+		next[unsure[i].SessionID] = p
+	}
 	s.fleet.mu.Lock()
 	defer s.fleet.mu.Unlock()
 	if s.fleet.prev == nil {
 		s.fleet.prev = map[string]map[string]turnPrev{}
 	}
+	if s.fleet.prevConn == nil {
+		s.fleet.prevConn = map[string]time.Time{}
+	}
 	s.fleet.prev[machine] = next
+	s.fleet.prevConn[machine] = conn
 }
 
 func (s *Service) turnsBook() *turnTracker {
@@ -242,6 +297,7 @@ func (s *Service) publishList(machine string) []proto.Session {
 	// told as null either way.
 	s.hub.Tell(assistantwire.EventFleetSessions, rpc.Marshaled(b))
 	s.liveChanged(false)
+	s.todoRunsChanged(machine) // a card, a seen turn: a to-do's view may file it elsewhere (todo_view_push.go)
 	return list
 }
 
@@ -365,6 +421,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	asks := s.fleet.asks.reader(machine, complete)
 	defer asks.done()
 	suggested := s.hubSuggestions(machine)
+	quiet := s.quietMarks(machine) // turns of task Agents that had no output (silent_turns.go)
 	for i := range list {
 		list[i].MachineID = machine
 		list[i].PendingInteractions = counts[list[i].SessionID]
@@ -392,6 +449,10 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 				list[i].Queued = append(slices.Clip(list[i].Queued), q...) // the node's slice is shared: never write into it
 				list[i].QueuedRelayed = uint16(min(len(q), math.MaxUint16))
 			}
+			if u := shown[list[i].SessionID].Undelivered; len(u) > 0 {
+				kept := slices.Clone(u) // the owner's messages that could not go in (undelivered.go, #10194)
+				list[i].Undelivered = &kept
+			}
 		}
 		list[i].SeenAt = seen[list[i].SessionID]
 		localizeSession(lang, &list[i]) // the node's Chinese activity line… (fleet_text.go)
@@ -401,6 +462,8 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		list[i].State, list[i].BackgroundWorking = stateWithBackground(agentState(list[i], list[i].SeenAt), list[i])
 		list[i].BackgroundWaiting = backgroundWaiting(list[i])
 		list[i].TurnError, list[i].TurnErrorKind = turnError(list[i])
+		// A task Agent's turn with no output: interrupted or stopped, not done (silent_turns.go, #10187).
+		putQuietTurn(&list[i], quiet, lang)
 		decorateLimit(&list[i]) // a subscription's usage limit and when it resets (usage_limit.go)
 		list[i].TurnErrorCode = sessionTurnErrorCode(list[i])
 		if list[i].TurnError != "" {
@@ -462,6 +525,9 @@ func (s *Service) listedSession(machine, sid string) (proto.Session, bool) {
 	list, err := s.archivedListed(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
 	if err != nil {
 		s.logf("load agent archives: %v", err)
+	}
+	if len(list) == 0 {
+		return proto.Session{}, false // an unreadable deletion ledger hides assistant rows rather than exposing them
 	}
 	return list[0], true
 }

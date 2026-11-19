@@ -37,6 +37,7 @@ var (
 	_ host.TextTyper   = (*herdrCoreHost)(nil)
 	_ host.Organizer   = (*herdrCoreHost)(nil)
 	_ host.Launcher    = (*herdrCoreHost)(nil)
+	_ host.EnvLauncher = (*herdrCoreHost)(nil)
 )
 
 // herdrCorePaneEnv is the variable herdr-core sets in every terminal: its address.

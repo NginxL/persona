@@ -27,6 +27,18 @@ describe("launcher quota", () => {
     expect(quotaUsage({ label: "今日", requests: 1, tokens: 2 })).toBe("1 次 · 2 token");
   });
 
+  it("moves up a unit where rounding reaches the next one (#9913)", () => {
+    // the unit follows the number as it is shown, as formatTokens does (999,500 → 1M, not 1000K)
+    expect(quotaCount(99_999_499)).toBe("9999.9 万");
+    expect(quotaCount(99_999_500)).toBe("1 亿");
+    expect(quotaCount(99_999_999)).toBe("1 亿");
+    expect(quotaCount(1e8)).toBe("1 亿");
+    expect(quotaCount(-99_999_999)).toBe("-1 亿");
+    expect(quotaCount(9_999.4)).toBe("9999");
+    expect(quotaCount(9_999.5)).toBe("1 万");
+    expect(quotaAmount({ label: "每月", used: 99_999_800, limit: 1e8, unit: "tokens" })).toBe("1 亿 / 1 亿 token");
+  });
+
   it("selects the tightest weekly window for a provider's rail bar, and nothing when it is unknown", () => {
     const answer = { quota: { gateway: "g", budget: [{ label: "每周预算", used_ratio: 0.62 }], pools: [
       { name: "a", windows: [{ label: "5 小时", used_ratio: 0.99 }, { label: "每周", used_ratio: 0.77, resets_at: "2099-01-01T00:00:00Z" }] },

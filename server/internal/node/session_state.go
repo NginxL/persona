@@ -38,6 +38,7 @@ type sessionState struct {
 	Model                   string          `json:"model,omitempty"`
 	ModelFingerprint        string          `json:"model_fingerprint,omitempty"`
 	ModelEffort             string          `json:"model_effort,omitempty"`
+	Origin                  string          `json:"origin,omitempty"` // manager-recorded conversation source, for model-call authorization
 	ConfigDir               string          `json:"config_dir,omitempty"`
 	Cwd                     string          `json:"cwd"`
 	IsMain                  bool            `json:"is_main,omitempty"`
@@ -45,6 +46,9 @@ type sessionState struct {
 	StartedAt               time.Time       `json:"started_at"`
 	StopCause               proto.StopCause `json:"stop_cause,omitempty"`
 	StopCauseAt             int64           `json:"stop_cause_at,omitempty"`
+	// AwaitingFirstMessage: an empty start reserved this conversation without sending
+	// a model input. Runtime instructions and the idle state wait for actual delivery.
+	AwaitingFirstMessage bool `json:"awaiting_first_message,omitempty"`
 	// MainCompactWindow: the window the main conversation last ran with (modelExecution.MainCompactWindow), kept like
 	// IsMain (the hub's copy keeps neither, so until the node restarts) for a start that carries no execution: a manual
 	// compaction with no process running (assistant_compact.go).
@@ -60,6 +64,8 @@ type sessionState struct {
 	Tasks []string `json:"tasks,omitempty"`
 	// Compaction: the last compaction the user asked for (assistant_compact.go).
 	Compaction *proto.Compaction `json:"compaction,omitempty"`
+	// IdleCompaction is the main chat's user-idle clock and unattended compaction latch.
+	IdleCompaction *idleCompactionState `json:"idle_compaction,omitempty"`
 	// Guest: a guest conversation's tools (assistant_guest.go): every process it runs in has no built-in tools and
 	// only these of Persona's. Nil is an ordinary conversation.
 	Guest []string `json:"guest,omitempty"`
@@ -393,6 +399,8 @@ func (s *stateFile) put(id string, v sessionState) bool {
 	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	if old, ok := s.Sessions[id]; ok {
+		// Owned by state.update: a send's earlier copy must not erase a user's newer arrival.
+		v.IdleCompaction = old.IdleCompaction
 		if old.CreationID != "" {
 			v.CreationID, v.Incarnation = old.CreationID, old.Incarnation
 		}

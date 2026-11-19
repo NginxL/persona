@@ -35,6 +35,8 @@
   "claude_plugin_unavailable": "このコンピュータの Persona node にはインストールするプラグインがありません。先に node を更新してください。",
   "claude_plugin_error": "前回の確認に失敗しました。Persona Link がまもなく再試行します。",
   "claude_plugin_unknown": "まだ確認していません。",
+  "app_menu_about": "Personaについて",
+  "app_menu_hide": "Personaを隠す",
   "tray_open": "Persona を開く",
   "tray_quit": "Persona を終了",
   "update_check": "アップデートを確認",

@@ -86,7 +86,8 @@ fun rememberInboxItemBody(slots: ExtensionSlots?, route: InboxItemUiRoute, revis
     val scope = rememberCoroutineScope()
     val source by rememberUpdatedState(onSource)
     val handle = rememberExtensionView(model, appLink = { url -> ExtensionViewText.inboxSource(url)?.let { source(it); true } ?: false })
-    LaunchedEffect(model, revision) { model.load() }
+    // The item changed (a new message): a reply being typed in its page stays. The first draw has nothing typed yet.
+    LaunchedEffect(model, revision) { model.load(keepTyped = true) }
     KeepFresh(model)
     val reload = remember(model) { { scope.launch { model.load() }; Unit } }
     return InboxItemBody(

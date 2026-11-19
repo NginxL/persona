@@ -7,6 +7,8 @@
   "source_patrol": "Scheduled patrol",
   "source_followup": "Follow-up",
   "source_supervision": "Supervision",
+  "source_scheduled_task": "Sent by a scheduled task",
+  "show_more": "Show more",
   "source_other": "Source",
   "open_task": "{line}, open task"
 }

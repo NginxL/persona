@@ -334,7 +334,7 @@ func TestUsageSweepReportMatchesGlobbedFiles(t *testing.T) {
 	after := newUsageMeter()
 	for _, f := range n.usageFiles(cutoff) {
 		got = append(got, f.path)
-		after.scan(f.path, f.st, cutoff)
+		after.scan(f, cutoff)
 	}
 	if !slices.Equal(got, want) || len(got) != 4 {
 		t.Fatalf("usage files %q, want %q", got, want)

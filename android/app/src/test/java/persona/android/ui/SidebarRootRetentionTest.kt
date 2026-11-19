@@ -35,6 +35,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.delay
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -51,7 +52,8 @@ import persona.core.navigation.InboxRoute
 @RunWith(AndroidJUnit4::class)
 @Config(application = Application::class, sdk = [35])
 class SidebarRootRetentionTest {
-    @get:Rule val rule = createComposeRule()
+    val rule = createComposeRule()
+    @get:Rule val host = RuleChain.outerRule(ComponentActivityHostRule()).around(rule)
 
     @Test
     fun aDraftAndARunningEffectSurviveAnotherRoot() {

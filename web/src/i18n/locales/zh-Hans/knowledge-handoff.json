@@ -1,0 +1,21 @@
+{
+  "title": "交给 Agent",
+  "open_dialog": "交给 Agent…",
+  "pick": "选一个 Agent",
+  "ask_label": "要它做什么",
+  "ask_placeholder": "要它做什么（可选）",
+  "transcript": "附上逐字稿",
+  "gets": "它会收到这场会的纪要：总结、结论、待办和没定的事。",
+  "send": "发送",
+  "running": "会还在开，结束后再交。",
+  "no_material": "这场会还没有可交的内容：没有纪要，也没有逐字稿。",
+  "problem_not_agent": "这是 Persona 的对话，不是 Agent。",
+  "problem_not_allowed": "这个 Agent 不能接收会议内容。",
+  "problem_unavailable": "它的电脑连不上，或者对话已关闭。",
+  "problem_send_failed": "消息没发出去。",
+  "agent": "Agent",
+  "row_sent": "已交给「{name}」",
+  "row_failed": "没能交给「{name}」",
+  "retry": "重试",
+  "open": "打开"
+}

@@ -232,6 +232,7 @@ func probeCodexCatalog(ctx context.Context, base, key, version string, env map[s
 			req.Header.Set("Authorization", "Bearer "+key)
 			req.Header.Set("Accept", "application/json")
 			modelhttp.SetDefaultUserAgent(req.Header) // Persona's own request, as its other gateway requests (#8775)
+			modelhttp.SetOpenCodeSession(req.Header, req.URL.String(), env[openCodeSessionEnv])
 			resp, err := client.Do(req)
 			switch {
 			case err != nil:

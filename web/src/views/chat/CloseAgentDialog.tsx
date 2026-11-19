@@ -11,7 +11,7 @@ import { Button, cx, Dialog, toast } from "../../ui/atoms";
 import { cleanupReady, KEEP, runCleanup, useAgentWorktree, WorktreeCleanup, type Cleanup } from "./SessionDialogs";
 
 // "Close…" (#7125): the one way the web closes an Agent. Its row menu, the chat's ⋯ and "Close pane" on its pane all
-// ask here (lib/close-agent.ts; views/CloseAgentHost.tsx loads this chunk once the browser is idle), reading the agent's latest row as it changes:
+// ask here (lib/close-agent.ts; views/CloseAgentHost.tsx loads this chunk on that intent), reading the agent's latest row as it changes:
 // - not busy, it archives and closes (lib/agent-archives.ts, `archive?close=1`): the chat stays, saying it is archived;
 // - busy, it says what closing interrupts, and "Close anyway" closes it through `POST …/close` (the hub refuses to
 //   archive a busy agent), then leaves its chat as "Close agent" did (#3405); so does an agent the hub cannot archive and close.

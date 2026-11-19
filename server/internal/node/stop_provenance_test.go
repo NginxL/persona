@@ -329,8 +329,12 @@ func TestClosingStoppedTerminalsRecordsUserIntent(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if n.stopCause(sidA) != proto.StopUser {
-				t.Fatalf("user closure remained eligible: %s", n.stopCause(sidA))
+			want := proto.StopUser
+			if action == "exit" {
+				want = proto.StopExit // the Agent was told to quit: an end of its session, never resume-eligible (#10355)
+			}
+			if got := n.stopCause(sidA); got != want || got.AllowsSupervisorResume() {
+				t.Fatalf("user closure: stop cause %s, want %s", got, want)
 			}
 		})
 	}

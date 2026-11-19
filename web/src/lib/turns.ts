@@ -20,6 +20,7 @@ export type Step =
   | { kind: "text"; id: string; item: Item }
   | { kind: "notice"; id: string; item: Item }
   | { kind: "image"; id: string; item: Item }
+  | { kind: "visualization"; id: string; item: Item }
   | { kind: "fold"; id: string; item: Item };
 
 export interface UserMessage {
@@ -347,6 +348,9 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
         else cur.steps.push({ kind: "image", id: it.id, item: it });
         break;
       }
+      case "visualization":
+        cur.steps.push({ kind: "visualization", id: it.id, item: it });
+        break;
       case "thinking":
         // an empty thought (Claude Code mostly writes them without words) still shows as "Thinking Ns"
         cur.steps.push({ kind: "thinking", id: it.id, item: it });
@@ -434,7 +438,7 @@ export function toolChip(use: Item): string {
     }
     return "";
   };
-  const name = use.tool_name ?? "";
+  const name = canonicalMcpToolName(use.tool_name) ?? "";
   const tool = name.startsWith("mcp__") && !isPersonaTool(name) ? "" : name;
   const newer = ownEntry(CLAUDE_TOOL_CHIP, tool);
   let v = "";
@@ -580,7 +584,17 @@ export const TOOL_LABEL: Record<string, string> = {
   apply_patch: t("lib-turns.tool_change"),
 };
 
-export function toolLabel(name?: string): string {
+const AGY_PERSONA_MCP_RE = new RegExp(`^mcp_(?:${[...PERSONA_SERVERS].join("|")})(?:_[0-9a-fA-F]{8,16})?_([a-z][a-z0-9_]*)$`);
+
+/** Normalize Antigravity's single-underscore Persona MCP names (`mcp_persona_<tool>`, `mcp_persona_<hex>_<tool>`) to `mcp__persona__<tool>`. */
+export function canonicalMcpToolName(name?: string): string | undefined {
+  if (!name || !name.startsWith("mcp_") || name.startsWith("mcp__")) return name;
+  const m = AGY_PERSONA_MCP_RE.exec(name);
+  return m ? `mcp__persona__${m[1]}` : name;
+}
+
+export function toolLabel(rawName?: string): string {
+  const name = canonicalMcpToolName(rawName);
   if (!name) return t("lib-turns.tool");
   const label = ownEntry(TOOL_LABEL, name);
   if (label) return label;
@@ -596,7 +610,8 @@ export function mcpServerLabel(server: string): string {
 }
 
 /** The server part of mcp__<server>__<tool> ("mcp__<server>" alone for a server-wide request), else null. */
-export function mcpServer(name?: string): string | null {
+export function mcpServer(rawName?: string): string | null {
+  const name = canonicalMcpToolName(rawName);
   if (!name?.startsWith("mcp__")) return null;
   const rest = name.slice(5);
   const i = rest.lastIndexOf("__");
@@ -605,7 +620,8 @@ export function mcpServer(name?: string): string | null {
 
 /** A tool's name for a sentence (a permission card): Persona's own MCP tool as "Persona · mail send", another server's
  *  in words ("GitHub · Create issue", #2986), others as written. */
-export function toolDisplayName(name?: string): string {
+export function toolDisplayName(rawName?: string): string {
+  const name = canonicalMcpToolName(rawName);
   const server = mcpServer(name);
   if (server === null) return name || toolLabel();
   const raw = name!.slice(5 + server.length + 2);
@@ -623,7 +639,8 @@ export function cardToolName(ix: { tool_name?: string; tool_title?: string }): s
 
 
 /** Whether a tool is one of Persona's own MCP tools (mcp__persona__agent_read…). */
-export function isPersonaTool(name?: string): boolean {
+export function isPersonaTool(rawName?: string): boolean {
+  const name = canonicalMcpToolName(rawName);
   const server = mcpServer(name);
   return server !== null && PERSONA_SERVERS.has(server.replace(/^plugin_/, "")) && name!.length > 5 + server.length + 2;
 }
@@ -680,7 +697,8 @@ const PERSONA_VERB_KEY: Record<string, string> = {
 /** How one of Persona's own tools reads in a step: a verb ("Read agent chat"), or for the phone and mail families the
  *  family and what it did ("iPhone" + "contacts search"); null for every other tool and the Persona tools without one
  *  (they keep "Persona · agent read"). Display only: the server stays `persona` on the wire. */
-export function personaToolVerb(name?: string): { verb: string; what?: string } | null {
+export function personaToolVerb(rawName?: string): { verb: string; what?: string } | null {
+  const name = canonicalMcpToolName(rawName);
   if (!isPersonaTool(name)) return null;
   const base = name!.slice(name!.lastIndexOf("__") + 2);
   const key = ownEntry(PERSONA_VERB_KEY, canonicalTool(base));
@@ -729,7 +747,8 @@ function newTurn(id: string): Turn {
 }
 
 /** Only Persona's visibility tools, not similarly named tools on unrelated MCP servers. */
-export function supervisionTool(name?: string): "notify_user" | "ask_user" | "supervision_finish" | "task_review" | undefined {
+export function supervisionTool(rawName?: string): "notify_user" | "ask_user" | "supervision_finish" | "task_review" | undefined {
+  const name = canonicalMcpToolName(rawName);
   const bare = name?.startsWith("mcp__") && isPersonaTool(name) ? name.slice(name.lastIndexOf("__") + 2) : name;
   return bare === "notify_user" || bare === "ask_user" || bare === "supervision_finish" || bare === "task_review" ? bare : undefined;
 }

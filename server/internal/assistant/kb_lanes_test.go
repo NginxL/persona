@@ -114,14 +114,72 @@ func TestKBCountedModel(t *testing.T) {
 	ctx := context.WithValue(context.Background(), kbLaneStatsKey{}, st)
 	paused := &ai.PausedError{Pause: ai.Pause{Reason: ai.ReasonBusy, Until: time.Now()}}
 	for _, err := range []error{nil, nil, errors.New("example"), paused, context.Canceled, context.DeadlineExceeded} {
-		_ = kbCounted(lanesModel{err: err}).JSONMax(ctx, "", "", 1, nil)
+		_ = kbCounted("kb.topics", lanesModel{err: err}).JSONMax(ctx, "", "", 1, nil)
 	}
-	_ = kbCounted(lanesModel{}).JSONMax(context.Background(), "", "", 1, nil)
+	_ = kbCounted("kb.topics", lanesModel{}).JSONMax(context.Background(), "", "", 1, nil)
 	if st.calls.Load() != 4 || st.failed.Load() != 2 || st.putOff.Load() != 1 {
 		t.Fatalf("calls %d, failed %d, put off %d; want 4, 2, 1", st.calls.Load(), st.failed.Load(), st.putOff.Load())
 	}
-	if kbCounted(nil) != nil {
+	if kbCounted("kb.topics", nil) != nil {
 		t.Fatal("a missing model became one")
+	}
+}
+
+// A call with no model set up for it is no model call and no failure: the lane says once for each model use that it
+// has no model (not "1 model call(s), 1 failed" every round), and once that a model answered it again, when one did.
+// A use that works does not say so for another that still has none, and a failed call is no answer.
+func TestKBLaneNoModelLogsOnce(t *testing.T) {
+	unset := ai.New(ai.Config{}).JSONMax(context.Background(), "", "", 1, &struct{}{})
+	if !ai.IsNotConfigured(unset) {
+		t.Fatalf("not the not-configured error: %v", unset)
+	}
+	st := &kbLaneStats{}
+	_ = kbCounted("kb.topics", lanesModel{err: unset}).JSONMax(context.WithValue(context.Background(), kbLaneStatsKey{}, st), "", "", 1, nil)
+	if st.calls.Load() != 0 || st.failed.Load() != 0 {
+		t.Fatalf("calls %d, failed %d; want 0, 0", st.calls.Load(), st.failed.Load())
+	}
+
+	var lines []string
+	s := &Service{logf: func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }}
+	errs := map[string]error{"kb.topics": unset, "kb.project": nil}
+	only := ""
+	lane := &kbLane{name: "topics", run: func(ctx context.Context, _ *kb.Engine) {
+		for _, use := range []string{"kb.project", "kb.topics"} {
+			if only == "" || only == use {
+				_ = kbCounted(use, lanesModel{err: errs[use]}).JSONMax(ctx, "", "", 1, nil)
+			}
+		}
+	}}
+	for range 5 {
+		s.kbRunLane(context.Background(), nil, lane)
+	}
+	if len(lines) != 6 || !strings.Contains(lines[0], "kb: topics lane: no model is set up for kb.topics") {
+		t.Fatalf("with no model for kb.topics, 5 runs logged:\n%s", strings.Join(lines, "\n"))
+	}
+	lines, only = nil, "kb.project" // the run makes only the call that works
+	s.kbRunLane(context.Background(), nil, lane)
+	only = ""
+	s.kbRunLane(context.Background(), nil, lane)
+	for _, line := range lines {
+		if strings.Contains(line, "no model is set up") || strings.Contains(line, "answers") {
+			t.Fatalf("kb.topics still has no model, logged:\n%s", strings.Join(lines, "\n"))
+		}
+	}
+	lines, errs["kb.topics"] = nil, errors.New("example")
+	s.kbRunLane(context.Background(), nil, lane)
+	if len(lines) != 1 || !strings.Contains(lines[0], "2 model call(s), 1 failed") {
+		t.Fatalf("a failed call is no answer, logged:\n%s", strings.Join(lines, "\n"))
+	}
+	lines, errs["kb.topics"] = nil, nil
+	s.kbRunLane(context.Background(), nil, lane)
+	s.kbRunLane(context.Background(), nil, lane)
+	if len(lines) != 3 || !strings.Contains(lines[0], "kb: topics lane: a model answers kb.topics again") || !strings.Contains(lines[1], "2 model call(s), 0 failed") {
+		t.Fatalf("with a model again, logged:\n%s", strings.Join(lines, "\n"))
+	}
+	lines, errs["kb.topics"] = nil, unset
+	s.kbRunLane(context.Background(), nil, lane)
+	if len(lines) != 2 || !strings.Contains(lines[0], "no model is set up for kb.topics") {
+		t.Fatalf("the model gone again, logged:\n%s", strings.Join(lines, "\n"))
 	}
 }
 

@@ -159,7 +159,7 @@ class ChatChromeLanguageShotsTest {
                             Scene.Modes -> ChatModeBar(session, chrome, online = true, onPickModel = {})
                             Scene.ApiError -> ApiErrorLine(error)
                             Scene.MessageMenu -> MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {},
-                                onHandToPersona = {}, onNotice = {})
+                                onForward = {}, onNotice = {})
                             null -> Unit
                         }
                     }

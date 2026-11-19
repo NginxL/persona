@@ -496,6 +496,8 @@ test('headless and subagent runs are not discovered outside assistant directorie
 test('deleted native sessions leave the next list and notify the node without ACP close', async (t) => {
   for (const missing of ['summary', 'session', 'cwd group', 'sessions root']) await t.test(missing, async (t) => {
     const f = await fixture(t)
+    // Drain the startup publication so this test cannot pass merely because that push discovers the new native session.
+    await until('initial sessions published', () => f.node.last('runtime.sessions')?.sessions?.length === 0)
     const { dir } = await terminalSession(f)
     assert.equal((await f.runtime.driver.listSessions())[0].status, 'done')
     await until('terminal row published', () => f.node.last('runtime.sessions')?.sessions?.some((s) => s.session_id === ID))

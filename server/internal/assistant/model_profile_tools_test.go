@@ -430,7 +430,7 @@ func TestProfileSnapshotFreshOutsideCache(t *testing.T) {
 		if err := st.PutSetting(ctx, modelProfileStateKey, modelProfileState{Active: id}); err != nil {
 			t.Fatal(err)
 		}
-		got := s.contextSnapshot(ctx, "")
+		got := s.contextSnapshot(ctx, "", false)
 		if !strings.Contains(got, "- 模型档位：") {
 			t.Fatal("profile line missing")
 		}

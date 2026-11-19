@@ -323,16 +323,21 @@ final class MachinePagesTests: XCTestCase {
     @MainActor func testNewSessionPicksAModel() throws {
         launch(["-tab", "dev", "-cwd.macbook", "/Users/me/code/blog"])
         see(app.buttons["新建会话"], "新建会话", timeout: 15).tap()
-        see(machineCard("macbook"), "MacBook card").tap()
+        shot("new-chat-machines")
+        see(machineCard("server"), "Server card").tap()
         // Model Settings' launcher (claude in the mock) runs; with nothing picked, so does its model.
         let row = see(app.buttons["newChat.model"], "模型 row", timeout: 15)
         XCTAssertTrue(row.label.contains("默认模型") && row.label.contains("模型配置：model-chat"), row.label)
         shot("new-chat-model")
         row.tap()
         see(app.navigationBars["模型"], "model picker")
-        see(app.buttons["newChat.model.default"], "默认 first")
-        see(app.buttons["newChat.model.opus"], "an alias")
+        let alias = see(app.buttons["newChat.model.opus"], "an alias")
         shot("model-picker")
+        let aliasDetail = app.staticTexts["claude · opus → claude-opus-5-5"].firstMatch
+        XCTAssertTrue(aliasDetail.waitForExistence(timeout: 2), alias.label)
+        let defaultRow = see(app.buttons["newChat.model.default"], "默认 first")
+        let defaultDetail = app.staticTexts["claude · 模型配置：model-chat"].firstMatch
+        XCTAssertTrue(defaultDetail.waitForExistence(timeout: 2), defaultRow.label)
         // The picker's own field, not the Agents page's behind the sheet.
         let search = see(app.searchFields.matching(NSPredicate(format: "label CONTAINS %@", "模型 ID")).firstMatch, "the search field")
         search.tap()

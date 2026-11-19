@@ -60,6 +60,9 @@ interface AssistantManagement {
     suspend fun archiveConversation(session: SessionKey): Unit = throw UnsupportedOperationException("Archive unavailable")
     /** Brings an archived conversation back into the list (POST /api/v1/assistant/conversations/{id}/unarchive). */
     suspend fun unarchiveConversation(session: SessionKey): Unit = throw UnsupportedOperationException("Unarchive unavailable")
+    /** Replaces a conversation's user-defined labels in one write; an empty list clears them. */
+    suspend fun setConversationTags(session: SessionKey, tags: List<String>): Unit =
+        throw UnsupportedOperationException("Conversation tags unavailable")
     /**
      * The archived conversations, newest first ("Archived (N)", iOS `archivedConversations`): those `GET /api/v1/assistant?archived=1`
      * marks `archived`, never a health chat. Only the ones their computer still lists (docs/assistant/assistant.md

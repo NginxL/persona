@@ -39,6 +39,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -94,7 +95,8 @@ import persona.feature.inbox.ReplyTarget
 @RunWith(AndroidJUnit4::class)
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w951dp-h673dp-mdpi")
 class SidebarRootsRuntimeTest {
-    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+    val rule = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val host = RuleChain.outerRule(ComponentActivityHostRule()).around(rule)
 
     @Test
     fun selectionOnTheInboxRootConsumesBackAndTheNextBackReturnsToTheConversation() {

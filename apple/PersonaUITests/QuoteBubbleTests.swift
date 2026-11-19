@@ -115,7 +115,8 @@ final class QuoteBubbleTests: XCTestCase {
         XCTAssertTrue(reply.waitForExistence(timeout: 20), "the 周末徒步群 chat did not open")
         let quote = app.buttons.matching(identifier: "bubble.quote").firstMatch
         XCTAssertTrue(quote.waitForExistence(timeout: 5), "Mia's reply has no quote")
-        let quoted = String(quote.label.split(separator: "：", maxSplits: 1).last ?? "")
+        // QuoteCard joins the sender and summary with ": "; the message row's text is the summary alone.
+        let quoted = String(quote.label.split(separator: ":", maxSplits: 1).last ?? "").trimmingCharacters(in: .whitespaces)
         sleep(1)
         shot("feishusent")
 

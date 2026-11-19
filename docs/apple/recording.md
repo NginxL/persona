@@ -62,6 +62,7 @@ In-person meetings and hallway discussions went unrecorded: the recorder sat fou
 | The drawer | **Meetings** (Recordings until #8731), first among the places: opens the Meetings page, whose Start Meeting starts one (the row starts nothing); while something records the row reads "In a Meeting… Open" (a note: "Recording… Open") and opens it | `AssistantSidebar.meetingRow`, `ShellView.openRecordingsPage` |
 | Persona's main conversation | **Start Meeting** (Record until #8731) in the composer's + list (the iPhone's touch and hold on +, the attach panel's More tab, the iPad's + menu; #3723): starts recording and opens Recordings; while a recording runs it reads "Recording… Open" and opens it. Not in other conversations | `AttachMoreSection.common(meeting:)`, `Composer.attachMoreSections` |
 | Meetings page (#8731 v2) | The Meetings home. **Upcoming Meetings**: today's meetings from this phone's calendar (on now, red, or still to come; not all-day, declined or untitled; at most three, `MeetingCalendar.upcoming`), each with time, name, how many were invited and where, and **Start**, which starts the meeting named after it with the quick start's options; without calendar access one row asks for it. The **quick start**: the name (typed, else the calendar's meeting on now, else "Meeting · now"), **Meeting | Note** (segmented; Note hides who is in it and the button says Start Note), who is in it (you, and **Invite Persona**: once invited Persona answers on screen and its menu removes it; `MeetingPeopleRow`; a hub without the meeting conversation keeps the Persona role and Who Attends rows), and who transcribes (this iPhone, or "Cloud · service"; a menu while the hub can transcribe now; the hub's default that can't run now in the warning words; `MeetingTranscriptionLine`). Private Meeting, the language and the microphone are the page's ⋯ (`MeetingOptionsMenu`). **Start Meeting** is the page's one prominent button in the bottom bar; while a recording runs the bar holds its card. Below: Still on This iPhone and All Meetings. `-showUpcomingSample YES` shows two made-up calendar meetings | `RecordingCaptureControls` (`Part`), `RecordingStartForm`, `RecordingStart`, `RecordingsSection`, `RecordingsPage` |
+| Calendar reminder (#8731 G2) | A minute before a meeting on this phone's calendar starts (one Upcoming Meetings would list, in the next 36 hours, at most 16 at once), a notification: the meeting's name, "Starts at 10:00. Record it?" and **Start**, which opens the app and starts the meeting named after the event, in its room; a plain tap opens the Meetings page. The app asks the system again whenever it comes to the front, the switch moves or a meeting starts (none for the meeting recording), so a meeting moved while the app stayed away keeps its old reminder. **Settings › Meetings › Remind Me Before Meetings** turns it off (on every iPhone, on by default), with the way to calendar access when the phone has none. `-showMeetingReminder start\|open` answers a made-up meeting's reminder through its own content: the simulator can't show a notification without the system's prompt | `MeetingReminders`, `MeetingSettingsView` |
 | Home screen icon's menu | **Start Meeting** | `QuickAction.meetingRecording` |
 | Control Center, Lock Screen, Action button | the **Start Meeting** control (its kind unchanged), without opening the app | `MeetingRecordingControl` → `StartMeetingRecordingIntent` |
 | Siri, Shortcuts, Spotlight | **Start Meeting**: "Start a meeting with Persona", "Persona, start a meeting", and the earlier "Record with Persona", "Record a meeting with Persona", with their zh-Hans / ja phrases | `PersonaShortcuts`, `StartMeetingRecordingIntent` |
@@ -131,7 +132,7 @@ The hub writes minutes for a meeting recording once its text is complete (#2710;
 
 Persona can attend a meeting being recorded on the iPhone (#2981; the iPhone side is #3375). The contract, with every field and error, is [meeting-minutes.md](../assistant/meeting-minutes.md) "Attending a meeting"; this is what the app does with it. Only a hub that lists the `meeting_attendance` feature gets any of it: with another hub the Recordings page, the upload and the Live Activity are exactly as before. The redesign (#3862) replaces the attending session with the meeting's own room conversation and a meeting page, on a hub that lists `meeting_conversation`: [meeting-minutes.md](../assistant/meeting-minutes.md) "Meeting conversation (#3862)". The iPhone does phase 1 of it, phase 2, the live view, phase 3, photos, phase 4, realtime voice, and phase 6, talking about any recording ("The meeting conversation (#3862)" below); a meeting started on a hub without it, or before the hub listed it, keeps everything this section describes.
 
-- **Persona invited, on a hub with the meeting conversation (#8731)**: a meeting starts with only you; **Invite Persona** on the quick start makes it start as Listen (the hub's default role when that one answers), and the page's speaker comes with the meeting room. Not invited, it starts as `notes` where the hub lists `meeting_notes` (#8851, `RecordingAttendance.notes`): the room follows the meeting (live log, topics, highlights) and Persona answers nothing; removing Persona mid-meeting goes back to `notes` (`outRole`). `notes` is shown as Off everywhere a role is shown or picked (`MeetingAttendance.shown`, `choices`); asking, Talk, the Live Activity's answer and the asks bar follow `answers` (listener or participant), the live log and the topics follow `attends`. Settings › Meetings is one switch, **Invite Persona Automatically** (off: `meeting_attendance_default` off; on: listener), and at its end an **Experimental** one kept on this phone, **Echo Cancellation with the Speaker** (#8731 B2, off by default, `MeetingRecorder.echoWithSpeakerKey`): on, the room's speaker turned on mid-meeting turns the system's echo cancellation on to the end (`RecordingCapture.turnOnEchoCancellation`, `RecordingSegmentWriter.turnOnVoiceProcessing`: the engine stops, voice processing comes on and the tap is made again for the new format, as after a route change; the log line says how many milliseconds the microphone stopped). Never on the simulator. An older manager reads `notes` as off.
+- **Persona invited, on a hub with the meeting conversation (#8731)**: a meeting starts with only you; **Invite Persona** on the quick start makes it start as Listen (the hub's default role when that one answers), and the page's speaker comes with the meeting room. Not invited, it starts as `notes` where the hub lists `meeting_notes` (#8851, `RecordingAttendance.notes`): the room follows the meeting (live log, topics, highlights) and Persona answers nothing; removing Persona mid-meeting goes back to `notes` (`outRole`). `notes` is shown as Off everywhere a role is shown or picked (`MeetingAttendance.shown`, `choices`); asking, Talk, the Live Activity's answer and the asks bar follow `answers` (listener or participant), the live log and the topics follow `attends`. Settings › Meetings has one switch for Persona, **Invite Persona Automatically** (off: `meeting_attendance_default` off; on: listener), then the calendar reminder kept on this phone (G2, above; the page shows on every iPhone, its Persona rows only where the hub offers attending), and at its end an **Experimental** one kept on this phone, **Echo Cancellation with the Speaker** (#8731 B2, off by default, `MeetingRecorder.echoWithSpeakerKey`): on, the room's speaker turned on mid-meeting turns the system's echo cancellation on to the end (`RecordingCapture.turnOnEchoCancellation`, `RecordingSegmentWriter.turnOnVoiceProcessing`: the engine stops, voice processing comes on and the tap is made again for the new format, as after a route change; the log line says how many milliseconds the microphone stopped). Never on the simulator. An older manager reads `notes` as off.
 - **Role, chosen as the recording starts** (a hub without the meeting conversation): **Off** (the hub writes the minutes after the meeting, as before), **Listen** (Persona follows the meeting; answers show on screen only), or **Take Part** (they are also said aloud). The Recordings page shows the choice under **Record** for a meeting (`RecordingCaptureControls.personaRow`), pre-selected from the hub's `meeting_attendance_default`, which **Settings › Meetings** changes (`MeetingSettingsView`, `PUT /api/v1/assistant`). A pick on the page is for that one recording. The drawer, the home screen's menu, the Control, Siri and the Action button start with the default and the session picked last unless that was the main chat, else with Persona off, so they stay one tap (never the main chat by default, #3862); the last word from the hub (whether it offers attending, its default) is kept for a start without the app in front (`MeetingAttendanceDefaults`).
 - **Who attends**: one session per recording (`MeetingAttendees`): the main chat (sent by leaving `attending_session` out), Persona's other open chats, or an Agent that takes messages; never one the hub would refuse ("Sessions that never attend": a work computer's, another manager's, the health space's, a chat whose replies leave the apps or that an extension opened, one in `bypassPermissions`). The one picked last is pre-selected while it can still attend, unless it was the main chat: the main chat attends only when picked for that meeting (`RecordingAttendance.mainPicked`; owner decision in #3862, since every line fed to a chat fills its context). With nobody chosen the role shows Off; Listen or Take Part shows Who Attends: Choose with "Choose who attends. Until then Persona stays out of the meeting.", a start without a choice starts with Persona off, the picker never pre-selects the main chat, and turning Persona on mid-meeting (the strip's Turn on Persona or its role menu; `MeetingRecorder.setRole` returns false) opens the picker first and turns on once someone is picked. The upload holds it whatever built the attendance: an attending role with no session named and the main chat not picked goes as `off` (`RecordingAttendance.sentRole`, which the stored mark, live lines and asks follow too), so `attending_session` is never left out by default. Kept on the recording as `RecordingEntry.attendance` (`RecordingAttendance`), on this phone only.
 - **The upload** (`RecordingUpload`, `RecordingSync`): an attending recording goes at once, ahead of the others and without the save debounce, before it has any text, and every later upload carries the same `attendance` and `attending_session`. A meeting never attended carries neither. The `200` says what the hub took (`attendance`, `attendance_problem`); a `200` without `attendance` is an older manager, and the phone stops attending that meeting (`stopped: unsupported`).
@@ -927,10 +928,11 @@ Settings › Meetings, the meeting page, the Live Activity, the recording's page
 
 ## A meeting's tape and its replay
 
-For development and tests only (#9417): DEBUG builds, launch arguments, no UI and no setting. Tuning how the live
-transcript, the highlights and the map work together needs the same meeting played many times; a real meeting is slow to
-hold and never the same twice. So a meeting can be recorded from an audio file, everything the meeting room was shown is
-written down as it arrives (a *tape*), and a tape plays back in the room at its own pace.
+For development and tests (#9417). Tuning how the live transcript, the highlights and the map work together needs the
+same meeting played many times; a real meeting is slow to hold and never the same twice. So a meeting can be recorded
+from an audio file, everything the meeting room was shown is written down as it arrives (a *tape*), and a tape plays back
+in the room at its own pace. Recording from a file and writing tapes are DEBUG-only (launch arguments, no UI). Replaying a
+tape is also on every build, under Developing Persona (#10589, "Replaying a tape on any build" below).
 
 ### An audio file in place of the microphone
 
@@ -973,35 +975,86 @@ room holds at a moment.
 
 ### Replay
 
+`MeetingReplay` plays a tape; DEBUG starts one from launch arguments, every build from Developing Persona (below).
 `-showMeetingReplay <tape>` (an absolute path to a tape or a tape folder, a name in Documents/meeting-tapes, or `sample`
 for the made-up `MeetingTapeSample`), with `-showMeetingReplaySpeed 1|2|4` (0.25 to 16) and `-showMeetingReplayEnd YES`
 (the meeting ends by itself at the tape's end; otherwise it goes on, silent, until End). Open the Recordings page
-(`-openShellPage recordings`) and the room comes up: a made-up room meeting (`MeetingReplay.id`), Persona answering on
-screen, started with the live view and the highlights, records itself with no microphone while the tape's events reach
-the room's stores at `t` divided by the speed: the captions and lines into `MeetingTranscription` as hub transcription
-has them, the room, the topics and the highlights into `MeetingConversation`. The replayed meeting stays off every hub
-(`MeetingReplay.holds`): `RecordingSync.status` never makes it pending, `MeetingConversation` never reads its `…/live`,
-it asks for no hub transcription (so no audio socket and no gap upload), and after End its minutes are the tape's.
+(`-openShellPage recordings`) and the room comes up: a made-up room meeting (`ReplayedMeeting.id`), Persona answering on
+screen, started with the live view and the highlights, records itself with no microphone (`RecordingCapture.beginReplay`:
+only while nothing else records) while the tape's events reach the room's stores when the tape's clock passes their `t`:
+the captions and lines into `MeetingTranscription` as hub transcription has them, the room, the topics and the
+highlights into `MeetingConversation`.
+
+The tape's clock (`MeetingReplayClock`) runs at the speed, which can change while it plays, and stands still while the
+meeting is paused. The tape's audio, where it has one and Sound is on, plays along at 1× and 2× (`AVAudioPlayer` with its
+rate, in a `.playback` session opened off the main actor) and is the clock while it plays; at 4× it is silent. The tape
+never goes back, and its time stops at its length. After End its minutes are the tape's, without their `version` (the hub
+has no such minutes, so Add to To-Dos is never offered); the replayed meeting leaves the recordings when its page after
+the meeting closes, and at the next launch.
+
+The replayed meeting stays off every hub (`ReplayedMeeting`, in `apple/Shared/Recording/`):
+
+- `APIClient` refuses every request that names its id, in the path or the query (`request`, `conditionalGet`,
+  `streamed`, `putBytes`, `uploadBytes`, `download`): an `APIError` with the code `replayed_meeting`, nothing sent.
+- `RecordingSync.status` never makes it pending. Its Delete is this phone's only and is never queued: a `DELETE` for its
+  fixed id would leave the hub a tombstone, and reconciliation would then delete every later replay while it plays
+  (DEBUG replays before #10589 did this). Reconciliation ignores the hub's word on it; a queued delete for it is dropped.
+- `MeetingConversation` never reads its `…/live`; Private Meeting, Just Me and the follow-up refuse it before anything
+  waits for an upload; so do Hand to Agent, the meeting's photos, Add to To-Dos and Regenerate. `MeetingAsk.canAsk` is
+  false for it. It asks for no hub transcription (no audio socket, no gap upload), and the DEBUG tape recorder never tapes it.
+- The room offers none of it (`MeetingRoomOffers.replay`): no composer, Talk, Just Me, Bookmark, Photo, Speaker, Invite or
+  page menu, only Pause and End; the line under the title is the tape's time of its length ("1:23 / 3:46"), Replaying or
+  Paused, and the speed, a menu (`MeetingReplayStateLine`); the subtitle says it replays a tape on this iPhone only, not
+  on the hub. End asks "End the Replay?". After it, no ⋯ menu (Rename, Recording Details, Hand to Agent) and no
+  follow-up composer; Recording Details has no Private Meeting or Talk about this meeting.
 
 The tape holds what the room's stores held, not the room's own conversation: Persona's messages in the thread aren't
 on it, so the replayed Live box keeps its last lines unfolded where the meeting's folded to its newest line under the
 thread.
 
 To see the hub's current highlights and map logic on the same audio, record it again: start a meeting with
-`-openMeetingAudio` and the tape's audio, then compare the new tape with the old one.
+`-openMeetingAudio` and the tape's audio, then compare the new tape with the old one. (On TestFlight builds that re-run
+is not available: #10590.)
+
+### Replaying a tape on any build
+
+Settings › About › Developing Persona › **Replay a Meeting Tape…** (#10589, `MeetingTapesPage`; who it serves and what
+it keeps: docs/operations/developing-persona.md "Replaying a meeting tape"). The page sets the speed and the sound, lists
+the tapes on this phone, those on the owner's computers and Choose from Files; a tap starts the tape and the page
+presents the room (`recordingLiveSheet`). A tape is a folder with `tape.json` and the audio it names.
+
+- **On this phone** (`MeetingTapeLibrary`): Application Support/meeting-tapes, a folder per tape, the whole folder out of
+  backups. Swipe to delete. Turning Developing Persona off deletes them all.
+- **On your computers**: each online computer's `~/.persona/meeting-tapes` is listed (`GET /api/v1/machines/{id}/fs`), a
+  folder per tape; a tap downloads its `tape.json`, then the audio it names (`…/file/download`, with progress), and keeps
+  them here. The hub relays the bytes and keeps nothing. The folder is under the node's own data folder: not in iCloud
+  Drive (which the node never reads), Desktop, Documents or Downloads (macOS asks before a background service reads
+  those), and readable by the node's path guard.
+- **Choose from Files…**: a tape's folder, or its `tape.json` and audio picked together (the audio is kept under the name
+  the tape gives it). Anything else is refused ("That isn't a meeting tape").
+- A tape is at most 32 MB, its audio at most 1 GB.
+
+`-openMeetingTapes sample|empty` (DEBUG) turns Developing Persona on and opens the page, with the made-up tape on this
+phone or none.
 
 Real meetings' audio and tapes hold other people's words: they stay on the machine that made them, never in the
 repository, a gist, an issue or a PR. The repository has only the made-up sample: `MeetingTapeSample` and its
 JSON, apple/PersonaTests/Fixtures/meeting-tape/tape.json, with its audio, apple/PersonaTests/Fixtures/meeting-tape/audio.m4a
 (macOS `say` in two voices, the same words at the same times).
 
-Tests: `MeetingTapeTests` (the fixture is the made-up tape and survives a round trip, a frame at each moment, a line read
+Tests: `MeetingReplayGuardTests` (#10589: every request naming the replayed meeting refused in `APIClient`, Private
+Meeting, Just Me, the follow-up, Hand to Agent, photos, Add to To-Dos, Regenerate and Ask refused, what the room offers,
+the tape's clock at each speed, paused and following the audio, the time's words, the minutes without their version, the
+tapes kept from a folder or picked files, refused when no tape, deleted with the switch); `RecordingSyncTests` (never
+uploaded, Delete never sent, a hub's tombstone ignored); `MeetingTapeTests` (the fixture is the made-up tape and survives a round trip, a frame at each moment, a line read
 again in its place, the schedule at 1×, 2× and 4×, the speed's bounds, the replay held away from sync and showing the
 hub's lines and the room's lists, the launch argument, the file's real-time pace and pause, a writer recording the
 file as a microphone); `MeetingReplayUITests` against the mock hub (the made-up tape at 2×: the lines one by one, the
 two highlights, the map's three topics, End with the tape's minutes and nothing at the mock; a meeting started with
 `-openMeetingAudio`: no prompt, the file's audio up the audio socket in hub transcription and the hub's lines back in
-the room). PERSONA_SHOTS saves `replay-<appearance>-live|live-end|highlights|map|end|after|minutes|file-input`.
+the room; the made-up tape from Developing Persona's page at 2×: only Pause and End in the room, Pause holding the tape,
+the speed changed while it plays, End with the tape's minutes and no Hand to Agent, nothing at the mock, no delete there).
+PERSONA_SHOTS saves `replay-<appearance>-live|live-end|highlights|map|end|after|minutes|file-input|tapes|about|paused|speed`.
 
 ## All-day recording (Apple)
 
@@ -1092,6 +1145,8 @@ Paired simulators don't deliver `transferFile` and never run background tasks, a
 ## Verified (from #3235 onward)
 
 - iOS / watch simulator and Mac (`CODE_SIGNING_ALLOWED=NO`) builds; `RecordingSyncTests`: upload only once until changed, queued offline retries, eventual deletion after deleting offline, local deletion following knowledge-base deletion, reconciliation restoring recordings lost by the hub, expiry removing audio too, and no upload without text.
+- Hand to Agent after a meeting (#8852, `MeetingHandoffUITests` against the mock hub, `POST /mock/meeting_handoff` to make a try fail): the meeting's page offers it in its ⋯ once the hub has the meeting; the sheet picks the latest Agent with the transcript off; a try kept as failed says why in the sheet and on the page's row with Retry, which opens the sheet on the same Agent; once it went the row says where, with Open (docs/assistant/meeting-minutes.md, "Handing a meeting to an Agent (#8852)").
+- One row for a meeting both imported and recorded (#8872, `MeetingImportedUITests` against a mock hub with `MOCK_IMPORTED_MEETING=1`, which lists a Lark meeting named as the made-up weekly meeting): the meeting's page after the meeting links to its Lark notes under the facts, and Knowledge's Meetings list shows it once, the recording's row marked with Lark (docs/design/DESIGN_SYSTEM.md, "One row for one meeting" under the meetings home).
 - End-to-end UI (`RecordingKnowledgeUITests`, `TEST_RUNNER_PERSONA_MOCK_HUB`, read back through mock hub `/api/v1/recordings` and `/mock/recordings`): a fictional recording waits on the Recordings page and automatically syncs to the hub (only text and timestamps), then leaves the page for Knowledge's Meetings list (All Meetings), where it opens its own page; deleting from details, or with a swipe in that list, also deletes it from the hub, with no later upload; no recording entry in the + menu of the new-chat composer.
   `TEST_RUNNER_PERSONA_SHOTS=<directory>` and `TEST_RUNNER_PERSONA_SHOTS_APPEARANCE=light|dark` save screenshots: the page, the list, details, the swipe and + menu.
 

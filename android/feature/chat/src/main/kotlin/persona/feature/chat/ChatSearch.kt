@@ -28,6 +28,19 @@ import kotlinx.serialization.json.*
 internal data class ChatSearchHit(val itemId: String, val category: String, val snippet: String, val ranges: List<IntRange>)
 internal data class ChatSearchResults(val hits: List<ChatSearchHit> = emptyList(), val truncated: Boolean = false)
 
+/**
+ * Projects the same complete search input as the old full-text observer. Frozen windows ignore ordinary live deltas;
+ * a newer structure generation still admits older history without replacing existing frozen items.
+ */
+internal class ChatSearchProjection {
+    private var structureGeneration = -1L
+
+    fun update(revision: ChatLiveItems.Revision, frozen: Boolean, project: () -> List<Item>): List<Item>? {
+        if (frozen && structureGeneration == revision.structureGeneration) return null
+        return project().also { structureGeneration = revision.structureGeneration }
+    }
+}
+
 private fun JsonElement.strings(): Sequence<String> = when (this) {
     is JsonObject -> values.asSequence().flatMap { it.strings() }
     is JsonArray -> asSequence().flatMap { it.strings() }

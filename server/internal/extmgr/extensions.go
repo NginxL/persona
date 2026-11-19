@@ -1477,3 +1477,35 @@ func (ps *extensions) roleChanged(ctx context.Context) {
 		}
 	}
 }
+
+// connectorSwitched restarts the extension whose connector id the user just switched on or off: its program got the
+// connectors that were on at initialize (active.connectors) and is never told again, so one that works for a connector
+// by itself (a listener, replies) would go on after the switch (docs/extensions/extensions.md "Turning contributions
+// on and off"). Only one that runs now (an extension that is off has no process and no connectors registered); the
+// hub's own connectors restart nothing. Called once the choice is kept, outside the manager's locks.
+func (ps *extensions) connectorSwitched(ctx context.Context, id string, on bool) {
+	if ps == nil || ps.h == nil || ps.h.connectors == nil {
+		return
+	}
+	c := ps.h.connectors.Get(id)
+	if c == nil {
+		return
+	}
+	owner := ""
+	ps.mu.Lock()
+	for eid, hp := range ps.byID {
+		if hp.proc != nil && slices.ContainsFunc(hp.conns, func(x *proc.Conn) bool { return connector.Connector(x) == c }) {
+			owner = eid
+		}
+	}
+	ps.mu.Unlock()
+	if owner == "" {
+		return
+	}
+	state := "off"
+	if on {
+		state = "on"
+	}
+	ps.logf("plugin %s: restarted for its connector %s switched %s", owner, id, state)
+	ps.apply(ctx, owner)
+}

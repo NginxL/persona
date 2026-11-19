@@ -101,6 +101,19 @@ func (h *hookTurns) agent(id string, pid int, start string, now time.Time) {
 	t.pid, t.start = pid, start
 }
 
+// process is the claude process the session's hooks last ran under (pid, its start mark), 0 when they have not said.
+func (h *hookTurns) process(id string) (pid int, start string) {
+	if h == nil {
+		return 0, ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if t := h.m[id]; t != nil {
+		return t.pid, t.start
+	}
+	return 0, ""
+}
+
 // canBypass: the session's claude was started so that Allow All is in its shift+tab cycle (#1379).
 func (h *hookTurns) canBypass(id string) bool {
 	if h == nil {

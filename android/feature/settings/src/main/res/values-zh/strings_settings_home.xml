@@ -16,7 +16,7 @@
     <string name="settings_search_empty">没有找到相关设置</string>
     <string name="settings_search_empty_detail">换个名称搜索，或清空搜索内容。</string>
     <string name="settings_search_models_aliases">供应商 模型配置 用途 密钥 API Key 运行方式</string>
-    <string name="settings_search_agents_aliases">Claude Code Codex 会话分诊 编码 运行时</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy 会话分诊 编码 运行时</string>
     <string name="settings_search_notifications_aliases">通知设置 通知 通知渠道 电池 保活 自启动 胶囊 悬浮 静音 电脑 锁屏 后台</string>
     <string name="settings_search_connectors_aliases">邮箱 邮件 手机 飞书 Lark 以你的名义发出</string>
     <string name="settings_search_extensions_aliases">扩展 插件 市场</string>

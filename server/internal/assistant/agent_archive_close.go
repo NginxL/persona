@@ -63,7 +63,7 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 		return agentArchiveCloseResult{}, err
 	}
 	if agentCloseBusy(row) {
-		return agentArchiveCloseResult{}, archiveRefusal(http.StatusConflict, "agent_busy", i18n.Err("hub-agent_archives.close_busy"))
+		return agentArchiveCloseResult{}, archiveBusyRefusal(row, true)
 	}
 	if row, err = svc.setAgentArchive(ctx, row.MachineID, row.SessionID, true); err != nil {
 		return agentArchiveCloseResult{}, err
@@ -79,7 +79,8 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 	return res, nil
 }
 
-// retireArchived closes the archived session's agent through its node (session.retire), and says how that went.
+// retireArchived closes the archived session's agent through its node. A runtime with a declared close capability
+// uses session.close; a terminal agent uses session.retire, and the result says how that went.
 func (svc *Service) retireArchived(ctx context.Context, row proto.Session) agentArchiveCloseResult {
 	if row.Status == proto.StatusOffline {
 		return agentArchiveCloseResult{Outcome: archiveCloseNotRunning}
@@ -89,12 +90,21 @@ func (svc *Service) retireArchived(ctx context.Context, row proto.Session) agent
 	var out struct {
 		Closed bool `json:"closed"`
 	}
+	method := deviceSessionRetire
+	runtimeClose := row.Capabilities != nil && row.Capabilities.Close != nil && *row.Capabilities.Close
+	if runtimeClose {
+		method = "session.close"
+	}
 	// close_terminal: the user asked to close it (a node before #4754 closes it anyway).
-	err := svc.call(ctx, row.MachineID, deviceSessionRetire, map[string]any{"session_id": row.SessionID, "close_terminal": true}, &out)
+	params := map[string]any{"session_id": row.SessionID}
+	if !runtimeClose {
+		params["close_terminal"] = true
+	}
+	err := svc.call(ctx, row.MachineID, method, params, &out)
 	var re *rpc.Error
 	switch {
-	case err == nil && out.Closed:
-		svc.logf("agent archive %s/%s: closed its agent and its terminal", row.MachineID, row.SessionID)
+	case err == nil && (runtimeClose || out.Closed):
+		svc.logf("agent archive %s/%s: closed its agent", row.MachineID, row.SessionID)
 		return agentArchiveCloseResult{Closed: true, Outcome: archiveCloseClosed}
 	case err == nil:
 		return agentArchiveCloseResult{Outcome: archiveCloseNotRunning}

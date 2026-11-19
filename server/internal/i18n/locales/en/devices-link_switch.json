@@ -1,0 +1,7 @@
+{
+  "forbidden": "Only a device with full access, or the admin page, can switch this computer to Persona Link.",
+  "in_progress": "This computer is already switching to Persona Link.",
+  "unavailable": "This computer cannot switch to Persona Link now.",
+  "save_failed": "The switch to Persona Link could not be saved, so it did not start. Try again.",
+  "deploy_refused": "This computer is switching to Persona Link. Update its node once that is done."
+}

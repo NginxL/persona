@@ -30,7 +30,7 @@ export function toggleBackgroundPanel(mid: string, sid: string) {
  *  within the day the node keeps it (lib/workflows.ts recentWorkflows). The header's button shows only then. */
 export function hasBackgroundWork(s: Session | undefined, now: number): boolean {
   if (!s) return false;
-  return Boolean(s.loop) || otherBackground(s).length > 0 || recentWorkflows(s, now).length > 0;
+  return Boolean(s.loop) || otherBackground(s).length > 0 || (s.background_ended?.length ?? 0) > 0 || recentWorkflows(s, now).length > 0;
 }
 
 /** The composer's `/workflows` (cindy's): opens the panel instead of going to the Agent. */

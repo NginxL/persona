@@ -134,4 +134,49 @@ func TestMachinesListAmbiguousAndMissing(t *testing.T) {
 	if m.CPUBusyPercent.Reason != "metric_not_reported" || m.MemoryAvailableBytes.Reason != "memory_measurement_missing_or_ambiguous" || m.Swap.Reason != "swap_measurement_missing_or_ambiguous" || m.DiskFreeBytes.Reason != "disk_measurement_missing_or_ambiguous" || m.WorkingAgents.Reason != "sessions_unavailable" || m.NodeOutdated.Reason != "target_version_not_confirmed" {
 		t.Fatalf("unexpected facts: %s", text)
 	}
+	if m.BatteryPercent != nil || m.BatteryCharging != nil || m.TempC != nil {
+		t.Fatalf("expected nil battery/temp when absent: %s", text)
+	}
+}
+
+func TestMachinesListBatteryAndTemp(t *testing.T) {
+	f := newFakeHub()
+	f.devices = []Device{{ID: "laptop", Online: true, Reachable: true}, {ID: "desktop", Online: true, Reachable: true}}
+	batt, chg, temp := 88.0, true, 54.2
+	d := &resourceDevs{
+		fleetDevs: newFleetDevs(),
+		machines:  map[string]*proto.Machine{"laptop": {}, "desktop": {}},
+		samples: map[string]*proto.MetricSample{
+			"laptop":  {T: time.Now().Unix(), MemTotal: 100, DiskTotal: 100, BatteryPercent: &batt, BatteryCharging: &chg, TempC: &temp},
+			"desktop": {T: time.Now().Unix(), MemTotal: 100, DiskTotal: 100},
+		},
+	}
+	s := newTestService(t, f)
+	s.devs = d
+	text, err := s.toolMachinesList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Machines []map[string]any `json:"machines"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Machines) != 2 {
+		t.Fatalf("machines = %d", len(out.Machines))
+	}
+	laptop, desktop := out.Machines[0], out.Machines[1]
+	if laptop["battery_percent"] == nil || laptop["battery_charging"] == nil || laptop["temp_c"] == nil {
+		t.Fatalf("laptop missing battery/temp: %v", laptop)
+	}
+	if _, ok := desktop["battery_percent"]; ok {
+		t.Fatalf("desktop must omit battery_percent: %v", desktop)
+	}
+	if _, ok := desktop["battery_charging"]; ok {
+		t.Fatalf("desktop must omit battery_charging: %v", desktop)
+	}
+	if _, ok := desktop["temp_c"]; ok {
+		t.Fatalf("desktop must omit temp_c: %v", desktop)
+	}
 }

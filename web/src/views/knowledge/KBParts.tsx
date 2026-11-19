@@ -1,8 +1,9 @@
 // Small pieces the knowledge pages share: the kind tile, tinted pills, marked text, section headers, local icons.
-import { importanceTone, initial, isKind, markParts, projectKindLabel, relevanceTone, topicPointCount, type KBEntry, type KBKind, type Tone } from "../../lib/kb";
+import { importanceTone, initial, isKind, markParts, projectKindLabel, relevanceTone, topicPointCount, type KBDetail, type KBEntry, type KBKind, type Tone } from "../../lib/kb";
 import { cx } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
+import { connectorBrand } from "../../lib/connectors";
 
 // Icons the shared set does not have yet (person, video, calendar, tag); same grammar as ui/icons.tsx.
 const LOCAL: Record<string, React.ReactNode> = {
@@ -161,4 +162,21 @@ export function onPlainClick(e: React.MouseEvent, go: () => void) {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
   e.preventDefault();
   go();
+}
+
+/** What a link to an imported meeting's own notes says (#8872): the app's name where this client knows the connector
+ *  (Lark), else "Original Meeting Notes". */
+export function importedNotesLabel(source?: string): string {
+  return connectorBrand(source ?? "") === "lark" ? t("knowledge-kbparts.open_imported_lark") : t("knowledge-kbparts.open_imported");
+}
+
+/** A recording's imported meeting (#8872), from its detail: `meta.imported_meeting` and the link the hub resolves for it,
+ *  which has its notes' URL (`extra`) and connector (`source`); null without one, or with nothing to open. */
+export function importedMeetingOf(d?: KBDetail | null): { url: string; source?: string } | null {
+  if (d?.kind !== "recordings") return null;
+  const ref = d.meta?.imported_meeting as { kind?: unknown; id?: unknown } | undefined;
+  if (!ref || typeof ref.id !== "string") return null;
+  const link = (d.links ?? []).find((l) => l.kind === "meetings" && l.id === ref.id);
+  const url = link?.extra?.trim();
+  return url ? { url, source: link?.source } : null;
 }

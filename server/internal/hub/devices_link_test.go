@@ -428,6 +428,219 @@ func TestAWarmMachineIsNotConnectedYet(t *testing.T) {
 	}
 }
 
+// A manager's devices.list is about its own report, not the carrier's: complete only once it has reported, and its
+// machines reachable while the carrier is away (#6795).
+func TestAManagersViewIsItsOwnReport(t *testing.T) {
+	h, srv, _ := newBusHub(t)
+	h.cfg.Machines = []MachineConfig{{ID: "ma", Name: "ma", Kind: "local"}, {ID: "mb", Name: "mb", Kind: "local"}}
+	a := connectGuardManager(t, h, srv.URL, assistantwire.AssistantID, nodeAnswers)
+	b := connectGuardManager(t, h, srv.URL, "m-0b0b0b", nodeAnswers)
+	if _, err := h.moveMachine(context.Background(), "mb", "m-0b0b0b"); err != nil {
+		t.Fatal(err)
+	}
+	a.report(t, devicewire.State{Machine: proto.Machine{ID: "ma", Name: "ma"}})
+	eventually(t, 5*time.Second, "the carrier", h.devicesUp)
+	type view struct {
+		Devices  []assistantwire.Device `json:"devices"`
+		Complete bool                   `json:"complete"`
+	}
+	listOf := func(f *guardManager) view {
+		t.Helper()
+		var v view
+		if err := f.call(t, assistantwire.MethodDevice, assistantwire.DeviceCall{Device: assistantwire.DeviceAll, Method: assistantwire.DeviceDevicesList}, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	reaches := func(v view, id string) bool {
+		for _, d := range v.Devices {
+			if d.ID == id {
+				return d.Reachable
+			}
+		}
+		return false
+	}
+	// B is connected but has not reported: its list is not complete, whatever the carrier did.
+	if v := listOf(b); v.Complete || len(v.Devices) != 0 {
+		t.Fatalf("B's list before its report: %+v", v)
+	}
+	if v := listOf(a); !v.Complete || !reaches(v, "ma") {
+		t.Fatalf("the carrier's list: %+v", v)
+	}
+	b.report(t, devicewire.State{Machine: proto.Machine{ID: "mb", Name: "mb"}})
+	eventually(t, 5*time.Second, "B reported", func() bool { return h.devicesUpFor("m-0b0b0b") })
+	if v := listOf(b); !v.Complete || !reaches(v, "mb") {
+		t.Fatalf("B's list once it reported: %+v", v)
+	}
+	// The carrier's connection ends: its machines are unreachable, B's view is as it was.
+	c := h.busConnOf(assistantwire.AssistantID)
+	if c == nil {
+		t.Fatal("no carrier connection")
+	}
+	_ = c.ws.CloseNow()
+	eventually(t, 5*time.Second, "the carrier gone", func() bool { return !h.devicesUp() && !h.localMachine("ma").reachable() })
+	if v := listOf(b); !v.Complete || !reaches(v, "mb") || !h.devicesUpFor("m-0b0b0b") {
+		t.Fatalf("B's list while the carrier is away: %+v", v)
+	}
+}
+
+// A machine nobody is known to carry (the ownership setting could not be read: unknownMachineOwner) is offline at once,
+// hub start or not: there is no manager to wait for (#6795).
+func TestNoWaitForAMachineNobodyIsKnownToCarry(t *testing.T) {
+	h := newTestHub(t)
+	h.cfg.Machines = []MachineConfig{{ID: "own", Name: "Own", Kind: "local", OwnerRequired: true}}
+	h.startDevices(context.Background()) // the start's window is open, nobody has reported
+	m := h.machineByID("own")
+	if o := m.ownerOrCarrier(); o != unknownMachineOwner {
+		t.Fatalf("own's manager: %q", o)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	began := time.Now()
+	if err := m.call(ctx, "fs.list", map[string]any{"path": "/"}, nil); !errors.Is(err, errManagerOffline) || time.Since(began) > time.Second {
+		t.Fatalf("a call to a machine nobody carries: %v after %v", err, time.Since(began))
+	}
+	if h.devicesUpFor(unknownMachineOwner) {
+		t.Fatal("nobody is up")
+	}
+}
+
+// The end of a manager's connection forgets its up state only when no newer connection is there: one that connected
+// and reported before the old end was handled keeps it (#6795).
+func TestAGoneConnectionDoesNotForgetTheNewOnesUp(t *testing.T) {
+	h := newTestHub(t)
+	const b = "m-0b0b0b"
+	h.devicesConnected(b)
+	h.applyDeviceStatesFrom(b, devicewire.States{})
+	d := &h.devices
+	d.mu.Lock()
+	conns := d.conns[b]
+	d.mu.Unlock()
+	// The next connection's handshake and report land before the old one's end is handled.
+	h.devicesConnected(b)
+	h.applyDeviceStatesFrom(b, devicewire.States{})
+	h.upGone(b, conns)
+	if !h.devicesUpFor(b) {
+		t.Fatal("the new connection's up state went with the old connection")
+	}
+	// Nothing newer: the end forgets it, and a call waits for a new connection (the start's window) or fails.
+	d.mu.Lock()
+	conns = d.conns[b]
+	d.mu.Unlock()
+	h.upGone(b, conns)
+	if h.devicesUpFor(b) {
+		t.Fatal("the up state outlived its connection")
+	}
+}
+
+// A report from a manager removed from the roster (sent before it was hung up) does not make it up: nothing of its
+// counts any more, as its entries do not (machine_entries.go).
+func TestAReportAfterLeavingTheRosterIsNotUp(t *testing.T) {
+	h := newTestHub(t)
+	h.cfg.Machines = []MachineConfig{{ID: "box", Name: "Box", Kind: "ssh"}}
+	h.startDevices(context.Background())
+	h.forgetMachineEntries("m-0b0b0b") // removed from the roster
+	h.applyDeviceStatesFrom("m-0b0b0b", devicewire.States{})
+	if h.devicesUpFor("m-0b0b0b") {
+		t.Fatal("a manager that left the roster is up")
+	}
+	h.applyDeviceStatesFrom(devicesOwner, devicewire.States{})
+	if !h.devicesUp() {
+		t.Fatal("the carrier's report")
+	}
+}
+
+// A hub that just restarted waits for the machine's own manager: a call to another manager's warm machine before that
+// manager reports waits for it, not for the carrier, instead of failing at once; once it reported and went, a call
+// fails at once as the carrier's do (#6795).
+func TestACallToAnotherManagersWarmMachineWaitsForIt(t *testing.T) {
+	h, srv, store := newBusHub(t)
+	ctx := context.Background()
+	h.cfg.Machines = []MachineConfig{{ID: "ma", Name: "ma", Kind: "local"}, {ID: "mb", Name: "mb", Kind: "local"}}
+	bTok := busToken(t, h, "m-0b0b0b", "m-0b0b0b") // in the roster: its machine's move is kept at the start
+	if err := store.PutSetting(ctx, machineOwnersKey, map[string]string{"mb": "m-0b0b0b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutSetting(ctx, devicesWarmKey, map[string]any{"saved_at": time.Now(), "machines": map[string]any{
+		"mb": map[string]any{"info": proto.NodeInfo{Hostname: "mb", Version: "test"}, "sessions": []proto.Session{}}}}); err != nil {
+		t.Fatal(err)
+	}
+	h.startDevices(ctx)
+	m := h.localMachine("mb")
+	if m == nil || m.ownerOrCarrier() != "m-0b0b0b" || !m.snapshot().Online {
+		t.Fatalf("mb before its manager: %+v", m)
+	}
+	res := make(chan error, 1)
+	go func() {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		res <- m.call(cctx, "fs.list", map[string]any{"path": "/"}, nil)
+	}()
+	select {
+	case err := <-res:
+		t.Fatalf("the call did not wait for mb's manager: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// The carrier reporting is not it.
+	a := connectGuardManager(t, h, srv.URL, assistantwire.AssistantID, nodeAnswers)
+	a.report(t, devicewire.State{Machine: proto.Machine{ID: "ma", Name: "ma"}})
+	eventually(t, 5*time.Second, "the carrier", h.devicesUp)
+	select {
+	case err := <-res:
+		t.Fatalf("the carrier's report ended the wait for mb's manager: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	b := connectGuardManagerWith(t, srv.URL, "m-0b0b0b", bTok, nodeAnswers)
+	// A manager's own call waits for its first report too, just as the carrier's does.
+	ownRes := make(chan error, 1)
+	go func() {
+		ownRes <- b.call(t, assistantwire.MethodDevice, assistantwire.DeviceCall{Device: "mb", Method: "panes.list", Params: json.RawMessage(`{}`)}, nil)
+	}()
+	select {
+	case err := <-ownRes:
+		t.Fatalf("B's own call did not wait for its report: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	select {
+	case err := <-res:
+		t.Fatalf("B connecting ended the wait for its report: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	b.report(t, devicewire.State{Machine: proto.Machine{ID: "mb", Name: "mb"}})
+	select {
+	case err := <-res:
+		if err != nil {
+			t.Fatalf("the call once mb's manager reported: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the call never went")
+	}
+	select {
+	case err := <-ownRes:
+		if err != nil {
+			t.Fatalf("B's own call once it reported: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("B's own call never went")
+	}
+	if !strings.Contains(b.log(), `"method":"fs.list"`) || !strings.Contains(b.log(), `"method":"panes.list"`) || strings.Contains(a.log(), "fs.list") {
+		t.Fatalf("the call went to the wrong manager; the carrier saw\n%s\nB saw\n%s", a.log(), b.log())
+	}
+	// Its start is over: without it a call fails at once, as the carrier's do.
+	c := h.busConnOf("m-0b0b0b")
+	if c == nil {
+		t.Fatal("no connection of B's")
+	}
+	_ = c.ws.CloseNow()
+	eventually(t, 5*time.Second, "B gone", func() bool { return !h.devicesUpFor("m-0b0b0b") })
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	began := time.Now()
+	if err := m.call(cctx, "fs.list", map[string]any{"path": "/"}, nil); !errors.Is(err, errManagerOffline) || time.Since(began) > time.Second {
+		t.Fatalf("a call to mb after its manager went: %v after %v", err, time.Since(began))
+	}
+}
+
 // #6372: a chat subscribed through a node restart keeps getting its items. A node watches per connection, so the
 // manager tells the new connection to watch again.
 func TestLiveItemsAfterTheNodeReconnects(t *testing.T) {

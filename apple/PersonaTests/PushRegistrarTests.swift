@@ -10,6 +10,12 @@ private final class FakeSystem {
     var allowed: Bool?
     private(set) var requests = 0
     private(set) var registrations = 0
+    /// The groups' first hubs; nil: the pairings can't be read (before the first unlock).
+    var hubs: [PushRegistrar.Hub]? = []
+    var now = Date(timeIntervalSince1970: 1_000_000)
+    /// Waits for a retry due while the app stays open: none by default (the test moves the clock and comes back).
+    var sleep: @MainActor (Duration) async -> Bool = { _ in false }
+    var waits: [Duration] = []
     /// The prompt on screen, waiting for an answer.
     private(set) var prompt: CheckedContinuation<Bool, Never>?
 
@@ -22,7 +28,10 @@ private final class FakeSystem {
                 return await withCheckedContinuation { self.prompt = $0 }
             },
             allowed: { self.allowed },
-            register: { self.registrations += 1 })
+            register: { self.registrations += 1 },
+            hubs: { self.hubs },
+            now: { self.now },
+            sleep: { await self.sleep($0) })
     }
 
     /// The prompt's tap reaches the system's switch first; the request's answer comes after.
@@ -156,6 +165,248 @@ struct PushRegistrarTests {
         // Back, with no registration from this device at that hub.
         await r.refreshRoute(group: "g") { tokens(["watch": APIClient.PushRoute(route: "relay")]) }
         #expect(health.health.routes["g"] == nil && health.health.unchecked == nil)
+    }
+
+    // MARK: - Registering again (#9612)
+
+    /// A hub that takes this device's registration; `retired` is its push registration gone (#9611), which a
+    /// registration brings back unless `keepsRetiring`.
+    @MainActor
+    private final class Hub {
+        let fake = FakeHub()
+        var retired = false
+        var keepsRetiring = false
+        var refusing = false
+        /// The push routes `GET /api/v1/auth/tokens` lists, by credential ("me" is this device's).
+        var routes: [String: String] = ["me": "direct"]
+
+        init() {
+            fake.on("POST", "/api/v1/devices") { [unowned self] _ in
+                if refusing { throw URLError(.notConnectedToInternet) }
+                if !keepsRetiring { retired = false }
+                return Data(#"{"push":{"route":"direct"}}"#.utf8)
+            }
+            fake.on("PUT", "/api/v1/devices/d/prefs") { [unowned self] _ in
+                if retired {
+                    throw APIError(status: 409, message: "register again", fields: ["code": APIClient.pushRegistrationRequired])
+                }
+                return Data(#"{"input":true}"#.utf8)
+            }
+            fake.on("GET", "/api/v1/auth/tokens") { [unowned self] _ in
+                let push = routes.map { #""\#($0.key)":{"route":"\#($0.value)"}"# }.joined(separator: ",")
+                return Data(#"{"tokens":[],"current":"me","push":{\#(push)}}"#.utf8)
+            }
+        }
+
+        var posts: Int { fake.sent("POST", "/api/v1/devices").count }
+        var puts: Int { fake.sent("PUT", "/api/v1/devices/d/prefs").count }
+        var reads: Int { fake.sent("GET", "/api/v1/auth/tokens").count }
+
+        /// The app's client for this hub, answering a 409 through `r`, as `APIClient.onPushRegistrationRequired` does.
+        func api(_ r: PushRegistrar) -> APIClient {
+            var api = fake.client
+            api.registerPush = { group in await r.registrationRequired(group: group).value }
+            return api
+        }
+    }
+
+    private let token = Data([0xAB, 0xCD])
+
+    /// Notifications allowed, APNs answered and the hub took the launch's registration.
+    private func registered(_ fake: FakeSystem, _ hub: Hub) async -> (PushRegistrar, PushHealthStore) {
+        fake.allowed = true
+        fake.hubs = [PushRegistrar.Hub(group: "", api: hub.fake.client)]
+        let (r, health) = registrar(fake)
+        await r.registerIfPossible()?.value
+        await r.didRegister(token: token)?.value
+        return (r, health)
+    }
+
+    /// 409 `push_registration_required` on a settings write: exactly one registration, then the write again.
+    @Test func aRetiredRegistrationRegistersAgainAndTheWriteGoesThrough() async throws {
+        let fake = FakeSystem(), hub = Hub()
+        let (r, _) = await registered(fake, hub)
+        #expect(hub.posts == 1)
+
+        hub.retired = true // the hub revoked the credential it was under
+        let prefs = try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs())
+        #expect(prefs.input == true)
+        #expect(hub.posts == 2 && hub.puts == 2)
+
+        // Registered again, the next write goes straight through.
+        _ = try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs())
+        #expect(hub.posts == 2 && hub.puts == 3)
+    }
+
+    /// A hub that keeps answering 409 after taking the registration doesn't make a loop: one registration, then the
+    /// 409 stands; another 409 soon after starts none.
+    @Test func aRepeated409DoesNotLoop() async {
+        let fake = FakeSystem(), hub = Hub()
+        let (r, _) = await registered(fake, hub)
+        hub.retired = true
+        hub.keepsRetiring = true
+
+        await #expect(throws: APIError.self) { try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs()) }
+        #expect(hub.posts == 2 && hub.puts == 2)
+        await #expect(throws: APIError.self) { try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs()) }
+        #expect(hub.posts == 2 && hub.puts == 3)
+
+        // Ten minutes on, a 409 may register once more.
+        fake.now += PushRegistrar.requiredCooldown
+        await #expect(throws: APIError.self) { try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs()) }
+        #expect(hub.posts == 3)
+    }
+
+    /// Without an APNs token in this process there is nothing to register with: the 409 stands, nothing is sent.
+    @Test func a409BeforeAnyTokenSendsNothing() async {
+        let fake = FakeSystem(), hub = Hub()
+        fake.hubs = [PushRegistrar.Hub(group: "", api: hub.fake.client)]
+        let (r, _) = registrar(fake)
+        hub.retired = true
+        await #expect(throws: APIError.self) { try await hub.api(r).setNotifyPrefs(device: "d", NotifyPrefs()) }
+        #expect(hub.posts == 0 && hub.puts == 1)
+    }
+
+    /// A registration POST that failed is tried again when the app comes back, once its backoff is over.
+    @Test func aFailedRegistrationIsTriedAgainOnReturn() async {
+        let fake = FakeSystem(), hub = Hub()
+        hub.refusing = true
+        let (r, health) = await registered(fake, hub)
+        #expect(hub.posts == 1)
+        #expect(health.health.unchecked?[""] != nil)
+
+        await r.foreground()?.value // back at once: still waiting out the backoff
+        #expect(hub.posts == 1 && hub.reads == 0)
+
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value // due, still refused: the wait doubles
+        #expect(hub.posts == 2)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value
+        #expect(hub.posts == 2)
+
+        hub.refusing = false
+        fake.now += PushRegistrar.backoff(2)
+        await r.foreground()?.value
+        #expect(hub.posts == 3)
+        #expect(health.health.routes[""]?.route == "direct" && health.health.unchecked == nil)
+        #expect(fake.registrations == 1) // APNs isn't asked again: its token is kept
+    }
+
+    /// While the app stays open, a failed registration is tried again when it is due, and stops once it reaches the hub.
+    @Test func aFailedRegistrationIsTriedAgainWhileOpen() async throws {
+        let fake = FakeSystem(), hub = Hub()
+        fake.sleep = { d in
+            fake.waits.append(d)
+            fake.now += TimeInterval(d.components.seconds)
+            if fake.waits.count == 2 { hub.refusing = false }
+            return fake.waits.count <= 3
+        }
+        hub.refusing = true
+        _ = await registered(fake, hub)
+        for _ in 0..<200 where hub.posts < 3 { await Task.yield() }
+        #expect(hub.posts == 3)
+        #expect(fake.waits == [.seconds(PushRegistrar.backoff(1)), .seconds(PushRegistrar.backoff(2))])
+    }
+
+    /// A registration to every group that one hub missed goes to every hub again after its backoff; only a pass that
+    /// reached them all ends the retries.
+    @Test func aRegistrationThatMissedOneHubIsSentToEveryHubAgain() async {
+        let fake = FakeSystem(), a = Hub(), b = Hub()
+        b.refusing = true
+        fake.allowed = true
+        fake.hubs = [PushRegistrar.Hub(group: "a", api: a.fake.client), PushRegistrar.Hub(group: "b", api: b.fake.client)]
+        let (r, health) = registrar(fake)
+        await r.registerIfPossible()?.value
+        #expect(await r.didRegister(token: token)?.value == ["a"])
+        #expect(a.posts == 1 && b.posts == 1)
+
+        await r.foreground()?.value // back at once: still waiting out the backoff
+        #expect(a.posts == 1 && b.posts == 1)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value // due: every hub again; b still refuses, so the wait doubles
+        #expect(a.posts == 2 && b.posts == 2)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value
+        #expect(a.posts == 2 && b.posts == 2)
+
+        b.refusing = false
+        fake.now += PushRegistrar.backoff(2)
+        await r.foreground()?.value
+        #expect(a.posts == 3 && b.posts == 3)
+        #expect(health.health.routes["b"]?.route == "direct")
+
+        fake.now += PushRegistrar.backoff(3) // every hub took it: nothing left to try again
+        await r.foreground()?.value
+        #expect(a.posts == 3 && b.posts == 3 && a.reads == 0 && b.reads == 0)
+    }
+
+    @Test func theBackoff() {
+        #expect(PushRegistrar.backoff(1) == 30 && PushRegistrar.backoff(2) == 60 && PushRegistrar.backoff(3) == 120)
+        #expect(PushRegistrar.backoff(20) == 3600)
+    }
+
+    /// Once the hub took it, coming back registers no more and asks the hub at most once an hour.
+    @Test func aRegistrationThatReachedTheHubIsNotRepeated() async {
+        let fake = FakeSystem(), hub = Hub()
+        let (r, _) = await registered(fake, hub)
+        for _ in 0..<3 {
+            fake.now += 600
+            await r.foreground()?.value
+        }
+        #expect(hub.posts == 1 && hub.reads == 0)
+
+        fake.now += PushRegistrar.checkInterval // the hub still lists a route for this credential: nothing to do
+        await r.foreground()?.value
+        await r.foreground()?.value
+        #expect(hub.posts == 1 && hub.reads == 1)
+        #expect(fake.registrations == 1)
+    }
+
+    /// Coming back an hour later to a hub that lists no push route for this credential registers with it, though this
+    /// process registered long ago.
+    @Test func aHubWithNoRouteForThisDeviceIsRegisteredWithAgain() async {
+        let fake = FakeSystem(), hub = Hub()
+        let (r, health) = await registered(fake, hub)
+        #expect(r.registered)
+        hub.routes = ["watch": "relay"] // retired: only the watch's credential has a route
+        fake.now += PushRegistrar.checkInterval
+        await r.foreground()?.value
+        #expect(hub.reads == 1 && hub.posts == 2)
+        #expect(health.health.routes[""]?.route == "direct")
+    }
+
+    /// Pairings that can't be read when APNs answers (before the first unlock) are registered with once they can.
+    @Test func unreadablePairingsAreTriedAgain() async {
+        let fake = FakeSystem(), hub = Hub()
+        fake.allowed = true
+        fake.hubs = nil
+        let (r, _) = registrar(fake)
+        await r.registerIfPossible()?.value
+        await r.didRegister(token: token)?.value
+        #expect(hub.posts == 0)
+
+        fake.hubs = [PushRegistrar.Hub(group: "", api: hub.fake.client)]
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value
+        #expect(hub.posts == 1)
+    }
+
+    /// APNs gave no token: asked again when the app comes back after the backoff, not at every return.
+    @Test func apnsIsAskedAgainAfterItFailed() async {
+        let fake = FakeSystem()
+        fake.allowed = true
+        let (r, health) = registrar(fake)
+        await r.registerIfPossible()?.value
+        r.didFail(URLError(.notConnectedToInternet))
+        #expect(health.health.apnsError != nil)
+        await r.foreground()?.value
+        #expect(fake.registrations == 1)
+        fake.now += PushRegistrar.backoff(1)
+        await r.foreground()?.value
+        #expect(fake.registrations == 2)
+        await r.foreground()?.value
+        #expect(fake.registrations == 2)
     }
 
     @Test func theSystemsSwitch() {

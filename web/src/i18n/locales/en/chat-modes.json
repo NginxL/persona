@@ -1,0 +1,21 @@
+{
+  "changed_from": "{who} changed the permission mode from “{from}” to “{to}”",
+  "changed_to": "{who} changed the permission mode to “{to}”",
+  "restart_queued": "{who} picked “{to}”: the session restarts in it once this turn ends",
+  "restart_done": "Restarted in “{to}”",
+  "restart_already": "Already in “{to}”, no restart needed",
+  "restart_failed": "Couldn't restart in “{to}”",
+  "restart_failed_why": "Couldn't restart in “{to}”: {why}",
+  "restart_dropped": "Called off, won't restart in “{to}”",
+  "restart_dropped_why": "Called off, won't restart in “{to}”: {why}",
+  "why_replaced": "another switch took its place",
+  "why_process_exited": "the process it was picked for has exited",
+  "why_process_replaced": "the session runs in another process now",
+  "why_process_unknown": "it couldn't tell which process to restart",
+  "why_expired": "it waited over two hours",
+  "why_not_stopped": "the agent didn't quit",
+  "why_start_failed": "the new process didn't start, so the session carries on as before",
+  "why_stopped": "the new process didn't start, and the session has stopped",
+  "by_hub": "The hub",
+  "by_unknown": "A device"
+}

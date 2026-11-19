@@ -8,9 +8,15 @@ type BotMessage struct {
 	Topic   bool   // said in a topic of a group chat (the thread of a todo), not in the bot's private chat
 	Owner   string // "" is the Chinese word for "user"
 	Text    string
+	Todo    *BotTodo // the reminder being answered; stored to-do content, not another instruction from the owner
 	Quote   *BotQuote
 	Forward string // the forwarded messages, one line each
 	Files   []string
+}
+
+// BotTodo is the to-do behind a reminder card. Notes is an excerpt; the web link on the card opens the whole to-do.
+type BotTodo struct {
+	ID, Title, Notes string
 }
 
 type BotQuote struct {

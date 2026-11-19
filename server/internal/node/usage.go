@@ -3,31 +3,30 @@ package node
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"hash/fnv"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/sysmon"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // Token usage of every agent on this machine, for the Dynamic Island's TPM / today's tokens / requests (docs/apple/live-activity.md).
-// The transcripts are the record: Claude Code writes each reply's usage on its assistant lines (main and subagent
-// files), Codex and compatible variants a token_count event per request. The meter reads only what the files gained since the last
+// The agents' records are the record: each agent's adapter (usage_adapters.go) says which files hold its usage and
+// parses them (tokenuse): Claude Code writes each reply's usage on its assistant lines (main and subagent files), Codex
+// and compatible variants a token_count event per request. The meter reads only what the files gained since the last
 // scan, sums it per minute and model for the last usageWindow, and reports changed minutes to the hub as "usage".
 // A node starts with the hub connection, so a fresh meter re-reads the window from the files and sends it whole
 // ("full"): nothing is stored, and restarting either side recounts the same numbers; the manager keeps the week
-// (docs/server/machines.md "Token usage").
+// (docs/server/machines.md "Token usage"). Runtime reports are separate deltas (runtime_usage.go).
 //
-// Each bucket also says which launcher ran it (the session's, as Persona started it; "" for one typed in a terminal),
-// and a reply is counted once in the window even when it is in more than one file: a fork (Claude Code's
-// --fork-session, Codex's fork) copies the history it starts from, timestamps and all, into the new file.
+// Each bucket also says which launcher ran it (the session's, as Persona started it; "" for one typed in a terminal)
+// and which agent (its adapter's), and a reply is counted once in the window even when it is in more than one file: a
+// fork (Claude Code's --fork-session, Codex's fork) copies the history it starts from, timestamps and all, into the
+// new file.
 
 const (
 	usageWindow  = 26 * time.Hour // "today" in any time zone, and the hour before
@@ -40,22 +39,25 @@ type usageKey struct {
 	minute   int64
 	model    string
 	launcher string
+	agent    string
 }
 
 type usageFile struct {
-	session   string // its session or thread id (usageSession)
-	off       int64
-	lastID    string // Claude: every content block of a reply repeats its usage
-	model     string // Codex: from the latest turn_context
-	lastTotal int64  // Codex: the session's running total, to skip repeated token_count events
+	session string // its session or thread id (usageAdapter.session)
+	off     int64
+	parser  tokenuse.Parser
+	// The request of the file's latest record that was not More: skip, it was not counted (before the window, after
+	// the backfill's end, a copy counted in another file), so its More records are not either; else at, its bucket.
+	skip bool
+	at   usageKey
 }
 
 type usageMeter struct {
 	files   map[string]*usageFile
 	buckets map[usageKey]*proto.UsageBucket
 	dirty   map[usageKey]bool
-	// counted: every reply counted in the window (Claude's message id, Codex's timestamp and running total), and the
-	// minute it is in, so a fork's copy of it in another file is not counted again.
+	// counted: every reply counted in the window (its record's Key: Claude's message id, Codex's timestamp and running
+	// total), and the minute it is in, so a fork's copy of it in another file is not counted again.
 	counted map[string]int64
 	// launcherOf names the launcher of a session ("" unknown); nil: none.
 	launcherOf func(session string) string
@@ -74,25 +76,24 @@ func newUsageMeter() *usageMeter {
 		counted: map[string]int64{}}
 }
 
-// usagePath is a transcript usageFiles lists, with the stat that found it in the window (scan reads up to its size).
+// usagePath is a file usageFiles lists, with the stat that found it in the window (scan reads up to its size) and the
+// adapter of the agent it is of.
 type usagePath struct {
 	path string
 	st   os.FileInfo
+	ad   usageAdapter
 }
 
-// usageFiles lists the transcripts that may hold usage of the window: Claude Code's (every config directory, their
-// subagents and their workflow runs' agents, projectTranscripts), Codex's and the compatible CLI's rollouts.
+// usageFiles lists the files that may hold usage of the window, every adapter's (usageAdapters): Claude Code's
+// transcripts (every config directory, their subagents and their workflow runs' agents), Codex's and the compatible
+// CLI's rollouts.
 func (n *Node) usageFiles(cutoff time.Time) []usagePath {
-	paths := n.projectTranscripts()
-	for _, home := range []string{n.codexHome(), n.traexHome()} {
-		for _, r := range rollouts(home) {
-			paths = append(paths, r.path)
-		}
-	}
-	out := make([]usagePath, 0, len(paths))
-	for _, p := range paths {
-		if st, err := os.Stat(p); err == nil && st.ModTime().After(cutoff) && n.scopedTranscriptAllows(p) {
-			out = append(out, usagePath{p, st})
+	var out []usagePath
+	for _, ad := range n.usageAdapters() {
+		for _, p := range ad.paths(n, cutoff) {
+			if st, err := os.Stat(p); err == nil && st.ModTime().After(cutoff) && n.scopedTranscriptAllows(p) {
+				out = append(out, usagePath{p, st, ad})
+			}
 		}
 	}
 	return out
@@ -116,6 +117,7 @@ func (n *Node) meterUsage(ctx context.Context, stateLoaded <-chan struct{}) {
 		st, _ := n.state.get(session)
 		return st.Launcher
 	}
+	queries := n.usageQueries()
 	t := time.NewTicker(usageEvery)
 	defer t.Stop()
 	for {
@@ -125,9 +127,15 @@ func (n *Node) meterUsage(ctx context.Context, stateLoaded <-chan struct{}) {
 			if ctx.Err() != nil {
 				return
 			}
-			m.scan(f.path, f.st, cutoff)
+			m.scan(f, cutoff)
+		}
+		for _, q := range queries {
+			for _, r := range q.poll(ctx, n, cutoff) {
+				m.add(&usageFile{}, r, cutoff)
+			}
 		}
 		m.prune(cutoff)
+		n.flushRuntimeUsage()
 		if n.peer != nil {
 			if params, ok := m.report(now); ok {
 				params["load"], params["cpus"] = loadAverage(), runtime.NumCPU()
@@ -142,180 +150,101 @@ func (n *Node) meterUsage(ctx context.Context, stateLoaded <-chan struct{}) {
 	}
 }
 
-// scan reads what path gained since the last scan (a file seen for the first time: from about the cutoff), up to the
-// size st (usageFiles' stat of it) says; what it gains after that is read on the next sweep.
-func (m *usageMeter) scan(path string, st os.FileInfo, cutoff time.Time) {
-	uf := m.files[path]
+// newUsageFile is the meter's state of a file it reads for the first time, read from off.
+func newUsageFile(f usagePath, off int64) *usageFile {
+	return &usageFile{session: f.ad.session(f.path), off: off, parser: f.ad.parser()}
+}
+
+// scan reads what f gained since the last scan (a file seen for the first time: from about the cutoff), up to the
+// size its stat (usageFiles') says; what it gains after that is read on the next sweep.
+func (m *usageMeter) scan(f usagePath, cutoff time.Time) {
+	uf := m.files[f.path]
 	if uf == nil {
-		uf = &usageFile{session: usageSession(path), off: startOffset(path, st.Size(), cutoff)}
-		m.files[path] = uf
+		uf = newUsageFile(f, startOffset(f.path, f.st.Size(), cutoff))
+		m.files[f.path] = uf
 	}
-	if st.Size() < uf.off { // rewritten
-		*uf = usageFile{session: uf.session}
+	if f.st.Size() < uf.off { // rewritten
+		*uf = *newUsageFile(f, 0)
 	}
-	if st.Size() == uf.off {
+	if f.st.Size() == uf.off {
 		return
 	}
-	f, err := os.Open(path)
+	fh, err := os.Open(f.path)
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	end := min(st.Size(), uf.off+usageMaxRead)
-	codex := strings.HasPrefix(filepath.Base(path), "rollout-")
-	uf.off += eachLine(io.NewSectionReader(f, uf.off, end-uf.off), func(line []byte) {
-		if codex {
-			m.codexLine(uf, line, cutoff)
-		} else {
-			m.claudeLine(uf, line, cutoff)
+	defer fh.Close()
+	end := min(f.st.Size(), uf.off+usageMaxRead)
+	uf.off += eachLine(io.NewSectionReader(fh, uf.off, end-uf.off), func(line []byte) {
+		if r, ok := uf.parser.Line(line); ok {
+			m.add(uf, r, cutoff)
 		}
 	})
 }
 
-// usageSession is the session a transcript belongs to: a Claude Code transcript's name (<id>.jsonl), the session
-// folder over a subagent's (<id>/subagents/agent-….jsonl) or a workflow run's agent's
-// (<id>/subagents/workflows/<run>/agent-….jsonl), a Codex rollout's thread id (its name ends with it).
-func usageSession(path string) string {
-	name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	if dir := filepath.Dir(path); filepath.Base(dir) == "subagents" {
-		return filepath.Base(filepath.Dir(dir))
+// add counts a record of uf's session: a request, or more of the one before it (More). A request before cutoff or
+// from the meter's until on is not counted, nor one whose Key was counted already (a copy in another file); a record
+// without a Key is counted as it is.
+func (m *usageMeter) add(uf *usageFile, r tokenuse.Record, cutoff time.Time) {
+	if r.More {
+		if !uf.skip {
+			m.addTo(uf.at, r.Tokens, false)
+		}
+		return
 	}
-	if runs := filepath.Dir(filepath.Dir(path)); filepath.Base(runs) == "workflows" && filepath.Base(filepath.Dir(runs)) == "subagents" {
-		return filepath.Base(filepath.Dir(filepath.Dir(runs)))
-	}
-	if strings.HasPrefix(name, "rollout-") && len(name) >= 36 {
-		return name[len(name)-36:]
-	}
-	return name
-}
-
-// add counts one reply of uf's session; reply identifies it (empty: no way to tell a copy, counted).
-func (m *usageMeter) add(uf *usageFile, reply string, ts time.Time, model string, u proto.UsageBucket) {
-	if model == "" {
-		model = "unknown"
-	}
-	if !m.until.IsZero() && !ts.Before(m.until) {
+	uf.skip = true
+	if r.Time.Before(cutoff) || !m.until.IsZero() && !r.Time.Before(m.until) {
 		return
 	}
 	step := m.step
 	if step <= 0 {
 		step = 60
 	}
-	minute := ts.Unix() / step * step
-	if reply != "" && m.seen != nil {
+	minute := r.Time.Unix() / step * step
+	if r.Key != "" && m.seen != nil {
 		h := fnv.New64a()
-		h.Write([]byte(reply))
+		h.Write([]byte(r.Key))
 		if _, ok := m.seen[h.Sum64()]; ok {
 			return
 		}
 		m.seen[h.Sum64()] = struct{}{}
-	} else if reply != "" {
-		if _, ok := m.counted[reply]; ok {
+	} else if r.Key != "" {
+		if _, ok := m.counted[r.Key]; ok {
 			return
 		}
-		m.counted[reply] = minute
+		m.counted[r.Key] = minute
+	}
+	model := r.Model
+	if model == "" {
+		model = "unknown"
+	}
+	session := uf.session
+	if r.Session != "" { // a database's row says its session
+		session = r.Session
 	}
 	launcher := ""
-	if m.launcherOf != nil && uf.session != "" {
-		launcher = m.launcherOf(uf.session)
+	if m.launcherOf != nil && session != "" {
+		launcher = m.launcherOf(session)
 	}
-	k := usageKey{minute, model, launcher}
+	uf.skip, uf.at = false, usageKey{minute, model, launcher, r.Agent}
+	m.addTo(uf.at, r.Tokens, true)
+}
+
+// addTo adds t to bucket k, and a request with request.
+func (m *usageMeter) addTo(k usageKey, t tokenuse.Tokens, request bool) {
 	b := m.buckets[k]
 	if b == nil {
-		b = &proto.UsageBucket{Minute: k.minute, Model: model, Launcher: launcher}
+		b = &proto.UsageBucket{Minute: k.minute, Model: k.model, Launcher: k.launcher, Agent: k.agent}
 		m.buckets[k] = b
 	}
-	b.Input += u.Input
-	b.CacheWrite += u.CacheWrite
-	b.CacheRead += u.CacheRead
-	b.Output += u.Output
-	b.Requests++
+	b.Input += t.Input
+	b.CacheWrite += t.CacheWrite
+	b.CacheRead += t.CacheRead
+	b.Output += t.Output
+	if request {
+		b.Requests++
+	}
 	m.dirty[k] = true
-}
-
-func (m *usageMeter) claudeLine(uf *usageFile, line []byte, cutoff time.Time) {
-	if !bytes.Contains(line, []byte(`"usage"`)) || !bytes.Contains(line, []byte(`"assistant"`)) {
-		return
-	}
-	var e struct {
-		Type      string    `json:"type"`
-		Timestamp time.Time `json:"timestamp"`
-		Message   *struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
-			Usage *struct {
-				InputTokens              int64 `json:"input_tokens"`
-				CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-				OutputTokens             int64 `json:"output_tokens"`
-			} `json:"usage"`
-		} `json:"message"`
-	}
-	if json.Unmarshal(line, &e) != nil || e.Type != "assistant" || e.Message == nil || e.Message.Usage == nil {
-		return
-	}
-	if e.Message.ID != "" && e.Message.ID == uf.lastID {
-		return
-	}
-	uf.lastID = e.Message.ID
-	if e.Message.Model == "<synthetic>" || e.Timestamp.Before(cutoff) { // <synthetic>: an error Claude Code wrote itself
-		return
-	}
-	u := e.Message.Usage
-	reply := ""
-	if e.Message.ID != "" {
-		reply = "claude:" + e.Message.ID
-	}
-	m.add(uf, reply, e.Timestamp, e.Message.Model, proto.UsageBucket{Input: u.InputTokens, CacheWrite: u.CacheCreationInputTokens,
-		CacheRead: u.CacheReadInputTokens, Output: u.OutputTokens})
-}
-
-func (m *usageMeter) codexLine(uf *usageFile, line []byte, cutoff time.Time) {
-	if !bytes.Contains(line, []byte(`"token_count"`)) && !bytes.Contains(line, []byte(`"turn_context"`)) {
-		return
-	}
-	type tokens struct {
-		Input  int64 `json:"input_tokens"`
-		Cached int64 `json:"cached_input_tokens"`
-		Output int64 `json:"output_tokens"`
-		Total  int64 `json:"total_tokens"`
-	}
-	var l struct {
-		Timestamp time.Time `json:"timestamp"`
-		Type      string    `json:"type"`
-		Payload   struct {
-			Type  string `json:"type"`
-			Model string `json:"model"`
-			Info  *struct {
-				Total tokens `json:"total_token_usage"`
-				Last  tokens `json:"last_token_usage"`
-			} `json:"info"`
-		} `json:"payload"`
-	}
-	if json.Unmarshal(line, &l) != nil {
-		return
-	}
-	if l.Type == "turn_context" {
-		if l.Payload.Model != "" {
-			uf.model = l.Payload.Model
-		}
-		return
-	}
-	// Codex repeats token_count (rate limit updates carry the same totals): only a grown total is a new request.
-	if l.Payload.Type != "token_count" || l.Payload.Info == nil || l.Payload.Info.Total.Total <= uf.lastTotal {
-		return
-	}
-	uf.lastTotal = l.Payload.Info.Total.Total
-	if l.Timestamp.Before(cutoff) {
-		return
-	}
-	last := l.Payload.Info.Last
-	model := uf.model
-	if model == "" {
-		model = "codex"
-	}
-	reply := "codex:" + l.Timestamp.UTC().Format(time.RFC3339Nano) + ":" + strconv.FormatInt(l.Payload.Info.Total.Total, 10)
-	m.add(uf, reply, l.Timestamp, model, proto.UsageBucket{Input: max(last.Input-last.Cached, 0), CacheRead: last.Cached, Output: last.Output})
 }
 
 func (m *usageMeter) prune(cutoff time.Time) {

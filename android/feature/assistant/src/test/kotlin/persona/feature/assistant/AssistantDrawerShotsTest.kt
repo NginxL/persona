@@ -48,7 +48,7 @@ import java.time.Instant
 
 /**
  * The Persona tab's history drawer drawn on the JVM with Robolectric's native graphics (no emulator), in every style,
- * light and dark: the main conversation first, as "Persona" with Persona's face, and "More" without "Profile".
+ * light and dark: the main conversation first with the home icon, and "More" without "Profile".
  * Assistant details remain available from the Persona toolbar, not settings. Each is written as a PNG to `build/drawer-shots/` (or
  * `-Dpersona.shots=<dir>`) to look at.
  */
@@ -104,22 +104,14 @@ class AssistantDrawerShotsTest {
                 }
             }
         }
-        // The main conversation reads "Persona" (the session keeps its own title), with a small 主对话 under it so it
-        // reads as a chat (#6327, as the web, #6293), and "Profile" is gone.
         rule.onAllNodesWithText("主对话").assertCountEquals(1)
         rule.onAllNodesWithText("资料页").assertCountEquals(0)
         rule.onAllNodesWithText("认识 Persona").assertCountEquals(0)
-        // #2004 on every platform: the first row is the main conversation as "Persona" with the app's mark, then a
-        // line; Persona is not listed again (no header of its own, no second main row).
-        rule.onAllNodesWithText("Persona").assertCountEquals(1)
-        val persona = rule.onNodeWithText("Persona").fetchSemanticsNode().boundsInRoot
-        // The texts themselves, not the row they merge into.
-        val name = rule.onNodeWithText("Persona", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val mark = rule.onNodeWithText("主对话", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertTrue("主对话 is under Persona", name.bottom <= mark.top)
+        rule.onAllNodesWithText("Persona").assertCountEquals(0)
+        val mainRow = rule.onNodeWithText("主对话").fetchSemanticsNode().boundsInRoot
         val search = rule.onNodeWithText("搜索对话").fetchSemanticsNode().boundsInRoot
-        assertTrue("Persona is above the search", persona.bottom <= search.top && mark.bottom <= search.top)
-        rule.onNodeWithText("Persona").performClick()
+        assertTrue("Main conversation is above search", mainRow.bottom <= search.top)
+        rule.onNodeWithText("主对话").performClick()
         assertTrue(mainTapped)
         assertEquals(null, opened)
         rule.onNodeWithText("启动器").performScrollTo().performClick()
@@ -145,10 +137,29 @@ class AssistantDrawerShotsTest {
         style = AppStyle.Glass; dark = false
         mainTapped = false
         groups = ConversationGroups(null, emptyList(), recent)
-        rule.onAllNodesWithText("Persona").assertCountEquals(1)
+        rule.onAllNodesWithText("主对话").assertCountEquals(1)
         rule.onNodeWithText("开始主对话").performClick()
         assertTrue(mainTapped)
         capture("drawer-no-main-glass-light")
+    }
+
+    @Test @Config(fontScale = 2f)
+    fun drawsTheMainRowAtLargestTextSize() {
+        var dark by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                Box(Modifier.testTag("shot").width(400.dp).height(800.dp).background(PersonaTheme.palette.background)) {
+                    AssistantDrawer("", {}, ConversationGroups(main, listOf(pinned), recent),
+                        active = null, hasMain = true, onEnd = null, onMain = {}, onOpen = {}, onInfo = {},
+                        onNew = {}, onSettings = {})
+                }
+            }
+        }
+        rule.onNodeWithText("主对话").assertExists()
+        capture("drawer-glass-light-large-text")
+        dark = true
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        capture("drawer-glass-dark-large-text")
     }
 
     @Test fun navigationPagesAddTrailingChevronsAndKeepBadges() {
@@ -477,6 +488,48 @@ class AssistantDrawerShotsTest {
         rule.onNodeWithText("结束…").assertExists()
     }
 
+    private fun showRecentBackgroundSupervisor() {
+        val background = Session(machineId = "hub", sessionId = "bg", title = "Background supervisor", origin = "supervisor",
+            status = "working", updatedAt = minutesAgo(3), lastText = "登录页修复：三条验收标准都有证据，已验收。")
+        val snapshot = persona.core.contracts.api.AssistantSnapshot(main.key, listOf(main, background) + recent,
+            backgroundSupervisor = "bg", recentTaskChats = true)
+        val groups = conversationGroups(snapshot, "", ConversationWords("新对话", "接力", "接力：%s", "后台督办"))
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
+                    AssistantDrawer("", {}, groups, active = null, hasMain = true, onEnd = {}, onMain = {}, onOpen = {},
+                        onInfo = {}, onNew = {}, onSettings = {}, onArchive = {}, onLeader = {}, onRename = {}, onEditTags = {})
+                }
+            }
+        }
+    }
+
+    @Test fun recentBackgroundSupervisorUsesBuiltInNameAndTaskOrigin() {
+        showRecentBackgroundSupervisor()
+        rule.onNodeWithText("后台督办").assertExists()
+        rule.onAllNodesWithText("Background supervisor").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("定时任务", useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test fun recentBackgroundSupervisorOmitsManagementActions() {
+        showRecentBackgroundSupervisor()
+        rule.onAllNodesWithContentDescription("对话操作")[1].performClick()
+        rule.onNodeWithText("拷贝会话 ID").assertExists()
+        rule.onAllNodesWithText("设为常驻").assertCountEquals(0)
+        rule.onAllNodesWithText("归档").assertCountEquals(0)
+        rule.onAllNodesWithText("重命名…").assertCountEquals(0)
+        rule.onAllNodesWithText("编辑标签…").assertCountEquals(0)
+        rule.onAllNodesWithText("结束…").assertCountEquals(0)
+        rule.onNodeWithText("拷贝会话 ID").performClick()
+        // An ordinary Recent row keeps the same management actions.
+        rule.onAllNodesWithContentDescription("对话操作")[2].performClick()
+        rule.onNodeWithText("设为常驻").assertExists()
+        rule.onNodeWithText("归档").assertExists()
+        rule.onNodeWithText("重命名…").assertExists()
+        rule.onNodeWithText("编辑标签…").assertExists()
+        rule.onNodeWithText("结束…").assertExists()
+    }
+
     @Test fun drawsSearchResultsInEveryStyle() {
         val said = AssistantSearchHit(itemId = "m1", snippet = "前面的话青石巷后面还有一句", ranges = listOf(listOf(4, 7)))
         val route = Session(machineId = "hub", sessionId = "route", title = "路线", status = "idle",
@@ -500,7 +553,7 @@ class AssistantDrawerShotsTest {
         rule.onNodeWithText("周末去哪儿").assertExists()
         rule.onNodeWithText("已归档").assertExists()
         rule.onNodeWithText("较早的对话还在整理，可能有些暂时搜不到。").assertExists()
-        rule.onAllNodesWithText("Persona").assertCountEquals(1)
+        rule.onAllNodesWithText("主对话").assertCountEquals(1)
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()

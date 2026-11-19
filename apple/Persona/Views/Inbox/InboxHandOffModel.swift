@@ -44,6 +44,8 @@ final class InboxHandOffModel {
         let error: String?
         /// The outbox already initiated this item's Done write; the caller must not file it again.
         let filed: Bool
+        /// It did not go in yet and the assistant keeps it to send by itself (#10194): the item is not filed as done.
+        var kept = false
 
         static let sent = AgentSendResult(delivered: true, error: nil, filed: false)
         static func failed(_ error: String? = nil) -> AgentSendResult {
@@ -408,7 +410,7 @@ final class InboxHandOffModel {
                     self.error = result.error
                     return false
                 }
-                filed = result.filed
+                filed = result.filed || result.kept // a kept message has not reached the agent: nothing is filed
                 sent = (target, key)
             }
             if let sent { record(sent.target, sent.key, title: itemTitle ?? ask, clientID: UUID()) }
@@ -516,6 +518,8 @@ extension AppModel {
         let outcome = await sendPending(key, msg)
         settleSend(key, msg.id, outcome)
         if outcome == .sent { return handOffSent(key, msg) }
+        // Not delivered yet; the assistant sends it by itself (#10194): the sheet closes, the item stays where it is.
+        if outcome == .kept { return InboxHandOffModel.AgentSendResult(delivered: true, error: nil, filed: false, kept: true) }
         if outcome == .failed { return .failed(chat(key).pending.first { $0.id == msg.id }?.failure) }
         return await waitForHandOffDelivery(key, msg)
     }

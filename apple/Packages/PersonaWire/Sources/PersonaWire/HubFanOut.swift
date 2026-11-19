@@ -17,9 +17,9 @@ public nonisolated enum HubFanOut {
     /// On the main actor by name, not by the caller's `#isolation`: the answers came back on a pool thread that way,
     /// and the callers' AppModel reads stopped the app at launch (#4777).
     @MainActor
-    public static func run<T: Sendable>(_ groups: [String], fetch: @escaping @Sendable (String) async throws -> T,
-                                 each: (String, Result<T, Error>) -> Void) async {
-        await withTaskGroup(of: (String, Result<T, Error>).self, isolation: MainActor.shared) { tasks in
+    public static func run<Scope: Sendable, T: Sendable>(_ groups: [Scope], fetch: @escaping @Sendable (Scope) async throws -> T,
+                                                       each: @MainActor (Scope, Result<T, Error>) -> Void) async {
+        await withTaskGroup(of: (Scope, Result<T, Error>).self, isolation: MainActor.shared) { tasks in
             for g in groups {
                 tasks.addTask {
                     do { return (g, .success(try await fetch(g))) } catch { return (g, .failure(error)) }

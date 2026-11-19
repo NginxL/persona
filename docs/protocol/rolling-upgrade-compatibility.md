@@ -140,6 +140,32 @@ chosen by a `runtime` in the main chat's model binding. Each pair keeps working:
 | Session rows | `runtime` and `runtime_fallback` are no longer produced, and the hub drops them from an older node's report. Clients read their absence as the CLI. |
 | The runtime package | The Agent SDK runtime package (`persona-agent-sdk-runtime`, under its older `jarvis-` name too) is no longer carried. An older node that looks for it finds none and runs the CLI, its existing fallback. Copies already unpacked under a node's `runtime-packages/` are unused and not cleaned up. |
 
+### Node connection lanes (#10660)
+
+A manager and a node built since #10660 frame their connection on four lanes (protocol.md "Lanes"); any older end
+keeps JSON lines, byte for byte. The switch is asked for on the connection itself, so what sits between the two ends
+does not take part:
+
+| Pair | What happens |
+| --- | --- |
+| New manager, new node | `node.info` announces `node_lanes_v1`; the manager sends `rpc.lanes`, the node answers and frames its output after the answer, the manager frames its own after one marker line. Logged as `lanes=on` on the "connected" line. |
+| New manager, older node | No `node_lanes_v1` (and a node from before the handshake never counts as having it): the manager never asks. Lines, as before. |
+| Older manager, new node | The manager never sends `rpc.lanes`; the node announces a capability the manager ignores and writes lines as before. |
+| A node that announces lanes and refuses | It answers `rpc.lanes` with an error (`lanes_refused`, or `unknown method`); the manager logs "staying with lines" and goes on with lines. |
+| An older relay in between | `node --stdio` relaying to a resident node, Persona Link and its hub relay (`spliceWS`), tailcat, ssh and a member hub copy bytes without reading them; frames pass through all of them, older versions included. A `node --stdio` that serves the connection itself is the node: its own version decides. |
+| A manager that stopped waiting | The node's answer switches the manager's input whenever it is read, and its output follows: an answer after the handshake's wait ran out still frames both directions. |
+| Lines in flight during the switch | Each side switches its output under its writer's lock right after its announcing line, and its input right after the other side's: nothing written before is read as frames, nothing after as lines (`TestLanesUpgradeWithTrafficInFlight`). |
+
+Nothing is stored: every new connection negotiates again, so a node or manager rolled back mid-session simply connects
+with lines next time.
+
+### Launcher default models (#4663)
+
+A launcher with no explicit model has an empty `model` on the wire; display text is never a model ID. Older nodes and
+shell helpers could send the Chinese placeholder `默认` instead. Every client treats that legacy value exactly like an
+empty model: the launcher's own default applies, its existing localized Default presentation is used, and no placeholder
+is sent as a model pick. Explicit model IDs are unchanged in both directions.
+
 ## 配置、目录、服务与升级渠道
 
 | 标识 | 旧名 | 新名 | 新实现读旧安装 | 与旧实现共存／回退 |

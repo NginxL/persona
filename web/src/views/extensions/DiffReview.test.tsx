@@ -29,13 +29,13 @@ afterEach(() => {
   host = null;
 });
 
-function mount(sent: Sent[], answer: (a: UIAction, v?: Record<string, string>) => UIActionResult | null = () => ({})) {
+function mount(sent: Sent[], answer: (a: UIAction, v?: Record<string, string>) => UIActionResult | null | Promise<UIActionResult | null> = () => ({})) {
   host = document.createElement("div");
   document.body.append(host);
   const r = createRoot(host);
   root = r;
   const view = SHOWCASE["code-review-v5"];
-  const act = (a: UIAction, v?: Record<string, string>) => sent.push([a.id, { ...v, ...a.values }]);
+  const act = (a: UIAction, v?: Record<string, string>) => void sent.push([a.id, { ...v, ...a.values }]);
   const fetch = async (a: UIAction, v?: Record<string, string>) => {
     sent.push([a.id, v]);
     return answer(a, v);
@@ -135,6 +135,34 @@ describe("code review (UI version 5)", () => {
     expect(treeMark.classList.contains("text-green")).toBe(true);
     expect(d.querySelector(".code-hl")).toBeNull();
     expect(root.textContent).toContain("已查看 2 / 5");
+  });
+
+  it("takes the viewed mark back when the extension does not take it", async () => {
+    const sent: Sent[] = [];
+    let fail = () => {};
+    const root = mount(sent, (a) => (a.id === "mark_viewed" ? new Promise<null>((done) => (fail = () => done(null))) : {}));
+    const d = diff(root, "src/upload/client.go");
+    const mark = () => d.querySelector('[role="checkbox"]')!.getAttribute("aria-checked");
+    click(d.querySelector('[role="checkbox"]'));
+    expect(sent.at(-1)).toEqual(["mark_viewed", { path: "src/upload/client.go", viewed: "true" }]);
+    expect(mark()).toBe("true"); // shown at once, before the answer
+    await flush(async () => fail()); // the extension's answer: a failure (ExtensionView's fetchQuiet: null)
+    expect(mark()).toBe("false");
+    expect(root.textContent).toContain("已查看 1 / 5");
+  });
+
+  it("takes a viewed mark back only when the latest change of it is rejected", async () => {
+    const answers: ((r: UIActionResult | null) => void)[] = [];
+    const root = mount([], (a) => (a.id === "mark_viewed" ? new Promise<UIActionResult | null>((done) => answers.push(done)) : {}));
+    const d = diff(root, "src/upload/client.go");
+    const mark = () => d.querySelector('[role="checkbox"]')!.getAttribute("aria-checked");
+    for (let i = 0; i < 3; i++) click(d.querySelector('[role="checkbox"]')); // viewed, not viewed, viewed again
+    expect(answers).toHaveLength(3);
+    await flush(async () => answers[1]({}));
+    await flush(async () => answers[0](null)); // an older change rejected: the newer one stands
+    expect(mark()).toBe("true");
+    await flush(async () => answers[2](null)); // the latest rejected: back to the mark before it
+    expect(mark()).toBe("false");
   });
 
   it("folds generated files and does not load them until asked", () => {

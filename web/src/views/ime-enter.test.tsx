@@ -219,7 +219,7 @@ describe("Safari's candidate keys in the code views and the provider wizard (#49
 
   it("does not send the code composer with ⌘/Ctrl+Enter", async () => {
     const sent: string[] = [];
-    act(() => root.render(<ViewSections view={SHOWCASE["code-overview"]} {...INERT} onAct={(a) => sent.push(a.id)} />));
+    act(() => root.render(<ViewSections view={SHOWCASE["code-overview"]} {...INERT} onAct={(a) => void sent.push(a.id)} />));
     const area = host.querySelector("textarea")!;
     typeArea(area, "LGTM");
     await safari(area, "Enter", { ctrlKey: true });

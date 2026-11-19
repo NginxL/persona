@@ -116,7 +116,7 @@ class ChatDataRepositories private constructor(
         private fun openLegacyCache(context: Context, scope: HubScope): ItemsDatabase {
             val directory = legacyDirectory(context, scope).apply { mkdirs() }
             return Room.databaseBuilder(context.applicationContext, ItemsDatabase::class.java,
-                File(directory, "items.db").absolutePath).addMigrations(ItemsDatabase.MIGRATION_1_2, ItemsDatabase.MIGRATION_3_4, ItemsDatabase.MIGRATION_4_5, ItemsDatabase.MIGRATION_5_6).build()
+                File(directory, "items.db").absolutePath).addMigrations(ItemsDatabase.MIGRATION_1_2, ItemsDatabase.MIGRATION_3_4, ItemsDatabase.MIGRATION_4_5, ItemsDatabase.MIGRATION_5_6, ItemsDatabase.MIGRATION_6_7).build()
         }
     }
 }

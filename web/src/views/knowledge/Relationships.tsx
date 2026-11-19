@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, enc, errorText } from "../../lib/api";
 import { importanceTone, linkGroups, type KBDetail, type KBDetailResponse, type KBEntry } from "../../lib/kb";
-import { matchesRemovalEnd, relationshipRemoval, removalConfirmed, type Removal } from "../../lib/kb-relationships";
+import { matchesRemovalEnd, relationshipAllowance, relationshipRemoval, removalConfirmed, removalUpdate, type Allowance, type Removal } from "../../lib/kb-relationships";
 import { href } from "../../lib/router";
-import { Button, Dialog, IconButton } from "../../ui/atoms";
+import { Button, Dialog, IconButton, Switch } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Card, importanceLabel, MoreRow, onPlainClick, SectionTitle, Tile, TonePill } from "./KBParts";
 
@@ -23,7 +23,7 @@ const SHOWN = 4;
 export function Relationships(props: Props) {
   const [openKinds, setOpenKinds] = useState<Set<string>>(new Set());
   const [intent, setIntent] = useState<Removal | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmed, setConfirmed] = useState<"" | "excluded" | "locked">("");
   const [dialogOpen, setDialogOpen] = useState(false);
   return <>
     {intent && !dialogOpen && <Card>
@@ -51,7 +51,7 @@ export function Relationships(props: Props) {
                 <Icon name="chevronRight" size={12} stroke={2.2} className="shrink-0 text-ink-3" />
               </a>
               {removal && <IconButton icon="x" label={t("knowledge-relationships.action")} disabled={intent !== null} onClick={() => {
-                if (props.current() && !intent) { setConfirmed(false); setIntent(removal); setDialogOpen(true); }
+                if (props.current() && !intent) { setConfirmed(""); setIntent(removal); setDialogOpen(true); }
               }} />}
             </div>;
           })}
@@ -61,13 +61,61 @@ export function Relationships(props: Props) {
         </Card>
       </section>;
     })}
-    {confirmed && <p role="status" className="text-sm text-ink-2">{t("knowledge-relationships.success")}</p>}
-    {intent && <RemovalDialog {...props} intent={intent} open={dialogOpen} onClose={(keep) => { setDialogOpen(false); if (!keep) setIntent(null); }} onConfirmed={() => { setConfirmed(true); setIntent(null); setDialogOpen(false); props.onSaved(); }} />}
+    {confirmed && <p role="status" className="text-sm text-ink-2">{t(confirmed === "locked" ? "knowledge-relationships.success" : "knowledge-relationships.success_excluded")}</p>}
+    <RemovedLinks {...props} onAllowed={() => setConfirmed("")} />
+    {intent && <RemovalDialog {...props} intent={intent} open={dialogOpen} onClose={(keep) => { setDialogOpen(false); if (!keep) setIntent(null); }} onConfirmed={(locked) => { setConfirmed(locked ? "locked" : "excluded"); setIntent(null); setDialogOpen(false); props.onSaved(); }} />}
   </>;
 }
 
-function RemovalDialog({ intent, open, auth, current, onRefreshed, onClose, onConfirmed }: Props & { intent: Removal; open: boolean; onClose: (keep: boolean) => void; onConfirmed: () => void }) {
+/** The links the user removed (detail.removed): Persona keeps them out; Allow again lets it link them on its own. */
+function RemovedLinks(props: Props & { onAllowed: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [failure, setFailure] = useState<{ key: string; text: string } | null>(null);
+  const rows = (props.detail.removed ?? []).flatMap((x) => {
+    const allowance = relationshipAllowance(props.detail, x);
+    return allowance ? [{ x, allowance, key: `${x.kind}/${x.id}` }] : [];
+  });
+  if (!rows.length) return null;
+  const self = typeof props.detail.meta?.id === "string" ? props.detail.meta.id : props.detail.id;
+  const allow = async (x: KBEntry, key: string, allowance: Allowance) => {
+    if (busy || !props.current()) return;
+    setBusy(key); setFailure(null);
+    try {
+      await api(`/kb/${enc(allowance.target.kind)}/${enc(allowance.target.id)}`, { ...props.auth, method: "PUT", json: allowance.update });
+      if (!props.current()) return;
+      const r = await api<KBDetailResponse>(`/kb/${enc(props.detail.kind)}/${enc(self)}`, props.auth);
+      if (!props.current()) return;
+      props.onRefreshed(r);
+      if (r.detail.removed?.some((y) => y.kind === x.kind && y.id === x.id)) setFailure({ key, text: t("knowledge-relationships.allow_unconfirmed", { name: x.name }) });
+      else { props.onAllowed(); props.onSaved(); }
+    } catch (err) {
+      if (props.current()) setFailure({ key, text: t("knowledge-relationships.allow_failed", { error: errorText(err) }) });
+    } finally {
+      setBusy("");
+    }
+  };
+  return <section>
+    <SectionTitle title={t("knowledge-relationships.removed_title")} count={rows.length} />
+    <Card>
+      <p className="px-4 pt-3 text-label leading-snug text-ink-3">{t("knowledge-relationships.removed_hint")}</p>
+      {rows.map(({ x, allowance, key }) => <div key={key}>
+        <div className="flex items-center gap-3 px-4 py-2.5">
+          <Tile entry={x} size={30} />
+          <span className="min-w-0 flex-1 truncate text-meta font-medium text-ink-2" title={x.name}>{x.name}</span>
+          <Button size="sm" className="touch-hit" busy={busy === key} disabled={busy !== ""} aria-label={t("knowledge-relationships.allow_label", { name: x.name })} onClick={() => void allow(x, key, allowance)}>
+            {t("knowledge-relationships.allow")}
+          </Button>
+        </div>
+        {failure?.key === key && <p role="alert" className="break-words px-4 pb-2.5 text-label text-red">{failure.text}</p>}
+      </div>)}
+    </Card>
+  </section>;
+}
+
+function RemovalDialog({ intent, open, auth, current, onRefreshed, onClose, onConfirmed }: Props & { intent: Removal; open: boolean; onClose: (keep: boolean) => void; onConfirmed: (locked: boolean) => void }) {
   const [phase, setPhase] = useState<"confirm" | "writing" | "reading" | "retry-write" | "read-error" | "unconfirmed">("confirm");
+  // Off by default: only this link stays out. Fixed once the first write goes out, so a retry sends the same intent.
+  const [lockLists, setLockLists] = useState(false);
   const [error, setError] = useState("");
   const busy = useRef(false);
   const alive = useRef(true);
@@ -108,8 +156,8 @@ function RemovalDialog({ intent, open, auth, current, onRefreshed, onClose, onCo
     busy.current = false;
     if (failure) {
       setError(failure); setPhase("read-error");
-    } else if (removalConfirmed(intent, details)) {
-      onConfirmed();
+    } else if (removalConfirmed(intent, details, lockLists)) {
+      onConfirmed(lockLists);
     } else {
       setError(attempt.current.error);
       setPhase(attempt.current.accepted ? "unconfirmed" : "retry-write");
@@ -121,7 +169,7 @@ function RemovalDialog({ intent, open, auth, current, onRefreshed, onClose, onCo
     setPhase("writing"); setError("");
     attempt.current = { accepted: false, error: "" };
     try {
-      await api(`/kb/${enc(intent.target.kind)}/${enc(intent.target.id)}`, { ...auth, method: "PUT", json: intent.update });
+      await api(`/kb/${enc(intent.target.kind)}/${enc(intent.target.id)}`, { ...auth, method: "PUT", json: removalUpdate(intent, lockLists) });
       attempt.current.accepted = true;
     } catch (err) {
       attempt.current.error = errorText(err);
@@ -140,9 +188,16 @@ function RemovalDialog({ intent, open, auth, current, onRefreshed, onClose, onCo
       <p>{t("knowledge-relationships.confirm", { first: intent.ends[0].name, second: intent.ends[1].name })}</p>
       <p>{t("knowledge-relationships.keep")}</p>
       <div className="rounded-control bg-field p-3">
-        <p className="font-medium text-ink">{t("knowledge-relationships.lock_title")}</p>
-        {intent.ends.map((end) => <p key={`${end.kind}/${end.id}`} className="mt-2">{t("knowledge-relationships.lock", { name: end.name, list: t(`knowledge-relationships.list_${end.field}`) })}</p>)}
-        <p className="mt-2">{t("knowledge-relationships.lock_hint")}</p>
+        <p className="font-medium text-ink">{t("knowledge-relationships.exclude_title")}</p>
+        <p className="mt-2">{t("knowledge-relationships.exclude", { first: intent.ends[0].name, second: intent.ends[1].name })}</p>
+        <div className="mt-3 flex items-center gap-3">
+          <span className="min-w-0 flex-1 font-medium text-ink">{t("knowledge-relationships.lock_option")}</span>
+          <Switch on={lockLists} onChange={setLockLists} disabled={phase !== "confirm"} label={t("knowledge-relationships.lock_option")} />
+        </div>
+        {lockLists && <>
+          {intent.ends.map((end) => <p key={`${end.kind}/${end.id}`} className="mt-2">{t("knowledge-relationships.lock", { name: end.name, list: t(`knowledge-relationships.list_${end.field}`) })}</p>)}
+          <p className="mt-2">{t("knowledge-relationships.lock_hint")}</p>
+        </>}
       </div>
       {working && <p role="status">{t(phase === "writing" ? "knowledge-relationships.removing" : "knowledge-relationships.reading")}</p>}
       {phase === "read-error" && <p role="alert">{t(attempt.current.accepted ? "knowledge-relationships.accepted_read_error" : "knowledge-relationships.rejected_read_error", { error, writeError: attempt.current.error })}</p>}

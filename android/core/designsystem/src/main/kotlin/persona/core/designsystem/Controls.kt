@@ -5,6 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale as scaleDraw
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -59,7 +61,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.node.requireDensity
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.Dp
@@ -140,7 +144,21 @@ fun JButton(
     val shape = RoundedCornerShape(if (style == AppStyle.Board) shapes.button else size.height / 2)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed && style == AppStyle.Glass && !PersonaTheme.reduceMotion) 0.96f else 1f, label = "press")
+    val reduceMotion = PersonaTheme.reduceMotion
+    // Layout width, not snapshot state. Reading it from composition made every Brief and Board button recompose once
+    // after the first layout. It is read only while a Glass button is pressed; scale does not change the layout width.
+    val widthPx = remember { floatArrayOf(0f) }
+    val growthPx = with(LocalDensity.current) { PageTransitionTokens.pressGrowthDp.dp.toPx() }
+    val glassPress = pressed && style == AppStyle.Glass && !reduceMotion
+    val scale by animateFloatAsState(
+        targetValue = if (glassPress) glassPressTarget(true, true, false, widthPx[0], growthPx) else 1f,
+        animationSpec = if (pressed) {
+            IosSpring(PageTransitionTokens.glassPressDurationMs, PageTransitionTokens.glassPressBounce).spec()
+        } else {
+            IosSpring(PageTransitionTokens.glassReleaseDurationMs, PageTransitionTokens.glassReleaseBounce).spec()
+        },
+        label = "press",
+    )
     val (fill, content) = when (kind) {
         JButtonKind.Primary -> palette.action to palette.onAction
         JButtonKind.Secondary -> (if (style == AppStyle.Board) palette.surface else palette.surfaceStrong) to palette.ink
@@ -155,7 +173,9 @@ fun JButton(
     }
     val busy = loading
     Row(
-        modifier.heightIn(min = size.height).minimumInteractiveComponentSize().scale(scale).then(frame)
+        modifier.heightIn(min = size.height).minimumInteractiveComponentSize().scale(scale)
+            .onSizeChanged { if (style == AppStyle.Glass && !reduceMotion) widthPx[0] = it.width.toFloat() }
+            .then(frame)
             .clickable(interaction, indication = androidx.compose.material3.ripple(), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .stableAlpha(if (enabled || busy) 1f else 0.4f)
             .padding(horizontal = if (kind == JButtonKind.Quiet) 8.dp.dense else size.padding),
@@ -184,6 +204,7 @@ fun JTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
  * Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square).
  * [badge] is the needs-you dot at the top end; [count], when above 0, a neutral count capsule at the bottom end (how many
  * a control holds, never how many need the user: that is [JBadge]'s, in the needs-you color).
+ * Adjacent home actions can opt out of [expandOnHomePress] to keep the pressed circle clear of its neighbor.
  */
 @Composable
 fun JIconButton(
@@ -197,13 +218,14 @@ fun JIconButton(
     badge: Boolean = false,
     selected: Boolean = false,
     count: Int = 0,
+    expandOnHomePress: Boolean = true,
 ) {
-    if (count <= 0) JIconButtonBox(icon, contentDescription, onClick, modifier, enabled, raised, tint, badge, selected)
+    if (count <= 0) JIconButtonBox(icon, contentDescription, onClick, modifier, enabled, raised, tint, badge, selected, expandOnHomePress)
     else Box(modifier) {
         // The circle clips the button's ripple; the capsule hangs over its edge, so it sits outside that clip.
         val palette = PersonaTheme.palette
         val label = if (count > 99) "99+" else "$count"
-        JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled, raised, tint, badge, selected)
+        JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled, raised, tint, badge, selected, expandOnHomePress)
         Text(label, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold),
             color = palette.ink2, maxLines = 1,
             modifier = Modifier.align(Alignment.BottomEnd).clearAndSetSemantics {}.stableAlpha(if (enabled) 1f else 0.4f)
@@ -215,19 +237,39 @@ fun JIconButton(
 @Composable
 private fun JIconButtonBox(
     icon: PhIcon, contentDescription: String?, onClick: () -> Unit, modifier: Modifier, enabled: Boolean, raised: Boolean,
-    tint: Color?, badge: Boolean, selected: Boolean,
+    tint: Color?, badge: Boolean, selected: Boolean, expandOnHomePress: Boolean,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val color = tint ?: palette.ink
+    val homeAction = raised && style == AppStyle.Glass && LocalHomeNavigationActions.current
+    val interactive = homeAction && enabled && LocalGlassSource.current != null &&
+        PersonaTheme.glass == GlassLevel.Liquid && !PersonaTheme.reduceMotion
+    val pressSource = if (interactive) remember { MutableInteractionSource() } else null
+    val feedback = if (pressSource != null) {
+        val pressed by pressSource.collectIsPressedAsState()
+        val progress = animateFloatAsState(if (pressed) 1f else 0f, PersonaTheme.motion.enter(), label = "home action press")
+        val growth = if (expandOnHomePress) HomeTokens.actionPressScale - 1f else 0f
+        // Draw outside the resting circle. The hit target and Haze capture keep their original coordinates.
+        Modifier.graphicsLayer().drawWithContent {
+            val fraction = progress.value.coerceIn(0f, 1f)
+            if (fraction == 0f) drawContent()
+            else scaleDraw(1f + growth * fraction) {
+                this@drawWithContent.drawContent()
+                drawCircle(Color.White, alpha = HomeTokens.actionPressVeil * fraction)
+            }
+        }
+    } else Modifier
     val surface = when {
         !raised -> Modifier
+        homeAction -> Modifier.size(Tokens.MinTouch.android).then(feedback).homeNavigationGlassSurface(interactive)
         style == AppStyle.Glass -> Modifier.size(44.dp).floatingSurface(CircleShape)
         style == AppStyle.Brief -> Modifier.size(42.dp).clip(CircleShape).background(palette.surface)
         else -> Modifier.size(40.dp).clip(RoundedCornerShape(8.dp.corner)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp.corner))
     }
     Box(
-        modifier.size(48.dp).clip(CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        modifier.size(48.dp).then(if (interactive && expandOnHomePress) Modifier else Modifier.clip(CircleShape))
+            .clickable(interactionSource = pressSource, indication = LocalIndication.current, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
             .stableAlpha(if (enabled) 1f else 0.4f),
         contentAlignment = Alignment.Center,

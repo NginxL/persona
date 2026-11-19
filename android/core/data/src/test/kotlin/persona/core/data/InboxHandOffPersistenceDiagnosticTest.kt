@@ -50,7 +50,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -59,6 +58,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.net.HttpURLConnection
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
@@ -440,6 +440,14 @@ class InboxHandOffPersistenceDiagnosticTest {
         val http = ComposerHttpFixture(fixture, pairing)
         try {
             http.server.enqueue(refusalResponse())
+            val probe = http.server.url("/").toUrl().openConnection() as HttpURLConnection
+            probe.setRequestProperty("User-Agent", "persona-ports")
+            probe.setRequestProperty("Accept", "text/html")
+            try {
+                assertEquals("port discovery must not consume the queued refusal", 404, probe.responseCode)
+            } finally {
+                probe.disconnect()
+            }
             val composer = connectRefusedComposer(fixture, http)
             http.server.enqueue(MockResponse().setResponseCode(500).setBody(
                 """{"error":"HTTP 500","code":"internal","delivered":"yes"}""",
@@ -739,7 +747,7 @@ class InboxHandOffPersistenceDiagnosticTest {
         private val fixture: HandOffFixture,
         private val pairing: HubScope,
     ) {
-        val server = MockWebServer().apply { start() }
+        val server = PortDiscoveryMockServer().apply { start() }
         private val endpoint = Endpoint(server.url("/").toString(), "lan")
         private val connection = OkHttpHubConnection(
             HubConnectionConfig(pairing.hubId, null, "test-token", listOf(endpoint), "test"),

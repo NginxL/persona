@@ -1,9 +1,9 @@
-# Where the iPhone app's entitlements file is (#9290), merged into project.yml by its `include:` always. XcodeGen writes
-# the target's `entitlements.properties` (in project.yml) to this path and signs with it, whatever CODE_SIGN_ENTITLEMENTS
-# says. It is here and not in project.yml because in a merge project.yml's own values win over every include's, while a
-# later include's win over an earlier one's: so apple/siri-calls.yml, included after this one, can move it to a generated
-# copy that adds Siri's entitlement. Without this, the overlay could only add the key to this tracked file, and an
-# unattended release, which needs its worktree clean after every step, would stop.
+# Where the iPhone app's entitlements file is by default (#9290), merged into project.yml by its `include:` always.
+# XcodeGen writes the target's `entitlements.properties` (in project.yml) to this path and derives CODE_SIGN_ENTITLEMENTS
+# from it. It is here and not in project.yml because in a merge project.yml's own values win over every include's, while
+# a later include's win over an earlier one's: a feature's opt-in include can select the generated opt-in copy, and
+# siri-calls.yml can then select its own generated copy. No tracked entitlements file is rewritten, so an unattended
+# release's worktree stays clean.
 targets:
   Persona:
     entitlements:

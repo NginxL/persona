@@ -160,6 +160,12 @@ pub struct Settings {
     pub query: String,
     #[serde(default)]
     pub machine_filter: String,
+    /// iOS's merged-list hub selection is active only in multi-hub mode. An empty filter selects every group;
+    /// `=<group>` selects one group, with `=` selecting the default empty group.
+    #[serde(default)]
+    pub multi_hub: bool,
+    #[serde(default)]
+    pub hub_filter: String,
     /// Archived history may include offline rows, without making ordinary offline live sessions visible.
     #[serde(default)]
     pub history: bool,
@@ -509,6 +515,12 @@ impl Query {
             if legacy != input.settings.machine_filter {
                 return false;
             }
+        }
+        if input.settings.multi_hub
+            && !input.settings.hub_filter.is_empty()
+            && input.settings.hub_filter.strip_prefix('=') != Some(session.app_hub_group.as_deref().unwrap_or(""))
+        {
+            return false;
         }
         let machine_path = machine_path.to_lowercase();
         if !self
@@ -1173,16 +1185,21 @@ fn tab_key(row: &Row) -> Option<String> {
 /// The rows the compact By Project view actually draws. A quiet space opens flat pane rows, not tab headers.
 fn tab_rows(rows: &[&Row], groups: &[Group], settings: &Settings) -> Vec<Entry> {
     let pinned: Vec<&Row> = rows.iter().copied().filter(|row| row.pinned).collect();
+    let by_id: StdHashMap<&str, &Row> = rows.iter().copied().map(|row| (row.id.as_str(), row)).collect();
+    let group_members = |group: &Group| {
+        group
+            .rows
+            .iter()
+            .filter_map(|id| by_id.get(id.as_str()).copied())
+            .collect::<Vec<&Row>>()
+    };
+    // make_space already owns display order; unread_shown separately retains filtered input order.
     let mut entries = plain_entries(&pinned);
     for group in groups.iter().filter(|group| group.id != "pinned") {
         if group.folded {
             continue;
         }
-        let members: Vec<&Row> = rows
-            .iter()
-            .copied()
-            .filter(|row| group.rows.contains(&row.id))
-            .collect();
+        let members = group_members(group);
         let expanded = settings.expanded_idle.contains(&group.id) || !settings.query.is_empty();
         let busy: BTreeSet<&str> = members
             .iter()

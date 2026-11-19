@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { t } from "../../i18n";
-import { level, load, memPercent, percent, rate, runs, usedOfTotal, type Level } from "../../lib/machine-detail";
+import { level, load, memPercent, percent, rate, runs, temperature, usedOfTotal, type Level } from "../../lib/machine-detail";
 import { formatTokens, totalTokens } from "../../lib/tokens";
 import type { Machine, MachineMetrics, MetricPoint } from "../../lib/types";
 import { cx } from "../../ui/atoms";
@@ -21,6 +21,9 @@ export function MachineMetricsSummary({ machine, metrics }: { machine: Machine; 
   const total = positive(latest?.mem_total) ?? positive(metrics?.system?.memory) ?? positive(machine.system?.memory);
   const cpu = known(latest?.cpu);
   const memory = memPercent(known(latest?.mem_used), total);
+  const battery = known(latest?.battery_percent);
+  const charging = latest?.battery_charging === true;
+  const temp = known(latest?.temp_c);
   const now = Date.now() / 1000;
   const usage = metrics?.usage;
   const minute = Math.floor(now / 60) * 60;
@@ -48,6 +51,26 @@ export function MachineMetricsSummary({ machine, metrics }: { machine: Machine; 
           </MetricCell>
         )}
       </div>
+      {(battery !== undefined || temp !== undefined) && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line/60 pt-2 text-xs text-ink-3 tabular-nums" data-testid="machine-power-thermal">
+          {battery !== undefined && (
+            <span data-testid="metric-battery">
+              {t("machines.battery")}{" "}
+              <span className={cx("font-medium", battery <= 15 && !charging ? "text-red" : battery <= 25 && !charging ? "text-orange" : "text-ink")}>
+                {percent(battery)}{charging ? ` · ${t("machines.charging")}` : ""}
+              </span>
+            </span>
+          )}
+          {temp !== undefined && (
+            <span data-testid="metric-temp">
+              {t("machines.temperature")}{" "}
+              <span className={cx("font-medium", temp >= 90 ? "text-red" : temp >= 75 ? "text-orange" : "text-ink")}>
+                {temperature(temp)}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

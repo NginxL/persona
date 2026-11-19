@@ -1,0 +1,8 @@
+{
+  "slots": 15,
+  "cpus_per_slot": 4,
+  "first_cpu": 0,
+  "lock_directory": "/path/to/private/pr-review-runtime/process-slots",
+  "address_space_bytes": 8589934592,
+  "cpu_seconds": 14400
+}

@@ -35,6 +35,8 @@
   "claude_plugin_unavailable": "这台电脑上的 Persona node 没有可安装的插件。请先更新 node。",
   "claude_plugin_error": "上次检查失败。Persona Link 很快会再试。",
   "claude_plugin_unknown": "还没有检查。",
+  "app_menu_about": "关于 Persona",
+  "app_menu_hide": "隐藏 Persona",
   "tray_open": "打开 Persona",
   "tray_quit": "退出 Persona",
   "update_check": "检查更新",

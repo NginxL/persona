@@ -164,7 +164,9 @@ func TestJustFinished(t *testing.T) {
 		c.UpdatedAt = at
 		return c
 	}
-	done := func(at time.Time) proto.WorkState { return proto.WorkState{Phase: proto.WorkDone, Line: "已合并", TurnAt: at} }
+	done := func(at time.Time) proto.WorkState {
+		return proto.WorkState{Phase: proto.WorkDone, Line: "已合并", TurnAt: at}
+	}
 	ft.d.setSessions("mac", []proto.Session{ended("fresh", recent), ended("old", old), ended("seen", recent), ended("asks", recent)})
 	s.markSeen(context.Background(), "mac", "seen")
 	s.fleetTakeSnapshot(Snapshot{Work: workReport(true, map[string]proto.WorkState{"fresh": done(recent), "old": done(old),

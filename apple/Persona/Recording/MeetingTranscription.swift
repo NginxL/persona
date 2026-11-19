@@ -932,10 +932,8 @@ final class MeetingTranscription {
         set(id, m)
     }
 
-    #if DEBUG
-    /// A replayed meeting's state (`MeetingReplay`, #9417), as its socket would have left it.
+    /// A replayed meeting's state (`MeetingReplay`, #9417, #10589), as its socket would have left it.
     func replace(_ id: UUID, _ m: Meeting) { set(id, m) }
-    #endif
 
     private func set(_ id: UUID, _ m: Meeting) {
         var m = m

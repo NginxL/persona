@@ -52,7 +52,7 @@ func TestCodexStartsInSameDirectoryRunConcurrently(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					_, err := n.startCodex(ctx, launch, cwd, "codex", []string{"codex"}, fmt.Sprintf("subtask %d", i), "w1", "", "")
+					_, err := n.startCodex(ctx, launch, cwd, "codex", []string{"codex"}, modelExecution{}, fmt.Sprintf("subtask %d", i), "w1", "", "")
 					results <- err
 				}()
 				select {
@@ -139,7 +139,7 @@ func TestCodexSamePromptStartsClaimDistinctThreads(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s, err := n.startCodex(ctx, launch, cwd, "codex", []string{"codex"}, prompt, "w1", "", "")
+			s, err := n.startCodex(ctx, launch, cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
 			if err != nil {
 				results <- err
 				return

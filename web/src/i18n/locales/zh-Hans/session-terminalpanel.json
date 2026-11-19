@@ -34,5 +34,7 @@
   "stopped": "这个 Agent 已停止。点「恢复」会在这个终端里让它接着运行。",
   "stopped_closed": "这个 Agent 已停止，它的终端也已关闭。点「恢复」会在新标签页里让它接着运行。",
   "resume": "恢复",
-  "resume_failed": "没能恢复这个 Agent。{error}"
+  "resume_failed": "没能恢复这个 Agent。{error}",
+  "close_this_pane": "关闭此窗格",
+  "pane_actions": "窗格操作"
 }

@@ -1,0 +1,19 @@
+{
+  "busy": "This conversation is still working with its previous model settings. Wait for it to finish or stop it before sending with the new selection. Your message was not sent.",
+  "disabled": "This model connection is not enabled on this computer. Your message was not sent.",
+  "scope_required": "This connection can only be used by an explicit model choice in your main chat. Your message was not sent.",
+  "purpose_unsupported": "This connection cannot be used as a default, an Agent preset, or for this task. Choose it directly in your main chat instead.",
+  "runtime_unsupported": "This connection requires the Claude Code CLI. It cannot run with the selected execution method, so your message was not sent.",
+  "platform_unsupported": "This connection is not supported on this computer's operating system. Your message was not sent.",
+  "sandbox_unsupported": "This connection does not yet support the required agent sandbox. Your message was not sent, and the sandbox was not disabled.",
+  "target_not_found": "This model connection is no longer available on this computer. Refresh the model list or restore the connection; your selection has not been changed.",
+  "model_not_found": "The selected model is not available through this connection. Refresh the model list and choose a model again.",
+  "protocol_unsupported": "The local model adapter uses an unsupported protocol version. Update the adapter and try again.",
+  "config_conflict": "This connection has settings that cannot be safely combined with Persona. Review the adapter configuration; your message was not sent.",
+  "credentials_missing": "This connection needs authentication on this computer. Configure it locally and try again.",
+  "revision_mismatch": "This connection changed before it could start. Refresh the model list and try again. Your message was not sent.",
+  "timeout": "The local model adapter did not become ready in time. Your message was not sent.",
+  "inventory_invalid": "The local model adapter returned an invalid model list. Other connections are still available.",
+  "unavailable": "The local model connection could not start. Check its configuration and try again; no other connection was selected.",
+  "probe_unsupported": "This connection does not support the separate connection test or shell inspection. Use it explicitly in your main chat to verify it."
+}

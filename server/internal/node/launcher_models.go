@@ -60,6 +60,9 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 	if name != "claude" && !shellcmd.NameRe.MatchString(name) {
 		return proto.LauncherModels{}, fmt.Errorf("invalid launcher %q", name)
 	}
+	if proto.IsExternalLauncher(name) {
+		return n.externalLauncherModels(ctx, name, refresh)
+	}
 	if isDesktopLauncher(name) { // the app runs its session on the model it picks (claudedesktop_new.go)
 		return proto.LauncherModels{Agent: "claude", Models: []proto.AgentModel{}, Locked: desktopModelLocked}, nil
 	}
@@ -150,6 +153,10 @@ func (n *Node) launcherModels(ctx context.Context, name, agentType string, refre
 // a login shell as `( name … )`, so it is asked only of a launcher this machine offers (knownLauncher) or one the hub's
 // hub.json names (configured). Any other word would run as a command: `reboot` (#1185).
 func (n *Node) runnableLauncher(ctx context.Context, name string, configured bool) error {
+	if proto.IsExternalLauncher(name) {
+		_, err := n.externalInventoryTarget(ctx, name, false)
+		return err
+	}
 	if configured || n.knownLauncher(ctx, name) {
 		return nil
 	}
@@ -157,6 +164,10 @@ func (n *Node) runnableLauncher(ctx context.Context, name string, configured boo
 }
 
 func (n *Node) knownLauncher(ctx context.Context, name string) bool {
+	if proto.IsExternalLauncher(name) {
+		_, err := n.externalInventoryTarget(ctx, name, false)
+		return err == nil
+	}
 	if name == "claude" || name == traexAgent {
 		return true
 	}

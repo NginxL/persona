@@ -53,6 +53,9 @@ type direction struct {
 	NameBy string `json:"name_by,omitempty"`
 	// Progress: the leader's latest own summary (leader_progress, #3679).
 	Progress *leaderProgress `json:"progress,omitempty"`
+	// Notes: what the owner wrote for this direction (#10086, direction_notes.go), "" none; NotesAt when.
+	Notes   string     `json:"notes,omitempty"`
+	NotesAt *time.Time `json:"notes_at,omitempty"`
 }
 
 type leaderTold struct {
@@ -318,9 +321,13 @@ type leaderView struct {
 	assistantwire.LeaderChangedEvent
 	// Progress: the leader's latest own summary (leader_progress), nil before its first.
 	Progress *leaderProgress `json:"progress,omitempty"`
-	By       string          `json:"by"`
-	At       time.Time       `json:"at"`
-	EndedAt  *time.Time      `json:"ended_at,omitempty"`
+	// Notes: what the owner wrote for the direction (direction_notes.go), NotesAt when; the leader and the
+	// direction's new Agents are given them.
+	Notes   string     `json:"notes,omitempty"`
+	NotesAt *time.Time `json:"notes_at,omitempty"`
+	By      string     `json:"by"`
+	At      time.Time  `json:"at"`
+	EndedAt *time.Time `json:"ended_at,omitempty"`
 }
 
 // directionRoutes: GET /api/v1/assistant/leaders lists every direction, current leaders first, then ended ones, each as
@@ -342,7 +349,7 @@ func (s *Service) directionRoutes() {
 		for id, d := range b.m {
 			list = append(list, leaderView{LeaderChangedEvent: assistantwire.LeaderChangedEvent{ID: id, Title: titles[id].title,
 				Name: nameOf(d, titles[id].title, pnames, pok), Project: d.Project, Ended: d.EndedAt != nil}, Progress: d.Progress,
-				By: d.By, At: d.At, EndedAt: d.EndedAt})
+				Notes: d.Notes, NotesAt: d.NotesAt, By: d.By, At: d.At, EndedAt: d.EndedAt})
 		}
 		b.mu.Unlock()
 		slices.SortFunc(list, func(a, b leaderView) int {

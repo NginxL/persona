@@ -39,6 +39,15 @@ func TestParseBlockedAndLast(t *testing.T) {
 	}
 }
 
+// A file a task made for the user is an artifact like any other: the manager copies it to the conversation's computer
+// (#10511).
+func TestParseFileArtifact(t *testing.T) {
+	c, arts, ok := Parse("<closeout status=\"done\">\nartifact: file /home/me/manual.md\n</closeout>")
+	if !ok || c.Status != proto.CloseoutDone || len(arts) != 1 || arts[0].Kind != "file" || arts[0].Ref != "/home/me/manual.md" {
+		t.Fatalf("closeout = %+v artifacts = %+v ok=%v", c, arts, ok)
+	}
+}
+
 func TestParseRefuses(t *testing.T) {
 	for name, reply := range map[string]string{
 		"none":          "All done, merged and deployed.",

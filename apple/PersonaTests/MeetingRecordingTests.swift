@@ -606,7 +606,11 @@ import PersonaWire
 
     /// Siri and the Control start it without opening the app; the first time it may come to the front to ask for the microphone.
     @Test func startRunsInTheBackground() {
-        #expect(StartMeetingRecordingIntent.supportedModes.contains(.background))
+        if #available(iOS 26.0, *) {
+            #expect(StartMeetingRecordingIntent.supportedModes.contains(.background))
+        } else {
+            #expect(StartMeetingRecordingIntent.openAppWhenRun == false)
+        }
     }
 
     /// A button restored without its recording (or for one that ended) does nothing and doesn't throw.

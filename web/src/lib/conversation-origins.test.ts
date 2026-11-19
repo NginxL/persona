@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoConversations, autoOrigin, externalFrom, externalOpening, externalOrigin, matchesOrigin, originMarkLabel, parseOriginFilter, recentConversations } from "./conversation-origins";
+import { autoConversations, autoOrigin, externalFrom, externalOpening, externalOrigin, matchesOrigin, openerOf, originMarkLabel, parseOriginFilter, recentConversations } from "./conversation-origins";
 import type { Item, Session } from "./types";
 
 const conv = (id: string, extra: Partial<Session> = {}) => ({ machine_id: "hub", session_id: id, title: id, cwd: "", status: "idle", ...extra }) as Session;
@@ -71,6 +71,20 @@ describe("conversation origins (docs/protocol/protocol.md「Origin of assistant 
     expect(externalOpening(lark, [item("a1", "assistant", "text")], false)).toBeUndefined();
     expect(externalOpening(conv("c", { origin: "channel" }), items, false)).toBeUndefined();
     expect(externalOpening(conv("c"), items, false)).toBeUndefined();
+  });
+
+  it("names the extension that opened an external conversation by opened_by, else origin_ref (#10358)", () => {
+    expect(openerOf("lark_agent", { opened_by: "bridge", origin_ref: "bridge" })).toBe("bridge");
+    expect(openerOf("extension", { opened_by: " notes " })).toBe("notes");
+    // one opened before the hub noted opened_by: origin_ref is that extension too
+    expect(openerOf("lark_agent", { origin_ref: "bridge" })).toBe("bridge");
+    expect(openerOf("extension", { opened_by: "", origin_ref: "notes" })).toBe("notes");
+    // the backfill knows no extension, and the other origins' refs are not extensions
+    expect(openerOf("lark_agent", {})).toBeUndefined();
+    expect(openerOf("lark_agent", undefined)).toBeUndefined();
+    expect(openerOf("inbox", { origin_ref: "item-1" })).toBeUndefined();
+    expect(openerOf("spawned", { origin_ref: "conv-1", opened_by: "x" })).toBeUndefined();
+    expect(openerOf(undefined, { opened_by: "x" })).toBeUndefined();
   });
 });
 

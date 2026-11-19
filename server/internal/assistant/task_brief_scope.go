@@ -153,7 +153,7 @@ func (s *Service) rescope(ctx context.Context, t Todo, self, via string, doneWhe
 			c.DoneWhen = doneWhen
 			c.Change = "done_when replaced"
 		}
-		if o := s.callerOrigin(ctx, self); o.Request != nil {
+		if o := s.callerOrigin(ctx, self); o.Request != nil && len(o.Request.Via) == 0 { // relayed words are no approval
 			c.Approval = o.Request
 		}
 		if _, err := s.applyScope(ctx, t, c); err != nil && !errors.Is(err, errScopeNothing) {
@@ -216,7 +216,7 @@ func (s *Service) toolTaskScope(ctx context.Context, self string, args json.RawM
 			return "", errors.New("done_when: give the criteria as they are after the change (the whole list); a task is never left with none")
 		}
 	}
-	if o := s.callerOrigin(ctx, self); o.Request != nil {
+	if o := s.callerOrigin(ctx, self); o.Request != nil && len(o.Request.Via) == 0 { // relayed words are no approval
 		c.Approval = o.Request
 	}
 	brief, err := s.applyScope(ctx, t, c)

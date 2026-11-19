@@ -40,7 +40,7 @@ async function load(a = project, b = person, af = "people") {
   render(a);
   await reply(requests.at(-1)!, response(a, { [af]: [member(b, af), "unrelated"] }, [b]));
 }
-async function verify(a = project, b = person, af = "people", bf = "projects", opts: { partial?: boolean; ignored?: boolean; fail?: boolean } = {}) {
+async function verify(a = project, b = person, af = "people", bf = "projects", opts: { partial?: boolean; ignored?: boolean; fail?: boolean; locked?: boolean } = {}) {
   const pair = reads().slice(-2);
   expect(pair.map((r) => r.url).sort()).toEqual([`/api/v1/kb/${a.kind}/${a.id}`, `/api/v1/kb/${b.kind}/${b.id}`].sort());
   for (const r of pair) {
@@ -48,7 +48,8 @@ async function verify(a = project, b = person, af = "people", bf = "projects", o
     const e = first ? a : b, other = first ? b : a, field = first ? af : bf;
     const remains = opts.ignored || (!first && opts.partial);
     await reply(r, opts.fail && !first ? { error: "Synthetic read failure" } : response(e, {
-      [field]: ["unrelated", ...(remains ? [member(other, field)] : [])], locked_fields: remains ? ["name"] : ["name", field],
+      [field]: ["unrelated", ...(remains ? [member(other, field)] : [])], locked_fields: remains || !opts.locked ? ["name"] : ["name", field],
+      ...(remains ? {} : { excluded: { [field]: [member(other, field)] } }),
     }, remains ? [other] : []), opts.fail && !first ? 503 : 200);
   }
 }
@@ -67,14 +68,16 @@ it.each(mappings)("removes $a.kind → $b.kind through the real detail/API calle
   click("Remove relationship");
   expect(dialog()?.textContent).toContain(a.name);
   expect(dialog()?.textContent).toContain(b.name);
-  expect(dialog()?.textContent).toContain("entire");
+  expect(dialog()?.textContent).toContain("Only this relationship");
+  expect(dialog()?.textContent).toContain("Other relationships keep updating");
+  expect(dialog()?.textContent).not.toContain("entire");
   expect(dialog()?.textContent).toContain("Both entries are kept");
   expect(writes()).toHaveLength(0);
   click("Remove");
   expect(writes()).toHaveLength(1);
   const put = writes()[0], target = reverse ? b : a;
   expect(put.url).toBe(`/api/v1/kb/${target.kind}/${target.id}`);
-  expect(JSON.parse(put.init.body as string)).toEqual({ [delta]: [reverse ? a.id : b.id] });
+  expect(JSON.parse(put.init.body as string)).toEqual({ [delta]: [reverse ? a.id : b.id], lock_lists: false });
   expect(new Headers(put.init.headers).get("Authorization")).toBe("Bearer synthetic-owner-a");
   expect(new Headers(put.init.headers).get("X-Persona-Manager")).toBe("assistant");
   await reply(put, { id: target.id });
@@ -82,6 +85,7 @@ it.each(mappings)("removes $a.kind → $b.kind through the real detail/API calle
   await verify(a, b, af, bf);
   expect(saved).toHaveBeenCalledOnce();
   expect(dialog()).toBeNull();
+  expect(host.textContent).toContain("Relationship removed. Persona won’t add it back on its own.");
   expect(host.textContent).toContain("Existing facts");
   expect(host.textContent).toContain("Existing profile");
   expect(host.textContent).toContain("#existing");
@@ -155,7 +159,7 @@ it("retries reads only after an accepted mutation and failed readback", async ()
   expect(saved).toHaveBeenCalledOnce(); expect(writes()).toHaveLength(1);
 });
 
-it.each(["ignored", "reverse-remains", "locks-missing", "record-missing", "wrong-entry"])("never reports success for an accepted but unconfirmed removal: %s", async (mode) => {
+it.each(["ignored", "reverse-remains", "exclusion-missing", "record-missing", "wrong-entry"])("never reports success for an accepted but unconfirmed removal: %s", async (mode) => {
   await load(); click("Remove relationship"); click("Remove"); await reply(writes()[0], {});
   if (mode === "ignored" || mode === "reverse-remains") {
     await verify(project, person, "people", "projects", { ignored: mode === "ignored", partial: mode === "reverse-remains" });
@@ -240,7 +244,7 @@ it.each(["project", "item"])("uses backend raw, request and canonical identities
   await reply(reads().at(-1)!, { detail: source });
   click("Remove relationship"); click("Remove");
   expect(writes()[0].url).toBe("/api/v1/kb/docs/d%2F1");
-  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ remove_projects: ["project"] });
+  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ remove_projects: ["project"], lock_lists: false });
   await reply(writes()[0], { id: "d/1" });
   const pair = reads().slice(-2);
   expect(pair.map((r) => r.url).sort()).toEqual(["/api/v1/kb/docs/d%2F1", "/api/v1/kb/projects/project"]);
@@ -322,7 +326,7 @@ it.each(["chats", "people"].flatMap((kind) => ["project", "entity"].map((directi
   click("Remove relationship"); click("Remove");
   const expectedURL = direction === "project" ? "/api/v1/kb/projects/project" : `/api/v1/kb/${kind}/${encodeURIComponent(raw)}`;
   expect(writes()[0].url).toBe(expectedURL);
-  expect(JSON.parse(writes()[0].init.body as string)).toEqual(direction === "project" ? { [`remove_${kind}`]: [raw] } : { remove_projects: ["project"] });
+  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ ...(direction === "project" ? { [`remove_${kind}`]: [raw] } : { remove_projects: ["project"] }), lock_lists: false });
   await reply(writes()[0], {});
   for (const r of reads().slice(-2)) await reply(r, { detail: r.url.includes(`/${kind}/`) ? fixture.afterEntity : fixture.afterProject });
   expect(saved).toHaveBeenCalledOnce();
@@ -339,4 +343,80 @@ it("places a retained correction before the remaining related lists", async () =
   const remaining = host.querySelector(`a[href="/kb/chats/${chat.id}"]`)!.closest("section")!;
   expect(pending.compareDocumentPosition(remaining) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(writes()).toHaveLength(1);
+});
+
+it("locks both whole lists only when the switch is on, and then confirms the locks too", async () => {
+  await load(); click("Remove relationship");
+  const lock = buttons("Also stop automatic changes to both lists")[0];
+  expect(lock.getAttribute("aria-checked")).toBe("false");
+  click("Also stop automatic changes to both lists");
+  expect(dialog()?.textContent).toContain("protect the entire people list");
+  click("Remove");
+  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ remove_people: [person.id], lock_lists: true });
+  expect(buttons("Also stop automatic changes to both lists")[0].disabled).toBe(true);
+  await reply(writes()[0], {});
+  await verify(); // excluded on both ends, lists not locked: an older or failed lock is not success
+  expect(saved).not.toHaveBeenCalled(); expect(dialog()?.textContent).toContain("This hub may need an update");
+  click("Retry verification"); await verify(project, person, "people", "projects", { locked: true });
+  expect(saved).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain("Relationship removed and protection confirmed on both entries.");
+});
+
+const removedDetail = (removed: KBEntry[], excluded: Record<string, string[]>) =>
+  ({ detail: { ...response(project, { excluded }).detail, removed } });
+
+it("drops the removal's success line once a removed link is allowed again", async () => {
+  await load(); click("Remove relationship"); click("Remove"); await reply(writes()[0], {}); await verify();
+  expect(host.textContent).toContain("Persona won’t add it back on its own.");
+  render(project, 1); await reply(reads().at(-1)!, removedDetail([person], { people: [person.id] }));
+  expect(host.textContent).toContain("Persona won’t add it back on its own.");
+  click("Allow again"); await reply(writes()[1], {}); await reply(reads().at(-1)!, response(project, {}));
+  expect(host.textContent).not.toContain("Persona won’t add it back on its own.");
+});
+
+it("lists what the user removed and allows one again without linking it", async () => {
+  render(project); await reply(reads().at(-1)!, removedDetail([person], { people: [person.id] }));
+  expect(host.textContent).toContain("Removed by you");
+  expect(host.textContent).toContain("Persona won’t link these again on its own.");
+  expect(buttons(`Allow “${person.name}” again`)).toHaveLength(1);
+  click("Allow again");
+  expect(writes()).toHaveLength(1);
+  expect(writes()[0].url).toBe(`/api/v1/kb/projects/${project.id}`);
+  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ allow_people: [person.id] });
+  act(() => buttons("Allow again")[0].click());
+  expect(writes()).toHaveLength(1);
+  await reply(writes()[0], { id: project.id });
+  expect(reads().at(-1)!.url).toBe(`/api/v1/kb/projects/${project.id}`);
+  await reply(reads().at(-1)!, response(project, {}));
+  expect(saved).toHaveBeenCalledOnce();
+  expect(host.textContent).not.toContain("Removed by you");
+});
+
+it("allows a removed document again from the project through the document", async () => {
+  const doc = entry("docs");
+  render(project); await reply(reads().at(-1)!, removedDetail([doc], { items: [`docs/${doc.id}`] }));
+  click("Allow again");
+  expect(writes()[0].url).toBe(`/api/v1/kb/docs/${doc.id}`);
+  expect(JSON.parse(writes()[0].init.body as string)).toEqual({ allow_projects: [project.id] });
+});
+
+it.each(["write", "still-removed"])("says when allowing again did not take (%s) and keeps the row", async (mode) => {
+  render(project); await reply(reads().at(-1)!, removedDetail([person], { people: [person.id] }));
+  click("Allow again");
+  if (mode === "write") {
+    await reply(writes()[0], { error: "Synthetic allow failure" }, 503);
+    expect(host.querySelector('[role="alert"]')?.textContent).toMatch(/^Couldn’t allow it again: .*Synthetic allow failure/);
+  } else {
+    await reply(writes()[0], {});
+    await reply(reads().at(-1)!, removedDetail([person], { people: [person.id] }));
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("is still kept out");
+  }
+  expect(saved).not.toHaveBeenCalled();
+  expect(buttons("Allow again")[0].disabled).toBe(false);
+});
+
+it("offers Allow again only for links the entry's own record keeps out", async () => {
+  render(project); await reply(reads().at(-1)!, removedDetail([person, chat], { people: ["someone-else"] }));
+  expect(host.textContent).not.toContain("Removed by you");
+  expect(buttons("Allow again")).toHaveLength(0);
 });

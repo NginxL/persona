@@ -257,7 +257,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigOrphaned, sigOverdue, sigRecheck, sigUndecidable, sigOwnerCannot, sigParkedDue} {
+	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigOrphaned, sigOverdue, sigRecheck, sigUndecidable, sigOwnerCannot, sigParkedDue} {
 		delete(b.pending, t.ID+"|"+k) // reviewed: what waited is answered
 	}
 	if verdict == reviewAccepted || verdict == reviewCancelled {
@@ -420,7 +420,8 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		if notHeld != "" {
 			pushed += " can_wait was ignored (" + notHeld + "): it is pushed as usual."
 		}
-		if s.pushDecision(ctx, t.ID) {
+		phone := s.pushDecision(ctx, t.ID)
+		if phone {
 			pushed += " A push with your recommendation also went to their phone; its \"OK\" takes the recommendation and sends it " +
 				"to the task's agent, which ends the decision too (drop a question of yours about it then)."
 		}
@@ -435,6 +436,21 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 					"again; review it once the agent stops.%s", t.ID, maxReworkRounds, said, pushed), nil
 			}
 			return fmt.Sprintf("Task %s waits for the user: %s. Don't ask them again; review it once the agent stops.%s", t.ID, said, pushed), nil
+		}
+		if background {
+			// No card went out, and the main conversation was told (escalateToMain above). A round lists no ask_user
+			// (supervise_round.go roundToolsWithheld), and the owner does not read the background supervisor's folded
+			// turns: what is to decide reaches them by the hub's push, or by its notify_user when there was none.
+			was := ""
+			if over {
+				was = fmt.Sprintf(" was sent back %d times already: it now", maxReworkRounds)
+			}
+			tell := "Push what is to decide, with your recommendation, to the user with notify_user (they do not read this conversation)"
+			if phone {
+				tell = "Don't push it again"
+			}
+			return fmt.Sprintf("Task %s%s waits for the user (needs_user), and the main conversation was told. %s; review it again once "+
+				"they decide (that also ends the decision the briefing lists for it).%s", t.ID, was, tell, pushed), nil
 		}
 		if over {
 			return fmt.Sprintf("Task %s was sent back %d times already: it now waits for the user (needs_user). Tell the user what is "+
@@ -607,7 +623,8 @@ func (s *Service) sendToTaskAs(ctx context.Context, t Todo, text string, wait bo
 		if err := s.call(ctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil); err != nil {
 			return err
 		}
-		_, err := s.appendFeed(ctx, t.Origin, feedRouted, t.ID, map[string]string{"text": text, "from": routedFromAssistant})
+		_, err := s.appendFeed(ctx, t.Origin, feedRouted, t.ID, map[string]string{"text": text, "from": routedFromAssistant,
+			"machine_id": c.MachineID, "session_id": c.SessionID}) // the run it told (#10465)
 		return err
 	}
 	if c.Status == proto.StatusOffline && wait {

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 /** Corner radii of one style. Buttons and chips are pills in glass and brief, nearly square on the board. */
 @Immutable
@@ -48,6 +49,51 @@ data class IosSpring(val durationMs: Int, val bounce: Float) {
     val dampingRatio: Float get() = 1f - bounce
     val stiffness: Float get() = (2 * PI / (durationMs / 1000.0)).pow(2).toFloat()
     fun <T> spec(): FiniteAnimationSpec<T> = spring(dampingRatio = dampingRatio, stiffness = stiffness)
+}
+
+/**
+ * A spring as SwiftUI's `interpolatingSpring(mass:stiffness:damping:)`: Compose's damping ratio is
+ * `damping / (2√(stiffness × mass))` (Theme.Motion.keyboard, `Theme.swift:822`).
+ */
+@Immutable
+data class IosMassSpring(val mass: Float = 1f, val stiffness: Float, val damping: Float) {
+    val dampingRatio: Float get() = (damping / (2f * sqrt(stiffness * mass))).coerceAtLeast(0.01f)
+    /** Compose's spring assumes mass 1, so the stiffness we pass is iOS stiffness / mass. */
+    val composeStiffness: Float get() = stiffness / mass
+    fun <T> spec(): FiniteAnimationSpec<T> = spring(dampingRatio = dampingRatio, stiffness = composeStiffness)
+}
+
+/**
+ * Shared motions from `spec/tokens/motion.json` / iOS `Theme.Motion`, as Compose specs. Glass, Brief and Board share
+ * these (Brief and Board keep their own tweens only for the style-local state/layout springs in [PersonaMotion]).
+ */
+object SharedMotion {
+    /** Theme.Motion.expand (`Theme.swift:769`): smooth 0.4 s. */
+    fun <T> expand(): FiniteAnimationSpec<T> =
+        IosSpring(Tokens.Motion.Expand.duration, Tokens.Motion.Expand.bounce).spec()
+
+    /** Theme.Motion.reveal (`Theme.swift:784`): easeOut 0.28 s. */
+    fun <T> reveal(): FiniteAnimationSpec<T> =
+        tween(Tokens.Motion.Reveal.duration, easing = ComposerMotion.curve(Tokens.Motion.Reveal.curve))
+
+    /** Theme.Motion.conceal (`Theme.swift:785`): easeIn 0.2 s. */
+    fun <T> conceal(): FiniteAnimationSpec<T> =
+        tween(Tokens.Motion.Conceal.duration, easing = ComposerMotion.curve(Tokens.Motion.Conceal.curve))
+
+    /** Theme.Motion.drawer (`Theme.swift:799`): interpolating spring 0.32 s, no bounce. */
+    fun <T> drawer(): FiniteAnimationSpec<T> =
+        IosSpring(Tokens.Motion.Drawer.duration, Tokens.Motion.Drawer.bounce).spec()
+
+    /** Theme.Motion.springBack (`Theme.swift:803`): spring 0.3 s, bounce 0.25. */
+    fun <T> springBack(): FiniteAnimationSpec<T> =
+        IosSpring(Tokens.Motion.SpringBack.duration, Tokens.Motion.SpringBack.bounce).spec()
+
+    /** Theme.Motion.keyboard (`Theme.swift:822`): mass 1, stiffness 555.027, damping 47.118. */
+    fun <T> keyboard(): FiniteAnimationSpec<T> =
+        IosMassSpring(
+            stiffness = Tokens.Motion.Keyboard.stiffness,
+            damping = Tokens.Motion.Keyboard.damping,
+        ).spec()
 }
 
 /**

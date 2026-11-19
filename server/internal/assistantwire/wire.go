@@ -148,6 +148,8 @@ type Device struct {
 	// (--model) and effort, which "Models" needs of the machine a launcher purpose runs on.
 	Version            string `json:"version,omitempty"`
 	ModelConfiguration bool   `json:"model_configuration,omitempty"`
+	// ExternalInventory is announced only by a node with an enabled, trusted local model adapter.
+	ExternalInventory bool `json:"external_inventory,omitempty"`
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`
@@ -424,6 +426,8 @@ type SessionView struct {
 	// Tags are the conversation's user-defined labels (assistant/conversation_tags.go); absent or empty for one without.
 	Tags   []string `json:"tags,omitempty"`
 	Queued []string `json:"queued,omitempty"` // messages from other conversations waiting for its turn to end
+	// Undelivered: the owner's messages it keeps after they could not go in (proto.Session.Undelivered, #10194).
+	Undelivered []proto.UndeliveredMessage `json:"undelivered,omitempty"`
 	// Origin is who opened the conversation (docs/protocol/protocol.md "Origin of assistant chats": user, channel, inbox, task, spawned,
 	// lark_agent, extension) and OriginRef what of (the inbox item, the task, the conversation, the channel, the
 	// extension); both "" while it is not known.

@@ -6,14 +6,17 @@
 // ↑ ↓ Home End on it, re-queues them all in the new order. Four rows or fewer show in full; five or more show three
 // and "N more".
 // Messages from other conversations come last and are only shown; since #6394 they collapse into one line
-// ("N messages from other conversations are waiting"), opened on demand, so a backlog no longer spreads over the
-// composer. Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next
-// push; a reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
+// ("N messages from other chats · Arrives when this chat is free"), opened on demand, so a backlog no longer spreads
+// over the composer. Opened, each row names the chat it came from once (the hub's 「来自「…」：」 prefix taken off) and
+// opens in place to its whole text. Only the groups that are there are drawn, with a hairline between two of them.
+// Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next push; a
+// reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
 // (QueueStrip.tsx loads it).
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, errorText, sessionPath } from "../../lib/api";
 import { agentLabel } from "../../lib/mentions";
 import { keepAllBut, moved, movedTo, parseQueued, queuedMarks } from "../../lib/queue";
+import { relayedFrom } from "../../lib/queue-relayed";
 import type { Session } from "../../lib/types";
 import { hasFinePointer } from "../../lib/viewport";
 import { Collapse, cx, Spinner, toast } from "../../ui/atoms";
@@ -235,9 +238,9 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
       key={row.id}
       row={row}
       n={pos + 1}
-      photos={row.own ? (photosOf?.(row.raw) ?? 0) : 0}
-      editable={editable && row.own}
-      movable={editable && row.own && own > 1}
+      photos={photosOf?.(row.raw) ?? 0}
+      editable={editable}
+      movable={editable && own > 1}
       takesNow={takesNow}
       agent={agent}
       explain={explain}
@@ -261,31 +264,43 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
     />
   );
   // The messages other conversations sent in: one line while collapsed, their read-only rows when opened (#6394).
+  // Its hairline only parts it from the owner's rows above: with none of those it is the card's first thing, and a line
+  // over it (and the empty list's padding) would stand alone at the card's top.
   const relayedLine = relayedRows.length > 0 && (
-    <div className="border-t border-line">
+    <div data-queue-relayed-group className={cx(shown.length > 0 && "border-t border-line")}>
       <button
         type="button"
         aria-expanded={relayedOpen}
         data-queue-relayed-summary
         onClick={() => setRelayedOpen((o) => !o)}
-        className="touch-hit flex h-8 w-full items-center gap-1.5 px-2 text-label leading-none whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+        className="touch-hit flex h-8 w-full items-center gap-1.5 px-3 text-label leading-none whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink"
       >
-        <Icon name="send" size={13} stroke={2} className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left">{t("chat-queuepanel.relayed_summary", { count: relayedRows.length })}</span>
+        {/* in the rows' 20 px handle column, so the summary's words line up with every row's */}
+        <span aria-hidden className="flex size-5 shrink-0 items-center justify-center">
+          <Icon name="chat" size={13} stroke={2} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left">
+          <span className="font-medium text-ink-2">{t("chat-queuepanel.relayed_summary", { count: relayedRows.length })}</span>
+          <span data-queue-relayed-when> · {t("chat-queuepanel.relayed_note")}</span>
+        </span>
         <Icon name="chevron" size={13} className={cx("shrink-0 transition-transform duration-200", relayedOpen && "rotate-180")} />
       </button>
       {relayedOpen && (
-        <div role="list" data-queue-relayed-list>
-          {relayedRows.map((row, pos) => rowFor(row, own + pos))}
+        <div role="list" data-queue-relayed-list className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pb-1">
+          {relayedRows.map((row, pos) => (
+            <RelayedRow key={row.id} row={row} n={own + pos + 1} />
+          ))}
         </div>
       )}
     </div>
   );
   const rowsAndFold = (
     <>
-      <div ref={list} id={listId} role="list" className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pt-1.5 pb-0.5">
-        {visible.map((row, pos) => rowFor(row, pos))}
-      </div>
+      {shown.length > 0 && (
+        <div ref={list} id={listId} role="list" className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pt-1.5 pb-0.5">
+          {visible.map((row, pos) => rowFor(row, pos))}
+        </div>
+      )}
       {folds && (
         <div className="flex items-center justify-center border-t border-line px-2 py-1.5 text-[12px] leading-none">
           <button
@@ -319,7 +334,7 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
           <button
             type="button"
             aria-expanded={open}
-            aria-controls={listId}
+            aria-controls={shown.length > 0 ? listId : undefined}
             onClick={() => setOpen((o) => !o)}
             className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[8px] px-1.5 text-left text-[11.5px] font-medium text-ink-3 transition-colors hover:bg-hover"
           >
@@ -358,7 +373,8 @@ const ROUND = "touch-hit flex size-5 shrink-0 items-center justify-center rounde
 // shown while the row is hovered or has the focus; always on a screen without hover
 const ON_ACTIVE = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 
-/** One queued message. `photos`: ones it went with beside its words (a Persona chat's, when this browser sent it). */
+/** One of the owner's queued messages. `photos`: ones it went with beside its words (a Persona chat's, when this browser
+ *  sent it). */
 function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain, explainId, busy, locked, dragging, rowRef, handleRef, onKey, onPointerDown, onSendNow, onEdit, onDelete }: {
   row: Row;
   n: number;
@@ -387,8 +403,7 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
   const carried = marks.map((m) => markWords(m.kind, m.count)).join(t("chat-queuepanel.mark_join"));
   const words = parts.text;
   const said = [words, carried].filter(Boolean).join(" · ") || t("chat-queuepanel.no_text");
-  const relayed = !row.own;
-  const label = t("chat-queuepanel.row_label", { n, text: relayed ? [t("chat-queuepanel.relayed_from"), said, t("chat-queuepanel.relayed_note")].join(" · ") : said });
+  const label = t("chat-queuepanel.row_label", { n, text: said });
   // the whole message as a tooltip, only when its line is cut
   const fit = (e: React.SyntheticEvent<HTMLElement>) => {
     const el = e.currentTarget;
@@ -403,7 +418,6 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
       role="listitem"
       aria-label={label}
       data-queue-row
-      data-queue-relayed={relayed || undefined}
       className={cx(
         "group flex items-center gap-1.5 rounded-[8px] border border-transparent px-2 py-0.5 transition-colors hover:bg-hover focus-within:bg-hover",
         dragging && "relative z-10 bg-hover",
@@ -428,12 +442,6 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
         </button>
       ) : (
         <span aria-hidden className="size-5 shrink-0" />
-      )}
-      {relayed && (
-        <span data-queue-note title={t("chat-queuepanel.relayed_note")} className="relative top-px flex max-w-[120px] min-w-0 shrink-0 items-center gap-1.5 text-[13px] leading-[1.25] font-semibold text-ink">
-          <Icon name="send" size={13} stroke={2} className="shrink-0" />
-          <span className="truncate">{t("chat-queuepanel.relayed_from")}</span>
-        </span>
       )}
       <p
         data-queue-row-body
@@ -478,6 +486,94 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
             </button>
           </div>
         ))}
+    </div>
+  );
+}
+
+/** One message another conversation (or the system) sent in: only shown. It names the chat it came from once, then its
+ *  words on one line; a line cut short opens in place to its whole text (the chevron, or a click on the row that selects
+ *  nothing), so nothing it says is left to a hover tooltip, and the opened text can be selected and copied. */
+function RelayedRow({ row, n }: { row: Row; n: number }) {
+  const source = useMemo(() => relayedFrom(row.raw), [row.raw]);
+  const parts = useMemo(() => parseQueued(source ? source.text : row.raw), [source, row.raw]);
+  const marks = queuedMarks(parts);
+  const carried = marks.map((m) => markWords(m.kind, m.count)).join(t("chat-queuepanel.mark_join"));
+  const words = parts.text || carried || t("chat-queuepanel.no_text");
+  const from = source?.from;
+  const label = t("chat-queuepanel.row_label", {
+    n,
+    text: [from ? t("chat-queuepanel.relayed_from_chat", { chat: from }) : t("chat-queuepanel.relayed_from"), words, t("chat-queuepanel.relayed_note")].join(" · "),
+  });
+  const body = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  // whether its one line is cut: measured while closed, and again as the composer's width changes
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el || open) return;
+    const measure = () => setCut(el.scrollWidth > el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [open, words, from]);
+  const opens = cut || open;
+  const toggle = () => setOpen((o) => !o);
+  return (
+    <div
+      role="listitem"
+      aria-label={label}
+      data-queue-row
+      data-queue-relayed
+      onClick={() => opens && !window.getSelection()?.toString() && toggle()}
+      className={cx(
+        "group flex gap-1.5 rounded-[8px] px-2 py-0.5 text-meta leading-[1.25] transition-colors",
+        open ? "items-start" : "items-center",
+        opens && "cursor-pointer hover:bg-hover focus-within:bg-hover",
+      )}
+    >
+      <span aria-hidden className="size-5 shrink-0" />
+      <span className={cx("flex min-w-0 flex-1 gap-1.5", open ? "items-start pt-0.5" : "relative top-px items-center")}>
+        {from && (
+          <span data-queue-from className="max-w-[40%] min-w-0 shrink-0 truncate font-medium text-ink">
+            {from}
+          </span>
+        )}
+        <span
+          ref={body}
+          data-queue-row-body
+          className={cx(
+            "min-w-0 flex-1 text-ink-2 transition-colors",
+            opens && "group-hover:text-ink",
+            open ? "max-h-[132px] cursor-text overflow-y-auto overscroll-contain break-words whitespace-pre-wrap" : "truncate",
+          )}
+        >
+          {marks.map((m) => (
+            <span key={m.kind} data-queue-mark={m.kind} aria-hidden className="mr-1.5 inline-flex items-center gap-0.5 align-[-2px] text-ink-3">
+              <Icon name={MARK_ICON[m.kind]} size={13} />
+              {m.count > 1 && <span className="text-submeta font-medium tabular-nums">{m.count}</span>}
+            </span>
+          ))}
+          {parts.text || <span className="text-ink-3">{words}</span>}
+        </span>
+      </span>
+      {opens && (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? t("chat-queuepanel.less") : t("chat-queuepanel.show_all")}
+          title={open ? t("chat-queuepanel.less") : t("chat-queuepanel.show_all")}
+          data-queue-relayed-toggle
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+          className="touch-hit flex size-5 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:text-ink"
+        >
+          <Icon name="chevron" size={13} className={cx("transition-transform duration-200", open && "rotate-180")} />
+        </button>
+      )}
     </div>
   );
 }

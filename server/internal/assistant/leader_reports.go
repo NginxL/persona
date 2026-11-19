@@ -23,19 +23,19 @@ import (
 //   - needs the owner's decision on a plan: a plan the leader handed out, or the main conversation handed to it
 //     (task_plan supervisor), waits for the owner's Start (#3608; told once per plan, with its id and no to-do);
 //   - is stuck: by the To-dos SOP (todo_triage.go) it sits in Waiting on you, or stopped unfinished (PR to merge, Other
-//     open, Shelved), and nothing of it moved for leaderStuckAfter.
+//     open, Shelved), and nothing of it moved for the task estimate × 1.5 (at least 2 hours).
 //
 // They are read off the ledger (reviews, the to-dos, their agents' sessions), never asked of a model, and progress is
 // never reported. Each is told once: what was told is kept in the assistant's store (assistant.leader_reports), saved
 // before the report is queued, so a restart or a replay of the same ledger tells nothing again. A review is told by its
-// time; a stuck task at most once per leaderStuckAfter. Only tasks of a current leader are reported: once a direction
+// time; a stuck task at most once per leaderStuckRepeat. Only tasks of a current leader are reported: once a direction
 // ended, its tasks' signals are the main conversation's again, as before.
 
 const leaderReportsKey = "assistant.leader_reports"
 
 const (
-	// leaderStuckAfter: a task that did not move this long is stuck; it is told so at most this often.
-	leaderStuckAfter = 24 * time.Hour
+	// leaderStuckRepeat limits repeat notifications independently of the estimate-based detection threshold.
+	leaderStuckRepeat = 24 * time.Hour
 	// leaderReportsEvery: how often the ledger is read for stuck tasks besides after each change.
 	leaderReportsEvery = 10 * time.Minute
 	// leaderReportsKeep: how long a told review is remembered (a review older than this is never told again either).
@@ -202,7 +202,7 @@ func (s *Service) leaderReportsSync(ctx context.Context, now time.Time, stuckToo
 		}
 		tr := triageTodo(lt, look, now, time.Time{}, loc, false) // a failed start is closed: never stuck
 		stuck := taskStuck(t, tr, reached[t.ID], now)
-		if last, ok := told.Stuck[t.ID]; stuck && (!ok || now.Sub(last) >= leaderStuckAfter) {
+		if last, ok := told.Stuck[t.ID]; stuck && (!ok || now.Sub(last) >= leaderStuckRepeat) {
 			told.Stuck[t.ID] = now
 			key := "stuck|" + t.ID + "|" + now.UTC().Format(time.RFC3339Nano)
 			text := leaderReportText(l, assistantwire.LeaderStuck, t, "", tr.Section)
@@ -324,16 +324,27 @@ func (s *Service) openPlans(ctx context.Context, conversation string, since time
 }
 
 // taskStuck is the one stuck rule (#3485, #4352): by the To-dos SOP it sits in Waiting on you, or stopped unfinished
-// (PR to merge, Other open, Shelved), and nothing of it moved for leaderStuckAfter. reached: every machine its agents are
-// on answered (one that did not may be running it). leader.report kind stuck and the direction tree's stuck both read it.
+// (PR to merge, Other open, Shelved), and nothing moved for the task estimate × 1.5 (at least 2 hours).
+// reached: every machine its agents are on answered (one that did not may be running it).
+// leader.report kind stuck and the direction tree's stuck both read it.
 // A to-do no agent has worked on yet (notStarted) is stuck only in Waiting on you: elsewhere it has not started, it is
 // not stopped (#5846).
 func taskStuck(t Todo, tr todoTriage, reached bool, now time.Time) bool {
 	if notStarted(t) && tr.Section != triageWaiting {
 		return false
 	}
-	return reached && t.DoneAt == nil && !tr.Last.IsZero() && now.Sub(tr.Last) >= leaderStuckAfter &&
+	return reached && t.DoneAt == nil && !tr.Last.IsZero() && now.Sub(tr.Last) >= leaderTaskStuckAfter(t) &&
 		slices.Contains([]string{triageWaiting, triagePR, triageOther, triageShelved}, tr.Section)
+}
+
+// leaderTaskStuckAfter reuses the task's existing estimate and the supervision silence rule.
+// Tasks without supervision or an estimate use the same two-hour minimum.
+func leaderTaskStuckAfter(t Todo) time.Duration {
+	expect := 0
+	if t.Supervision != nil {
+		expect = t.Supervision.ExpectMinutes
+	}
+	return silentAfter(expect)
 }
 
 // notStarted: no agent has ever worked on to-do t (none linked, not even one let go since), and it is not a concern

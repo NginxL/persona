@@ -1,0 +1,1114 @@
+{
+  "version": 1,
+  "hubs": {
+    "home": {
+      "id": "hub-home",
+      "addresses": [
+        "https://hub.example.com",
+        "http://hub.example.com:18660",
+        "http://[2001:db8::10]:18660"
+      ]
+    },
+    "proxied": {
+      "id": "hub-proxied",
+      "addresses": [
+        "https://proxy.example.org/persona"
+      ]
+    }
+  },
+  "build": [
+    {
+      "name": "persona",
+      "page": {
+        "page": "persona"
+      },
+      "path": "/persona"
+    },
+    {
+      "name": "new conversation",
+      "page": {
+        "page": "persona-new"
+      },
+      "path": "/persona/new"
+    },
+    {
+      "name": "conversation",
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a"
+      },
+      "path": "/persona/c-7f3a"
+    },
+    {
+      "name": "conversation at a message",
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "at": "msg-1"
+      },
+      "path": "/persona/c-7f3a?at=msg-1"
+    },
+    {
+      "name": "conversation of another assistant, keys in table order",
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "machine": "mac-1",
+        "manager": "m-2",
+        "at": "msg-1"
+      },
+      "path": "/persona/c-7f3a?machine=mac-1&manager=m-2&at=msg-1"
+    },
+    {
+      "name": "agent session",
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a"
+      },
+      "path": "/s/mac-1/0b5c7e2a"
+    },
+    {
+      "name": "agent session at a message whose id holds #",
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "uuid#2"
+      },
+      "path": "/s/mac-1/0b5c7e2a?at=uuid%232"
+    },
+    {
+      "name": "machine id with a space is escaped",
+      "page": {
+        "page": "session",
+        "machine": "studio mac",
+        "session": "0b5c7e2a"
+      },
+      "path": "/s/studio%20mac/0b5c7e2a"
+    },
+    {
+      "name": "agents",
+      "page": {
+        "page": "agents"
+      },
+      "path": "/agents"
+    },
+    {
+      "name": "inbox",
+      "page": {
+        "page": "inbox"
+      },
+      "path": "/inbox"
+    },
+    {
+      "name": "inbox item",
+      "page": {
+        "page": "inbox-item",
+        "id": "assistant:9f8e7d6c"
+      },
+      "path": "/inbox/assistant:9f8e7d6c"
+    },
+    {
+      "name": "inbox item of another assistant",
+      "page": {
+        "page": "inbox-item",
+        "id": "assistant:9f8e7d6c",
+        "manager": "m-2"
+      },
+      "path": "/inbox/assistant:9f8e7d6c?manager=m-2"
+    },
+    {
+      "name": "to-dos",
+      "page": {
+        "page": "todos"
+      },
+      "path": "/todos"
+    },
+    {
+      "name": "to-do is a path, not ?id=",
+      "page": {
+        "page": "todo",
+        "id": "t-19"
+      },
+      "path": "/todos/t-19"
+    },
+    {
+      "name": "knowledge",
+      "page": {
+        "page": "knowledge"
+      },
+      "path": "/kb"
+    },
+    {
+      "name": "knowledge kind",
+      "page": {
+        "page": "knowledge",
+        "kind": "people"
+      },
+      "path": "/kb/people"
+    },
+    {
+      "name": "knowledge entry whose id holds /",
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "docs",
+        "id": "notes/plan.md"
+      },
+      "path": "/kb/docs/notes%2Fplan.md"
+    },
+    {
+      "name": "recording id is escaped",
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "recordings",
+        "id": "rec 5"
+      },
+      "path": "/kb/recordings/rec%205"
+    },
+    {
+      "name": "meeting",
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "meetings",
+        "id": "m-31"
+      },
+      "path": "/kb/meetings/m-31"
+    },
+    {
+      "name": "computers",
+      "page": {
+        "page": "machines"
+      },
+      "path": "/machines"
+    },
+    {
+      "name": "computer",
+      "page": {
+        "page": "machine",
+        "id": "mac-1"
+      },
+      "path": "/machines/mac-1"
+    },
+    {
+      "name": "settings",
+      "page": {
+        "page": "settings"
+      },
+      "path": "/settings"
+    },
+    {
+      "name": "settings tab",
+      "page": {
+        "page": "settings",
+        "tab": "hub"
+      },
+      "path": "/settings?tab=hub"
+    },
+    {
+      "name": "settings tab and item, tab first",
+      "page": {
+        "page": "settings",
+        "tab": "models",
+        "item": "supervise"
+      },
+      "path": "/settings?tab=models&purpose=supervise"
+    },
+    {
+      "name": "extension settings",
+      "page": {
+        "page": "settings",
+        "tab": "extensions",
+        "item": "github"
+      },
+      "path": "/settings?tab=extensions&extension=github"
+    },
+    {
+      "name": "sent records",
+      "page": {
+        "page": "settings",
+        "tab": "connectors",
+        "item": "-sent"
+      },
+      "path": "/settings?tab=connectors&connector=-sent"
+    },
+    {
+      "name": "extension page",
+      "page": {
+        "page": "extension",
+        "extension": "weather",
+        "ui": "today"
+      },
+      "path": "/extension/weather/today"
+    },
+    {
+      "name": "extension page with state",
+      "page": {
+        "page": "extension",
+        "extension": "weather",
+        "ui": "today",
+        "state": "{\"d\":1}"
+      },
+      "path": "/extension/weather/today?state=%7B%22d%22%3A1%7D"
+    }
+  ],
+  "links": [
+    {
+      "name": "web and app links",
+      "base": "https://hub.example.com",
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a"
+      },
+      "web": "https://hub.example.com/persona/c-7f3a",
+      "app": "persona://open/persona/c-7f3a"
+    },
+    {
+      "name": "a trailing slash on the address is not doubled",
+      "base": "https://hub.example.com/",
+      "page": {
+        "page": "todo",
+        "id": "t-19"
+      },
+      "web": "https://hub.example.com/todos/t-19",
+      "app": "persona://open/todos/t-19"
+    },
+    {
+      "name": "a hub under a sub-path",
+      "base": "https://proxy.example.org/persona/",
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a"
+      },
+      "web": "https://proxy.example.org/persona/persona/c-7f3a",
+      "app": "persona://open/persona/c-7f3a"
+    },
+    {
+      "name": "no public address: no web link",
+      "base": "",
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a"
+      },
+      "web": "",
+      "app": "persona://open/s/mac-1/0b5c7e2a"
+    }
+  ],
+  "parse": [
+    {
+      "name": "agent session",
+      "url": "https://hub.example.com/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "agent session at a message (escaped #)",
+      "url": "https://hub.example.com/s/mac-1/0b5c7e2a?at=uuid%232",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "uuid#2",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "agent session with its view",
+      "url": "https://hub.example.com/s/mac-1/0b5c7e2a?view=term",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "view": "term",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "another address of the same hub, plain http",
+      "url": "http://hub.example.com:18660/persona/c-7f3a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "host is case-insensitive",
+      "url": "https://HUB.example.com/persona/c-7f3a?at=msg-1",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "at": "msg-1",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "an IPv6 address of the hub",
+      "url": "http://[2001:db8::10]:18660/todos/t-19",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "the default port written out",
+      "url": "https://hub.example.com:443/todos/t-19",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "to-do, older ?id= form",
+      "url": "https://hub.example.com/todos?id=t-19",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "to-dos",
+      "url": "https://hub.example.com/todos",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todos",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "a tab's agent (older /t form)",
+      "url": "https://hub.example.com/t/mac-1/space-a/2/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "persona",
+      "url": "https://hub.example.com/persona",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "persona",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "the root is persona",
+      "url": "https://hub.example.com/",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "persona",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "new conversation",
+      "url": "https://hub.example.com/persona/new",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "persona-new",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "conversation of another assistant",
+      "url": "https://hub.example.com/persona/c-7f3a?machine=mac-1&manager=m-2",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "machine": "mac-1",
+        "manager": "m-2",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "agents",
+      "url": "https://hub.example.com/agents",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "agents",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "agents, older /a form",
+      "url": "https://hub.example.com/a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "agents",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "inbox",
+      "url": "https://hub.example.com/inbox",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "inbox",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "inbox item with its assistant",
+      "url": "https://hub.example.com/inbox/assistant%3A9f8e7d6c?manager=m-2",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "inbox-item",
+        "id": "assistant:9f8e7d6c",
+        "manager": "m-2",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "inbox item, : unescaped",
+      "url": "https://hub.example.com/inbox/assistant:9f8e7d6c",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "inbox-item",
+        "id": "assistant:9f8e7d6c",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "knowledge",
+      "url": "https://hub.example.com/kb",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "knowledge kind",
+      "url": "https://hub.example.com/kb/people",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge",
+        "kind": "people",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "knowledge entry whose id holds an escaped /",
+      "url": "https://hub.example.com/kb/docs/notes%2Fplan.md",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "docs",
+        "id": "notes/plan.md",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "meeting",
+      "url": "https://hub.example.com/kb/meetings/m-31",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "meetings",
+        "id": "m-31",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "recording",
+      "url": "https://hub.example.com/kb/recordings/rec%205",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "recordings",
+        "id": "rec 5",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "an unknown knowledge kind is no page",
+      "url": "https://hub.example.com/kb/spells/x",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "computers",
+      "url": "https://hub.example.com/machines",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "machines",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "computer",
+      "url": "https://hub.example.com/machines/mac-1?range=7d",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "machine",
+        "id": "mac-1",
+        "range": "7d",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "settings",
+      "url": "https://hub.example.com/settings",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "settings tab",
+      "url": "https://hub.example.com/settings?tab=hub",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "hub",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "settings tab and item",
+      "url": "https://hub.example.com/settings?tab=models&purpose=supervise",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "models",
+        "item": "supervise",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "extension settings",
+      "url": "https://hub.example.com/settings?tab=extensions&extension=github",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "extensions",
+        "item": "github",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "an unknown tab opens settings",
+      "url": "https://hub.example.com/settings?tab=nonsense",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "sent records, older path",
+      "url": "https://hub.example.com/settings/sent",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "connectors",
+        "item": "-sent",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "extension page with state",
+      "url": "https://hub.example.com/extension/weather/today?state=%7B%22d%22%3A1%7D",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "extension",
+        "extension": "weather",
+        "ui": "today",
+        "state": "{\"d\":1}",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "extension page, older /plugin form",
+      "url": "https://hub.example.com/plugin/weather/today",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "extension",
+        "extension": "weather",
+        "ui": "today",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "keys no row lists are dropped",
+      "url": "https://hub.example.com/s/mac-1/0b5c7e2a?at=msg-1&token=abc",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "a fragment is ignored",
+      "url": "https://hub.example.com/persona/c-7f3a#settings-providers",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "hub": "hub-home"
+      }
+    },
+    {
+      "name": "the admin page is no page of the table",
+      "url": "https://hub.example.com/admin",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "a share page is no page of the table",
+      "url": "https://hub.example.com/share/0123abcd",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "an agent link without its session",
+      "url": "https://hub.example.com/s/mac-1",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "another site",
+      "url": "https://other.example.net/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "external"
+    },
+    {
+      "name": "a look-alike host",
+      "url": "https://hub.example.com.evil.example/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "external"
+    },
+    {
+      "name": "another port",
+      "url": "https://hub.example.com:8443/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "external"
+    },
+    {
+      "name": "a user name and password",
+      "url": "https://user:pw@hub.example.com/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "unsafe"
+    },
+    {
+      "name": "not a web link",
+      "url": "mailto:me@example.com",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "external"
+    },
+    {
+      "name": "hub under a sub-path",
+      "url": "https://proxy.example.org/persona/persona/c-7f3a",
+      "hubs": [
+        "home",
+        "proxied"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "hub": "hub-proxied"
+      }
+    },
+    {
+      "name": "to-do on the second hub",
+      "url": "https://proxy.example.org/persona/todos/t-19",
+      "hubs": [
+        "home",
+        "proxied"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19",
+        "hub": "hub-proxied"
+      }
+    },
+    {
+      "name": "same host outside the hub's sub-path",
+      "url": "https://proxy.example.org/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home",
+        "proxied"
+      ],
+      "page": null,
+      "reason": "external"
+    },
+    {
+      "name": "app link",
+      "url": "persona://open/s/mac-1/0b5c7e2a?at=msg-1",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1"
+      },
+      "route": "/s/mac-1/0b5c7e2a?at=msg-1"
+    },
+    {
+      "name": "app link naming its hub",
+      "url": "persona://open/persona/c-7f3a?hub=hub-home",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a",
+        "hub": "hub-home"
+      },
+      "route": "/persona/c-7f3a"
+    },
+    {
+      "name": "app link to a to-do",
+      "url": "persona://open/todos/t-19",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19"
+      },
+      "route": "/todos/t-19"
+    },
+    {
+      "name": "app link to extension settings",
+      "url": "persona://open/settings?tab=extensions&extension=github",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "extensions",
+        "item": "github"
+      },
+      "route": "/settings?tab=extensions&extension=github"
+    },
+    {
+      "name": "app link drops keys no row lists",
+      "url": "persona://open/s/mac-1/0b5c7e2a?at=msg-1&token=abc",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1"
+      },
+      "route": "/s/mac-1/0b5c7e2a?at=msg-1"
+    },
+    {
+      "name": "app link to persona",
+      "url": "persona://open/persona",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "persona"
+      },
+      "route": "/persona"
+    },
+    {
+      "name": "app link, older route= form",
+      "url": "persona://open?route=%2Fpersona%2Fc-7f3a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "conversation",
+        "id": "c-7f3a"
+      },
+      "route": "/persona/c-7f3a"
+    },
+    {
+      "name": "app link, older route= form drops an action key (add)",
+      "url": "persona://open?route=%2Fsettings%3Ftab%3Dmodels%26add%3D1",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "models"
+      },
+      "route": "/settings?tab=models"
+    },
+    {
+      "name": "app link, older route= form drops keys no row lists",
+      "url": "persona://open?route=%2Fs%2Fmac-1%2F0b5c7e2a%3Fat%3Dmsg-1%26token%3Dabc",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1"
+      },
+      "route": "/s/mac-1/0b5c7e2a?at=msg-1"
+    },
+    {
+      "name": "app link to a path no row lists",
+      "url": "persona://open/admin",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page",
+      "route": "/admin"
+    },
+    {
+      "name": "app link leaving the hub",
+      "url": "persona://open//evil.example/x",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "unsafe"
+    },
+    {
+      "name": "app link with a port",
+      "url": "persona://open:8080/s/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "unsafe"
+    },
+    {
+      "name": "Live Activity row",
+      "url": "persona://open?machine=mac-1&session=0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a"
+      }
+    },
+    {
+      "name": "older session link",
+      "url": "persona://session/mac-1/0b5c7e2a",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a"
+      }
+    },
+    {
+      "name": "older session link at a message",
+      "url": "persona://session/mac-1/0b5c7e2a?at=msg-1",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "session",
+        "machine": "mac-1",
+        "session": "0b5c7e2a",
+        "at": "msg-1"
+      }
+    },
+    {
+      "name": "older task link",
+      "url": "persona://task/t-19",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "todo",
+        "id": "t-19"
+      }
+    },
+    {
+      "name": "older knowledge link, the rest is the id",
+      "url": "persona://kb/docs/notes/plan.md",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "knowledge-entry",
+        "kind": "docs",
+        "id": "notes/plan.md"
+      }
+    },
+    {
+      "name": "older extension settings link",
+      "url": "persona://settings/extensions/github",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "settings",
+        "tab": "extensions",
+        "item": "github"
+      }
+    },
+    {
+      "name": "older extension page link",
+      "url": "persona://extension/weather/today",
+      "hubs": [
+        "home"
+      ],
+      "page": {
+        "page": "extension",
+        "extension": "weather",
+        "ui": "today"
+      }
+    },
+    {
+      "name": "a pairing link is an action, not a page",
+      "url": "persona://pair?url=https%3A%2F%2Fhub.example.com&token=abc",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "ask is an action, not a page",
+      "url": "persona://ask?text=hi",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    },
+    {
+      "name": "a file in a card is not a page of the table",
+      "url": "persona://file/mac-1/%2Ftmp%2Fa.txt",
+      "hubs": [
+        "home"
+      ],
+      "page": null,
+      "reason": "not-a-page"
+    }
+  ]
+}

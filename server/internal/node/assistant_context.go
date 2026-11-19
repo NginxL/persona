@@ -257,6 +257,13 @@ func (n *Node) turnContext(id string, c contextAnswer) (block string, commit fun
 		block = strings.TrimSpace(block + "\n" + c.ViewErrors)
 	}
 	return block, func() {
+		n.state.update(id, func(v *sessionState) bool {
+			if !v.AwaitingFirstMessage {
+				return false
+			}
+			v.AwaitingFirstMessage = false
+			return true
+		})
 		if len(c.Receipts) > 0 {
 			n.ackViewErrors(id, c.Receipts)
 		}

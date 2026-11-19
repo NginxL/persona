@@ -51,6 +51,9 @@
     <string name="machines_metric_load">負荷</string>
     <string name="machines_metric_disk">ディスク</string>
     <string name="machines_metric_swap">スワップ</string>
+    <string name="machines_metric_battery">バッテリー</string>
+    <string name="machines_metric_charging">充電中</string>
+    <string name="machines_metric_temperature">温度</string>
     <string name="machines_swap_off">無効</string>
     <string name="machines_no_sample">新しいサンプルはまだありません</string>
     <string name="machines_offline_history">マシンはオフラインです。以下のグラフは過去のサンプルです。</string>

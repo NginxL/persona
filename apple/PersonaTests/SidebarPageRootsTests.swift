@@ -73,9 +73,26 @@ import Testing
         #expect(roots.current == .conversation && !roots.keeps(inbox))
     }
 
+    /// Choosing the Agents tab forgets its roots each time (#10270): with nothing to forget the roots are not written
+    /// again, so nothing that reads them is drawn again in the frame the tab switches in; with something, they go back.
+    @Test func forgettingNothingWritesNothing() {
+        let sidebar = UnifiedSidebar(part: .agents)
+        #expect(SidebarPageRoots.start.forgotten)
+        let observed = RootsObservationFlag()
+        withObservationTracking { _ = sidebar.roots } onChange: { MainActor.assumeIsolated { observed.changed = true } }
+        sidebar.forget(path: .constant(NavigationPath()))
+        #expect(!observed.changed)
+        sidebar.select(agent, path: .constant(NavigationPath()))
+        #expect(observed.changed && !sidebar.roots.forgotten)
+        sidebar.forget(path: .constant(NavigationPath()))
+        #expect(sidebar.root == .conversation && sidebar.roots.forgotten)
+    }
+
     @Test func theShadedPlaceFollowsTheRoot() {
         #expect(inbox.place == .inbox && recordings.place == .recordings)
         #expect(SidebarPageRoot.page(SidebarRoute.health).place == .health)
         #expect(agent.place == nil && SidebarPageRoot.conversation.place == nil)
     }
 }
+
+@MainActor private final class RootsObservationFlag { var changed = false }

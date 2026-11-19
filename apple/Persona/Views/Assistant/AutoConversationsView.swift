@@ -131,6 +131,7 @@ struct AutoConversationsView: View {
     private func row(_ s: Session) -> some View {
         let title = s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title
         let from = AutoConversations.source(of: s, tasks: taskChats.known(on: model.api))
+        let opener = ConversationOpener.of(s) // the extension that opened it, whose own icon its mark draws when it can (#10358)
         let detail = [filter == .all ? from?.name : nil, [.working, .needsYou, .unread].contains(s.state) ? s.state.label : s.updatedAt.map { Fmt.relative($0) }]
             .compactMap { $0 }.joined(separator: " · ")
         // The hub's built-in background supervisor (#5083) stays listed: no Archive, no Pin.
@@ -145,7 +146,7 @@ struct AutoConversationsView: View {
                         } else {
                             Text(title).font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
                         }
-                        if let from { AutoSourceMark(source: from) } // what opened it, as in the sidebar (#3758, #5195)
+                        if let from { AutoSourceMark(source: from, opener: opener) } // what opened it, as in the sidebar (#3758, #5195)
                     }
                     if !detail.isEmpty {
                         Text(detail).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
@@ -159,8 +160,8 @@ struct AutoConversationsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([title, filter == .all ? nil : from?.markLabel, detail.isEmpty ? nil : detail].compactMap { $0 }
-            .joined(separator: String(localized: ", ", comment: "Separator between the parts of a VoiceOver label")))
+        .sourceLabel([title], source: filter == .all ? nil : from, opener: opener, [detail.isEmpty ? nil : detail],
+                     separator: String(localized: ", ", comment: "Separator between the parts of a VoiceOver label"))
         .accessibilityIdentifier("auto-conversation")
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if !builtIn {

@@ -20,6 +20,9 @@ vi.mock("../../lib/ops", () => ({
 import { InteractionCard } from "./Interactions";
 import { getState } from "../../lib/store";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

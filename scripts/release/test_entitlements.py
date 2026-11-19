@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 HERE = Path(__file__).resolve().parent
 APPLE = HERE.parent.parent / "apple"
@@ -114,6 +115,56 @@ class SiriCalls(MacApp):
     def test_on_signed_with_it_is_ok(self):
         self.ask_for_siri()
         self.assertIn("entitlements ok: 1 bundles in Persona.app", self.check({**self.SIGNED, ents.SIRI: True}))
+
+
+class OptInsInAReleaseIPA(unittest.TestCase):
+    """The exported-IPA path checks every entitlement its Release target asks for, not only HealthKit and Siri (#9526)."""
+    CASES = {
+        'CarPlay voice': 'com.apple.developer.carplay-voice-based-conversation',
+        'HomeKit': 'com.apple.developer.homekit',
+        'HealthKit background delivery': ents.HEALTH_BACKGROUND,
+    }
+
+    def check(self, key, with_opt_in):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wanted = {'aps-environment': 'development', ents.TIME_SENSITIVE: True, key: True}
+            with open(root / 'Persona.entitlements', 'wb') as f:
+                plistlib.dump(wanted, f)
+            targets = {(BUNDLE, 'iphoneos'): {
+                'CODE_SIGN_ENTITLEMENTS': 'Persona.entitlements', 'PROJECT_DIR': str(root),
+                'DEVELOPMENT_TEAM': 'TEAM', 'TARGET_NAME': 'Persona'}}
+            signed = {'application-identifier': 'TEAM.' + BUNDLE, 'aps-environment': 'production',
+                      ents.TIME_SENSITIVE: True}
+            if with_opt_in:
+                signed[key] = True
+            ipa = root / 'Persona.ipa'
+            with zipfile.ZipFile(ipa, 'w') as archive:
+                archive.writestr('Payload/Persona.app/Info.plist', plistlib.dumps({
+                    'CFBundleIdentifier': BUNDLE, 'DTPlatformName': 'iphoneos'}))
+            printed, stopped = [], None
+            with patch.object(ents, 'targets', return_value=targets), patch.object(ents, 'signed', return_value=signed), \
+                    patch.object(ents.check_no_callkit, 'scan', return_value=(1, [])), \
+                    patch('builtins.print', lambda *a, **k: printed.append(' '.join(map(str, a)))):
+                try:
+                    ents.check(str(ipa))
+                except SystemExit as stop:
+                    stopped = str(stop)
+            return printed, stopped
+
+    def test_check_rejects_an_ipa_missing_each_opt_in_entitlement(self):
+        for name, key in self.CASES.items():
+            with self.subTest(opt_in=name):
+                printed, stopped = self.check(key, with_opt_in=False)
+                self.assertIsNotNone(stopped, 'an IPA signed without %s must not pass check' % key)
+                self.assertIn(key, '\n'.join(printed) + (stopped or ''))
+
+    def test_check_accepts_an_ipa_with_each_opt_in_entitlement(self):
+        for name, key in self.CASES.items():
+            with self.subTest(opt_in=name):
+                printed, stopped = self.check(key, with_opt_in=True)
+                self.assertIsNone(stopped, stopped)
+                self.assertIn('entitlements ok: 1 bundles in Persona.ipa', printed)
 
 
 class CheckLinksNoCallKit(MacApp):

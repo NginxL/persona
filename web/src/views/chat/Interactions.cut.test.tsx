@@ -32,6 +32,9 @@ import { cutBelow } from "./card-cut";
 import { getState, reset, upsertSession } from "../../lib/store";
 import { t } from "../../i18n";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -11,6 +11,7 @@ struct AskPersonaIntent: AppIntent {
         categoryName: "Chat",
         searchKeywords: ["Persona", "Assistant", "ask [Ask Persona Intent 4628c0]", "assistant", "ask"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Question [Ask Persona Intent 33a861]", requestValueDialog: "What do you want to ask Persona?")

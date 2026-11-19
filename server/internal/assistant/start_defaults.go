@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -19,8 +20,8 @@ import (
 // installed extension granted the assistant.start_defaults hub scope, stores a policy of rules (GET/PUT
 // /api/v1/assistant/start-defaults, start_defaults_routes.go); a policy an extension writes must expire within
 // startDefaultsMaxExpiry, so a stopped or uninstalled extension leaves nothing in force. With no policy, an expired one
-// or no rule that fits a task, the task starts exactly as it would without the feature, and explicit caller values
-// always win.
+// or no rule that fits a task, the task starts exactly as it would without the feature (apart from the Codex goal
+// default, startGoalSource), and explicit caller values always win.
 
 // StartDefaults is what one policy rule gives a task start.
 type StartDefaults struct {
@@ -34,16 +35,21 @@ type StartDefaults struct {
 	Effort string
 	// Ultracode: applied only to a Claude Code start whose caller did not say.
 	Ultracode *bool
-	// Goal: GoalFromDoneWhen turns the task's done_when into one checkable condition typed as /goal before the first
-	// message (docs/integrations/agent-goal.md "A goal set at the start"). Only new Claude Code starts take it.
+	// Goal: GoalFromDoneWhen turns the task's done_when into one checkable condition typed as /goal after the first
+	// message (docs/integrations/agent-goal.md "A goal set at the start"); GoalOff asks for none, not even the Codex
+	// default; "" leaves it to the default (startGoalSource). Only new Claude Code and Codex starts take a goal.
 	Goal string
 	// PlanFirst asks for the self-planning constraint in the task's prompt, for a launcher whose model does not act
 	// on a thinking-effort setting (the prompt is then the only lever).
 	PlanFirst bool
 }
 
-// GoalFromDoneWhen: build the start's goal from the task's done_when.
-const GoalFromDoneWhen = "done_when"
+// The goal sources a rule can name. GoalFromDoneWhen: build the start's goal from the task's done_when. GoalOff: no
+// goal for the tasks the rule matches, which turns the Codex default off (startGoalSource).
+const (
+	GoalFromDoneWhen = "done_when"
+	GoalOff          = "off"
+)
 
 // PresetChoice is one preset of StartDefaults: its name is a model profile tier, weight its share among usable ones.
 type PresetChoice struct {
@@ -82,7 +88,8 @@ type StartDefaultsPolicy struct {
 	By string `json:"by,omitempty"`
 }
 
-// StartDefaultsRule is one match and what a matching task starts with; the first rule that fits wins.
+// StartDefaultsRule is one match and what a matching task starts with; the first rule that fits wins, except for the
+// goal, which the first fitting rule naming one decides (matchStartDefaults).
 type StartDefaultsRule struct {
 	When StartDefaultsMatch `json:"when"`
 	Then StartDefaultsThen  `json:"then"`
@@ -134,8 +141,8 @@ func (p *StartDefaultsPolicy) validate(allowNoExpiry bool, now time.Time) error 
 		if r.Then.Effort != "" && !slices.Contains(proto.EffortLevels, r.Then.Effort) {
 			return fmt.Errorf("%s.then.effort must be one of %v", at, proto.EffortLevels)
 		}
-		if r.Then.Goal != "" && r.Then.Goal != GoalFromDoneWhen {
-			return fmt.Errorf("%s.then.goal must be %q", at, GoalFromDoneWhen)
+		if r.Then.Goal != "" && r.Then.Goal != GoalFromDoneWhen && r.Then.Goal != GoalOff {
+			return fmt.Errorf("%s.then.goal must be %q or %q", at, GoalFromDoneWhen, GoalOff)
 		}
 		if len(r.Then.Presets) > startDefaultsMaxPresets {
 			return fmt.Errorf("%s.then.presets has %d entries; at most %d", at, len(r.Then.Presets), startDefaultsMaxPresets)
@@ -192,19 +199,29 @@ func (s *Service) startDefaults(ctx context.Context, facts StartFacts) (StartDef
 	return d, ok, nil
 }
 
-// matchStartDefaults turns the first rule of p whose when fits the task into the start's defaults.
+// matchStartDefaults turns the first rule of p whose when fits the task into the start's defaults. The goal is decided
+// on its own: by the first fitting rule that names one, which need not be that rule, so a later goal "off" still turns
+// the Codex default off for a task an earlier rule silent on the goal fits (startGoalSource).
 func matchStartDefaults(p *StartDefaultsPolicy, facts StartFacts) (StartDefaults, bool) {
+	var d StartDefaults
+	fits := false
 	for _, r := range p.Rules {
 		if !startDefaultsMatch(r.When, facts) {
 			continue
 		}
-		d := StartDefaults{By: p.By, Effort: r.Then.Effort, Ultracode: r.Then.Ultracode, Goal: r.Then.Goal, PlanFirst: r.Then.PlanFirst}
-		for _, pr := range r.Then.Presets {
-			d.Presets = append(d.Presets, PresetChoice{Name: strings.TrimSpace(pr.Name), Weight: pr.Weight})
+		if !fits {
+			fits = true
+			d = StartDefaults{By: p.By, Effort: r.Then.Effort, Ultracode: r.Then.Ultracode, PlanFirst: r.Then.PlanFirst}
+			for _, pr := range r.Then.Presets {
+				d.Presets = append(d.Presets, PresetChoice{Name: strings.TrimSpace(pr.Name), Weight: pr.Weight})
+			}
 		}
-		return d, true
+		if r.Then.Goal != "" {
+			d.Goal = r.Then.Goal
+			break
+		}
 	}
-	return StartDefaults{}, false
+	return d, fits
 }
 
 // startDefaultsMatch says whether a rule's when fits a task's facts; every set field has to fit.
@@ -229,6 +246,18 @@ var presetIntN = func(n int) int { return rand.IntN(n) }
 // was handed to. A task leader's worker takes the class of the conversation that follows up its leader's task. ""
 // when no conversation follows the task up.
 func (s *Service) taskSupervisorClass(ctx context.Context, t *PlanTask) string {
+	sup := s.taskSupervisorOf(t)
+	if sup == "" || s.isLeaderRef(sup) {
+		return ""
+	}
+	return s.dispatchConversationClass(ctx, s.settings(ctx).MachineID, sup)
+}
+
+// taskSupervisorOf is the conversation that follows task t up: the one its supervision ledger names (written when the
+// plan started, before the agent), else the leader conversation the plan was handed to (PlanTask.Supervisor, set only
+// when the main conversation hands a task over: a leader's own plan leaves it empty). A task leader's worker is
+// followed up through its leader's task, so it takes that task's. "" when no conversation follows the task up.
+func (s *Service) taskSupervisorOf(t *PlanTask) string {
 	sup := t.Supervisor
 	todoID := t.TodoID
 	if t.Parent != "" {
@@ -239,10 +268,7 @@ func (s *Service) taskSupervisorClass(ctx context.Context, t *PlanTask) string {
 			sup = todo.Supervision.Supervisor
 		}
 	}
-	if sup == "" || s.isLeaderRef(sup) {
-		return ""
-	}
-	return s.dispatchConversationClass(ctx, s.settings(ctx).MachineID, sup)
+	return sup
 }
 
 // roleOf is the task's role as a fact: roleLeader for a task leader, else worker.
@@ -292,10 +318,12 @@ func (s *Service) applyStartPreset(ctx context.Context, t *PlanTask, caller star
 	return note
 }
 
-// applyStartExtras adds the defaults' effort, ultracode, goal and self-planning prompt to a task's start, after the
-// launcher fit (claude: what runs is Claude Code). caller is what the task named before any tier, Model Settings, the
-// fit or a preset filled something in. Explicit caller values always win; why is the preset's note, said with the rest.
-func (s *Service) applyStartExtras(ctx context.Context, t *PlanTask, caller startPick, d StartDefaults, claude bool, params map[string]any, why string) {
+// applyStartExtras adds the defaults' effort, ultracode and self-planning prompt to a task's start, after the launcher
+// fit (agent: what runs, "claude" for Claude Code); the goal is applyStartGoal's. caller is what the task named before
+// any tier, Model Settings, the fit or a preset filled something in. Explicit caller values always win; why is the
+// preset's note, said with the rest.
+func (s *Service) applyStartExtras(ctx context.Context, t *PlanTask, caller startPick, d StartDefaults, agent string, params map[string]any, why string) {
+	claude := agent == "claude"
 	// Effort, strongest first: the caller's own effort, then the effort of a tier the caller named; otherwise the
 	// policy's effort wins over a preset's and Model Settings' default (the policy says how this kind of task starts).
 	// Claude Code only; other agents keep whatever they were given.
@@ -316,18 +344,76 @@ func (s *Service) applyStartExtras(ctx context.Context, t *PlanTask, caller star
 		t.Ultracode = &on
 		t.startFilled.ultracode = true
 	}
-	if claude && d.Goal == GoalFromDoneWhen && len(t.DoneWhen) > 0 {
-		goal := prompts.RenderTaskGoal(t.DoneWhen)
-		if utf8.RuneCountInString(goal) <= proto.StartGoalMax {
-			params["goal"] = goal
-		} else {
-			s.logf("task %s: goal longer than %d runes, no /goal set", t.TodoID, proto.StartGoalMax)
-		}
-	}
 	t.planFirst = d.PlanFirst
 	if d.By != "" && why != "" {
 		t.noteWhy(d.By + ": " + why)
 	}
+}
+
+// startGoalSource says whether a task start takes a goal from its done_when, and whether that goal is the built-in
+// default rather than a rule's. ruled says a policy rule fits the task (d is its defaults, whose Goal is the first
+// fitting rule's that names one: matchStartDefaults). Only a new Claude Code or Codex start (not a resume) whose task
+// has done_when criteria takes a goal at all. A rule that names a goal decides: done_when sets it on both agents, off
+// on neither. Otherwise (no policy, an expired one, no rule that fits, or none that fits naming the goal) a Codex start
+// takes its done_when by default: Codex has no Stop hook, so its goal is the only thing that keeps it working toward
+// the criteria between the supervisor's reviews. Claude Code keeps starting without one.
+func startGoalSource(d StartDefaults, ruled bool, agent string, resume bool, doneWhen int) (goal, byDefault bool) {
+	if resume || doneWhen == 0 || agent != "claude" && agent != "codex" {
+		return false, false
+	}
+	rule := ""
+	if ruled {
+		rule = d.Goal
+	}
+	switch {
+	case rule == GoalFromDoneWhen:
+		return true, false
+	case rule == GoalOff:
+		return false, false
+	case agent == "codex":
+		return true, true // the default
+	}
+	return false, false
+}
+
+// applyStartGoal adds the task's goal to its start when startGoalSource says so: Claude Code's /goal and Codex's
+// alike, typed after the first message (docs/integrations/agent-goal.md). It runs on every start try, with or without
+// a policy rule; a goal over proto.StartGoalMax is left out and logged. refusedHere says the start is one the node is
+// known to refuse a goal for (defaultGoalRefusedOn): the built-in default is then left out, logged, rather than sent
+// to be refused and started again; a rule's goal still goes, so its refusal reaches the task's why. byDefault says the
+// goal sent is the built-in default, whose refusal is only logged (startTaskAgent).
+func (s *Service) applyStartGoal(t *PlanTask, d StartDefaults, ruled bool, agent string, refusedHere bool, params map[string]any) (byDefault bool) {
+	resume, _ := params["resume_session_id"].(string)
+	goal, byDefault := startGoalSource(d, ruled, agent, resume != "", len(t.DoneWhen))
+	if !goal {
+		return false
+	}
+	if byDefault && refusedHere {
+		s.logf("task %s: this start cannot take a goal; starting without the default goal", t.TodoID)
+		return false
+	}
+	text := prompts.RenderTaskGoal(t.DoneWhen)
+	if utf8.RuneCountInString(text) > proto.StartGoalMax {
+		s.logf("task %s: goal longer than %d runes, no /goal set", t.TodoID, proto.StartGoalMax)
+		return false
+	}
+	params["goal"] = text
+	return byDefault
+}
+
+// defaultGoalRefusedOn says, from what the hub already knows, that m's node refuses a goal for this start: one in an
+// engine runtime (Paseo, Cindy) or a desktop app's launcher (claude-desktop, codex-app), which have no screen to type
+// /goal at (node/startgoal.go). Other refusals (an old node, a screenless terminal host) show only when it answers.
+func defaultGoalRefusedOn(m Device, params map[string]any, agent startAgent) bool {
+	host, _ := params["host"].(string)
+	if agentStartHost(m, host) != "" {
+		return true
+	}
+	switch source := compat.Source(agent.source); {
+	case source == "codex_app", source == "claude_desktop", proto.RuntimeEngine(source):
+		return true
+	}
+	return false
 }
 
 // chooseStartPreset picks the first usable preset, or one of the weighted usable ones. A usable preset is one the
@@ -395,8 +481,8 @@ func (s *Service) chooseStartPreset(ctx context.Context, t *PlanTask, choices []
 	return pick.Name, note, true
 }
 
-// goalRefusal: a session.start that carried a goal was refused for it (an old node, an agent other than Claude Code, a
-// resume or a screenless host). A goal is an extra, so the caller starts the agent again without it and says why.
+// goalRefusal: a session.start that carried a goal was refused for it (an old node, an agent other than Claude Code or
+// Codex, a resume or a screenless host). A goal is an extra, so the caller starts the agent again without it and says why.
 func (s *Service) goalRefusal(err error, params map[string]any) (reason string, refused bool) {
 	if on, _ := params["goal"].(string); on == "" {
 		return "", false

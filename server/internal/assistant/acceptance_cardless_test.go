@@ -285,7 +285,7 @@ func TestCardlessAcceptSaysSoInTheTopic(t *testing.T) {
 		t.Fatal("not accepted")
 	}
 	e.clk.advance(threadPostSettle)
-	mustContain(t, "accepted line", textOf(e.onlyPost(t)), "已验收", testWeb+"/todos?id="+id)
+	mustContain(t, "accepted line", textOf(e.onlyPost(t)), "已验收", testWeb+"/todos/"+id)
 }
 
 // Verifying a card-less ask plans the report back to where the request came from, as verifying on a card does.

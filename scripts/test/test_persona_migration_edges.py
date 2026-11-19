@@ -102,7 +102,7 @@ class PersonaMigrationEdgesTests(unittest.TestCase):
             self.go, ROOT / "server", self.clean_env())
         (source / "go.mod").write_text(
             "module github.com/nwverse/persona/server\n\n" + directives)
-        for package in ("compat", "nodeproto", "proto", "dialogwire"):
+        for package in ("compat", "nodeproto", "proto", "dialogwire", "aiwire"):
             shutil.copytree(ROOT / "server/internal" / package, source / "internal" / package,
                             ignore=shutil.ignore_patterns("*_test.go"), dirs_exist_ok=True)
         for name in ('paths.go', 'env.go'):

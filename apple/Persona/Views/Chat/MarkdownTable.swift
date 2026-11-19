@@ -285,6 +285,9 @@ struct FittedTable: View {
                 .environment(\.tableColumnAlignments, measure.alignments)
                 .liftTableSize() // its room in the text view over a lifted copy's words
         }
+        // As tall as its rows, whatever height it is offered, as the theme's paragraphs are: a sideways scroll view takes
+        // less when offered less, and the table was cut under a row while the paragraph after it was drawn whole (#10012).
+        .fixedSize(horizontal: false, vertical: true)
         .scrollDisabled(plan?.scrolls != true)
         // What shows of it, not offset + container: on an iPad the chat's scroll views run on under the sidebar, inset
         // by it, and the container leaves that out, so the fade stayed at the end (#5737).

@@ -18,6 +18,7 @@ import persona.core.navigation.MachineDetailRoute
 import persona.core.navigation.MessageJumps
 import persona.core.navigation.Navigator
 import persona.feature.chat.*
+import persona.feature.assistant.personaConversationTitle
 import persona.feature.inbox.InboxWebSelection
 import persona.feature.inbox.LocalInboxWebSelection
 import java.util.UUID
@@ -65,6 +66,7 @@ internal fun ShellLinkHost(session: ShellSession, navigator: Navigator, feedback
                 session.sessions.sessions.value.map { it.key }, session.assistant.assistant.value, navigator)
         }
     }
+    val forwarding = rememberChatForwarding(session, navigator)
     var picked by remember { mutableStateOf<ChatLinkContext?>(null) }
     val inboxPick: (InboxWebSelection) -> Unit = { selection -> picked = ChatLinkContext("context", selection.title, selection.url, selection.text) }
     // Without a main conversation to send to, a pick can only say where it works.
@@ -73,7 +75,7 @@ internal fun ShellLinkHost(session: ShellSession, navigator: Navigator, feedback
     val contextElsewhere: (ChatLinkContext) -> Unit = { feedback.notice(contextNotice) }
     val editElsewhere: suspend (ChatLinkContext, String) -> Unit = { _, _ -> feedback.notice(editNotice) }
     CompositionLocalProvider(LocalChatAppLinks provides appLinks, LocalChatHubLinks provides hubLinks,
-        LocalInboxWebSelection provides inboxPick.takeIf { handToPersona != null }) {
+        LocalInboxWebSelection provides inboxPick.takeIf { handToPersona != null }, LocalChatForwarding provides forwarding) {
         ChatLinkHost(
             onContext = contextElsewhere.takeIf { handToPersona == null },
             onEdit = editElsewhere.takeIf { handToPersona == null },
@@ -135,4 +137,36 @@ internal fun openHubPage(link: String, hubs: List<String>, namespace: String?, s
         is HubPage.Screen -> navigator.navigate(page.key.let { if (it is MachineDetailRoute) it.copy(machineId = machine(it.machineId)) else it })
     }
     return true
+}
+
+/**
+ * What chats need for Forward (#3901): the sessions and Persona's conversations the app already holds, each group's Recent,
+ * and how a target opens: an Agent's chat in Agents, a Persona conversation in Persona's page, Persona's new conversation
+ * with its composer focused, or the new-agent page. Forwards stay on their hub group (Persona's page shows the selected one).
+ */
+@Composable
+private fun rememberChatForwarding(session: ShellSession, navigator: Navigator): ChatForwarding {
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val wiring = chatWiringSource()
+    return remember(session, navigator, resources, wiring) {
+        ChatForwarding(
+            agents = session.sessions.sessions, machines = session.sessions.machines, assistant = session.assistant.assistant,
+            personaGroupOf = { key ->
+                GroupKeys.namespaceOf(key.machineId) == session.groups.groups.value.firstOrNull { it.selected }?.namespace
+            },
+            conversationTitle = { it.personaConversationTitle(resources) },
+            memory = { key -> wiring.bindingsFor(key).value?.forwardMemory },
+            openChat = { key, assistant ->
+                if (assistant) {
+                    navigator.selectTab(AppTab.Persona)
+                    navigator.navigate(ChatRoute(key.machineId, key.sessionId, ConversationKind.Assistant))
+                } else navigator.navigate(ChatRoute(key.machineId, key.sessionId, ConversationKind.Agent))
+            },
+            openPersonaHome = {
+                persona.feature.assistant.AssistantComposerFocus.request()
+                navigator.selectTab(AppTab.Persona)
+            },
+            openNewAgent = { context -> navigator.navigate(persona.core.navigation.NewAgentRoute(context = context)) },
+        )
+    }
 }

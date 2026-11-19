@@ -7,7 +7,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { writeResultUnknown } from '../core/TransportPolicy';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { cert } from '@kit.DeviceCertificateKit';
-import { socket } from '@kit.NetworkKit';
+import { connection, socket } from '@kit.NetworkKit';
 import { rcp } from '@kit.RemoteCommunicationKit';
 import { url, util } from '@kit.ArkTS';
 
@@ -16,6 +16,7 @@ const MAX_BINARY_BYTES: number = 32 * 1024 * 1024;
 const MAX_FRAME_BYTES: number = 1024 * 1024;
 const MAX_HEADER_BYTES: number = 16 * 1024;
 const REQUEST_TIMEOUT_MS: number = 15000;
+const NEXT_ADDRESS_TIMEOUT_MS: number = 2500;
 const WS_GUID: string = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export interface TransportProxy {
@@ -71,6 +72,16 @@ interface ParsedEndpoint {
   port: number;
   scheme: string;
   hostHeader: string;
+}
+
+interface DirectSocket {
+  tcp: socket.TCPSocket;
+  family: number;
+}
+
+function numericFamily(address: string): number {
+  if (address.includes(':')) return 2;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(address) ? 1 : 0;
 }
 
 export interface BytesResponse {
@@ -385,23 +396,25 @@ export class HubTransport {
   async connect(onMessage: (payload: string) => void, onState?: (state: string) => void,
     onBinary?: (payload: ArrayBuffer) => void): Promise<void> {
     this.assertLive(this.generation);
-    if (this.tlsSocket || this.tcpSocket) throw new Error('already_connecting');
+    if (this.connectionStage !== 'idle') throw new Error('already_connecting');
     if (!this.token) throw new Error('missing_credential');
     this.messageCallback = onMessage;
     this.binaryCallback = onBinary;
     this.stateCallback = onState;
     const generation = this.generation;
+    this.connectionStage = 'open_socket';
     try {
       const requestPath = routePath(this.endpoint, this.streamPath);
-      if (this.endpoint.scheme === 'https') await this.connectSecure(requestPath, generation);
-      else await this.connectPlain(requestPath, generation);
+      const cancelled = new Promise<void>((_, reject) => { this.openReject = reject; });
+      const open = this.endpoint.scheme === 'https' ? this.connectSecure(requestPath, generation) : this.connectPlain(requestPath, generation);
+      await Promise.race([open, cancelled]);
       this.assertLive(generation);
       this.stateCallback?.('ready');
     } catch (error) {
       const fields = error as Object as Record<string, Object>; const code = fields ? fields['code'] : undefined;
       this.failSocket(error instanceof Error ? error : new Error(typeof code === 'number' ? 'native_' + code : 'connect_failed'));
       throw error instanceof Error ? error : new Error('connect_failed');
-    }
+    } finally { this.openReject = undefined; }
   }
 
   private attachSocketHandlers(
@@ -423,27 +436,89 @@ export class HubTransport {
     }
   }
 
+  private async directPeers(): Promise<socket.NetAddress[]> {
+    const host = this.endpoint.hostname, port = this.endpoint.port, family = numericFamily(host);
+    if (family) return [{ address: host, port: port, family: family }];
+    this.connectionStage = 'resolve_address';
+    const answers = await this.withTimeout(connection.getAddressesByName(host), REQUEST_TIMEOUT_MS, 'dns_timeout');
+    const ipv4: socket.NetAddress[] = [], ipv6: socket.NetAddress[] = [], seen = new Set<string>();
+    for (const answer of answers) {
+      const kind = numericFamily(answer.address);
+      if (!kind || seen.has(answer.address)) continue;
+      seen.add(answer.address);
+      (kind === 2 ? ipv6 : ipv4).push({ address: answer.address, port: port, family: kind });
+    }
+    const peers: socket.NetAddress[] = [];
+    for (let index = 0; index < Math.max(ipv4.length, ipv6.length); index++) {
+      if (index < ipv6.length) peers.push(ipv6[index]);
+      if (index < ipv4.length) peers.push(ipv4[index]);
+    }
+    if (!peers.length) throw new Error('dns_no_addresses');
+    return peers;
+  }
+
+  private async openDirectSocket(generation: number, deadline: number): Promise<DirectSocket> {
+    const peers = await this.directPeers();
+    this.assertLive(generation);
+    this.connectionStage = 'connect_tcp';
+    for (let index = 0; index < peers.length; index++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('connect_timeout');
+      const count = peers.length - index;
+      const timeout = count === 1 ? remaining : Math.min(NEXT_ADDRESS_TIMEOUT_MS, Math.ceil(remaining / count));
+      const peer = peers[index], tcp = socket.constructTCPSocketInstance();
+      this.tcpSocket = tcp;
+      try {
+        await this.withTimeout(tcp.connect({ address: peer, timeout: timeout }), timeout, 'connect_timeout');
+        this.assertLive(generation);
+        return { tcp: tcp, family: peer.family || 1 };
+      } catch (error) {
+        if (this.tcpSocket === tcp) {
+          this.tcpSocket = undefined;
+          tcp.close().catch((): void => {});
+        }
+        this.assertLive(generation);
+        if (index === peers.length - 1) throw error as Error;
+      }
+    }
+    throw new Error('connect_timeout');
+  }
+
   private async connectSecure(requestPath: string, generation: number): Promise<void> {
-    const ws = socket.constructTLSSocketInstance();
-    this.tlsSocket = ws;
-    this.connectionStage = 'bind_tls';
-    const ipv6 = this.endpoint.hostname.includes(':');
-    await ws.bind({ address: ipv6 ? '::' : '0.0.0.0', port: 0, family: ipv6 ? 2 : 1 });
+    const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+    let ws: socket.TLSSocket, family: number;
+    if (this.proxy) {
+      family = numericFamily(this.endpoint.hostname) === 2 ? 2 : 1;
+      ws = socket.constructTLSSocketInstance();
+      this.tlsSocket = ws;
+      this.connectionStage = 'bind_tls';
+      await ws.bind({ address: family === 2 ? '::' : '0.0.0.0', port: 0, family: family });
+    } else {
+      const direct = await this.openDirectSocket(generation, deadline);
+      this.assertLive(generation);
+      // NetworkKit transfers the connected descriptor to TLS. Only TCP failures try another address.
+      ws = socket.constructTLSSocketInstance(direct.tcp);
+      this.tlsSocket = ws;
+      this.tcpSocket = undefined;
+      family = direct.family;
+    }
     this.assertLive(generation);
     this.attachSocketHandlers((info: socket.SocketMessageInfo) => this.receive(info.message),
       (error: Error) => this.failSocket(error), () => this.failSocket(new Error('socket_closed')));
     this.connectionStage = 'connect_tls';
+    const timeout = this.proxy ? REQUEST_TIMEOUT_MS : deadline - Date.now();
+    if (timeout <= 0) throw new Error('connect_timeout');
     const options: socket.TLSConnectOptions = {
-      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: ipv6 ? 2 : 1 },
+      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: family },
       secureOptions: { protocols: [socket.Protocol.TLSv13, socket.Protocol.TLSv12] },
       ALPNProtocols: ['http/1.1'],
       skipRemoteValidation: !!this.pin,
-      timeout: REQUEST_TIMEOUT_MS
+      timeout: timeout
     };
     if (this.proxy) options.proxy = { type: socket.ProxyTypes.SOCKS5, address: { address: this.proxy.host, port: this.proxy.port, family: 1 },
       username: this.proxy.username, password: this.proxy.password };
     this.assertLive(generation);
-    await this.withTimeout(ws.connect(options), REQUEST_TIMEOUT_MS, 'connect_timeout');
+    await this.withTimeout(ws.connect(options), timeout, 'connect_timeout');
     this.assertLive(generation);
     if (this.pin) {
       this.connectionStage = 'cert_pin';
@@ -458,14 +533,10 @@ export class HubTransport {
   }
 
   private async connectPlain(requestPath: string, generation: number): Promise<void> {
-    const tcp = socket.constructTCPSocketInstance();
-    this.tcpSocket = tcp;
+    await this.openDirectSocket(generation, Date.now() + REQUEST_TIMEOUT_MS);
+    this.assertLive(generation);
     this.attachSocketHandlers((info: socket.SocketMessageInfo) => this.receive(info.message),
       (error: Error) => this.failSocket(error), () => this.failSocket(new Error('socket_closed')));
-    await this.withTimeout(tcp.connect({
-      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: this.endpoint.hostname.includes(':') ? 2 : 1 }, timeout: REQUEST_TIMEOUT_MS
-    }), REQUEST_TIMEOUT_MS, 'connect_timeout');
-    this.assertLive(generation);
     this.assertLive(generation); this.socketTrusted = true;
     this.connectionStage = 'upgrade_key';
     await this.sendUpgrade(requestPath);

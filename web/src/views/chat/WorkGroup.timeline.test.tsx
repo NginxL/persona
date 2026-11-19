@@ -136,6 +136,39 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     expect(rows().join(" ")).toContain("echo 13");
   });
 
+  it("shows current narration once, then restores it between its tools when newer words arrive (#10246)", async () => {
+    const prefix = [tool(1), words(3, "Current narration B."), tool(4)];
+    draw(seg(prefix), true, style);
+    expect(head(outer()).getAttribute("aria-expanded")).toBe("false");
+    tap(head(outer()));
+    await loaded();
+    const occurrences = (text: string) => (host.textContent ?? "").split(text).length - 1;
+    expect(occurrences("Current narration B.")).toBe(1);
+    expect(outer().textContent).not.toContain("Current narration B.");
+    expect(rows().join(" ")).toContain("echo 4");
+    // A newly streamed segment replaces B in the slot: B is now inspectable in chronology.
+    const ctx: ChatContextValue = { tasks: emptyTaskIndex(), subagents: [], scope: "x:", lineStyle: style };
+    act(() => root.render(<ChatContext.Provider value={ctx}><SegmentView key={segmentIdentity(seg(prefix))} seg={seg(prefix)} live mid="m" sid="s" streaming="New narration D." expandFold={async () => {}} /></ChatContext.Provider>));
+    expect(occurrences("Current narration B.")).toBe(1);
+    expect(occurrences("New narration D.")).toBe(1);
+    const detail = outer().querySelector("[data-work-detail]")!.textContent!;
+    expect(detail.indexOf("echo 1")).toBeLessThan(detail.indexOf("Current narration B."));
+    expect(detail.indexOf("Current narration B.")).toBeLessThan(detail.indexOf("echo 4"));
+    draw(seg([...prefix, words(6, "New narration D.")]), true, style);
+    expect(occurrences("New narration D.")).toBe(1);
+    draw(seg([...prefix, words(6, "New narration D."), words(7, "Final answer.")]), false, style);
+    expect(head(outer()).getAttribute("aria-expanded")).toBe("false");
+    tap(head(outer()));
+    expect(occurrences("Final answer.")).toBe(1);
+    expect(occurrences("Current narration B.")).toBe(1);
+    expect(occurrences("New narration D.")).toBe(1);
+    act(() => root.unmount());
+    root = createRoot(host);
+    draw(seg([...prefix, words(6, "New narration D."), words(7, "Final answer.")]), false, style);
+    expect(occurrences("Final answer.")).toBe(1);
+    expect(occurrences("Current narration B.")).toBe(1);
+  });
+
   it("the live Thinking line is drawn once, in the innermost live group", () => {
     live.thinking = true;
     draw(seg(running), true, style);

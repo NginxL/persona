@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -36,6 +37,9 @@ type assistantTurnRecovery struct {
 	lastReset  *time.Time
 	// triedOrder keeps r.used in first-use order for the marker's tried-model list.
 	triedOrder []string
+	// toolSearchRetried: the turn was resent once in a new process with every tool loaded after its endpoint refused
+	// tool search (#10365). Its own budget: the same-model and next-model ones stay as they were.
+	toolSearchRetried bool
 }
 
 // newAssistantRecovery is a conversation's chain begun by a failure of launcher running execution (key and current as
@@ -283,6 +287,9 @@ func (n *Node) recoverAssistantResult(p *assistantProc, failed bool, result stri
 // recoverAssistantResultFor optionally requires the recovery that captured a pending result to still own the session.
 // That identity check prevents a result delayed by process replacement from restarting a turn the user has cancelled.
 func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTurnRecovery, failed bool, result string, kinds ...string) bool {
+	if proto.IsExternalLauncher(p.launcher) {
+		return false // an explicit adapter pick never enters automatic model recovery
+	}
 	// A model this chain switched to that the gateway does not have was the recovery's pick, not the user's: it is
 	// spent, remembered for the launcher, and the chain goes on to the next one (#4283, #5234). One the user asked for
 	// stays theirs to fix, unless it answered here within the hour: then the gateway failed for a moment (#5234).
@@ -292,7 +299,15 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	transient404 := missing && !unavailable && p.replyModel != "" && !p.repliedAt.IsZero() &&
 		time.Since(p.repliedAt) < assistantAnsweredRecently
 	p.mu.Unlock()
-	if !unavailable && !transient404 && !assistantRecoverable(failed, result, kinds) {
+	ordinary := unavailable || transient404 || assistantRecoverable(failed, result, kinds)
+	// The endpoint refused Claude Code's tool search (#10365): remembered for the launcher and model, so their next
+	// start loads every tool, and the turn resent once in such a process, unseen. A process that started that way and
+	// is refused again ends the turn on the refusal (nothing loops).
+	toolSearch := failed && p.agent == "claude" && !p.toolSearch.forceOff && assistantwire.ToolSearchRefused(result)
+	if toolSearch && n.noteToolSearchRefused(p.launcher, p.model.Model, p.endpoint) {
+		n.logger.Printf("assistant %s: %s refused tool search for model %q: remembered, its next start loads every tool", short(p.id), p.launcher, p.model.Model)
+	}
+	if !ordinary && !toolSearch {
 		return false
 	}
 	p.mu.Lock()
@@ -371,6 +386,34 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 		p.mu.Unlock()
 		return true
 	}
+	if toolSearch && !r.toolSearchRetried {
+		// The same model in a new process (runAssistantRecovery restarts a stale one); no other budget spent.
+		r.toolSearchRetried = true
+		r.running = true
+		done := make(chan struct{})
+		r.done = done
+		n.mu.Unlock()
+		p.mu.Lock()
+		p.busy = true
+		p.mu.Unlock()
+		n.logger.Printf("assistant %s: resent once with every tool loaded", short(p.id))
+		go func() {
+			defer func() {
+				n.mu.Lock()
+				if r.done == done {
+					r.done = nil
+				}
+				n.mu.Unlock()
+				close(done)
+			}()
+			n.runAssistantRecovery(p, r, launcher, cwd, execution, current, true)
+		}()
+		return true
+	}
+	if !ordinary { // a refusal again, its one retry spent: the user's to see
+		n.mu.Unlock()
+		return false
+	}
 	if unavailable {
 		n.noteUnavailable(launcher, key)
 		if replyModel != "" && replyModel != key {
@@ -421,10 +464,13 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	return true
 }
 
-// nextAssistantModel is the next concrete entry in the launcher's own ordered list. "default" is a placeholder, not a
-// fallback. A configured model ID can match an alias's resolved model; custom entries absent from the list start at its
-// first concrete entry. Nothing here invents an order for the named Agent presets in ModelProfile.Tiers.
-func nextAssistantModel(list proto.LauncherModels, current string, used map[string]bool) (string, bool) {
+// nextAssistantModel is the next concrete entry in the launcher's own ordered list: the entries after current, then
+// those before it (#10277). "default" is a placeholder, not a fallback. A configured model ID can match an alias's
+// resolved model; custom entries absent from the list start at its first concrete entry. Where fit knows the windows
+// (a Codex launcher's catalog), an entry whose window cannot hold the conversation is skipped, and those whose window is
+// at least the asked-for model's come first; with none known the order is the list's. Nothing here invents an order
+// for the named Agent presets in ModelProfile.Tiers.
+func nextAssistantModel(list proto.LauncherModels, current string, used map[string]bool, fit assistantFit) (string, bool) {
 	if list.Locked != "" {
 		return "", false
 	}
@@ -447,15 +493,28 @@ func nextAssistantModel(list proto.LauncherModels, current string, used map[stri
 			break
 		}
 	}
+	order := make([]int, 0, len(list.Models))
 	for i := at + 1; i < len(list.Models); i++ {
+		order = append(order, i)
+	}
+	for i := 0; i < at; i++ {
+		order = append(order, i)
+	}
+	next := ""
+	for _, i := range order {
 		m := list.Models[i]
 		if m.Default || m.ID == "" || m.ID == "default" || !proto.ValidModelID(m.ID) || m.ID == current ||
-			(m.Resolved != "" && (m.Resolved == current || used[m.Resolved])) || used[m.ID] {
+			(m.Resolved != "" && (m.Resolved == current || used[m.Resolved])) || used[m.ID] || !fit.holds(m) {
 			continue
 		}
-		return m.ID, true
+		if fit.preferred(m) {
+			return m.ID, true
+		}
+		if next == "" {
+			next = m.ID
+		}
 	}
-	return "", false
+	return next, next != ""
 }
 
 // resolvedAssistantDefault is the model the launcher's default stands for, when current is that default (unnamed or
@@ -525,10 +584,17 @@ func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, 
 		n.mu.Lock()
 		n.markUnavailableUsed(launcher, r.used) // a model another chain found the gateway does not serve (#5234)
 		n.mu.Unlock()
-		next, ok := nextAssistantModel(list, current, r.used)
+		fit := n.assistantFallbackFit(ctx, p.id, launcher, list, r.from.Model, current)
+		next, ok := nextAssistantModel(list, current, r.used, fit)
 		if !ok {
+			if fit.need > 0 && len(fit.windows) > 0 {
+				n.logger.Printf("assistant %s: no fallback model left whose window holds %d tokens", p.id[:8], fit.need)
+			}
 			n.finishAssistantRecovery(p, r)
 			return
+		}
+		if w := fit.windows[next]; w > 0 {
+			n.logger.Printf("assistant %s: fallback %s (window %d) for a conversation needing %d", p.id[:8], next, w, fit.need)
 		}
 		execution = assistantExecutionForModel(execution, list, next)
 		r.used[next] = true
@@ -544,7 +610,8 @@ func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, 
 		n.recordRecoverySwitch(p.id, launcher, r.from.Model, r.probeFrom, next,
 			ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
 	}
-	err := assistantRecoverySend(withAssistantRecovery(ctx, r, !same), n, p, launcher, cwd, execution)
+	// Another model, or the same one where its endpoint has refused tool search since this process started: a new process.
+	err := assistantRecoverySend(withAssistantRecovery(ctx, r, !same || n.toolSearchStale(p)), n, p, launcher, cwd, execution)
 	var pending *assistantPendingFailure
 	var currentProc *assistantProc
 	n.mu.Lock()
@@ -604,8 +671,11 @@ func (n *Node) finishAssistantRecovery(p *assistantProc, r *assistantTurnRecover
 	delete(n.recoveries, p.id) // an exhausted chain leaves no per-conversation bookkeeping behind
 	n.mu.Unlock()
 	// The failure card needs the exhausted marker so it can offer Retry with the cause and reset time. A chain that
-	// switched keeps its From/To on the record; one that never moved leaves them empty.
-	n.recordRecoveryExhausted(p.id, ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
+	// switched keeps its From/To on the record; one that never moved leaves them empty. A chain that only resent a
+	// tool-search refusal (#10365) records none: the model service did not fail, and the hub words that error itself.
+	if !r.toolSearchRetried || r.switched || len(r.retried) > 0 {
+		n.recordRecoveryExhausted(p.id, ModelRecoveryReason(r.lastResult), r.lastReset, r.triedOrder)
+	}
 	if current {
 		p.mu.Lock()
 		p.busy = false

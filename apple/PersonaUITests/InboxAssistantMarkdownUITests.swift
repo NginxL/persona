@@ -52,16 +52,58 @@ final class InboxAssistantMarkdownUITests: XCTestCase {
                     shot(app, "assistant-body-\(env["PERSONA_PHASE"] ?? "after")-\(name)-\(scheme)-expanded", env)
                 }
 
-                // The Timeline's received entry opens to its message: words, not marks.
+                // The Timeline's received entry goes to the conversation and does not unfold its message: that is the
+                // text above (#9928). Nothing in the Timeline shows a mark.
                 let chain = app.descendants(matching: .any)["inbox.chain"].firstMatch
                 XCTAssertTrue(chain.waitForExistence(timeout: 5), "\(name) \(scheme): no Timeline")
-                let open = chain.buttons.matching(NSPredicate(format: "label == %@", "展开")).firstMatch
-                XCTAssertTrue(open.exists, "\(name) \(scheme): the received entry cannot open\n\(app.debugDescription)")
-                open.tap()
-                XCTAssertTrue(text("数据结构辅导课").waitForExistence(timeout: 5), "\(name) \(scheme): the message did not open")
-                app.swipeUp() // the opened message above the bottom bar
-                XCTAssertFalse(marks.exists, "\(name) \(scheme): a Markdown mark is shown: \(marks.label)")
+                app.swipeUp() // the Timeline above the bottom bar
                 shot(app, "assistant-body-\(env["PERSONA_PHASE"] ?? "after")-\(name)-\(scheme)-timeline", env)
+                XCTAssertFalse(chain.buttons.matching(NSPredicate(format: "label == %@", "展开")).firstMatch.exists,
+                               "\(name) \(scheme): the received entry still unfolds the text above\n\(app.debugDescription)")
+                XCTAssertFalse(marks.exists, "\(name) \(scheme): a Markdown mark is shown: \(marks.label)")
+                app.terminate()
+            }
+        }
+    }
+
+    /// The briefing's Open the Chat (under View Original) and its Timeline's received entry open the assistant's
+    /// conversation in the app (#9928, docs/protocol/deep-links.md), not the web page in the link sheet: the row's link
+    /// is the conversation's page on the paired hub (`/persona/<id>`).
+    @MainActor func testOpenTheChatOpensTheConversation() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let hub = env["PERSONA_MOCK_HUB"] else {
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_ASSISTANT_INBOX=1 (PERSONA_MOCK_HUB)")
+        }
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        _ = try Data(contentsOf: URL(string: hub + "/mock/assistant_inbox?mode=1")!)
+        let conversation = NSPredicate(format: "label CONTAINS %@", "今天有什么需要我处理的")
+        for scheme in ["light", "dark"] {
+            for way in ["source", "timeline"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-pairURL", pair, "-tab", "mail", "-inbox.kind", "", "-inbox.source", "",
+                                       "-openInboxItem", "assistant:s3", "-ui.scheme", scheme]
+                app.launchPinned()
+                XCTAssertTrue(app.descendants(matching: .any)["inbox.body"].firstMatch.waitForExistence(timeout: 20),
+                              "\(scheme): the briefing did not open\n\(app.debugDescription)")
+                if way == "source" {
+                    let original = app.buttons["inbox.viewSource"].firstMatch
+                    XCTAssertTrue(original.waitForExistence(timeout: 5), "\(scheme): no View Original")
+                    original.tap()
+                    let open = app.buttons["inbox.connector.open"].firstMatch
+                    XCTAssertTrue(open.waitForExistence(timeout: 10), "\(scheme): no Open the Chat\n\(app.debugDescription)")
+                    shot(app, "assistant-open-chat-\(env["PERSONA_PHASE"] ?? "after")-\(scheme)", env)
+                    open.tap()
+                } else {
+                    let received = app.descendants(matching: .any)["inbox.chain"].buttons
+                        .matching(NSPredicate(format: "label CONTAINS %@", "收到 1 条新消息")).firstMatch
+                    app.swipeUp()
+                    XCTAssertTrue(received.waitForExistence(timeout: 5), "\(scheme): no received entry\n\(app.debugDescription)")
+                    received.tap()
+                }
+                XCTAssertTrue(app.staticTexts.matching(conversation).firstMatch.waitForExistence(timeout: 20),
+                              "\(scheme) \(way): the conversation did not open in the app\n\(app.debugDescription)")
+                XCTAssertFalse(app.buttons["link-close"].exists, "\(scheme) \(way): it opened as a web page")
+                shot(app, "assistant-conversation-\(way)-\(env["PERSONA_PHASE"] ?? "after")-\(scheme)", env)
                 app.terminate()
             }
         }

@@ -106,18 +106,18 @@ describe("the model panel for a new Agent", () => {
     const follow = document.body.querySelector<HTMLElement>("[data-follow-row]")!;
     expect(follow.textContent).toContain("跟随模型配置");
     expect(follow.textContent).toContain("Claude · Opus 5.5");
-    expect(follow.getAttribute("aria-selected")).toBe("true");
+    expect(follow.getAttribute("aria-pressed")).toBe("true");
     // the list opens at its top, on the follow row (the panel scrolls to the first row marked current)
     expect(document.body.querySelector("[data-current]")).toBe(follow);
     expect(groups()).toEqual(["预设", "Claude", "work_gw", "Codex"]);
     // the model that runs stays lit in its own group
-    expect(row("默认：Opus 5.5", "Claude").getAttribute("aria-selected")).toBe("true");
+    expect(row("默认：Opus 5.5", "Claude").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("the follow row applies on a click and closes the panel; nothing goes into Recent", async () => {
     const { onFollow, onClose } = await open({ active: false });
     const follow = document.body.querySelector<HTMLElement>("[data-follow-row]")!;
-    expect(follow.getAttribute("aria-selected")).toBe("false");
+    expect(follow.getAttribute("aria-pressed")).toBe("false");
     key(follow, "Enter");
     await flush();
     expect(onFollow).toHaveBeenCalled();
@@ -128,7 +128,7 @@ describe("the model panel for a new Agent", () => {
   it("a preset is picked through onPreset, with no star or Customize, and its setup goes into Recent", async () => {
     const { onPreset, onPick } = await open();
     const preset = row("review", "预设");
-    expect(preset.textContent).toContain("Code review");
+    expect(preset.textContent).toContain("Claude · Code review");
     expect(preset.querySelector('button[aria-label="收藏"], [data-row-customize]')).toBeNull();
     act(() => preset.click());
     await flush();
@@ -141,6 +141,7 @@ describe("the model panel for a new Agent", () => {
     const { onHelp, onPick } = await open();
     const section = [...document.body.querySelectorAll<HTMLElement>("[data-panel-section]")].find((g) => g.getAttribute("aria-label") === "work_gw")!;
     expect(section.textContent).toContain("这台电脑的终端里用不了");
+    act(() => section.querySelector<HTMLButtonElement>("[data-panel-launcher]")!.click());
     const r = section.querySelector<HTMLElement>("[data-panel-row]")!;
     expect(r.getAttribute("aria-disabled")).toBe("true");
     act(() => r.click());

@@ -24,6 +24,8 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
+const assistantShellReady = "__PERSONA_ASSISTANT_SHELL_READY__"
+
 // An assistant process that exits within assistantEarlyExit of starting failed to start: its last assistantStderrTail
 // stderr lines go to the log.
 const (
@@ -57,6 +59,12 @@ func (p *assistantProc) awaitStart(d time.Duration) error {
 	case <-p.ready:
 		return nil
 	case <-t.C:
+		if proto.IsExternalLauncher(p.launcher) {
+			if p.cmd != nil && p.cmd.Process != nil {
+				_ = osproc.StopGroup(p.cmd.Process.Pid, true)
+			}
+			return externalRefusal(context.Background(), "adapter_timeout")
+		}
 		return nil
 	case <-p.exited:
 	}
@@ -84,7 +92,18 @@ func (p *assistantProc) startFailure() error {
 	}
 	p.mu.Lock()
 	tail := strings.Join(p.stderrTail, " | ")
+	lines := slices.Clone(p.stderrTail)
 	p.mu.Unlock()
+	if proto.IsExternalLauncher(p.launcher) {
+		code := "adapter_unavailable"
+		if len(lines) > 0 {
+			code = externalStderrCode(lines[len(lines)-1])
+		}
+		if code == "" {
+			code = "adapter_unavailable"
+		}
+		return externalRefusal(context.Background(), code)
+	}
 	if tail == "" {
 		tail = "没有输出"
 	}
@@ -176,6 +195,12 @@ func missingFrom(launcher string, lines []string, notFound bool) string {
 // spawnAssistant starts the conversation's process for its launcher's agent: claude -p (spawnClaude) or codex
 // app-server (spawnCodex). A new Codex conversation (id "") gets its id from Codex.
 func (n *Node) spawnAssistant(id, cwd, launcher string, resume, spare bool, options ...modelExecution) (*assistantProc, error) {
+	return n.spawnAssistantWith(id, cwd, launcher, resume, spare, spawnRound{}, options...)
+}
+
+// spawnAssistantWith is spawnAssistant for a round of the background supervisor too (round, assistant_round.go): a Claude
+// process resumed at its anchor with the round's tools. Only Claude takes a round (superviseRound).
+func (n *Node) spawnAssistantWith(id, cwd, launcher string, resume, spare bool, round spawnRound, options ...modelExecution) (*assistantProc, error) {
 	done, err := n.reload.enter()
 	if err != nil {
 		return nil, err
@@ -194,26 +219,47 @@ func (n *Node) spawnAssistant(id, cwd, launcher string, resume, spare bool, opti
 	if id == "" {
 		id = newUUID()
 	}
-	return n.spawnClaude(id, cwd, launcher, resume, spare, options...)
+	return n.spawnClaudeWith(id, cwd, launcher, resume, spare, round, options...)
 }
 
 // claudeAssistantMCPAndTools are a conversation's --mcp-config and tool permission flags.
 func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) []string {
+	return n.claudeAssistantMCPAndToolsFor(id, cwd, legacyMCP, "")
+}
+
+// claudeAssistantMCPAndToolsFor is claudeAssistantMCPAndTools for a process with tool set toolSet ("" the assistant's
+// own): a supervision round (roundToolSet) mounts only Persona's server, which asks the manager for the round's tools,
+// with no extension or other MCP server (--strict-mcp-config) and only the built-ins roundBuiltinTools.
+func (n *Node) claudeAssistantMCPAndToolsFor(id, cwd string, legacyMCP bool, toolSet string) []string {
 	if guest := n.guestOf(id); guest != nil { // assistant_guest.go: nothing else of the below
 		return n.guestMCPAndTools(id, guest, legacyMCP)
 	}
 	// Per-process MCP config: the assistant-only tools (ask_user, agents_*, lark_*…) and the conversation they act for.
+	env := assistantMCPEnv(id, n.dir)
+	if toolSet != "" {
+		env["PERSONA_TOOL_SET"] = toolSet
+	}
 	servers := map[string]any{"persona": map[string]any{
-		"command": n.bin, "args": []string{"mcp"}, "env": assistantMCPEnv(id, n.dir),
+		"command": n.bin, "args": []string{"mcp"}, "env": env,
 	}}
 	// The extensions' MCP servers whose command is on this machine (assistant_mcp.go).
-	extra, allow, deny := assistantMCPServers(n.assistantLark(context.Background()).MCPServers)
-	for name, s := range extra {
-		servers[name] = s
+	var allow, deny []string
+	builtins := assistantBuiltinTools
+	if toolSet == "" {
+		var extra map[string]any
+		extra, allow, deny = assistantMCPServers(n.assistantLark(context.Background()).MCPServers)
+		for name, s := range extra {
+			servers[name] = s
+		}
+	} else {
+		builtins = roundBuiltinTools
 	}
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": compat.MCPRegistrationServers(servers, legacyMCP)})
 	allow = append(allow, healthReportRules(cwd)...) // healthdeny.go
-	toolFlags := []string{"--mcp-config", string(mcp), "--allowedTools", strings.Join(append([]string{n.assistantTools(legacyMCP)}, allow...), ","), "--tools", assistantBuiltinTools}
+	toolFlags := []string{"--mcp-config", string(mcp), "--allowedTools", strings.Join(append([]string{n.assistantTools(legacyMCP)}, allow...), ","), "--tools", builtins}
+	if toolSet != "" {
+		toolFlags = append(toolFlags, "--strict-mcp-config")
+	}
 	// One --disallowedTools with a word per rule (it takes several, up to the next flag): a path may hold a comma.
 	if len(deny) > 0 {
 		deny = []string{strings.Join(deny, ",")}
@@ -235,7 +281,7 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, itself bool, arg
 	if itself {
 		command = commandInProfile("command claude", envValue(env, "CLAUDE_CONFIG_DIR"), scriptPath)
 	}
-	argv := append([]string{shell, "-ic", command + ` "$@"`, "persona"}, args...)
+	argv := append([]string{shell, "-ic", `echo ` + assistantShellReady + `; ` + command + ` "$@"`, "persona"}, args...)
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
@@ -247,8 +293,25 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, itself bool, arg
 }
 
 func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options ...modelExecution) (*assistantProc, error) {
+	return n.spawnClaudeWith(id, cwd, launcher, resume, spare, spawnRound{}, options...)
+}
+
+func (n *Node) spawnClaudeWith(id, cwd, launcher string, resume, spare bool, round spawnRound, options ...modelExecution) (*assistantProc, error) {
+	if round.anchor != "" && (!resume || spare || n.guestOf(id) != nil) {
+		return nil, errors.New("a supervision round resumes a Claude conversation")
+	}
 	execution := executionOption(options)
+	startCtx := context.Background()
+	if proto.IsExternalLauncher(launcher) {
+		startCtx = externalStartContext(execution)
+		if err := startCtx.Err(); err != nil {
+			return nil, externalAdapterError(startCtx, err)
+		}
+	}
 	if err := execution.check("claude"); err != nil {
+		return nil, err
+	}
+	if err := n.checkExternalAssistant(startCtx, id, launcher, execution, spare); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
@@ -276,6 +339,11 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if hooks == "" && n.launcherOwnSettings(context.Background(), launcher) != "" {
 		compaction.ownSettings = ""
 	}
+	toolSearch := n.assistantToolSearch(launcher, execution.Model, compaction)
+	compaction.toolSearchOff = toolSearch.forceOff
+	if toolSearch.forceOff {
+		n.logger.Printf("assistant %s: starts with every tool loaded: %s refused tool search for model %q", short(id), launcher, execution.Model)
+	}
 	var settingsErr error
 	settings, settingsErr = n.assistantCompactionSettings(id, cwd, settings, compaction)
 	if settingsErr != nil {
@@ -300,12 +368,15 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	// blocks under the old namespace remain valid on a resume with only Persona offered (verified on Claude Code 2.1.322);
 	// an old hub that still addresses the legacy namespace keeps the alias.
 	legacyMCP := !n.hubSupportsPersonaContracts()
-	args = append(args, n.claudeAssistantMCPAndTools(id, cwd, legacyMCP)...)
+	args = append(args, n.claudeAssistantMCPAndToolsFor(id, cwd, legacyMCP, round.toolSet)...)
 	model := execution.Model
 	if model == "" && resume && execution.Fingerprint != "" && !guest {
 		// The model configuration names none: the launcher's default, not the model the session ran on last
 		// (assistant_resume_model.go). A guest keeps what it started on.
 		model = n.resumeModel(launcher, cwd, settings, configPath)
+	}
+	if model != "" {
+		model = n.claudeModelArg(launcher, model) // no tier alias for a gateway (#10365); "" its default
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -320,14 +391,24 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	}
 	if resume {
 		args = append(args, "--resume", id)
+		if round.anchor != "" { // the end of its first turn (assistant_round.go)
+			args = append(args, "--resume-session-at", round.anchor)
+		}
 	} else {
 		args = append(args, "--session-id", id)
 	}
-	// Tool search is on for every conversation: personad mcp marks the Persona tools used all the time alwaysLoad, the
-	// rest and other MCP servers' tools wait behind ToolSearch (#5838, #7317). ENABLE_TOOL_SEARCH=true lifts Claude
-	// Code's hold-off for a conversation that ran without ToolSearch (one from before #5839), which would otherwise load
-	// every tool until it is compacted. Never false: that turns deferral off for every server (#5838).
-	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1", "ENABLE_TOOL_SEARCH=true"}, compaction.env()...)...)
+	// Tool search by where the requests go (toolSearchFor, #10365): personad mcp marks the Persona tools used all the
+	// time alwaysLoad, the rest and other MCP servers' tools wait behind ToolSearch (#5838, #7317). On Anthropic's own
+	// API, ENABLE_TOOL_SEARCH=true lifts Claude Code's hold-off for a conversation that ran without ToolSearch (one from
+	// before #5839), which would otherwise load every tool until it is compacted. Behind a gateway true would also lift
+	// Claude Code's own rule that keeps tool search off there, so a gateway gets false (every tool up front), and a
+	// start that cannot tell where its requests go gets nothing: Claude Code decides, as before #7371. A value the
+	// node inherited never reaches claude.
+	startEnv := []string{"PERSONA_ASSISTANT=1"}
+	if toolSearch.env != "" {
+		startEnv = append(startEnv, toolSearchEnv+"="+toolSearch.env)
+	}
+	env := identity.Environment(withoutEnv(os.Environ(), []string{toolSearchEnv}), append(startEnv, compaction.env()...)...)
 	env = n.claudeProcessEnv(env, configDir)
 	gateEnv, releaseGates := n.assistantLarkEnv(cwd, id) // its addresses at the gate proxy go with the process
 	if guest {
@@ -335,10 +416,12 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		gateEnv, releaseGates = nil, func() {} // no commands to gate: it has no Bash
 	}
 	cleanupMCP := func() {}
+	cleanupAdapter := func() {}
 	started := false
 	defer func() {
 		if !started {
 			cleanupMCP()
+			cleanupAdapter()
 			releaseGates()
 		}
 	}()
@@ -355,7 +438,16 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if itself {
 		n.logger.Printf("assistant %s: started on the Agent SDK: resumes with claude itself in its recorded profile, not the claude launcher", short(id))
 	}
-	cmd := n.assistantCLICommand(shell, launcher, cwd, itself, args, env)
+	var cmd *exec.Cmd
+	if proto.IsExternalLauncher(launcher) {
+		cmd, cleanupAdapter, err = n.externalCLICommand(startCtx, id, launcher, cwd, execution, args, env)
+		if err != nil {
+			cleanupAdapter = func() {}
+			return nil, err
+		}
+	} else {
+		cmd = n.assistantCLICommand(shell, launcher, cwd, itself, args, env)
+	}
 	cmd.SysProcAttr = osproc.GroupAttr() // so stop() can kill the whole group
 	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -371,16 +463,30 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		return nil, err
 	}
 	instructions := instructionsDigest(cwd)
-	startErr := cmd.Start()
+	var startErr error
+	if proto.IsExternalLauncher(launcher) {
+		startErr = startExternalCommand(startCtx, cmd, stdin)
+	} else {
+		startErr = cmd.Start()
+	}
 	closeStderrWriter()
 	if startErr != nil {
 		_ = stderr.Close()
+		if proto.IsExternalLauncher(launcher) {
+			return nil, externalAdapterError(startCtx, startErr)
+		}
 		return nil, fmt.Errorf("start %s: %w", launcher, startErr)
 	}
 	started = true
+	processExecution := execution
+	processExecution.StartupContext = nil // a live or resident process must never keep the completed RPC's context
+	// Effort is deliberately unconfirmed here: --effort cannot express auto and
+	// launcher environment/policy can override a flag. syncAssistantModes must
+	// receive its ACK before the user's first input, just as for live changes.
 	p := &assistantProc{id: id, agent: "claude", launcher: launcher, cwd: cwd, cmd: cmd, stdin: stdin, exited: make(chan struct{}), ready: make(chan struct{}),
-		stderrDone: make(chan struct{}), born: time.Now(), lastActive: time.Now(), mode: startMode, canBypass: startMode == proto.ModeBypass, model: execution, fingerprint: n.executionFingerprint(launcher, execution),
-		instructions: instructions, personaMCPOnly: !legacyMCP, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared()}
+		stderrDone: make(chan struct{}), born: time.Now(), lastActive: time.Now(), mode: startMode, canBypass: startMode == proto.ModeBypass, model: processExecution, fingerprint: n.executionFingerprint(launcher, processExecution),
+		instructions: instructions, personaMCPOnly: !legacyMCP, origin: execution.Origin, compactIdleAt: compaction.idle(), declaredWindow: compaction.declared(),
+		round: round.anchor != "", toolSet: round.toolSet, toolSearch: toolSearch, endpoint: compaction.endpoint}
 	if !spare {
 		n.mu.Lock()
 		n.procs[id] = p
@@ -391,7 +497,11 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	go n.readAssistant(p, stdout)
 	go func() {
 		_ = cmd.Wait()
+		if proto.IsExternalLauncher(launcher) && !osproc.SweepGroup(cmd.Process.Pid, externalAdapterGroupSweep) {
+			n.logger.Printf("assistant %s: external process group cleanup budget exhausted", short(id))
+		}
 		cleanupMCP()
+		cleanupAdapter()
 		releaseGates()
 		liveAssistants.Delete(p)
 		close(p.exited)
@@ -420,6 +530,28 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		n.emitDelta(id, "")
 		n.notifySessions()
 	}()
+	if proto.IsExternalLauncher(launcher) {
+		ctx, cancel := context.WithTimeout(startCtx, 5*time.Second)
+		err := p.control(ctx, map[string]any{"subtype": "initialize"})
+		cancel()
+		if err != nil || startCtx.Err() != nil {
+			_ = osproc.StopGroup(cmd.Process.Pid, true)
+			// The same waiter owns descendant cleanup and private settings. Bound the join; an exhausted budget is
+			// unknown cleanup evidence, never a reason to claim the process group is empty.
+			select {
+			case <-p.exited:
+			case <-time.After(externalAdapterGroupSweep + externalAdapterPipeGrace):
+				n.logger.Printf("assistant %s: external initialization cleanup budget exhausted", short(id))
+			}
+			if startCtx.Err() != nil {
+				return nil, externalAdapterError(startCtx, startCtx.Err())
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, externalRefusal(startCtx, "adapter_timeout")
+			}
+			return nil, p.startFailure()
+		}
+	}
 	return p, nil
 }
 
@@ -453,6 +585,12 @@ func watchAssistantStderr(logger *log.Logger, p *assistantProc, stderr io.ReadCl
 	sc := bufio.NewScanner(stderr)
 	for sc.Scan() {
 		l := sc.Text()
+		if proto.IsExternalLauncher(launcher) {
+			l = externalStderrCode(l)
+			if l == "" {
+				continue
+			}
+		}
 		if strings.Contains(l, "rror") {
 			logger.Printf("assistant %s: %s", id[:8], l)
 		}
@@ -468,6 +606,13 @@ func watchAssistantStderr(logger *log.Logger, p *assistantProc, stderr io.ReadCl
 	if err := sc.Err(); err != nil {
 		logger.Printf("assistant %s: stderr read: %v", id[:8], err)
 		_, _ = io.Copy(io.Discard, stderr)
+	}
+	p.mu.Lock()
+	stopReason := p.stopReason
+	p.mu.Unlock()
+	if stopReason != "" {
+		logger.Printf("assistant %s: stopped by node after %s: %s", short(id), time.Since(born).Round(time.Millisecond), stopReason)
+		return
 	}
 	if lived := time.Since(born); lived < assistantEarlyExit && len(tail) > 0 {
 		logger.Printf("assistant %s: %s exited %s after it started: %s", id[:8], launcher, lived.Round(time.Millisecond),

@@ -75,6 +75,23 @@ func TestBackgroundTaskNotices(t *testing.T) {
 	if ev.Task.TaskID != notes[2].Task.TaskID || ev.Task.Title != notes[2].Task.Title {
 		t.Fatal("a Monitor's event and its end carry its task id and description")
 	}
+	if len(meta.Background) != 0 || len(meta.BackgroundEnded) != 3 {
+		t.Fatalf("final background state: running %+v ended %+v", meta.Background, meta.BackgroundEnded)
+	}
+	for _, notice := range notes[2:] {
+		found := false
+		for _, ended := range meta.BackgroundEnded {
+			if ended.ID == notice.Task.TaskID {
+				found = true
+				if ended.Status != "ended" || ended.OutputFile == "" || ended.OutputFile != notice.Task.OutputFile {
+					t.Fatalf("retained Monitor: %+v, notice %+v", ended, notice.Task)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Monitor %s has no retained outcome", notice.Task.TaskID)
+		}
+	}
 }
 
 // Completed workflow notifications were observed as both user messages and queued-command attachments.

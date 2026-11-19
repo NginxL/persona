@@ -160,9 +160,9 @@ jobs:
           RELEASE_CHANNEL: ${{ contains(github.ref_name, '-') && 'beta' || 'release' }}
         run: |
           set -euo pipefail
-          host="build-publish/bin/personad-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          host="build-publish/bin/personad-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
           build="$(date -u +%Y%m%d%H%M)"
-          (cd build-publish/bin && shasum -a 256 *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
+          (cd build-publish/bin && shasum -a 256 -- *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
           "$host" release manifest --dir build-publish/bin --version "$VERSION" --build "$build" --commit "$COMMIT" --channel "$RELEASE_CHANNEL" --out build-publish/bin/latest.json
           "$host" release verify --dir build-publish/bin --manifest build-publish/bin/latest.json
       - name: Upload signed Darwin downloads

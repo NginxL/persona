@@ -19,8 +19,9 @@ func TestParseLaunchersSimple(t *testing.T) {
 	out := "claude                     " + strings.Repeat(" ", 40) + "默认\n" +
 		"cc_ds                      " + strings.Repeat(" ", 40) + "deepseek\n"
 	got := parseLaunchers(out)
+	// An older helper's display placeholder reads as no model on the wire, not as a model ID.
 	want := []proto.Launcher{
-		{Name: "claude", Model: "默认"},
+		{Name: "claude"},
 		{Name: "cc_ds", Model: "deepseek"},
 	}
 	if !reflect.DeepEqual(got, want) {

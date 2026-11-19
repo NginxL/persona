@@ -51,6 +51,8 @@ const { PersonaAssistant } = await import("../../PersonaAssistant");
 const { navigate, useRoute } = await import("../../../lib/router");
 const { resetOutboxClaimsForTests } = await import("../../../lib/outbox");
 const { resetStalePullsForTests } = await import("../useTranscript");
+const { loadPages } = await import("../../../lib/lazy-page");
+await loadPages();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const files = import.meta.glob<{ cases: SyncCase[] }>("../../../../../spec/fixtures/sync/*.json", { eager: true, import: "default" });

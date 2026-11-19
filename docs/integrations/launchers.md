@@ -4,13 +4,14 @@ A launcher determines which gateway and model claude uses. Previously, all were 
 node types the name into the interactive shell in a herdr pane, expanding functions and aliases, prefixed with `HERDR_AGENT=claude`; see “How herdr recognizes Agents started by launchers” below). Since 2026-10-31, “Settings › Model Providers” manages them alongside entries added in the app.
 Code: `server/internal/assistant/models_launchers.go` (owned by the manager; hub only forwards these routes, `docs/assistant/model-config.md`, “Who owns models”), `server/internal/node/managed.go`; app `Views/Settings/ModelLaunchersView.swift`.
 
-## Two sources
+## Sources
 
 | Source | Defined in | Actions |
 | --- | --- | --- |
 | **Persona-managed** | Added in the app: name, Base URL, API Key, authentication method, model, small model, sub-Agent model, custom model option, extra arguments | Edit, delete |
 | **rc file (~/.zshrc / ~/.bashrc) and PATH** | Functions and aliases in each computer's login shell config (zsh reads `~/.zshrc`, bash reads `~/.bashrc`), grouped by file, and wrapper scripts on its PATH (`source: "path"`), shown from the last snapshot and refreshed in the background when opening this page (node caches for 1 minute) | View each computer's function definition or script text (Key / Token redacted), hide / restore in Persona |
 | **Built-in** | Each computer's plain `claude` command (“Claude Code default” in Model Configuration, `source: "builtin"`), listed per computer with its version | View, hide / restore in Persona (#4384) |
+| **External adapter** | An explicitly registered local program supplies a sanitized inventory (`source: "external"`); connection configuration and credentials stay on that computer | Choose a model explicitly in the main chat; edit the connection in its source tool, not in Persona |
 
 - Scope: each Persona-managed entry has its own **device scope** (“Device scope and on-demand delivery” below): all your computers, chosen ones, or none (the key stays with the manager). ~/.zshrc entries identify their source computers (same-name entries merge into one row). Offline computers use their last synchronized lists (settings `launchers.zshrc`).
 - A computer that reported its Claude Code version offers the built-in `claude` in its pickers even when the node's shell-wrapper list omits plain `claude` (#4660). The hub uses that same installation signal as the built-in provider and Agent-start fallback; it does not infer an installation from wrappers alone, and a hidden built-in stays hidden. A new work session takes it the same way: the node's start options and work start accept plain `claude` whenever its login shell runs it, listed or not (#7425).
@@ -26,6 +27,144 @@ Code: `server/internal/assistant/models_launchers.go` (owned by the manager; hub
 The answer adds `sync`: one item per computer, with `state` `ok` / `offline` / `timeout` / `error` (`error` carries the reason), plus `shell`, `rc_file` and the last successful sync time `synced_at`
 (settings `launchers.zshrc.meta`). A computer that didn't answer still shows its last list, but the entries' `stale` names that computer; every client marks them “Not updated” and explains why in the per-computer group.
 An entry's `rc_files` are the files it came from (`source: "zshrc"` only; older nodes don't report it, so it is `~/.zshrc`).
+
+## External model adapters (#7940)
+
+For advanced users who already manage connections in another local tool, an optional adapter supplies the model
+inventory and prepares a native CLI's connection settings. It is not a runtime or a model gateway: Persona still
+owns the conversation, permissions, hooks, MCP tools, controls and cancellation. Without the local opt-in described
+in `docs/operations/config.md` ("A local external model adapter"), the node does not read adapter configuration,
+search for a program or start background work.
+
+### Local authority and supported use
+
+Only the node's startup environment may select the registry through `PERSONA_LAUNCHER_ADAPTER_CONFIG`. The registry
+contains a stable adapter ID, a fixed command argument array and a trusted absolute `native_program` path. The hub,
+clients and inventory cannot provide commands. Interpreter-based programs must name the interpreter explicitly;
+an absolute script with an `env` shebang alone may still depend on the service's PATH.
+
+Version 1 supports an explicit, saved model pick in the user's main conversation on a POSIX computer, with the
+Claude Code CLI and a policy that does not require the agent sandbox. It does not support Agent SDK, coding or
+terminal starts, automatic fallback, global purpose defaults, profiles, tiers or background tasks. A required or
+unknown sandbox policy refuses the start; it never disables the sandbox or substitutes another runtime.
+
+The manager checks the actual main conversation and its persisted pick before supplying an internal execution
+binding. The node checks that binding and its local registry again. A stale client, a forged source field or a
+missing registry cannot turn the reserved `persona_ext_` launcher namespace into a shell command.
+
+### Inventory contract
+
+The node appends `inventory --protocol 1 --offline` to the locally registered command. Stdin is closed and stdout
+must contain one JSON document, without banners. A minimal synthetic response is:
+
+```json
+{
+  "protocol": 1,
+  "targets": [{
+    "id": "example-target",
+    "name": "Example connection",
+    "engine": "claude-code",
+    "revision": "example-revision",
+    "capabilities": {
+      "contexts": ["main-chat"],
+      "runtimes": ["cli"],
+      "platforms": ["posix"]
+    },
+    "credential_state": "unknown",
+    "models": [{"id": "example-model", "name": "Example model", "default": true}]
+  }]
+}
+```
+
+Targets have stable IDs independent of display names. One target represents a connection and execution method;
+its models retain their original IDs and use the same `proto.ValidModelID` grammar as saved Persona picks and native
+execution, including a supported `~` prefix. An adapter must not advertise IDs that cannot be saved or executed.
+A target may carry an `unavailable_code` from the adapter error vocabulary.
+`credential_state` is `configured`, `missing` or `unknown`: configured is not a successful call, unknown can be tried
+explicitly, and missing cannot start. No URL, key, secret reference, raw environment, argument recipe or local path
+belongs in this response. Unknown fields and invalid or duplicate identities are rejected rather than forwarded.
+
+Inventory reads have a five-second deadline and a one-MiB stdout limit, at most 256 targets and 4096 models.
+An enabled node announces `external_launcher_inventory_v1`; the manager's internal device row projects it as
+`external_inventory:true`. Nodes without the local opt-in advertise neither, and the manager does not probe them.
+
+The manager reads this source through `launchers.list {source:"external",refresh:true}`. This branch runs before
+shell, host or runtime discovery and returns only the registered adapter's sanitized entries. Missing registration,
+invalid inventory and refresh failures are explicit errors, not a healthy empty source. A saved external target or
+model refresh can load a cold registry directly, without waiting for shell startup files. The loaded target still
+passes identity, scope, capability, model and revision checks; refreshing never grants authority.
+
+External and ordinary snapshots are updated independently. A successful external read replaces only that machine's
+external entries; a failed read does not erase ordinary last-seen launchers. A late or failed shell refresh cannot
+erase the external snapshot or turn a partial result into a complete successful list. `launchers.changed` invalidates
+this source in the background, and ordinary directory reads keep their existing nonblocking/cache behavior.
+
+### Native bootstrap and credentials
+
+For a supported start the node appends the following arguments to its fixed local command:
+
+```sh
+exec --protocol 1 --context main-chat --runtime cli \
+  --target example-target --model example-model --revision example-revision \
+  --native-program /absolute/path/to/claude \
+  --settings-output /absolute/private/process-directory/settings.json \
+  -- -p --input-format stream-json --output-format stream-json
+```
+
+The shown native flags are abbreviated: Persona supplies the full settings, session/resume, hooks, tools and MCP
+arguments. The adapter parses only its own side of `--`, does not read stdin in advance and never sends the native
+`-p` through its interactive command parser. Execution uses argument arrays without a shell. Stdout belongs only to
+the native stream, stderr diagnostics contain static codes without configuration values, and exit status, EOF and
+termination signals must survive the wrapper. Native initialization is acknowledged before Persona delivers the
+first user message. External inventory/bootstrap waits share the current operation's cancellation token, so Stop
+can cancel a pending start before it obtains the conversation's typing lock or delivers input. That startup token
+is detached after initialization and is not stored as the lifetime context of a resident conversation; completing
+one RPC does not terminate a successfully started native process. External startup errors expose static codes,
+not executable paths or raw operating-system exceptions.
+
+The adapter resolves credentials locally, never from RPC arguments. It preserves Persona's settings and pins only
+the selected connection's approved environment in a single final settings file, because process environment alone
+cannot establish precedence over existing settings. The node assigns a random private directory; the final file
+is 0600 and its directory is 0700. Credentials can therefore exist in protected temporary local files, but never
+in inventory, command arguments, manager state or diagnostics. The adapter cleans up normally and the node removes
+the directory after exit or a forced stop. User settings and credential files are not rewritten.
+
+Settings or native program paths are not accepted from a request. User and project settings are checked for native
+provider-mode switches that could override the selected route. A managed or remotely cached policy may have effective
+rules this bounded integration cannot establish, so its presence is refused rather than read or bypassed. The shared
+native policy locations include the selected profile's `remote-settings.json`, Linux `/etc/claude-code` policy files
+and directories, and the platform's managed policy roots. The adapter does not disable settings sources or rewrite
+the user's proxy/egress policy.
+
+Source-tool session and permission preferences are not authority to change Persona's controls. An implementation
+must explicitly exclude those preferences and diagnose them without values; unknown or unsafe recipe fields fail
+before native execution. It must not silently import bypass mode, replace hooks/MCP, change the model by an alias
+search or run an additional proxy.
+
+### Selection, revision and failure
+
+The manager materializes an external target's default row into an exact model ID when saving the main chat's pick.
+A later catalog default change does not change that choice. Resetting the pick returns to the existing Persona
+default; it does not make the external target a global default or a fallback for other conversations. When changing
+to or away from an external connection while the previous process is busy, the next message is refused until that
+work finishes or is stopped; it is never delivered using the previous external authorization. Compaction, accepted
+queued input and active background work also count as work that must not be cut off by a model/source change.
+
+Clearing the main conversation retains its explicit choice in the manager's durable handoff. Only that handoff can
+reserve a server-generated replacement main-conversation ID and carry the external choice into the new main chat;
+a normal new chat, guest or caller-supplied ID cannot obtain this scope. Failed starts keep the reservation and choice
+for retry instead of falling back or repeatedly losing the user's selection.
+
+A revision identifies the effective non-secret recipe, not the label, usage order or credential value. The adapter
+re-reads configuration and authentication at each new start and refuses a revision mismatch before native creation.
+An inventory update does not restart an existing conversation: its actual process binding and the current catalog
+revision are separate. A later new process uses a freshly validated binding; Persona does not replay a user message
+or silently select another connection after a mismatch.
+
+Unsupported scope/runtime/platform/sandbox, missing credentials, invalid inventory and local adapter failures are
+not vendor outages. The separate shell probe, automatic connection test and repair do not run through this source
+in version 1. Verify the supported path by explicitly using it in the main chat. Changing the trusted command or
+disabling the registry takes effect when the node is restarted; it does not rewrite saved model picks.
 
 ## Which shell
 
@@ -56,6 +195,13 @@ To fix it, make the launcher exist where the terminal's shell reads it:
 
 Launcher health keeps such a launcher apart (`not_in_terminal`, `docs/server/launcher-health.md`): the login shell's check passes, so only a start with it that works clears it.
 
+**The node's own program, on a home reached through a link (#10365).** A home that is a link (`/home/me -> /data/home/me`) and a terminal in a container that mounts the home at `/home/me` without the real path: the node's resolved file (`/data/home/me/.persona/bin/personad`) does not exist there, so every managed launcher failed with `…/personad: No such file or directory`, and the Agents there lost Persona's hooks and MCP server, which name the same path.
+The node keeps two spellings of itself (`node/selfprogram.go`): the resolved file stays the update target (`node.info`'s `executable`) and what macOS attributes Full Disk Access to, while every process it starts is handed the data directory's spelling of the same file (`<PERSONA_HOME>/bin/personad`, where the start files already live), else the program under `$HOME`'s own spelling, else the file as it is. `personad node doctor` asks the same function, so the generated hooks, settings and MCP files it checks are the ones the node wrote and `--fix` does not flip them back.
+The checkouts the node makes with git (task and "New worktree…" checkouts on herdr-core or without herdr's worktree command, Agents' own worktrees, review copies) get their two git links rewritten to the home's spelling (`node/worktree_links.go`), and a directory the hub resolves for an Agent to start in (`workspace.resolve` with `terminal`) or a checkout `worktree.prepare` hands back is named the same way, so git and the Agent work inside the container too.
+After the update a `not_in_terminal` record left by the old path still holds until a start with that launcher works: one explicit retry of the failed task (which passes the fixed-machine gate for this kind of record) clears it.
+
+The terminal's shell can also stop before the start types anything, on a question its startup files ask (oh-my-zsh's update question, compinit's insecure directories, a passphrase; #2570, #10365). The start then ends with `shell_waiting`, not a launcher problem: the tab is kept for 10 minutes and the App offers the question's answers. Picking one types it into that tab and starts the Agent there; the message that start refused goes out once it is up (`docs/protocol/protocol.md` "Answering a start's question"). The tab a start opens gets oh-my-zsh's, oh-my-bash's and powerlevel10k's own switches for those questions in its shell's environment where the engine takes one, unset again before the launcher runs (`docs/integrations/engines.md` "What a start tab's shell starts with").
+
 ## Detecting launchers in ~/.zshrc (`launcherScript` in `node/launchers.go`)
 
 node gathers two things in one login-shell invocation (`zsh -ic`, loading `~/.zshrc` first), cached for 1 minute.
@@ -79,6 +225,10 @@ The script frames what it prints with begin/end markers, and node reads only bet
   and neither is `claude` / `codex` / `omp` itself. The scan stats only regular files and links, reads two bytes before the rest, and gets 3 seconds (a hung
   network mount): past them the last scan's scripts stand.
 - **Codex** (since 2026-11-02): If `codex` is on PATH, add `codex`, plus aliases running only one `codex` command, after the Claude entries, with `agent: "codex"`.
+  On a Mac where the login shell finds no `codex` (and has no alias or function of that name), the ChatGPT app's bundled CLI
+  (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`) is plain `codex` instead, run by that path (#10437).
+  `codex-app` (the Codex App, `docs/integrations/codex.md`, "New chats in the Codex App") is only ever an explicit pick: a default that
+  gives way to a launcher the computer has never picks it (`launcherInstead`).
   See `docs/integrations/codex.md`, “Starting from the phone” for creating Codex sessions from the phone.
 - Not launchers: an alias named exactly `claude`, aliases running an internal Codex-fork CLI, Codex aliases doing other work (`cd x && codex`),
   or unrelated aliases (`ll`, `gst`…). If none exist, only default `claude` appears.
@@ -131,7 +281,7 @@ The first message is never typed into the pane:
 - **pi**: through the Persona extension in that pi process (`session.send`, `docs/integrations/pi.md`). If the extension does not list the session within 30 seconds, Persona uses bounded, best-effort agent cleanup and leaves the tab at the shell; a user-picked pane with ambiguous ownership is left untouched. The message is not sent (`pi_no_extension`), so a start never falls back to typing into pi's input.
 - **cursor and agy**: through herdr's `agent.prompt`, once herdr reports the agent. herdr 0.9.5 detects both (its integrations `cursor` and `antigravity-cli`) and reads `HERDR_AGENT` for a wrapper that execs them under another name. Persona does not read their conversations: the phone shows the terminal and can send and interrupt.
 
-Neither cursor nor agy names a session Persona can resume, so a herdr restart starts them again without one; pi's resume names its session (`pi --session`). pi runs with `--approve` on start and resume, so a directory with project-local files does not stop it at a Trust prompt nobody answers (`docs/integrations/pi.md`, "Project trust"). Resuming one of these sessions from the phone with `session.start` is refused (`work_agent_resume`): a stopped pi resumes in its own herdr tab when the phone sends it a message (`docs/integrations/pi.md`), and the others are resumed on the computer.
+Neither keeps token counts the node can read, so their usage is not on the token calendar (`docs/server/machines.md`, "Token usage"). Neither cursor nor agy names a session Persona can resume, so a herdr restart starts them again without one; pi's resume names its session (`pi --session`). pi runs with `--approve` on start and resume, so a directory with project-local files does not stop it at a Trust prompt nobody answers (`docs/integrations/pi.md`, "Project trust"). Resuming one of these sessions from the phone with `session.start` is refused (`work_agent_resume`): a stopped pi resumes in its own herdr tab when the phone sends it a message (`docs/integrations/pi.md`), and the others are resumed on the computer.
 
 **The Cursor CLI on a Mac over SSH.** `cursor-agent` keeps its sign-in in the macOS keychain. A pane opened inside an SSH session (or by a launchd job that is not the GUI user's) finds the keychain locked and asks for it, so the agent never becomes ready and the start fails. Run it in the GUI session: herdr itself started there (the node service of a logged-in user), not `ssh mac cursor-agent`. The same applies to anything else the CLI reads from the keychain.
 
@@ -187,11 +337,23 @@ What these agents do not do here, and why:
   of moving to a model the gateway does not serve. A provider with no `models` list, or one that lists all three, keeps Claude Code's fallback. The rule reads the declared list, not what the
   gateway serves: a provider imported from a computer's aliases lists only the model its alias names, so it has the fallback off until its list names all three or its `env` empties the variable. The provider's `env` wins either way:
   `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=` keeps the fallback, `=1` turns it off (`docs/integrations/claude-integration.md`, "Refusal fallback behind a gateway").
+- **Tool search off behind a gateway** (#10365): a managed provider whose Base URL (its own `env`'s `ANTHROPIC_BASE_URL`, else the stored one) is not Anthropic's own API gets
+  `ENABLE_TOOL_SEARCH=false` (both in `personad launch` environment, which then drops an inherited value, and the settings `env` above): every tool is loaded up front, and no request carries
+  `defer_loading` tools, `tool_reference` blocks or the `ToolSearch` tool, which a gateway edge may refuse (`400 request is not representable on this edge: ToolSearch is not supported on this endpoint`).
+  Claude Code keeps tool search off behind such a Base URL by itself, but any value of the variable lifts that rule, and the assistant's processes carry one. The provider's `env` wins:
+  `ENABLE_TOOL_SEARCH=true` opts back in (deferral saves about 23K tokens per request where the gateway carries it); a refusal is then resent once with every tool loaded and remembered for that
+  provider and model (`docs/integrations/claude-integration.md`, "Tool search behind a gateway (#10365)").
+- **No tier alias behind a gateway** (#10365): Claude Code sends a tier variable's value (`ANTHROPIC_DEFAULT_OPUS_MODEL` …) to the gateway as the model's name, so a provider whose default model or tier
+  field held `opus` asked the gateway for "opus" (404). For a provider whose Base URL is not Anthropic's own API, a tier alias (`opus`, `sonnet`, `haiku`, `fable`, `best`, `opusplan`, `default`, `inherit`,
+  with or without `[1m]`) in its default model, a tier field or its `env` counts as unset: the tier's own model, else the default model, else nothing (Claude Code's own ID). A `--model <alias>` the node
+  passes (an assistant conversation, a terminal Agent, a launcher switch, Test, a typed `/model`) becomes the model the provider's environment gives that tier, `[1m]` kept, or is left out (the provider's default;
+  a typed `/model` types `/model default`); `personad launch` does the same to whatever reaches it and says so on stderr when it leaves one out. Plain `claude`, shell launchers and providers on Anthropic's own API keep their aliases.
 - **Authentication method** (`auth`, 2026-11-04): which variable receives the key. `api_key` (default, used by existing launchers) sets `ANTHROPIC_API_KEY`; Claude Code sends
   `x-api-key`, the only method accepted by the official API. `bearer` sets `ANTHROPIC_AUTH_TOKEN` and sends `Authorization: Bearer`, for compatible gateways accepting only Bearer
   (common relay gateways accept both, requiring no change). When the manager directly calls the Messages API with a launcher (triage, translation, etc.), it follows this header choice too; Responses already uses Bearer and needs no selection.
   Editing a launcher without `auth` in the request (an app not yet upgraded) preserves the old value.
 - **Persona request identity**: Persona's direct API calls, connection tests, model discovery and quota requests send `User-Agent: Persona/<version>` by default. A provider's custom `User-Agent` takes precedence where custom headers are supported. Quota requests use the quota extension's own `User-Agent` when supplied and do not inherit provider headers. A direct API redirect to another origin and subsequent redirects use Persona's default identity to keep the custom value private; Agent processes send their own headers.
+- **OpenCode Go session routing** (#10014, `server/internal/modelhttp/opencode.go`): OpenCode Go subscription gateways (`opencode.ai` and `*.opencode.ai` under `/inference/go` or `/zen/go`) reject requests missing `x-opencode-session` with HTTP 400 `MissingSessionID`, while direct-API and Chat Completions providers do not accept manual custom headers. When a request targets an OpenCode Go gateway and carries no `x-opencode-session`, Persona attaches a UUIDv4 session identifier automatically across direct API calls (`server/internal/ai`: derived from `Request.SessionID` or `WithSessionID(ctx)` when present, otherwise stable per client instance), connection tests and model discovery (`assistant/models_probe.go`), availability checks (`POST /api/v1/launchers/{name}/check`), and managed launcher environments (`ANTHROPIC_CUSTOM_HEADERS` in `node/launcherenv.go` for Claude Code; `PERSONA_OPENCODE_SESSION` + `env_http_headers` in `node/managed.go`, catalog probes in `node/codex_catalog.go`, and `node/pi_providers.go` for Codex and pi). An explicit `x-opencode-session` header where supported takes precedence, and cross-origin redirects drop the header. OpenCode Go is a coding subscription rather than a pay-as-you-go vendor endpoint, so it is supported natively by URL detection rather than listed in `presets_builtin.json`.
 - **Testing sends what a launch sends** (#5329): `POST /api/v1/launchers/test` and `/discover` put the key in one header only, the one the launch's variable makes Claude Code send:
   `auth: "api_key"` → `x-api-key`, `"bearer"` → `Authorization: Bearer`; without `auth`, a stored provider (`name`) uses its stored method (the predicate `personad launch` uses) and a preset its own.
   A test that sent both headers used to pass for a gateway that then refused the launch with 401. Responses and Chat Completions probes send Bearer only, as their real calls do.
@@ -340,8 +502,8 @@ A Codex provider (`agent` `codex`) reaches its gateway as a model provider of Pe
 - **Headers and the environment are secrets, like keys**: The manager encrypts them with the same key into `headers_sealed` / `env_sealed`, decrypting only when sending to node; GET returns only `has_headers` / `has_env`.
   PUT without `headers` (`env`) retains the value; an empty string clears it. Other new fields behave the same way: omission leaves them unchanged (old apps editing providers do not clear them).
 - **Validate on write**: Valid Base URL; thinking level only low / medium / high / xhigh / max, with each model's default level included in its supported levels; no negative numbers (a model's `max_output_tokens` included); no empty or duplicate model IDs; each header line must contain “:”; each environment line must be `NAME=value` with a shell variable's name. Errors never quote a line.
-- **A Messages Base URL is stored without a trailing `/v1`** (#4886): Claude Code and the Anthropic SDKs add `/v1/messages` to `ANTHROPIC_BASE_URL` themselves, so an address pasted as many gateways document it (`https://gw.example.com/v1`) would run as `/v1/v1/messages` and answer 404, though its connection test passed. Saving (POST / PUT, a preset filling in the address) and importing from ~/.zshrc drop the `/v1` that ends the path, and trailing slashes, with `proto.MessagesBaseURL` (`server/internal/proto/launcher.go`): a deployment prefix before it stays (`https://gw.example.com/team/v1` → `https://gw.example.com/team`, DeepSeek's `/anthropic/v1` → `/anthropic`), and a run of `/v1` goes whole, so the function is idempotent. It applies to providers whose agent reads `ANTHROPIC_BASE_URL` (`proto.ManagedLauncher.MessagesBase`: `api` empty or `messages`, any agent but Codex and Antigravity). Responses and Chat Completions bases (`https://api.openai.com/v1`) and Codex / Antigravity launchers (`OPENAI_BASE_URL`, `GOOGLE_GEMINI_BASE_URL`) keep their `/v1`.
-  A provider stored with `/v1` before this is read the same way (`proto.ManagedLauncher.LaunchBaseURL`) without rewriting the record: the manager hands it to nodes without the `/v1` (`launchers.catalog`, `launchers.pull` and the older push), so a node from before this change launches it correctly too; the node drops it again at launch (`providerEnv`) for a manager from before; an import matches it to an alias without it, a plugin preset still matches it by address, and the manager's own Messages calls never doubled it (`ai.apiEndpoint`). Saving it again stores it without `/v1`, which counts as a changed gateway and clears its failure records.
+- **A Messages Base URL is stored without a trailing `/v1`, and pasted endpoint paths are stripped** (#4886, #10014): Claude Code and the Anthropic SDKs add `/v1/messages` to `ANTHROPIC_BASE_URL` themselves, so an address pasted as many gateways document it (`https://gw.example.com/v1` or `https://gw.example.com/v1/messages`) would run as `/v1/v1/messages` or `/v1/messages/v1/messages` and answer 404. Likewise, pasting a full Chat Completions or Responses endpoint (`https://opencode.ai/inference/go/openai/v1/chat/completions`, `https://api.openai.com/v1/responses`) into **Base URL** would double the path on probes and direct calls. Saving (POST / PUT, a preset filling in the address) and importing from ~/.zshrc normalize the path with `proto.MessagesBaseURL` and `proto.APIBaseURL` (`server/internal/proto/launcher.go`): Messages providers (`proto.ManagedLauncher.MessagesBase`: `api` empty or `messages`, any agent but Codex and Antigravity) strip a pasted `/v1/messages` suffix first and then drop any trailing `/v1` segments (`a run of /v1 goes whole`), keeping deployment prefixes (`https://gw.example.com/team/v1` → `https://gw.example.com/team`, `https://gw.example.com/messages/v1` and `https://gw.example.com/messages/v1/messages` → `https://gw.example.com/messages`, DeepSeek's `/anthropic/v1` → `/anthropic`); Chat Completions drops a trailing `/chat/completions` and Responses (plus Codex launchers) drops a pasted `/v1/responses` while preserving bare `/responses` deployment prefixes (`https://gw.example.com/responses` stays unchanged) and keeping `/v1` on OpenAI-compatible bases (`https://api.openai.com/v1`).
+  A provider stored before this normalization is read the same way (`proto.ManagedLauncher.LaunchBaseURL`, `assistant/models_resolve.go`, `assistant/models_probe.go`, and `ai.apiEndpoint` in `server/internal/ai/ai.go`) without rewriting the record: nodes, connection tests, model discovery and direct API calls all reach `<base>/v1/<endpoint>` without 404s. Saving it again stores the normalized Base URL, which counts as a changed gateway and clears its failure records.
 - On read, `source` stays `persona` / `zshrc`; provider origin (`zshrc:<alias>@<machine>`, `preset:<id>`) lives in `origin`.
 - Names `test`, `discover`, `import`, `presets`, and `claude` are reserved for APIs and cannot be used.
 

@@ -169,7 +169,7 @@
   },
   {
     "name": "ask_user",
-    "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this instead. The user can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card is put up the same way but this call returns at once without the answer: end the turn without guessing it, and the user's answer comes to this conversation later as a new message that quotes the question and the answer (so does word that the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default. A waiting call holds this turn, so anything else sent to this conversation (another conversation's message, a supervision message) waits behind it: once such a message waits and the question has been up for a couple of minutes, the call returns without the answer and the card stays up as with wait false; end the turn then, and the answer comes later as a new message.",
+    "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this. They can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card goes up the same way but the call returns at once: end the turn without guessing the answer; it comes later as a new message quoting the question and the answer (or saying the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default. A waiting call holds this turn, so anything else sent to this conversation waits behind it: once such a message waits and the question has been up for a couple of minutes, the call returns without the answer and the card stays up as with wait false; end the turn then.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -240,7 +240,7 @@
   },
   {
     "name": "notify_user",
-    "description": "Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; don't notify for ordinary replies (they get one automatically). In the hub's low-distraction mode, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.",
+    "description": "Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; ordinary replies already notify. In the hub's low-distraction mode, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -297,13 +297,17 @@
   },
   {
     "name": "schedule_followup",
-    "description": "Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work, and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). `at` is RFC 3339 or relative (\"30m\", \"2h\", \"1d\"). For a recurring task pass `every` (\"30m\", \"2h\", at least 5m) once: Persona repeats it and the user sees, edits and stops it in the app; never schedule the next run from inside a run. For times an interval can't say, pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused and the reply lists the next runs. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns the task off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. `inbox` is the user's setting for putting results in the Inbox: pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Wake yourself later with `prompt`; `new_conversation: true` uses its own chat. Wakes reset the message hop chain at most once per 10 minutes. `at` accepts RFC3339 or relative 30m/2h/1d. For repeats set `every` (5m-7d) once; never chain runs. Or use `cron` instead of at/every: 5 fields in the user's zone, at least 5m apart; @hourly/@daily/@weekly/@monthly/@yearly work. Day 0/7 is Sunday; restricted day fields match either. Inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort; overrides require an own conversation, and permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat each run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved recurring work advancing a supervised to-do, pass its explicit `todo_id`; do not guess from a title. Omission keeps an association; \"\" clears it; one-shots refuse it. Progress means new Agent answers, criterion-state changes or changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.",
     "input_schema": {
       "type": "object",
       "required": [
         "prompt"
       ],
       "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this recurring follow-up advances; empty clears the association"
+        },
         "fresh_each_run": {
           "type": "boolean"
         },
@@ -379,10 +383,14 @@
   },
   {
     "name": "schedule_routine",
-    "description": "Set up a recurring routine: at a time every day (or selected weekdays), Persona starts a new conversation with `prompt`, you do the work, and the user gets a push with your answer (with `push: \"asked\"`, only what you send with notify_user). For times a time of day and weekdays can't say, pass `cron` instead of `time` / `weekdays`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, `0 9 * * 1,3,5`), or @hourly / @daily / @weekly / @monthly / @yearly. Day of week 0 and 7 are Sunday; restricted day fields match either. Runs are at least 5 minutes apart; seconds, @every and TZ= are refused. A bad expression is refused and the reply lists the next runs, so check them. Pass `id` (from list_followups) to change an existing routine: only fields given change; `enabled: false` pauses it. A routine can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns it off and records a skipped run. Omit `until` to keep an existing end time; null clears it. Times use the user's zone. The routine runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` / `effort`; an empty `launcher` returns to Main chat. Omit these to keep what the routine has. `inbox` (off / worthy / every) is the user's Inbox setting: pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.",
+    "description": "Create a recurring routine, or pass `id` from list_followups to edit only the fields supplied. `enabled: false` pauses it. Use `time` with optional `weekdays`, or `cron` instead. Times use the user's zone; cron has 5 fields, runs at least 5m apart, supports the listed aliases, treats 0/7 as Sunday and restricted day fields as either. Seconds, @every and TZ= are refused; inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; \"\" clears it. Persona checks Agent answers, criterion-state changes and changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.",
     "input_schema": {
       "type": "object",
       "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this routine advances; empty clears the association"
+        },
         "fresh_each_run": {
           "type": "boolean"
         },
@@ -660,7 +668,7 @@
   },
   {
     "name": "agent_send",
-    "description": "Send a message to an agent as the user would type it; queued while it works. Only send what the user asked for. A stopped agent takes no plain message. Only a recorded non-user stop (idle, task completion, restart) permits resume; user and unknown stops need the user's Resume. If the next work needs its context (investigation followed by a fix, rework, the user asked for this agent), send with resume and resume_why: the same session and permission mode, your text first, the reason shown to the user. It must be supervised (give task unless it is on an open task of yours). Unrelated work, a nearly full context or an agent gone off track: agent_start a new one (agent_read the old one). Unsure: ask_user, reuse or new. A failed resume says why. A user's branch that never ran is started by its first message. Only /exit or /quit stops a running agent (tab kept); finished tasks' agents stop automatically. /exit to another conversation's task is refused (the user can close it, or agent_archive with close).\n\nA dialog holding its terminal refuses the send (dialog_open) with its first line and whether Enter alone closes it; then send with dismiss_notice true. Confirmations, permissions and pickers are never closed for you: tell the user, or use interaction_answer.\n\nTo hand new work to a running agent (one the user opened, a long-lived one that passes work on), give task from the main conversation: once sent, the agent is your supervised task as agent_supervise makes one (a todo with the text as notes, done_when, a card; 督办 messages, task_review). Put the criteria in the text too: the agent reads only the text. An agent on one of your tasks takes more under the same title (done_when updated); another title, the user's own todo or another conversation's task is refused, with nothing sent. A failed send makes no task. Leave task out or null for a reply, nudge or decision; a task with only blank fields counts as left out.",
+    "description": "Send a message to an agent as the user would type it; queued while it works. Only send what the user asked for. A stopped agent takes no plain message. Only a recorded non-user stop (idle, task completion, restart) permits resume; user and unknown stops need the user's Resume. If the next work needs its context (investigation followed by a fix, rework, the user asked for this agent), send with resume and resume_why: the same session and permission mode, your text first, the reason shown to the user. It must be supervised (give task unless it is on an open task of yours). Unrelated work, a nearly full context or an agent gone off track: agent_start a new one (agent_read the old). Unsure: ask_user. A failed resume says why. A user's branch that never ran is started by its first message. Only /exit or /quit stops a running agent (tab kept); finished tasks' agents stop automatically. /exit to another conversation's task is refused (the user can close it, or agent_archive with close).\n\nA dialog holding its terminal refuses the send (dialog_open) with its first line and whether Enter alone closes it; then send with dismiss_notice true. Confirmations, permissions and pickers are never closed for you: tell the user or use interaction_answer.\n\nTo hand new work to a running agent (one the user opened, a long-lived one that passes work on), give task from the main conversation: once sent, the agent is your supervised task as agent_supervise makes one (a todo with the text as notes, done_when, a card; 督办 messages, task_review). Put the criteria in the text too: the agent reads only the text. An agent on one of your tasks takes more under the same title (done_when updated); another title, the user's own todo or another conversation's task is refused, with nothing sent. A failed send makes no task. Leave task out or null for a reply, nudge or decision; a task with only blank fields counts as left out.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -848,7 +856,7 @@
   },
   {
     "name": "agent_start",
-    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list for current machine resources and availability before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions; traex and omp: no effort.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables are there; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier, so leave it off for small or quick work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Whether it is really on shows as `ultracode=on` in agents_list once Claude Code confirms it. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry the same call; follow what the refusal says instead.",
+    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions; traex and omp: no effort.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -921,7 +929,7 @@
   },
   {
     "name": "agent_supervise",
-    "description": "Take an agent you did not hand out (opened by hand on the Agents page, or by agent_start without a task) under your supervision, from the main conversation, as if task_plan had started it: it becomes a task of this conversation (a todo, its card in the conversation) that is followed up: a 督办 message comes when it needs its supervisor (waits for review, stopped short, waits for an answer, makes no progress, reports), and task_review closes it. By default the background supervisor, the built-in conversation that follows up the tasks no leader supervises, gets those messages and reviews the task, and you may still review it yourself; with assistant.main_supervises_own_tasks on they come to you. The answer says which. On an agent of a task you supervise already, it sets that task's done_when and expect_minutes instead, as a logged scope change of the task's brief (the same rules as task_scope, which is the tool to use for it). An agent of another conversation's task stays that conversation's.",
+    "description": "Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -931,15 +939,15 @@
       "properties": {
         "machine": {
           "type": "string",
-          "description": "the machine's id or name, as agents_list shows it"
+          "description": "agents_list machine id or name"
         },
         "session_id": {
           "type": "string",
-          "description": "the agent's session id, or its first 8 characters"
+          "description": "Agent session id or first 8 characters"
         },
         "title": {
           "type": "string",
-          "description": "the task in a short line (Chinese, under 20 characters); empty: the agent's title"
+          "description": "Chinese task title, under 20 characters; empty: Agent title"
         },
         "done_when": {
           "type": "array",
@@ -947,11 +955,37 @@
           "items": {
             "type": "string"
           },
-          "description": "results you can check when it says it is done (a PR merged, a screenshot, what the live system answers)"
+          "description": "checkable completion criteria"
         },
         "expect_minutes": {
           "type": "integer",
-          "description": "how long it should take from now; longer without progress counts as stuck"
+          "description": "estimated minutes from now"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_transfer",
+    "description": "Main only: move an open Agent task to a current direction or main (App Move to). Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Transfer back to undo. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "supervisor"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "agents_list machine id or name"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Agent session id or first 8 characters"
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "exact direction or main id from conversations_list"
         }
       }
     }
@@ -1387,7 +1421,7 @@
   },
   {
     "name": "kb_search",
-    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes: never promise a trimmed recording's full transcript.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1424,7 +1458,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes and all-day recordings' recaps are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts stay for recording_days (14 days by default), minutes and recaps for minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1456,7 +1490,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (default 14 days); then meetings keep only minutes and all-day recordings their recap, per minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); minutes and recaps stay for minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1485,7 +1519,7 @@
   },
   {
     "name": "kb_update",
-    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
+    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. `remove_*` (ids) unlink for good: Persona won't relink it by itself; the rest still updates. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1512,11 +1546,11 @@
         },
         "merge_into": {
           "type": "string",
-          "description": "projects only: fold this project into that one (slug or name) when they are the same work; nothing else is changed in the same call"
+          "description": "projects only: fold this project into that one (slug or name); nothing else changes in the same call"
         },
         "unmerge": {
           "type": "boolean",
-          "description": "projects only: undo the merge that folded this project (slug or name) into another: it is listed again and takes back its chats, people, items and aliases; nothing else is changed in the same call"
+          "description": "projects only: undo the merge that folded this project (slug or name) into another; nothing else changes in the same call"
         },
         "name": {
           "type": "string"
@@ -1582,7 +1616,7 @@
           "items": {
             "type": "string"
           },
-          "description": "projects: aliases that are not this project's (another project's name, too generic)"
+          "description": "projects: aliases that are not this project's (another's name, too generic)"
         },
         "chats": {
           "type": "array",
@@ -1590,7 +1624,19 @@
             "type": "string"
           }
         },
+        "remove_chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "people": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_people": {
           "type": "array",
           "items": {
             "type": "string"
@@ -1746,7 +1792,7 @@
   },
   {
     "name": "secret_run",
-    "description": "Run commands on one of the user's computers that need a password only the user knows, typically its sudo password. Never ask for a password in the conversation, in ask_user or anywhere else: call this instead. The user gets a card in the Persona app (iPhone, Mac, Vision Pro, Android or the web) showing the computer, your purpose and every command verbatim, types the password there and taps Run; that computer's node then runs exactly those commands in order, each as the user with /bin/sh -c in the home directory and PATH=/usr/bin:/bin:/usr/sbin:/sbin (give other tools by their absolute path). Only a command that runs sudo with -S gets the password, as a line on its stdin; every other command gets an empty stdin. Write sudo as `sudo -S -k -p '' …`, one sudo per command and never after a pipe (sudo would read the pipe; run a pipeline as root with `sudo -S -k -p '' sh -c '…'`); a sudo without -S is refused. Where a sudoers rule says NOPASSWD, sudo does not read stdin and the command it runs gets the password instead, so do not give such a command anything that reads stdin. Commands are printable ASCII only (letters, digits, punctuation, spaces), so the card shows exactly what runs. The first command that fails stops the run. Never write a command that prints, stores or sends the password. You never see the password: the result is JSON with status (ran, failed, declined, expired or refused), the computer, a message and, for ran and failed, each command's exit_code, timed_out and output (stdout and stderr, clipped to its end); when a command's output held the password, none of it comes back (output_withheld: true). A command stopped at the timeout may still be running as root: check its state before asking again. declined, expired and refused mean nothing ran: tell the user, and ask again only if they want to. Windows computers cannot run it.",
+    "description": "Run commands on one of the user's computers that need a password only the user knows, typically its sudo password. Never ask for a password in the conversation or in ask_user: call this instead. The user gets a card in the Persona app showing the computer, your purpose and every command verbatim, types the password there and taps Run; that computer's node then runs exactly those commands in order, each as the user with /bin/sh -c in the home directory and PATH=/usr/bin:/bin:/usr/sbin:/sbin (give other tools by their absolute path). Only a command that runs sudo with -S gets the password, as a line on its stdin; every other command gets an empty stdin. Write sudo as `sudo -S -k -p '' …`, one sudo per command and never after a pipe (sudo would read the pipe; run a pipeline as root with `sudo -S -k -p '' sh -c '…'`); a sudo without -S is refused. Where a sudoers rule says NOPASSWD, sudo does not read stdin and the command it runs gets the password instead, so do not give such a command anything that reads stdin. Commands are printable ASCII only, so the card shows exactly what runs. The first command that fails stops the run. Never write a command that prints, stores or sends the password; you never see it. The result is JSON with status (ran, failed, declined, expired or refused), the computer, a message and, for ran and failed, each command's exit_code, timed_out and output (stdout and stderr, clipped to its end); when a command's output held the password, none of it comes back (output_withheld: true). A command stopped at the timeout may still run as root: check before asking again. declined, expired and refused mean nothing ran: tell the user; ask again only if they want. Not on Windows.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1926,7 +1972,7 @@
   },
   {
     "name": "repository_add",
-    "description": "Add a saved repository reference to the current assistant when the user asks. Accepts the same GitHub/GitLab URLs and metadata as Settings \u003e Repositories, checks existence through the existing guarded metadata service, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings \u003e Repositories to reverse the addition.",
+    "description": "Add a saved repository reference to the current assistant when the user asks. Accepts the same URLs and metadata as Settings \u003e Repositories, checks existence through the repository's provider, and refuses duplicates or concurrent changes. Shows the normalized repository and details in a permission card; only the user's own approval saves it. Returns the saved binding with id and verified_at. This is a reference, not authorization or an allowlist: it does not clone, fetch source, grant permissions, or establish a machine or local checkout. Credentials in URLs are refused. If the response is lost or saving is uncertain, use repositories_list/repository_get before retrying. Remove the reference in Settings \u003e Repositories to reverse the addition.",
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
@@ -1938,7 +1984,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048,
-          "description": "GitHub or GitLab repository URL, repository page, or git SSH remote without credentials."
+          "description": "Repository URL, repository page, or git SSH remote without credentials."
         },
         "provider": {
           "type": "string",
@@ -1946,7 +1992,7 @@
             "github",
             "gitlab"
           ],
-          "description": "Required for a self-hosted instance; public GitHub/GitLab is detected from its host."
+          "description": "Required for a self-hosted GitHub/GitLab; other providers are detected from the host."
         },
         "name": {
           "type": "string",
@@ -2029,21 +2075,25 @@
   },
   {
     "name": "conversations_list",
-    "description": "List Persona's own conversations (the 对话 sidebar), newest activity first: id, title, last activity, whether it is the main conversation, whether it is running now, and the gist of its last message. Archived ones are left out unless `include_archived`. This conversation is marked. Use it to find a conversation the user means (\"the one about the trip\") before reading, renaming, archiving or messaging it.",
+    "description": "List your Persona conversations, newest activity first: id, title, tags, last activity, main/running state and last-message gist. Archived ones need `include_archived`; this conversation is marked. Use it to identify the user's conversation before reading, renaming, archiving, tagging or messaging it.",
     "input_schema": {
       "type": "object",
       "properties": {
         "query": {
           "type": "string",
-          "description": "only conversations whose title or last message contains this (case-insensitive)"
+          "description": "case-insensitive match on title or last message"
+        },
+        "tag": {
+          "type": "string",
+          "description": "exact tag to match"
         },
         "include_archived": {
           "type": "boolean",
-          "description": "also list archived conversations (marked as such)"
+          "description": "include archived conversations (marked as such)"
         },
         "limit": {
           "type": "integer",
-          "description": "how many (default 30, max 100)"
+          "description": "default 30, max 100"
         }
       }
     }
@@ -2069,18 +2119,21 @@
   },
   {
     "name": "conversation_rename",
-    "description": "Rename a Persona conversation. Titles read 「MMDD | 类型 | 主题」: give `kind` and `topic` and the hub puts the day the conversation started in front. A title the user gave stays: renaming one fails unless the user asked for this rename in so many words (then pass `user_asked`). The main conversation has no title to change.",
+    "description": "Rename: direction name via main-only direction_name (no date/kind); ordinary kind/topic becomes MMDD | kind | topic using its start date. User-chosen names/titles require user_asked. Main has no title.",
     "input_schema": {
       "type": "object",
       "required": [
-        "id",
-        "kind",
-        "topic"
+        "id"
       ],
       "properties": {
         "id": {
           "type": "string",
-          "description": "full id or its first 8 characters; this conversation's own id renames it"
+          "description": "conversation id or first 8 characters"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "direction: plain project-supervisor name"
         },
         "kind": {
           "type": "string",
@@ -2095,15 +2148,16 @@
             "研究",
             "评审",
             "定时"
-          ]
+          ],
+          "description": "ordinary conversation kind"
         },
         "topic": {
           "type": "string",
-          "description": "what it is about, at most 14 characters"
+          "description": "ordinary topic, at most 14 characters"
         },
         "user_asked": {
           "type": "boolean",
-          "description": "the user asked for this rename; needed to replace a title they gave"
+          "description": "explicit user request to replace their title/name"
         }
       }
     }
@@ -2141,8 +2195,32 @@
     }
   },
   {
+    "name": "conversation_tags_set",
+    "description": "Replace a conversation's tags; [] clears them. These user-defined labels group conversations in apps and lists. They are trimmed and de-duplicated, at most 10 of 32 characters each. Tag only conversations in your own space when the user asks for tags or grouping; never invent them. This conversation is a valid id.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "tags"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or first 8 characters"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "complete replacement list; [] clears all"
+        }
+      }
+    }
+  },
+  {
     "name": "conversation_new",
-    "description": "Start a new Persona conversation with an opening message and return its id at once (it does not wait for the answer). For work that deserves its own thread, when the user asks for one. The message arrives marked as coming from this conversation; it is named after its first turn like any new conversation. It is told to send its result back with conversation_send; if a turn of it fails, or ends without it ever having sent anything back, Persona leaves one notice here (once per conversation). An organization policy may keep some conversations read-only, including starting another conversation from them: such a call is refused with the policy's reason. Do not retry it; follow what the refusal says instead.",
+    "description": "Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2151,14 +2229,25 @@
       "properties": {
         "text": {
           "type": "string",
-          "description": "the opening message: everything the new conversation needs, it does not see this one"
+          "description": "everything the new conversation needs; it does not see this one"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" or a message id: the user's words, carried verbatim"
         }
       }
     }
   },
   {
     "name": "conversation_send",
-    "description": "Send a message to another Persona conversation (not this one). If it is running, the message waits until its current turn ends; if the user is talking in it, until they have been quiet for 2 minutes. The result says which. The message arrives marked as coming from this conversation, so the other side can answer with conversation_send. Conversations passing messages back and forth are limited (a few requests from the user's message, a few messages per pair in ten minutes): your first message back to the conversation whose message you are working on is its answer and adds no hop. Don't reply just to acknowledge. An organization policy may stop some conversations from forwarding work to the main or a leader conversation; such a send is refused with the policy's reason. Passing on the owner's own words to the main conversation stays allowed: start the message with their verbatim words. Do not retry a refused send; follow what the refusal says instead.",
+    "description": "Message another conversation. It waits for a running turn or 2 min of user quiet. Marked as from this one; replies use conversation_send. Few hops per user message (main: no cap; a wake-up resets; a first reply adds none); long back-and-forth is cut. Past the rate it queues: the result says when, no resend. Don't reply just to acknowledge. Follow policy refusals; don't retry. Owner-verbatim words to main stay allowed: start with them. Handing on a user request: set quote (free once).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2172,13 +2261,17 @@
         },
         "text": {
           "type": "string"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" or a message id: the user's words, carried verbatim"
         }
       }
     }
   },
   {
     "name": "task_plan",
-    "description": "Plan Agent work (code, repo research, or more than a few tool calls) instead of starting agents yourself: one task per independent piece. Check machines_list before choosing resources. Fill every field from the knowledge base, agents_list and user preferences; each choice is an editable chip with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Returns immediately: carry on. Each queued task becomes a todo in your context snapshot; use agent_send to reach its Agent. Things a tool does for you (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not an Agent start; check the task outcome. From a leader conversation (assistant.leaders) or any other side conversation you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. What the main conversation hands out to no leader is followed up by the background supervisor by default (a built-in conversation that gets the 督办 messages and reviews with task_review; the main conversation may too), and by the main conversation itself, as a leader would, when assistant.main_supervises_own_tasks is on. A conversation that cannot be sent a 督办 message leaves what it hands out to that same follow-up, and gets a one-line notice with the task's link when each one ends. The answer says who follows up. The answer lists running work that looks like the same task: check it before letting both go on. A todo this conversation opened with no agent yet (a Lark topic's, named in the message that handed it over, or a piece from todo_create part_of) is the task's own: give it as todo_id and no new todo is made; any other is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders), which supervises and reviews its tasks as if it had handed them out; leave it out for work of no direction. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one checkable result) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. For retry, rework, or replacement, give continues and continues_why; keep the original todo and brief even if dispatch fails. Start must stop and release prior Agents and reopen the same todo. Unreachable prior Agents, unauthorized takeovers, and open legacy successors block replacement. Apply owner-authorized scope changes with task_scope before planning and pass its scope_revision to reject staleness. Supply goal, authorization bounds, and new information; the manager appends effective criteria. A task that changes files sets readonly false with explicitly authorized writable permission (for example, Codex bypassPermissions), which also lets a replacement Agent on the same todo implement fixes. A read-only Codex sandbox cannot be changed in place: use a fresh writable process; with no permission change, a plain agent_send follow-up to the live Agent is fine. A task that only reads sets readonly true; its first message includes the read-only constraint. Claude-family launchers use bypassPermissions for both read-only and writable tasks; Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions, not a security boundary). pi, cursor and agy have no read-only mode and are refused in either setting. role \"leader\" makes the task's agent a task leader: it hands direct workers to its own task through its own restricted task_plan and task_review and gets their supervision messages; only for a task that splits into several agents' work. Its workers cannot hand tasks on.\n\nWhen repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight.\n\nWorkspace policy: \"new\" makes an isolated checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\"} selects one; \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/\u003ctodo id\u003e. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.",
+    "description": "Plan Agent work (code, repo research, or more than a few tool calls) instead of starting agents yourself: one task per independent piece. Check machines_list before choosing resources. Fill every field from the knowledge base, agents_list and user preferences; each choice is an editable chip with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Returns immediately: carry on. Each queued task becomes a todo in your context snapshot; use agent_send to reach its Agent. Things a tool does for you (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not an Agent start; check the task outcome. From a leader conversation (assistant.leaders) or any other side conversation you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. What the main conversation hands out to no leader is followed up by the background supervisor by default (a built-in conversation that gets the 督办 messages and reviews with task_review; the main conversation may too), and by the main conversation itself, as a leader would, when assistant.main_supervises_own_tasks is on. A conversation that cannot be sent a 督办 message leaves what it hands out to that same follow-up, and gets a one-line notice with the task's link when each one ends. The answer says who follows up. The answer lists running work that looks like the same task: check it before letting both go on. A todo this conversation opened with no agent yet (a Lark topic's, named in the message that handed it over, a todo_create part_of piece, or a failed start) is the task's own: give it as todo_id and no new todo is made. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders), which supervises and reviews its tasks as if it had handed them out; leave it out for work of no direction. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one checkable result) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. For rework, replacement or a retry on another computer, give continues and continues_why (see continues); a start that did not come up is retried with task_retry, also on another launcher. Apply owner-authorized scope changes with task_scope before planning and pass its scope_revision to reject staleness. Supply goal, authorization bounds, and new information; the manager appends effective criteria. A task that changes files sets readonly false with explicitly authorized writable permission (for example, Codex bypassPermissions), which also lets a replacement Agent on the same todo implement fixes. A read-only Codex sandbox cannot be changed in place: use a fresh writable process; with no permission change, a plain agent_send follow-up to the live Agent is fine. A task that only reads sets readonly true; its first message includes the read-only constraint. Claude-family launchers use bypassPermissions for both read-only and writable tasks; Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions, not a security boundary). pi, cursor and agy have no read-only mode and are refused in either setting. role \"leader\" makes the task's agent a task leader: it hands direct workers to its own task through its own restricted task_plan and task_review and gets their supervision messages; only for a task that splits into several agents' work. Its workers cannot hand tasks on.\n\nWhen repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight.\n\nWorkspace policy: \"new\" makes an isolated checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\"} selects one; \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/\u003ctodo id\u003e. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2380,7 +2473,7 @@
               },
               "todo_id": {
                 "type": "string",
-                "description": "optional: an open todo this conversation opened or supervises with no live Agent on it (stopped ones are released at Start). To stop a live Agent or reopen a closed todo use continues and continues_why instead; given both, they name the same todo"
+                "description": "optional: an open or failed-start todo this conversation opened or supervises, with no live Agent (stopped ones are released at Start). To stop a live Agent or reopen a done one use continues; given both, they name the same todo"
               },
               "inbox_item": {
                 "type": "string",
@@ -2558,7 +2651,7 @@
           "items": {
             "type": "string"
           },
-          "description": "accepted, optional: what was done beyond the task's brief (one line each); the completion report lists it after the criteria"
+          "description": "accepted, optional: what was done beyond the task's brief (one line each); the task's page lists it after the criteria"
         },
         "user_check": {
           "type": "boolean",
@@ -2831,7 +2924,7 @@
   },
   {
     "name": "task_retry",
-    "description": "Start a task's agent again after it did not start: in the same tab while its computer keeps it (after task_start_keys answered what stopped it), otherwise in a new tab (a start that failed for good is reopened). At most 3 times per task; the hub never retries by itself. It returns at once; whether the agent came up arrives as a 督办 message. Only for a task of this conversation; your reason is kept with the task's history.",
+    "description": "Start a failed task's agent again: in its kept tab (once task_start_keys answered what stopped it), else in a new tab, reopening it; with launcher, on that launcher of the same computer and workspace. At most 3 retries; the hub never retries itself. Returns at once; the outcome comes as a 督办 message. Only this conversation's tasks; reason goes in their history.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2841,11 +2934,19 @@
       "properties": {
         "todo_id": {
           "type": "string",
-          "description": "the task's id, as the 督办 message gives it"
+          "description": "the task's id, from the 督办 message"
         },
         "reason": {
           "type": "string",
           "description": "why it should start now, in the user's language, one sentence"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "optional: another launcher of that computer, as the 督办 message lists"
+        },
+        "model": {
+          "type": "string",
+          "description": "with launcher: a model id (default: its own)"
         }
       }
     }
@@ -2868,7 +2969,7 @@
   },
   {
     "name": "todo_repositories_set",
-    "description": "Replace associations atomically using revisions from todo_repositories_get and repositories_list. [] removes metadata only. Retained source snapshots stay fixed; remove and reselect to adopt a changed catalog identity. Editable after execution. Omitted links preserve; [] clears. Use {url} or {kind,number}; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.",
+    "description": "Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2908,7 +3009,6 @@
                 "type": "object",
                 "properties": {
                   "kind": {
-                    "type": "string",
                     "enum": [
                       "default",
                       "branch",
@@ -2918,10 +3018,28 @@
                     ]
                   },
                   "value": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "default"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                ]
               },
               "links": {
                 "type": "array",
@@ -2929,26 +3047,60 @@
                   "type": "object",
                   "properties": {
                     "url": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     },
                     "kind": {
-                      "type": "string",
                       "enum": [
                         "issue",
                         "pull_request"
                       ]
                     },
                     "number": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
                     },
                     "title": {
                       "type": "string",
-                      "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                      "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
                       "maxLength": 1024
                     }
                   },
-                  "additionalProperties": false
-                }
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "required": [
+                        "url"
+                      ],
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "number"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "kind",
+                        "number"
+                      ],
+                      "not": {
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "maxItems": 50
               }
             },
             "additionalProperties": false
@@ -2960,7 +3112,7 @@
   },
   {
     "name": "todo_repository_links_set",
-    "description": "Replace all links for repo_id at the revision from todo_repositories_get; URLs must match its saved identity. Use {url} or {kind,number}. [] clears; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.",
+    "description": "Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2987,25 +3139,58 @@
             "type": "object",
             "properties": {
               "url": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "kind": {
-                "type": "string",
                 "enum": [
                   "issue",
                   "pull_request"
                 ]
               },
               "number": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,19}$"
               },
               "title": {
                 "type": "string",
-                "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
                 "maxLength": 1024
               }
             },
-            "additionalProperties": false
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "url"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "number"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "kind",
+                  "number"
+                ],
+                "not": {
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            ]
           }
         }
       },
@@ -3014,7 +3199,7 @@
   },
   {
     "name": "todo_repository_links_add",
-    "description": "Record discovered/opened issue/PR links without manual user entry. Accept 1–50 exact URLs across links:[{url,title}] and legacy urls; group repositories automatically, including unlisted ones. Use actual source titles, never guesses; nonempty titles refresh, omitted/empty preserve. Deduplicate links; this explicit call can restore removed links. Atomic; preserves aliases, refs and source snapshots. Use todo_repositories_get and revision-checked set tools to replace/remove. Associations do not prove completion.",
+    "description": "Atomically add 1–50 exact issue/PR URLs across links:[{url,title}] and legacy urls. Auto-group even unlisted repositories; no manual entry. Actual titles only: nonempty refreshes, omitted/empty keeps. Deduplicate; explicit adds can restore removed links. Preserve aliases, refs and source snapshots. Replace/remove via todo_repositories_get and revision-checked set tools. Associations never prove completion.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -3046,7 +3231,7 @@
               },
               "title": {
                 "type": "string",
-                "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                "description": "Full plain source title; ≤1,024 UTF-8 bytes after trimming.",
                 "maxLength": 1024
               }
             },
@@ -3141,7 +3326,7 @@
   },
   {
     "name": "todo_create",
-    "description": "Create a Persona to-do when the user asks or agrees to record work or a reminder. Immediate, without confirmation; agents execute via task_plan. An open title/due duplicate returns the existing to-do, but refuses supplied bindings: edit those with todo_repositories_get/set. Use a short action title in the user's language and details in notes. In a leader chat, records a piece of that direction; dispatch with task_plan todo_id, or finish unassigned work with todo_complete. Optional repository_bindings save atomically; get IDs/catalog_revision from repositories_list. Metadata does not create files or advance task progress.",
+    "description": "Record requested/agreed work or reminders immediately, without confirmation; execute via task_plan. Open title/due duplicates return existing to-dos but refuse bindings: use todo_repositories_get/set. Short title in the user's language; details in notes. In leader chats: record that direction's work; task_plan dispatches, todo_complete finishes unassigned work. Bindings save atomically; IDs/catalog_revision from repositories_list. No files or task progress changes.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -3154,15 +3339,15 @@
         },
         "notes": {
           "type": "string",
-          "description": "Source, links, amounts and other details."
+          "description": "Details."
         },
         "due": {
           "type": "string",
-          "description": "Due date YYYY-MM-DD when only the day is known; otherwise YYYY-MM-DD HH:MM in the user's time zone or RFC3339. Relative 2h/3d also accepted."
+          "description": "Day only: YYYY-MM-DD; otherwise YYYY-MM-DD HH:MM (user time zone) or RFC3339. Relative 2h/3d accepted."
         },
         "remind": {
           "type": "string",
-          "description": "Reminder datetime (user's time zone or RFC3339) or relative 30m/2h/1d; never past. Omit unless requested or the deadline is close and important."
+          "description": "Future reminder (user time zone/RFC3339 or relative 30m/2h/1d). Only if requested or deadline close and important."
         },
         "priority": {
           "type": "string",
@@ -3183,7 +3368,7 @@
         },
         "project": {
           "type": "string",
-          "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates."
+          "description": "Existing kb_list project slug/name; prefer long-term work. Only when clear; no near-duplicates."
         },
         "part_of": {
           "type": "string",
@@ -3226,7 +3411,6 @@
                     "type": "object",
                     "properties": {
                       "kind": {
-                        "type": "string",
                         "enum": [
                           "default",
                           "branch",
@@ -3236,10 +3420,28 @@
                         ]
                       },
                       "value": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "default"
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "value"
+                        ]
+                      }
+                    ]
                   },
                   "links": {
                     "type": "array",
@@ -3247,26 +3449,60 @@
                       "type": "object",
                       "properties": {
                         "url": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         },
                         "kind": {
-                          "type": "string",
                           "enum": [
                             "issue",
                             "pull_request"
                           ]
                         },
                         "number": {
-                          "type": "string"
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,19}$"
                         },
                         "title": {
                           "type": "string",
-                          "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                          "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
                           "maxLength": 1024
                         }
                       },
-                      "additionalProperties": false
-                    }
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "required": [
+                            "url"
+                          ],
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "kind"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "number"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "kind",
+                            "number"
+                          ],
+                          "not": {
+                            "required": [
+                              "url"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "maxItems": 50
                   }
                 },
                 "additionalProperties": false

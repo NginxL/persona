@@ -135,6 +135,10 @@ const (
 	// for); without one, or with another channel's, the hub refuses. ok false (status as InteractionsGet's) when it is no
 	// longer pending, an error when the answer does not fit it.
 	InteractionsResolve = "interactions.resolve"
+	// InteractionsClarify: {interaction_id, text, client_msg_id, action, channel, chat_id, message_id} → {ok, status}:
+	// an owner's non-final question on a prepared approval. It consumes the same fresh, card/channel-bound owner action
+	// as InteractionsResolve but never supplies or creates a Resolution; the original card remains pending.
+	InteractionsClarify = "interactions.clarify"
 
 	// CodeCannotSend: a channel has nowhere to send to yet (channel.CodeCannotSend); CodeNeedsTriageModel: a plugin
 	// can't be switched on before the inbox's triage model is set (409 to the app).

@@ -1,5 +1,9 @@
 package persona.feature.inbox
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -18,7 +22,14 @@ class LarkDocCommentsTest {
         var fail: Exception? = null
         /** What a write answers; null: `{ok:true}` without threads (then the model reads them again). */
         var answer: JsonObject? = null
-        override suspend fun threads(url: String): JsonObject { reads++; return threads }
+        /** A read answers the threads as they were when it was asked, once this lets it through. */
+        var hold: CompletableDeferred<Unit>? = null
+        override suspend fun threads(url: String): JsonObject {
+            reads++
+            val now = threads
+            hold?.await()
+            return now
+        }
         override suspend fun write(thread: String?, body: JsonObject): JsonObject {
             writes += thread to body
             fail?.let { throw it }
@@ -98,6 +109,26 @@ class LarkDocCommentsTest {
         assertEquals("t-old", api.writes.single().first)
         assertEquals(LarkDocCommentTarget.Document, model.target)
         assertEquals(1, api.reads) // the answer had the threads
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun aSlowFirstReadDoesNotTakeBackTheCommentJustSent() = runTest {
+        val api = FakeApi()
+        val model = LarkDocCommentsModel(doc, api)
+        val slow = CompletableDeferred<Unit>()
+        api.hold = slow
+        val first = launch { model.load() }
+        runCurrent()
+        // The comment is sent while the sheet's first read is still on its way; the write's answer has it.
+        val mine = Json.parseToJsonElement("""{"id":"t-mine","whole":true,"resolved":false,"quote":"","replies":[
+            {"id":"r9","author":{"name":"我"},"content":[{"kind":"text","text":"整体不错"}],"createdAt":"2026-11-05T08:00:00Z"}]}""")
+        api.answer = buildJsonObject { put("ok", true); put("threads", JsonArray(threads()["threads"]!!.jsonArray + mine)) }
+        model.draft = "整体不错"
+        model.send()
+        assertEquals("t-mine", model.threads(false).first().id)
+        slow.complete(Unit)
+        first.join()
+        assertEquals("t-mine", model.threads(false).first().id)
     }
 
     @Test fun aPassageCommentCarriesItsQuoteAndBlock() = runTest {

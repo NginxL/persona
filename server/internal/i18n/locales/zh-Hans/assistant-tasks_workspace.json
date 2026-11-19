@@ -12,5 +12,10 @@
   "machine_local": "任务工作区已在 {from} 上准备好，不能迁移到 {to}",
   "create": "新任务工作区未创建成功；未启动 Agent",
   "no_commits": "{machine} 上的 {path} 还没有任何提交，无法从它新建任务工作区；先提交一次，或选择一个已有工作区。未启动 Agent",
-  "busy_no_commits": "{machine} 上的文件夹 {path} 正被任务 {id}（{title}）使用，且没有任何提交，无法新建工作区；请先完成那个任务，或在其他文件夹启动这个任务"
+  "busy_no_commits": "{machine} 上的文件夹 {path} 正被任务 {id}（{title}）使用，且没有任何提交，无法新建工作区；请先完成那个任务，或在其他文件夹启动这个任务",
+  "own_checkout_elsewhere": "这个待办的分支 {branch} 已在 {path} 检出，不在任务检出文件夹里，Persona 不会接管它；要在那里继续，请用 workspace {\"existing\": \"{path}\"} 重新安排任务",
+  "own_checkout_dirty": "这个待办之前的检出 {path}（分支 {branch}）有未提交的改动，Persona 不会自行复用；要在那里继续，请用 workspace {\"existing\": \"{path}\"} 重新安排任务，或把改动保存到别处后删除该检出",
+  "own_checkout_in_use": "这个待办之前的检出 {path}（分支 {branch}）正被 Agent {owner} 使用；请等它结束或停止它，然后再启动",
+  "own_checkout_unverified": "无法确认 {path} 仍是这个待办在分支 {branch} 上的干净检出；请检查后用 workspace {\"existing\": \"{path}\"} 重新安排任务以在那里继续，或删除它",
+  "own_path_taken": "这个任务的检出文件夹 {path} 里已有文件，没有在那里新建检出；如果那是这个待办之前的工作，请用 workspace {\"existing\": \"{path}\"} 重新安排任务以在那里继续，或删除它"
 }

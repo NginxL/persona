@@ -1012,8 +1012,7 @@ struct AssistantSidebar: View {
                         .rotationEffect(.degrees(folded.wrappedValue ? 0 : 90))
                     Spacer(minLength: 0)
                 }
-                .padding(.vertical, Theme.Sidebar.rowPadding)
-                .scaledFrame(minHeight: Theme.Sidebar.row)
+                .modifier(SidebarHeadingBox())
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -1025,10 +1024,26 @@ struct AssistantSidebar: View {
             trailing()
         }
         .padding(.leading, Theme.Space.m)
-        .padding(.top, Theme.Space.s)
+        .padding(.top, SidebarHeadingBox.above)
     }
     #endif
 }
+
+#if os(iOS)
+/// The box of a Sidebar layout section heading's name (#6332, #10551): Pages, Persona Chats and Agents all take it, so the
+/// three are as tall and as far apart whatever a heading carries beside its name (Agents' ⋯, Personal Agents and +, in
+/// a box of their own that never sets the row's height). A sidebar row's height and padding, and `above` over it.
+struct SidebarHeadingBox: ViewModifier {
+    /// The room over each heading, inside its row.
+    static let above = Theme.Space.s
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, Theme.Sidebar.rowPadding)
+            .scaledFrame(minHeight: Theme.Sidebar.row)
+    }
+}
+#endif
 
 /// Which part of the sidebar an `AssistantSidebar` draws (#6332).
 enum AssistantSidebarPart {
@@ -1420,8 +1435,9 @@ extension AssistantSidebar {
     }
     #endif
 
-    /// The sidebar's first row in every layout: the main conversation as Persona with the current persona's logo (#2004, #3203).
-    /// Only the name shown is Persona's: it is the same conversation, its key and its data unchanged. Its state
+    /// The sidebar's first row in every layout: the main conversation, as "Main Chat" with the main conversation's symbol
+    /// in the places' symbol column (#9973). The assistant's face and name are the head's right above it; this row had
+    /// them too (#2004, #3203, #6401) and the iPad showed the same face three times. Its state
     /// (working, waiting, unread) on the right, as on a conversation's row. It shows while its session is not in the
     /// list too (not loaded yet, or listed by no machine now, #4606): it still opens it, or with no main conversation
     /// yet the new-conversation page, whose first one becomes it. Off until the hub's assistant config came: a
@@ -1433,13 +1449,13 @@ extension AssistantSidebar {
         let radius = Theme.Sidebar.radius
         return Button { if let key { open(key) } else { newConversation() } } label: {
             HStack(spacing: Theme.Sidebar.gap) {
-                // Where the places below have their symbol, the same width (on the Mac's plain list, `macPlace`'s).
-                PersonaAvatar(size: macPlacesGroup ? Theme.Sidebar.mark : Theme.Sidebar.glyphColumn)
-                // The small "Main Chat" under the name keeps the row readable as a conversation, not a heading (#6328, as the web, #6293).
-                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    Text(mainDisplayName).font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
-                    Text("Main Chat").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
+                // Where the places below have their symbol, drawn as theirs (on the Mac's plain list, `macPlace`'s).
+                Theme.Icon.image(Theme.Icon.home).resizable().scaledToFit() // resizable: an Image, not ThemedIcon
+                    .fontWeight(isShell ? .medium : .regular)
+                    .foregroundStyle(macPlacesGroup ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.primary))
+                    .scaledFrame(width: Theme.Sidebar.glyph, height: Theme.Sidebar.glyph)
+                    .scaledFrame(width: macPlacesGroup ? Theme.Sidebar.mark : Theme.Sidebar.glyphColumn)
+                Text("Main Chat").font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
                 Spacer(minLength: 0)
                 if let main { RowStateMark(state: main.state) }
             }
@@ -1454,7 +1470,7 @@ extension AssistantSidebar {
         }
         .buttonStyle(.plain)
         .macListRow(selected: selected, in: Rectangle(), drawsShade: false) // the row draws its own (`selectedFill`)
-        .accessibilityLabel([mainDisplayName, String(localized: "Main Chat"), main.flatMap { stateWord($0) }].compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
+        .accessibilityLabel([String(localized: "Main Chat"), main.flatMap { stateWord($0) }].compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("sidebar-main")
         .disabled(key == nil && model.assistantConfig == nil)
@@ -1476,15 +1492,12 @@ extension AssistantSidebar {
         }
     }
 
-    /// The main conversation's name in the sidebar (#2004; it was Main Chat before, and again in #4606). The current
-    /// assistant's own name when the hub has a roster (#6401: the sidebar's head and this row name one identity),
-    /// else the look's name; "Persona" only as the last fallback.
-    static func mainDisplayName(_ model: AppModel) -> String {
+    /// The assistant's name as the sidebar's head says it: the current assistant's own when the hub has a roster (#6401),
+    /// else the look's name; "Persona" only as the last fallback. The top bar names the main conversation by it too
+    /// (#9973); the main conversation's row and search results say "Main Chat" under the head.
+    static func assistantName(_ model: AppModel) -> String {
         model.currentAssistant?.name ?? model.persona.name
     }
-
-    /// The main conversation's name on this sidebar.
-    private var mainDisplayName: String { Self.mainDisplayName(model) }
 
     /// A place to go; `place`: what it shows beside the Sidebar layout's sidebar, its row shaded while it does.
     @ViewBuilder private func action(_ title: String, _ symbol: String, id: String? = nil, count: Int = 0, place: ShellPage? = nil,
@@ -1729,7 +1742,7 @@ extension AssistantSidebar {
         // The main conversation and the hub's built-in background supervisor (#5083) stay: no Archive, Pin or End.
         let builtIn = model.isBackgroundSupervisor(s.sessionID)
         let kept = isMain || builtIn
-        let title = isMain ? mainDisplayName : named ?? (s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title)
+        let title = isMain ? String(localized: "Main Chat") : named ?? (s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title)
         let preview = s.lastText.map { Fmt.plain($0).replacingOccurrences(of: "\n", with: " ") } ?? ""
         let direction = model.assistantLeaders.contains(s.sessionID) ? model.directionTree?.leader(s.sessionID) : nil
         let counts = direction?.counts.label
@@ -1737,17 +1750,20 @@ extension AssistantSidebar {
         // under it runs (the tree's `running`, an Agent at work, #6626); the row's own needs-you / unread dot still takes
         // precedence. It is the only way the row says so: no "N working" beside it.
         let leadWorking = direction?.running ?? false
-        // What opened it when Persona did (#5195): the rule All Chats' filters use, so its mark and its filter agree.
+        // What opened it when Persona did (#5195): the rule All Chats' filters use, so its mark and its filter agree. One
+        // an extension opened is marked with that extension's own icon when it can be (#10358).
         let source = isMain ? nil : AutoConversations.source(of: s, tasks: taskChats.known(on: model.api))
+        let opener = ConversationOpener.of(s)
         return Button {
             if let said { model.messageJump = MessageJump(key: s.key, item: said.itemID) }
             open(s.key)
         } label: {
             HStack(spacing: Theme.Space.m) {
                 // The shell's list is ChatGPT's: titles only, all in one column (the marks made it busy); the main
-                // conversation (only in search results here) keeps the app's logo, as its first row has it (#2004).
+                // conversation (only in search results here) keeps its symbol, as its first row has it (#9973).
                 if isMain {
-                    PersonaAvatar(size: isShell ? Theme.Sidebar.glyphColumn : Theme.Sidebar.mark)
+                    ThemedIcon(Theme.Icon.home).font(Theme.Font.body).foregroundStyle(.secondary)
+                        .scaledFrame(width: isShell ? Theme.Sidebar.glyphColumn : Theme.Sidebar.mark)
                 } else if isShell {
                     EmptyView()
                 } else {
@@ -1762,7 +1778,7 @@ extension AssistantSidebar {
                 } else {
                     titleText(title, named: !isMain)
                 }
-                ConversationSourceMark(source: source, channels: s.channels) // what opened it, or its latest message's channel
+                ConversationSourceMark(source: source, channels: s.channels, opener: opener) // what opened it, or its latest message's channel
                 Spacer(minLength: Theme.Space.xs)
                 // What waits on you under a direction ("N need you", #4331); what runs is the mark after it (#6626).
                 if let counts {
@@ -1785,9 +1801,9 @@ extension AssistantSidebar {
         .tag(s.key)
         .macListRow(selected: selected, in: Rectangle(), drawsShade: false) // the row draws its own (`selectedFill`)
         // a row a search found by a message says the manager's whole snippet in the last message's place (#6284)
-        .accessibilityLabel([title, counts, isMain && s.title != title ? s.title : nil, source?.markLabel, stateWord(s, under: leadWorking),
-                             said?.snippet ?? (preview.isEmpty ? nil : preview)]
-            .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
+        .sourceLabel([title, counts, isMain && s.title != title ? s.title : nil], source: source, opener: opener,
+                     [stateWord(s, under: leadWorking), said?.snippet ?? (preview.isEmpty ? nil : preview)],
+                     separator: String(localized: ", ", comment: "Separator between parts of an accessibility label"))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(isMain ? "sidebar-main" : "sidebar-conversation")
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

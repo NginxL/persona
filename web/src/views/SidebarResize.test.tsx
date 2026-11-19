@@ -5,7 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CHAT_MIN, getSidebarWidth, PANEL_MIN, resetSidebarWidth, setSidebarWidth, SIDEBAR_DEFAULT, SIDEBAR_WIDTH_KEY } from "../lib/layout";
+import { CHAT_MIN, getSidebarWidth, PANEL_GAP, PANEL_MIN, resetSidebarWidth, setSidebarWidth, SIDEBAR_DEFAULT, SIDEBAR_WIDTH_KEY } from "../lib/layout";
 import { closePanel, openPanel } from "../lib/panel";
 import { SIDEBAR_VAR, SidebarResize } from "./SidebarResize";
 
@@ -90,7 +90,7 @@ describe("the sidebar's resize handle", () => {
     // a 1180 window with a panel open: the page keeps CHAT_MIN and the panel its least
     setWindow(1180);
     act(() => openPanel({ kind: "files", mid: "m1", sid: "s1", cwd: "/work/demo" }));
-    expect(drawn()).toBe(`${Math.max(SIDEBAR_DEFAULT, 1180 - CHAT_MIN - PANEL_MIN)}px`);
+    expect(drawn()).toBe(`${Math.max(SIDEBAR_DEFAULT, 1180 - CHAT_MIN - PANEL_MIN - 2 * PANEL_GAP)}px`);
     act(() => closePanel());
     expect(drawn()).toBe("480px");
     // the remembered width is still the one asked for

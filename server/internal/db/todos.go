@@ -57,7 +57,17 @@ type TodoRow struct {
 	// for, never nil (docs/assistant/todos.md "Requests in pieces"). The manager checks them before they are written.
 	PartOf string   `json:"part_of"`
 	After  []string `json:"after"`
+	// RestoredAt is when the owner last brought it back from Inactive (#10226): activity for its status only, never an
+	// edit (updated_at stays). Nil when never. Only RestoreTodo writes it.
+	RestoredAt *time.Time `json:"restored_at"`
+	// SomedayUntil is when a to-do the owner put off to Someday comes back (#10226), SomedayNoDate for Someday with no
+	// date; nil while it is not put off. SetTodoSomeday writes it; reopening (TodoEdit.Apply) and RetryTodo clear it.
+	SomedayUntil *time.Time `json:"someday_until"`
 }
+
+// SomedayNoDate is the someday_until of a to-do put off to Someday with no date to come back on: a far date, so that
+// "put off until" is the one rule for both (docs/assistant/todos.md "Restores and Someday").
+var SomedayNoDate = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
 
 // KindConcern is a todo for something the owner raised in the main conversation and wants an answer to (#3561,
 // docs/assistant/todos.md "Concerns"): it closes only through ReportConcern, once the main conversation told the owner
@@ -110,13 +120,13 @@ type TodoAgentRow struct {
 }
 
 const todoColumns = `id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by, done_reason, reopened_at, quiet,
-	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item, part_of, after_ids`
+	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at, inbox_item, part_of, after_ids, restored_at, someday_until`
 
 // todoDest is where a row of todoColumns is scanned to.
 func todoDest(r *TodoRow) []any {
 	return []any{&r.ID, &r.Title, &r.Notes, &r.DoneAt, &r.CreatedAt, &r.UpdatedAt, &r.Origin, &r.PlanID, &r.StartError, &r.DoneBy,
 		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind,
-		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After}
+		&r.SeenAt, &r.InboxItem, &r.PartOf, &r.After, &r.RestoredAt, &r.SomedayUntil}
 }
 
 // ListTodos returns all todos ordered by created_at DESC.
@@ -264,6 +274,7 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 			cur.DoneAt = nil
 			cur.StartError = "" // reopened: no longer failed
 			cur.DoneBy, cur.DoneReason = "", ""
+			cur.SomedayUntil = nil // reopened: the owner is on it again, not putting it off (#10226)
 		}
 	}
 	if e.SetDue {
@@ -328,9 +339,11 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		e.Apply(&cur, updatedAt)
 		_, err = tx.Exec(ctx, `UPDATE todos SET title = $2, notes = $3, done_at = $4, updated_at = $5, start_error = $6,
 			done_by = $7, done_reason = $8, reopened_at = $9, due_at = $10, due_date = $11, remind_at = $12, reminded_at = $13,
-			priority = $14, project = $15, origin = $16, part_of = $17, after_ids = $18, inbox_item = $19 WHERE id = $1`,
+			priority = $14, project = $15, origin = $16, part_of = $17, after_ids = $18, inbox_item = $19,
+			someday_until = $20 WHERE id = $1`,
 			cur.ID, cur.Title, cur.Notes, cur.DoneAt, cur.UpdatedAt, cur.StartError, cur.DoneBy, cur.DoneReason, cur.ReopenedAt,
-			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin, cur.PartOf, nonNilIDs(cur.After), cur.InboxItem)
+			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin, cur.PartOf, nonNilIDs(cur.After), cur.InboxItem,
+			cur.SomedayUntil)
 		if err != nil {
 			return err
 		}
@@ -351,6 +364,41 @@ func (d *DB) SeeTodo(ctx context.Context, id string, at *time.Time) (*TodoRow, e
 		Scan(todoDest(&r)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrTodoNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// RestoreTodo records that the owner brought todo id back from Inactive at at (#10226). Like SeeTodo it is not an edit:
+// updated_at stays; restored_at is activity for the to-do's status only.
+func (d *DB) RestoreTodo(ctx context.Context, id string, at time.Time) (*TodoRow, error) {
+	var r TodoRow
+	err := d.pool.QueryRow(ctx, `UPDATE todos SET restored_at = $2 WHERE id = $1 RETURNING `+todoColumns, id, at).
+		Scan(todoDest(&r)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrTodoNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// SetTodoSomeday puts todo id off to Someday until until (SomedayNoDate: no date), or with nil takes it out of Someday
+// (#10226). Only an open to-do is put off: ErrTodoCompleted when it is closed, though not for a failed start, which
+// waits on the owner to retry or close it. Taking it out applies to any. Not an edit: updated_at stays.
+func (d *DB) SetTodoSomeday(ctx context.Context, id string, until *time.Time) (*TodoRow, error) {
+	var r TodoRow
+	err := d.pool.QueryRow(ctx, `UPDATE todos SET someday_until = $2
+		WHERE id = $1 AND ($2::timestamptz IS NULL OR done_at IS NULL OR start_error <> '') RETURNING `+todoColumns, id, until).
+		Scan(todoDest(&r)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, gerr := d.GetTodo(ctx, id); gerr != nil {
+			return nil, gerr
+		}
+		return nil, ErrTodoCompleted
 	}
 	if err != nil {
 		return nil, err
@@ -406,12 +454,13 @@ func (d *DB) FailTodo(ctx context.Context, id, startError string, at time.Time) 
 	return &r, nil
 }
 
-// RetryTodo reopens a todo whose agent did not start, to start it again (#1396): not done, no error, reopened now.
+// RetryTodo reopens a todo whose agent did not start, to start it again (#1396): not done, no error, reopened now, and
+// out of Someday (the owner is on it again, #10226).
 // False (and no error) when it is not failed any more: a retry that came first already reopened it.
 func (d *DB) RetryTodo(ctx context.Context, id string, at time.Time) (*TodoRow, bool, error) {
 	var r TodoRow
 	err := d.pool.QueryRow(ctx, `UPDATE todos SET done_at = NULL, start_error = '', done_by = '', done_reason = '',
-		reopened_at = $2, updated_at = $2 WHERE id = $1 AND done_at IS NOT NULL AND start_error <> ''
+		reopened_at = $2, updated_at = $2, someday_until = NULL WHERE id = $1 AND done_at IS NOT NULL AND start_error <> ''
 		RETURNING `+todoColumns, id, at).
 		Scan(todoDest(&r)...)
 	if errors.Is(err, pgx.ErrNoRows) {

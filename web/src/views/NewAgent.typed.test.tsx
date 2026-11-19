@@ -94,6 +94,10 @@ async function open() {
 
 async function openPanel() {
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
+  await flush();
+  // These caller tests inspect model actions; disclose the catalog first.
+  for (const header of document.body.querySelectorAll<HTMLButtonElement>('[data-panel-launcher][aria-expanded="false"]')) act(() => header.click());
   await flush();
 }
 
@@ -112,7 +116,7 @@ describe("New agent: a typed model ID (#1644)", () => {
     const reads = listReads();
     await openPanel();
     expect(listReads()).toBe(reads + 1);
-    expect(row("model:claude\nacme/coder-9")!.getAttribute("aria-selected")).toBe("true");
+    expect(row("model:claude\nacme/coder-9")!.getAttribute("aria-pressed")).toBe("true");
     act(() => pill().click());
     expect(pill().title).toContain("coder-9");
     act(() => button("启动").click());
@@ -124,8 +128,7 @@ describe("New agent: a typed model ID (#1644)", () => {
     await open();
     await openPanel();
     expect(rows().map((r) => r.dataset.panelRow)).toEqual(["model:claude\ndefault"]);
-    // the provider's own view describes each row: the Default row says why no model can be picked
-    act(() => document.body.querySelector<HTMLButtonElement>('[data-rail-cell="claude"]')!.click());
+    // Expanded launcher rows keep the existing description of the fixed model.
     expect(row("model:claude\ndefault")!.textContent).toContain("启动器固定了模型参数");
     // and a search for an ID offers no "Use …"
     type(search(), "acme/coder-9");

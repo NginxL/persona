@@ -66,6 +66,8 @@ data class ChatAppBindings(
     val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     /** This group's hub's subscription use (`GET /api/v1/usage/windows`), for ultracode's quota line (#582). */
     val usage: (suspend () -> List<persona.core.contracts.api.UsageAccount>)? = null,
+    /** Forward to's Recent for this group (#3901): on the phone, ids only, gone with the pairing; null where there is none. */
+    val forwardMemory: ForwardMemory? = null,
 )
 
 interface ChatWiringSource {
@@ -219,10 +221,10 @@ fun ChatDestination(
         wiring?.agentShares?.let { provider -> sharingManager?.let { owner -> { provider.forSession(session, owner) } } }
     }?.takeIf { style == ChatRenderStyle.Agent }
     val editor = rememberChatDraftEditor(if (historyReadOnly) null else wiring, session)
-    val handToPersona = rememberHandToPersona(wiring?.mainSender?.takeIf { style != ChatRenderStyle.Assistant }, navigator)
     val composer by (editor?.composer ?: remember { MutableStateFlow<ChatComposerState?>(null) }).collectAsStateWithLifecycle()
     val error by (editor?.error ?: remember { MutableStateFlow<Int?>(null) }).collectAsStateWithLifecycle()
     ComposerFocusAskEffect(session, composer)
+    if (editor != null && composer == null) return
     // The next card another chat waits on you with, after answering here (Persona's conversation in the Assistant tab).
     val elsewhere = LocalWaitingElsewhere.current.takeUnless { historyReadOnly }
     androidx.compose.runtime.CompositionLocalProvider(LocalUsageRead provides wiring?.usage) {
@@ -239,9 +241,10 @@ fun ChatDestination(
                     persona.core.navigation.ConversationKind.Agent, side = true)) }),
                 onOpenAssistant = { navigator.navigate(conversationRoute(it, assistant = true)) },
                 onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
-                files = wiring?.files, ports = wiring?.ports, onHandToPersona = handToPersona,
+                files = wiring?.files, ports = wiring?.ports,
                 tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
                 assistantManagement = assistantManagement,
+                mainConversation = assistantSnapshot.mainSession?.sessionId,
                 leaderConversations = assistantSnapshot.leaders.toSet(),
                 agentShares = sharing,
                 inboxTrays = services.inboxTrays(), inboxScope = wiring?.scope?.path,

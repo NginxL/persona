@@ -316,6 +316,7 @@ func (s *Service) askGroup(ctx context.Context, c assistantwire.InboxSource, t c
 		in.Kind = s.inbox.kindWords(c.ID, t.Kind)
 	}
 	budget := groupOutputBudget(len(t.Group.New), len(events))
+	model := s.purposeModelFor(purposeTriage, "inbox_group")
 	retried := false
 	for {
 		in.Left = groupCalls - len(in.Calls)
@@ -326,7 +327,7 @@ func (s *Service) askGroup(ctx context.Context, c assistantwire.InboxSource, t c
 		sctx, scancel := context.WithTimeout(ctx, groupStepTimeout)
 		input := prompts.RenderInboxGroupInput(in)
 		in.Problem = "" // a correction is shown on the immediately following request only
-		err := s.inboxModelJSON(sctx, purposeTriage, system, input, budget, &out)
+		err := model.JSONMax(sctx, system, input, budget, &out)
 		scancel()
 		paused, _ := modelPaused(err)
 		var problem error

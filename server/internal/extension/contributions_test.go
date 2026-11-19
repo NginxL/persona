@@ -74,14 +74,22 @@ func TestContributionSwitches(t *testing.T) {
 		t.Fatal("after a restart:", ids)
 	}
 
-	// Another extension cannot take the id of a contribution switched off.
+	// A UI ID belongs to its extension even when switched off; another extension has its own usage page.
 	other := t.TempDir()
 	writePackage(t, other, func(m map[string]any) {
 		m["id"] = "other"
 		m["contributes"] = map[string]any{"ui": []any{map[string]any{"id": "usage", "title": "x", "placement": "extension_page"}}}
 	})
+	if _, err := r.Preview(ctx, "dir:"+other, ""); err != nil {
+		t.Fatal("other/usage is independent of example-notes/usage:", err)
+	}
+	// Other contribution points still reserve their IDs while switched off.
+	writePackage(t, other, func(m map[string]any) {
+		m["id"] = "other-provider"
+		m["contributes"] = map[string]any{"providers": []any{map[string]any{"id": "notes-mini", "name": "Other", "base_url": "https://example.com"}}}
+	})
 	if _, err := r.Preview(ctx, "dir:"+other, ""); err == nil {
-		t.Fatal("ui usage is still example-notes's")
+		t.Fatal("provider notes-mini is still example-notes's")
 	}
 
 	// Back on.

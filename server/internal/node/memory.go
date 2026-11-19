@@ -13,15 +13,17 @@ import (
 
 // The assistant's memory is Claude Code's auto-memory for its directory: one Markdown file per fact under
 // ~/.claude/projects/<encoded cwd>/memory, indexed by MEMORY.md. The app lists, edits and deletes the files. On a
-// Codex launcher the assistant reads and writes the same directory (codexMemoryPrompt), so it is one memory either way.
+// Codex launcher the assistant reads and writes the same directory (codexMemoryPrompt), and a Claude conversation in
+// any profile is told to (autoMemoryDirectory, memory_merge.go), so it is one memory either way.
 
 type memoryOp struct {
-	Op            string  `json:"op"` // list | write | delete
+	Op            string  `json:"op"` // list | write | delete | dream-read | dream-write | merges
 	Cwd           string  `json:"cwd"`
 	Name          string  `json:"name"`
 	Content       string  `json:"content"`
 	Previous      *string `json:"previous"`
 	PreviousIndex string  `json:"previous_index"`
+	After         string  `json:"after"` // merges: only the runs after this id
 }
 
 type MemoryFile struct {
@@ -37,12 +39,15 @@ var (
 	memoryNameRe = lazyre.New(`^[A-Za-z0-9][A-Za-z0-9._-]{0,100}\.md$`)
 )
 
-// memoryDir is where Claude Code keeps auto-memory for cwd (it encodes the resolved path).
+// memoryDir is the memory for cwd. The assistant's own directory has one, whichever Claude profile a conversation
+// runs in: the project's memory in the node's default config directory, a fixed place that does not depend on which
+// directories exist (#9440). Any other directory (the Health space) keeps where Claude Code puts it: the first config
+// directory that has the project.
 func (n *Node) memoryDir(cwd string) string {
-	if real, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = real
+	key := memoryKey(cwd)
+	if oneMemory(cwd) {
+		return filepath.Join(n.defaultClaudeDir(), "projects", key, "memory")
 	}
-	key := projectKeyRe.ReplaceAllString(cwd, "-")
 	dirs := n.projectDirs()
 	for _, p := range dirs { // the config directory the assistant's claude actually writes to
 		if _, err := os.Stat(filepath.Join(p, key)); err == nil {
@@ -61,8 +66,10 @@ func (n *Node) assistantMemory(a memoryOp) (any, error) {
 	}
 	n.memoryMu.Lock()
 	defer n.memoryMu.Unlock()
-	dir := n.memoryDir(a.Cwd)
+	dir := n.mergedMemoryDir(a.Cwd) // the other profiles' copies are in before anything reads it
 	switch a.Op {
+	case "merges":
+		return map[string]any{"runs": n.memoryMerges(a.Cwd, a.After), "dir": dir}, nil
 	case "list":
 		entries, err := os.ReadDir(dir)
 		if err != nil && !os.IsNotExist(err) {
@@ -126,7 +133,7 @@ func dropIndexLine(index, name string) error {
 	}
 	var keep []string
 	for _, l := range strings.Split(string(b), "\n") {
-		if strings.Contains(l, "("+name+")") {
+		if memoryIndexLinks(l, name) {
 			continue
 		}
 		keep = append(keep, l)

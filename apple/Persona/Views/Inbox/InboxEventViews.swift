@@ -736,7 +736,7 @@ struct InboxChainSection: View {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 tappable(e, target) { line(e, target: target, open: open, showsLiveState: showsLiveState) }
                 // An entry that goes somewhere and has messages too: they open here with the chevron.
-                if target.navigates && e.expandable {
+                if target.navigates && unfolds(e) {
                     Button { toggle(e) } label: {
                         ThemedIcon(open ? Theme.Icon.collapse : Theme.Icon.expand)
                             .font(Theme.Font.labelHeavy).foregroundStyle(.secondary)
@@ -751,6 +751,12 @@ struct InboxChainSection: View {
         }
         .padding(.vertical, Theme.Space.xs)
         .accessibilityValue(e.id)
+    }
+
+    /// Whether an entry that goes somewhere also unfolds its messages beside it. An assistant row's received message is the
+    /// text drawn in full above (#9041): its entry only goes to the conversation, one arrow (#9928).
+    private func unfolds(_ e: InboxItem.ChainEntry) -> Bool {
+        e.expandable && !(item.isAssistantRow && e.kind == "received")
     }
 
     private func line(_ e: InboxItem.ChainEntry, target: InboxChainTarget, open: Bool, showsLiveState: Bool) -> some View {

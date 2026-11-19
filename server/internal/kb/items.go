@@ -517,8 +517,7 @@ func (e *Engine) List(kind, tag string) []Entry {
 	case KindDoc, KindMeeting, KindEvent:
 		for _, it := range e.Store.Items(kind) {
 			if has(it.Tags) && it.Title != "" {
-				out = append(out, Entry{Kind: kind, ID: it.ID, Name: it.Title, OneLine: it.Note, Importance: it.Importance,
-					Relevance: it.Relevance, Tags: it.Tags, Updated: it.At, Extra: it.URL})
+				out = append(out, itemEntry(kind, it))
 			}
 		}
 	case KindRecording:
@@ -534,24 +533,51 @@ func (e *Engine) List(kind, tag string) []Entry {
 	return out
 }
 
+// itemEntry is a document, meeting or event of kind as lists and links show it: Extra is its link, Source the connector
+// that supplied it (#8872).
+func itemEntry(kind string, it *Item) Entry {
+	return Entry{Kind: kind, ID: it.ID, Name: it.Title, OneLine: it.Note, Importance: it.Importance,
+		Relevance: it.Relevance, Tags: it.Tags, Updated: it.At, Extra: it.URL, Source: it.Source}
+}
+
 // recordingEntry is a recording as lists show it: Extra is the device it was made on, RecordingKind its kind (a
-// recording stored before kinds is a note, as an upload without one is).
+// recording stored before kinds is a note, as an upload without one is), MeetingID its imported meeting's id (#8872).
 func recordingEntry(r *Recording) Entry {
-	return Entry{Kind: KindRecording, ID: r.ID, Name: r.Name, OneLine: r.OneLine, Importance: r.Importance,
+	e := Entry{Kind: KindRecording, ID: r.ID, Name: r.Name, OneLine: r.OneLine, Importance: r.Importance,
 		Relevance: r.Relevance, Tags: r.Tags, Updated: r.StartedAt, Extra: r.Device, RecordingKind: cmp.Or(r.Kind, RecordingNote)}
+	if r.ImportedMeeting != nil {
+		e.MeetingID = r.ImportedMeeting.ID
+	}
+	return e
 }
 
 // Prompt is a short Markdown digest of the most important projects and chats, for the assistant's live snapshot.
 func (e *Engine) Prompt(projects, chats int) string {
 	var d prompts.KBDigest
+	// What has ended stays out (#9427): a done project, one whose chats have all ended at their source though it is not
+	// finished yet, and a chat that ended there (a pull request merged or closed).
 	for _, p := range e.List(KindProject, "") {
-		if len(d.Projects) >= projects || strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
+		if len(d.Projects) >= projects {
+			break
+		}
+		if strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
 			continue
+		}
+		if pr, ok := e.Store.Project(p.ID); ok {
+			if ended, _ := e.projectEnded(pr); ended {
+				continue
+			}
 		}
 		d.Projects = append(d.Projects, digestEntry(p))
 	}
 	for _, c := range e.List(KindChat, "") {
-		if len(d.Chats) >= chats || c.Importance == "P3" {
+		if len(d.Chats) >= chats {
+			break
+		}
+		if c.Importance == "P3" {
+			continue
+		}
+		if ch, ok := e.Store.Chat(c.ID); ok && ch.Ended() {
 			continue
 		}
 		d.Chats = append(d.Chats, digestEntry(c))

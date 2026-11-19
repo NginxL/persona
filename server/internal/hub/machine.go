@@ -33,6 +33,9 @@ type Machine struct {
 	// named is what the computer is called now: cfg.Name until it is renamed (renameMachineLive, the manager's
 	// report), which changes nothing else of it; read through name().
 	named atomic.Pointer[string]
+	// kindNow is how its manager reaches it now: cfg.Kind until a switch to Persona Link, or back, changed it
+	// (link_switch.go), as its manager's next report says (applyDeviceStatesFrom); read through kind().
+	kindNow atomic.Pointer[string]
 
 	mu sync.Mutex
 	// peer is how calls reach the node: the manager over the bus (busNode) for a machine it reported, or a test's
@@ -166,6 +169,17 @@ func (m *Machine) setName(name string) {
 	}
 }
 
+// kind is how the computer is reached now (its entry's kind, "" for ssh): cfg.Kind unless a switch changed it.
+func (m *Machine) kind() string {
+	if k := m.kindNow.Load(); k != nil {
+		return *k
+	}
+	return m.cfg.Kind
+}
+
+// setKind takes the computer's entry's new kind (a switch from ssh to Persona Link, or back); nothing else changes.
+func (m *Machine) setKind(kind string) { m.kindNow.Store(&kind) }
+
 func (m *Machine) snapshot() proto.Machine {
 	computer, browser, iphone := m.hub.extrasOf(m) // before m.mu: it takes it
 	m.mu.Lock()
@@ -181,7 +195,7 @@ func (m *Machine) snapshot() proto.Machine {
 		if icon == "" {
 			icon = "laptop"
 		}
-		s = proto.Machine{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, Icon: icon, SSHHost: m.cfg.SSHHost,
+		s = proto.Machine{ID: m.cfg.ID, Name: m.name(), Kind: m.kind(), Icon: icon, SSHHost: m.cfg.SSHHost,
 			Hostname: m.info.Hostname, OS: m.info.OS, Arch: m.info.Arch, Home: m.info.Home, HerdrVersion: m.info.HerdrVersion,
 			ClaudeVersion: m.info.ClaudeVersion, LastSeen: m.lastSeen, NodeVersion: m.info.Version, Engine: cmp.Or(m.engine, proto.EngineHerdr),
 			Tailcat: m.cfg.TailcatAddr != ""}
@@ -220,7 +234,7 @@ func (m *Machine) canDeployLocked() (bool, string) {
 	if m.cfg.Kind == "local" {
 		return false, i18n.T(m.hub.userLang(), "hub-machine.deploy_local")
 	}
-	if (m.cfg.Kind == kindLink || m.cfg.Kind == kindService || m.derived) && !m.info.NodeUpdate {
+	if kind := m.kind(); (kind == kindLink || kind == kindService || m.derived) && !m.info.NodeUpdate {
 		if m.info.NodeUpdateReason != "" {
 			return false, m.info.NodeUpdateReason
 		}
@@ -281,9 +295,10 @@ func (m *Machine) reachable() bool {
 	m.mu.Lock()
 	p := m.peer
 	managed, connected := m.managed, m.connected
+	owner := cmp.Or(m.owner, devicesOwner)
 	m.mu.Unlock()
 	if managed {
-		return connected && m.hub.devicesUp()
+		return connected && m.hub.devicesUpFor(owner) // its own manager's state (devices_reports.go)
 	}
 	if p == nil {
 		return false

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { chatLines, freshWords, humanizeTool, isLoopTick, mcpServerName, mergeItems, withoutFolded, parseUserText, pickSubject, segments, openRecap, personaToolVerb, toolChip, toolDisplayName, toolLabel, formatDuration } from "./turns";
+import { PERSONA_SERVERS } from "./compatibility";
+import { chatLines, freshWords, humanizeTool, isLoopTick, mcpServerName, mergeItems, withoutFolded, parseUserText, pickSubject, segments, openRecap, personaToolVerb, supervisionTool, supervisionVisible, toolChip, toolDisplayName, toolLabel, formatDuration } from "./turns";
 import type { Item } from "./types";
 
 const u = (seq: number, text: string, extra: Partial<Item> = {}): Item => ({ id: `u${seq}#0`, seq, role: "user", kind: "text", text, ...extra });
@@ -551,4 +552,21 @@ it("personaToolVerb names Persona's own tools by what they do, and nothing else"
   expect(personaToolVerb("mcp__persona")).toBeNull();
   expect(personaToolVerb("agent_read")).toBeNull();
   expect(personaToolVerb(undefined)).toBeNull();
+});
+
+it("recognizes Antigravity single-underscore and scoped Persona MCP tool names", () => {
+  for (const server of PERSONA_SERVERS) {
+    for (const prefix of [`mcp_${server}`, `mcp_${server}_0c671287`, `mcp_${server}_55a1c59d`]) {
+      expect(personaToolVerb(`${prefix}_notify_user`)).toEqual(personaToolVerb("mcp__persona__notify_user"));
+      expect(toolDisplayName(`${prefix}_mail_send`)).toBe("Persona · mail send");
+      expect(supervisionTool(`${prefix}_notify_user`)).toBe("notify_user");
+      expect(supervisionTool(`${prefix}_ask_user`)).toBe("ask_user");
+      expect(supervisionTool(`${prefix}_task_review`)).toBe("task_review");
+      expect(supervisionTool(`${prefix}_supervision_finish`)).toBe("supervision_finish");
+    }
+  }
+  expect(supervisionTool("mcp_persona_other_notify_user")).toBeUndefined();
+  const call: Item = { id: "c1", seq: 2, role: "assistant", kind: "tool_use", tool_use_id: "call_1", tool_name: "mcp_persona_0c671287_notify_user", tool_input: { message: "Ready" } };
+  const ok: Item = { id: "r1", seq: 3, role: "user", kind: "tool_result", tool_use_id: "call_1", text: "Notification sent." };
+  expect(supervisionVisible([u(1, "Check"), call, ok], new Map([["call_1", ok]]), false)).toBe(true);
 });

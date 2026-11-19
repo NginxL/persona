@@ -74,6 +74,13 @@ func TestGoldenRelay(t *testing.T) {
 		Tool: "conversation_send", Text: "示例消息：把结果整理一下", Hop: 2}))
 }
 
+func TestGoldenRelayQuote(t *testing.T) {
+	golden(t, "relay.quote", relayText(relayMsg{From: "b2e4d6f8-0000-4000-8000-000000000001", FromTitle: "Persona",
+		Tool: "conversation_send", Text: "示例消息：这件交给你", Hop: 1, Quote: &BriefRequest{Text: "示例原话：周五前把导出修好",
+			At: time.Date(2026, 11, 17, 4, 52, 0, 0, time.UTC), Conversation: "b2e4d6f8-0000-4000-8000-000000000001", MessageID: "msg-1",
+			Via: []string{"b2e4d6f8-0000-4000-8000-000000000001", "b2e4d6f8-0000-4000-8000-000000000003"}}}))
+}
+
 func TestGoldenTaskPrompt(t *testing.T) {
 	loc, _ := time.LoadLocation("Asia/Shanghai") // passed in: the output doesn't depend on the machine's zone
 	due := time.Date(2026, 10, 31, 1, 0, 0, 0, time.UTC)
@@ -190,6 +197,9 @@ func TestGoldenTodoThreadReply(t *testing.T) {
 	golden(t, "todo_thread_reply.unrecorded", prompts.RenderTodoThreadReply(prompts.TodoThreadReply{Title: "天气 App 发 1.3 版", Text: "先发安卓，iOS 等审核过了再说"}))
 	in := prompts.BotMessage{Persona: true, Owner: "示例用户", Text: "先发安卓"}
 	golden(t, "bot_message.private", prompts.RenderBotMessage(in))
+	in.Todo = &prompts.BotTodo{ID: "todo_0123456789abcdef", Title: "天气 App 发版", Notes: "先发安卓。\n链接：https://example.com/release"}
+	golden(t, "bot_message.todo_reminder", prompts.RenderBotMessage(in))
+	in.Todo = nil
 	in.Topic = true
 	golden(t, "bot_message.topic", prompts.RenderBotMessage(in))
 }

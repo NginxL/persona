@@ -58,5 +58,7 @@ xcrun simctl io <udid> screenshot vision.png
 - On the simulator, sign ad hoc locally (`CODE_SIGN_IDENTITY=-`): a build with `CODE_SIGNING_ALLOWED=NO` cannot read or write the keychain, so it cannot enter demo mode.
   Why: when the keychain read fails (missing entitlement), the registry counts as "unreadable" (`registryUnreadable`), and demo mode only opens when the registry is known to be empty.
   In DEBUG visionOS builds, `-openWelcome YES` treats the just-cleared registry as known empty, so demo mode works without signing too (not verified on the simulator).
-- When you change code shared by iOS / Mac, build all three: `Persona`, `PersonaMac`, `PersonaVision`.
+- When you change code shared with iOS (`Persona/`, `Shared/`), build both `Persona` and `PersonaVision` (the native Mac target is gone, #7228).
+  `scripts/ci/apple.sh` does not build `PersonaVision`, so this build is the only check: an iOS-only member or import
+  (`#if os(iOS)`, a package only the iPhone app links, such as `PersonaCore`) used from shared code breaks it (#10294).
 - On the visionOS simulator, `launch` after `simctl terminate` often shows no window (the process is there, the scene is not created): `simctl shutdown` and then `boot` first.

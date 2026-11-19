@@ -1,15 +1,11 @@
 package hub
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // POST /api/v1/sessions/{mid}/{sid}/rewind (#2436): go back in a Claude session to before one of its messages — the node
@@ -70,21 +66,12 @@ func (h *Hub) rewindSession(w http.ResponseWriter, r *http.Request, m *Machine) 
 	if body.PromptsAfter != nil {
 		params["prompts_after"] = *body.PromptsAfter
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), rewindTimeout)
-	defer cancel()
-	var out json.RawMessage
-	if err := m.call(ctx, "session.rewind", params, &out); err != nil {
-		var re *rpc.Error
-		if errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method") {
-			writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, "这台机器上的 personad 太旧，还不会回退会话，需要重新部署", nil)
-			return
-		}
-		callErr(w, err)
+	out, ok := h.callNode(w, r, m, "session.rewind", params, rewindTimeout, "hub-rewind.outdated", nil)
+	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if len(out) == 0 {
 		out = json.RawMessage(`{}`)
 	}
-	_, _ = w.Write(out)
+	writeRawJSON(w, out)
 }

@@ -234,10 +234,13 @@ private fun GroupHeader(section: PanelSection, words: ModelPanelWords, onReload:
 /** A row's second line: where it comes from in All, Recent and Favorites, what the model is in a provider's own view. */
 @Composable
 private fun second(row: PanelRow, section: PanelSection, view: PanelView): String? = when {
-    row.kind == PanelRow.Kind.Typed -> stringResource(R.string.designsystem_modelpanel_use_typed_note)
+    row.kind == PanelRow.Kind.Typed -> listOf(row.provider.name, stringResource(R.string.designsystem_modelpanel_use_typed_note)).joinToString(" · ")
     view is PanelView.Provider -> row.model.description
-    section.kind == PanelSection.Kind.Provider -> row.model.description?.takeIf { it.isNotBlank() } ?: row.model.resolved?.takeIf { it != row.model.id }
-    else -> row.provider.name
+    else -> {
+        val detail = if (section.kind == PanelSection.Kind.Provider)
+            row.model.description?.takeIf { it.isNotBlank() } ?: row.model.resolved?.takeIf { it != row.model.id } else null
+        listOfNotNull(row.provider.name, detail).joinToString(" · ")
+    }
 }
 
 /** One two-line row (the web's `Row`): the provider's tile, the name, its star and Customize, then the engine and the effort. */

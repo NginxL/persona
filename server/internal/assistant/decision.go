@@ -58,12 +58,8 @@ var (
 	// decisionDefaultAfter: a decision that can be undone and has no deadline of its own takes its recommendation after
 	// this long.
 	decisionDefaultAfter = 24 * time.Hour
-	// decisionRecheckAfter: a decision that waited this long goes back to its supervisor once; decisionRaiseEvery: how
-	// often one that is never taken by default is raised to the owner again.
+	// decisionRecheckAfter: a decision that waited this long goes back to its supervisor once before it can be shown again.
 	decisionRecheckAfter = 24 * time.Hour
-	decisionRaiseEvery   = 24 * time.Hour
-	// decisionRecheckGrace: how long the supervisor has with a recheck before the owner is raised the decision again.
-	decisionRecheckGrace = time.Hour
 	// decisionSettle: how long after its review (or after its ask was taken) a needs_user task may be without an ask
 	// before that counts as undecidable: the ask is being written, or the answer is on its way to the agent.
 	decisionSettle = 10 * time.Minute
@@ -230,7 +226,16 @@ func backgroundText(l i18n.Lang, loc *time.Location, a *acceptAsk) string {
 		where = i18n.T(l, "assistant-reports.decision_where_named", i18n.Args{"title": f.Title})
 	}
 	args := i18n.Args{"where": where, "date": f.At.In(loc).Format("2006-01-02"), "message": f.Message}
-	line := i18n.T(l, "assistant-reports.decision_from_assistant", args)
+	origin := "assistant-reports.decision_from_assistant"
+	switch f.StartedBy {
+	case briefByLeader:
+		origin = "assistant-reports.decision_from_leader"
+	case briefByRoutine:
+		origin = "assistant-reports.decision_from_routine"
+	case briefByHub:
+		origin = "assistant-reports.decision_from_hub"
+	}
+	line := i18n.T(l, origin, args)
 	if !f.ByAssistant && f.Message != "" {
 		line = i18n.T(l, "assistant-reports.decision_from_owner", args)
 	}
@@ -283,7 +288,8 @@ func (s *Service) askRound(id, asked string) (*acceptAsk, error) {
 			return nil, nil
 		}
 	}
-	if t, ok := s.todoNow(id); !ok || acceptAskEnded(&cp, t) || acceptAskStale(&cp, t) {
+	t, ok := s.todoNow(id)
+	if !ok || acceptAskEnded(&cp, t) || acceptAskStale(&cp, t) || !cp.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision) {
 		return nil, nil
 	}
 	return &cp, nil
@@ -533,55 +539,95 @@ func ownerHeld(v *Supervision) bool {
 	return r.OwnerResponse == respondNotAsked && !r.HoldReleased
 }
 
+// ownerDecisionReturned says the latest needs_user review is back with its supervisor, so neither its ask nor the bare
+// review may still look like a live owner decision. Fixed responses deliberately keep their existing visibility rules.
+func ownerDecisionReturned(v *Supervision) bool {
+	if v == nil || v.State != reviewNeedsUser || len(v.Reviews) == 0 {
+		return false
+	}
+	r := v.Reviews[len(v.Reviews)-1]
+	return r.Verdict == reviewNeedsUser && (!r.RecheckAt.IsZero() || !r.RestateAt.IsZero() && r.OwnerResponse == "")
+}
+
+// decisionRecheckDue says a complete decision is old enough that it must not be pushed again before its supervisor
+// confirms the facts. The sweep persists the hand-back; owner projections also honor an already-persisted marker.
+func decisionRecheckDue(a *acceptAsk, now time.Time) bool {
+	return a != nil && decideAsk(a) && a.AgentReply == nil && a.Recommend != "" && now.Sub(a.AskedAt) >= decisionRecheckAfter
+}
+
 // ---- old and unanswerable decisions ----
 
-// sweepDecisionAges looks at the decisions still waiting: one older than decisionRecheckAfter goes back to its
-// supervisor once (recheck), and one that is never taken by default is raised to the owner again every
-// decisionRaiseEvery, after the supervisor had decisionRecheckGrace with its recheck.
+// markDecisionRecheck records the owner-facing hand-back on the same review round. A newer review that has not yet
+// replaced its ask cannot be marked by an older sweep. The ask write follows; if that write fails, the projection fails
+// closed (hidden) and the next sweep retries it before any signal goes out.
+func (s *Service) markDecisionRecheck(ctx context.Context, id string, asked, at time.Time) bool {
+	eligible := true
+	_, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+		n := len(v.Reviews)
+		if v.State != reviewNeedsUser || n == 0 {
+			eligible = false
+			return false
+		}
+		r := &v.Reviews[n-1]
+		a, ok := s.askCopy(id)
+		if r.Verdict != reviewNeedsUser || !ok || !a.AskedAt.Equal(asked) || r.At.After(asked) {
+			eligible = false
+			return false
+		}
+		if r.RecheckAt.IsZero() {
+			r.RecheckAt = at
+			return true
+		}
+		return false
+	})
+	if err != nil {
+		s.logf("task %s: decision: recheck review: %v", id, err)
+		return false
+	}
+	return eligible
+}
+
+// sweepDecisionAges returns decisions older than decisionRecheckAfter to their supervisor once. Until a fresh review
+// re-issues one, its old facts leave every owner queue and cannot be answered, defaulted or pushed again. A persisted
+// recheck from an older release gets the matching review marker without another signal.
 func (s *Service) sweepDecisionAges(now time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	for _, w := range s.awaitingAcceptance(ctx) {
+	for _, w := range s.acceptanceRounds(ctx, true) {
 		a := w.ask
 		if !decideAsk(&a) || a.AgentReply != nil {
 			continue
 		}
-		// One that recommends nothing goes back as undecidable instead (undecidableSignal): not both.
-		recheck := a.RecheckAt.IsZero() && a.Recommend != "" && now.Sub(a.AskedAt) >= decisionRecheckAfter
-		raise := neverDefault(a.WhyOwner) && a.Response == "" && now.Sub(maxTime(a.AskedAt, a.RaisedAt)) >= decisionRaiseEvery &&
-			!a.RecheckAt.IsZero() && now.Sub(a.RecheckAt) >= decisionRecheckGrace
-		if !recheck && !raise {
+		if !a.RecheckAt.IsZero() {
+			s.markDecisionRecheck(ctx, w.todo, a.AskedAt, a.RecheckAt)
+			continue
+		}
+		if !decisionRecheckDue(&a, now) {
+			continue
+		}
+		if !s.markDecisionRecheck(ctx, w.todo, a.AskedAt, now.UTC()) {
 			continue
 		}
 		b := &s.accept
 		b.mu.Lock()
 		cur := b.asks[w.todo]
-		if cur == nil || !cur.AskedAt.Equal(a.AskedAt) || !cur.AcceptedAt.IsZero() || cur.AgentReply != nil {
+		if cur == nil || !cur.AskedAt.Equal(a.AskedAt) || !cur.AcceptedAt.IsZero() || cur.AgentReply != nil || !cur.RecheckAt.IsZero() {
 			b.mu.Unlock()
 			continue
 		}
 		prev := *cur
-		if recheck {
-			cur.RecheckAt = now.UTC()
-		} else {
-			cur.RaisedAt = now.UTC()
-		}
+		cur.RecheckAt = now.UTC()
 		if err := s.saveAcceptErrLocked(ctx); err != nil {
 			*cur = prev
 			b.mu.Unlock()
 			s.logf("task %s: decision: save: %v", w.todo, err)
 			continue
 		}
-		cp := *cur
 		b.mu.Unlock()
-		if recheck {
-			s.logf("task %s: its decision waited %s: back to its supervisor to confirm it", w.todo, humanDuration(now.Sub(a.AskedAt)))
-			s.signal(superviseSignal{Todo: w.todo, Kind: sigRecheck, Key: "recheck@" + a.AskedAt.UTC().Format(time.RFC3339Nano),
-				Minutes: int(now.Sub(a.AskedAt).Minutes()), Decision: s.signalDecision(ctx, &a)})
-			continue
-		}
-		s.logf("task %s: a decision never taken by default still waits: raised again", w.todo)
-		s.remindOverdue(ctx, w.todo, cp)
+		s.askChanged(ctx)
+		s.logf("task %s: its decision waited %s: back to its supervisor to confirm it", w.todo, humanDuration(now.Sub(a.AskedAt)))
+		s.signal(superviseSignal{Todo: w.todo, Kind: sigRecheck, Key: "recheck@" + a.AskedAt.UTC().Format(time.RFC3339Nano),
+			Minutes: int(now.Sub(a.AskedAt).Minutes()), Decision: s.signalDecision(ctx, &a)})
 	}
 }
 

@@ -106,13 +106,12 @@ final class RecordingLibrary {
         didChange?(entry.id)
     }
 
-    #if DEBUG
-    /// Screenshots and UI tests put the same made-up recording back after a run deleted it.
+    /// The same made-up recording back after a run deleted it: a replayed meeting tape's (`ReplayedMeeting`, #10589), and
+    /// in DEBUG the screenshots' and UI tests'.
     func restore(_ id: UUID) {
         guard deleted.remove(id) != nil else { return }
         try? JSONEncoder().encode(deleted).write(to: root.appendingPathComponent("deleted.json"), options: .atomic)
     }
-    #endif
 
     /// Whether this id was deleted here (its tombstone stops late watch segments from recreating it).
     func isDeleted(_ id: UUID) -> Bool { deleted.contains(id) }

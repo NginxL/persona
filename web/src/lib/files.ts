@@ -120,15 +120,33 @@ export function joinPath(dir: string, name: string): string {
   return dir.replace(/\/+$/, "") + "/" + name.replace(/^\/+/, "");
 }
 
+// A path from a Windows computer: a drive letter or a UNC share, the same test as baseName's in lib/format.ts. Only
+// there is a backslash a separator (the node answers such paths with backslashes); in any other path it is a character
+// of a name.
+const WINDOWS_PATH = /^[A-Za-z]:[\\/]|^\\\\/;
+
+/** `p` without separators at its end, and where its last separator is now (-1: none). */
+function lastPart(p: string): { t: string; at: number } {
+  if (!WINDOWS_PATH.test(p)) {
+    const t = p.replace(/\/+$/, "");
+    return { t, at: t.lastIndexOf("/") };
+  }
+  const t = p.replace(/[\\/]+$/, "");
+  return { t, at: Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\")) };
+}
+
+/** The folder `p` is in: "/" for a file at the root, a Windows drive's root with its separator (`C:\`), "" for a bare name. */
 export function dirName(p: string): string {
-  const t = p.replace(/\/+$/, "");
-  const i = t.lastIndexOf("/");
-  return i < 0 ? "" : i === 0 ? "/" : t.slice(0, i);
+  const { t, at } = lastPart(p);
+  if (at < 0) return "";
+  if (at === 0) return "/";
+  const dir = t.slice(0, at);
+  return /^[A-Za-z]:$/.test(dir) ? t.slice(0, at + 1) : dir;
 }
 
 export function fileName(p: string): string {
-  const t = p.replace(/\/+$/, "");
-  return t.slice(t.lastIndexOf("/") + 1) || p;
+  const { t, at } = lastPart(p);
+  return t.slice(at + 1) || p;
 }
 
 /** The folders of `path` below `root` (["a", "b"] for root/a/b), [] for root itself, null when it is not inside. */
@@ -146,7 +164,22 @@ export function resolveRef(baseDir: string, ref: string): string {
   if (!src || !isMachineRef(ref)) return "";
   const path = decodeURIComponentSafe(src);
   if (path.startsWith("~") || path.startsWith("/")) return normalizePath(path);
+  if (WINDOWS_PATH.test(baseDir)) return windowsResolve(baseDir, path);
   return normalizePath(joinPath(baseDir, path));
+}
+
+/** `rel` inside a Windows computer's folder `dir`, either separator, in backslashes; ".." never goes above the drive or
+ *  the UNC share. */
+function windowsResolve(dir: string, rel: string): string {
+  const unc = dir.startsWith("\\\\");
+  const out = dir.split(/[\\/]+/).filter(Boolean);
+  const root = unc ? 2 : 1; // the drive, or the server and its share
+  for (const part of rel.split(/[\\/]+/)) {
+    if (!part || part === ".") continue;
+    if (part !== "..") out.push(part);
+    else if (out.length > root) out.pop();
+  }
+  return (unc ? "\\\\" : "") + out.join("\\") + (out.length === root && !unc ? "\\" : "");
 }
 
 /** A reference that points into the machine (relative, absolute or ~/), not a URL or an in-page anchor. */

@@ -77,6 +77,8 @@ afterEach(() => {
 });
 
 const sections = () => [...host.querySelectorAll<HTMLElement>("[data-section]")].map((s) => [s.dataset.section, s.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded") ?? "always"]);
+// the section bar opens on Needs you (#9053): the sections' own folds are All's
+const showAll = () => act(() => host.querySelector<HTMLButtonElement>('[data-bar-choice="all"]')!.click());
 const clickText = async (text: string) => {
   const b = [...document.body.querySelectorAll<HTMLElement>("button, [role=menuitem]")].find((x) => x.getAttribute("aria-label") === text || x.textContent?.trim() === text || x.textContent?.includes(text))!;
   await act(async () => b.click());
@@ -87,6 +89,7 @@ describe("the inbox of several managers", () => {
   it("lists the current assistant's items only, and keeps each one's sections open or closed on their own", async () => {
     act(() => root.render(<InboxList />));
     await flush();
+    showAll();
     const rows = () => [...host.querySelectorAll<HTMLElement>("[data-item]")].map((r) => `${r.dataset.manager}:${r.dataset.item}`);
     // the default's two items, in its two sections; nothing of the other manager, and no manager's name over them
     expect(sections()).toEqual([["action", "true"], ["fyi", "true"]]);

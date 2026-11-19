@@ -90,6 +90,7 @@ func (s *Service) applyPickedModel(ctx context.Context, params map[string]any) e
 // A launcher's model goes to the agent as --model, so it has to be a model id (#1644): a call's own pick that is not
 // one is refused here (a configured one that is not was dropped by applyModel).
 func (s *Service) finishModel(ctx context.Context, id string, params map[string]any, b ModelBinding) error {
+	delete(params, "external")
 	name, ok := strings.CutPrefix(b.Provider, "launcher.")
 	if !ok {
 		if strings.HasPrefix(id, "plugin.") {
@@ -97,6 +98,11 @@ func (s *Service) finishModel(ctx context.Context, id string, params map[string]
 			return nil
 		}
 		return i18n.Err("assistant-models.err_not_launcher")
+	}
+	if externalProvider(b.Provider) {
+		if err := s.applyExternalScope(ctx, id, params, b); err != nil {
+			return err
+		}
 	}
 	if err := checkModelID(b.Model); err != nil {
 		return err

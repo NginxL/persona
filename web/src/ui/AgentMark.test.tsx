@@ -31,7 +31,7 @@ describe("AgentMark", () => {
   it("says which agent it is, in the interface language", () => {
     expect(draw("claude")).toContain('role="img"');
     expect(draw("claude")).toContain('aria-label="Claude Code"');
-    expect(draw("opencode")).toContain('aria-label="OpenCode"');
+    expect(draw("opencode")).toContain('aria-label="opencode"');
     expect(draw("cursor-agent")).toContain('aria-label="Cursor"');
   });
 

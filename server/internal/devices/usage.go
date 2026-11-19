@@ -49,6 +49,10 @@ type usageBatchStore interface {
 	PutUsages(ctx context.Context, writes []db.UsageWrite) (rejected []error, err error)
 }
 
+type additiveUsageStore interface {
+	AddUsage(ctx context.Context, machine string, buckets []proto.UsageBucket) error
+}
+
 func (d *Devices) usageStore() usageStore {
 	if s, ok := d.opts.Store.(usageStore); ok {
 		return s
@@ -56,26 +60,69 @@ func (d *Devices) usageStore() usageStore {
 	return nil
 }
 
+func (d *Devices) restoreRuntimeUsage(ctx context.Context, now time.Time) {
+	store, ok := d.opts.Store.(interface {
+		RecentRuntimeUsage(context.Context, time.Time) (map[string][]proto.UsageBucket, error)
+	})
+	if !ok {
+		return
+	}
+	restoreCtx, cancel := context.WithTimeout(ctx, usageWriteTimeout)
+	defer cancel()
+	buckets, err := store.RecentRuntimeUsage(restoreCtx, now.Truncate(time.Minute).Add(-usageNodeWindow))
+	if err != nil {
+		d.logf("restore recent runtime usage: %v", err)
+		return
+	}
+	d.usage.mu.Lock()
+	defer d.usage.mu.Unlock()
+	if d.usage.machines == nil {
+		d.usage.machines = map[string]*machineUsage{}
+	}
+	for machine, entries := range buckets {
+		m := d.usage.machines[machine]
+		if m == nil {
+			m = &machineUsage{buckets: map[usageKey]proto.UsageBucket{}}
+			d.usage.machines[machine] = m
+		}
+		for _, b := range entries {
+			k := usageKey{b.Minute, b.Model, b.Launcher, b.Agent}
+			if _, exists := m.buckets[k]; !exists {
+				m.buckets[k] = b
+			}
+		}
+	}
+}
+
 // usageWrite is one "usage" notification to store; written in order (a full window, then what changed).
 type usageWrite struct {
 	machine     string
 	buckets     []proto.UsageBucket
 	replaceFrom time.Time
+	add         bool
 }
 
 // onUsage takes a node's "usage" notification: the island's sums (in memory), and Postgres for the charts.
 func (d *Devices) onUsage(machine string, params json.RawMessage, now time.Time) {
-	if !d.usage.apply(machine, params, now) || d.usageStore() == nil {
-		return
-	}
 	var p struct {
 		Buckets []proto.UsageBucket `json:"buckets"`
 		Full    bool                `json:"full"`
+		Add     bool                `json:"add"`
 	}
-	if json.Unmarshal(params, &p) != nil || (len(p.Buckets) == 0 && !p.Full) {
+	if json.Unmarshal(params, &p) != nil {
 		return
 	}
-	w := usageWrite{machine: machine, buckets: p.Buckets}
+	store := d.usageStore()
+	_, additive := store.(additiveUsageStore)
+	_, batch := store.(usageBatchStore)
+	if p.Add && !additive && !batch {
+		d.logf("[%s] usage: runtime usage requires an additive store", machine)
+		return
+	}
+	if !d.usage.apply(machine, params, now) || store == nil || (len(p.Buckets) == 0 && !p.Full) {
+		return
+	}
+	w := usageWrite{machine: machine, buckets: p.Buckets, add: p.Add}
 	if p.Full {
 		w.replaceFrom = now.Add(-usageNodeWindow).Truncate(time.Minute).Add(time.Minute)
 	}
@@ -180,7 +227,15 @@ func (d *Devices) saveUsage(ctx context.Context, st usageStore, writes []usageWr
 	if !ok {
 		for _, w := range writes {
 			wctx, cancel := context.WithTimeout(ctx, usageWriteTimeout)
-			if err := st.PutUsage(wctx, w.machine, w.buckets, w.replaceFrom); err != nil && ctx.Err() == nil {
+			var err error
+			if w.add {
+				if add, ok := st.(additiveUsageStore); ok {
+					err = add.AddUsage(wctx, w.machine, w.buckets)
+				}
+			} else {
+				err = st.PutUsage(wctx, w.machine, w.buckets, w.replaceFrom)
+			}
+			if err != nil && ctx.Err() == nil {
 				d.logf("[%s] save usage: %v", w.machine, err)
 			}
 			cancel()
@@ -189,7 +244,7 @@ func (d *Devices) saveUsage(ctx context.Context, st usageStore, writes []usageWr
 	}
 	batch := make([]db.UsageWrite, len(writes))
 	for i, w := range writes {
-		batch[i] = db.UsageWrite{Machine: w.machine, Buckets: w.buckets, ReplaceFrom: w.replaceFrom}
+		batch[i] = db.UsageWrite{Machine: w.machine, Buckets: w.buckets, ReplaceFrom: w.replaceFrom, Add: w.add}
 	}
 	wctx, cancel := context.WithTimeout(ctx, usageWriteTimeout)
 	defer cancel()

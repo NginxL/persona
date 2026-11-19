@@ -380,11 +380,17 @@ func withFirstPromptWaits(t *testing.T, wait, recover time.Duration) {
 // request runs one hub request through the node's handler; the result comes back as decoded JSON.
 func request(t *testing.T, n *Node, method string, params map[string]any) (map[string]any, error) {
 	t.Helper()
+	return requestCtx(t, context.Background(), n, method, params)
+}
+
+// requestCtx is request with ctx as the hub's call (its deadline, as the hub gives it).
+func requestCtx(t *testing.T, ctx context.Context, n *Node, method string, params map[string]any) (map[string]any, error) {
+	t.Helper()
 	b, err := json.Marshal(params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := n.handle(context.Background(), method, b)
+	res, err := n.handle(ctx, method, b)
 	out := map[string]any{}
 	if res != nil {
 		rb, _ := json.Marshal(res)

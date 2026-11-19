@@ -9,6 +9,7 @@ import {
   diffTotals,
   dirName,
   extendStates,
+  fileName,
   gitLetter,
   gitMark,
   gitTone,
@@ -61,6 +62,40 @@ describe("paths", () => {
     expect(isMachineRef("mailto:me@example.com")).toBe(false);
     expect(isMachineRef("//cdn.example.com/x.png")).toBe(false);
     expect(isMachineRef("docs/x.md")).toBe(true);
+  });
+
+  // A Windows computer answers its paths with backslashes (filepath.Clean on the node): its folder, its name and what its
+  // Markdown refers to are read by either separator (#9968), the same test as baseName in lib/format.ts.
+  it("reads a Windows computer's path by backslashes and slashes", () => {
+    expect(dirName("C:\\Users\\me\\docs\\README.md")).toBe("C:\\Users\\me\\docs");
+    expect(dirName("C:\\Users\\me\\docs\\")).toBe("C:\\Users\\me");
+    expect(dirName("C:\\Users\\me\\proj/src/a.ts")).toBe("C:\\Users\\me\\proj/src");
+    expect(dirName("C:\\README.md")).toBe("C:\\");
+    expect(dirName("C:/README.md")).toBe("C:/");
+    expect(dirName("\\\\server\\share\\docs\\a.md")).toBe("\\\\server\\share\\docs");
+    expect(fileName("C:\\Users\\me\\docs\\README.md")).toBe("README.md");
+    expect(fileName("C:\\Users\\me\\docs\\")).toBe("docs");
+    expect(fileName("\\\\server\\share\\a.md")).toBe("a.md");
+  });
+
+  it("resolves a Windows Markdown file's references in its folder, never above its drive or share", () => {
+    expect(resolveRef("C:\\Users\\me\\docs", "img/logo.png")).toBe("C:\\Users\\me\\docs\\img\\logo.png");
+    expect(resolveRef("C:\\Users\\me\\docs", "../notes.md#top")).toBe("C:\\Users\\me\\notes.md");
+    expect(resolveRef("C:\\Users\\me\\docs", "./a%20b.png")).toBe("C:\\Users\\me\\docs\\a b.png");
+    expect(resolveRef("C:\\Users\\me\\docs", "sub\\c.md")).toBe("C:\\Users\\me\\docs\\sub\\c.md");
+    expect(resolveRef("C:\\", "../../x.md")).toBe("C:\\x.md");
+    expect(resolveRef("\\\\server\\share\\docs", "../../x.md")).toBe("\\\\server\\share\\x.md");
+    expect(resolveRef("C:\\Users\\me\\docs", "~/notes.txt")).toBe("~/notes.txt");
+    expect(resolveRef("C:\\Users\\me\\docs", "https://example.com/x.png")).toBe("");
+  });
+
+  it("keeps a backslash that is part of a name anywhere else", () => {
+    expect(dirName("/home/me/odd\\name")).toBe("/home/me");
+    expect(fileName("/home/me/odd\\name")).toBe("odd\\name");
+    expect(fileName("/home/me/docs/")).toBe("docs");
+    expect(dirName("a.md")).toBe("");
+    expect(dirName("/")).toBe("");
+    expect(resolveRef("/u/w", "odd\\name.png")).toBe("/u/w/odd\\name.png");
   });
 });
 

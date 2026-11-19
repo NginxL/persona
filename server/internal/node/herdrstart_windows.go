@@ -22,6 +22,10 @@ var herdrPaneShell = func() string { return "" }
 // or default pane shell (windowsRestoreShells). A var for tests.
 var herdrRestoreShells = windowsRestoreShells
 
+// adoptedPaneShells: an adopted pane whose innermost program is PowerShell or pwsh takes a new PowerShell pane's
+// handoff; any other stack is used as it is (windowsAdoptedPaneShells). A var for tests.
+var adoptedPaneShells = windowsAdoptedPaneShells
+
 // freshPaneShells resolves a new pane. Only classic herdr gets foreground/config detection and a PowerShell default.
 // Every unnamed nonclassic pane returns main's empty fallback; a host-named non-PowerShell shell stays as reported.
 func (n *Node) freshPaneShells(ctx context.Context, launch host.Launcher, created *host.Created) []string {

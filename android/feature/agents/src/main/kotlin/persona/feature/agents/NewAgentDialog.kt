@@ -31,6 +31,8 @@ import persona.feature.chat.rememberUltracodeQuota
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.models.AgentModelPanel
+import persona.feature.chat.ForwardComposerCard
+import persona.feature.chat.ForwardMessage
 import java.net.URI
 
 @Composable
@@ -354,6 +356,8 @@ private fun LazyListScope.newAgentItems(
             UltracodeQuotaLines(quota, blocked == null, Modifier.padding(horizontal = rowPadding).padding(bottom = Tokens.Space.m))
         }
     }
+    // A forwarded message (#3901) goes before the first message: its card over it.
+    usableForward(state.context)?.let(ForwardMessage::read)?.let { forward -> item("forward") { ForwardComposerCard(forward) } }
     item("prompt") {
         JTextField(state.prompt, model::prompt, enabled = !state.locked,
             label = stringResource(when {
@@ -402,8 +406,8 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
 /** A folder, a launcher or the configuration to follow, an online machine, a first message when required, and attachments ready to go. */
 internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
     state.selection.cwd.isNotBlank() && (state.selection.launcher.isNotBlank() || state.following) &&
-        machines.any { it.id == state.machineId && it.online } && (!state.promptRequired || state.prompt.isNotBlank()) &&
-        state.attachmentsHold == null
+        machines.any { it.id == state.machineId && it.online } &&
+        (!state.promptRequired || state.prompt.isNotBlank() || usableForward(state.context) != null) && state.attachmentsHold == null
 
 internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
 

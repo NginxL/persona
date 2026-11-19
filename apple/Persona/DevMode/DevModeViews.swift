@@ -25,20 +25,53 @@ struct DevModeSection: View {
                     Text("Export Diagnostics…").lineLimit(1)
                 }
                 .accessibilityIdentifier("dev-mode-export")
+                #if os(iOS)
+                // A recorded meeting's live transcript, highlights and map, replayed on this phone (#10589).
+                NavigationLink(value: SettingsPage.meetingTapes) {
+                    Text("Replay a Meeting Tape…").lineLimit(1)
+                }
+                .accessibilityIdentifier("dev-mode-meeting-tapes")
+                #endif
+                #if os(iOS)
+                // An on-device experiment for Phone › Recents (#9887): the kind of handle a call to Persona carries.
+                Picker(selection: Binding(get: { dev.callHandle }, set: { dev.setCallHandle($0) })) {
+                    Text("Generic [Call handle]").tag(CallHandleKind.generic)
+                    Text("Email [Call handle]").tag(CallHandleKind.email)
+                } label: {
+                    Text("Call Handle").lineLimit(1)
+                }
+                .accessibilityIdentifier("dev-mode-call-handle")
+                #endif
             }
         } footer: {
             Text("When this is on, this device records logs, errors and energy use so you can export them for an Agent to look into. The data stays on this device; turning this off deletes it.")
         }
-        .task(id: dev.isOn) { await dev.refresh() }
+        .task(id: dev.isOn) {
+            await dev.refresh()
+            #if os(iOS)
+            if dev.isOn { await MeetingTapeLibrary.shared.refresh() }
+            #endif
+        }
         .alert(String(localized: "Turn off and delete the \(Self.bytes(dev.size ?? 0)) recorded?"), isPresented: $confirmOff) {
             Button(String(localized: "Export First…")) { model.settingsPath.append(SettingsPage.devExport) }
             Button(String(localized: "Turn Off and Delete"), role: .destructive) { dev.setOn(false) }
             Button(String(localized: "Cancel"), role: .cancel) {}
+        } message: {
+            if hasTapes { Text("The meeting tapes on this iPhone are deleted too.") }
         }
     }
 
+    /// Meeting tapes are on this phone (#10589): turning off deletes them too, so it asks.
+    private var hasTapes: Bool {
+        #if os(iOS)
+        MeetingTapeLibrary.shared.hasTapes
+        #else
+        false
+        #endif
+    }
+
     private func switched(_ on: Bool) {
-        if on || (dev.size ?? 0) == 0 { dev.setOn(on) } else { confirmOff = true }
+        if on || ((dev.size ?? 0) == 0 && !hasTapes) { dev.setOn(on) } else { confirmOff = true }
     }
 
     private var recorded: String {

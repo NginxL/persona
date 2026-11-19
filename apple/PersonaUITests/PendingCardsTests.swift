@@ -112,6 +112,25 @@ final class PendingCardsTests: XCTestCase {
         shot("one")
     }
 
+    /// The recorded post-plan mode on the photo Agent's card (MOCK_PLAN_THEN=default), in both schemes and at the
+    /// largest text size. Run with TEST_RUNNER_PERSONA_UI_STYLE=beautiful too for the other card style (#3784).
+    func testRecordedPlanCard() {
+        for look in ["light", "dark", "largest"] {
+            let extra = look == "largest" ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                : ["-ui.scheme", look]
+            launch(chat: Self.photos, extra)
+            XCTAssertTrue(app.scrollViews["pending-cards"].waitForExistence(timeout: 15), "the recorded plan card (\(look))")
+            dismissIconAlert()
+            sleep(2)
+            XCTAssertFalse(app.buttons["批准并自动执行"].exists, "the conflicting legacy approval is absent (\(look))")
+            let mode = app.staticTexts["每步都问"].firstMatch
+            XCTAssertTrue(mode.waitForExistence(timeout: 5), "the recorded mode is in the card (\(look))")
+            for _ in 0..<3 where !mode.isHittable { app.scrollViews["pending-cards"].swipeUp() }
+            XCTAssertTrue(mode.isHittable, "the recorded mode is visible (\(look))")
+            shot("recorded-plan-\(look)")
+        }
+    }
+
     /// A lone question card, the keyboard down (#6277): it grows past half the page until the conversation keeps a fixed
     /// minimum above it, so on a phone as tall as an iPhone 17 Pro its question, every option with its description and
     /// 「其他回答」 are whole in the form's scroll area and can be tapped without scrolling. It was held to half the page: two

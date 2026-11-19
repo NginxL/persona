@@ -100,12 +100,12 @@ func (n *Node) resumeInEngine(ctx context.Context, h *runtimeConn, id string, ar
 		return nil, err
 	}
 	var created *host.Created
-	if ws == "" {
-		if created, err = launch.CreateSpace(ctx, cwd, filepath.Base(cwd)); err == nil && created.SlotID != "" {
+	if ws == "" { // a start's tab, as newTab's (startenv.go)
+		if created, err = createStartSpace(ctx, launch, cwd, filepath.Base(cwd)); err == nil && created.SlotID != "" {
 			_ = renameSlot(ctx, launch, created.SlotID, tabLabel("", nil))
 		}
 	} else {
-		created, err = launch.CreateSlot(ctx, ws, cwd, tabLabel("", n.tabLabels(ctx, launch, ws)))
+		created, err = createStartSlot(ctx, launch, ws, cwd, tabLabel("", n.tabLabels(ctx, launch, ws)))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("创建终端标签页失败：%w", err)

@@ -4,10 +4,21 @@ On a case-insensitive file system, the default on macOS, two such paths are one 
 other, `git status` always shows one of them as modified, and rebases and checkouts stop on it.
 """
 from pathlib import Path
+import os
 import subprocess
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _source_root():
+    configured = os.environ.get("PERSONA_CI_SOURCE_ROOT")
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("PERSONA_CI_SOURCE_ROOT must be absolute")
+        return Path(configured)
+    return Path(__file__).resolve().parents[2]
+
+
+ROOT = _source_root()
 
 
 def case_clashes(paths):

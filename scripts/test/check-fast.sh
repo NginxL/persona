@@ -13,11 +13,20 @@
 #
 # Path mapping (diff mode):
 #   web/**                     npm ci (only with no node_modules or a changed package.json/package-lock.json),
-#                              node_modules against package-lock.json, typecheck, vitest run
-#   schema/extension/**, spec/fixtures/injected/**, spec/fixtures/sync/**, spec/fixtures/attention/**,
-#   spec/fixtures/chat-search/**, scripts/mock/inbox_events.json
-#                              also the web check: web/src and its vitest suite read these files. They are the inputs
-#                              outside web/ of the web lane in scripts/ci/paths.py; test_check_fast.py keeps the two in sync
+#                              node_modules against package-lock.json, typecheck, then the tests that python3
+#                              scripts/ci/paths.py --web-plan picks (#10619):
+#     web/src/** only          npx vitest related --run: the tests whose imports reach a changed file, plus every
+#                              vitest file that reads files from disk (fs, node:fs/promises, readFileSync,
+#                              import.meta.glob, ?raw) or builds through a Vite config (imports vite): the import
+#                              graph does not see those reads. They are found by scanning the tests at run time
+#     web/src/lib/store.ts, web/src/lib/api.ts, web/src/ui/atoms.tsx, web/src/i18n/**, a web/src module the Vite
+#     configs import, anything the vitest setup files reach (setupFiles, globalSetup: their imports and reads, followed
+#     to the end, such as web/src/admin/catalog.ts), anything in web/ outside web/src (configs, package.json,
+#     package-lock.json, scripts/, e2e/)
+#                              npm test, the whole suite (as --all does)
+#   files outside web/ that web/src and its tests name (spec/fixtures/<case>/..., schema/extension/..., scripts/mock/...)
+#                              also the web check, related tests as above: scripts/ci/paths.py derives the list from
+#                              the paths web/src and its tests name, the web lane's inputs in CI too (--web-inputs)
 #   integrations/<pkg>/**      node --test test/*.test.{js,mjs} (packages without tests are skipped)
 #   site/**                    node --test site/worker.test.mjs
 #   sdk/ts/**                  bun test (skipped with a reason when bun is absent)
@@ -31,18 +40,28 @@
 #   server/internal/db/migrations/**, scripts/ci/migration_freeze.py
 #                              python3 scripts/ci/migration_freeze.py (a migration already on the base must not be
 #                              edited, deleted or renamed; comment- and whitespace-only edits pass; a new file may be
-#                              added). A rename out of the directory counts too. --all runs it when the script is present.
+#                              added, named YYYYMMDDHHMMSS_<name>.sql by the UTC second it was written). A rename out of
+#                              the directory counts too. --all runs it when the script is present.
 #   server/**/*_test.go, sdk/go/**/*_test.go, scripts/ci/sleep_ratchet.py, scripts/ci/sleep_baseline.json
 #                              python3 scripts/ci/sleep_ratchet.py (each Go test file's time.Sleep count may stay or
 #                              fall, never rise; comments, strings and a // sleep-ok: reason line do not count; a new
 #                              file starts at zero; --update only lowers). A rename out of those trees counts too.
 #                              --all runs it when the script is present.
-#   spec/fixtures/**, schema/extension/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
+#   spec/fixtures/**, schema/extension/**, schema/wire/**, integrations/**, docs/<file>, scripts/test/server_test_env.py
 #                              also go test on each server package whose _test.go names that input (server-test.yml's
 #                              path filter), found at run time with git grep (comment lines are ignored)
 #   android/**                 scripts/app/android_i18n_check.py plus the android checkers' own unittests (no gradle)
 #   .github/**                 scripts/test/pr_needs_issue_test.mjs
 #   schema/**                  the extension-schema py, the sdk bundle py, and sdk/go go test (mirrors CI's job)
+#   schema/wire/**, spec/fixtures/**, scripts/gen/extension_schema.py, scripts/test/test_extension_schema.py
+#                              also scripts/test/test_wire_schema.py: it holds the fixtures' samples to the wire schemas
+#                              (and imports the extension test's validator); CI's guards step always runs it
+#   spec/fixtures/todo-{detail,layout}/**, spec/fixtures/todo-view/README.md, spec/fixtures/agent-names/**,
+#   schema/wire/todo-view.schema.json, server/internal/assistant/{todos,todo_ask}.go, scripts/test/test_wire_schema.py,
+#   scripts/test/test_extension_schema.py
+#                              also scripts/test/test_todo_fixtures.py: it holds the to-do page and window fixtures to
+#                              their READMEs' rules, the view schema, the todo-view line keys, the agent names and the
+#                              fields the hub writes on a listed to-do (and imports the wire and extension schema tests)
 #   scripts/**                 privacy/PR/extension/refs/bundle/i18n checks picked by path; PR+extension when
 #                              ambiguous (a case "*" matches slashes, so scripts/* covers nested paths too); plus
 #                              each changed scripts/<dir>/test_*.py and the test_<name>.py of each changed script
@@ -50,7 +69,12 @@
 #                              directory as CI does (#3968). scripts/hooks/** also runs
 #                              scripts/test/test_privacy_check.py and test_check_deno_adapter_sh.py (they run the
 #                              hooks; the latter also for scripts/gen/deno_adapter.sh); scripts/privacy_check.py also
-#                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check)
+#                              scripts/release/test_check_bundle_privacy.py (it imports privacy_check);
+#                              scripts/release/debug_switches.{txt,py} and release.sh also test_debug_switches.py,
+#                              test_release_debug_guard.py and scripts/test/test_apple_release_switch_names.py;
+#                              scripts/test/go_trimpath.sh also scripts/ci/test_ci.py and scripts/test/test_check_fast.py
+#                              (they run server.sh and check-fast.sh with it); scripts/heavy_slot.py also
+#                              scripts/test/test_check_fast.py (it runs check-fast.sh with it)
 #   docs/**, any *.md          scripts/test/test_doc_paths.py and test_doc_go_paths.py (paths quoted in the docs, the
 #                              CLAUDE.md doc index), test_doc_sections.py (section names quoted after a doc path),
 #                              test_doc_wire.py (the wire lists in protocol.md, extensions.md)
@@ -68,8 +92,11 @@
 # scripts/privacy_check.py runs on every invocation that has changes (it is a seconds-long local scan, no network).
 #
 # Independent checks run in parallel; each command gets a GNU timeout (override with the CHECK_FAST_TIMEOUT_*
-# variables below). Every check prints one PASS / FAIL / TIMEOUT / SKIP line with its duration, followed by a
-# summary. The temp log directory is kept when a check fails or times out and removed on a fully clean run.
+# variables below). The go test / go build and vitest commands first take a machine-wide slot of their kind
+# (scripts/heavy_slot.py; docs/operations/testing.md "Heavy build slots"), so parallel worktrees queue instead of
+# thrashing; the wait comes before the timeout, and a wait past PERSONA_HEAVY_SLOT_TIMEOUT is a TIMEOUT.
+# Every check prints one PASS / FAIL / TIMEOUT / SKIP line with its duration, followed by a summary. The temp log
+# directory is kept when a check fails or times out and removed on a fully clean run.
 #
 # Exit codes: 0 all checks passed, skipped or not needed; 1 one or more checks FAILED; 124 no failure but at least
 # one check TIMEOUT (a timeout is reported, not silently treated as success; run the full suite when that happens).
@@ -134,6 +161,14 @@ node_ok() { [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; }
 HAVE_GO=0; have go && HAVE_GO=1
 HAVE_PY=0; have python3 && HAVE_PY=1
 HAVE_BUN=0; have bun && HAVE_BUN=1
+# Go's build cache key holds each package's directory unless -trimpath is set: add it, so worktrees share compiled
+# packages (#10614). The helper keeps a user-set GOFLAGS; without the helper GOFLAGS stays as it was.
+if [ "$HAVE_GO" -eq 1 ] && GO_TRIMPATH_FLAGS=$(sh scripts/test/go_trimpath.sh 2>/dev/null); then
+  export GOFLAGS="$GO_TRIMPATH_FLAGS"
+fi
+# A job that sets JOB_SLOT (go, web) runs its steps in a machine-wide slot of that kind (#10714); without the helper
+# or python3 they run as before.
+HEAVY_SLOT="$PWD/scripts/heavy_slot.py"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/check-fast.XXXXXX")
 # Keep WORK after a failure or timeout (its logs are the trail to read); a clean run removes it on exit.
@@ -241,11 +276,18 @@ step() {
   #   go test panics "panic: test timed out after …" when ITS suite deadline kills the run;
   #   node's TAP reporter emits "failureType: 'testTimeoutFailure'". A node per-test timeout under the default
   #   reporter is a clean exit 1 naming the test, so it rightly stays a FAIL, not a whole-job TIMEOUT.
-  local _out="$WORK/job.${JOB_I:-x}.steps.log"
-  "$TIMEOUT_BIN" -k 5s "$_seconds" "$@" 2>&1 | tee -a "$_out"
+  local _out="$WORK/job.${JOB_I:-x}.steps.log" _slot
+  # The slot comes before the timeout, so waiting in its queue is not counted as a hung step.
+  _slot=()
+  if [ -n "${JOB_SLOT:-}" ] && [ "$HAVE_PY" -eq 1 ] && [ -f "$HEAVY_SLOT" ]; then
+    _slot=(python3 "$HEAVY_SLOT" run --kind "$JOB_SLOT" --)
+  fi
+  ${_slot[@]+"${_slot[@]}"} "$TIMEOUT_BIN" -k 5s "$_seconds" "$@" 2>&1 | tee -a "$_out"
   local _rc=${PIPESTATUS[0]}
   local _hint="${JOB_HINT:+ ($JOB_HINT)}"
   if [ "$_rc" -eq 124 ]; then
+    # The helper's own 124: no slot came free in time, so the command never ran (not a hung check).
+    grep -q '^heavy_slot: timed out' "$_out" 2>/dev/null && _hint=" (no $JOB_SLOT slot came free; it did not run)$_hint"
     printf 'TIMEOUT\t%s\t%s\t%s%s\n' "$_rc" "$SECONDS" "$_desc" "$_hint" > "$JOB_STATUS"
     exit 0
   fi
@@ -314,7 +356,7 @@ job_privacy() {
   step "$TIMEOUT_OTHER" "python3 scripts/privacy_check.py" python3 scripts/privacy_check.py || return $?
 }
 
-job_web() {  # $1 = ci when npm ci must run first
+job_web() {  # $1 = ci when npm ci must run first; WEB_MODE (full or related) and WEB_PLAN pick the tests
   if ! node_ok; then skip "node >= 22 not found (found: $(node -v 2>/dev/null || echo none))"; fi
   if [ "$1" = ci ]; then
     JOB_HINT="a stale web/node_modules can cause this; remove web/node_modules and rerun"
@@ -324,7 +366,16 @@ job_web() {  # $1 = ci when npm ci must run first
   # A node_modules from before the last lock bump runs old packages: stop with the list instead (#4776).
   in_dir web step "$TIMEOUT_OTHER" "web: node_modules matches package-lock.json" npm run check:deps || return $?
   in_dir web step "$TIMEOUT_OTHER" "web: tsc -b (typecheck)" npm run typecheck || return $?
-  in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest run" npm test
+  JOB_SLOT=web
+  if [ "$WEB_MODE" = related ]; then
+    # The plan's files after its first line, relative to web/: the changed ones and those that read files from disk.
+    local _files=() _f
+    while IFS= read -r _f; do [ -n "$_f" ] && _files+=("$_f"); done < <(tail -n +2 "$WEB_PLAN")
+    in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest related ($WEB_REASON)" \
+      npx --no -- vitest related --run --passWithNoTests ${_files[@]+"${_files[@]}"}
+  else
+    in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest run" npm test
+  fi
 }
 
 job_integration() {  # $1 = package directory name under integrations/
@@ -352,6 +403,7 @@ job_sdk_ts() {
 
 job_go() {  # $1 = a package dir (internal/foo, cmd/bar, plugins/baz) or ALL for ./...
   [ "$HAVE_GO" -eq 1 ] || skip "go not found"
+  JOB_SLOT=go
   local _pattern _label _inner
   if [ "$1" = ALL ]; then _pattern=./...; _label="go test ./..."; else _pattern="./$1/..."; _label="go test ./$1/..."; fi
   _inner=$((TIMEOUT_GO_TEST - 10)); [ "$_inner" -lt 5 ] && _inner=5
@@ -372,6 +424,7 @@ GO_GUARD_TESTS='^(TestHubAnswersOnlyItsOwnRoutes|TestHubDoesNotImportTheManager|
 # job_go_guards runs both guard commands, the second one also when the first failed, so one run names every failure.
 job_go_guards() {
   [ "$HAVE_GO" -eq 1 ] || skip "go not found"
+  JOB_SLOT=go
   local _inner=$((TIMEOUT_GO_TEST - 10)) _rc=0
   [ "$_inner" -lt 5 ] && _inner=5
   in_dir server step "$TIMEOUT_GO_TEST" "go test ${GO_GUARD_PKGS[*]}" \
@@ -383,11 +436,13 @@ job_go_guards() {
 
 job_go_build() {
   [ "$HAVE_GO" -eq 1 ] || skip "go not found"
+  JOB_SLOT=go
   in_dir server step "$TIMEOUT_GO_TEST" "go build ./..." go build ./...
 }
 
 job_sdk_go() {  # sdk/go is its own Go module (its own go.mod), not part of server/.
   [ "$HAVE_GO" -eq 1 ] || skip "go not found"
+  JOB_SLOT=go
   local _inner=$((TIMEOUT_GO_TEST - 10)); [ "$_inner" -lt 5 ] && _inner=5
   in_dir sdk/go step "$TIMEOUT_GO_TEST" "sdk/go: go test ./..." go test -count=1 -timeout "${_inner}s" ./...
 }
@@ -400,10 +455,13 @@ job_i18n() {
     python3 -B test_android_i18n_check.py || return $?
   in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_token_baseline.py self-test" \
     python3 -B test_android_token_baseline.py || return $?
+  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_motion_baseline.py self-test" \
+    python3 -B test_android_motion_baseline.py || return $?
   in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_slot_order.py self-test" \
     python3 -B test_android_slot_order.py || return $?
   in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: android_slot_order.py" python3 -B android_slot_order.py || return $?
-  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: android_token_baseline.py" python3 -B android_token_baseline.py
+  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: android_token_baseline.py" python3 -B android_token_baseline.py || return $?
+  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: android_motion_baseline.py" python3 -B android_motion_baseline.py
 }
 
 job_external_refs() {
@@ -611,11 +669,8 @@ else
   fi
   echo "check-fast: $(printf '%s\n' "$CHANGED" | wc -l | tr -d ' ') changed file(s) against $(git rev-parse --short "$MB") (merge-base with $BASE_REF)"
   while IFS= read -r f; do
-    # Repository files outside web/ that web/src and its vitest suite read: a change to one also runs the web check,
-    # on top of its own mapping below. The same list is the web lane's filter in scripts/ci/paths.py.
-    case "$f" in
-      schema/extension/*|spec/fixtures/injected/*|spec/fixtures/sync/*|spec/fixtures/attention/*|spec/fixtures/chat-search/*|scripts/mock/inbox_events.json) WEB=1 ;;
-    esac
+    # Files outside web/ that web/src and its tests read also run the web check, on top of their own mapping below:
+    # the web plan after this loop finds them.
     case "$f" in server/*|sdk/go/*) GO_GUARDS=1 ;; esac  # on top of the mapping below (job_go_guards)
     case "$f" in
       web/*) WEB=1 ;;
@@ -668,6 +723,35 @@ else
   done <<< "$CHANGED"
 fi
 
+# The web check's plan (#10619): scripts/ci/paths.py scans web/src and the web tests for the files they read, and
+# prints "none", "full" or "related" with a reason, then the files vitest related starts from. Without it (no python3,
+# or the scan failed), a change under web/ runs the whole suite and files outside web/ do not run the web check.
+WEB_MODE=full; WEB_REASON=""; WEB_PLAN="$WORK/web-plan.txt"
+if [ "$ALL" -eq 0 ]; then
+  if [ "$HAVE_PY" -eq 1 ] && [ -f scripts/ci/paths.py ]; then
+    if printf '%s\n' "$CHANGED" | "$TIMEOUT_BIN" -k 5s "$TIMEOUT_OTHER" python3 scripts/ci/paths.py --web-plan \
+        > "$WEB_PLAN" 2> "$WORK/web-plan.err"; then
+      read -r WEB_MODE WEB_REASON < "$WEB_PLAN"
+      case "$WEB_MODE" in
+        full|related) WEB=1 ;;
+        *) WEB_MODE=full ;;  # none: nothing the web check reads changed
+      esac
+    else
+      WEB_MODE=full
+      INFO+=("INFO  web plan: python3 scripts/ci/paths.py --web-plan failed ($(tail -n 1 "$WORK/web-plan.err" 2>/dev/null)): a web/ change runs the whole suite, and files outside web/ do not run the web check")
+    fi
+  elif [ "$WEB" -eq 1 ]; then
+    INFO+=("INFO  web plan: python3 or scripts/ci/paths.py not found: the whole web suite runs, and files outside web/ do not run the web check")
+  fi
+  if [ "$WEB" -eq 1 ]; then
+    if [ "$WEB_MODE" = related ]; then
+      echo "check-fast: web tests: vitest related, $WEB_REASON"
+    else
+      echo "check-fast: web tests: the whole suite${WEB_REASON:+, $WEB_REASON}"
+    fi
+  fi
+fi
+
 # Collect affected server packages: server/internal/foo/... -> ./internal/foo/..., plugins/bar/... likewise.
 if [ "$ALL" -eq 0 ]; then
   while IFS= read -r f; do
@@ -698,6 +782,7 @@ if [ "$ALL" -eq 0 ]; then
     case "$f" in
       spec/fixtures/*) _re='spec/fixtures|"spec", *"fixtures"' ;;
       schema/extension/*) _re='schema/extension|"schema", *"extension"' ;;
+      schema/wire/*) _re='schema/wire|"schema", *"wire"' ;;
       integrations/*/*) _re='integrations/|"integrations"' ;;
       scripts/test/server_test_env.py) _re='server_test_env\.py' ;;
       docs/*) _re=$(printf '%s' "$f" | sed 's/[][\.^$*+?(){}|]/\\&/g') ;;  # docs/example-guide.md -> docs/example-guide\.md
@@ -793,6 +878,8 @@ else
     # check_bundle_privacy.py imports privacy_check; test_merge_pr_sh.py copies privacy_check.py into its temp
     # repositories, where merge-pr.sh runs it, and checks that pr_watch_merge.py's merge lock excludes merge-pr.sh's.
     # It copies changed_ratchets.py and the two ratchets it imports there too (#7977); test_changed_ratchets.py imports them.
+    # test_ci.py and test_check_fast.py run server.sh and this script with go_trimpath.sh, which composes their GOFLAGS;
+    # test_check_fast.py runs this script with heavy_slot.py too.
     case "$f" in
       scripts/hooks/*)
         script_test_add scripts/test/test_privacy_check.py; script_test_add scripts/test/test_check_deno_adapter_sh.py ;;
@@ -802,8 +889,30 @@ else
       scripts/operations/pr_watch_merge.py|scripts/ci/changed_ratchets.py) script_test_add scripts/test/test_merge_pr_sh.py ;;
       scripts/ci/sleep_ratchet.py|scripts/ci/web_font_ratchet.py)
         script_test_add scripts/ci/test_changed_ratchets.py; script_test_add scripts/test/test_merge_pr_sh.py ;;
+      scripts/test/go_trimpath.sh)
+        script_test_add scripts/ci/test_ci.py; script_test_add scripts/test/test_check_fast.py ;;
+      scripts/heavy_slot.py) script_test_add scripts/test/test_check_fast.py ;;
+    esac
+    # The Release binary's DEBUG checks (#10616, #10654): a list that matches no script name, whose union merges can
+    # leave it out of order, the checker test_apple_release_switch_names.py imports, and release.sh, which runs it.
+    case "$f" in
+      scripts/release/debug_switches.txt|scripts/release/debug_switches.py|scripts/release/release.sh)
+        script_test_add scripts/release/test_debug_switches.py; script_test_add scripts/release/test_release_debug_guard.py
+        script_test_add scripts/test/test_apple_release_switch_names.py ;;
     esac
     case "$f" in deploy/docker/*|docs/operations/docker.md|Dockerfile) script_test_add scripts/test/test_docker_entrypoint.py ;; esac
+    # test_wire_schema.py holds every sample the shared fixtures keep for a wire schema to that schema, at any depth.
+    case "$f" in
+      schema/wire/*|spec/fixtures/*|scripts/gen/extension_schema.py|scripts/test/test_extension_schema.py)
+        script_test_add scripts/test/test_wire_schema.py ;;
+    esac
+    # test_todo_fixtures.py holds the to-do page and window fixtures to their READMEs' rules; it also reads the view
+    # schema, the todo-view line keys, the agent names and the row fields of the hub's Todo and listedTodo, and imports
+    # the wire and extension schema tests.
+    case "$f" in
+      spec/fixtures/todo-detail/*|spec/fixtures/todo-layout/*|spec/fixtures/todo-view/README.md|spec/fixtures/agent-names/*|schema/wire/todo-view.schema.json|server/internal/assistant/todos.go|server/internal/assistant/todo_ask.go|scripts/test/test_wire_schema.py|scripts/test/test_extension_schema.py)
+        script_test_add scripts/test/test_todo_fixtures.py ;;
+    esac
   done <<< "$CHANGED"
 fi
 

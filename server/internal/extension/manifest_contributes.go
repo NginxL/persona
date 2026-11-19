@@ -154,6 +154,31 @@ func (m *Manifest) Schemes() []string {
 	return out
 }
 
+// RepositoryProviders are the manifest's contributions to repository_providers that hold to the point's rules. Parse
+// refuses a manifest with any other, but a stored one that no longer parses is loaded loosely (fromRow), unchecked: its
+// items that break a rule (a built-in GitHub or GitLab host, an upper-case one) claim nothing, so the registry's
+// lookups, the install's clash checks and the permission digest never see them.
+func (m *Manifest) RepositoryProviders() []RepositoryProviderItem {
+	var items []RepositoryProviderItem
+	_ = json.Unmarshal(m.Contributes["repository_providers"], &items)
+	var out []RepositoryProviderItem
+	for _, it := range items {
+		if checkRepositoryProvider(it) == nil {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// RepositoryHosts are the hosts the manifest's repository_providers contributions claim.
+func (m *Manifest) RepositoryHosts() []string {
+	var out []string
+	for _, p := range m.RepositoryProviders() {
+		out = append(out, p.Hosts...)
+	}
+	return out
+}
+
 // Topics are the events the plugin is told about, each once.
 func (m *Manifest) Topics() []string {
 	var out []string

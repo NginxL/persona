@@ -278,10 +278,11 @@ struct ChatSupervisionTests {
 
     @Test func canonicalToolNamespacesMatchTheWebExactly() {
         for bare in ["notify_user", "ask_user", "supervision_finish", "task_review"] {
-            for prefix in ["", "mcp__persona__", "mcp__plugin_persona__", "mcp__\(LegacyNames.product)__", "mcp__plugin_\(LegacyNames.product)__"] {
+            for prefix in ["", "mcp__persona__", "mcp__plugin_persona__", "mcp__\(LegacyNames.product)__", "mcp__plugin_\(LegacyNames.product)__",
+                           "mcp_persona_", "mcp_persona_0c671287_", "mcp_\(LegacyNames.product)_", "mcp_\(LegacyNames.product)_55a1c59d_"] {
                 #expect(Supervision.tool(prefix + bare) == bare)
             }
-            for prefix in ["mcp__fictional__", "mcp__persona_other__", "mcp__plugin_persona_other__", "mcp__persona__extra__"] {
+            for prefix in ["mcp__fictional__", "mcp__persona_other__", "mcp__plugin_persona_other__", "mcp__persona__extra__", "mcp_persona_other_"] {
                 #expect(Supervision.tool(prefix + bare) == nil)
             }
         }
@@ -357,7 +358,7 @@ struct ChatSupervisionTests {
         folded.fold?.supervisionUser = nil
         folded.supervisionUser = nil
         #expect(!visible([input(1), folded]))
-        #expect(ChatCache.folder == "chats-v19")
+        #expect(ChatCache.folder == "chats-v20")
     }
 
     @Test func queuedSupervisionAndTheNextGenuineQueuedInputAreSeparateTurns() {

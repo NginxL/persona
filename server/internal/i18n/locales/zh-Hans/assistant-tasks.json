@@ -14,6 +14,13 @@
   "fixed_launcher_unhealthy": "固定电脑 {machine} 上的启动器 {launcher} 不可用：{reason}。任务仍留在该电脑，请在健康恢复后重试。",
   "launcher_not_on_machine": "{machine} 上没有启动器 {launcher}，没有启动任何 Agent。这台电脑能用的启动器：{launchers}",
   "launcher_swapped": "{launcher} 不在 {machine} 上，改用 {to}（它的默认模型）",
+  "retried_on_launcher": "改用 {to} 重新开始：{from} 在 {machine} 上没开起来",
+  "retry_launcher_unusable": "{launcher} 现在在 {machine} 上开不起来：{reason}。没有启动任何 Agent。可以改用的启动器：{launchers}",
+  "retry_model_without_launcher": "模型要和启动器一起给：请同时指定启动器。",
+  "retry_launcher_not_started": "没有改用 {launcher} 启动：这个任务已经在重新开始，或者已经开始了。如果那次也没开起来，再选一次启动器。",
+  "start_answer_read_only": "这台设备不能回答电脑终端里的提问。",
+  "start_answer_need_choice": "请选一个回答。",
+  "start_answer_node_outdated": "先更新 {machine} 上的 Persona，才能在这里回答它终端里的提问。什么都没有输入。",
   "launcher_kind_missing": "{machine} 的 {engine} 里没有 {launcher}，也没有别的 {kind} provider，没有启动，也不会改用别类 Agent。它在那里的 provider：{launchers}",
   "readonly_launcher_unsupported": "{machine} 上的 {launcher} 启动的是 {agent}，它没有只读模式，所以这个只读任务被拒绝：没有启动任何 Agent，也不会改用别的启动器。可以把它规划成可写任务（readonly false），或用这台电脑上 Claude Code 或 Codex 的启动器以只读方式规划：{launchers}",
   "start_identity_conflict": "启动响应未确认所请求电脑上的会话身份。",
@@ -30,6 +37,8 @@
   "machine_offline": "「{name}」现在离线，等它连上再重试",
   "silent_turn": "这一轮没有任何输出：Agent 没有回复，也没有调用工具（模型服务可能返回了空内容）",
   "interrupted": "模型服务出错，中断了",
+  "stopped": "随对话一起停下了",
+  "stopped_turn": "随对话一起停下了，这一轮还没有任何输出",
   "check_no_reply": "没读到 Agent 的回复",
   "check_side_turn": "最后的回复没交代这个任务",
   "done": "完成了",
@@ -66,5 +75,5 @@
   "start_link_lost": "和「{machine}」的连接断了，重连后也没看到任务起来：{reason}",
   "start_machine_busy": "「{machine}」一直连着，但在等待时间内没回应（电脑可能太忙）：{reason}",
   "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}",
-  "start_goal_skipped": "没在第一条消息前设目标就启动了：{reason}"
+  "start_goal_skipped": "启动时没能设开始目标：{reason}"
 }

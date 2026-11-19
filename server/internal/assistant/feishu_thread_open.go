@@ -211,7 +211,7 @@ func (s *Service) openTodoIn(ctx context.Context, ev feishubot.MessageEvent, st 
 	}
 	s.botNoteTo(ctx, to, msg.MessageID, line)
 
-	content.Text = prompts.RenderTodoThreadOpen(prompts.TodoThreadOpen{Title: contextText(clip(oneLine(title), 80)), TodoID: todo.ID, Text: text, Quote: quote, NoTopic: topic == nil})
+	content.Text = prompts.RenderTodoThreadOpen(prompts.TodoThreadOpen{Language: answerLanguage(s.hello(ctx).Locale), Title: contextText(clip(oneLine(title), 80)), TodoID: todo.ID, Text: text, Quote: quote, NoTopic: topic == nil})
 	if err := s.botSendIn(ctx, &ev, content, target, topic); err != nil {
 		s.logf("bots: %s: todo %s to the main conversation: %v", where, todo.ID, err)
 		say("thread_open_not_sent", i18n.Args{"error": clip(oneLine(err.Error()), 200)})

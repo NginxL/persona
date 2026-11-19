@@ -145,11 +145,42 @@ describe("Codex commentary as assistant text (#5853)", () => {
     const items = [user("u1", 0, "What is the current status?"), ...tool("check", "Bash", 1000), say("status", "The focused tests pass; the full run is next.", 2000), ...tool("verify", "Bash", 3000)];
     const running = blocks(items, true);
     expect(topSteps(running)).toEqual(["status"]);
-    expect(folded(running, "status")).toBe(true);
+    expect(folded(running, "status")).toBe(false);
 
     const done = blocks([...items, say("final", "All checks passed.", 4000)]);
     expect(topSteps(done)).toEqual(["final"]);
     expect(groups(done)[0].children.map(shape)).toEqual([["check"], "status", ["verify"]]);
+  });
+});
+
+describe("Codex visualization fragments stand alone (#10321)", () => {
+  const viz = (id: string, at?: number) =>
+    mk("assistant", "visualization", at, { id, visualization: { path: `/home/me/.codex/visualizations/2026/10/28/thread/${id}.html`, mode: "wide" } });
+
+  it("keeps a fragment after the answer outside the collapsed summary", () => {
+    const b = blocks([user("u1", 0), ...tool("b1", "Bash", 1000, 1500), say("a1", "Done.", 2000), viz("v1", 2000)]);
+    expect(topSteps(b)).toEqual(["v1", "a1"]);
+    expect(folded(b, "v1")).toBe(false);
+    expect(folded(b, "b1")).toBe(true);
+  });
+
+  it("treats the fragment as response content, not work after the answer: the words stay out of the summary", () => {
+    const b = blocks([user("u1", 0), ...tool("b1", "Bash", 1000, 1500), say("a1", "Done.", 2000), viz("v1", 2000)]);
+    expect(folded(b, "a1")).toBe(false);
+  });
+
+  it("a marker-only turn leaves the fragment standalone beside one summary", () => {
+    const b = blocks([user("u1", 0), ...tool("b1", "Bash", 1000, 1500), viz("v1", 2000)]);
+    expect(groups(b)).toHaveLength(1);
+    expect(topSteps(b)).toEqual(["v1"]);
+    expect(folded(b, "v1")).toBe(false);
+  });
+
+  it("keeps several fragments standalone in order, none inside the summary", () => {
+    const b = blocks([user("u1", 0), ...tool("b1", "Bash", 1000, 1500), viz("v1", 2000), viz("v2", 2001)]);
+    expect(topSteps(b)).toEqual(["v1", "v2"]);
+    expect(folded(b, "v1")).toBe(false);
+    expect(folded(b, "v2")).toBe(false);
   });
 });
 
@@ -171,7 +202,7 @@ describe("while the agent works", () => {
     expect(groups(newer)).toHaveLength(1);
     expect(groups(newer)[0].id).toBe(groups(first)[0].id);
     expect(folded(newer, "a1")).toBe(true);
-    expect(groups(newer)[0].children.map(shape)).toEqual([["t1"], "a1", ["t2"], "a2", ["t3"]]);
+    expect(groups(newer)[0].children.map(shape)).toEqual([["t1"], "a1", ["t2"], ["t3"]]);
     expect(groups(groups(newer)[0].children).map((g) => g.live)).toEqual([false, false, true]);
   });
 
@@ -186,7 +217,7 @@ describe("while the agent works", () => {
     const fold = mk("assistant", "fold", 500, { id: "fold:note", fold: { items: 13, tools: 6, thoughts: 1, through_seq: 99, latest_thinking: thought } });
     const b = blocks([user("u1", 0), fold, say("a1", "Latest text.", 2000), think("new", 3000)], true);
     expect(topSteps(b)).toEqual(["a1"]);
-    expect(groups(b)[0].children.map(shape)).toEqual([["fold:note"], "a1", ["new"]]);
+    expect(groups(b)[0].children.map(shape)).toEqual([["fold:note"], ["new"]]);
     expect(groups(groups(b)[0].children)[0].children[0]).toMatchObject({ step: { item: fold } });
   });
 
@@ -228,11 +259,11 @@ describe("the timeline inside a summary", () => {
   it("live: the last run is the live one with its own clock from the narration before it; earlier runs are done", () => {
     const b = blocks(turn(), true);
     expect(topSteps(b)).toEqual(["n1"]);
-    expect(groups(b)[0].children.map(shape)).toEqual([["th1", "t1"], "n1", ["t2", "th2", "t3"]]);
+    expect(groups(b)[0].children.map(shape)).toEqual([["th1", "t1"], ["t2", "th2", "t3"]]);
     const more = blocks([...turn(), say("n2", "Tests pass; one more check.", 9500), ...tool("t4", "Bash", 10_000)], true);
     expect(topSteps(more)).toEqual(["n2"]);
     expect(groups(more)[0].live).toBe(true);
-    expect(groups(more)[0].children.map(shape)).toEqual([["th1", "t1"], "n1", ["t2", "th2", "t3"], "n2", ["t4"]]);
+    expect(groups(more)[0].children.map(shape)).toEqual([["th1", "t1"], "n1", ["t2", "th2", "t3"], ["t4"]]);
     expect(inner(more).map((g) => g.live)).toEqual([false, false, true]);
     expect(inner(more)[2].startedAt).toBe(T0 + 9500);
     expect(groupTitle(inner(more)[2])).toBe("正在工作…");
@@ -244,7 +275,7 @@ describe("the timeline inside a summary", () => {
       const b = blocks(prefix, live);
       expect(topSteps(b)).toEqual(["n2"]);
       expect(groups(b)[0].children.map(shape)).toEqual([
-        ["th1", "t1"], "n1", ["t2", "th2", "t3"], "n2", ["t4"],
+        ["th1", "t1"], "n1", ["t2", "th2", "t3"], ["t4"],
       ]);
       expect(inner(b).map((g) => [g.startedAt, g.durationMs, g.live])).toEqual([
         [T0, 3000, false], [T0 + 3000, 6500, false], [T0 + 9500, 1500, live],
@@ -252,7 +283,8 @@ describe("the timeline inside a summary", () => {
       expect(groups(b)[0].durationMs).toBe(11_000);
     }
     const completed = blocks([...prefix, say("final", "Done.", 12_000)]);
-    expect(groups(completed)[0].children.map(shape)).toEqual(groups(blocks(prefix))[0].children.map(shape));
+    expect(groups(completed)[0].children.map(shape)).toEqual([["th1", "t1"], "n1", ["t2", "th2", "t3"], "n2", ["t4"]]);
+    expect(folded(completed, "n2")).toBe(true);
   });
 
   it("live, with the latest words after the last run: that run is over, the outer line still works", () => {

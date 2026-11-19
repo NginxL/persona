@@ -36,6 +36,13 @@ internal enum class TurnErrorFix(val code: String, @StringRes val title: Int, @S
     companion object {
         fun of(code: String?): TurnErrorFix? = entries.firstOrNull { it.code == code }
     }
+
+    /** The same title with the affected launcher's ID, when the session names one. */
+    @get:StringRes val launcherTitle: Int get() = when (this) {
+        NotLoggedIn -> R.string.chat_turn_fix_not_logged_in_launcher
+        AuthFailed -> R.string.chat_turn_fix_auth_failed_launcher
+        ModelRoute -> R.string.chat_turn_fix_model_route_launcher
+    }
 }
 
 /** Where a turn error's Fix It goes: the model's set-up, or the launcher's provider; null where the app cannot open it. */
@@ -46,11 +53,12 @@ val LocalTurnErrorFixAction = staticCompositionLocalOf<((ReadinessActionId) -> U
  * the error card's frame with what is wrong, what to do and Fix It; [raw], the agent's own words, folded under it.
  */
 @Composable
-internal fun TurnErrorFixCard(fix: TurnErrorFix, raw: String?) {
+internal fun TurnErrorFixCard(fix: TurnErrorFix, raw: String?, launcher: String? = null) {
     val onFix = LocalTurnErrorFixAction.current
     val palette = PersonaTheme.palette
     var open by rememberSaveable(fix) { mutableStateOf(false) }
-    ErrorCard(stringResource(fix.title), emptyList(), open, { open = !open }, action = {
+    val title = if (launcher.isNullOrBlank()) stringResource(fix.title) else stringResource(fix.launcherTitle, launcher)
+    ErrorCard(title, emptyList(), open, { open = !open }, action = {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             Text(stringResource(fix.detail), style = PersonaTheme.type.callout, color = palette.ink2)
             onFix?.let { JButton(stringResource(R.string.chat_turn_fix_action), { it(fix.action) }, size = JButtonSize.Medium) }

@@ -86,7 +86,8 @@ const daemonMaxMessage = 64 << 20
 var daemonCaps = []string{"start", "send", "interrupt", "rename", "close", "execution"}
 
 // daemonMethods are the node → runtime calls a link forwards to its daemon.
-var daemonMethods = map[string]bool{"session.items": true, "session.image": true, "session.item": true, "session.watch": true,
+var daemonMethods = map[string]bool{"session.items": true, "session.image": true, "session.item": true, "session.visualization": true,
+	"session.watch":   true,
 	"session.unwatch": true, "session.send": true, "session.interrupt": true, "session.rename": true, "session.close": true,
 	"session.start": true, "session.execution": true}
 
@@ -711,7 +712,7 @@ func (l *daemonLink) fromDaemonEvent(event string, params json.RawMessage) {
 			}
 		}
 		_ = l.rp.Notify("runtime.sessions", map[string]any{"sessions": out})
-	case "session.items", "session.delta":
+	case "session.items", "session.delta", "usage.report":
 		var p map[string]json.RawMessage
 		if json.Unmarshal(params, &p) != nil || p == nil {
 			return

@@ -111,7 +111,7 @@ class AssistantConfigTest {
             server.enqueue(MockResponse().setBody("""{"agent":"claude","models":[
                 {"id":"opus","name":"Opus"},{"id":"default","default":true}]}"""))
             val models = api.launcherModels("laptop", "runtime")
-            assertEquals("/api/v1/machines/laptop/launchers/runtime/models", server.takeRequest().path)
+            assertEquals("/api/v1/machines/laptop/launchers/runtime/models?purpose=assistant", server.takeRequest().path)
             assertEquals(listOf("opus", "default"), models?.models?.map { it.id })
             assertEquals(true, models?.models?.last()?.isDefault)
         }

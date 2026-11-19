@@ -109,11 +109,10 @@ import PersonaWire
         routing.store.clear(.init(session: s.key, cwd: s.cwd))
         defer { routing.store.clear(.init(session: s.key, cwd: s.cwd)) }
 
-        // These are the real row/detail input paths: no repository request and no manually cloned facts.
-        func rowFacts() -> AgentActionFacts { AgentActionFacts(session: s, model: model) }
-        func detailFacts() -> AgentActionFacts {
-            AgentActionFacts(session: s, model: model)
-        }
+        // The row and the detail both show `AgentActionMenuReader`, whose facts these are: no repository request and no
+        // manually cloned facts.
+        func rowFacts() -> AgentActionFacts { AgentActionMenuReader.factsForTesting(session: s, model: model) }
+        func detailFacts() -> AgentActionFacts { AgentActionMenuReader.factsForTesting(session: s, model: model) }
         let unloaded = try #require(detailFacts())
         #expect(rowFacts().items.map(\.id) == unloaded.items.map(\.id))
         #expect(!unloaded.items.contains { $0.id == .git })

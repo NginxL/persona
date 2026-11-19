@@ -178,10 +178,10 @@ func codexExecutionArgs(argv []string, e modelExecution) []string {
 }
 
 // startCodex starts a Codex launcher in a new tab with the first message and returns its session once the thread is
-// known. With no message it returns the waiting row once Codex's input box is up (codex_waiting.go). In a pane it was
+// known, its record naming the model and effort asked for (execution), which a resume runs again (retire.go). With no message it returns the waiting row once Codex's input box is up (codex_waiting.go). In a pane it was
 // given (adoptedPane: a switch from Claude Code, engine_switch.go) it starts there, and a start that fails leaves that
 // pane open: what it left in front is for the caller to clear.
-func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launcher string, argv []string, prompt, ws, tabName, mode string) (*proto.Session, error) {
+func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launcher string, argv []string, execution modelExecution, prompt, ws, tabName, mode string) (*proto.Session, error) {
 	waiting := strings.TrimSpace(prompt) == ""
 	if waiting {
 		prompt = ""
@@ -291,11 +291,12 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		return nil, fmt.Errorf("%w\n%s", err, lastLines(shown, 12))
 	}
 	if waiting {
-		return n.openCodexWait(ctx, pane, cwd, launcher, mode, began), nil
+		return n.openCodexWait(ctx, pane, cwd, launcher, mode, execution, began), nil
 	}
 	defer n.unclaimCodexThread(id)
 	n.bindPane(pane, id)
-	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC()}
+	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
+	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort}
 	if mode == "plan" {
 		st.AppMode = mode
 	}

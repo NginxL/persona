@@ -164,7 +164,7 @@ func (s *Service) kbRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		ignored := kb.Unsupported(r.PathValue("kind"), u.Update) // not applied: said, not dropped silently
+		ignored := kb.UserUnsupported(r.PathValue("kind"), u) // not applied: said, not dropped silently
 		id, err := e.ApplyUser(r.PathValue("kind"), r.PathValue("id"), u)
 		if errors.Is(err, kb.ErrNotFound) {
 			apierr.Write(w, http.StatusNotFound, err)

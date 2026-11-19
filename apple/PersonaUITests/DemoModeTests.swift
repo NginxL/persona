@@ -86,16 +86,21 @@ final class DemoModeTests: XCTestCase {
 
     @MainActor private func tab(_ name: String) {
         if name == "Persona" {
-            if !app.assistantDrawn() {
+            if app.shellShown?.drawerOpen == true {
+                see(app.buttons["sidebar-main"].firstMatch, "the main conversation in the open drawer").tapCenter()
+            } else if !app.assistantDrawn() {
                 ShellFinger(app).switchTo(agents: false, "Assistant in the demo walkthrough")
             }
         } else {
             if app.navigationBars["收件箱"].exists { back() }
-            let id = app.assistantDrawn() ? "assistant-sidebar-button" : "work-sidebar-button"
-            let drawer = see(app.buttons[id].firstMatch, "the visible page's drawer button")
-            // Retained UIKit pages can confuse hit-testing queries after a push/pop; tap where the finger lands,
-            // then require the actual drawer route to appear.
-            drawer.tapCenter()
+            // A place root has ☰, not Back (#8221): back() above may have opened the drawer already.
+            if app.shellShown?.drawerOpen != true {
+                let id = app.assistantDrawn() ? "assistant-sidebar-button" : "work-sidebar-button"
+                let drawer = see(app.buttons[id].firstMatch, "the visible page's drawer button")
+                // Retained UIKit pages can confuse hit-testing queries after a push/pop; tap where the finger lands,
+                // then require the actual drawer route to appear.
+                drawer.tapCenter()
+            }
             let entry = name == "收件箱" ? app.buttons["sidebar-inbox"].firstMatch : app.drawerSettingsButton
             see(entry, "the drawer's \(name)").tapCenter()
         }

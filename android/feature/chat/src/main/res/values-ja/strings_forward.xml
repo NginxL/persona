@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_menu_forward">転送</string>
+    <string name="chat_forward_me">自分</string>
+    <string name="chat_forward_messages">メッセージ</string>
+    <string name="chat_forward_heading">%1$s から転送</string>
+    <string name="chat_forward_heading_chat">%1$s から転送 · %2$s</string>
+    <string name="chat_forward_meta">%1$s · %2$s</string>
+    <string name="chat_forward_no_content">内容がありません</string>
+    <string name="chat_forward_remove">転送を解除</string>
+    <string name="chat_forward_open_original">元のメッセージを開く</string>
+    <string name="chat_forward_show_all">すべて表示</string>
+    <string name="chat_forward_no_note">上の転送されたメッセージを見てください。</string>
+    <string name="chat_forward_file_on">（%1$s 上のファイル：%2$s）</string>
+    <string name="chat_forward_file">（ファイル：%1$s）</string>
+    <string name="chat_forward_cut">（原文はさらに長く、ここで切れています。）</string>
+    <string name="chat_forward_route_from_to_persona">%1$s から転送 · Persona へ</string>
+    <string name="chat_forward_route_to_persona">Persona へ</string>
+    <string name="chat_forward_route_to_agent">%1$s へ</string>
+    <string name="chat_forward_route_from_to_agent_on">%1$s から転送 · %3$s の %2$s へ</string>
+    <string name="chat_forward_route_to_agent_on">%2$s の %1$s へ</string>
+    <string name="chat_forward_title">転送先</string>
+    <string name="chat_forward_search">チャット、コンピュータ、プロジェクトを検索</string>
+    <string name="chat_forward_preview">転送するメッセージ</string>
+    <string name="chat_forward_main_chat">メインチャット</string>
+    <string name="chat_forward_new_agent">新規エージェント…</string>
+    <string name="chat_forward_new_agent_detail">コンピュータ、フォルダ、モデルを選びます</string>
+    <string name="chat_forward_recent">最近</string>
+    <string name="chat_forward_no_match">一致するチャットはありません</string>
+    <string name="chat_forward_failed">転送できませんでした：%1$s</string>
+</resources>

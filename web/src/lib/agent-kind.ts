@@ -51,7 +51,7 @@ export function providerAgent(agent: string | undefined | null, provider: string
 /** What the agent is called: the product's name for the ones the app knows, else the runtime's own label, else the string as reported. */
 export function agentName(raw: string | undefined | null, label?: string): string {
   const id = agentId(raw);
-  if (isMarked(id) || id === "traex") return t(`agent-mark.${id}`);
+  if (isMarked(id) || id === "traex" || id === "omp") return t(`agent-mark.${id}`); // spec/fixtures/agent-names
   return label?.trim() || (raw ?? "").trim() || t("agent-mark.unknown");
 }
 

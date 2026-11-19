@@ -113,7 +113,7 @@ function sections(items: Section[], listId: string): ReactNode[] {
 
 /** What a row calls a chat: a Persona chat by its readable title as the sidebar does (a `<persona-context>` tag read,
  *  "New chat" for none), an Agent by its session's. */
-const chatTitle = (s: Session, persona: boolean) => (persona ? conversationTitle(s) : sessionTitle(s));
+const chatTitle = (s: Session, persona: boolean, main = false) => (main ? t("sidebar.main_chat") : persona ? conversationTitle(s) : sessionTitle(s));
 
 /** A chat's match by its title (starting with what was typed 100, containing it 80), then every word in its folder,
  *  computer or last line (40): a Persona chat's, and an Agent's until lib/agent-search.ts has loaded. */
@@ -193,7 +193,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   const pagesKey = pages.map((p) => [p.k, p.label, p.icon, href(p.to)].join("\u0001")).join("\n");
   const places = useMemo<PlaceInput[]>(
     () => [
-      ...(hasAssistant ? [{ key: "persona", title: t("palette.place_persona"), icon: "spark" as const, to: { name: "persona" } as Route }, { key: "history", title: t("sidebar.all_chats"), icon: "list" as const, to: { name: "history" } as Route }] : []),
+      ...(hasAssistant ? [{ key: "persona", title: t("palette.place_persona"), icon: "home" as const, to: { name: "persona" } as Route }, { key: "history", title: t("sidebar.all_chats"), icon: "list" as const, to: { name: "history" } as Route }] : []),
       ...pages.map((p) => ({ key: p.k, title: p.label, icon: p.icon, to: p.to })),
       // the Sessions and Terminal page's Terminals list (#4754): every plain terminal, to open one and type
       ...(panesOn ? [{ key: "terminals", title: t("palette.place_terminals"), icon: "terminal" as const, to: { name: "terminal", view: "terminals" } as Route }] : []),
@@ -282,7 +282,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     const remoteKeys = merged?.remoteKeys ?? new Set<string>();
     out = merged?.hits ?? out;
     for (const s of operators ? [] : assistant?.conversations ?? []) {
-      const sc = score(s, query, "persona", true);
+      const sc = Math.max(score(s, query, "persona", true), s.session_id === assistant?.main ? matchPaletteWords(t("sidebar.main_chat"), query, "") : 0);
       if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationPage(s.session_id, s.machine_id, s.manager), assistant: true, score: sc });
     }
     // what the manager found: a chat found by a message opens at it (not one found by its title); one not listed here
@@ -559,6 +559,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             }
             const h = r.hit;
             const st = stateOf(h.s);
+            const isMain = Boolean(h.assistant && h.s.session_id === assistant?.main && h.s.machine_id === assistant.machine_id);
             // a Persona chat says what was said last (its folder is the assistant's own, the same for every chat); an Agent
             // where it runs
             const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [[machineWithHub(h.s.machine_id, machines), h.s.space_name, tabLabel(h.s)].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
@@ -568,10 +569,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
               row: (
               <button ref={ref} type="button" {...option} onMouseMove={() => setActive(i)} onClick={() => pick(r)} className={rowClass}>
                 {!h.assistant && <SessionMark s={h.s} size={14} />}
-                <span className="flex size-5 shrink-0 items-center justify-center">{h.assistant ? <Icon name="spark" size={13} className="text-ink-3" /> : <StatusMark state={st} />}</span>
+                <span className="flex size-5 shrink-0 items-center justify-center">{h.assistant ? <Icon name={isMain ? "home" : "spark"} size={14} className="text-ink-3" /> : <StatusMark state={st} />}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-ink">{chatTitle(h.s, Boolean(h.assistant))}</span>
+                    <span className="truncate text-[13px] font-medium text-ink">{chatTitle(h.s, Boolean(h.assistant), isMain)}</span>
                     {r.previous && <span className="shrink-0 rounded-[5px] bg-field px-1.5 text-[10.5px] text-ink-3 shadow-hairline">{t("palette.previous")}</span>}
                   </span>
                   {h.evidence ? (

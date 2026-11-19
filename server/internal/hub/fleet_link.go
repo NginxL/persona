@@ -628,6 +628,17 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		h.forwardOwned(w, h.captureOwnerAnswer(r), h.byInteraction)
 	})))
+	// A clarification is an owner's free-text message to the originating
+	// conversation, not a card answer. Restricted answer-only devices and
+	// extension principals cannot speak as the owner here. The operation receipt
+	// and the manager's client_msg_id together make an unchanged retry one message.
+	api.HandleFunc("POST /api/v1/interactions/{id}/clarify", h.withoutTerminalControls(h.withClientOp("clarify", func(w http.ResponseWriter, r *http.Request) {
+		if answerOnly(r) || principalOf(r.Context()).Role == roleExtension {
+			writeErr(w, http.StatusForbidden, errors.New("only the owner can ask an approval question"))
+			return
+		}
+		h.forwardOwned(w, r, h.byInteraction)
+	})))
 	// Body client_id uses the same durable operation receipts as resolve.
 	api.HandleFunc("POST /api/v1/interactions/{id}/choose", h.withReplyReceipt("choose", h.serveChoose))
 	// "Change answer": a question the assistant answered gets the user's answer (assistant/fleet_delegate.go); a device that may

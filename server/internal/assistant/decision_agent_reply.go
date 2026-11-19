@@ -39,7 +39,7 @@ func (s *Service) agentDecisionSpoke(ctx context.Context, r SessionRef, at time.
 	}
 	a := b.asks[id]
 	if a == nil || !decideAsk(a) || a.AskedAt.IsZero() || !a.AcceptedAt.IsZero() ||
-		!at.After(a.AskedAt) || acceptAskStale(a, t) || acceptAskEnded(a, t) {
+		!at.After(a.AskedAt) || acceptAskStale(a, t) || acceptAskEnded(a, t) || !a.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision) {
 		b.mu.Unlock()
 		return
 	}
@@ -192,5 +192,10 @@ func (s *Service) agentDecisionPrompt(machine, session string, p map[string]any)
 			return
 		}
 	}
-	s.agentDecisionSpoke(context.Background(), SessionRef{MachineID: machine, SessionID: session}, at, "")
+	// acceptTryAs holds this todo's action lock across session.send. Waiting for it here would deadlock the read loop
+	// with that send, its reverse calls and every reply. Queue the decision work instead: the send completes first, then
+	// the hook acquires the lock in event order.
+	s.inOrder(func() {
+		s.agentDecisionSpoke(context.Background(), SessionRef{MachineID: machine, SessionID: session}, at, "")
+	})
 }

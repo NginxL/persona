@@ -119,6 +119,9 @@ type taskTurn struct {
 	Receipt bool        `json:"receipt,omitempty"`
 	Judged  *turnJudged `json:"judged,omitempty"`
 	Signal  *turnSignal `json:"signal,omitempty"`
+	// Silent: the turn, taken up as interrupted, had no output at all (proto.TurnErrorNoOutput, or
+	// proto.TurnErrorStopped when Persona's Stop interrupted it): what the Agent's row says of it (silent_turns.go).
+	Silent string `json:"silent,omitempty"`
 }
 
 // turnJudged is the judgment written for a turn: the judge's check, the error when it could not say (the supervisor
@@ -314,6 +317,7 @@ func (s *Service) turnsLocked(ctx context.Context) bool {
 		doc.Since = time.Now().UTC()
 	}
 	b.doc, b.loaded = doc, true
+	s.restoreQuietTurns(doc.Turns)
 	if fresh && st != nil { // since when it is kept must outlive this manager
 		if err := st.PutSetting(ctx, taskTurnsKey, b.doc); err != nil {
 			s.logf("task turns: %v", err)
@@ -335,6 +339,10 @@ func (s *Service) saveTurnsLocked(ctx context.Context) {
 // one to take off): the ledger holds one turn for each open task that had one, no more. A closed task that is opened
 // again starts from what ends after that (recoverTurn), and a turn's receipt keeps its one id in the feed.
 func (s *Service) pruneTurns(ctx context.Context) {
+	// The verdicts and Stops kept past their time (silent_turns.go); the apps are told the rows that lose one.
+	for m := range s.pruneQuiet(time.Now(), "", nil) {
+		go s.publishSessions(m)
+	}
 	b := &s.tasks.turns
 	b.mu.Lock()
 	if !s.turnsLocked(ctx) || len(b.doc.Turns) == 0 {
@@ -392,11 +400,18 @@ func (s *Service) turnOf(ctx context.Context, todo string) (taskTurn, bool) {
 // no end yet and this is that turn (sameUnnamed: it gets its name now); or when no end is known now either and
 // nothing was written to the transcript since (sameRow).
 func (s *Service) takeTurn(ctx context.Context, t Todo, last proto.Session, items []proto.Item, end turnClose, named bool, since time.Time, state string) (e taskTurn, again bool) {
+	return s.takeTurnAs(ctx, t, last, items, end, named, since, state, "")
+}
+
+// takeTurnAs is takeTurn for an interrupted turn with no output (silent: its kind, silent_turns.go), kept on the ledger
+// in the same write that takes the turn up: a manager that stops between the two never has the turn without it. A
+// turn taken before without it (an older manager) gets it now.
+func (s *Service) takeTurnAs(ctx context.Context, t Todo, last proto.Session, items []proto.Item, end turnClose, named bool, since time.Time, state, silent string) (e taskTurn, again bool) {
 	if !named {
 		end = turnClose{}
 	}
 	fresh := taskTurn{Machine: last.MachineID, Session: last.SessionID, Key: end.Key, Open: turnOpen(items), Rev: last.Rev,
-		Seen: last.UpdatedAt.UTC(), State: state, Work: since.UTC(), At: time.Now().UTC()}
+		Seen: last.UpdatedAt.UTC(), State: state, Work: since.UTC(), At: time.Now().UTC(), Silent: silent}
 	b := &s.tasks.turns
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -409,6 +424,9 @@ func (s *Service) takeTurn(ctx context.Context, t Todo, last proto.Session, item
 		changed := !cur.Work.Equal(since) || cur.Rev != last.Rev
 		if named && cur.Key == "" {
 			cur.Key, cur.Open, changed = end.Key, fresh.Open, true // its name, now that the transcript has it
+		}
+		if silent != "" && cur.State == turnInterrupted && cur.Silent == "" {
+			cur.Silent, changed = silent, true
 		}
 		if changed {
 			cur.Work, cur.Rev, cur.Seen = since.UTC(), last.Rev, last.UpdatedAt.UTC() // the stretch it closes now, as the judgment and the signals name it

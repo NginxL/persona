@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the HarmonyOS NAPI integration's resource and test registration invariants."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -13,9 +14,11 @@ ENTRY = ROOT / 'harmony/entry'
 
 class HarmonyCoreIntegrationTest(unittest.TestCase):
     def test_napi_is_one_library_without_a_cpp_bridge(self):
-        cmake = (ENTRY / 'src/main/cpp/CMakeLists.txt').read_text()
-        self.assertIn('libpersona_core_ohos.so', cmake)
-        self.assertIn('PERSONA_CORE_LIBRARY', cmake)
+        cpp = ENTRY / 'src/main/cpp'
+        cmake = (cpp / 'CMakeLists.txt').read_text()
+        core = ROOT / 'native/app-core/target/aarch64-unknown-linux-ohos/release/libpersona_core_ohos.so'
+        relative_core = Path(os.path.relpath(core, cpp)).as_posix()
+        self.assertIn(f'set(PERSONA_CORE_LIBRARY "${{CMAKE_CURRENT_SOURCE_DIR}}/{relative_core}")', cmake)
         self.assertNotIn('persona_core_napi.cpp', cmake)
         package = (ENTRY / 'oh-package.json5').read_text()
         self.assertIn('"libpersona_core_ohos.so": "file:./src/main/cpp/types/libpersona_core"', package)

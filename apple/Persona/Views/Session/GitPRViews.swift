@@ -161,7 +161,7 @@ struct GitPRSheet: View {
             .themedPage()
             .refreshable { await pr.read(status, machine: machineID, cwd: cwd, deps: deps, force: true) }
             .navigationTitle(pr.answer?.pr.map { Text(verbatim: "#\($0.number)") } ?? Text("Pull Request"))
-            .navigationSubtitle(pr.answer?.pr.map { "\($0.head) → \($0.base)" } ?? (status.branch ?? ""))
+            .navigationSubtitleWhenSupported(pr.answer?.pr.map { "\($0.head) → \($0.base)" } ?? (status.branch ?? ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let p = pr.answer?.pr, let u = URL(string: p.url) {
@@ -457,7 +457,7 @@ struct GitPRCreateSheet: View {
             .listStyle(.insetGrouped)
             .themedPage()
             .navigationTitle(Text("New Pull Request"))
-            .navigationSubtitle(status.branch ?? "")
+            .navigationSubtitleWhenSupported(status.branch ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 SheetClose(disabled: pr.busy != nil) { dismiss() }

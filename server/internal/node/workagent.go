@@ -356,7 +356,7 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 		notice := fmt.Sprintf("Persona 还不读 %s 的对话：手机上能发消息、看终端。", a.Agent)
 		return map[string]any{"items": []proto.Item{{ID: a.Agent + "#0", Seq: 1, Role: "system", Kind: "notice", Text: notice,
 			TS: time.Now().UTC()}}, "has_more": false, "history": a.Agent + "-pane:" + id, "to_seq": 1}, nil, true
-	case "session.item", "session.image":
+	case "session.item", "session.image", "session.visualization":
 		return nil, fmt.Errorf("no item"), true
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true

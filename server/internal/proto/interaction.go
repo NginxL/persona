@@ -2,6 +2,7 @@ package proto
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/dialogwire"
@@ -18,6 +19,9 @@ const (
 
 // AnsweredByAssistant marks a resolution the assistant gave for the user (Resolution.AnsweredBy).
 const AnsweredByAssistant = "assistant"
+
+// AnsweredByTerminal marks a decision made in the terminal rather than on its card (Resolution.AnsweredBy).
+const AnsweredByTerminal = "terminal"
 
 // AnsweredByDefault marks a resolution nobody gave: the question's deadline passed unanswered and, as going ahead can
 // be undone, its recommended options were taken by default (Resolution.AnsweredBy; docs/protocol/protocol.md "Who
@@ -37,6 +41,19 @@ const DismissedExpired = "expired"
 // "Asking without holding the turn"): its turn ended when the card went up, so no turn is held behind it. It is the
 // one ask_user card that is Resumable (a waiting one lives in the manager's memory and is not).
 func (ix Interaction) AskedWithoutWaiting() bool { return ix.ToolName == "ask_user" && ix.Resumable }
+
+// OneTapQuestion is the question ix asks when one tap may answer it without opening the app (a notification's
+// options, a to-do's row): a question card with exactly one question, options to choose from and no fields to fill in,
+// not raised in a Just me turn (whose push says nothing of what it asks). A health conversation's card is never
+// answered so either; only the hub and the manager can tell one (identity.InHealthSpace on its cwd), and each checks
+// it beside this. False otherwise.
+func (ix Interaction) OneTapQuestion() (Question, bool) {
+	if ix.Kind != IxQuestion || len(ix.Questions) != 1 || len(ix.Fields) > 0 || len(ix.Questions[0].Options) == 0 ||
+		ix.Private {
+		return Question{}, false
+	}
+	return ix.Questions[0], true
+}
 
 // QuestionOptionDefer dismisses a triage question without sending an agent reply.
 // Other question runtimes do not interpret this triage-only action.
@@ -78,6 +95,8 @@ type Interaction struct {
 	Questions    []Question      `json:"questions,omitempty"`
 	Plan         string          `json:"plan,omitempty"`
 	ToolInput    json.RawMessage `json:"tool_input,omitempty"`
+	// PlanThen is the permission mode recorded at a plan-mode start to use after approval; empty on legacy cards.
+	PlanThen string `json:"plan_then,omitempty"`
 	// EditableText is the outgoing body text a Claude Code Lark send/reply approval card may let the user edit before
 	// allowing. It is set only by that command gate; runtimes and other cards cannot declare it.
 	EditableText    string       `json:"editable_text,omitempty"`
@@ -90,6 +109,9 @@ type Interaction struct {
 	Elicitation     *Elicitation `json:"elicitation,omitempty"`
 	// CanCancel is advertised only by runtimes supporting question-only cancellation.
 	CanCancel bool `json:"can_cancel,omitempty"`
+	// CanClarify advertises an assistant-owned prepared approval whose owner may ask a question without resolving it.
+	// Only the authoritative creation path sets it; older clients ignore it and keep their existing Allow/Deny behavior.
+	CanClarify bool `json:"can_clarify,omitempty"`
 	// Dialog is the screen's dialog read on the hub (screen interactions); answers name an option and are checked
 	// against Dialog.Rev before any key is pressed. Absent when the screen shows no dialog it could read.
 	Dialog *dialogwire.Dialog `json:"dialog,omitempty"`
@@ -193,6 +215,15 @@ type Elicitation struct {
 	ID              string          `json:"elicitation_id,omitempty"`
 }
 
+// PlanAfterMode is a valid mode to apply after a plan, or "" when a card from another or older source names no
+// supported following mode. In particular plan itself is not a following mode; unknown values keep legacy behavior.
+func PlanAfterMode(mode string) string {
+	if mode == "plan" || !slices.Contains(PermissionModes, mode) {
+		return ""
+	}
+	return mode
+}
+
 type Resolution struct {
 	// Cancel discards only this question, without supplying answers or interrupting the task.
 	Cancel   bool              `json:"cancel,omitempty"`
@@ -211,8 +242,8 @@ type Resolution struct {
 	Keys       []string `json:"keys,omitempty"`
 	Text       string   `json:"text,omitempty"`
 	// AnsweredBy is who answered when it was not the user in the app: AnsweredByAssistant for a question the
-	// assistant answered on their behalf (docs/assistant/assistant.md), AnsweredByDefault for recommended options taken
-	// at a deadline. Absent when the user answered.
+	// assistant answered on their behalf (docs/assistant/assistant.md), AnsweredByTerminal for a terminal-decided
+	// dismissal, and AnsweredByDefault for recommended options taken at a deadline. Absent when the user answered.
 	AnsweredBy string `json:"answered_by,omitempty"`
 	// Late: the history's record of an answer that came after the card expired: the user's own answer on the to-do the
 	// question became, or its recommendation taken at its deadline (AnsweredByDefault). The card stays "expired".

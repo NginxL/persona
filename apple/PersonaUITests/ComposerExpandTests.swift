@@ -101,11 +101,22 @@ final class ComposerExpandTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         assertCorner()
         shot("04-collapsed")
+        // The keyboard can be visible before the sheet has returned focus to the box; do not lose the first keystroke.
+        let focused = NSPredicate { _, _ in self.field.value(forKey: "hasKeyboardFocus") as? Bool == true }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: focused, evaluatedWith: nil)], timeout: 5), .completed,
+                       "collapse did not return keyboard focus to the composer")
         field.typeText("!")
         XCTAssertEqual(field.value as? String, scrollingDraft + "!", "the cursor did not return to the end")
 
         // Delete back to a single line and dismiss the keyboard: the expand icon goes away when unfocused and single-line.
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: scrollingDraft.count + 1 - "Draft line 1".count))
+        // The delete batch and the composer's short shrink animation can still be settling when typeText returns.
+        let oneLine = NSPredicate { _, _ in
+            (self.field.value as? String) == "Draft line 1" && abs(self.field.frame.height - oneLineHeight) <= 2
+        }
+        let settled = XCTNSPredicateExpectation(predicate: oneLine, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
+                       "the composer did not settle to one line: \(String(describing: field.value)), height \(field.frame.height)")
         XCTAssertEqual(field.value as? String, "Draft line 1")
         XCTAssertEqual(field.frame.height, oneLineHeight, accuracy: 2)
         element("shell-composer-dismiss-keyboard").tap()

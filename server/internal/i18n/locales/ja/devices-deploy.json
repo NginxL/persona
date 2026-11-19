@@ -7,6 +7,7 @@
   "package_bad": "リリースから取得した{os}/{arch}用のnodeプログラムが検証に通らなかったため、使用しませんでした：{err}",
   "package_moved": "{os}/{arch}用のnodeプログラムのダウンロード中に新しいバージョン{version}が公開されたため、ダウンロードしたものは使用しませんでした。もう一度試すと新しいバージョンから取得します",
   "install_failed": "インストールできませんでした：{err}",
+  "wrapper": "このコンピューターの{path}はpersonad本体ではなくスクリプト（personadを起動するラッパー）のため、置き換えませんでした。置き換えると、nodeが使うデータフォルダーなどラッパーの設定が失われます。代わりに、ラッパーが実行するpersonadを更新してください",
   "minutes_other": "{count}分",
   "seconds_other": "{count}秒",
   "not_back": "インストールしましたが、{wait}以内にハブに再接続できませんでした",

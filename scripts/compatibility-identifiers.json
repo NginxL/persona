@@ -55,6 +55,22 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "android/core/data/src/test/kotlin/persona/core/data/PortDiscoveryMockServer.kt": {
+      "reason": "Exact discovery-request regression fixture retaining both protocol generations.",
+      "tokens": [
+        "jarvis-ports"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "android/core/data/src/test/kotlin/persona/core/data/PortDiscoveryMockServerTest.kt": {
+      "reason": "Exact discovery-request regression fixture retaining both protocol generations.",
+      "tokens": [
+        "jarvis-ports"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "android/core/contracts/src/test/kotlin/persona/core/contracts/ProtocolCompatibilityTest.kt": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -314,6 +330,14 @@
     },
     "desktop/src/urls.ts": {
       "reason": "Exact OS URL scheme retained for installed clients and existing pairing links.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "desktop/test/page-routes.test.ts": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
         "jarvis"
       ],
@@ -1126,6 +1150,24 @@
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
         "JARVIS_HOME"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/node/powershell_start_test.go": {
+      "reason": "Goldens captured from main's start command, which still names the retained legacy MCP tools and unsets the legacy environment aliases.",
+      "tokens": [
+        "JARVIS_ASSISTANT",
+        "JARVIS_ASSISTANT_BIN",
+        "JARVIS_GUEST",
+        "JARVIS_SESSION_ID",
+        "JARVIS_SPACE",
+        "mcp__jarvis__report_to_supervisor",
+        "mcp__jarvis__task_plan",
+        "mcp__jarvis__task_review",
+        "mcp__jarvis__todo_bind_thread",
+        "mcp__jarvis__todo_decision_add",
+        "mcp__jarvis__todo_decisions"
       ],
       "path_tokens": [],
       "external_refs": []

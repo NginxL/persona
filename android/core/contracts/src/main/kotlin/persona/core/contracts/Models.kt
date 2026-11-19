@@ -282,6 +282,7 @@ data class SessionCapabilities(
 @Serializable(with = WorkStateSerializer::class)
 data class WorkState(
     val phase: String = "",
+    @SerialName("just_finished") val justFinished: Boolean = false,
     val on: String? = null,
     val line: String? = null,
     val wait: String? = null,
@@ -437,6 +438,8 @@ data class Session(
     @SerialName("assistant") val assistant: Boolean = false,
     /** An assistant conversation put away (POST /api/v1/assistant/conversations/{id}/archive): kept, not listed. */
     @SerialName("archived") val archived: Boolean = false,
+    /** User-defined labels; null on an older hub and where the hub omits an empty set. */
+    @SerialName("tags") val tags: List<String>? = null,
     /** The manager it belongs to (docs/assistant/managers.md「Ownership」); null from an older hub: the default manager. */
     @SerialName("manager") val manager: String? = null,
     /**
@@ -504,7 +507,8 @@ data class Session(
     @SerialName("turn_error") val turnError: String? = null,
     /**
      * What the agent or the hub called [turnError] (docs/protocol/protocol.md): `usage_limit` is a subscription limit
-     * until it resets, not a turn to continue as an interruption. Older hubs never send it.
+     * until it resets, not a turn to continue as an interruption; `no_output` and `stopped` are the hub's own word on a
+     * task Agent's turn with no output (#10187), [turnError] then being its sentence, not an API error. Older hubs never send it.
      */
     @SerialName("turn_error_kind") val turnErrorKind: String? = null,
     /** When a `usage_limit` resets (RFC3339). Absent when that time is not known. */
@@ -1089,6 +1093,7 @@ data class Interaction(
     /** The runtime can discard this question without answering or interrupting the task. */
     @SerialName("can_cancel") val canCancel: Boolean? = null,
     @SerialName("plan") val plan: String? = null,
+    @SerialName("plan_then") val planThen: String? = null,
     @SerialName("tool_input") val toolInput: JsonElement? = null,
     @SerialName("summary") val summary: String? = null,
     @SerialName("screen") val screen: String? = null,
@@ -1127,6 +1132,12 @@ data class Interaction(
     val suggestion: RuleSuggestion? = null,
 ) {
     val sessionKey: SessionKey get() = SessionKey(machineId, sessionId)
+    /** A supported following mode; absent, plan and unknown values keep the legacy approval choices (#3784). */
+    val recordedPlanThen: String?
+        get() = when (planThen) {
+            "default", "acceptEdits", "auto", "bypassPermissions" -> planThen
+            else -> null
+        }
     /** The page that answers it; resolution still uses this interaction's own id and session. */
     val homeKey: SessionKey get() = SessionKey(machineId, foldedUnder?.takeIf(String::isNotBlank) ?: sessionId)
 

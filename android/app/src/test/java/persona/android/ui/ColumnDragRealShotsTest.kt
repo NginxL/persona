@@ -37,6 +37,7 @@ import org.junit.Assert.assertTrue
 import kotlin.math.abs
 import org.junit.Before
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -56,15 +57,17 @@ import persona.feature.assistant.AssistantSidebarContent
 import java.io.File
 
 /**
- * The real Assistant column at the foldable widths, Glass, light and dark.
+ * The real Assistant column at the foldable widths, Glass, Brief and Board, light and dark.
  * Colour blocks live in SidebarColumnDragShotsTest. These frames are the ones a review looks at.
  * #9803 also uses this harness for Persona-root resting shots and exclusion-rect checks.
+ * The finger spring is the same in every style (`Theme.Split.settle`); the button path is not on this drag.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35])
 class ColumnDragRealShotsTest {
-    @get:Rule val rule = createComposeRule()
+    val rule = createComposeRule()
+    @get:Rule val host = RuleChain.outerRule(ComponentActivityHostRule()).around(rule)
 
     @Before fun hardwareSnapshots() = installColumnDragHardwareSnapshot(on = true)
 
@@ -77,18 +80,19 @@ class ColumnDragRealShotsTest {
     @Test fun besideFoldable() = frames(over = false, prefix = "beside", windowDp = 951f, widthPx = 951, heightPx = 673)
 
     /**
-     * #9803 PR evidence: real phone shell at Persona root (drawer closed), Glass light and dark.
+     * #9803 PR evidence: real phone shell at Persona root (drawer closed), every style, light and dark.
      * Publishes a leading systemGestureExclusionRects band; a pushed page publishes none.
      */
     @Config(qualifiers = "en-w411dp-h891dp-mdpi")
     @Test fun phonePersonaRootEdgeEvidence() {
         val evidence = evidenceDir()
         var dark by mutableStateOf(false)
+        var style by mutableStateOf(AppStyle.Glass)
         var dragEnabled by mutableStateOf(true)
         lateinit var host: View
         rule.setContent {
             host = LocalView.current
-            PersonaTheme(style = AppStyle.Glass, darkTheme = dark, reduceMotion = true) {
+            PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                 val scope = rememberCoroutineScope()
                 val (snapshot, repository, main) = assistantFixture()
                 JShellDrawer(
@@ -121,15 +125,18 @@ class ColumnDragRealShotsTest {
             .build()
         rule.runOnIdle { ViewCompat.dispatchApplyWindowInsets(host, insets) }
         rule.waitForIdle()
+        for (nextStyle in AppStyle.entries) {
         for (isDark in listOf(false, true)) {
+            style = nextStyle
             dark = isDark
             dragEnabled = true
             rule.waitForIdle()
             rule.onNodeWithText("The trip outline is ready.").assertExists()
-            val bitmap = saveEvidence(evidence, "real-phone-glass-${if (isDark) "dark" else "light"}")
+            val bitmap = saveEvidence(evidence, "real-phone-${nextStyle.key}-${if (isDark) "dark" else "light"}")
             assertEquals(411, bitmap.width)
             assertEquals(891, bitmap.height)
-            assertTrue("phone root exclusion ${leadingExclusionRects(host)}", leadingExclusionRects(host).isNotEmpty())
+            assertTrue("phone root exclusion ${nextStyle.key} ${leadingExclusionRects(host)}", leadingExclusionRects(host).isNotEmpty())
+        }
         }
         dragEnabled = false
         rule.waitForIdle()
@@ -138,17 +145,18 @@ class ColumnDragRealShotsTest {
 
     /**
      * #9803 PR evidence: real foldable shell at Persona root with the column hidden (the state that
-     * publishes the exclusion), Glass light and dark. A pushed detail publishes none.
+     * publishes the exclusion), every style, light and dark. A pushed detail publishes none.
      */
     @Config(qualifiers = "en-w951dp-h673dp-mdpi")
     @Test fun foldablePersonaRootEdgeEvidence() {
         val evidence = evidenceDir()
         var dark by mutableStateOf(false)
+        var style by mutableStateOf(AppStyle.Glass)
         var detailAtRoot by mutableStateOf(true)
         lateinit var host: View
         rule.setContent {
             host = LocalView.current
-            PersonaTheme(style = AppStyle.Glass, darkTheme = dark, reduceMotion = true) {
+            PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                 val scope = rememberCoroutineScope()
                 val (snapshot, repository, main) = assistantFixture()
                 AssistantPaneFrame(
@@ -176,16 +184,19 @@ class ColumnDragRealShotsTest {
             }
         }
         rule.waitForIdle()
+        for (nextStyle in AppStyle.entries) {
         for (isDark in listOf(false, true)) {
+            style = nextStyle
             dark = isDark
             detailAtRoot = true
             rule.waitForIdle()
             rule.onNodeWithText("Weekend plans").assertDoesNotExist()
             rule.onNodeWithText("The trip outline is ready.").assertExists()
-            val bitmap = saveEvidence(evidence, "real-foldable-951x673-glass-${if (isDark) "dark" else "light"}")
+            val bitmap = saveEvidence(evidence, "real-foldable-951x673-${nextStyle.key}-${if (isDark) "dark" else "light"}")
             assertEquals(951, bitmap.width)
             assertEquals(673, bitmap.height)
-            assertTrue("foldable root exclusion ${leadingExclusionRects(host)}", leadingExclusionRects(host).isNotEmpty())
+            assertTrue("foldable root exclusion ${nextStyle.key} ${leadingExclusionRects(host)}", leadingExclusionRects(host).isNotEmpty())
+        }
         }
         detailAtRoot = false
         rule.waitForIdle()
@@ -208,7 +219,7 @@ class ColumnDragRealShotsTest {
     }
 
     private fun evidenceDir(): File =
-        File(System.getenv("ROOT_EDGE_SHOTS") ?: "/tmp/persona-leader/shots-9803").also { it.mkdirs() }
+        File(System.getenv("ROOT_EDGE_SHOTS") ?: "build/root-edge-shots").also { it.mkdirs() }
 
     private fun saveEvidence(out: File, name: String): Bitmap {
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
@@ -235,9 +246,10 @@ class ColumnDragRealShotsTest {
     private fun frames(over: Boolean, prefix: String, windowDp: Float, widthPx: Int, heightPx: Int) {
         val (snapshot, repository, main) = assistantFixture()
         var dark by mutableStateOf(false)
+        var style by mutableStateOf(AppStyle.Glass)
         var shown by mutableStateOf(false)
         rule.setContent {
-            PersonaTheme(style = AppStyle.Glass, darkTheme = dark, reduceMotion = false) {
+            PersonaTheme(style = style, darkTheme = dark, reduceMotion = false) {
                 val scope = rememberCoroutineScope()
                 AssistantPaneFrame(
                     regular = true, showSidebar = true, shown = shown, overlay = over, drags = true,
@@ -267,16 +279,18 @@ class ColumnDragRealShotsTest {
         println("column-drag-real ${out.absolutePath}")
         val columnDp = if (over) PaneSplits.DefaultLeft else sidebarSplit(windowDp, emptyList()).sidebar
         val columnPx = with(rule.density) { columnDp.dp.toPx() }
+        for (nextStyle in AppStyle.entries) {
         for (isDark in listOf(false, true)) {
             val mode = if (isDark) "dark" else "light"
+            val styleName = nextStyle.key
             rule.mainClock.autoAdvance = true
-            rule.runOnIdle { dark = isDark; shown = false }
+            rule.runOnIdle { style = nextStyle; dark = isDark; shown = false }
             rule.waitForIdle()
             rule.onNodeWithText("Weekend plans").assertDoesNotExist()
             rule.onNodeWithText("The trip outline is ready.").assertExists()
-            val start = save(out, "$prefix-$mode-start")
-            assertEquals("$prefix $mode width", widthPx, start.width)
-            assertEquals("$prefix $mode height", heightPx, start.height)
+            val start = save(out, "$prefix-$styleName-$mode-start")
+            assertEquals("$prefix $styleName $mode width", widthPx, start.width)
+            assertEquals("$prefix $styleName $mode height", heightPx, start.height)
             val drag = columnDrag()
             assertEquals("Idle", drag.step())
             rule.runOnIdle { drag.begin(open = true, over = over, widthPx = columnPx) }
@@ -287,16 +301,16 @@ class ColumnDragRealShotsTest {
                 ShadowLooper.idleMainLooper()
                 i++
             }
-            assertEquals("$prefix $mode stuck at ${drag.step()}", "Follow", drag.step())
+            assertEquals("$prefix $styleName $mode stuck at ${drag.step()}", "Follow", drag.step())
             // The still of this frame, before the finger moves. The live capture above is the same layout.
             // A glass bar recorded without its blur is black here (`SplitColumnControl.swift:191`).
             val still = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
-            assertBarMatchesLive(start, still, "$prefix $mode")
+            assertBarMatchesLive(start, still, "$prefix $styleName $mode")
             rule.runOnIdle { drag.move(columnPx / 2f) }
             rule.waitForIdle()
             rule.onNodeWithText("Weekend plans").assertExists()
-            val mid = save(out, "$prefix-$mode-mid")
-            assertTrue("$prefix $mode mid matches start", !mid.sameAs(start))
+            val mid = save(out, "$prefix-$styleName-$mode-mid")
+            assertTrue("$prefix $styleName $mode mid matches start", !mid.sameAs(start))
             rule.mainClock.autoAdvance = false
             rule.runOnIdle {
                 drag.end(2000f)
@@ -308,8 +322,8 @@ class ColumnDragRealShotsTest {
                 ShadowLooper.idleMainLooper()
                 frames++
             }
-            assertEquals("$prefix $mode did not release (${drag.step()})", "Fade", drag.step())
-            save(out, "$prefix-$mode-release")
+            assertEquals("$prefix $styleName $mode did not release (${drag.step()})", "Fade", drag.step())
+            save(out, "$prefix-$styleName-$mode-release")
             var fade = 0
             while (fade < 40 && drag.step() != "Idle") {
                 rule.mainClock.advanceTimeByFrame()
@@ -317,7 +331,7 @@ class ColumnDragRealShotsTest {
                 fade++
             }
             assertEquals("Idle", drag.step())
-            assertTrue("$prefix $mode stayed shut", shown)
+            assertTrue("$prefix $styleName $mode stayed shut", shown)
             rule.mainClock.autoAdvance = true
             rule.runOnIdle { drag.begin(open = false, over = over, widthPx = columnPx) }
             var shut = 0
@@ -327,10 +341,10 @@ class ColumnDragRealShotsTest {
                 ShadowLooper.idleMainLooper()
                 shut++
             }
-            assertEquals("$prefix $mode shut stuck at ${drag.step()}", "Follow", drag.step())
+            assertEquals("$prefix $styleName $mode shut stuck at ${drag.step()}", "Follow", drag.step())
             rule.runOnIdle { drag.move(-columnPx / 2f) }
             rule.waitForIdle()
-            save(out, "$prefix-$mode-shut")
+            save(out, "$prefix-$styleName-$mode-shut")
             rule.mainClock.autoAdvance = false
             rule.runOnIdle {
                 drag.end(-2000f)
@@ -343,7 +357,8 @@ class ColumnDragRealShotsTest {
                 shutFrames++
             }
             assertEquals("Idle", drag.step())
-            assertTrue("$prefix $mode shut did not close", !shown)
+            assertTrue("$prefix $styleName $mode shut did not close", !shown)
+        }
         }
     }
 

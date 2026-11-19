@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -262,7 +263,15 @@ fun JSidebarColumn(
             }
             Box(Modifier.align(Alignment.TopEnd).width(Tokens.Space.xxs / 2).fillMaxHeight().background(palette.line))
         }
-        Box(Modifier.fillMaxSize().padding(start = if (sidebar != null && !overlay) pageStart * progress else 0.dp)) {
+        // The detail stack is that column's own navigation controller, so a push stays inside it
+        // (SplitNavigation.swift:140-143). Clip after the inset, or the slide still paints the column.
+        // Over the page the column stays above the page (SplitNavigation.swift:202-208).
+        val beside = sidebar != null && !overlay
+        Box(
+            Modifier.fillMaxSize()
+                .padding(start = if (beside) pageStart * progress else 0.dp)
+                .then(if (beside) Modifier.clipToBounds() else Modifier),
+        ) {
             Box(Modifier.fillMaxSize().then(if (modal)
                 Modifier.focusProperties { canFocus = false }.clearAndSetSemantics {} else Modifier)) { content() }
             if (overlay && visible) Box(Modifier.fillMaxSize().padding(start = width * progress)

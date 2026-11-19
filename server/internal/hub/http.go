@@ -33,10 +33,22 @@ import (
 	"github.com/nwverse/persona/server/internal/sessionlist"
 )
 
+// nodeOutdated recognizes the prefix also returned by an old manager that lacks
+// devicewire.MethodCall, even when that manager sets CodeUnknownMethod.
+func (h *Hub) nodeOutdated(w http.ResponseWriter, r *http.Request, err error, key string, args i18n.Args) bool {
+	var re *rpc.Error
+	if key == "" || !errors.As(err, &re) || !strings.HasPrefix(re.Message, "unknown method") {
+		return false
+	}
+	writeErrCode(routeLanguageWriter{ResponseWriter: w, language: h.requestLang(r)}, http.StatusConflict, proto.CodeNodeOutdated, i18n.Err(key, args))
+	return true
+}
+
 func (h *Hub) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	h.passwordLoginRoutes(mux)
+	h.browserLoginRoutes(mux)
 	api := http.NewServeMux()
 	h.apiMux = api
 	if h.upd != nil {
@@ -480,6 +492,31 @@ func callErr(w http.ResponseWriter, err error) {
 	apierr.Call(w, err)
 }
 
+// callNode relays a raw JSON result and keeps each caller's timeout and error mapping.
+func (h *Hub) callNode(w http.ResponseWriter, r *http.Request, m *Machine, method string, params any, timeout time.Duration, outdated string, args i18n.Args, handle ...func(error) bool) (json.RawMessage, bool) {
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	var out json.RawMessage
+	if err := m.call(ctx, method, params, &out); err != nil {
+		if h.nodeOutdated(w, r, err, outdated, args) {
+			return nil, false
+		}
+		for _, f := range handle {
+			if f(err) {
+				return nil, false
+			}
+		}
+		callErr(w, err)
+		return nil, false
+	}
+	return out, true
+}
+
+func writeRawJSON(w http.ResponseWriter, out json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(out)
+}
+
 // proxy forwards a GET to the machine's node and returns its result verbatim.
 func (h *Hub) proxy(method string, params func(*http.Request) any) http.HandlerFunc {
 	return h.withMachine(func(w http.ResponseWriter, r *http.Request, m *Machine) {
@@ -487,15 +524,11 @@ func (h *Hub) proxy(method string, params func(*http.Request) any) http.HandlerF
 		if params != nil {
 			p = params(r)
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer cancel()
-		var out json.RawMessage
-		if err := m.call(ctx, method, p, &out); err != nil {
-			callErr(w, err)
+		out, ok := h.callNode(w, r, m, method, p, 30*time.Second, "", nil)
+		if !ok {
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(out)
+		writeRawJSON(w, out)
 	})
 }
 
@@ -598,6 +631,21 @@ func (h *Hub) sessionImage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	_, _ = w.Write(data)
 }
 
+// sessionVisualization serves one visualization item's HTML fragment as raw UTF-8. A fragment never changes, so the
+// app may cache it forever.
+func (h *Hub) sessionVisualization(w http.ResponseWriter, r *http.Request, m *Machine) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	var html string
+	if err := m.call(ctx, "session.visualization", map[string]any{"session_id": r.PathValue("sid"), "item_id": r.PathValue("iid")}, &html); err != nil {
+		callErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	_, _ = w.Write([]byte(html))
+}
+
 // proxyBody forwards a POST body (plus session_id from the path) to the node.
 func (h *Hub) proxyBody(method string) http.HandlerFunc {
 	// Resuming an offline session can take a while (shell + claude startup).
@@ -605,32 +653,21 @@ func (h *Hub) proxyBody(method string) http.HandlerFunc {
 }
 
 // proxyBodyFor is proxyBody that waits up to timeout for the node.
-func (h *Hub) proxyBodyFor(method string, timeout time.Duration) http.HandlerFunc {
+func (h *Hub) proxyBodyFor(method string, timeout time.Duration, mutate ...func(*http.Request, map[string]any)) http.HandlerFunc {
 	return h.withMachine(func(w http.ResponseWriter, r *http.Request, m *Machine) {
-		p := map[string]any{}
-		if r.ContentLength != 0 {
-			if err := decodeJSONBody(w, r, &p, 32<<20); err != nil && !errors.Is(err, io.EOF) {
-				writeBodyErr(w, err, err)
-				return
-			}
-		}
-		if p == nil {
-			writeErr(w, http.StatusBadRequest, errors.New("request body must be a JSON object"))
+		p, ok := optionalObject(w, r, 32<<20)
+		if !ok {
 			return
 		}
 		p["session_id"] = r.PathValue("sid")
-		if method == "claude.settings.set" {
-			p["locale"] = h.requestLang(r)
+		for _, f := range mutate {
+			f(r, p)
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-		var out json.RawMessage
-		if err := m.call(ctx, method, p, &out); err != nil {
-			callErr(w, err)
+		out, ok := h.callNode(w, r, m, method, p, timeout, "", nil)
+		if !ok {
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(out)
+		writeRawJSON(w, out)
 	})
 }
 
@@ -638,31 +675,21 @@ func (h *Hub) proxyBodyFor(method string, timeout time.Duration) http.HandlerFun
 // the user's stop button in an app: the assistant is told, so a Feishu /agent request it works on is stopped as well
 // (#3308; the plugin's own /stop goes through the assistant, not here).
 func (h *Hub) interruptSession(w http.ResponseWriter, r *http.Request, m *Machine) {
-	p := map[string]any{}
-	if r.ContentLength != 0 {
-		if err := decodeJSONBody(w, r, &p, 32<<20); err != nil && !errors.Is(err, io.EOF) {
-			writeBodyErr(w, err, err)
-			return
-		}
-	}
-	if p == nil {
-		p = map[string]any{}
+	p, ok := optionalObject(w, r, 32<<20)
+	if !ok {
+		return
 	}
 	sid := r.PathValue("sid")
 	p["session_id"] = sid
 	r = h.captureHumanSubmission(r, "")
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-	var out json.RawMessage
-	if err := m.call(ctx, "session.interrupt", p, &out); err != nil {
-		callErr(w, err)
+	out, ok := h.callNode(w, r, m, "session.interrupt", p, 90*time.Second, "", nil)
+	if !ok {
 		return
 	}
 	if s, ok := m.session(sid); ok && (s.Assistant || m.isAssistant(s)) {
 		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).UserStopped(r.Context(), assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid})
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(out)
+	writeRawJSON(w, out)
 }
 
 func (h *Hub) listSessions(w http.ResponseWriter, r *http.Request) {

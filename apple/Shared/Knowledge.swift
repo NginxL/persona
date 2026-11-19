@@ -51,11 +51,18 @@ nonisolated struct KBEntry: Codable, Identifiable, Hashable, Sendable {
     var extra: String?
     /// A recording's kind: meeting, note or day (#8870); nil on other kinds and from a hub before it.
     var recordingKind: String?
+    /// A chat's source; a document's, meeting's or event's connector (#8872); nil from a hub before it.
+    var source: String?
+    /// A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872).
+    var meetingID: String?
+    /// In the meetings list, a recording that stands for an imported meeting too: that meeting (`KBList.meetings`).
+    var imported: KBImportedMeeting? = nil
 
     enum CodingKeys: String, CodingKey {
-        case kind, id, name, importance, relevance, tags, updated, extra
+        case kind, id, name, importance, relevance, tags, updated, extra, source
         case oneLine = "one_line"
         case recordingKind = "recording_kind"
+        case meetingID = "meeting_id"
     }
 
     /// The pill a recording's row carries in the meetings list: notes and all-day recordings are the exceptions among
@@ -89,11 +96,21 @@ nonisolated struct KBList: Decodable, Sendable {
     var tags: [String]?
 
     /// The meetings list (#8731): the meetings imported from connected apps and the recordings made in Persona, with
-    /// each tag once.
+    /// each tag once. A meeting both recorded and imported is one row (#8872): the recording's, which carries the
+    /// imported meeting (`imported`), and the imported meeting's own row goes.
     static func meetings(_ meetings: KBList, recordings: KBList) -> KBList {
         var tags: [String] = []
         for t in (meetings.tags ?? []) + (recordings.tags ?? []) where !tags.contains(t) { tags.append(t) }
-        return KBList(items: meetings.items + recordings.items, tags: tags)
+        let byID = Dictionary(meetings.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var covered = Set<String>()
+        let recs = recordings.items.map { r -> KBEntry in
+            guard let id = r.meetingID, let m = byID[id] else { return r }
+            covered.insert(m.id)
+            var r = r
+            r.imported = KBImportedMeeting(id: m.id, url: KBImportedMeeting.link(m.extra), source: m.source)
+            return r
+        }
+        return KBList(items: meetings.items.filter { !covered.contains($0.id) } + recs, tags: tags)
     }
 
     /// Newest first, entries with no time last; otherwise in the order given.
@@ -122,6 +139,40 @@ nonisolated struct KBDetail: Decodable, Sendable {
     var moments: [KBMomentRef]?
     /// A topic's knowledge points (docs/assistant/knowledge.md "Topics").
     var points: [KBTopicPoint]?
+
+    /// A recording's imported meeting (#8872): `meta.imported_meeting` and the link the hub resolves for it; nil without
+    /// one, or with nothing to open.
+    var importedMeeting: KBImportedMeeting? {
+        guard kind == KBKind.recordings.rawValue else { return nil }
+        return KBImportedMeeting.of(meta, links: links)
+    }
+}
+
+/// The meeting imported from a connected app that a recording stands for too (#8872): its id, its notes' link and the
+/// connector it came from.
+nonisolated struct KBImportedMeeting: Codable, Hashable, Sendable {
+    var id: String
+    var url: URL?
+    var source: String?
+
+    /// A meetings item's `extra` as a link: its notes in the app, nil when it has none.
+    static func link(_ extra: String?) -> URL? {
+        guard let s = extra?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return URL(string: s)
+    }
+
+    /// From a recording's detail: `meta.imported_meeting`, with its notes' link and connector from the link the hub
+    /// resolves for it; nil without one, or with no link to open.
+    static func of(_ meta: JSONValue?, links: [KBEntry]?) -> KBImportedMeeting? {
+        of(id: meta?["imported_meeting"]?["id"]?.string, links: links)
+    }
+
+    /// The imported meeting `id` among a detail's `links`, with its notes' link; nil without either.
+    static func of(id: String?, links: [KBEntry]?) -> KBImportedMeeting? {
+        guard let id, let link = (links ?? []).first(where: { $0.kind == KBKind.meetings.rawValue && $0.id == id }),
+              let url = Self.link(link.extra) else { return nil }
+        return KBImportedMeeting(id: id, url: url, source: link.source)
+    }
 }
 
 /// One knowledge point of a topic: what it is (`kind`), the text, the reason or cause (`why`), the subtopics it is under

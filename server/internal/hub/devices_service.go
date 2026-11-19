@@ -56,12 +56,13 @@ func (h *Hub) keepConnectorCred(ctx context.Context, c devicewire.ConnectorCred)
 // pairConnector has the machine's manager (the carrier for one being added) pair a service machine's connector (the
 // admin page); it keeps the credential (devices.connector_paired, its own machine's only).
 func (h *Hub) pairConnector(ctx context.Context, pairLink, id, address, proxyURL string) (string, string, error) {
-	_ = h.waitDevices(ctx) // the hub just started: the manager is on its way
+	owner := h.machineOwner(id)
+	_ = h.waitDevicesFor(ctx, owner) // the hub just started: its manager is on its way
 	var out struct {
 		Address string `json:"address"`
 		Version string `json:"version"`
 	}
-	err := h.callBus(ctx, h.machineOwner(id), devicewire.MethodPairConnector, devicewire.PairConnector{Link: pairLink, MachineID: id,
+	err := h.callBus(ctx, owner, devicewire.MethodPairConnector, devicewire.PairConnector{Link: pairLink, MachineID: id,
 		Address: address, Proxy: proxyURL}, &out)
 	if errors.Is(err, errBusOffline) {
 		return "", "", errAssistantOffline

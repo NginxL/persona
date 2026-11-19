@@ -42,6 +42,49 @@ func (d *DB) PairTokenByHash(ctx context.Context, hash string) (*PairToken, erro
 	return &p, nil
 }
 
+// RevokeLinkPair expires one machine-bound pairing code and revokes the link credential it issued, if any.
+// The pair row serializes this operation with redemption, including an unacknowledged redemption. The returned
+// credential ID must also be invalidated in the hub's live credential cache and relays. A missing pair returns
+// found=false; repeated calls return the same credential ID. Callers must retain the pair hash for recovery.
+func (d *DB) RevokeLinkPair(ctx context.Context, hash, machine string) (credentialID string, found bool, err error) {
+	if hash == "" || machine == "" {
+		return "", false, errors.New("pair hash and machine are required")
+	}
+	err = pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		var id string
+		err := tx.QueryRow(ctx, `UPDATE pair_tokens SET expires_at = `+endedNow+`
+			WHERE token_hash = $1 AND machine_id = $3 RETURNING COALESCE(device_id, '')`, hash, time.Now(), machine).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		if id == "" {
+			return nil
+		}
+		// Do not touch a credential unless it is the link credential for this exact machine.
+		tag, err := tx.Exec(ctx, `UPDATE device_tokens SET revoked_at = COALESCE(revoked_at, now())
+			WHERE id = $1 AND machine_id = $2 AND role = 'link'`, id, machine)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("pair credential does not match machine")
+		}
+		if err := dropDeviceRegistrations(ctx, tx, id); err != nil {
+			return err
+		}
+		credentialID = id
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return credentialID, found, nil
+}
+
 // RedeemPairToken consumes the pairing credential and issues a device credential in the same transaction.
 // A concurrent redemption, an expired credential or a failed insert cannot leave an extra device token.
 func (d *DB) RedeemPairToken(ctx context.Context, pairHash string, device DeviceToken, tokenHash string) (bool, error) {

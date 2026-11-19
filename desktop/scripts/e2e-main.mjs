@@ -31,6 +31,9 @@ const token = process.env.PERSONA_DESKTOP_E2E_TOKEN ?? ""; // a temporary pairin
 const otherToken = process.env.PERSONA_DESKTOP_E2E_OTHER_TOKEN ?? "";
 let card; // a pending permission or question card of the synthetic hub, chosen by the caller
 try { card = JSON.parse(process.env.PERSONA_DESKTOP_E2E_CARD ?? "null"); } catch { card = undefined; }
+// The link that starts the app (#10282): macOS hands it over as open-url before any window exists (emitted below).
+const coldLink = scenario === "root" && card?.session_id
+  ? `persona://open/s/${encodeURIComponent(card.machine_id)}/${encodeURIComponent(card.session_id)}` : undefined;
 const local = value => /^http:\/\/127\.0\.0\.1:\d+\//.test(value);
 const otherHub = otherHubURL ? new URL(otherHubURL) : undefined;
 const headless = process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
@@ -243,6 +246,14 @@ async function chatAndAgents() {
 
 async function rootScenario() {
   await signIn();
+  await step("the persona:// link that started the app opens its page once the page listens", async () => {
+    // The signed-out page did not listen, so the route waited through sign-in for the app (page-routes.ts).
+    if (!coldLink) throw new Error("no cold-start link: the synthetic hub has no pending card");
+    await until("cold-start route", async () => (await path()).startsWith(`${prefix}/`) && (await path()).endsWith(`/${card.session_id}`));
+    const there = await path();
+    await go("/"); // the steps after this one start where sign-in leaves the page
+    return { path: there };
+  });
   await enableNotifications();
   await chatAndAgents();
   await step("Agent session with a waiting card", async () => {
@@ -489,4 +500,5 @@ const setIslandState = NotchIsland.prototype.setState;
 NotchIsland.prototype.setState = function setState(...args) { island = this; return setIslandState.apply(this, args); };
 const created = new Promise(done => app.once("browser-window-created", (_event, window) => done(window)));
 await import(pathToFileURL(join(import.meta.dirname, "..", "dist", "main.js")).href);
+if (coldLink) app.emit("open-url", { preventDefault() {} }, coldLink);
 main(created).then(() => finish(), error => finish(error));

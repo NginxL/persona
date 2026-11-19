@@ -1,4 +1,4 @@
-Start a new Persona conversation with an opening message and return its id at once (it does not wait for the answer). For work that deserves its own thread, when the user asks for one. The message arrives marked as coming from this conversation; it is named after its first turn like any new conversation. It is told to send its result back with conversation_send; if a turn of it fails, or ends without it ever having sent anything back, Persona leaves one notice here (once per conversation). An organization policy may keep some conversations read-only, including starting another conversation from them: such a call is refused with the policy's reason. Do not retry it; follow what the refusal says instead. Pass `tags` when the user asks for the new conversation to carry labels from the start.
+Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.
 
 ```json
 {
@@ -7,12 +7,16 @@ Start a new Persona conversation with an opening message and return its id at on
   "properties": {
     "text": {
       "type": "string",
-      "description": "the opening message: everything the new conversation needs, it does not see this one"
+      "description": "everything the new conversation needs; it does not see this one"
     },
     "tags": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "tags the new conversation is born with; trimmed and de-duplicated, at most 10 of 32 characters each"
+      "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+    },
+    "quote": {
+      "type": "string",
+      "description": "\"latest\" or a message id: the user's words, carried verbatim"
     }
   }
 }

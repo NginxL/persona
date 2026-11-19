@@ -52,7 +52,9 @@ func hubSources(t *testing.T) map[string]*ast.File {
 	return out
 }
 
-// readList reads a testdata list: one entry per line, `#` starts a comment, blank lines skipped.
+// readList reads a testdata list: one entry per line, `#` starts a comment, blank lines skipped. An entry or a comment
+// line that appears twice fails: the lists are union-merged (.gitattributes), which keeps both sides' copy of a line.
+// Other comment lines aren't checked, so a merge can keep a reworded comment's old wording next to the new one.
 func readList(t *testing.T, name string) []string {
 	t.Helper()
 	f, err := os.Open(filepath.Join("testdata", name))
@@ -61,15 +63,22 @@ func readList(t *testing.T, name string) []string {
 	}
 	defer f.Close()
 	var out []string
+	seen := map[string]bool{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
+		key := strings.TrimSpace(line) // a comment line as a whole, an entry without its comment
 		if i := strings.Index(line, "#"); i >= 0 {
 			line = line[:i]
 		}
 		if line = strings.TrimSpace(line); line != "" {
+			key = line
 			out = append(out, line)
 		}
+		if key != "" && seen[key] {
+			t.Errorf("testdata/%s has %q twice (a merge kept both sides' copy): delete one", name, key)
+		}
+		seen[key] = true
 	}
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)

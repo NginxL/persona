@@ -9,7 +9,6 @@ final class ExtensionSettingsTests: XCTestCase {
         let env = ProcessInfo.processInfo.environment
         guard let hub = env["PERSONA_EXTENSIONS_HUB"] else { throw XCTSkip("needs mock_hub.py with MOCK_EXTENSIONS=1 (PERSONA_EXTENSIONS_HUB)") }
         let look = env["PERSONA_EXTENSIONS_APPEARANCE"] ?? "light"
-        // Take the count from the current mock's list, not the six extensions there were before later examples were added.
         var (data, response) = try await URLSession.shared.data(from: URL(string: hub + "/api/v1/extensions")!)
         if (response as? HTTPURLResponse)?.statusCode == 404 {
             (data, response) = try await URLSession.shared.data(from: URL(string: hub + "/api/v1/plugins")!)
@@ -17,8 +16,11 @@ final class ExtensionSettingsTests: XCTestCase {
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let plugins = try XCTUnwrap((json["extensions"] ?? json["plugins"]) as? [[String: Any]])
-        let attention = plugins.filter { ["needs_setup", "error", "incompatible"].contains($0["status"] as? String ?? "") }.count
-        let summary = "\(plugins.count) 个" + (attention > 0 ? " · \(attention) 个要处理" : "")
+        // Count what Settings shows: the default assistant's share of the merged mock list, not other assistants' copies.
+        // Legacy unstamped items belong to the default assistant too.
+        let currentAssistant = plugins.filter { ($0["manager"] as? String ?? "assistant") == "assistant" }
+        let attention = currentAssistant.filter { ["needs_setup", "error", "incompatible"].contains($0["status"] as? String ?? "") }.count
+        let summary = "\(currentAssistant.count) 个" + (attention > 0 ? " · \(attention) 个要处理" : "")
         func shot(_ app: XCUIApplication, _ name: String) {
             guard let dir = env["PERSONA_SHOTS"] else { return }
             try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appending(path: "plugins-\(name)-\(look).png"))
@@ -52,8 +54,13 @@ final class ExtensionSettingsTests: XCTestCase {
 
         let notes = app.buttons["plugin-example-notes"]
         XCTAssertTrue(notes.waitForExistence(timeout: 15), "no plugin list:\n\(app.debugDescription)")
-        XCTAssertTrue(app.buttons["plugin-telegram"].exists && app.buttons["plugin-voice"].exists)
+        let telegram = app.buttons["plugin-telegram"]
+        let voice = app.buttons["plugin-voice"]
+        // The loaded usage card can push these lazy rows below the viewport; waiting alone never creates them.
+        for _ in 0..<8 where !(telegram.exists && voice.exists) { app.swipeUp() }
+        XCTAssertTrue(telegram.exists && voice.exists)
         shot(app, "list")
+        for _ in 0..<8 where !notes.isHittable { app.swipeDown() }
         notes.tap()
 
         XCTAssertTrue(app.staticTexts["还缺：密钥「API Key」"].waitForExistence(timeout: 10), "no 还缺:\n\(app.debugDescription)")

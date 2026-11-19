@@ -13,7 +13,9 @@ import { launcherBlock } from "../lib/launcher-health";
 import { forgetModel, modelList, readModels, subscribeModelLists, useModelLists, type ModelList } from "../lib/session-models";
 import type { Launcher } from "../lib/types";
 import { toast } from "../ui/atoms";
-import { ModelPanel } from "../ui/model-panel/ModelPanel";
+import { lazyOverlay } from "./LazyOverlay";
+
+const ModelPanel = lazyOverlay(() => import("../ui/model-panel/ModelPanel").then((m) => m.ModelPanel));
 import { ModelPill } from "./chat/ModelPill";
 
 const NO_LIST: ModelList = {};

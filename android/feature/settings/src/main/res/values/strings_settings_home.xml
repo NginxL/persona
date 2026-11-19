@@ -16,7 +16,7 @@
     <string name="settings_search_empty">No matching settings</string>
     <string name="settings_search_empty_detail">Try another name or clear the search.</string>
     <string name="settings_search_models_aliases">provider API key model profile launcher configuration</string>
-    <string name="settings_search_agents_aliases">Claude Code Codex session triage coding runtime</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy session triage coding runtime</string>
     <string name="settings_search_notifications_aliases">notification settings notification channel battery keep alive auto start capsule mute desktop lock screen background</string>
     <string name="settings_search_connectors_aliases">mail email phone Lark Feishu sent as you</string>
     <string name="settings_search_extensions_aliases">extension plugin marketplace</string>

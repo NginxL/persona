@@ -203,12 +203,13 @@ func (s *Service) outcomeAgents(ctx context.Context, t Todo) []outcomeAgent {
 
 // pullOutcome asks the model what the task came to (the kb.project purpose: it writes the projects' timelines).
 func (s *Service) pullOutcome(ctx context.Context, t Todo, agents []outcomeAgent) (taskOutcome, error) {
-	in := prompts.TodoOutcomeInput{Title: t.Title, Prompt: clipMiddle(strings.TrimSpace(t.Notes), 1500)}
+	language := answerLanguage(s.hello(ctx).Locale)
+	in := prompts.TodoOutcomeInput{Language: language, Title: t.Title, Prompt: clipMiddle(strings.TrimSpace(t.Notes), 1500)}
 	for _, a := range agents {
 		in.Replies = append(in.Replies, prompts.TodoOutcomeReply{Machine: a.Machine, Cwd: a.Cwd, Text: clipMiddle(a.Text, outcomeReplyMax)})
 	}
 	var out taskOutcome
-	err := s.purposeModel("kb.project").JSONMax(ctx, prompts.RenderTodoOutcome(prompts.TodoOutcome{Owner: s.owner(ctx)}),
+	err := s.purposeModel("kb.project").JSONMax(ctx, prompts.RenderTodoOutcome(prompts.TodoOutcome{Language: language, Owner: s.owner(ctx)}),
 		prompts.RenderTodoOutcomeInput(in), 2048, &out)
 	return out, err
 }
@@ -380,23 +381,33 @@ const (
 // its projects' one line and latest todo outcomes (todo/project); empty when the directory is no project's or the
 // knowledge base is not open (the agent starts without it).
 func (s *Service) projectContext(ctx context.Context, machine, dir string) string {
+	c, _ := s.projectContextSlugs(ctx, machine, dir)
+	return c
+}
+
+// projectContextSlugs is projectContext and the slugs of the projects dir belongs to.
+func (s *Service) projectContextSlugs(ctx context.Context, machine, dir string) (string, []string) {
 	if strings.TrimSpace(dir) == "" || s.isWorkMachine(machine) {
-		return ""
+		return "", nil
 	}
 	e, err := s.kbGet(ctx)
 	if err != nil || e == nil {
-		return ""
+		return "", nil
 	}
 	projects := e.ProjectsForWork(machine, dir)
+	if len(projects) == 0 {
+		return ""
+	}
 	// What extensions wrote for these projects (extension_context.go): asked once for all of them.
 	var slugs []string
 	for _, p := range projects {
 		slugs = append(slugs, p.Slug)
 	}
 	fromExtensions := s.projectExtensionContext(ctx, slugs)
+	language := answerLanguage(s.hello(ctx).Locale)
 	var blocks []string
 	for _, p := range projects {
-		d := prompts.TodoProject{Name: contextText(oneLine(p.Name)), OneLine: contextText(oneLine(p.OneLine)), Extensions: fromExtensions[p.Slug]}
+		d := prompts.TodoProject{Language: language, Name: contextText(oneLine(p.Name)), OneLine: contextText(oneLine(p.OneLine)), Extensions: fromExtensions[p.Slug]}
 		for _, o := range e.Store.TodoOutcomes(p.Slug, projectOutcomesMost) {
 			d.Outcomes = append(d.Outcomes, prompts.TodoProjectOutcome{When: o.When, Title: contextText(o.Title), Text: contextText(o.Text)})
 		}
@@ -407,17 +418,25 @@ func (s *Service) projectContext(ctx context.Context, machine, dir string) strin
 			break
 		}
 	}
-	return strings.Join(blocks, "\n\n")
+	return strings.Join(blocks, "\n\n"), slugs
 }
 
-// withProjectContext puts the project background of dir on machine before a new agent's first prompt; the prompt as
-// it is without any (or when it is empty: nothing to put it before).
-func (s *Service) withProjectContext(ctx context.Context, machine, dir, prompt string) string {
+// withProjectContext puts the project background of dir on machine before a new agent's first prompt, and the notes
+// of the directions the work belongs to (lead: the leader conversation supervising or starting it, "" none;
+// direction_notes.go) before that; the prompt as it is without any (or when it is empty: nothing to put it before).
+func (s *Service) withProjectContext(ctx context.Context, machine, dir, lead, prompt string) string {
 	if strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	if c := s.projectContext(ctx, machine, dir); c != "" {
-		return c + "\n\n" + prompt
+	var parts []string
+	c, slugs := s.projectContextSlugs(ctx, machine, dir)
+	if s.isWorkMachine(machine) {
+		lead = "" // a work machine's agent is told nothing of the owner's own directions either
+	} else if d := s.directionContext(ctx, lead, slugs); d != "" {
+		parts = append(parts, d)
 	}
-	return prompt
+	if c != "" {
+		parts = append(parts, c)
+	}
+	return strings.Join(append(parts, prompt), "\n\n")
 }

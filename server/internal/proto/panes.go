@@ -115,6 +115,9 @@ type WorktreePrepare struct {
 type WorktreeCheckout struct {
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
+	// InCheckouts: the checkout lies in the folder where checkouts of this repository go (WorktreePrepare.Path), not
+	// the main checkout or a folder of the user's own. Older nodes leave it out.
+	InCheckouts bool `json:"in_checkouts,omitempty"`
 }
 
 type WorktreeComposer struct {

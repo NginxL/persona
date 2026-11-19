@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the web client's pages on a phone (#1996): Dialog is a bottom sheet at phone width (its
 footer in sight, Tab kept inside, Back closes it) and still the centred card on a wide screen; icon buttons take a
-44pt touch; Settings is a list of categories with Back between them; the inbox filters keep to one row; a todo's circle is
+44pt touch; Settings is a list of categories with Back between them; the inbox filters and section bar keep to one row each; a todo's circle is
 hit without opening the row, and the row opens from the keyboard; a long-pressed message keeps its menu.
 
 Needs a running web page against the fake hub and Playwright for Python (it drives the installed Chrome):
@@ -170,6 +170,14 @@ def inbox_filters(page, tag, shots):
       const tops = new Set([...t.children].filter(c => c.getClientRects().length).map(c => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); }));
       return { rows: tops.size, docW: document.documentElement.scrollWidth, W: innerWidth }; }""")
     check(res["rows"] == 1 and res["docW"] <= res["W"], f"{tag}: the inbox filters keep to one row that scrolls sideways", res)
+    # the section bar above them (#9053): one row of choices too, its words never wrapping, with All (the reset) in full
+    res = page.evaluate("""() => { const t = document.querySelector('[role=radiogroup][aria-label="分段"]');
+      const pills = [...t.querySelectorAll('[data-bar-choice]')];
+      const tops = new Set(pills.map(c => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); }));
+      const all = t.querySelector('[data-bar-choice="all"]').getBoundingClientRect(), box = t.getBoundingClientRect();
+      return { rows: tops.size, tall: Math.max(...pills.map(c => c.getBoundingClientRect().height)), allIn: all.left >= box.left - 0.5 && all.right <= box.right + 0.5,
+        docW: document.documentElement.scrollWidth, W: innerWidth }; }""")
+    check(res["rows"] == 1 and res["tall"] <= 24 and res["allIn"] and res["docW"] <= res["W"], f"{tag}: the inbox section bar keeps to one row", res)
     shot(page, shots, f"inbox_{tag}")
     page.get_by_role("button", name="更多操作").tap()
     item = page.get_by_role("menuitem", name="全部清理")

@@ -11,6 +11,7 @@
   "workspace_resolving": "ワークスペースのパスを解決中…",
   "workspace_engine_path": "パスはマシンのエンジンが決定します。ブランチを変更すると再表示します。",
   "tray_needs_you": "要対応",
+  "next_unanswered": "次の回答待ち",
   "tray_running": "進行中",
   "tray_empty_parked": "保留中のタスクはありません",
   "tray_review": "Persona の確認待ち",

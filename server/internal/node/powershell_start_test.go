@@ -7,12 +7,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/orcart"
 	"github.com/nwverse/persona/server/internal/orcart/orcarttest"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 const powerShellTestBash = `C:\Program Files\Git\bin\bash.exe`
@@ -181,13 +184,15 @@ func TestWindowsPaneShellDecisionGitBashNames(t *testing.T) {
 	}
 }
 
-// Actual origin/main output, not branch-derived; the direct golden uses a Windows node directory and omits its prefix.
+// Actual origin/main output (plus the Agent mark PERSONA_AGENT=1 after PERSONA_HOME, #10111, and #10365's startup
+// variables in the host bash file's unset), not branch-derived; the direct golden uses a Windows node directory and
+// omits its prefix.
 const (
 	r3MainDirect       = `claude --session-id 0e000000-0000-4000-8000-0000000000aa --settings 'C:'\\'Users'\\'u'\\'settings.json' --mcp-config 'C:'\\'node dir/mcp.json' --allowedTools 'mcp__persona__report_to_supervisor,mcp__jarvis__report_to_supervisor,mcp__persona__todo_decisions,mcp__jarvis__todo_decisions,mcp__persona__todo_decision_add,mcp__jarvis__todo_decision_add,mcp__persona__todo_bind_thread,mcp__jarvis__todo_bind_thread,mcp__persona__task_plan,mcp__jarvis__task_plan,mcp__persona__task_review,mcp__jarvis__task_review'`
 	r3MainStartPath    = `C:\node dir\agent start.sh`
 	r3MainAnchor       = "session id"
 	r3MainHostBashFile = `command rm -f -- 'C:'\\'node dir'\\'agent start.sh'
-unset PERSONA_ASSISTANT JARVIS_ASSISTANT PERSONA_ASSISTANT_BIN JARVIS_ASSISTANT_BIN PERSONA_SESSION_ID JARVIS_SESSION_ID PERSONA_SPACE JARVIS_SPACE PERSONA_GUEST JARVIS_GUEST CLAUDE_CODE_AUTO_COMPACT_WINDOW ENABLE_TOOL_SEARCH CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_EFFORT CLAUDE_PID CLAUDE_PLUGIN_DATA && PERSONA_HOME='C:'\\'node dir' claude
+unset PERSONA_ASSISTANT JARVIS_ASSISTANT PERSONA_ASSISTANT_BIN JARVIS_ASSISTANT_BIN PERSONA_SESSION_ID JARVIS_SESSION_ID PERSONA_SPACE JARVIS_SPACE PERSONA_GUEST JARVIS_GUEST CLAUDE_CODE_AUTO_COMPACT_WINDOW ENABLE_TOOL_SEARCH CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_EFFORT CLAUDE_PID CLAUDE_PLUGIN_DATA DISABLE_AUTO_UPDATE DISABLE_UPDATE_PROMPT POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD && PERSONA_HOME='C:'\\'node dir' PERSONA_AGENT=1 claude
 `
 	r3MainHostBashTyped = `. 'C:'\\'node dir'\\'agent start.sh' && true 'session id'`
 	r3MainResume        = `claude --resume 0e000000-0000-4000-8000-0000000000aa --settings "C:\\Users\\u\\settings.json" --mcp-config "C:\\node dir/mcp.json" --allowedTools mcp__persona__report_to_supervisor,mcp__jarvis__report_to_supervisor,mcp__persona__todo_decisions,mcp__jarvis__todo_decisions,mcp__persona__todo_decision_add,mcp__jarvis__todo_decision_add,mcp__persona__todo_bind_thread,mcp__jarvis__todo_bind_thread,mcp__persona__task_plan,mcp__jarvis__task_plan,mcp__persona__task_review,mcp__jarvis__task_review`
@@ -264,23 +269,234 @@ func TestWindowsHostNamedPowerShellUsesHandoff(t *testing.T) {
 	}
 }
 
-func TestWindowsAdoptedPaneUsesMainBytes(t *testing.T) {
+// withWindowsAdoptedPanes makes startPaneShells read an adopted pane as the Windows build does (herdrstart_windows.go).
+func withWindowsAdoptedPanes(t *testing.T) {
+	t.Helper()
+	old := adoptedPaneShells
+	adoptedPaneShells = windowsAdoptedPaneShells
+	t.Cleanup(func() { adoptedPaneShells = old })
+}
+
+// Off Windows an adopted pane keeps its raw programs: a pwsh there gets the command typed as before (#9854 is
+// Windows only).
+func TestAdoptedPowerShellOffWindowsUsesMainBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows turns an innermost PowerShell into the handoff")
+	}
 	n := &Node{dir: `C:\node dir`}
-	direct := r3MainDirect
 	created := &host.Created{Pane: host.PaneRef{Kind: host.Herdr, ID: "w1:p1"}}
 	ctx := withAdoptedPane(context.Background(), created, []string{"bash", "pwsh"})
 	shells := n.startPaneShells(ctx, &herdrHost{}, created)
 	if !reflect.DeepEqual(shells, []string{"bash", "pwsh"}) {
 		t.Fatalf("adopted shells = %q, want main's raw stack", shells)
 	}
-	cmd := n.agentStartCommand(direct, shellQuote, shells...)
+	cmd := n.agentStartCommand(r3MainDirect, shellQuote, shells...)
 	useStartFile := n.typesStartFile(&herdrHost{}, shells...)
 	if useStartFile {
-		t.Fatal("adopted PowerShell stack moved to a start file")
+		t.Fatal("adopted pwsh stack moved to a start file off Windows")
 	}
 	if got := startLineChoice(cmd, r3MainStartPath, r3MainAnchor, powerShellTestBash, useStartFile, shells...); got != r3MainDirect {
 		t.Fatalf("typed = %q, want main %q", got, r3MainDirect)
 	}
+}
+
+func TestWindowsAdoptedPaneShells(t *testing.T) {
+	gitBash := `C:\Program Files\Git\bin\bash.exe`
+	for _, tc := range []struct {
+		name  string
+		names []string
+		want  []string
+	}{
+		{"Windows PowerShell", []string{"powershell.exe"}, []string{windowsPowerShellPane}},
+		{"PowerShell 7", []string{"pwsh.exe"}, []string{windowsPowerShellPane}},
+		{"upper case", []string{"PWSH.EXE"}, []string{windowsPowerShellPane}},
+		{"mixed case path", []string{`C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.EXE`}, []string{windowsPowerShellPane}},
+		{"bare pwsh", []string{"pwsh"}, []string{windowsPowerShellPane}},
+		{"PowerShell started from Git Bash", []string{"bash", "pwsh"}, []string{windowsPowerShellPane}},
+		{"Git Bash", []string{"bash"}, []string{"bash"}},
+		{"Git Bash path", []string{gitBash}, []string{gitBash}},
+		{"Git Bash started from PowerShell", []string{"pwsh", "bash"}, []string{"pwsh", "bash"}},
+		{"Git Bash started from Windows PowerShell", []string{"POWERSHELL.EXE", gitBash}, []string{"POWERSHELL.EXE", gitBash}},
+		{"cmd stays as it is", []string{"cmd.exe"}, []string{"cmd.exe"}},
+		{"nothing", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowsAdoptedPaneShells(tc.names); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("shells = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Run Agent Here, a stopped session's own terminal and a switch adopt a pane. On Windows, one whose innermost program
+// is PowerShell or pwsh now takes the handoff a new PowerShell pane takes: the POSIX command, with its PERSONA_HOME /
+// unset prefix, in the start file, and only the & line typed (#9854). The list the shell-prompt checks read is
+// still the raw programs.
+func TestWindowsAdoptedPowerShellPaneUsesHandoff(t *testing.T) {
+	withWindowsAdoptedPanes(t)
+	withPowerShellTestBash(t)
+	newPane := windowsPaneShellDecision(true, "", []string{"powershell.exe"}, "")
+	for _, front := range [][]string{
+		{"powershell.exe"},
+		{"pwsh.exe"},
+		{"PWSH.EXE"},
+		{`C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.EXE`},
+		{"pwsh"},
+		{"bash", "pwsh"},
+	} {
+		t.Run(strings.Join(front, ">"), func(t *testing.T) {
+			n, f, _ := herdrNode(t)
+			n.dir = t.TempDir()
+			launch := n.hosts.Get(host.Herdr).(*herdrHost)
+			created := &host.Created{Pane: host.PaneRef{Kind: host.Herdr, ID: "w1:p2"}, SlotID: "w1:t2", SpaceID: "w1"}
+			ctx := withAdoptedPane(context.Background(), created, front)
+			shells := n.startPaneShells(ctx, launch, created)
+			if !reflect.DeepEqual(shells, newPane) {
+				t.Fatalf("adopted shells = %q, want a new PowerShell pane's %q", shells, newPane)
+			}
+			if got := paneShells(ctx, created); !reflect.DeepEqual(got, front) {
+				t.Fatalf("the adopted list became %q, want the raw %q", got, front)
+			}
+			cmd := n.agentStartCommand(withHerdrAgent(typedHerdrAgent(launch, "claude", shells...), "claude --session-id "+startID), shellQuote, shells...)
+			if want := n.agentStartCommand("claude --session-id "+startID, shellQuote, newPane...); cmd != want {
+				t.Fatalf("start file command = %q, want a new PowerShell pane's %q", cmd, want)
+			}
+			if !strings.HasPrefix(cmd, "unset ") || !strings.Contains(cmd, "PERSONA_HOME="+shellQuote(n.dir)+" claude ") {
+				t.Fatalf("start file lost the PERSONA_HOME / unset prefix: %q", cmd)
+			}
+			typed, err := n.typeStart(ctx, launch, created, "w1", startID, cmd, shells...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer typed.done()
+			if want := powerShellStartLine(powerShellTestBash, typed.path, startID); typed.line != want {
+				t.Fatalf("typed = %q, want %q", typed.line, want)
+			}
+			b, err := os.ReadFile(typed.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(b) != startScript(typed.path, cmd) {
+				t.Fatalf("start file = %q", b)
+			}
+			var inputs []string
+			for _, c := range f.calls() {
+				if c.Method == "pane.send_input" {
+					inputs = append(inputs, str(c.Params["text"]))
+				}
+			}
+			if len(inputs) != 1 || inputs[0] != typed.line {
+				t.Fatalf("pane input = %q, want only %q", inputs, typed.line)
+			}
+		})
+	}
+}
+
+// An adopted Git Bash pane, Git Bash started from PowerShell included, keeps main's bytes on Windows.
+func TestWindowsAdoptedBashPaneUsesMainBytes(t *testing.T) {
+	withWindowsAdoptedPanes(t)
+	withPowerShellTestBash(t)
+	for _, tc := range []struct {
+		name  string
+		front []string
+		file  bool // main typed `. <start file>`; otherwise the command itself
+	}{
+		{"Git Bash", []string{"bash"}, true},
+		{"login Git Bash", []string{"-bash"}, true},
+		{"Git Bash started from pwsh", []string{"pwsh", "bash"}, false},
+		{"Git Bash started from Windows PowerShell", []string{"PowerShell.EXE", "bash"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f, _ := herdrNode(t)
+			n.dir = t.TempDir()
+			launch := n.hosts.Get(host.Herdr).(*herdrHost)
+			created := &host.Created{Pane: host.PaneRef{Kind: host.Herdr, ID: "w1:p2"}, SlotID: "w1:t2", SpaceID: "w1"}
+			ctx := withAdoptedPane(context.Background(), created, tc.front)
+			shells := n.startPaneShells(ctx, launch, created)
+			if !reflect.DeepEqual(shells, tc.front) {
+				t.Fatalf("adopted shells = %q, want main's raw stack %q", shells, tc.front)
+			}
+			cmd := n.agentStartCommand("claude --session-id "+startID, shellQuote, shells...)
+			typed, err := n.typeStart(ctx, launch, created, "w1", startID, cmd, shells...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer typed.done()
+			want := cmd
+			if tc.file {
+				want = ". " + shellQuote(typed.path) + " && true " + shellQuote(startID)
+			}
+			if typed.line != want || (typed.path != "") != tc.file {
+				t.Fatalf("typed = %q (start file %q), want main %q", typed.line, typed.path, want)
+			}
+			if strings.HasPrefix(typed.line, "& ") {
+				t.Fatalf("a Git Bash pane got the PowerShell line: %q", typed.line)
+			}
+			for _, c := range f.calls() {
+				if c.Method == "pane.send_input" && strings.Contains(str(c.Params["text"]), powerShellTestBash) {
+					t.Fatalf("a Git Bash pane was typed the PowerShell handoff: %v", c)
+				}
+			}
+		})
+	}
+}
+
+// Run Agent Here end to end in a pane whose front program is pwsh, the one PowerShell name the shell-prompt check
+// knows: the check takes the pane as it did, and the start types the handoff instead of the POSIX command.
+func TestWindowsRunAgentHereInPowerShellUsesHandoff(t *testing.T) {
+	withWindowsAdoptedPanes(t)
+	withPowerShellTestBash(t)
+	n, f, home := actionNode(t)
+	f.reply("pane.process_info", map[string]any{"process_info": map[string]any{"foreground_processes": []any{
+		map[string]any{"pid": 1, "name": "pwsh", "argv0": "pwsh"}}}})
+	f.reply("agent.prompt", map[string]any{})
+	var mu sync.Mutex
+	var files []string
+	f.after(func(c herdrCall) {
+		if c.Method != "pane.send_input" {
+			return
+		}
+		// Whatever was typed, the agent comes up, so a start that typed the wrong line fails below instead of
+		// waiting for an agent that never comes.
+		left, _ := filepath.Glob(filepath.Join(n.dir, startScriptPrefix+"*"))
+		mu.Lock()
+		for _, path := range left {
+			if b, err := os.ReadFile(path); err == nil {
+				files = append(files, string(b))
+			}
+		}
+		mu.Unlock()
+		f.reply("session.snapshot", snapshot(nil, nil, []any{
+			agentOf(cursorAgent, "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, cursorAgent),
+		}, nil))
+	})
+	s, err := n.runAgentInPane(context.Background(), "w1:p2", cursorAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Agent != cursorAgent || s.PaneID != "w1:p2" {
+		t.Fatalf("session: %+v", s)
+	}
+	var inputs []string
+	for _, c := range f.calls() {
+		if c.Method == "pane.send_input" {
+			inputs = append(inputs, str(c.Params["text"]))
+		}
+	}
+	prefix := "& " + powerShellQuote(powerShellTestBash) + " -ic '. $''"
+	if len(inputs) != 1 || !strings.HasPrefix(inputs[0], prefix) || strings.Contains(inputs[0], "cursor-agent") {
+		t.Fatalf("pane input = %q, want only the PowerShell handoff", inputs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(files) != 1 || !strings.Contains(files[0], "PERSONA_HOME="+shellQuote(n.dir)+" cursor-agent") ||
+		strings.Contains(files[0], "HERDR_AGENT=") {
+		t.Fatalf("start files = %q, want the POSIX cursor-agent command a new PowerShell pane gets", files)
+	}
+	if left, _ := filepath.Glob(filepath.Join(n.dir, startScriptPrefix+"*")); len(left) != 0 {
+		t.Fatalf("start files left behind: %v", left)
+	}
+	closesNothing(t, f)
 }
 
 func TestWindowsHerdrRestoreUsesMainBytes(t *testing.T) {

@@ -1,5 +1,5 @@
 // What the agent is waiting on (questions, plans, permissions, terminal dialogs, MCP forms and links), as Beautiful UI's Approval Card.
-import { createContext, Fragment, Suspense, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Component, createContext, Fragment, Suspense, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { answerCard, usePendingLine } from "../../lib/card-answer";
 import { cardKeyAction, focusComposer } from "../../lib/card-keys";
 import { lazyPage } from "../../lib/lazy-page";
@@ -13,6 +13,7 @@ import type { Interaction } from "../../lib/types";
 import { defaults, elicitationDraft, elicitationResolution, elicitationSource, fields, numberInputMode, saveElicitationDraft, urlHost, urlTarget, validate, type ElicitationAction, type Field, type Values } from "../../lib/elicitation";
 import { answerLines } from "../../lib/answered";
 import { answerBlock, interactionCanAnswer, sessionTitle } from "../../lib/format";
+import { modeTitle, PERMISSION_MODES } from "../../lib/session-actions";
 import { interactionAsk } from "../../lib/inbox";
 import { plainMarkdown } from "../../lib/plain-markdown";
 import { cardToolName, mcpServerLabel } from "../../lib/turns";
@@ -21,12 +22,9 @@ import { RecommendedTag } from "../../ui/RecommendedTag";
 import { dropAnswered, getSession, useStore, type AnsweredCard as Answered } from "../../lib/store";
 import { useChildRow } from "../../lib/use-child-sessions";
 import { isSide } from "../../lib/side-fold";
-import { Button, Collapse, cx, EASE, Kbd, Menu, SECRET_INPUT, toast, useMenu } from "../../ui/atoms";
+import { Button, Collapse, cx, EASE, Kbd, Loading, Menu, SECRET_INPUT, toast, useMenu } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
-import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
-import { usePermissionText } from "./permission-text";
-import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { ANSWERED_LIST_MAX, cardFold, cardLine, nextWaiting, PLAN_MAX, showsAnswered } from "./dock";
 import { useCardCut } from "./card-cut";
 import { answeredShown, answeredTally, keptAnswers, latestAnswer, nextRun, runPosition, tallyDetail, answeredHideAt } from "./card-stack";
@@ -34,10 +32,12 @@ import { ScrollFold } from "./fold-scroll";
 import { cardState } from "../../lib/card-focus";
 import { href, onLinkClick, type Route } from "../../lib/router";
 import { t } from "../../i18n";
-import { alwaysScope, offersAlways } from "../../lib/always-scope";
 import { StatusMark } from "../../ui/StatusMark";
 import { useVoiceAsking } from "../../lib/voice/calls";
 import { composing } from "../../lib/send-history";
+import { ErrorNotice } from "../../ui/ErrorNotice";
+import { reportBoundary } from "../../lib/error-reports";
+import { isChunkError } from "../PageBoundary";
 import { useChatCardTapGuard, useChatTapGuardView } from "./card-tap-guard";
 
 /** Answers a card: the chat's cards and the overview's quick answers (Home, #4090) send through this. */
@@ -476,16 +476,17 @@ function PlanCard({ ix }: { ix: Interaction }) {
   const [rejecting, setRejecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const menu = useMenu();
+  const planThen = ix.plan_then && ix.plan_then !== "plan" && PERMISSION_MODES.some((m) => m.id === ix.plan_then) ? ix.plan_then : undefined;
   const go = async (body: Record<string, unknown>) => {
     setBusy(true);
     await resolve(ix, body);
     setBusy(false);
   };
-  // Enter approves with edits (the Approve button); rejecting has its own field, whose Enter is the field's
+  // Enter approves in the recorded following mode, else with edits (the Approve button); rejecting's Enter is its field's
   const keys = useCardKeys({
     enter: () => {
       if (busy || rejecting) return false;
-      void go({ approve: true, mode: "acceptEdits" });
+      void go({ approve: true, mode: planThen ?? "acceptEdits" });
     },
   });
   const tapGuard = useChatCardTapGuard(ix);
@@ -521,14 +522,15 @@ function PlanCard({ ix }: { ix: Interaction }) {
               {t("chat-interactions.request_changes")}
             </Button>
             <span className="flex items-center">
-              <Button tone="primary" busy={busy} className="rounded-r-none" onClick={() => go({ approve: true, mode: "acceptEdits" })}>
+              {planThen && <span className="mr-2 text-meta font-medium whitespace-nowrap text-ink-2">{modeTitle(planThen)}</span>}
+              <Button tone="primary" busy={busy} className={planThen ? undefined : "rounded-r-none"} onClick={() => go({ approve: true, mode: planThen ?? "acceptEdits" })}>
                 {t("chat-interactions.approve")}
                 {keys.focused && <Kbd>Enter</Kbd>}
               </Button>
-              <button type="button" aria-label={t("chat-interactions.approve_mode")} disabled={busy} onClick={menu.open} className="touch-hit flex h-8 w-7 items-center justify-center rounded-r-control border-l border-white/15 bg-ink text-surface enabled:hover:opacity-90 disabled:opacity-40">
+              {!planThen && <button type="button" aria-label={t("chat-interactions.approve_mode")} disabled={busy} onClick={menu.open} className="touch-hit flex h-8 w-7 items-center justify-center rounded-r-control border-l border-white/15 bg-ink text-surface enabled:hover:opacity-90 disabled:opacity-40">
                 <Icon name="chevron" size={12} stroke={2.4} />
-              </button>
-              {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" side="top" width={196} items={MODES.map((m) => ({ key: m.key, label: m.label, onSelect: () => go({ approve: true, mode: m.key }) }))} />}
+              </button>}
+              {!planThen && menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" side="top" width={196} items={MODES.map((m) => ({ key: m.key, label: m.label, onSelect: () => go({ approve: true, mode: m.key }) }))} />}
             </span>
           </>
         )
@@ -541,66 +543,67 @@ function PlanCard({ ix }: { ix: Interaction }) {
   );
 }
 
-function PermissionCard({ ix }: { ix: Interaction }) {
-  const [busy, setBusy] = useState(false);
-  const editable = usePermissionText(ix);
-  const go = async (body: Record<string, unknown>) => {
-    setBusy(true);
-    await resolve(ix, body);
-    setBusy(false);
-  };
-  // Enter allows (the Allow button). Deny is never a key away: it stays an explicit press of its button — or Enter
-  // while that button is focused, which is the button's own activation, not the card's main action
-  const keys = useCardKeys({
-    enter: () => {
-      if (busy || editable.composing || !editable.canAllow) return false;
-      void go(editable.allow());
-    },
-  });
-  const tapGuard = useChatCardTapGuard(ix);
+// The complete tool-approval card loads with the first permission interaction, keeping its optional clarification UI
+// and permission editor out of the first screen. Its slot stays identifiable while the chunk loads or cannot load.
+const PermissionCard = lazyPage(() => import("./PermissionCard").then((m) => m.PermissionCard));
+
+export function PermissionCardLoading({ ix }: { ix: Interaction }) {
   return (
-    <Card
-      kicker={t("chat-interactions.permission_kicker")}
-      title={t("chat-interactions.permission_title", { tool: cardToolName(ix) })}
-      cardKeys={keys}
-      tapGuard={tapGuard}
-      onDismiss={() => go({ dismiss: true })}
-      busy={busy}
-      footer={
-        <>
-          <Button tone="quiet" disabled={busy} onClick={() => go(editable.deny())}>
-            {t("chat-interactions.deny")}
-          </Button>
-          <span className="flex gap-1.5">
-            {/* Only where an Always is kept (offersAlways): never on the manager's own cards. */}
-            {offersAlways(ix) && !editable.changed && (
-              <Button tone="secondary" disabled={busy} onClick={() => go({ allow: true, always: true })}>
-                {t("chat-interactions.always_allow")}
-              </Button>
-            )}
-            <Button tone="primary" busy={busy} disabled={!editable.canAllow} onClick={() => go(editable.allow())}>
-              {t("chat-interactions.allow")}
-              {keys.focused && <Kbd>Enter</Kbd>}
-            </Button>
-          </span>
-        </>
-      }
-    >
-      <PermissionBody ix={ix} />
-      {editable.editor}
-      {alwaysScope(ix) && <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{alwaysScope(ix)}</p>}
+    <Card kicker={t("chat-interactions.permission_kicker")} title={t("chat-interactions.permission_title", { tool: cardToolName(ix) })} footer={null}>
+      <Loading />
     </Card>
   );
+}
+
+/** A repeated cached import failure gets one full reload per card and tab session. The marker survives that reload;
+ *  if the chunk is still unavailable, the card keeps its local Retry instead of entering a reload loop. */
+function reloadPermissionChunk(id: string) {
+  const key = `permission-chunk-reload:${id}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+  } catch {
+    return;
+  }
+  location.reload();
+}
+
+/** One failed permission chunk must not blank its card or take down the chat. Retry first remounts lazyPage; browsers
+ *  that cached the failed native import reload once on its repeated failure. Another card starts without this failure. */
+export class PermissionCardFrame extends Component<{ ix: Interaction; children?: ReactNode }, { error: unknown }> {
+  state = { error: null as unknown };
+  failures = 0;
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    const chunk = isChunkError(error);
+    reportBoundary(error, "permission_card", chunk, info.componentStack);
+    if (chunk && this.failures++) reloadPermissionChunk(this.props.ix.id);
+  }
+
+  render() {
+    const { ix, children } = this.props;
+    if (this.state.error) {
+      return (
+        <Card kicker={t("chat-interactions.permission_kicker")} title={t("chat-interactions.permission_title", { tool: cardToolName(ix) })}
+          footer={<Button size="sm" onClick={() => this.setState({ error: null })}>{t("app.retry")}</Button>}>
+          <ErrorNotice role="alert" className="border-0 bg-transparent p-0" message={t("chat-interactions.permission_load_failed")}
+            description={t("chat-interactions.permission_load_hint")} />
+        </Card>
+      );
+    }
+    return <Suspense fallback={<PermissionCardLoading ix={ix} />}>{children ?? <PermissionCard ix={ix} />}</Suspense>;
+  }
 }
 
 /** A terminal dialog's words under its question (#6638): at most six lines in view, the rest a scroll inside them. */
 const DETAIL_FOLD = "mb-2 max-h-[6lh] text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2";
 
-const CODE_BOX = "max-h-48 overflow-auto rounded-[8px] bg-inset px-2.5 py-2 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-ink-2 shadow-hairline";
+export const CODE_BOX = "max-h-48 overflow-auto rounded-[8px] bg-inset px-2.5 py-2 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-ink-2 shadow-hairline";
 
-/** What the tool will do, field by field (Android PermissionRequestSummary): the agent's sentence, then the command,
- *  file or address under a small label, an edit's changes; a tool it does not know shows the hub's summary. The raw
- *  input stays one click away, open from the start only when nothing else says what the tool does. */
 const FROM_MAX = 48;
 
 /** "From subagent · <type>" for a subagent's card, its type on one line and cut to FROM_MAX; for a child session's card
@@ -613,51 +616,6 @@ export function permissionFrom(ix: Pick<Interaction, "agent_id" | "agent_type" |
   const agent = name.length > FROM_MAX ? `${name.slice(0, FROM_MAX - 1)}…` : name;
   if (ix.folded_under && isSide(ix)) return t("lib-elicitation.from_side", { agent });
   return ix.folded_under && ix.folded_as === "worker" ? t("lib-elicitation.from_worker", { agent }) : t("lib-elicitation.from_subagent", { agent });
-}
-
-function PermissionBody({ ix }: { ix: Interaction }) {
-  const input = ix.tool_input ?? {};
-  const hasInput = Object.keys(input).length > 0;
-  const detail = permissionDetail(ix.tool_name, input);
-  const diffs = detail && DIFF_TOOLS.has(ix.tool_name ?? "") ? editDiffs({ id: ix.id, seq: 0, role: "assistant", kind: "tool_use", tool_name: ix.tool_name, tool_input: input }) : null;
-  const reason = permissionReason(ix.agent, ix.reason);
-  const extra = detail ? summaryExtra(ix.summary, detail.fields) : "";
-  const extraShown = extra && extra !== detail?.note && extra !== reason && !detail?.fields.some((f) => f.value === extra);
-  const lead = detail ? undefined : ix.summary?.trim();
-  const [showInput, setShowInput] = useState(!detail && !lead);
-  // a subagent's call (Claude Code sends its parent's session with agent_id and agent_type): say which one asks
-  // (#4376); the main session's own cards (agent_type alone, as `claude --agent x` sets it, or "main") say nothing
-  const from = permissionFrom(ix);
-  return (
-    <div className="flex flex-col gap-2">
-      {from && <p data-permission-from title={from} className="truncate text-[12px] leading-snug text-ink-3">{from}</p>}
-      {reason && <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink-2">{reason}</p>}
-      {detail?.note && <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-ink">{detail.note}</p>}
-      {detail?.fields.map((f) => (
-        <div key={f.label}>
-          <div className="mb-1 text-[11px] font-medium text-ink-3">{t(`chat-interactions.field_${f.label}`)}</div>
-          <pre className={CODE_BOX}>{f.value}</pre>
-        </div>
-      ))}
-      {diffs && diffs.length > 0 && (
-        <div>
-          <div className="mb-1 text-[11px] font-medium text-ink-3">{t(ix.tool_name === "Write" ? "chat-interactions.field_content" : "chat-interactions.field_changes")}</div>
-          <div className="flex max-h-48 flex-col gap-2 overflow-auto">
-            <DiffBlocks diffs={diffs} />
-          </div>
-        </div>
-      )}
-      {extraShown && <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2">{extra}</p>}
-      {lead && <pre className={CODE_BOX}>{lead}</pre>}
-      {hasInput && (detail || lead) && (
-        <button type="button" aria-expanded={showInput} onClick={() => setShowInput((v) => !v)} className="touch-hit flex items-center gap-1 self-start text-[11.5px] whitespace-nowrap text-ink-3 transition-colors hover:text-ink">
-          <Icon name="chevron" size={11} stroke={2.4} style={{ transform: showInput ? "none" : "rotate(-90deg)", transition: "transform 150ms" }} />
-          {t(showInput ? "chat-interactions.hide_input" : "chat-interactions.show_input")}
-        </button>
-      )}
-      {showInput && <pre className={CODE_BOX}>{JSON.stringify(input, null, 2)}</pre>}
-    </div>
-  );
 }
 
 /**
@@ -1424,7 +1382,7 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
     : ix.kind === "plan" ? <PlanCard ix={ix} />
     : isSecretRun(ix) ? <SecretRunCard key={ix.id} ix={ix} />
     : isSecretHandoff(ix) ? <SecretHandoffCard key={ix.id} ix={ix} />
-    : ix.kind === "permission" ? <PermissionCard ix={ix} />
+    : ix.kind === "permission" ? <PermissionCardFrame key={ix.id} ix={ix} />
     : ix.kind === "elicitation" ? <ElicitationCard ix={ix} /> : <ScreenCard ix={ix} />;
   const asked = useVoiceAsking(ix);
   // a permission card says it in its body (PermissionBody); a secret run's or hand-off's card has none, so it says it here

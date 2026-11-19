@@ -71,11 +71,18 @@ type devicesState struct {
 	settleDue   map[string]bool
 	saidLost    map[string]bool
 	warnedOld   map[string]bool
-	// up is closed while the manager is connected and has reported; warmUntil: until then calls wait for it (a hub
-	// just restarted, the machines shown as before).
-	up        chan struct{}
-	upOpen    bool
+	// up is closed while its manager is connected and has reported its machines, by manager (upChanLocked makes one):
+	// what a machine's reachability, a call to its node and its manager's devices.list "complete" read. The state is
+	// each manager's own, never the carrier's for everyone: one flag made the carrier's restart show the other
+	// managers' machines unreachable and their lists incomplete, and let a call to another manager's machine fail at
+	// once while the hub's start showed it online (#6795). warmUntil: a hub just restarted, the machines shown as
+	// before; until then a call waits for a manager that has not reported since the start (reportedSince).
+	up        map[string]chan struct{}
+	upOpen    map[string]bool
 	warmUntil time.Time
+	// conns counts owner's connections (devicesConnected): the end of one forgets its up state only when no newer one
+	// came meanwhile (upGone).
+	conns map[string]uint64
 	// fresh: the manager's connection is new (by manager); at its first report the hub asks it to watch what the
 	// apps watch.
 	fresh map[string]bool

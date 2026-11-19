@@ -20,6 +20,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -35,6 +36,8 @@ import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ComposerOperationException
 import persona.core.contracts.api.DraftUploadState
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
+import persona.core.designsystem.icons.dismissKeyboard
 import persona.core.designsystem.icons.PhIcons
 import persona.feature.chat.media.MediaShare
 import java.io.File
@@ -96,6 +99,7 @@ fun ChatComposer(
      */
     blockedLabel: String? = null,
     onBlocked: () -> Unit = {},
+    useShellSurface: Boolean = false,
     /**
      * The model pill (#5055, Glass): at the right of the toolbar row, before the mic and Send, while the toolbar shows; it
      * gets how much room the composer has ([ModelPillWidth], the web's container rules). Null: none.
@@ -103,6 +107,7 @@ fun ChatComposer(
     modelPill: (@Composable (ModelPillWidth) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val compactShell = useShellSurface && PersonaTheme.style == AppStyle.Glass
     val adaptiveProbePage = "chat:${session.path}"
     val resources = LocalResources.current
     val photosOnly = stringResource(R.string.chat_composer_photos_only)
@@ -118,6 +123,7 @@ fun ChatComposer(
     var confirmClear by remember { mutableStateOf(false) }
     var cameraDenied by remember { mutableStateOf(false) }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     // A photo in the draft being marked up (iOS editingIndex); [editOpening] while it is read for the editor.
     var editing by remember { mutableStateOf<ComposerPhotoEdit?>(null) }
@@ -408,11 +414,12 @@ fun ChatComposer(
         }
     }
 
-    // The field grows with the draft through six lines, then scrolls inside and offers Expand.
-    // The text keeps clear of the button only while it shows.
+    // The field grows through six lines. On a compact Agent chat the editor is also a shortcut while typing or for a
+    // multiline draft, as on the iPhone. The text keeps clear of the button only while it shows.
     val growLines = ComposerGrowLines
     var lineCount by remember { mutableIntStateOf(1) }
-    val offersExpand = enabled && composerOffersExpand(lineCount, growLines)
+    val offersExpand = enabled && (composerOffersExpand(lineCount, growLines) ||
+        compactShell && (state.focused || '\n' in state.value.text))
     LaunchedEffect(enabled) { if (!enabled) expandedEditor = false }
     val canSend = enabled && state.ready && !sending
     val homeAssistant = LocalHomeChrome.current?.let { it.items.firstOrNull()?.key == it.selected } == true
@@ -426,19 +433,40 @@ fun ChatComposer(
     val density = androidx.compose.ui.platform.LocalDensity.current
     var composerDp by remember { mutableFloatStateOf(0f) }
     ComposerFrame(
-        modifier = if (modelPill != null) Modifier.onSizeChanged { composerDp = with(density) { it.width.toDp().value } } else Modifier,
+        modifier = if (!compactShell && modelPill != null) Modifier.onSizeChanged { composerDp = with(density) { it.width.toDp().value } } else Modifier,
         // Blank space around the field (its padding, beside the buttons) types too: one tap, not a hunt for the line.
         onBlankTap = { if (enabled) { focusRequester.requestFocus(); keyboard?.show() } },
         expanded = expanded,
+        useShellSurface = useShellSurface,
         leading = {
-            JIconButton(PhIcons.Plus, stringResource(R.string.chat_composer_add), { menu = true }, enabled = !sending && enabled)
+            if (!compactShell || enabled)
+                JIconButton(PhIcons.Plus, stringResource(R.string.chat_composer_add), { menu = true }, enabled = !sending && enabled)
+            if (compactShell && state.focused) {
+                JIconButton(PersonaIcons.dismissKeyboard, stringResource(R.string.chat_composer_hide_keyboard), {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                }, raised = false)
+            }
             if (expanded) {
-                if (mentions != null) JIconButton(PhIcons.At, stringResource(R.string.chat_mention), ::startMention, enabled = enabled)
+                // The + sheet opens the same mention picker. Keep the direct entry while the + sheet is disabled by sending.
+                if (mentions != null && (!compactShell || sending))
+                    JIconButton(PhIcons.At, stringResource(R.string.chat_mention), ::startMention, enabled = enabled)
                 leading?.invoke(this)
             }
         },
         trailing = {
-            if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
+            if (expanded && compactShell) {
+                if (enabled && modelPill != null) {
+                    // A model pill that cannot fit its touch target would overlap a neighbor.
+                    BoxWithConstraints(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        when {
+                            maxWidth >= Tokens.Size.box80 -> modelPill(ModelPillWidth.AgentComposer)
+                            maxWidth >= Tokens.MinTouch.android -> modelPill(ModelPillWidth.Compact)
+                            else -> Unit
+                        }
+                    }
+                } else Spacer(Modifier.weight(1f))
+            } else if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
             // The mic stays (iOS ShellComposerBar): more can be dictated after what is typed. Send beside it once there is
             // something to send, else a stop while the agent works; nothing else while the box is empty. On Glass the button
             // changing grows and shrinks as iOS's does (ComposerActionSlot, #4210 T3).
@@ -446,9 +474,10 @@ fun ChatComposer(
             if (blockedLabel != null && enabled) BlockedSendButton(blockedLabel, onBlocked)
             else ComposerActionSlot(
                 when {
-                    hasContent -> ComposerAction(SendKind.Send, enabled = canSend, loading = sending)
-                    working && canInterrupt -> ComposerAction(SendKind.Stop, enabled = !sending && !interruptPending && service != null)
-                    dictate == null -> ComposerAction(SendKind.Send, enabled = false, loading = sending)
+                    hasContent && (!compactShell || enabled) -> ComposerAction(SendKind.Send, enabled = canSend, loading = sending)
+                    working && canInterrupt && (!compactShell || enabled) ->
+                        ComposerAction(SendKind.Stop, enabled = !sending && !interruptPending && service != null)
+                    dictate == null && (!compactShell || enabled && sending) -> ComposerAction(SendKind.Send, enabled = false, loading = sending)
                     else -> null
                 },
                 // A lambda, not `::send`: references to a local function compare equal whatever they capture, so the slot was
@@ -511,7 +540,8 @@ fun ChatComposer(
             decorationBox = { field ->
                 Box {
                     if (state.value.text.isEmpty()) Text(if (working && enabled && !homeAssistant) stringResource(R.string.chat_composer_placeholder_working) else composerPlaceholder,
-                        style = PersonaTheme.type.body, color = PersonaTheme.palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        style = PersonaTheme.type.body, color = PersonaTheme.palette.ink3, maxLines = if (compactShell) 1 else 2,
+                        overflow = TextOverflow.Ellipsis)
                     field()
                 }
             })

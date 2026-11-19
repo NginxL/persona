@@ -92,6 +92,9 @@ private func isolatedWebView(scripts: Bool, network: Bool, coordinator: Isolated
     config.dataDetectorTypes = []
     #endif
     let web = WKWebView(frame: .zero, configuration: config)
+    #if os(iOS)
+    CallMediaGuard.shared.register(web) // a file's media stays still while a system call is live
+    #endif
     web.navigationDelegate = coordinator
     web.uiDelegate = coordinator
     return web

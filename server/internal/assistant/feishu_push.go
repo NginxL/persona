@@ -34,6 +34,29 @@ func (s *Service) feishuPushKeyed(ctx context.Context, machine, session, title, 
 // feishuPushTold is feishuPushKeyed telling r whether the push goes to the bot at all and, when it does, whether its
 // first card landed (notify_user's answer, channels_copies.go).
 func (s *Service) feishuPushTold(ctx context.Context, machine, session, title, body, key string, r *copyReport) error {
+	return s.feishuPushToldTodo(ctx, machine, session, title, body, key, r, nil)
+}
+
+// feishuTodoReminder sends a reminder in its own bounded background context, as feishuPush does for notify_user.
+func (s *Service) feishuTodoReminder(machine, session, title, body string, todo Todo) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = s.feishuTodoPush(ctx, machine, session, title, body, todo)
+}
+
+// feishuTodoPush is a to-do reminder's Feishu copy. Its body has the complete stored notes (answerCards still applies
+// the card budget), its button opens that to-do, and a reply carries its id back into the same main conversation.
+func (s *Service) feishuTodoPush(ctx context.Context, machine, session, title, body string, todo Todo) error {
+	return s.feishuPushToldTodo(ctx, machine, session, title, body, "", nil, &todo)
+}
+
+// feishuPushToldTodo is feishuPushTold, with a to-do only on the reminder path. Ordinary notify_user passes nil and
+// keeps its conversation link, context-free reply routing and body exactly as before.
+func (s *Service) feishuPushToldTodo(ctx context.Context, machine, session, title, body, key string, r *copyReport, todo *Todo) error {
+	private := todo != nil && s.todoInHealth(ctx, *todo)
+	if private {
+		title, body = healthNotice(s.botLang(ctx))
+	}
 	st, err := s.feishuStatus(ctx)
 	ready := err == nil && st.Ready
 	s.workbenchOn(st.Features, ready) // as feishuFeatures
@@ -60,7 +83,12 @@ func (s *Service) feishuPushTold(ctx context.Context, machine, session, title, b
 			ac.card.Config = head.Config
 		}
 		if i == len(cards)-1 && session != "" {
-			ac.card.Buttons(s.openButton(ctx, machine, session))
+			if todo != nil {
+				web := todoLink(strings.TrimRight(st.PublicURL, "/"), todo.ID)
+				ac.card.Buttons(s.openLinkButton(ctx, web))
+			} else {
+				ac.card.Buttons(s.openButton(ctx, machine, session))
+			}
 		}
 	}
 	if s.divertAnswer(ctx, "push", cards) { // a notifications companion takes it (feishu_companions.go)
@@ -93,7 +121,11 @@ func (s *Service) feishuPushTold(ctx context.Context, machine, session, title, b
 			r.went(channel.Feishu, nil)
 		}
 		if session != "" {
-			s.rememberBotThread(mid, botTarget{Kind: targetPersona, MachineID: machine, SessionID: session}, title)
+			target := botTarget{Kind: targetPersona, MachineID: machine, SessionID: session}
+			if todo != nil && !private {
+				target.TodoID = todo.ID
+			}
+			s.rememberBotThread(mid, target, title)
 		}
 	}
 	if len(missing) > 0 && (key == "" || again == nil) { // one sent again says nothing of the pieces it will send
@@ -140,7 +172,15 @@ func (s *Service) feishuMirror(ctx context.Context, machine, session string) {
 	label := i18n.T(l, "assistant-feishu_cards.main_chat")
 	if !main {
 		label = i18n.T(l, "assistant-feishu_cards.scheduled_task", i18n.Args{"task": task})
-		if run := s.briefClaim(session, asked, sess.TurnError != "" || cutOff(answer)); run != nil { // a routine with facts: one card Persona lays out (briefing.go)
+		cut := sess.TurnError != "" || cutOff(answer)
+		if s.briefFailure(session, asked, cut) {
+			return // watchScheduledRun sends the persisted one-per-occurrence facts fallback instead
+		}
+		run, claimed := s.briefClaim(session, asked, turn, cut)
+		if claimed {
+			return // the same retained turn already owns a briefing card, including its pending retries
+		}
+		if run != nil { // a routine with facts: fixed cards Persona lays out (briefing.go)
 			s.briefMirror(ctx, machine, session, label, run, answer, turn)
 			return
 		}
@@ -178,16 +218,21 @@ type mirrorSend struct {
 
 // mirrorStillDue: a retry of m may go now: the switch its conversation needs is on, its notify_user did not go to Feishu
 // meanwhile, and its turn is still the conversation's last (an old morning brief must not land under a newer answer).
-func (s *Service) mirrorStillDue(ctx context.Context, m *mirrorSend) bool {
-	f, ready := s.feishuFeatures(ctx)
+func (s *Service) mirrorStillDue(ctx context.Context, m *mirrorSend) (bool, error) {
+	st, err := s.feishuStatus(ctx)
+	ready, f := err == nil && st.Ready, st.Features
+	s.workbenchOn(f, ready)
+	if err != nil && !answered(err) {
+		return false, err // unknown readiness is temporary, not evidence that the owner switched the channel off
+	}
 	switch {
 	case !ready, m.main && !f.Sync, !m.main && !f.Pushes:
-		return false
+		return false, nil
 	case f.Pushes && s.pushedLately(channel.Feishu, m.target.MachineID, m.target.SessionID):
-		return false
+		return false, nil
 	}
 	_, answer, turn, ok := s.channelLastTurnOf(ctx, m.target.MachineID, m.target.SessionID)
-	return ok && answer == m.answer && turn == m.turn
+	return ok && answer == m.answer && turn == m.turn, nil
 }
 
 // feishuMirrorRetry is how long a mirrored answer whose first card did not get out waits before it is sent again, and
@@ -226,14 +271,7 @@ func (s *Service) feishuMirrorPost(ctx context.Context, m *mirrorSend, attempt i
 					s.logf("bots: mirror: given up after %d tries", attempt+1)
 					return
 				}
-				time.AfterFunc(feishuMirrorRetry, func() {
-					rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-					defer cancel()
-					if !s.mirrorStillDue(rctx, m) {
-						return // switched off, unpaired, pushed meanwhile, or a newer turn
-					}
-					s.feishuMirrorPost(rctx, m, attempt+1)
-				})
+				s.retryFeishuMirror(m, attempt+1)
 				return
 			}
 			missing = append(missing, i+1)
@@ -247,6 +285,26 @@ func (s *Service) feishuMirrorPost(ctx context.Context, m *mirrorSend, attempt i
 	if len(missing) > 0 {
 		s.botSay(ctx, missingPiecesNote(m.l, missing))
 	}
+}
+
+// retryFeishuMirror consumes the same bounded retry slots for status transport failures as for failed posts. Unknown
+// readiness never authorizes a post; a later slot must confirm the switches and original turn again.
+func (s *Service) retryFeishuMirror(m *mirrorSend, attempt int) {
+	time.AfterFunc(feishuMirrorRetry, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		due, err := s.mirrorStillDue(ctx, m)
+		if err != nil {
+			s.logf("bots: mirror retry status: %v", err)
+			if attempt < feishuMirrorRetries {
+				s.retryFeishuMirror(m, attempt+1)
+			}
+			return
+		}
+		if due {
+			s.feishuMirrorPost(ctx, m, attempt)
+		}
+	})
 }
 
 // agentDoneClip bounds the result text in a background agent's finished card; the rest is read in the app, so the

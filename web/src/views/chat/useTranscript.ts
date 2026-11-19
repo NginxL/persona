@@ -11,6 +11,7 @@ import { discardFeedCache, discardMemoryPage, feedCacheScope, readFeedCache, rea
 import type { Item, ItemsPage } from "../../lib/types";
 import { createTextThrottle, type TextThrottle } from "../../ui/stream/throttle";
 import { unlandedLive } from "../../lib/live-text";
+import { clearLive } from "../../lib/live";
 
 const PAGE = "turns=2&fold_work=1&lazy_images=1";
 /** How often a page checks whether it is behind (a pure comparison; nothing is asked unless it is, lib/stale-page.ts). */
@@ -408,6 +409,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       gapTimer.current = undefined; // the next session's first gap starts its own
       clearInterval(staleTimer);
       document.removeEventListener("visibilitychange", checkStale);
+      clearLive(mid, sid);
       send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -279,6 +279,8 @@ func (f *fakeExt) AssistantSummary(context.Context, string, string) (string, boo
 
 func (f *fakeExt) ConnectorTool(string) bool { return false }
 
+func (f *fakeExt) ToolAccess(string) (bool, bool) { return false, false }
+
 func (f *fakeExt) AssistantLark(context.Context) (proto.AssistantLark, error) {
 	return proto.AssistantLark{}, nil
 }

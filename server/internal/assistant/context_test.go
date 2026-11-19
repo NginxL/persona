@@ -27,7 +27,7 @@ func TestSnapshotIsNowAndDoesNotWait(t *testing.T) {
 	s.live.at = time.Now().Add(-10 * time.Minute)
 
 	start := time.Now()
-	got := s.contextSnapshot(ctx, "")
+	got := s.contextSnapshot(ctx, "", false)
 	if d := time.Since(start); d > snapshotWait+time.Second {
 		t.Fatalf("waited %v for a slow source", d)
 	}

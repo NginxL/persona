@@ -124,8 +124,8 @@ type sendOpts struct {
 	// typed and the switch is dropped, so none waits for the user's next message (switchNowRefusal).
 	SwitchNow bool `json:"switch_now"`
 	// OwnerInput: the owner typed this message in their own app (the devices manager sets it from the hub's
-	// human-input marker and drops any a caller sent). A Claude outside Persona's terminals at rest takes it as the
-	// person's input through Persona's plugin when it has it (ccplugin.go); every other message keeps its inbox.
+	// human-input marker and drops any a caller sent). A Claude outside Persona's terminals takes it as the person's
+	// input through its tmux pane, or through Persona's plugin when it has no pane; every other message keeps its inbox.
 	OwnerInput bool `json:"owner_input"`
 	// readBox: a screen that cannot be read refuses (unreadBoxMessage) instead of passing for an empty box. After a
 	// command that may still sit in the box (ultracode.go), not knowing is not enough to type after it.

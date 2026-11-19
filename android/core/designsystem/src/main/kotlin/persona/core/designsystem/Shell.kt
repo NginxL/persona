@@ -1,28 +1,44 @@
 package persona.core.designsystem
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.RippleConfiguration
+import androidx.compose.material3.RippleDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.scale as scaleDraw
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
@@ -39,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -335,6 +352,7 @@ fun HubCard(
 data class NavItem(val key: String, val label: String, val icon: PhIcon, val badge: Int = 0, val badgeText: String? = null, val dot: Boolean = false)
 
 /** Primary home navigation above the page; all auxiliary destinations belong to the sidebar. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeNavigation(
     items: List<NavItem>,
@@ -388,6 +406,8 @@ fun HomeNavigation(
     }
     val segmentWidth = HomeTokens.segmentWidth * scale + if (density.fontScale > 1f) Tokens.Space.s else Tokens.Space.flush
     val waiting = items.lastOrNull()?.badge ?: 0
+    val interactiveActions = LocalGlassSource.current != null &&
+        PersonaTheme.glass == GlassLevel.Liquid && !PersonaTheme.reduceMotion
     HomeNavigationLayout(
         modifier = modifier.fillMaxWidth().statusBarsPadding().heightIn(min = HomeTokens.headerHeight),
         horizontalPadding = Tokens.Space.l,
@@ -400,7 +420,12 @@ fun HomeNavigation(
         endAccessoryOffset = Tokens.Space.s,
         compactEndAccessoryOffset = Tokens.Space.flush,
         leading = leading,
-        trailing = trailing,
+        trailing = {
+            CompositionLocalProvider(
+                LocalHomeNavigationActions provides true,
+                LocalRippleConfiguration provides if (interactiveActions) HomeNavigationGlassRipple else LocalRippleConfiguration.current,
+            ) { trailing() }
+        },
         fullSwitcher = {
             GlassHomeSwitcher(items, selected, segmentWidth, scale,
                 textWidth = HomeTokens.segmentWidth * scale, onClick = choose)
@@ -550,6 +575,21 @@ private fun HomeNavigationLayout(
     }
 }
 
+internal val LocalHomeNavigationActions = staticCompositionLocalOf { false }
+
+@OptIn(ExperimentalMaterial3Api::class)
+private val HomeNavigationGlassRipple = RippleDefaults.RippleAlpha.let {
+    RippleConfiguration(
+        rippleAlpha = RippleAlpha(
+            draggedAlpha = it.draggedAlpha,
+            focusedAlpha = it.focusedAlpha,
+            hoveredAlpha = it.hoveredAlpha,
+            pressedAlpha = 0f,
+        ),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GlassHomeSwitcher(
     items: List<NavItem>,
@@ -566,6 +606,34 @@ private fun GlassHomeSwitcher(
     val palette = PersonaTheme.palette
     val density = androidx.compose.ui.platform.LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val placed = LocalSlidingPillAnimate.current
+    val interactive = placed && LocalGlassSource.current != null &&
+        PersonaTheme.glass == GlassLevel.Liquid && !PersonaTheme.reduceMotion
+    val pressSources = if (placed) {
+        remember(items.map(NavItem::key)) { List(items.size) { MutableInteractionSource() } }
+    } else {
+        emptyList()
+    }
+    val presses = pressSources.map { it.collectIsPressedAsState() }
+    val pressTransform = if (interactive) {
+        val pressScale = remember { Animatable(1f) }
+        val motion = PersonaTheme.motion
+        LaunchedEffect(presses, motion) {
+            snapshotFlow { presses.any { it.value } }.collectLatest { pressed ->
+                pressScale.animateTo(if (pressed) HomeTokens.switcherPressScale else 1f, motion.enter())
+            }
+        }
+        // Keep Haze's backdrop coordinates fixed while the capsule grows.
+        Modifier.graphicsLayer().drawWithContent {
+            val amount = pressScale.value
+            if (amount == 1f) drawContent()
+            else scaleDraw(amount) { this@drawWithContent.drawContent() }
+        }
+    } else {
+        Modifier
+    }
+    // The measuring copies only need the capsule's size.
+    val surface = if (placed) pressTransform.homeNavigationGlassSurface(interactive) else Modifier
     Box(modifier) {
         // One pill for the whole switch. iOS `ShellSwitch` / `SwitchMotion` (`ShellComponents.swift`):
         // a tap glides it on `Theme.Motion.state`, and the label's colour and weight change inside that
@@ -575,11 +643,12 @@ private fun GlassHomeSwitcher(
             selected = items.indexOfFirst { it.key == selected },
             count = items.size,
             color = if (PersonaTheme.darkTheme) HomeTokens.segmentDark else HomeTokens.segmentLight,
-            modifier = Modifier.testTag("home-switcher").floatingSurface(CircleShape).padding(surfacePadding),
+            modifier = Modifier.testTag("home-switcher").then(surface).padding(surfacePadding),
         ) { index ->
             val item = items[index]
             val chosen = item.key == selected
             val body = PersonaTheme.type.body
+            val available = with(density) { textWidth.toPx() }
             // The chosen weight's size is the old single measurement. The other weight is only the
             // crossfade (`GlassSegmentLabel`): SwiftUI fades the glyphs when the font changes.
             fun fitted(weight: FontWeight): androidx.compose.ui.text.TextStyle {
@@ -588,7 +657,6 @@ private fun GlassHomeSwitcher(
                     fontWeight = weight,
                 )
                 val measured = textMeasurer.measure(item.label, style = labelStyle, maxLines = 1)
-                val available = with(density) { textWidth.toPx() }
                 val fit = (available / measured.size.width.coerceAtLeast(1)).coerceAtMost(1f)
                 val baseFittedSize = maxOf(Tokens.Type.Label.size.value, labelStyle.fontSize.value * fit).sp
                 val fittedSize = if (narrowText) {
@@ -606,14 +674,28 @@ private fun GlassHomeSwitcher(
                 } else baseFittedSize
                 return labelStyle.copy(fontSize = fittedSize)
             }
-            Box(Modifier.width(segmentWidth).height(HomeTokens.segmentHeight * scale)
-                .clip(CircleShape)
-                .clickable(role = Role.Tab) { onClick(item) }
-                .semantics { this.selected = chosen }, contentAlignment = Alignment.Center) {
-                GlassSegmentLabel(
-                    item.label, selected = chosen, selectedColor = palette.ink, idleColor = palette.ink2,
-                    style = fitted(FontWeight.SemiBold), idleStyle = fitted(FontWeight.Normal),
-                )
+            // Touch lights the material or changes the pressed label's tone. Keep focus and hover cues;
+            // a filled press ripple would look like a second selected segment.
+            val pressed = !interactive && presses.getOrNull(index)?.value == true
+            val (selectedStyle, idleStyle) = remember(item.label, body, available, narrowText, textMeasurer) {
+                fitted(FontWeight.SemiBold) to fitted(FontWeight.Normal)
+            }
+            CompositionLocalProvider(LocalRippleConfiguration provides HomeNavigationGlassRipple) {
+                Box(Modifier.width(segmentWidth).height(HomeTokens.segmentHeight * scale)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = pressSources.getOrNull(index),
+                        indication = LocalIndication.current,
+                        role = Role.Tab,
+                    ) { onClick(item) }
+                    .semantics { this.selected = chosen }, contentAlignment = Alignment.Center) {
+                    GlassSegmentLabel(
+                        item.label, selected = chosen,
+                        selectedColor = if (pressed) palette.ink.copy(alpha = HomeTokens.switcherPressedSelectionAlpha) else palette.ink,
+                        idleColor = if (pressed) palette.ink else palette.ink2,
+                        style = selectedStyle, idleStyle = idleStyle,
+                    )
+                }
             }
         }
         val waiting = items.lastOrNull()?.badge ?: 0

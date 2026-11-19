@@ -24,6 +24,7 @@
   "result": "结果",
   "error": "出错",
   "image": "图片",
+  "visualization": "可视化",
   "cut_unknown": "部分内容未导出。",
   "cut": "还有 {n} 个字没有导出",
   "partial": "部分消息未能读取；最早保留的消息时间为 {from}。"

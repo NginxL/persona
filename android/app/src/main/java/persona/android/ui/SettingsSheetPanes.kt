@@ -2,6 +2,7 @@
 
 package persona.android.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.HingeInfo
@@ -25,6 +26,8 @@ import androidx.navigation3.ui.NavDisplay
 import persona.android.navigation.PaneHinge
 import persona.android.navigation.detailOf
 import persona.core.navigation.LocalDetailKey
+import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.glassPageChrome
 import persona.core.designsystem.rememberPageTransitions
 
 /**
@@ -83,7 +86,10 @@ internal fun SettingsSheetPanes(
                 predictivePopTransitionSpec = { pageTransitions.predictivePop },
                 entryProvider = { key ->
                     val entry = entries(key)
-                    NavEntry(key, entry.contentKey, entry.metadata + paneMetadata(key)) { entry.Content() }
+                    NavEntry(key, entry.contentKey, entry.metadata + paneMetadata(key)) {
+                        // The Box stays when style or Reduce Motion changes. The chrome modifier is identity outside Glass.
+                        Box(Modifier.fillMaxSize().glassPageChrome()) { entry.Content() }
+                    }
                 })
         }
     }

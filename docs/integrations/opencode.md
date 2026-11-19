@@ -122,6 +122,12 @@ Other opencode plugins (notification ones) can subscribe to the event stream at 
 
 Environment variables: `PERSONA_OPENCODE_DB` (location of opencode.db), `PERSONA_OPENCODE_DEBUG=1` (plugin logs to stderr, visible in the opencode server's output).
 
+## Token usage
+
+The node meters opencode's token usage from its database (the same file this runtime reads, `PERSONA_OPENCODE_DB` included), with the system `sqlite3`: each finished step and
+compaction, reasoning counted as output, under the agent `opencode` (`docs/server/machines.md`, "Token usage"). It does not need the runtime or a running opencode; without
+`sqlite3` on the computer opencode's usage is not counted.
+
 ## Limits and later
 
 - Only sessions in server processes that have the plugin installed. A server process's list is the most recent root sessions in the database (sessions run by other server processes are in the database too and get listed as idle;

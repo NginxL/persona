@@ -105,6 +105,9 @@
   "secret_provider_title": "シークレットの値を提供",
   "secret_provider_more_title": "シークレットの値を提供（新規）",
   "secret_provider_detail": "設定に {schemes} 参照が入っているとき、またはスマートフォンで参照を Agent に渡すことを承認したとき、Persona はこの拡張機能に値を求めます。どの参照が何に使われるかは伝わりますが、ほかのシークレットは見えません",
+  "repository_provider_title": "リポジトリとリンクを照会",
+  "repository_provider_more_title": "リポジトリとリンクを照会（新規）",
+  "repository_provider_detail": "{hosts} のリポジトリを追加したとき、または To-do の作業であなたやエージェントがそこのアドレスを追加・言及したとき、Persona はこの拡張機能にアドレスの読み取り、リポジトリの確認、リンクの照会を求めます。これらのアドレスは伝わりますが、ほかのホストのものは伝わりません",
   "assistant_data_title": "拡張機能が書いた内容をアシスタントが読む内容に加える",
   "assistant_data_detail": "プログラムが書いたテキストを、アシスタントの指示とスキル、Agent のプロジェクト背景、受信箱の仕分けと下書きに、サイズ上限の範囲で加えられます。各項目は詳細画面で個別にオフにできます"
 }

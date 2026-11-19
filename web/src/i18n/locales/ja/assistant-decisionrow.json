@@ -8,7 +8,7 @@
   "choose": "「{title}」で「{option}」を選ぶ",
   "choose_recommended": "「{title}」でおすすめの「{option}」を選ぶ",
   "another": "その他…",
-  "another_row": "「{title}」を開いて別の方法で答える",
+  "another_row": "「{title}」に自分の言葉で答える",
   "more": "ほかの答え",
   "decide_yourself": "任せます",
   "decide_yourself_detail": "Persona が決め、前提を記録します。",

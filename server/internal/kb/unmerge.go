@@ -14,12 +14,20 @@ type UserUpdate struct {
 	Update
 	// Unmerge (projects): undo the merge that folded this project into another (Unmerge); nothing else applies.
 	Unmerge bool `json:"unmerge,omitempty"`
+	// LockLists: a list a removal takes a link out of is locked whole too, on both entries, so automatic organizing
+	// changes nothing in it (locked_fields); false keeps out only the removed links (exclude.go). Unset: as lock says,
+	// what a removal did before exclusions, so a client that does not send it gets what it asked for.
+	LockLists *bool `json:"lock_lists,omitempty"`
+	// Allow*: links the user removed that automatic organizing may make again; nothing is linked by them.
+	AllowPeople   []string `json:"allow_people,omitempty"`
+	AllowChats    []string `json:"allow_chats,omitempty"`
+	AllowProjects []string `json:"allow_projects,omitempty"`
 }
 
 // ApplyUser is Apply, or Unmerge when u asks for it.
 func (e *Engine) ApplyUser(kind, id string, u UserUpdate) (string, error) {
 	if !u.Unmerge {
-		return e.Apply(kind, id, u.Update)
+		return e.applyUser(kind, id, u)
 	}
 	if kind != KindProject {
 		return "", errors.New("unmerge applies to projects")
@@ -142,6 +150,9 @@ func (e *Engine) unmergeProject(drop *Project) error {
 					keep.LockedFields, keep.Locked = l.Fields, l.Locked
 				}
 			}
+			for list, ids := range rec.Excluded {
+				keep.include(list, ids...)
+			}
 		} else {
 			names := map[string]bool{normName(drop.Name): true}
 			for _, a := range drop.Aliases {
@@ -160,6 +171,11 @@ func (e *Engine) unmergeProject(drop *Project) error {
 		keep.Dirty, keep.Updated = true, now
 		if err := e.Store.putEntity(KindProject, keep.Slug, keep, &keep.Tagging, true); err != nil {
 			return err
+		}
+		if rec != nil {
+			if err := e.excludeBack(keep.Slug, rec.Excluded, false); err != nil {
+				return err
+			}
 		}
 		e.index(KindProject, keep.Slug, keep.Name, keep.Tagging, keep.OneLine, keep.Updated)
 	}

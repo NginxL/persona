@@ -48,7 +48,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -659,7 +658,7 @@ class InboxHandOffDeliveryRegressionTest {
         private val fixture: HandOffFixture,
         private val pairing: HubScope,
     ) {
-        val server = MockWebServer().apply { start() }
+        val server = PortDiscoveryMockServer().apply { start() }
         private val endpoint = Endpoint(server.url("/").toString(), "lan")
         private val connection = OkHttpHubConnection(
             HubConnectionConfig(pairing.hubId, null, "test-token", listOf(endpoint), "test"),

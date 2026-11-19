@@ -8,7 +8,8 @@ import XCTest
 /// after).
 final class KnowledgeKindPillsUITests: XCTestCase {
     private var hub = ""
-    private static let kinds = ["projects", "topics", "chats", "people", "docs", "meetings", "events", "recordings"]
+    /// The kinds Knowledge lists (`KBKind.listed`): recordings are under Meetings since #8976 (#8731).
+    private static let kinds = ["projects", "topics", "chats", "people", "docs", "meetings", "events"]
     /// How late the hub answers while a pick is read: long enough to read the pills before the list lands.
     private static let lateBy = 1.5
 

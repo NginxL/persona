@@ -90,7 +90,7 @@ struct FilePermissionsSheet: View {
             }
             .themedGroupedPage()
             .navigationTitle(String(localized: "Permissions"))
-            .navigationSubtitle(name)
+            .navigationSubtitleWhenSupported(name)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
                 SheetClose { dismiss() }

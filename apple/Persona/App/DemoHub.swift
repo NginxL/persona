@@ -258,7 +258,7 @@ final class DemoHub {
             case "dirs":
                 guard online(id) else { throw APIError(status: 503, message: "\(id): machine is offline") }
                 return data["dirs"] ?? .object([:])
-            case "claude-settings", "codex-settings": return ["settings": .array([])]
+            case "claude-settings", "codex-settings", "agy-settings": return ["settings": .array([])]
             case "claude-dirs": return claudeDirsState(id)
             case "claude-live-replies": return ["on": .bool(liveReplies[id] ?? true)]
             #if os(macOS)
@@ -954,9 +954,20 @@ final class DemoHub {
             o["name"] = m["name"] ?? .string(id)
             return (w, .object(o))
         }.sorted { $0.0 > $1.0 }.map { $0.1 }
+        // Each agent's share (#9984), largest first; "" is usage kept before the hub counted agents apart.
+        let agents: [JSONValue] = Self.usageAgentMix.map { agent, f in
+            var o = Self.json(UsageTokens(input: Int64(Double(total.input) * f), cacheWrite: Int64(Double(total.cacheWrite) * f),
+                                          cacheRead: Int64(Double(total.cacheRead) * f), output: Int64(Double(total.output) * f),
+                                          requests: Int(Double(total.requests) * f)))
+            o["agent"] = .string(agent)
+            return .object(o)
+        }
         return ["usage": ["zone": .string(TimeZone.current.identifier), "hours": .array(hours), "machines": .array(shares),
-                          "total": .object(Self.json(total)), "stored": true]]
+                          "agents": .array(agents), "total": .object(Self.json(total)), "stored": true]]
     }
+
+    /// The agents' shares of the demo's usage, largest first.
+    private static let usageAgentMix: [(String, Double)] = [("claude", 0.62), ("codex", 0.21), ("opencode", 0.08), ("pi", 0.05), ("", 0.04)]
 
     /// GET /api/v1/machines/{id}/usage, like the manager's.
     private func usage(_ mid: String, range: String, model: String?, launcher: String?) -> JSONValue {

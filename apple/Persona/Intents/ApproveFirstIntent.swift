@@ -12,6 +12,7 @@ struct ApproveFirstIntent: AppIntent {
         categoryName: "Status",
         searchKeywords: ["Approve [Notification Actions 8cbe69]", "Allow [Notification Actions ce7ef2]", "Permission", "plan"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
     nonisolated static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 

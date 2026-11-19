@@ -232,16 +232,17 @@ def drop_missing_helpers(assets, state_dir):
     helpers = manifest.get("helpers")
     if not isinstance(helpers, dict):
         return assets
-    kept, dropped = {}, []
-    for program, platforms in helpers.items():
-        for plat, item in (platforms or {}).items():
-            name = item.get("name") if isinstance(item, dict) else None
-            if name in by_name:
-                kept.setdefault(program, {})[plat] = item
-            else:
-                dropped.append(str(name))
-    if not dropped:
-        return assets
+    if helpers:
+        kept, dropped = {}, []
+        for program, platforms in helpers.items():
+            for plat, item in (platforms or {}).items():
+                name = item.get("name") if isinstance(item, dict) else None
+                if name in by_name:
+                    kept.setdefault(program, {})[plat] = item
+                else:
+                    dropped.append(str(name))
+        if not dropped:
+            return assets
     print("warning: latest.json lists helper builds this receipt does not carry; uploading it without them: "
           + ", ".join(sorted(dropped)), file=sys.stderr, flush=True)
     if kept:
@@ -447,6 +448,18 @@ def write_state(path, state):
     temporary.replace(path)
 
 
+def check_beta_manifest(assets, version):
+    """Independent beta platforms need no hub manifest; a supplied one must be this exact beta."""
+    manifests = [Path(item["path"]) for item in assets if item["name"] == "latest.json"]
+    if len(manifests) > 1:
+        raise ConfigError("beta publication requires at most one latest.json")
+    if not manifests:
+        return
+    manifest = json.loads(manifests[0].read_text())
+    if manifest.get("channel") != "beta" or manifest.get("version") != version:
+        raise ConfigError("beta latest.json must carry this beta version/channel")
+
+
 def publish_once(config, tag, commit):
     platform = config["platform"]
     state = config["state_dir"] / "state.json"
@@ -471,14 +484,9 @@ def publish_once(config, tag, commit):
     except ValueError as error:
         raise ConfigError(str(error)) from error
     if is_beta_tag(tag):
-        # Stable manifests omit channel for compatibility. A beta feed must
-        # never identify itself as the stable latest.json.
-        manifests = [Path(item["path"]) for item in assets if item["name"] == "latest.json"]
-        if len(manifests) != 1:
-            raise ConfigError("beta publication requires one latest.json")
-        manifest = json.loads(manifests[0].read_text())
-        if manifest.get("channel") != "beta" or manifest.get("version") != tag[1:]:
-            raise ConfigError("beta latest.json must carry this beta version/channel")
+        # A platform receipt is independent: Android has its signed APK and index, iOS only its store receipt.
+        # Only the hub worker has latest.json; if present it can never point beta at a stable or another version.
+        check_beta_manifest(assets, tag[1:])
     check_release_manifest(assets)
     check_android_index(assets, tag[1:])
     upload(config["repository"], tag, assets)

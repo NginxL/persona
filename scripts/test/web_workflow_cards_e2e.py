@@ -304,20 +304,21 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     shot("completed-page")
     ok(f"{tag}: completed in place: 已完成, 11/11 Agent, 11 squares done, the time it took")
 
-    # the top bar's Background tasks button opens the panel's list: the four runs; a run's detail's "在对话中查看" brings
-    # the call into view
-    page.locator("main header").get_by_role("button", name="后台任务", exact=False).first.click()
+    # The overview lists the runs. Opening a detail or jumping to its call keeps the overview open.
+    trigger = page.locator("[data-session-overview-trigger]")
+    trigger.click()
+    overview = page.locator("[data-session-overview]")
+    expect(overview.locator("[data-bg-run]")).to_have_count(4)
+    shot("overview")
+    overview.locator('[data-bg-run="wffail"] [data-bg-row-button]').click()
     panel = page.locator('aside[aria-label="后台任务"]')
-    expect(panel.locator("[data-bg-run]")).to_have_count(4)
-    page.wait_for_timeout(350)
-    shot("panel")
-    panel.locator('[data-bg-run="wffail"] [data-bg-row-button]').click()
     expect(panel.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
     panel.locator('[data-workflow-card="failed"] [data-workflow-jump]').click()
     if size == "narrow":
         expect(panel).to_have_count(0)  # it covered the chat
+    expect(overview).to_be_visible()
     expect(main.locator('[data-tool-use="toolu_wf_failed"]')).to_be_in_viewport()
-    ok(f"{tag}: the button's panel lists the four runs; a detail's 在对话中查看 brings the call into view")
+    ok(f"{tag}: the overview stays open and the workflow detail can jump to its call")
 
     if size == "wide":
         # the sidebar's row for this agent, where the sidebar lists agents (its default now lists pages only)

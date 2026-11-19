@@ -8,6 +8,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 // Pure helpers of the file browser and the previews: paths on the session's machine, sizes and times.
@@ -128,14 +129,19 @@ internal fun fileTime(value: String?): Instant? {
     return runCatching { OffsetDateTime.parse(value.trim()).toInstant() }.getOrNull()
 }
 
-/** "Just now" / "5 min ago" / "3 hr ago" / "2 days ago", then the date (the year only when it is not this one), in [resources]' language. */
+/**
+ * "Just now" / "5 min ago" / "3 hr ago" / "2 days ago", then the date (the year only when it is not this one), in [resources]' language.
+ * Days count the midnights in [zone], not 24-hour spans, and from seven it is the date, as the web's `ago` (#9889).
+ */
 internal fun relativeTime(resources: Resources, time: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
     val seconds = Duration.between(time, now).seconds
+    // At least 1: a 25-hour day can leave a whole day's gap on one date.
+    val days = ChronoUnit.DAYS.between(time.atZone(zone).toLocalDate(), now.atZone(zone).toLocalDate()).coerceAtLeast(1).toInt()
     return when {
         seconds < 60 -> resources.getString(R.string.files_time_just_now)
         seconds < 3600 -> (seconds / 60).toInt().let { resources.getQuantityString(R.plurals.files_time_minutes_ago, it, it) }
         seconds < 86_400 -> (seconds / 3600).toInt().let { resources.getQuantityString(R.plurals.files_time_hours_ago, it, it) }
-        seconds < 7 * 86_400 -> (seconds / 86_400).toInt().let { resources.getQuantityString(R.plurals.files_time_days_ago, it, it) }
+        days < 7 -> resources.getQuantityString(R.plurals.files_time_days_ago, days, days)
         else -> {
             val thisYear = time.atZone(zone).year == now.atZone(zone).year
             LocalizedFormats.format(time, if (thisYear) LocalizedFormats.MONTH_DAY else LocalizedFormats.DATE, resources.configuration.locales[0], zone)

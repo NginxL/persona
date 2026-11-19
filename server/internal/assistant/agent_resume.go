@@ -40,9 +40,10 @@ func stoppedRefusal(c proto.Session) error {
 		"investigated this and should now fix it, rework of its own work, the user asked for the agent with the context), "+
 		"send again with resume true and resume_why, which resumes this same session with its context on its own "+
 		"launcher and permission mode (from the main conversation also give task, unless it is on an open task of yours). "+
-		"For unrelated work, or when its context is nearly full or it went off track, start a new agent with agent_start "+
-		"in its directory (with the task when it worked on one) and give it what it needs (read this one with agent_read). "+
-		"When you cannot tell, ask the user with ask_user: reuse this agent, or start a new one", agentLabel(c))
+		"For unrelated work, or when its context is nearly full or it went off track, start a replacement and give it what "+
+		"it needs (read this one with agent_read): for its task, task_plan with continues (the task's todo id) and "+
+		"continues_why, which keeps the task's todo and brief; for work on no task, agent_start in its directory. "+
+		"When you cannot tell, ask the owner (ask_user, or task_review needs_user): reuse this agent, or start a new one", agentLabel(c))
 }
 
 // resumeAllowed checks a resume before anything is asked or started: a reason, the computer reachable, room left in
@@ -103,8 +104,9 @@ func contextFull(c proto.Session) bool {
 
 // resumeFailed is a resume that did not happen, with why and what to do instead.
 func resumeFailed(c proto.Session, am Device, err error) error {
-	return fmt.Errorf("could not resume %s on %s: %w. Nothing was sent; start a new agent with agent_start in its directory "+
-		"instead (read this one with agent_read and give the new agent what it needs)", agentLabel(c), am.Name, err)
+	return fmt.Errorf("could not resume %s on %s: %w. Nothing was sent; start a replacement instead (read this one with "+
+		"agent_read and give it what it needs): for its task, task_plan with continues (the task's todo id) and continues_why; "+
+		"for work on no task, agent_start in its directory", agentLabel(c), am.Name, err)
 }
 
 // resumeParams are the node's session.start params for resuming c with text as its first message: the user's Resume
@@ -142,15 +144,16 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 	said := ""
 	if task != nil {
 		said = task.sent(sctx, s, told)
-		s.noteResume(sctx, self, task.todo.ID, note)
+		s.noteResume(sctx, self, task.todo.ID, am.ID, c.SessionID, note)
 		s.ensureSupervisor(sctx, task.todo.ID) // made or kept by adoptAgent; never left without a supervisor
 	} else if t, ok := s.openTodoOfAgent(am.ID, c.SessionID); ok {
 		s.ensureSupervisor(sctx, t.ID) // its task goes on with a supervisor, as a successor's does (tasks_successor.go)
 		s.releaseHold(sctx, t.ID)      // its supervisor sent it on: follow-ups go again (decision.go)
-		if _, err := s.appendFeed(sctx, self, feedRouted, t.ID, map[string]string{"text": told, "from": routedFromAssistant}); err != nil {
+		if _, err := s.appendFeed(sctx, self, feedRouted, t.ID, map[string]string{"text": told, "from": routedFromAssistant,
+			"machine_id": am.ID, "session_id": c.SessionID}); err != nil {
 			s.logf("task %s: routed feed: %v", t.ID, err)
 		}
-		s.noteResume(sctx, self, t.ID, note)
+		s.noteResume(sctx, self, t.ID, am.ID, c.SessionID, note)
 		said = fmt.Sprintf(" It works for your task %s (%q).", t.ID, t.Title)
 	}
 	return fmt.Sprintf("Resumed %s on %s (same session, with its context, on its own launcher and permission mode) and sent.",
@@ -162,9 +165,11 @@ func (s *Service) resumeNote(ctx context.Context, c proto.Session, am Device, wh
 	return i18n.T(s.lang(ctx), "assistant-tasks.resume_note", i18n.Args{"agent": agentLabel(c), "machine": am.Name, "why": why})
 }
 
-// noteResume puts the resume's note on task id's card in conversation self, as Persona's.
-func (s *Service) noteResume(ctx context.Context, self, id, note string) {
-	if _, err := s.appendFeed(ctx, self, feedRouted, id, map[string]string{"text": note, "from": routedFromAssistant}); err != nil {
+// noteResume puts the resume's note on task id's card in conversation self, as Persona's, naming the run it resumed
+// (machine, sid; #10465).
+func (s *Service) noteResume(ctx context.Context, self, id, machine, sid, note string) {
+	if _, err := s.appendFeed(ctx, self, feedRouted, id, map[string]string{"text": note, "from": routedFromAssistant,
+		"machine_id": machine, "session_id": sid}); err != nil {
 		s.logf("task %s: resume feed: %v", id, err)
 	}
 }

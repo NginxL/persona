@@ -183,9 +183,10 @@ class HubTunnelConnectionTest {
                         val down = ways.states.value["hub-a" to TunnelKind.Ssh] as TunnelState.Down
                         assertTrue(down.problem is TunnelProblem.HostKeyChanged)
                         assertEquals(0, server.logins.get())
-                        val dialled = server.connections.get()
+                        val dialled = server.handshakes.get()
                         delay(3_000)
-                        assertEquals(dialled, server.connections.get())
+                        assertEquals("accepted=${server.connections.get()} handshakes=${server.handshakes.get()}",
+                            dialled, server.handshakes.get())
                         assertTrue(connection.state.value != ConnectionState.Online)
                     }
                 }

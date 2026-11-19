@@ -4,8 +4,8 @@ import UIKit
 #endif
 
 /// Settings › Appearance & Display › Persona Banner in Screenshots (#9508), on by default and this device's only: a
-/// screenshot of a chat shows the assistant's avatar and name with "(Persona)" (`PersonaBrandLockup`) where the top
-/// bar is, while the screen keeps the bar. Off, the bar is drawn as it always was, on screen and in screenshots alike.
+/// screenshot of a chat shows the assistant's avatar and name, and GitHub's mark with Persona's repository at the
+/// right (`PersonaBrandLockup`, #10172), where the top bar is, while the screen keeps the bar. Off, the bar is drawn as it always was, on screen and in screenshots alike.
 nonisolated enum ScreenshotBannerPrefs {
     static let enabledKey = "ui.screenshotBanner"
     static let enabledByDefault = true
@@ -35,25 +35,23 @@ extension View {
     }
 }
 
-/// The banner a chat's screenshot shows where its bar is: the brand lockup at the leading edge, centred in `row`
-/// (the bar's row of buttons) or in the whole height, `.slim` where the large one does not fit (a folded header).
+/// The banner a chat's screenshot shows where its bar is: the brand lockup across it between the page margins (the
+/// face and the name at the leading one, the repository at the trailing one), centred in `row` (the bar's row of
+/// buttons) or in the whole height; slim where the large one does not fit (a folded header, large text).
 struct ScreenshotBannerContent: View {
     /// The row the lockup stands in: from the top by `top`, `height` tall; nil centres it in the whole banner.
     var row: (top: CGFloat, height: CGFloat)?
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            PersonaBrandLockup(size: .banner)
-            PersonaBrandLockup(size: .slim)
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: row?.height)
-        .padding(.top, row?.top ?? 0)
-        .frame(maxHeight: .infinity, alignment: row == nil ? .center : .top)
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        PersonaBrandLockup(size: .banner)
+            .padding(.horizontal, Theme.Space.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: row?.height)
+            .padding(.top, row?.top ?? 0)
+            .frame(maxHeight: .infinity, alignment: row == nil ? .center : .top)
+            .clipped()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -240,7 +238,6 @@ private struct CaptureEnvironment: ViewModifier {
             .modifier(IslandEnvironment(env))
             .environment(\.shellRailEdge, env.shellRailEdge)
             .environment(\.shellPillFollowsStrip, env.shellPillFollowsStrip)
-            .environment(\.tabBarAlongFoot, env.tabBarAlongFoot)
             .environment(\.tabIsActive, env.tabIsActive)
             .environment(\.openURL, env.openURL)
             .environment(\.openPort, env.openPort)

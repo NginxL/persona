@@ -1,0 +1,6 @@
+{
+  "read_only": "This device can't answer questions in a computer's terminal.",
+  "need_choice": "Choose one of the answers.",
+  "offline": "{name} is offline.",
+  "node_outdated": "Update Persona on this computer to answer its terminal's questions from here."
+}

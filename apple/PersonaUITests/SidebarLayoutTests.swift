@@ -103,6 +103,36 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertTrue(element("persona-avatar").waitForExistence(timeout: 10), "not on the conversation:\n\(app.debugDescription)")
     }
 
+    /// One face on the screen beside the column (#9973): the column's head draws the assistant's, the main conversation's
+    /// row says "Main Chat" with its symbol, and the conversation's top bar is the name pill alone, named as the head.
+    /// With the column folded the bar's face comes back over its pill; it goes again with the column.
+    @MainActor func testOneFaceBesideTheColumn() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launch(["-tab", "assistant"])
+        let main = element("sidebar-main"), bar = element("persona-avatar"), head = element("assistant-switcher")
+        XCTAssertTrue(main.waitForExistence(timeout: 20), "no Persona row:\n\(app.debugDescription)")
+        XCTAssertTrue(main.label.hasPrefix("主对话"), "the main row is not Main Chat: \(main.label)")
+        XCTAssertTrue(head.waitForExistence(timeout: 5) && bar.waitForExistence(timeout: 10), "no head or bar:\n\(app.debugDescription)")
+        let assistant = head.label.split(separator: ",").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        XCTAssertFalse(assistant.isEmpty, "the head says no name: \(head.label)")
+        XCTAssertTrue(bar.label.hasPrefix(assistant), "the top bar says \(bar.label), the head \(assistant)")
+        XCTAssertLessThan(bar.frame.height, 56, "the top bar draws a face beside the column: \(bar.frame)")
+        shot("one-face")
+        element("sidebar-fold-column").tap()
+        waitGone(main, "the column did not fold")
+        let taller = NSPredicate { _, _ in bar.frame.height >= 56 }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: taller, object: NSNull())], timeout: 10), .completed,
+                       "no face with the column folded: \(bar.frame)")
+        shot("one-face-folded")
+        element("assistant-sidebar-button").tap()
+        let back = NSPredicate { _, _ in main.exists && main.isHittable }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: back, object: NSNull())], timeout: 10), .completed,
+                       "the column did not come back:\n\(app.debugDescription)")
+        let pill = NSPredicate { _, _ in bar.frame.height < 56 }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: pill, object: NSNull())], timeout: 10), .completed,
+                       "the face stayed with the column out: \(bar.frame)")
+    }
+
     /// With nothing picked an iPad starts in the Merged sidebar (#4206, "Merged where wide"), and Settings names it
     /// so: Appearance › Sidebar says Merged.
     @MainActor func testNothingPickedIsMergedOnTheIPad() {

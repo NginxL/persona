@@ -1,0 +1,14 @@
+{
+  "invalid_name": "浏览器名称无效",
+  "invalid_replaces": "之前的凭据无效",
+  "busy": "等待中的登录太多，请过几分钟再试",
+  "expired": "这次登录已过期，请刷新二维码再试",
+  "not_waiting": "这次登录不在等待输入数字",
+  "number_mismatch": "数字不对，这次登录已作废",
+  "approver_revoked": "允许这次登录的设备已不再登录",
+  "device_required": "请在已登录的手机上允许这次登录",
+  "other_hub": "这个码属于另一个 Persona",
+  "decided": "这次登录已经处理过了",
+  "update_required": "请更新 Persona App 后再允许浏览器登录",
+  "unavailable": "浏览器登录暂时不可用"
+}

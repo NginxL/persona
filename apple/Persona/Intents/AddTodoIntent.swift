@@ -10,6 +10,7 @@ struct AddTodoIntent: AppIntent {
         categoryName: "To-dos",
         searchKeywords: ["To-dos", "todo", "to-do", "Tasks", "Reminder [Add Todo Intent 357f8a]", "Reminder [Add Todo Intent 8f29b3]"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Title", requestValueDialog: "What's the to-do?")

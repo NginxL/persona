@@ -54,7 +54,7 @@ object ChatWiringModule {
     }
 
     @Provides @Singleton
-    fun assistantWiring(owner: ChatDataOwner, services: AppServices, stacks: GroupStacks): AssistantAppWiring = object : AssistantAppWiring {
+    fun assistantWiring(owner: ChatDataOwner, services: AppServices, stacks: GroupStacks, conversations: AssistantConversations): AssistantAppWiring = object : AssistantAppWiring {
         @Composable
         override fun Host(navigator: Navigator, content: @Composable () -> Unit) {
             val wiring by owner.wiring.collectAsStateWithLifecycle()
@@ -76,7 +76,7 @@ object ChatWiringModule {
                 allMachines.filter { persona.core.contracts.GroupKeys.namespaceOf(it.id) == selectedNamespace }
             }
             val host = AssistantHostBindings(active.scope.path, active.assistantManagement, active.drafts,
-                active.coroutineScope, available, machines, active.mainSender) { key, options ->
+                active.coroutineScope, available, machines, conversations, active.mainSender) { key, options ->
                 ChatDestination(ChatRoute(key.machineId, key.sessionId,
                     kind = if (options.assistant) ConversationKind.Assistant else ConversationKind.Agent), navigator,
                     renderStyle = if (options.assistant) ChatRenderStyle.Assistant else ChatRenderStyle.Agent,
@@ -121,6 +121,8 @@ internal suspend fun createChatWiring(
         worktrees = { connection.route.value?.let { route -> persona.core.hub.HttpAgentCreationService(data.scope.path, route.endpoint.url,
             connection.token, connection.http.client, isCurrent = { current() && connection.route.value == route }) } },
         usage = { persona.core.hub.HttpMachineManagement(connection).usageWindows() },
+        // Recent targets of Forward live in the pairing's own preferences, erased with it (#3901).
+        forwardMemory = PreferencesForwardMemory(data.listPreferences),
         tasks = persona.core.domain.tasks.TasksStore(persona.core.hub.HttpTasksApi(connection), group, data.coroutineScope,
             repositories.snapshots.todoCache(), quickResults = quickResults))
 }
@@ -157,6 +159,7 @@ private class RoutedAssistantManagement(
     override suspend fun compactConversation(session: SessionKey) = api().compactConversation(session)
     override suspend fun archiveConversation(session: SessionKey) = api().archiveConversation(session)
     override suspend fun unarchiveConversation(session: SessionKey) = api().unarchiveConversation(session)
+    override suspend fun setConversationTags(session: SessionKey, tags: List<String>) = api().setConversationTags(session, tags)
     override suspend fun archivedConversations() = api().archivedConversations()
     override suspend fun searchChats(query: String, limit: Int) = api().searchChats(query, limit)
     override suspend fun renameConversation(session: SessionKey, title: String) = api().renameConversation(session, title)

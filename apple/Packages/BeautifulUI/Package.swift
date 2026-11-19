@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "BeautifulUI",
-    platforms: [.iOS(.v26), .macOS(.v26), .visionOS(.v26)],
+    platforms: [.iOS(.v18), .macOS(.v26), .visionOS(.v26)],
     products: [
         .library(name: "BeautifulUI", targets: ["BeautifulUI"]),
     ],

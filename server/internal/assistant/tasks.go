@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"sort"
@@ -133,11 +134,17 @@ type PlanTask struct {
 	// Set once started: the todo the task is, and why its agent did not start. TodoID is cleared when another plan
 	// takes over that to-do; ReuseTodo keeps the historical target. ErrorCode and ErrorArgs: the start's
 	// coded refusal when it was one (launcher_missing, claude_missing… with its details, as a session's
-	// start_error_code / start_error_args), for a card to offer its remedy (#1642).
+	// start_error_code / start_error_args), for a card to offer its remedy (#1642). ErrorArgs' launcher is the launcher
+	// that start ran, added by the hub when the refusal does not name it, also with no code (ranLauncher, #10365).
 	TodoID    string            `json:"todo_id,omitempty"`
 	Error     string            `json:"error,omitempty"`
 	ErrorCode string            `json:"error_code,omitempty"`
 	ErrorArgs map[string]string `json:"error_args,omitempty"`
+	// RetryWith: when its start failed because of its launcher on that computer, the other launchers there a retry may
+	// start it with (start_retry_launcher.go, #10365), plain claude first: what a card's "Use <launcher> instead" and
+	// task_retry's launcher offer. The hub's, set with the failure and cleared by the next start; never what a tool call
+	// or an edit says.
+	RetryWith []string `json:"retry_with,omitempty"`
 	// Start: the start being remedied after its agent did not start, or how that ended (start_remedy.go, #2570).
 	Start *StartRemedy `json:"start,omitempty"`
 	// Queue is set while the admission gate has refused this start for now: the task stays open (not failed, no
@@ -282,9 +289,12 @@ type tasksState struct {
 	// applied to them as they are read (loadSendsOut); under mu.
 	sendsAcceptedUnread map[string]time.Time
 	// retrying: the tasks whose agent is starting (again), one start at a time: a Retry after a failed start (#1396), a
-	// Continue, or a new agent after all of the task's stopped (startTaskSuccessor). A message on the card that would
-	// start another waits for that one and goes to the agent it started (routeAfterStart).
+	// Continue, a new agent after all of the task's stopped (startTaskSuccessor), or a plan taking the to-do over
+	// (todo_id, takeTodoForTask: taking). A message on the card that would start another waits for that one and goes
+	// to the agent it started (routeAfterStart).
 	retrying map[string]*taskStart
+	// taking: the start a plan taking a to-do over claimed, by to-do, ended with its reusing hold (releaseTakenTodo).
+	taking map[string]*taskStart
 	// outcomes: the completions whose outcome was recorded (todo_outcome.go, outcomeKey).
 	outcomes map[string]time.Time
 	// reusing holds taken-over todos and newly created Inbox tasks until their first Agent is linked or failed.
@@ -308,12 +318,14 @@ type tasksState struct {
 	workspaceClaims map[string]string
 	// turns: the turns completion handling took up, kept in the database (task_turns.go).
 	turns turnsState
+	// quiet: the verdicts on task Agents' turns with no output, and the agents Persona's Stop interrupted (silent_turns.go).
+	quiet quietTurns
 }
 
 func newTasksState() tasksState {
 	return tasksState{recoverBefore: time.Now(), plans: map[string]*TaskPlan{}, feed: map[string][]FeedItem{},
 		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]*taskStart{},
-		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, sendsOut: map[[2]string]*sendsOut{},
+		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, taking: map[string]*taskStart{}, sendsOut: map[[2]string]*sendsOut{},
 		sendsRetryAfter: sendsRetryEvery,
 		turns: turnsState{again: map[string]bool{}, looked: map[string]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
 			retry:   map[string]turnRetry{},
@@ -826,18 +838,32 @@ func (s *Service) taskRoutes() {
 			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot start tasks"))
 			return
 		}
-		t, err := s.retryTask(r.Context(), r.PathValue("id"))
+		// An optional body names another launcher of the same computer (and its model) to start with (#10365, hello
+		// feature task_retry_launcher); none, or an empty one, retries as the plan has it.
+		var in struct {
+			Launcher string `json:"launcher"`
+			Model    string `json:"model"`
+		}
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+				apierr.Write(w, http.StatusBadRequest, err)
+				return
+			}
+		}
+		t, err := s.retryTaskWith(r.Context(), r.PathValue("id"), retryWith{launcher: in.Launcher, model: in.Model, by: "user"})
+		var refused retryRefused
 		switch {
 		case err == nil:
 			apierr.WriteJSON(w, map[string]any{"todo": t})
 		case errors.Is(err, db.ErrTodoNotFound):
 			apierr.Write(w, http.StatusNotFound, err)
-		case errors.Is(err, errTaskNotRetryable), errors.Is(err, errTaskNotInPlan), errors.Is(err, errMachineOffline):
+		case errors.Is(err, errTaskNotRetryable), errors.Is(err, errTaskNotInPlan), errors.Is(err, errMachineOffline), errors.As(err, &refused):
 			apierr.Write(w, http.StatusConflict, err)
 		default:
 			planErr(w, err)
 		}
 	})
+	s.handle("POST /api/v1/todos/{id}/start/answer", s.postTaskStartAnswer) // the startup question its start stopped on (start_answer.go)
 	s.handle("GET /api/v1/assistant/conversations/{id}/feed", func(w http.ResponseWriter, r *http.Request) {
 		var since time.Time
 		if s := r.URL.Query().Get("since"); s != "" {

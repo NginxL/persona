@@ -54,7 +54,7 @@ func TestExtensionTokensNeverSeeTheHealthSpace(t *testing.T) {
 	}
 
 	for _, sid := range []string{"bh", "bd", "never-listed"} {
-		for _, path := range []string{"/items", "/items?fold_work=1", "/items/i1/full", "/items/i1/image", "/info", "/screen"} {
+		for _, path := range []string{"/items", "/items?fold_work=1", "/items/i1/full", "/items/i1/image", "/items/i1/visualization", "/info", "/screen"} {
 			if code, body := extDo(t, url, http.MethodGet, "/api/v1/sessions/mb/"+sid+path, "", nil); code != http.StatusNotFound {
 				t.Errorf("%s%s: %d %s", sid, path, code, body)
 			}

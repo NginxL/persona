@@ -126,6 +126,28 @@ func TestSubscriptionsRevisionLeaseAndRun(t *testing.T) {
 	}
 }
 
+func TestDeleteSubscriptionAtRevision(t *testing.T) {
+	d, ctx := openSubscriptions(t), context.Background()
+	now := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	row := SubscriptionRow{ID: "sub_delete_at", Connector: "example", Source: "notices", Revision: 3, Data: []byte(`{}`),
+		CreatedAt: now, UpdatedAt: now}
+	if err := d.CreateSubscription(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.DeleteSubscriptionAt(ctx, row.ID, row.Revision-1); err != nil || ok {
+		t.Fatalf("stale delete = %v, %v", ok, err)
+	}
+	if got, err := d.Subscription(ctx, row.ID); err != nil || got == nil || got.Revision != row.Revision {
+		t.Fatalf("stale delete changed the row: %+v, %v", got, err)
+	}
+	if ok, err := d.DeleteSubscriptionAt(ctx, row.ID, row.Revision); err != nil || !ok {
+		t.Fatalf("fresh delete = %v, %v", ok, err)
+	}
+	if got, err := d.Subscription(ctx, row.ID); err != nil || got != nil {
+		t.Fatalf("fresh delete left the row: %+v, %v", got, err)
+	}
+}
+
 // Old keys are dropped: past 400 days, and beyond the newest 5000.
 func TestSubscriptionSeenIsPruned(t *testing.T) {
 	d, ctx := openSubscriptions(t), context.Background()

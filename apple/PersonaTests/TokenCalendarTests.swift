@@ -129,5 +129,34 @@ struct TokenCalendarTests {
         await usage.loadHours()
         #expect(usage.hours?.hours.first?.tokens.output == 3 && usage.hours?.machines.map(\.name) == ["Studio", ""])
         #expect(usage.hours?.total.output == 4 && hub.sent("GET", "/api/v1/usage/hours").first?.query["days"] == "7")
+        #expect(usage.hours?.agents.isEmpty == true) // an older hub sends no agents: no By Agent section
+    }
+
+    /// Each agent's share (#9984), as the page names it: its product's name and mark; "" (usage kept before the hub
+    /// counted agents apart) has none.
+    @Test func readsTheAgents() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/usage/hours", json: #"{"usage":{"zone":"UTC","stored":true,"hours":[],"machines":[],"agents":[{"agent":"claude","cache_read":90,"out":10},{"agent":"","out":5},{"agent":"opencode","in":1}],"total":{"out":15}}}"#)
+        let api = hub.client
+        let usage = TokenUsageModel(api: { api })
+        await usage.loadHours()
+        let agents = try #require(usage.hours?.agents)
+        #expect(agents.map(\.agent) == ["claude", "", "opencode"] && agents.first?.tokens.total == 100)
+        #expect(AgentKind(usageAgent: "claude")?.name == "Claude Code" && AgentKind(usageAgent: "claude")?.brand == Theme.Brand.claude)
+        #expect(AgentKind(usageAgent: "codex")?.brand == Theme.Brand.openAI && AgentKind(usageAgent: "omp")?.name == "Oh My Pi")
+        #expect(AgentKind(usageAgent: "opencode")?.name == "opencode" && AgentKind(usageAgent: "opencode")?.brand == nil)
+        #expect(AgentKind(usageAgent: "") == nil)
+    }
+
+    /// What every client calls each agent (spec/fixtures/agent-names, #10042): the web checks the same file.
+    @Test func namesTheAgentsAsEveryClientDoes() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: repo.appending(path: "spec/fixtures/agent-names/names.json"))
+        let fixture = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let names = try #require(fixture["names"] as? [String: String])
+        #expect(!names.isEmpty)
+        for (id, name) in names {
+            #expect(AgentKind(usageAgent: id)?.name == name, "\(id)")
+        }
     }
 }

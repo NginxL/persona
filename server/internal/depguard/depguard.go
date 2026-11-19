@@ -27,14 +27,15 @@ var HubOwn = []string{"cmd/persona-hub", "internal/hub", "internal/hubcli", "int
 // code and its proxy, netproxy): the hub links these and its own, nothing else; a new package the hub needs is put in
 // one of the two lists on purpose, never one of the manager's.
 // sessionsearch is a pure projection of immutable runtime DTOs for sessionlist;
-// it owns no store, route, process, model call or transcript reader.
-var Shared = []string{"internal/acceptloop", "internal/aiwire", "internal/apierr", "internal/assistantwire",
+// it owns no store, route, process, model call or transcript reader. tokenuse is the parsers of token usage that
+// transcript uses: pure functions of a record's lines.
+var Shared = []string{"internal/acceptloop", "internal/aiwire", "internal/apierr", "internal/approval", "internal/assistantwire",
 	"internal/bus", "internal/channel", "internal/clitext", "internal/compat", "internal/connectorwire", "internal/db",
 	"internal/devicewire", "internal/dialogwire", "internal/errreport", "internal/extwire", "internal/i18n",
 	"internal/identity", "internal/kbwire", "internal/lazyre", "internal/link", "internal/managerconf", "internal/memtrim", "internal/netaddr",
 	"internal/netproxy", "internal/nodeproto", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/procs", "internal/prompts",
 	"internal/proto", "internal/rpc", "internal/screen", "internal/secretkey", "internal/sessionlist", "internal/sessionorigin", "internal/sessionsearch", "internal/streams",
-	"internal/textfmt", "internal/transcript", "internal/update", "internal/workspaceboard"}
+	"internal/textfmt", "internal/tokenuse", "internal/transcript", "internal/update", "internal/workspaceboard"}
 
 // HubExceptions are manager-side packages the hub still links, and may only shrink: internal/extension (and what it
 // pulls in) for the looks the hub serves and the database's extension types, until extensions are a part of their own.

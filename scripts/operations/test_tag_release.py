@@ -349,6 +349,37 @@ class TagReleaseTests(unittest.TestCase):
         (directory / "android.json").write_text(json.dumps(index))
         return [{"path": str(directory / name), "name": name} for name in (apk.name, "android.json")]
 
+    def test_beta_platform_receipt_does_not_need_a_hub_manifest(self):
+        # Each platform publishes independently to the immutable beta prerelease. Only the hub owns latest.json.
+        assets = self.android_receipt()
+        tag_release.check_beta_manifest(assets, "0.7.0-beta.2")
+        tag_release.check_beta_manifest([], "0.7.0-beta.2")  # a store-only iOS receipt
+        path = self.root / "latest.json"
+        for manifest in ({"channel": "beta", "version": "0.7.0-beta.2"},):
+            path.write_text(json.dumps(manifest))
+            tag_release.check_beta_manifest(assets + [{"path": str(path), "name": path.name}], "0.7.0-beta.2")
+        for manifest in ({"version": "0.7.0-beta.2"}, {"channel": "release", "version": "0.7.0-beta.2"},
+                         {"channel": "beta", "version": "0.7.0-beta.1"}):
+            path.write_text(json.dumps(manifest))
+            with self.subTest(manifest=manifest), self.assertRaisesRegex(tag_release.ConfigError, "version/channel"):
+                tag_release.check_beta_manifest(assets + [{"path": str(path), "name": path.name}], "0.7.0-beta.2")
+        with self.assertRaisesRegex(tag_release.ConfigError, "at most one"):
+            tag_release.check_beta_manifest([{"path": str(path), "name": "latest.json"},
+                                             {"path": str(path), "name": "latest.json"}], "0.7.0-beta.2")
+
+    def test_beta_android_receipt_passes_publication_without_latest_json(self):
+        config = self.config()
+        config["worktree"].mkdir()
+        receipt = Path(config["receipt"])
+        receipt.parent.mkdir(parents=True)
+        assets = self.android_receipt(version="0.7.0-beta.2")
+        receipt.write_text(json.dumps({"commit": self.commit, "assets": assets}))
+        with patch.object(tag_release, "resolve_tag", return_value=self.commit), \
+                patch.object(tag_release, "prepare_worktree"), patch.object(tag_release, "upload") as upload:
+            tag_release.invoke_agent(config, "v0.7.0-beta.2", self.commit)
+        self.assertEqual([item["name"] for item in upload.call_args.args[2]],
+                         ["Persona-0.3.0-android.apk", "android.json"])
+
     def test_android_index_must_describe_its_apk_and_version(self):
         tag_release.check_android_index(self.android_receipt(), "0.3.0")
         with self.assertRaisesRegex(tag_release.ConfigError, "not version 0.3.1"):

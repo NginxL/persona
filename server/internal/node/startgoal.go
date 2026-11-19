@@ -17,7 +17,7 @@ import (
 // its condition; typed before the task it would set the agent to work from the condition alone, and typed in the same
 // message as the task it would take the task for its condition. So it goes on its own, after the first message is in
 // the transcript (firstPrompt), while the agent works: Claude Code runs it at once even mid-turn. A goal never fails a
-// start: Claude is up, and the work goes on either way.
+// start: Claude is up, and the work goes on either way. A new Codex takes Codex's own /goal (codex_start_goal.go).
 
 // goalVerdictWait bounds how long the screen has to show what Claude Code said to /goal; tests shorten it.
 var goalVerdictWait = 5 * time.Second
@@ -27,7 +27,7 @@ const goalVerdictPoll = 200 * time.Millisecond
 // Why a start's goal cannot be had: refused before anything starts, in the words the node's other start refusals use
 // (ultracode.go), which the caller may put on the task.
 const (
-	goalNotClaude  = "只有新起的 Claude Code Agent 才能设开始时目标"
+	goalNotClaude  = "只有新起的 Claude Code 或 Codex Agent 才能设开始时目标"
 	goalResumed    = "恢复的会话不设开始时目标（会覆盖它原来的目标）"
 	goalTooLong    = "目标太长，没有设 /goal"
 	goalNoPrompt   = "开始时目标要跟在第一条消息后面设，这次启动没有第一条消息"
@@ -52,8 +52,8 @@ func cleanStartGoal(goal string) string { return strings.Join(strings.Fields(goa
 
 // checkStartGoal refuses, before anything starts, a start whose goal (cleaned) cannot be had: kind is the agent the
 // start runs ("claude", or what the launcher, a runtime or an app makes it), resume the session it resumes, prompt
-// the first message the goal is set after.
-func (n *Node) checkStartGoal(goal, kind, resume, prompt string) error {
+// the first message the goal is set after, hostKind the host the start runs in (its own, else the default).
+func (n *Node) checkStartGoal(goal, kind, hostKind, resume, prompt string) error {
 	switch {
 	case goal == "":
 		return nil
@@ -63,10 +63,10 @@ func (n *Node) checkStartGoal(goal, kind, resume, prompt string) error {
 		return refusal(proto.CodeStartGoalUnsupported, goalTooLong, nil)
 	case resume != "":
 		return refusal(proto.CodeStartGoalUnsupported, goalResumed, nil)
-	case kind != "claude":
+	case kind != "claude" && kind != "codex": // Codex's goal: codex_start_goal.go
 		return refusal(proto.CodeStartGoalUnsupported, goalNotClaude, nil)
 	}
-	if h := n.defaultHost(); h != nil && !drivesScreen(h) {
+	if h := n.hosts.Get(hostKind); h != nil && !drivesScreen(h) { // botmux may hand /goal over as a plain message
 		return refusal(proto.CodeStartGoalUnsupported, goalScreenless, nil)
 	}
 	return nil

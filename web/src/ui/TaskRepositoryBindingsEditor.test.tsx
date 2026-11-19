@@ -31,6 +31,17 @@ const titledSet: TaskRepositorySet = { ...twoLinks, repositories: [{ ...twoLinks
   { kind: "pull_request", number: "7", canonical_url: identity.canonical_url + "/pull/7", title: `Fix "quoted" <b>redirect</b> for the login flow across every provider` },
   { kind: "issue", number: "8", canonical_url: identity.canonical_url + "/issues/8", title: "Reported crash on the first screen" },
 ] }] };
+const twoCatalog: RepositoryCatalog = { ...catalog, repositories: [
+  ...catalog.repositories,
+  { ...other, id: "docs", name: "Docs", verified_at: "2026-01-01T00:00:00Z" },
+] };
+const twoSet: TaskRepositorySet = { ...set, revision: 2, repositories: [
+  set.repositories[0],
+  { repo_id: "docs", requested_ref: { kind: "default" },
+    source_snapshot: { identity: other, clone_url: other.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+    links: [], catalog_state: "current" },
+] };
+const typedSet: TaskRepositorySet = { ...set, repositories: [{ ...set.repositories[0], requested_ref: { kind: "tag", value: "v1.0" } }] };
 
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label)!;
 const click = async (label: string) => act(async () => { expect(button(label), label).toBeTruthy(); button(label).click(); });
@@ -49,6 +60,10 @@ const linkInput = () => document.querySelector<HTMLInputElement>('input[type="ur
 const typeInto = async (node: HTMLInputElement, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(node, value);
   node.dispatchEvent(new Event("input", { bubbles: true }));
+});
+const choose = async (node: HTMLSelectElement, value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(node, value);
+  node.dispatchEvent(new Event("change", { bubbles: true }));
 });
 const press = async (node: Element, key: string) => act(async () => {
   (node as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
@@ -488,7 +503,7 @@ it("keeps an empty alias, default ref and a controlled creation draft without re
 
 it("creates the Todo and association draft in one request, preserving old defaults", async () => {
   const context = repositoryRequestContext("assistant", credentialOwner(), () => true);
-  const pending = createTodoWithRepositories(context, " New work ", " Details ", undefined, { catalog_revision: 4, repositories: [{ repo_id: "web", requested_ref: { kind: "default" }, links: [{ url: identity.canonical_url + "/pull/7" }, { url: identity.canonical_url + "/pull/8" }, { url: "" }] }] });
+  const pending = createTodoWithRepositories(context, " New work ", " Details ", undefined, { catalog_revision: 4, repositories: [{ repo_id: "web", requested_ref: { kind: "default" }, links: [{ url: identity.canonical_url + "/pull/7" }, { url: identity.canonical_url + "/pull/8" }, { url: "" }] }] }, new Map([["web", identity]]));
   expect(calls).toHaveLength(1);
   expect(calls[0].path).toBe("/todos");
   const body = JSON.parse(calls[0].init.body as string);
@@ -507,6 +522,63 @@ it("offers no empty-state sentence that promises an editor nobody can open", asy
   await answer(calls[0], { ...catalog, repositories: [] });
   await act(async () => { button("Add repository").click(); });
   expect(document.querySelector("[data-repository-picker]")!.textContent).toContain("No saved repositories to add, or all of them are linked already.");
+});
+
+it("disables the editor save on an invalid source ref and recovers when it is corrected", async () => {
+  await render();
+  await answer(calls[0], set);
+  await click("Manage links");
+  await answerEditor(catalog, set);
+  await settle();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  await choose(dialog.querySelector("select")!, "branch");
+  const refInput = [...dialog.querySelectorAll<HTMLInputElement>("details input")].find((input) => input.maxLength !== 64)!;
+  expect(refInput).toBeTruthy();
+  expect(dialog.textContent).toContain("Use a valid branch, tag, commit or Git ref.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
+  await typeInto(refInput, "main");
+  await settle();
+  expect(dialog.textContent).not.toContain("Use a valid branch, tag, commit or Git ref.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(false);
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(JSON.parse(save.init.body as string).repositories[0].requested_ref).toEqual({ kind: "branch", value: "main" });
+  await answer(save, { ...set, revision: 2 });
+});
+
+it("rejects duplicate directory names case-insensitively before saving", async () => {
+  await render();
+  await answer(calls[0], twoSet);
+  await click("Manage links");
+  await answerEditor(twoCatalog, twoSet);
+  await settle();
+  const aliases = [...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[maxlength="64"]')];
+  expect(aliases).toHaveLength(2);
+  await typeInto(aliases[0], "Web");
+  await typeInto(aliases[1], "web");
+  await settle();
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Directory names must be unique, ignoring case.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
+  await typeInto(aliases[1], "docs");
+  await settle();
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(false);
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(JSON.parse(save.init.body as string).repositories.map((row: { directory_alias?: string }) => row.directory_alias)).toEqual(["Web", "docs"]);
+  await answer(save, { ...twoSet, revision: 3 });
+});
+
+it("shows and preserves a saved tag ref instead of resetting it", async () => {
+  await render();
+  await answer(calls[0], typedSet);
+  await click("Manage links");
+  await answerEditor(catalog, typedSet);
+  await settle();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector<HTMLSelectElement>("select")!.value).toBe("tag");
+  const refInput = [...dialog.querySelectorAll<HTMLInputElement>("details input")].find((input) => input.maxLength !== 64)!;
+  expect(refInput.value).toBe("v1.0");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("renders the picker as a searchable list, and Escape goes back to its button", async () => {
@@ -528,4 +600,128 @@ it("renders the picker as a searchable list, and Escape goes back to its button"
   // The list closes (its content leaves with the closing fold), and the focus goes back to the button that opened it.
   expect(button("Add repository").getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(button("Add repository"));
+});
+
+// An extension's repository on a placeholder host: its links keep the addresses the manager stored.
+const acme = { provider: "ext:acme-code/acme", instance_url: "https://code.acme.test", path: "acme-code/acme", canonical_url: "https://code.acme.test/acme-code/acme" };
+const acmeReview = { kind: "pull_request" as const, number: "12", canonical_url: acme.canonical_url + "/reviews/12" };
+const acmeIssue = { kind: "issue" as const, number: "4", canonical_url: acme.canonical_url + "/tickets/4", title: "Login loops" };
+const acmeCatalog: RepositoryCatalog = { manager: "assistant", catalog_revision: 4, repositories: [{ ...identity, id: "web", verified_at: "2026-01-01T00:00:00Z" }, { ...acme, id: "acme", name: "Acme app", provider_name: "Acme Code", verified_at: "2026-01-01T00:00:00Z" }] };
+const acmeSet = (state: "available" | "off" | "missing" = "available"): TaskRepositorySet => ({ schema_version: 1, manager: "assistant", todo_id: "todo_example", revision: 1, repositories: [{
+  repo_id: "acme", requested_ref: { kind: "default" },
+  source_snapshot: { identity: acme, clone_url: acme.canonical_url, catalog_revision: 4, transport_origin: "catalog", provider_name: "Acme Code" },
+  links: [acmeReview, acmeIssue], catalog_state: "current", provider_state: state, link_kinds: [{ kind: "pull_request", label: "MR" }],
+}] });
+
+it("opens an extension's links at their stored addresses, in its own words, with a generic mark and its name", async () => {
+  await render();
+  await answer(calls[0], acmeSet());
+  // No request beyond the to-do's own read: the row carries its source's state and words.
+  expect(calls.map((c) => c.path)).toEqual(["/todos/todo_example/repositories"]);
+  const section = document.querySelector("[data-todo-repositories]")!;
+  const mark = section.querySelector('[data-repository-mark="extension"]')!;
+  expect(mark.getAttribute("aria-hidden")).toBe("true");
+  expect(mark.parentElement).toBe(section.querySelector("[data-repository-row]"));
+  // The address first, then its source's name: a narrow line cuts the name before the repository's path.
+  expect(section.querySelector("[data-repository-row] a")!.textContent).toBe("code.acme.test/acme-code/acme · Acme Code");
+  expect(section.querySelector("[data-repository-row] a")!.getAttribute("title")).toBe(`${acme.canonical_url} · Acme Code`);
+  expect(section.textContent).not.toContain("ext:");
+  const links = [...section.querySelectorAll<HTMLAnchorElement>("[data-repository-link] a")];
+  expect(links.map((a) => a.getAttribute("href"))).toEqual([acmeReview.canonical_url, acmeIssue.canonical_url]);
+  // The source's word for a pull request, as given, and its number with #; an issue keeps the localized word under its title.
+  expect(links[0].textContent).toContain("MR");
+  expect(links[0].textContent).toContain("#12");
+  expect(links[0].getAttribute("aria-label")).toBe("MR #12 · acme-code/acme");
+  expect(section.querySelector('[data-link-icon="pullRequest"]')).toBeTruthy();
+  expect(section.querySelector('[data-link-icon="merge"]')).toBeNull();
+  expect(links[1].textContent).toContain("Login loops");
+  expect(links[1].getAttribute("aria-label")).toBe("Issue #4 · acme-code/acme · Login loops");
+  expect(section.textContent).not.toContain("Unavailable");
+});
+
+it("reads a row an extension's source cloned from its own address, and refuses that origin on a built-in row", async () => {
+  await render();
+  const set = acmeSet();
+  set.repositories[0].source_snapshot = { ...set.repositories[0].source_snapshot, clone_url: "ssh://git@code.acme.test/acme-code/acme.git", transport_origin: "provider" };
+  await answer(calls[0], set);
+  expect(document.querySelector("[data-todo-repositories] [data-repository-row]")).toBeTruthy();
+  act(() => root.unmount()); root = createRoot(host); calls = [];
+  await render();
+  await answer(calls[0], { ...set, repositories: [{ ...set.repositories[0], source_snapshot: { ...set.repositories[0].source_snapshot, identity, clone_url: identity.canonical_url }, links: [], provider_state: undefined, link_kinds: undefined }] });
+  expect(document.querySelector("[data-todo-repositories] [data-repository-row]")).toBeNull();
+  expect(document.querySelector("[data-todo-repositories]")!.textContent).toContain("Couldn't confirm repository links were loaded or saved.");
+});
+
+it("says an unavailable source on its row, keeps its links opening and turns off adding one", async () => {
+  await render();
+  await answer(calls[0], acmeSet("missing"));
+  const section = document.querySelector("[data-todo-repositories]")!;
+  expect(section.querySelector("[data-repository-row]")!.textContent).toContain("Unavailable");
+  expect(section.querySelector("[data-repository-note]")!.textContent).toBe("Acme Code is unavailable. Its links still open; adding a new one needs it.");
+  expect(section.querySelector(`a[href="${acmeReview.canonical_url}"]`)).toBeTruthy();
+  await click("Manage links");
+  await answerEditor(acmeCatalog, acmeSet("off"));
+  await settle();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector("[data-repository-row]")!.textContent).toContain("Unavailable");
+  expect(dialog.querySelector("[data-repository-note]")!.textContent).toContain("Acme Code is unavailable.");
+  expect(button("Add issue or PR").disabled).toBe(true);
+  // Its saved links still show in the dialog and are kept, by kind and number, through a save that removes one.
+  expect([...dialog.querySelectorAll<HTMLAnchorElement>("[data-repository-link] a")].map((a) => a.getAttribute("href"))).toEqual([acmeReview.canonical_url, acmeIssue.canonical_url]);
+  await act(async () => { dialog.querySelector<HTMLButtonElement>('[data-repository-link] button[aria-label="Remove #4"]')!.click(); });
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(JSON.parse(save.init.body as string).repositories).toEqual([{ repo_id: "acme", requested_ref: { kind: "default" }, links: [{ kind: "pull_request", number: "12" }] }]);
+});
+
+it("adds a pasted address of an extension's repository as pending and sends it as its URL", async () => {
+  await render();
+  await answer(calls[0], acmeSet());
+  await click("Manage links");
+  await answerEditor(acmeCatalog, acmeSet());
+  await settle();
+  await click("Add issue or PR");
+  for (const url of ["https://code.other.test/acme-code/acme/reviews/13", "http://code.acme.test/acme-code/acme/reviews/13", "https://code.acme.test/acme-code/sibling/reviews/13", "https://code.acme.test/acme-code/acme/reviews/13?tab=files"]) {
+    await typeInto(linkInput(), url);
+    await press(linkInput(), "Enter");
+    expect(document.querySelector('[role="alert"]')!.textContent, url).toContain("Use an issue or pull request link from this repository.");
+  }
+  await typeInto(linkInput(), acme.canonical_url + "/reviews/13");
+  await press(linkInput(), "Enter");
+  const pendingRow = document.querySelector('[role="dialog"] [data-link-pending]')!;
+  expect(pendingRow.textContent).toContain(acme.canonical_url + "/reviews/13");
+  expect(pendingRow.textContent).toContain("Checked when you save");
+  expect(pendingRow.querySelector("a")!.getAttribute("href")).toBe(acme.canonical_url + "/reviews/13");
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(save.path).toBe("/todos/todo_example/repositories");
+  expect(JSON.parse(save.init.body as string).repositories[0].links).toEqual([
+    { kind: "pull_request", number: "12" }, { kind: "issue", number: "4", title: "Login loops" }, { url: acme.canonical_url + "/reviews/13" },
+  ]);
+  // The source's answer decides: its refusal comes back in the hub's words, and the draft stays.
+  await answer(save, { code: "task_repositories_provider_refused", error: "Acme Code refused the link: it is not a review." }, 409);
+  expect(document.querySelector('[role="dialog"] [role="alert"]')!.textContent).toContain("Acme Code refused the link: it is not a review.");
+  expect(document.querySelector('[role="dialog"] [data-link-pending]')).toBeTruthy();
+});
+
+it("offers an extension's saved repository in the picker with the generic mark and its source's name", async () => {
+  const context = repositoryRequestContext("assistant", credentialOwner(), () => true);
+  const { useState } = await import("react");
+  function Draft() { const [value, onChange] = useState<import("../lib/task-repositories").CreateRepositoryBindings>(); return <NewTodoRepositoryBindings context={context} value={value} onChange={onChange} pending={false} />; }
+  await act(async () => root.render(<Draft />));
+  await click("Repositories and links (optional)");
+  await answer(calls[0], acmeCatalog);
+  await act(async () => { button("Add repository").click(); });
+  const option = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent?.includes("Acme app"))!;
+  expect(option().querySelector('[data-repository-mark="extension"]')).toBeTruthy();
+  expect(option().textContent).toContain("acme-code/acme · code.acme.test · Acme Code");
+  await typeInto(document.querySelector<HTMLInputElement>('[data-repository-picker] input')!, "acme code");
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+  await act(async () => { option().click(); });
+  // A new repository has no saved links: a pasted address is pending until the to-do is created.
+  await click("Add issue or PR");
+  await typeInto(linkInput(), acme.canonical_url + "/reviews/2");
+  await press(linkInput(), "Enter");
+  expect(document.querySelector("[data-task-repository-editor] [data-link-pending]")).toBeTruthy();
+  expect(calls).toHaveLength(1);
 });

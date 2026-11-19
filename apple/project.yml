@@ -2,9 +2,15 @@ name: Persona
 # Meta glasses (docs/apple/meta-glasses.md): the Wearables SDK, its keys and the glasses' Bluetooth and network strings are
 # merged in only when config.json app.meta_wearables.enabled is true (PERSONA_META_WEARABLES=YES, set by env).
 include:
-  # Where the iPhone app's entitlements file is (#9290): apart from this file, so siri-calls.yml below can sign with a
-  # generated copy instead. Always merged in.
+  # The default entitlements path lives apart from this file so later includes can select generated opt-in copies.
+  # XcodeGen derives CODE_SIGN_ENTITLEMENTS from the selected target entitlements path, not a target build setting.
   - path: app-entitlements.yml
+  - path: carplay-voice-entitlements.yml
+    enable: ${PERSONA_CARPLAY_VOICE}
+  - path: health-background-delivery-entitlements.yml
+    enable: ${PERSONA_HEALTH_BACKGROUND_DELIVERY}
+  - path: homekit-entitlements.yml
+    enable: ${PERSONA_HOMEKIT}
   - path: meta-wearables.yml
     enable: ${PERSONA_META_WEARABLES}
   # "Call Persona using Persona" through SiriKit (docs/apple/siri.md「Calling Persona」): the Intents extension and the Siri
@@ -18,7 +24,7 @@ configFiles:
   Release: Config.xcconfig
 options:
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.6"
     watchOS: "10.0"
     macOS: "26.0"
     visionOS: "26.0"
@@ -95,6 +101,9 @@ targets:
       - path: Shared
       - path: LiveActivity
     dependencies:
+      # The Mac framework lacks delegate descriptors the iPhone framework exports (#9948).
+      - sdk: LiveCommunicationKit.framework
+        weak: true
       - package: PersonaWire
       - target: PersonaWatch
       - target: PersonaWidgets
@@ -108,8 +117,8 @@ targets:
       - package: MarqueeGlow
       - package: PersonaScreenKit
       - package: PersonaInputKit
-    # The file XcodeGen writes these to (and signs with): Persona/Resources/Persona.entitlements, set in
-    # app-entitlements.yml.
+    # app-entitlements.yml or a later opt-in include selects the file. XcodeGen writes these properties there and derives
+    # CODE_SIGN_ENTITLEMENTS from the same path.
     entitlements:
       properties:
         aps-environment: development
@@ -133,11 +142,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID)
         PRODUCT_MODULE_NAME: Persona
         PRODUCT_NAME: Persona
-        # Meant to sign with the opt-in entitlements scripts/persona_config.py xcconfig writes (PERSONA_APP_ENTITLEMENTS:
-        # CarPlay voice, HomeKit, HealthKit background delivery). XcodeGen 2.46 derives CODE_SIGN_ENTITLEMENTS from the
-        # entitlements path instead and ignores this, so those opt-ins don't reach the signature today (#9526). The SiriKit
-        # opt-in avoids it with apple/app-entitlements.yml + apple/siri-calls.yml.
-        CODE_SIGN_ENTITLEMENTS: $(PERSONA_APP_ENTITLEMENTS:default=Persona/Resources/Persona.entitlements)
         # iPhone and iPad (2026-10-31: on iPad it ran as a phone-sized window). Wide layouts come from the size class
         # (SplitNavigation), as on an open iPhone Duo.
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -664,6 +668,9 @@ targets:
     dependencies:
       - package: PersonaWire
       - target: Persona
+      # The test bundle directly imports LiveCommunicationKit too; keep its symbols weak on a Mac.
+      - sdk: LiveCommunicationKit.framework
+        weak: true
       # The continuity fixture reader and C replay, test-only; it brings PersonaCore with it. The app never links it.
       - package: PersonaCore
         product: PersonaCoreTestSupport

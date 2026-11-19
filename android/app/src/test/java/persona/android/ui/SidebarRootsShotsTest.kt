@@ -134,7 +134,8 @@ import java.io.File
 
 /**
  * Regular-width sidebar roots (#9667) on the real Inbox and To-dos pages, each root its own NavDisplay.
- * Inbox → To-dos has no page transition (UnifiedSidebar.swift:67–74). A drill-down still pushes.
+ * Glass, Brief and Board, light and dark. Inbox → To-dos has no page transition (UnifiedSidebar.swift:67–74).
+ * A drill-down still pushes.
  * The conversation page is a draft field and a ticking effect: AssistantScreen needs a shell session.
  * The item page is a JPage on the real InboxEventRoute; InboxEventScreen also needs hand-off and reply composers.
  */
@@ -171,6 +172,7 @@ class SidebarRootsShotsTest {
         ))
         val landing = InboxLanding()
         var dark by mutableStateOf(false)
+        var style by mutableStateOf(AppStyle.Glass)
         val columnShown = mutableStateOf(true)
         val overlayShown = mutableStateOf(overlay)
         val conversation = mutableStateListOf<NavKey>(AssistantRoute)
@@ -198,20 +200,22 @@ class SidebarRootsShotsTest {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
-                    PersonaTheme(style = AppStyle.Glass, darkTheme = dark, reduceMotion = false) {
+                    PersonaTheme(style = style, darkTheme = dark, reduceMotion = false) {
                         SidebarRootsHarness(snapshot, repository, inbox, hosts, roots, overlay, columnShown, overlayShown, landing, ::pick)
                     }
                 }
             }
+            for (nextStyle in AppStyle.entries) {
             for (isDark in listOf(false, true)) {
-                rule.runOnIdle { dark = isDark; reset(); overlayShown.value = false }
+                rule.runOnIdle { style = nextStyle; dark = isDark; reset(); overlayShown.value = false }
                 val tone = if (isDark) "dark" else "light"
+                val styleName = nextStyle.key
                 settle()
                 // TextField keeps the tag on the unmerged node. The overlay starts open and would cover the field.
                 rule.onNodeWithTag("draft", useUnmergedTree = true).performTextReplacement("Keep this draft")
                 settle(400)
                 val ticksBefore = ticks()
-                save(shot("window"), "$size-draft-before-glass-$tone")
+                save(shot("window"), "$size-draft-before-$styleName-$tone")
 
                 reveal(overlay)
                 rule.onNode(hasText("Inbox") and hasClickAction()).performClick()
@@ -221,14 +225,14 @@ class SidebarRootsShotsTest {
                 // A covered host stays composed, so its button remains in the semantics tree.
                 if (overlay) placedSidebar().assertExists()
                 else rule.onAllNodesWithContentDescription("Sidebar").assertCountEquals(0)
-                save(shot("window"), "$size-inbox-rest-before-glass-$tone")
+                save(shot("window"), "$size-inbox-rest-before-$styleName-$tone")
                 if (!overlay) {
                     // Beside a shown column the page slot is the empty room (SplitNavigation.swift:419–420).
                     // Folding the column is the existing Show Sidebar control, the same one the conversation uses.
                     rule.runOnIdle { columnShown.value = false }
                     settle(800)
                     placedSidebar().assertExists()
-                    save(shot("window"), "$size-inbox-rest-folded-glass-$tone")
+                    save(shot("window"), "$size-inbox-rest-folded-$styleName-$tone")
                     rule.runOnIdle { columnShown.value = true }
                     // The column opens on the layout spring (300ms, no bounce). settle() is 32ms, which
                     // leaves that spring mid-travel: the next frame then shows the whole window, column
@@ -241,16 +245,18 @@ class SidebarRootsShotsTest {
                 rule.onNodeWithText("Approve Friday launch").performClick()
                 advance(80)
                 val pushMid = shot("window")
-                save(pushMid, "$size-item-push-mid-glass-$tone")
+                save(pushMid, "$size-item-push-mid-$styleName-$tone")
                 if (columnAtRest != null) {
                     // The left of the column, short of where a page sliding out of the slot could cover it.
-                    assertTrue("$size $tone drill-down leaves the sidebar column put",
+                    assertTrue("$size $styleName $tone drill-down leaves the sidebar column put",
                         matches(leftStrip(columnAtRest, 240), leftStrip(pushMid, 240)))
+                    // The whole column, including the edge a slide used to paint (#9896).
+                    assertColumnUntouched(columnAtRest, pushMid, "$size $styleName $tone mid-push")
                 }
                 settle(1_000)
                 val pushEnd = shot("window")
-                save(pushEnd, "$size-item-push-end-glass-$tone")
-                assertTrue("$size $tone item push mid frame differs", moved(maskSidebarHeader(pushMid), maskSidebarHeader(pushEnd)))
+                save(pushEnd, "$size-item-push-end-$styleName-$tone")
+                assertTrue("$size $styleName $tone item push mid frame differs", moved(maskSidebarHeader(pushMid), maskSidebarHeader(pushEnd)))
                 rule.onNodeWithContentDescription("Back").assertExists()
                 rule.onNodeWithTag("page-item").assertExists()
                 if (overlay) {
@@ -261,7 +267,7 @@ class SidebarRootsShotsTest {
                     val backToList = shot("window")
                     // The pop's departing page can keep a Back node after it has slid away (semantics ignore
                     // the slide translation). The page in front has no chevron.
-                    assertNoVisibleChevron(backToList, "$size $tone back to the list", overlay)
+                    assertNoVisibleChevron(backToList, "$size $styleName $tone back to the list", overlay)
                     if (overlay) placedSidebar().assertExists()
                     rule.onNodeWithText("Approve Friday launch").assertExists()
                 } else {
@@ -276,49 +282,54 @@ class SidebarRootsShotsTest {
                     rule.onNode(hasText("Inbox") and hasClickAction()).performClick()
                     advance(80)
                     val popMid = shot("window")
-                    save(popMid, "$size-inbox-pop-mid-glass-$tone")
+                    save(popMid, "$size-inbox-pop-mid-$styleName-$tone")
+                    if (columnAtRest != null) {
+                        assertColumnUntouched(columnAtRest, popMid, "$size $styleName $tone mid-pop")
+                    }
                     settle(1_000)
                     val popEnd = shot("window")
-                    save(popEnd, "$size-inbox-pop-end-glass-$tone")
-                    assertTrue("$size $tone re-pick pop mid frame differs", moved(maskSidebarHeader(popMid), maskSidebarHeader(popEnd)))
+                    save(popEnd, "$size-inbox-pop-end-$styleName-$tone")
+                    assertTrue("$size $styleName $tone re-pick pop mid frame differs", moved(maskSidebarHeader(popMid), maskSidebarHeader(popEnd)))
                     rule.onNodeWithText("Approve Friday launch").assertExists()
-                    assertNoVisibleChevron(popEnd, "$size $tone re-pick", overlay)
-                    val inboxShade = sample(popEnd, "Inbox")
-                    val todosShade = sample(popEnd, "To-dos")
-                    val scheduleShade = sample(popEnd, "Scheduled tasks")
-                    assertTrue("$size $tone inbox row ($inboxShade) is shaded and To-dos ($todosShade) is not",
+                    assertNoVisibleChevron(popEnd, "$size $styleName $tone re-pick", overlay)
+                    val inboxShade = sample(popEnd, "Inbox", nextStyle)
+                    val todosShade = sample(popEnd, "To-dos", nextStyle)
+                    val scheduleShade = sample(popEnd, "Scheduled tasks", nextStyle)
+                    assertTrue("$size $styleName $tone inbox row ($inboxShade) is shaded and To-dos ($todosShade) is not",
                         channelDelta(inboxShade, todosShade) > 8)
-                    assertTrue("$size $tone inbox row ($inboxShade) differs from Scheduled tasks ($scheduleShade)",
+                    assertTrue("$size $styleName $tone inbox row ($inboxShade) differs from Scheduled tasks ($scheduleShade)",
                         channelDelta(inboxShade, scheduleShade) > 8)
                 }
 
                 reveal(overlay)
                 rule.onNode(hasText("To-dos") and hasClickAction()).performClick()
-                advance(80)
+                // Beside the page this is a root swap with no push. Over the page the column slides on its own
+                // spec: Glass layout spring 300ms, Brief tween 240ms, Board tween 160ms (PersonaTheme.kt Motions).
+                advance(columnSlideMidMs(nextStyle))
                 val swapMid = shot("window")
-                save(swapMid, "$size-inbox-todos-mid-glass-$tone")
+                save(swapMid, "$size-inbox-todos-mid-$styleName-$tone")
                 settle(1_000)
                 val swapEnd = shot("window")
-                save(swapEnd, "$size-inbox-todos-end-glass-$tone")
+                save(swapEnd, "$size-inbox-todos-end-$styleName-$tone")
                 rule.onNodeWithText("Ship the notes").assertExists()
                 // A covered host can still expose a Back node from a drill that already slid away.
-                assertNoVisibleChevron(swapEnd, "$size $tone to-dos", overlay)
+                assertNoVisibleChevron(swapEnd, "$size $styleName $tone to-dos", overlay)
                 if (overlay) placedSidebar().assertExists()
                 else {
-                    val inboxShade = sample(swapEnd, "Inbox")
-                    val todosShade = sample(swapEnd, "To-dos")
-                    val scheduleShade = sample(swapEnd, "Scheduled tasks")
-                    assertTrue("$size $tone only To-dos is shaded ($todosShade) not Inbox ($inboxShade)",
+                    val inboxShade = sample(swapEnd, "Inbox", nextStyle)
+                    val todosShade = sample(swapEnd, "To-dos", nextStyle)
+                    val scheduleShade = sample(swapEnd, "Scheduled tasks", nextStyle)
+                    assertTrue("$size $styleName $tone only To-dos is shaded ($todosShade) not Inbox ($inboxShade)",
                         channelDelta(todosShade, inboxShade) > 8)
-                    assertTrue("$size $tone To-dos ($todosShade) differs from Scheduled tasks ($scheduleShade)",
+                    assertTrue("$size $styleName $tone To-dos ($todosShade) differs from Scheduled tasks ($scheduleShade)",
                         channelDelta(todosShade, scheduleShade) > 8)
                 }
                 val pageMid = if (overlay) mask(shot("page-todos"), 320, swapMid.height) else pageBesideColumn(swapMid)
                 val pageEnd = if (overlay) mask(shot("page-todos"), 320, swapEnd.height) else pageBesideColumn(swapEnd)
-                assertTrue("$size $tone Inbox → To-dos page mid frame equals the end frame",
+                assertTrue("$size $styleName $tone Inbox → To-dos page mid frame equals the end frame",
                     matches(pageMid, pageEnd, tolerance = if (overlay) 24 else 8))
                 if (overlay) {
-                    assertTrue("$size $tone overlay column is still moving at the mid frame", moved(swapMid, swapEnd))
+                    assertTrue("$size $styleName $tone overlay column is still moving at the mid frame", moved(swapMid, swapEnd))
                 }
 
                 reveal(overlay)
@@ -327,9 +338,9 @@ class SidebarRootsShotsTest {
                 rule.onNodeWithText("Approve Friday launch").assertExists()
                 rule.onNodeWithText("Review budget update").assertExists()
                 val inboxAgain = shot("window")
-                assertNoVisibleChevron(inboxAgain, "$size $tone inbox again", overlay)
+                assertNoVisibleChevron(inboxAgain, "$size $styleName $tone inbox again", overlay)
                 if (overlay) placedSidebar().assertExists()
-                save(inboxAgain, "$size-todos-inbox-end-glass-$tone")
+                save(inboxAgain, "$size-todos-inbox-end-$styleName-$tone")
 
                 if (!overlay) {
                     rule.onNode(hasText("FYI") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
@@ -342,7 +353,7 @@ class SidebarRootsShotsTest {
                     rule.onNode(hasText("Needs you") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).assertIsSelected()
                     rule.onNodeWithText("Approve Friday launch").assertExists()
                     rule.onNodeWithText("Weekly note").assertDoesNotExist()
-                    save(shot("window"), "$size-inbox-needs-you-after-fyi-glass-$tone")
+                    save(shot("window"), "$size-inbox-needs-you-after-fyi-$styleName-$tone")
                 }
 
                 scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
@@ -350,16 +361,30 @@ class SidebarRootsShotsTest {
                 assertEquals(Lifecycle.State.RESUMED, scenario.state)
                 assertEquals(listOf<NavKey>(AssistantRoute), hosts.current.toList())
                 rule.onNodeWithTag("draft", useUnmergedTree = true).assert(hasText("Keep this draft"))
-                assertTrue("$size $tone the draft's effect kept running", ticks() > ticksBefore)
+                assertTrue("$size $styleName $tone the draft's effect kept running", ticks() > ticksBefore)
                 // The inbox host stays composed, unplaced. Its row must not be the page in front.
                 val covered = rule.onAllNodesWithText("Approve Friday launch")
                     .fetchSemanticsNodes(atLeastOneRootRequired = false)
                 if (covered.isNotEmpty()) {
                     rule.onAllNodesWithText("Approve Friday launch")[0].assertIsNotDisplayed()
                 }
-                save(shot("window"), "$size-draft-after-glass-$tone")
+                save(shot("window"), "$size-draft-after-$styleName-$tone")
+            }
             }
         }
+    }
+
+    /**
+     * Mid-travel of the overlaid column (`sidebarColumnSpec`).
+     * Glass keeps 80ms inside the 300ms layout spring (`Tokens.Motion.Layout.duration`).
+     * Brief's tween is `standard` 240ms, so the mid frame is 120ms.
+     * Board's tween is `standard` 160ms, so the mid frame is 80ms.
+     * Page push (300ms) and pop (260ms) do not change with the style (`PageTransitions.kt`); those frames stay at 80ms.
+     */
+    private fun columnSlideMidMs(style: AppStyle): Long = when (style) {
+        AppStyle.Glass -> 80
+        AppStyle.Brief -> 120
+        AppStyle.Board -> 80
     }
 
     private fun ticks(): Int = rule.onNodeWithTag("ticks", useUnmergedTree = true).fetchSemanticsNode()
@@ -386,13 +411,24 @@ class SidebarRootsShotsTest {
         assertTrue("$label visible chevron pixels $differ", differ < 12)
     }
 
-    /** A pixel in the row fill, past the label and short of the badge, so the sample is the background. */
-    private fun sample(bitmap: Bitmap, label: String): Int {
+    /**
+     * A pixel of the selected-row mark.
+     * Glass shades the row (`Lists.kt` drawer fill is `palette.sunken`); the sample stays in the fill,
+     * past the label and short of the badge.
+     * Brief and Board paint `statusSurface`, the column's own paper (`sidebarBackground`), so that fill
+     * matches an unselected row. The mark is the edge (`Adaptive.kt` `selectedRow`): Brief's ink bar
+     * starts 12dp before the row, Board's accent bar is the first 3dp of the row.
+     */
+    private fun sample(bitmap: Bitmap, label: String, style: AppStyle): Int {
         val window = rule.onNodeWithTag("window").fetchSemanticsNode().boundsInRoot
         val row = rule.onAllNodes(hasText(label) and hasClickAction()).fetchSemanticsNodes().minBy { it.boundsInRoot.left }
         val bounds = row.boundsInRoot
-        val x = (bounds.left - window.left + (bounds.width * 0.72f)).toInt().coerceIn(0, bitmap.width - 1)
-        val y = (bounds.top - window.top + (bounds.height * 0.5f)).toInt().coerceIn(0, bitmap.height - 1)
+        val x = when (style) {
+            AppStyle.Glass -> bounds.left - window.left + bounds.width * 0.72f
+            AppStyle.Brief -> bounds.left - window.left - 12f + 1f
+            AppStyle.Board -> bounds.left - window.left + 1f
+        }.toInt().coerceIn(0, bitmap.width - 1)
+        val y = (bounds.top - window.top + bounds.height * 0.5f).toInt().coerceIn(0, bitmap.height - 1)
         return bitmap.getPixel(x, y)
     }
 
@@ -430,6 +466,17 @@ class SidebarRootsShotsTest {
     }
 
     private fun maskSidebarHeader(bitmap: Bitmap): Bitmap = mask(bitmap, 320, 220)
+
+    /** Exact RGBA of the beside column (320dp at mdpi). A push stays in the detail slot. */
+    private fun assertColumnUntouched(rest: Bitmap, frame: Bitmap, label: String) {
+        val width = minOf(320, rest.width, frame.width)
+        val height = minOf(rest.height, frame.height)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                assertEquals("$label column pixel ($x,$y)", rest.getPixel(x, y), frame.getPixel(x, y))
+            }
+        }
+    }
 
     private fun leftStrip(bitmap: Bitmap, width: Int): Bitmap =
         Bitmap.createBitmap(bitmap, 0, 0, minOf(width, bitmap.width), bitmap.height)

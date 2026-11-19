@@ -213,6 +213,13 @@ func (s *Service) readModelProfileState(ctx context.Context) (modelProfileState,
 
 // putModelProfileSettings requires an atomic store: a failed write must leave every setting untouched.
 func (s *Service) putModelProfileSettings(ctx context.Context, values map[string]any) error {
+	for _, value := range values {
+		if r, ok := value.(modelRecord); ok {
+			if err := checkExternalPurpose(r.Binding); err != nil {
+				return err
+			}
+		}
+	}
 	st := s.store()
 	if st == nil {
 		return i18n.Err("assistant-models.err_no_database")
@@ -319,6 +326,9 @@ func (s *Service) tierModel(ctx context.Context, tier string) (ModelTier, error)
 	t, ok := p.Tiers[tier]
 	if !ok {
 		return ModelTier{}, errors.New("the model profile in use (" + cmp.Or(p.Name, p.ID) + ") has no tier " + strings.TrimSpace(tier) + "; its tiers: " + strings.Join(slices.Sorted(maps.Keys(p.Tiers)), ", "))
+	}
+	if proto.IsExternalLauncher(t.Launcher) {
+		return ModelTier{}, i18n.Err("external-adapter.purpose_unsupported")
 	}
 	return t, nil
 }

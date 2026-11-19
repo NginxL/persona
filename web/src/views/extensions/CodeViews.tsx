@@ -24,13 +24,22 @@ import "./code-view.css";
 
 /** What a code component needs from the page: to send an action with values, and which one is under way. */
 export interface CodeHandlers {
-  act: (a: UIAction, values?: Record<string, string>) => void;
+  /** Sends an action. A page that can tell resolves to whether it was done (false: not sent, cancelled or failed); a
+   *  box clears what was typed unless it is false. */
+  act: (a: UIAction, values?: Record<string, string>) => void | Promise<boolean>;
   busy: string;
   /** Scroll to a file's diff on the page (a file tree without an action). */
   reveal?: (path: string) => void;
   local?: NativeLocal;
   canFetch?: () => boolean;
   fetch?: import("./review-context").ReviewApi["fetch"];
+}
+
+/** Runs `then` (clear a box, close it) once what `act` returned says the action was done: at once when the page cannot
+ *  tell, never when it was not done. */
+export function whenDone(sent: void | Promise<boolean>, then: () => void) {
+  if (sent instanceof Promise) void sent.then((ok) => ok && then());
+  else then();
 }
 
 export const PILL: Record<UITone, "green" | "orange" | "red" | undefined> = { neutral: undefined, positive: "green", caution: "orange", danger: "red" };
@@ -549,12 +558,12 @@ export function Box({ value, onChange, placeholder, autoFocus, onSubmit, disable
 }
 
 /** A small comment box: text and one button (a reply, an inline comment), with cancel when it can close. */
-function MiniComposer({ placeholder, send, busy, disabled, onCancel, autoFocus, local }: { placeholder: string; send: (body: string) => void; busy: boolean; disabled: boolean; onCancel?: () => void; autoFocus?: boolean; local?: NativeLocal }) {
+function MiniComposer({ placeholder, send, busy, disabled, onCancel, autoFocus, local }: { placeholder: string; send: (body: string) => void | Promise<boolean>; busy: boolean; disabled: boolean; onCancel?: () => void; autoFocus?: boolean; local?: NativeLocal }) {
   const [body, setBody] = useNativeState(local, "body", "");
   const go = () => {
     if (!body.trim() || disabled) return;
-    send(body.trim());
-    if (!local) setBody("");
+    // kept until it has gone: a send that failed leaves the text to send again
+    whenDone(send(body.trim()), () => { if (!local) setBody(""); });
   };
   return (
     <div className="flex flex-col gap-2">
@@ -602,8 +611,9 @@ export function CommentThread({ item, act, busy, local }: { item: UIItem } & Cod
               disabled={!!busy}
               onCancel={() => setReplying(false)}
               send={(body) => {
-                act(item.reply!, { body });
-                if (!local) setReplying(false);
+                const sent = act(item.reply!, { body });
+                whenDone(sent, () => { if (!local) setReplying(false); });
+                return sent;
               }}
             />
           ) : (

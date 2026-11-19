@@ -244,18 +244,24 @@ func (s *Service) taskTodoForConversation(conversation, id string) (Todo, error)
 
 // reusableTodo says whether a task of a plan from conversation may run on todo id (task_plan's todo_id): the todo is
 // one that conversation opened or supervises (a handover after its agent stopped carries on in the same to-do, #6427),
-// is not done, has no live agent on it and is not taken by a plan that started and has not linked its agent yet. An
+// is not closed for good (a failed start is taken up again: takeTodoForTask reopens it, #10365), its start is not being
+// remedied in a kept tab (task_retry's), has no live agent on it, is not starting again already (a Retry's, task_retry's
+// start on its way, tasksState.retrying) and is not taken by a plan that started and has not linked its agent yet. An
 // agent linked and never let go whose session stopped (its terminal kept, tasks_close.go), was archived or whose
 // computer the hub no longer knows is no agent working on it: those links are answered as stopped, for the taker to
 // let go (releaseStoppedAgents). A computer that cannot be reached is not an answer: its agent counts as working.
-// taking: the plan hold is what the caller is about to claim itself, so it is not looked at (takeTodoForTask holds it).
+// taking: the plan hold and the start are what the caller claimed itself, so they are not looked at (takeTodoForTask
+// holds them).
 func (s *Service) reusableTodo(ctx context.Context, conversation, id string, taking bool) (stopped []TodoAgent, err error) {
 	t, err := s.taskTodoForConversation(conversation, id)
 	if err != nil {
 		return nil, err
 	}
-	if t.DoneAt != nil {
+	if t.closedForGood() {
 		return nil, notReusable(id, "it is already done")
+	}
+	if s.startRemedying(ctx, t) {
+		return nil, notReusable(id, "its start is being remedied in the tab its computer keeps: use task_retry")
 	}
 	for _, a := range t.Agents {
 		if a.ReleasedAt != nil || a.DismissedAt != nil {
@@ -268,13 +274,37 @@ func (s *Service) reusableTodo(ctx context.Context, conversation, id string, tak
 	}
 	if !taking {
 		s.tasks.mu.Lock()
-		busy := s.tasks.reusing[id]
+		busy, starting := s.tasks.reusing[id], s.tasks.retrying[id] != nil
 		s.tasks.mu.Unlock()
 		if busy {
 			return nil, notReusable(id, "another plan is starting an agent on it")
 		}
+		if starting {
+			return nil, notReusable(id, errStartingAgain)
+		}
 	}
 	return stopped, nil
+}
+
+// errStartingAgain is why a to-do whose agent is starting again (a Retry, task_retry, a new agent after stopped
+// ones, another plan taking it over: tasksState.retrying) is not taken by a plan.
+const errStartingAgain = "its agent is starting again already (a Retry, or a new agent on it): wait for how that start ends"
+
+// startRemedying: t's start did not come up and is being remedied in the tab its computer keeps (start_remedy.go).
+// Only a supervised task's start is ever remedied, so the plans are read for those alone; a plan that can't be read
+// says nothing is being remedied. task_retry's mark on a start that had failed for good keeps no tab (no until): its
+// start is on its way under the start claim while it runs, and once the to-do is no longer a failed start, a mark left
+// behind (its manager stopped meanwhile) remedies nothing.
+func (s *Service) startRemedying(ctx context.Context, t Todo) bool {
+	if t.Supervision == nil {
+		return false
+	}
+	p, i, err := s.currentPlanAssignment(ctx, t)
+	if err != nil {
+		return false
+	}
+	r := p.Tasks[i].Start
+	return r != nil && r.State == remedying && (!r.Until.IsZero() || t.failedStart())
 }
 
 // todoAgentStopped: nothing runs agent a now, so a new agent may take over its to-do: its session is listed stopped
@@ -297,8 +327,10 @@ func (s *Service) todoAgentStopped(ctx context.Context, a TodoAgent) bool {
 }
 
 // takeTodoForTask is the todo a started plan's task runs on (PlanTask.ReuseTodo), checked again now (it may have been
-// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo). The stopped
-// agents still linked to it are let go first: the new agent is the one working on it.
+// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo). The hold is
+// also the to-do's one start on its way (claimTaskStart, which a Retry and task_retry take too), so a Retry of a failed
+// start and a plan taking it over never both start an agent on it, whichever comes first (#10365). The stopped agents
+// still linked to it are let go first: the new agent is the one working on it.
 func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation string, task PlanTask) (Todo, error) {
 	id := task.ReuseTodo
 	s.tasks.mu.Lock()
@@ -306,7 +338,12 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation stri
 		s.tasks.mu.Unlock()
 		return Todo{}, notReusable(id, "another plan is starting an agent on it")
 	}
-	s.tasks.reusing[id] = true
+	st, claimed := s.claimTaskStartLocked(id)
+	if !claimed {
+		s.tasks.mu.Unlock()
+		return Todo{}, notReusable(id, errStartingAgain)
+	}
+	s.tasks.reusing[id], s.tasks.taking[id] = true, st
 	s.tasks.mu.Unlock()
 	var stopped []TodoAgent
 	var err error
@@ -354,6 +391,18 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation stri
 	}
 	if task.Continues == id {
 		if err := s.reopenTodo(ctx, id); err != nil {
+			s.releaseTakenTodo(id)
+			return Todo{}, err
+		}
+	} else if cur, ok := s.todoNow(id); ok && cur.failedStart() {
+		// A failed start taken up through todo_id is open again, its error cleared, as a Retry reopens it: the new
+		// agent works on it, and it is not counted closed meanwhile (#10365). Another assistant sharing the store
+		// that reopened it first is starting it again itself: not a second agent.
+		_, reopened, err := s.reopenFailedTodo(ctx, id)
+		if err == nil && !reopened {
+			err = notReusable(id, errStartingAgain)
+		}
+		if err != nil {
 			s.releaseTakenTodo(id)
 			return Todo{}, err
 		}
@@ -443,14 +492,19 @@ func (s *Service) releaseStoppedAgents(ctx context.Context, id string, stopped [
 	return nil
 }
 
-// releaseTakenTodo lets go of a todo takeTodoForTask held; id "" is nothing.
+// releaseTakenTodo lets go of a todo takeTodoForTask held, and ends the start it claimed with it; id "" is nothing.
 func (s *Service) releaseTakenTodo(id string) {
 	if id == "" {
 		return
 	}
 	s.tasks.mu.Lock()
 	delete(s.tasks.reusing, id)
+	st := s.tasks.taking[id]
+	delete(s.tasks.taking, id)
 	s.tasks.mu.Unlock()
+	if st != nil {
+		s.endTaskStart(id, st, proto.Session{})
+	}
 }
 
 // taskStartTimeout bounds one start of a task's agent: a busy machine's shell can take minutes to run claude
@@ -603,18 +657,35 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	// The new tab's shell waits on a question, or the agent's screen stopped, and the computer keeps the tab: a
 	// supervised task's start is remedied first, not failed yet (start_remedy.go, #2570).
 	code, args := codedStartRefusal(err)
+	// The launcher this start ran, when the refusal does not name it: a tier, a start-defaults policy or the agent.new
+	// binding may have chosen it, which the plan does not keep, and a retry on another launcher starts from it
+	// (ranLauncher, #10365).
+	if args["launcher"] == "" {
+		if args == nil {
+			args = map[string]string{}
+		}
+		args["launcher"] = s.startLauncher(ctx, t.Launcher)
+	}
 	if s.beginRemedy(ctx, planID, i, t, err, code, args, reason) {
 		return
 	}
 	// A retry the assistant asked for that failed so its tab is gone: the start fails for good, and the supervisor and
 	// the user hear of it as of a first failure.
 	remedied := t.Start != nil && t.Start.State == remedying
+	// Its launcher's failure on that computer: the others there it may start with, for the card and the supervisor
+	// (start_retry_launcher.go, #10365). Only suggested: nothing starts on them unless someone asks.
+	var retryWith []string
+	if m, ok := s.machineByName(ctx, t.Machine); ok {
+		failed := t
+		failed.ErrorCode, failed.ErrorArgs = code, args
+		retryWith = s.retryLaunchers(ctx, m, failed, err)
+	}
 	if ferr := s.failTodo(ctx, t.TodoID, reason); ferr != nil {
 		s.logf("task %s: fail: %v", t.TodoID, ferr)
 	}
 	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		pt.Error = err.Error()
-		pt.ErrorCode, pt.ErrorArgs = code, args
+		pt.ErrorCode, pt.ErrorArgs, pt.RetryWith = code, args, retryWith
 		if remedied && pt.Start != nil {
 			pt.Start.State, pt.Start.Pane, pt.Start.At = remedyFailed, "", time.Now().UTC()
 		}
@@ -767,25 +838,55 @@ func (s *Service) currentPlanAssignmentIn(ctx context.Context, todo Todo, histor
 // off is told to go on (continueTask).
 // The todo it answers is as the apps get it.
 func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage, error) {
+	return s.retryTaskWith(ctx, todoID, retryWith{})
+}
+
+// retryTaskWith is retryTask, on another launcher of the same computer when with names one (retryOn, #10365): checked
+// before the to-do is reopened, a refusal changes nothing. The same launcher goes back to the tab its last start
+// stopped in while the computer keeps it (keptTabOf), so a shell question answered there meanwhile does not stop it
+// again in a new tab; another launcher opens a new one. With an answer, that answer is typed into the tab first
+// (answerKeptTab), and only a failed start whose question it answers starts again: refused, nothing changes. So with a
+// launcher: when another start of the task is on its way (a Retry, task_retry, a plan taking the to-do over) or it
+// started since, nothing starts on the launcher asked for, and that is refused rather than answered as if it had.
+func (s *Service) retryTaskWith(ctx context.Context, todoID string, with retryWith) (json.RawMessage, error) {
+	view, started, err := s.retryTaskStart(ctx, todoID, with)
+	if err == nil && !started && with.launcher != "" {
+		return nil, retryRefused{i18n.Err("assistant-tasks.retry_launcher_not_started", i18n.Args{"launcher": with.launcher})}
+	}
+	return view, err
+}
+
+// retryTaskStart is retryTaskWith; started: this call started the task's agent again (else the to-do is answered as
+// it is: another start is on its way, or it started since, a cut-off agent of it told to go on unless a launcher was
+// named).
+func (s *Service) retryTaskStart(ctx context.Context, todoID string, with retryWith) (_ json.RawMessage, started bool, _ error) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	cur, ok, err := s.todo(ctx, todoID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, db.ErrTodoNotFound
+		return nil, false, db.ErrTodoNotFound
 	}
 	// A to-do no conversation opened is nobody's task to start again. One with no plan id of its own (a plan took it
 	// over through todo_id) is: the plan that binds it is found below (currentPlanAssignment, #8770).
 	if cur.Origin == "" {
-		return nil, errTaskNotRetryable
+		return nil, false, errTaskNotRetryable
 	}
 	if cur.DoneAt == nil {
-		return s.continueTask(ctx, cur)
+		if with.answer != "" { // open: started again, or remedied by the assistant
+			return nil, false, errAnswerNotWaiting
+		}
+		if with.launcher != "" { // open: started again since; another launcher is for a failed start, not a Continue
+			view, err := s.todoView(ctx, todoID)
+			return view, false, err
+		}
+		view, err := s.continueTask(ctx, cur)
+		return view, false, err
 	}
-	failed := cur.DoneAt != nil && cur.StartError != ""
+	failed := cur.failedStart()
 	var st *taskStart
 	busy := s.taskStartOnWay(todoID)
 	if failed {
@@ -794,12 +895,15 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 		busy = !claimed
 	}
 	if busy || !failed {
-		if !busy && cur.DoneAt != nil {
-			return nil, errTaskNotRetryable // done by hand or by the hub, not a failed start
+		if with.answer != "" { // another start is on its way, or it is done: one answer is typed by one start
+			return nil, false, errAnswerNotWaiting
 		}
-		return s.todoView(ctx, todoID)
+		if !busy && cur.DoneAt != nil {
+			return nil, false, errTaskNotRetryable // done by hand or by the hub, not a failed start
+		}
+		view, err := s.todoView(ctx, todoID)
+		return view, false, err
 	}
-	started := false
 	defer func() {
 		if !started {
 			s.endTaskStart(todoID, st, proto.Session{})
@@ -807,44 +911,69 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	}()
 	p, i, err := s.currentPlanAssignment(ctx, cur)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 	t := p.Tasks[i]
 	t.Permission = strings.TrimSpace(t.Permission)
 	m, ok := s.machineByName(ctx, t.Machine)
 	if !ok {
-		return nil, i18n.Err("assistant-tasks.no_machine", i18n.Args{"machine": strconv.Quote(t.Machine)})
+		return nil, false, i18n.Err("assistant-tasks.no_machine", i18n.Args{"machine": strconv.Quote(t.Machine)})
 	}
 	if err := s.leaderOnWorkMachine(&t, m); err != nil { // a retry of a leader plan saved on a computer that is work-trust now
-		return nil, fmt.Errorf("%w; nothing was started", err)
+		return nil, false, fmt.Errorf("%w; nothing was started", err)
 	}
 	if !m.Reachable {
-		return nil, machineOffline(m.Name)
+		return nil, false, machineOffline(m.Name)
+	}
+	launcher, model, from := t.Launcher, t.Model, s.ranLauncher(ctx, t)
+	inPane := keptTabOf(t, time.Now())
+	if err := s.retryOn(ctx, &t, m, with); err != nil {
+		return nil, false, err
+	}
+	moved := t.Launcher != launcher && t.Launcher != from // on another launcher than the one that failed
+	if moved || t.Model != model {                        // another launcher starts in a new tab, as task_retry's does
+		inPane = ""
+	}
+	typed := false
+	if with.answer != "" {
+		if typed, err = s.answerKeptTab(ctx, m, t, inPane, with.answer); err != nil {
+			return nil, false, err
+		}
 	}
 	reopened, ok, err := s.reopenFailedTodo(ctx, todoID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	view, err := json.Marshal(reopened)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok { // another assistant sharing the store reopened it first
-		return view, nil
+		return view, false, nil
 	}
 	// Task i is kept as this retry starts it (t), its error cleared. The plan is read again under its lock, so what its
 	// other tasks recorded since p was read stays.
 	if err := s.patchPlanTask(ctx, p.ID, i, func(pt *PlanTask) {
 		*pt = t
-		pt.Error, pt.ErrorCode, pt.ErrorArgs = "", "", nil
+		pt.Error, pt.ErrorCode, pt.ErrorArgs, pt.RetryWith = "", "", nil, nil
 	}); err != nil {
 		s.logf("plan %s: %v", p.ID, err)
 	}
+	if moved && with.by != "" { // the step the task's history shows: who moved it to which launcher
+		s.remedyStep(ctx, p.Conversation, todoID, startRemedyBody{Action: "retry", By: with.by, LauncherFrom: from, LauncherTo: t.Launcher})
+	}
+	switch { // the answer's id, never what a prompt asked for
+	case with.answer != "" && typed:
+		s.remedyStep(ctx, p.Conversation, todoID, startRemedyBody{Action: "answer", By: with.by, Choice: with.answer})
+	case with.answer != "": // the question had left the tab's last line (answered at the computer): not the owner's answer
+		s.remedyStep(ctx, p.Conversation, todoID, startRemedyBody{Action: "answer_not_typed", By: with.by, Choice: with.answer})
+	}
 	s.logf("task %s: retrying its start on %s", todoID, m.ID)
 	started = true
+	t.inPane = inPane
 	s.startPlanTaskAsync(p.ID, p.Conversation, i, t, true, func() { s.endTaskStart(todoID, st, proto.Session{}) })
-	return view, nil
+	return view, true, nil
 }
 
 // continueText is what goes on a cut-off turn: what the chat's "Retry" on an API error card sends.
@@ -858,15 +987,11 @@ var continueHold = 30 * time.Second
 // one is on its way, or before the agent took it up, answer the todo as it is, as does a task with no agent cut off.
 // The agent's machine offline is refused.
 func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, error) {
-	var cut proto.Session
-	for _, c := range s.taskAgents(ctx, cur) {
-		if c.TurnError != "" && (cut.SessionID == "" || c.UpdatedAt.After(cut.UpdatedAt)) {
-			cut = c
-		}
-	}
+	cut := cutAgent(s.taskAgents(ctx, cur))
 	if cut.SessionID == "" {
 		return s.todoView(ctx, cur.ID)
 	}
+	at := s.cutRow(cut) // the turn picked, by the identity it shows by: every check below goes by it
 	m, ok := s.device(ctx, cut.MachineID)
 	if !ok || !m.Reachable {
 		name := cut.MachineID
@@ -880,6 +1005,12 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		return s.todoView(ctx, cur.ID)
 	}
 	release := func() { s.endTaskStart(cur.ID, st, proto.Session{}) }
+	// Still the turn it was picked for, now that this Continue holds the claim: one that went on meanwhile (an
+	// earlier Continue taken up, the owner at the computer) is not continued again.
+	if now := cutAgent(s.taskAgents(ctx, cur)); now.SessionID != cut.SessionID || now.TurnError != cut.TurnError || continueTakenUp(now, cut, at) {
+		release()
+		return s.todoView(ctx, cur.ID)
+	}
 	if stoppedAgent(cut) { // it stopped since (read-only, #4754): a new agent goes on with the task (tasks_successor.go)
 		var started proto.Session
 		defer func() { s.endTaskStart(cur.ID, st, started) }() // a message that waited for it goes to the new agent
@@ -900,16 +1031,58 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 	go func() {
 		defer release()
 		ctx := context.WithoutCancel(ctx)
+		n := 0
 		for end := time.Now().Add(continueHold); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+			if n++; s.continuePolled != nil {
+				s.continuePolled(n)
+			}
 			// Still cut off by the same error: not taken up yet. The session is as the node lists it: Claude Code's error
 			// is its last words, a Codex turn's the node's own TurnError (no words of its answer, #2185).
 			c, ok := s.session(ctx, cut.MachineID, cut.SessionID)
-			if !ok || c.Status == proto.StatusWorking || (strings.TrimSpace(c.LastText) != cut.TurnError && c.TurnError != cut.TurnError) {
-				return // it took it up (or is gone): a later cut may be continued again
+			if !ok {
+				continue // no answer this time: nothing says it took it up, the claim stays (until continueHold)
+			}
+			if c.Status == proto.StatusWorking || continueTakenUp(c, cut, at) {
+				return // it took it up: a later cut may be continued again
 			}
 		}
 	}()
 	return s.todoView(ctx, cur.ID)
+}
+
+// cutAgent is the agent among agents whose turn was cut off (a turn error) latest; none when no turn was.
+func cutAgent(agents []proto.Session) proto.Session {
+	var cut proto.Session
+	for _, c := range agents {
+		if c.TurnError != "" && (cut.SessionID == "" || c.UpdatedAt.After(cut.UpdatedAt)) {
+			cut = c
+		}
+	}
+	return cut
+}
+
+// cutRow is the identity of cut's turn that Continue goes by (continueTakenUp): for the hub's own word on a turn with
+// no output (silent_turns.go), the row its verdict was made at, which is what the verdict holds by; a row read later
+// (a moment late, its time corrected since) is no other turn. Otherwise the row as picked.
+func (s *Service) cutRow(cut proto.Session) rowAt {
+	if proto.SilentTurnKind(cut.TurnErrorKind) {
+		if m, ok := s.quietMarks(cut.MachineID)[cut.SessionID]; ok {
+			return m.rowAt
+		}
+	}
+	return rowOf(cut)
+}
+
+// continueTakenUp: agent c (the node's row, or the lists') is no longer at cut, the turn "Continue" was sent for, at
+// row at (cutRow). The hub's own word on a turn with no output (silent_turns.go) is not on the node's row: that turn
+// is over once the verdict no longer holds for c (rowAt.holds, the very check that shows it), so the guard is never let
+// go while the verdict still shows. Otherwise the error that cut it off is gone: Claude Code's is its last words, a
+// Codex turn's the node's own TurnError (#2185).
+func continueTakenUp(c, cut proto.Session, at rowAt) bool {
+	if proto.SilentTurnKind(cut.TurnErrorKind) {
+		return !at.holds(c)
+	}
+	return strings.TrimSpace(c.LastText) != cut.TurnError && c.TurnError != cut.TurnError
 }
 
 // taskStartRetryDelay is how long a task waits before its one retry after a start the new tab's terminal was not

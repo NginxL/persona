@@ -9,12 +9,14 @@
   "launcher_missing_terminal_here": "这台电脑上新开的终端标签页（{pane_shell}）里没有「{launcher}」这个命令；Persona 是在 {launcher_shell}（{rc_file}）里找到它的。请在终端的 shell 会读到的启动文件里定义它，或者在 Persona 里把它添加为模型供应商。",
   "launcher_missing_terminal_path": "{machine} 上新开的终端标签页（{pane_shell}）运行不了启动模型入口「{launcher}」要用的「{missing}」：终端所在的环境里没有这个文件，或者不能运行它（比如在容器里）。请在能看到它的终端里启动 Agent，或者换一个模型入口。",
   "launcher_missing_terminal_path_here": "这台电脑上新开的终端标签页（{pane_shell}）运行不了启动模型入口「{launcher}」要用的「{missing}」：终端所在的环境里没有这个文件，或者不能运行它（比如在容器里）。请在能看到它的终端里启动 Agent，或者换一个模型入口。",
+  "launcher_missing_terminal_short": "「{launcher}」在 {machine} 的终端里开不起来",
+  "launcher_missing_terminal_short_here": "「{launcher}」在这台电脑的终端里开不起来",
   "claude_missing_terminal": "{machine} 上新开的终端标签页（{pane_shell}）找不到启动模型入口「{launcher}」要用的 Claude Code（「{missing}」）。请在终端看得到的地方安装 Claude Code，或者把它加到这个 shell 的 PATH 里。",
   "claude_missing_terminal_here": "这台电脑上新开的终端标签页（{pane_shell}）找不到启动模型入口「{launcher}」要用的 Claude Code（「{missing}」）。请在终端看得到的地方安装 Claude Code，或者把它加到这个 shell 的 PATH 里。",
   "terminal_default_shell": "默认的 shell",
   "assistant_control_failed": "Claude 未能应用这项设置：{reason}",
-  "shell_waiting": "{machine} 上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行；这个标签会再留几分钟，可以去回答它。",
-  "shell_waiting_here": "这台电脑上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行；这个标签会再留几分钟，可以去回答它。",
+  "shell_waiting": "{machine} 上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行。如果 Persona 里列出了这个提问的回答，选一个，Agent 就会在那个标签里启动；也可以去 {machine} 上的那个标签里回答，再重新启动 Agent。标签会再留几分钟。",
+  "shell_waiting_here": "这台电脑上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行。如果 Persona 里列出了这个提问的回答，选一个，Agent 就会在那个标签里启动；也可以在这台电脑上的那个标签里回答，再重新启动 Agent。标签会再留几分钟。",
   "start_line_rejected": "{machine} 上新开的终端标签两次都没接住启动命令（它显示“{line}”）。什么都没运行；看看那个 shell 启动时做了什么，再重试。",
   "start_line_rejected_here": "这台电脑上新开的终端标签两次都没接住启动命令（它显示“{line}”）。什么都没运行；看看那个 shell 启动时做了什么，再重试。"
 }

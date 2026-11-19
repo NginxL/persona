@@ -1,9 +1,14 @@
 package persona.core.domain.models
 
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.JsonCodec
 import persona.core.contracts.ModelPick
 import persona.core.contracts.Session
 import persona.core.contracts.api.AgentLauncher
@@ -12,6 +17,7 @@ import persona.core.contracts.api.AssistantLaunchers
 import persona.core.contracts.api.LauncherDefault
 import persona.core.contracts.api.LauncherModels
 import persona.core.contracts.api.UnavailableLauncher
+import persona.core.domain.FixtureReader
 
 /**
  * A Persona chat's stored pick and its panel (the web's `lib/assistant-panel.test.ts` and `AssistantModelPill.test.tsx`,
@@ -34,6 +40,19 @@ class PersonaModelPanelTest {
     private fun read(name: String) = ModelList(read = true, list = lists[name])
     private fun of(session: Session?, main: Boolean = false, kept: Boolean = true, page: ModelPick? = null) =
         PersonaModelPanel.Chat(session, isMain = main, kept = kept, config = "claude", pagePick = page)
+
+    private val sharedCase = FixtureReader.read("assistant-launchers").single().value
+    private val sharedCandidates = sharedCase.getValue("candidates").jsonArray.map {
+        JsonCodec.decodeFromJsonElement<AgentLauncher>(it)
+    }
+    private val sharedAssistantNames = sharedCase.getValue("assistant").jsonArray.map { it.jsonPrimitive.content }
+    private val sharedInfo = AssistantLaunchers(
+        launchers = sharedCandidates.filter { it.name in sharedAssistantNames },
+        default = LauncherDefault("runtime"),
+        unavailable = sharedCandidates.filterNot { it.name in sharedAssistantNames }.map {
+            UnavailableLauncher(it.name, kind = "launcher", agent = it.agentType, code = "not_main_chat", reason = "Cannot run Assistant")
+        },
+    )
 
     @Test fun thePickIsReadFromModelPickWhereTheHubKeepsIt() {
         val picked = chat.copy(modelPick = ModelPick("team", "sonnet", "low"))
@@ -100,5 +119,27 @@ class PersonaModelPanelTest {
         assertEquals(PillSetup("claude", "Team API", "sonnet", "high"), pill.setup)
         val main = PersonaModelPanel.pill(of(chat, main = true), PersonaModelPanel.setup(of(chat, main = true), info), info, read("claude"))
         assertEquals(PillSetup("claude", "claude", "Opus 5.5", "high"), main.setup)
+    }
+
+    @Test fun sharedFixtureOffersTheSameEligibleChoicesForMainAndNewChats() {
+        assertEquals(listOf("runtime", "codex-gw", "team-api"), sharedCandidates.map { it.name })
+        val mainChat = chat.copy(launcher = "runtime", agent = "claude", model = null)
+        for ((page, running) in listOf(of(null) to false, of(mainChat, main = true) to true)) {
+            val setup = PersonaModelPanel.setup(page, sharedInfo)
+            val panel = PersonaModelPanel.panel(setup, sharedInfo, ::read, typed = true, running = running)
+            assertEquals(sharedAssistantNames, panel.providers.filter { it.unavailable == null }.map { it.id })
+            assertEquals(PanelReason.Hub("Cannot run Assistant"), panel.providers.single { it.id == "codex-gw" }.unavailable)
+        }
+    }
+
+    @Test fun sharedLegacyPlaceholderMeansTheLaunchersDefaultNotAConcreteModel() {
+        val page = of(null)
+        val setup = PersonaModelPanel.setup(page, sharedInfo)
+        assertEquals(PersonaModelPanel.Setup("runtime", source = PersonaModelPanel.Source.Default), setup)
+        val panel = PersonaModelPanel.panel(setup, sharedInfo, ::read, typed = true)
+        val runtime = panel.providers.single { it.id == "runtime" }
+        assertFalse(runtime.models.orEmpty().any { it.id == "默认" || it.name == "默认" })
+        assertNull(panel.state.current)
+        assertNull(PersonaModelPanel.pill(page, setup, sharedInfo, read("runtime")).setup.model)
     }
 }

@@ -56,9 +56,9 @@ describe("⌘K: recently opened (#2191)", () => {
     noteChatShown("s:m1/b"); // on the page now
     const html = render("");
     // (the pages, "Go to", follow the conversations as before)
-    expect(outline(html).slice(0, outline(html).indexOf("# 前往"))).toEqual(["# 最近打开", "Daily list", "Release notes", "# 会话", "Slow orders endpoint", "Home screen widget", "Blog to Astro"]);
+    expect(outline(html).slice(0, outline(html).indexOf("# 前往"))).toEqual(["# 最近打开", "主对话", "Release notes", "# 会话", "Slow orders endpoint", "Home screen widget", "Blog to Astro"]);
     // the first is the previous one, picked already: ⌘K then Return goes back to it
-    expect(html).toMatch(/aria-selected="true"[^>]*>(?:(?!aria-selected).)*Daily list<\/span>(?:(?!aria-selected).)*上一个/s);
+    expect(html).toMatch(/aria-selected="true"[^>]*>(?:(?!aria-selected).)*主对话<\/span>(?:(?!aria-selected).)*上一个/s);
   });
 
   it("skips one that is gone, and has no group when nothing else was opened", () => {

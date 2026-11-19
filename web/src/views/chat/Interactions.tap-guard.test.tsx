@@ -22,6 +22,9 @@ import { getState } from "../../lib/store";
 import { resetChatTapGuardForTest } from "./card-tap-guard";
 import { TAP_GUARD_ATTR } from "../../lib/tap-guard";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

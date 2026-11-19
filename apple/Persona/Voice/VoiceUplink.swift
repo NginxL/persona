@@ -108,6 +108,7 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
     private var levelSink: (@Sendable (Float) -> Void)?
     private var levelSum: Float = 0
     private var levelCount = 0
+    private var levelsOff = false
 
     /// What is sent at a time when held audio goes out: a tenth of a second.
     static let chunkSeconds = 0.1
@@ -148,13 +149,27 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
         lock.withLock { levelSink = sink }
     }
 
+    /// No level is measured or handed on (the app in the background, #9887: nobody sees the orb there).
+    var levelsPaused: Bool {
+        get { lock.withLock { levelsOff } }
+        set {
+            lock.withLock {
+                levelsOff = newValue
+                levelSum = 0
+                levelCount = 0
+            }
+        }
+    }
+
     /// One buffer from the microphone, PCM16 at `rate`. Any thread.
     func push(_ pcm: Data, rate: Int) {
         guard !pcm.isEmpty, rate > 0 else { return }
         let level: Float? = lock.withLock {
             guard !closed else { return nil }
-            levelSum += VoicePCM.sumOfSquares(pcm)
-            levelCount += pcm.count / 2
+            if !levelsOff {
+                levelSum += VoicePCM.sumOfSquares(pcm)
+                levelCount += pcm.count / 2
+            }
             let out = mutedFlag ? VoicePCM.silence(bytes: pcm.count) : pcm
             if gated {
                 // Outside a span, or while the socket is away, the audio goes nowhere: never held for later.
@@ -164,7 +179,7 @@ nonisolated final class VoiceUplink: @unchecked Sendable {
             } else {
                 hold(out, rate: rate)
             }
-            guard levelCount >= max(1, rate / 20) else { return nil }
+            guard !levelsOff, levelCount >= max(1, rate / 20) else { return nil }
             let value = mutedFlag ? 0 : min(1, (levelSum / Float(levelCount)).squareRoot())
             levelSum = 0
             levelCount = 0

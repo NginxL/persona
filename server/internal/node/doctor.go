@@ -109,15 +109,15 @@ func DefaultDoctorOptions() (DoctorOptions, error) {
 	if err != nil {
 		return DoctorOptions{}, err
 	}
-	bin, err := os.Executable()
+	dir := identity.DataDir(home)
+	// The node's own spelling of this program (selfprogram.go): the generated files name it, and another one would
+	// read as stale here and --fix would write them back the other way.
+	_, bin, err := selfProgram(home, dir)
 	if err != nil {
 		return DoctorOptions{}, err
 	}
-	if p, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = p
-	}
 	opts := DoctorOptions{
-		Dir: identity.DataDir(home), Bin: bin,
+		Dir: dir, Bin: bin,
 		NodeSock: nodeclient.SocketPath(), RuntimeSock: RuntimeSocketPath(), HerdrSock: herdr.SocketPath(),
 		ClaudeConfigDir: claudeDirOf(home), ClaudeVersion: claudeVersion, ClaudeProbe: claudeProbe,
 	}

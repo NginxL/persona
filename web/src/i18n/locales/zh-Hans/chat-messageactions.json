@@ -1,5 +1,9 @@
 {
   "copy": "复制",
+  "translate": "翻译",
+  "translating": "翻译中…",
+  "show_original": "查看原文",
+  "translation_failed": "翻译失败，请重试。",
   "select_text": "选择文本",
   "quote": "引用",
   "me": "我",

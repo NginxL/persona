@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -26,10 +27,18 @@ type startRec struct {
 	done    chan struct{}
 	cancel  context.CancelFunc // nil for a record without an async worker
 	session proto.Session      // what is listed while it starts
+	spec    *startSpec         // what it was asked to start (startAsyncIn), for start.continue to start again
 	err     error
 	ended   time.Time
 	tabID   string // the herdr tab, once made
 	tabName string // a name that came before the tab
+}
+
+// startSpec is what an async start was asked for: startContinue starts it again under the same id with the same
+// arguments, in the tab it stopped in (startcontinue.go).
+type startSpec struct {
+	kind, cwd, launcher, prompt, workspaceID, mode, effort, tabName string
+	execution                                                       modelExecution
 }
 
 type startLog struct {
@@ -83,6 +92,39 @@ func (l *startLog) add(id string, r *startRec) error {
 		l.running.Add(2)
 	}
 	return nil
+}
+
+// restart swaps the failed start of id, failed, for r, a start of it again under the same id, in one step: the session
+// is listed as starting again and the messages sent to it from now on wait for r, not failed's error. Refused when
+// the record of id is no longer failed (another restart took it, it expired) or the node is shutting down.
+func (l *startLog) restart(id string, failed, r *startRec) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopped {
+		return errors.New("node is shutting down")
+	}
+	if cur := l.m[id]; cur == nil || cur != failed || cur.ended.IsZero() || cur.err == nil || time.Since(cur.ended) > startFailedFor {
+		return errStartNotWaiting
+	}
+	l.m[id] = r
+	if r.cancel != nil {
+		l.running.Add(2)
+	}
+	return nil
+}
+
+// failed is id's failed start with what it listed (its session as it stands, copied under the lock) while it is
+// shown; nil when id has no start or one that has not failed.
+func (l *startLog) failed(id string) (*startRec, proto.Session) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r := l.m[id]
+	if r == nil || r.ended.IsZero() || r.err == nil || time.Since(r.ended) > startFailedFor {
+		return nil, proto.Session{}
+	}
+	s := r.session
+	s.StartErrorArgs = maps.Clone(s.StartErrorArgs)
+	return r, s
 }
 
 // close cancels unfinished starts and joins all their work before the node's hosts and state are torn down.
@@ -222,6 +264,9 @@ func (n *Node) startAsync(id, cwd, launcher, prompt, workspaceID, mode, effort, 
 
 // startAsyncIn is startAsync in host kind ("" : the default host, withStartHost).
 func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, effort, tabName string, options ...modelExecution) (*proto.Session, error) {
+	if proto.IsExternalLauncher(launcher) {
+		return nil, externalRefusal(context.Background(), "adapter_purpose_unsupported")
+	}
 	execution := executionOption(options)
 	if err := execution.check(launcher); err != nil {
 		return nil, err
@@ -250,25 +295,40 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 		return nil, refusal("codex_needs_prompt", "新建 Codex 会话要连第一条消息一起发（更新 App 后再试）。", nil)
 	}
 	now := time.Now().UTC()
-	ctx, cancel := context.WithTimeout(withStartHost(context.Background(), kind), n.startWait())
-	r := &startRec{done: make(chan struct{}), cancel: cancel, session: proto.Session{
-		SessionID: id, Cwd: cwd, Launcher: launcher, Agent: "claude", Status: proto.StatusIdle, Starting: true,
-		StartedByPersona: true, PermissionMode: mode, Effort: effort, UpdatedAt: now, WorkspaceID: workspaceID,
-	}}
+	spec := &startSpec{kind: kind, cwd: cwd, launcher: launcher, prompt: prompt, workspaceID: workspaceID, mode: mode,
+		effort: effort, tabName: tabName, execution: execution}
+	r, ctx := n.newStartRec(id, spec, now)
 	if err := n.starts.add(id, r); err != nil {
-		cancel()
+		r.cancel()
 		return nil, err
 	}
 	// Known from now on: its chat loads empty (startingSession) and its watch waits for the transcript.
 	n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, StartedAt: now})
 	n.noteModes(id, mode, effort)
+	return n.runAsyncStart(ctx, id, r), nil
+}
+
+// newStartRec is a starting record of id for spec, listed as of at, and the context its start runs in (bounded by
+// startWait, cancelled with the record).
+func (n *Node) newStartRec(id string, spec *startSpec, at time.Time) (*startRec, context.Context) {
+	ctx, cancel := context.WithTimeout(withStartHost(context.Background(), spec.kind), n.startWait())
+	return &startRec{done: make(chan struct{}), cancel: cancel, spec: spec, session: proto.Session{
+		SessionID: id, Cwd: spec.cwd, Launcher: spec.launcher, Agent: "claude", Status: proto.StatusIdle, Starting: true,
+		StartedByPersona: true, PermissionMode: spec.mode, Effort: spec.effort, UpdatedAt: at, WorkspaceID: spec.workspaceID,
+	}}, ctx
+}
+
+// runAsyncStart runs r, a record the log has just taken (add, restart), in the background and returns the session as
+// it starts.
+func (n *Node) runAsyncStart(ctx context.Context, id string, r *startRec) *proto.Session {
+	spec := r.spec
 	// The answer is the session as it starts, copied before the start runs: a start that fails at once has finish
 	// rewrite r.session (under the log's lock) before this goroutine would get to it.
 	s := r.session
 	go func() {
 		defer n.starts.running.Done()
-		defer cancel()
-		_, err := n.start(ctx, cwd, launcher, prompt, "", workspaceID, mode, effort, tabName, id, "", execution)
+		defer r.cancel()
+		_, err := n.start(ctx, spec.cwd, spec.launcher, spec.prompt, "", spec.workspaceID, spec.mode, spec.effort, spec.tabName, id, "", spec.execution)
 		if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
 			n.logf("start %s: %v", id, err)
 		}
@@ -280,5 +340,5 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 		defer n.starts.running.Done()
 		n.notifySessions()
 	}()
-	return &s, nil
+	return &s
 }

@@ -146,6 +146,16 @@ describe("a hub route's bytes", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBe("photo_not_found");
   });
+
+  // The visualization route's own answer is an HTML fragment (#10321): text/html on /api is legitimate only for
+  // callers that explicitly say so, and the bytes come back untouched instead of an edge interception error.
+  it("accepts a text/html answer only when the caller opts into it", async () => {
+    const html = "<!doctype html><div>chart</div>";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } })));
+    const blob = await apiBlob("/sessions/m/s/items/i1/visualization", { token: "test-token", allowHtmlResponse: true });
+    expect(blob.type).toBe("text/html;charset=utf-8");
+    expect(await blob.text()).toBe(html);
+  });
 });
 
 // What the hub answers when the computer did not (server/internal/apierr Body and Call): the summary may already be in the

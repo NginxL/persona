@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -291,11 +292,9 @@ type agentUsageEntry struct {
 	// started: a user line was read. A fork's transcript starts with its launcher's reply that launched it, copied
 	// (that request is the launcher's); the subagent's own work starts with its prompt.
 	started bool
-	req     transcript.RequestUsage
+	parser  tokenuse.Parser
 	sum     []proto.TokenUsage
 }
-
-var replyUsageMark = []byte(`"usage"`)
 
 // agentFileUsage is what the subagent transcript at path used, per model and speed (a copy: callers may keep it).
 func agentFileUsage(path string) []proto.TokenUsage {
@@ -327,7 +326,7 @@ func agentFileUsage(path string) []proto.TokenUsage {
 	n, _ := f.ReadAt(buf[:min(st.Size(), int64(len(buf)))], 0)
 	head := buf[:n]
 	if e.info == nil || !os.SameFile(e.info, st) || st.Size() <= e.size || !bytes.HasPrefix(head, e.head) {
-		e.info, e.size, e.off, e.head, e.started, e.req, e.sum = nil, 0, 0, e.head[:0], false, transcript.RequestUsage{}, nil
+		e.info, e.size, e.off, e.head, e.started, e.parser, e.sum = nil, 0, 0, e.head[:0], false, tokenuse.ClaudeParser(), nil
 	}
 	e.off += eachLine(io.NewSectionReader(f, e.off, st.Size()-e.off), e.line)
 	e.head = append(e.head[:0], head[:min(int64(len(head)), e.off)]...)
@@ -335,21 +334,18 @@ func agentFileUsage(path string) []proto.TokenUsage {
 	return slices.Clone(e.sum)
 }
 
-// line counts one line of the transcript: each request once, at the most its lines say (transcript.RequestUsage).
+// line counts one line of the transcript: each request once, at the most its lines say (tokenuse.ClaudeParser, the
+// usage meter's rules).
 func (e *agentUsageEntry) line(line []byte) {
 	switch lineKind(line) {
 	case 'u':
 		e.started = true
 	case 'a':
-		if !e.started || !bytes.Contains(line, replyUsageMark) {
+		if !e.started {
 			return
 		}
-		id, u, ok := transcript.ReplyUsage(line)
-		if !ok {
-			return
-		}
-		if add, ok := e.req.Add(id, u); ok {
-			e.sum = transcript.AddUsage(e.sum, add)
+		if r, ok := e.parser.Line(line); ok {
+			e.sum = transcript.AddUsage(e.sum, r.Item())
 		}
 	}
 }

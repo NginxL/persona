@@ -245,6 +245,10 @@
       "sf": "chevron.forward",
       "phosphor": "caret-right"
     },
+    "forwardMessage": {
+      "sf": "arrowshape.turn.up.right",
+      "phosphor": "arrow-bend-up-right"
+    },
     "gitBranch": {
       "sf": "arrow.triangle.branch",
       "phosphor": "git-branch"
@@ -560,6 +564,10 @@
     "safari": {
       "sf": "safari",
       "phosphor": "globe-simple"
+    },
+    "scanCode": {
+      "sf": "qrcode.viewfinder",
+      "phosphor": "qr-code"
     },
     "screen": {
       "sf": "display",

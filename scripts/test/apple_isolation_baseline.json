@@ -126,11 +126,6 @@
       "main" : 1
     }
   },
-  "apple/Persona/Views/Machines/ClipboardSection.swift" : {
-    "image-decode" : {
-      "main" : 1
-    }
-  },
   "apple/Persona/Views/Machines/ScreenCredentials.swift" : {
     "keychain-read" : {
       "main" : 1

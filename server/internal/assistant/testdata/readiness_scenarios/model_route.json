@@ -36,7 +36,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "This model isn't available"
+        "title": "Model not connected: this model isn't available on claude"
       },
       {
         "action": {
@@ -100,7 +100,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "このモデルは今使えません"
+        "title": "claudeでモデルを使えません"
       },
       {
         "action": {
@@ -164,7 +164,7 @@
         "launcher": "claude",
         "machine": "mbp",
         "state": "problem",
-        "title": "这个模型现在用不了"
+        "title": "模型没接好：claude 用不了这个模型"
       },
       {
         "action": {

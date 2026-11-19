@@ -61,8 +61,8 @@ func TestLiveClaudeCLI(t *testing.T) {
 		t.Fatalf("updated %+v", st)
 	}
 	// Turned off by the user with Claude Code's own command: left off, not updated.
-	if out, err := run(ctx, exe, dir, "plugin", "disable", id, "--json"); err != nil {
-		t.Fatalf("disable: %s %v", out, err)
+	if err := (cli{run: run, exe: exe, dir: dir}).do(ctx, "plugin", "disable", id); err != nil {
+		t.Fatalf("disable: %v", err)
 	}
 	m.Bundle = bundle(t, "0.3.0")
 	if st := step(OpCheck, proto.ClaudePluginDisabled); st.Version != "0.2.0" {

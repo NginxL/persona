@@ -1,0 +1,9 @@
+<persona-context kind="context" title="方向 · Weather · メモ" url="">
+この仕事は方向「Weather」に属します。オーナーがこの方向のすべてのタスク向けに書いたメモです。従ってください。タスク自体の指示と食い違うときはタスクが優先です。
+
+ナレッジベースのプロジェクト：Weather app
+目標：Ship on iOS and Android
+
+- Readings: the store build number
+- Never deploy on Fridays
+</persona-context>

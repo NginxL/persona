@@ -1,0 +1,10 @@
+{
+  "environment": "実行環境",
+  "worktree": "ワークツリー",
+  "subagents": "サブエージェント",
+  "running_count": "{count} 件が実行中",
+  "ended": "終了",
+  "ended_count": "{count} 件が終了",
+  "finished_count": "{count} 件が終了",
+  "show_in_chat": "チャットで表示"
+}

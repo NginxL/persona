@@ -19,6 +19,8 @@ export interface ExportWords {
   result: string;
   error: string;
   image: string;
+  /** A Codex visualization fragment: the interactive frame itself has no Markdown form, so it is a named placeholder. */
+  visualization: string;
   /** Locally clipped text: the known number of characters left out. */
   cut: (characters: number) => string;
   /** The hub supplied only part of the text; the number of missing characters is unknown. */
@@ -149,6 +151,10 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
     } else if (it.kind === "image") {
       agentHeading(it);
       block(`_[${w.image}]_`);
+    } else if (it.kind === "visualization") {
+      agentHeading(it);
+      const name = it.visualization?.title?.trim() || it.visualization?.path.split("/").pop() || "";
+      block(name ? `_[${w.visualization}: ${name}]_` : `_[${w.visualization}]_`);
     } else if (!o.work) {
       continue;
     } else if (it.kind === "thinking") {

@@ -27,6 +27,7 @@ class ExtensionNotificationActionReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             var record: ExtensionNotificationActionRecord? = null
             try {
+                dependencies.pairing().restore()
                 val store = ExtensionNotificationActionStore.shared
                 val current = store.peek(token)
                 record = current

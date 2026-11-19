@@ -4,6 +4,11 @@
       "id": "person",
       "kind": "people",
       "meta": {
+        "excluded": {
+          "projects": [
+            "project"
+          ]
+        },
         "id": "person",
         "last_seen": "2026-01-01T00:00:00Z",
         "locked_fields": [
@@ -15,13 +20,28 @@
         "source_id": "",
         "tagged_at": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/people/person"
+      "path": "synthetic-data/people/person",
+      "removed": [
+        {
+          "extra": " · ",
+          "id": "project",
+          "kind": "projects",
+          "name": "Example project",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "afterProject": {
       "id": "project",
       "kind": "projects",
       "meta": {
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "people": [
+            "person"
+          ]
+        },
         "kind": "",
         "locked_fields": [
           "people"
@@ -33,7 +53,16 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "updated": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/projects/project"
+      "path": "synthetic-data/projects/project",
+      "removed": [
+        {
+          "id": "person",
+          "kind": "people",
+          "name": "Example person",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "beforePerson": {
       "id": "person",
@@ -111,6 +140,11 @@
       "id": "person",
       "kind": "people",
       "meta": {
+        "excluded": {
+          "projects": [
+            "project"
+          ]
+        },
         "id": "person",
         "last_seen": "2026-01-01T00:00:00Z",
         "locked_fields": [
@@ -128,13 +162,28 @@
         "source_id": "",
         "tagged_at": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/people/person"
+      "path": "synthetic-data/people/person",
+      "removed": [
+        {
+          "extra": " · ",
+          "id": "project",
+          "kind": "projects",
+          "name": "Example project",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "partialProject": {
       "id": "project",
       "kind": "projects",
       "meta": {
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "people": [
+            "person"
+          ]
+        },
         "kind": "",
         "locked_fields": [
           "people"
@@ -146,7 +195,16 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "updated": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/projects/project"
+      "path": "synthetic-data/projects/project",
+      "removed": [
+        {
+          "id": "person",
+          "kind": "people",
+          "name": "Example person",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     }
   },
   "chats": {
@@ -157,6 +215,11 @@
         "compressed_at": "2026-01-01T00:00:00Z",
         "covered_until": "2026-01-01T00:00:00Z",
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "projects": [
+            "project"
+          ]
+        },
         "id": "chats/2",
         "kind": "",
         "last_at": "2026-01-01T00:00:00Z",
@@ -171,13 +234,28 @@
         "source_id": "",
         "tagged_at": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/chats/chats_2"
+      "path": "synthetic-data/chats/chats_2",
+      "removed": [
+        {
+          "extra": " · ",
+          "id": "project",
+          "kind": "projects",
+          "name": "Example project",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "afterProject": {
       "id": "project",
       "kind": "projects",
       "meta": {
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "chats": [
+            "chats/2"
+          ]
+        },
         "kind": "",
         "locked_fields": [
           "chats"
@@ -189,7 +267,16 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "updated": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/projects/project"
+      "path": "synthetic-data/projects/project",
+      "removed": [
+        {
+          "id": "chats/2",
+          "kind": "chats",
+          "name": "Example chat",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "beforeEntity": {
       "id": "chats_2",
@@ -264,6 +351,11 @@
       "kind": "docs",
       "meta": {
         "at": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "projects": [
+            "project"
+          ]
+        },
         "id": "d/1",
         "kind": "docs",
         "locked_fields": [
@@ -275,13 +367,28 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "title": "Example document"
       },
-      "path": "synthetic-data/docs/d_1"
+      "path": "synthetic-data/docs/d_1",
+      "removed": [
+        {
+          "extra": " · ",
+          "id": "project",
+          "kind": "projects",
+          "name": "Example project",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "afterProject": {
       "id": "project",
       "kind": "projects",
       "meta": {
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "items": [
+            "docs/d_1"
+          ]
+        },
         "kind": "",
         "locked_fields": [
           "items"
@@ -293,7 +400,16 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "updated": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/projects/project"
+      "path": "synthetic-data/projects/project",
+      "removed": [
+        {
+          "id": "d/1",
+          "kind": "docs",
+          "name": "Example document",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "beforeItem": {
       "id": "d_1",
@@ -362,6 +478,11 @@
       "id": "people_2",
       "kind": "people",
       "meta": {
+        "excluded": {
+          "projects": [
+            "project"
+          ]
+        },
         "id": "people/2",
         "last_seen": "2026-01-01T00:00:00Z",
         "locked_fields": [
@@ -373,13 +494,28 @@
         "source_id": "",
         "tagged_at": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/people/people_2"
+      "path": "synthetic-data/people/people_2",
+      "removed": [
+        {
+          "extra": " · ",
+          "id": "project",
+          "kind": "projects",
+          "name": "Example project",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "afterProject": {
       "id": "project",
       "kind": "projects",
       "meta": {
         "created": "2026-01-01T00:00:00Z",
+        "excluded": {
+          "people": [
+            "people/2"
+          ]
+        },
         "kind": "",
         "locked_fields": [
           "people"
@@ -391,7 +527,16 @@
         "tagged_at": "2026-01-01T00:00:00Z",
         "updated": "2026-01-01T00:00:00Z"
       },
-      "path": "synthetic-data/projects/project"
+      "path": "synthetic-data/projects/project",
+      "removed": [
+        {
+          "id": "people/2",
+          "kind": "people",
+          "name": "Example person",
+          "relevance": 0,
+          "updated": "2026-01-01T00:00:00Z"
+        }
+      ]
     },
     "beforeEntity": {
       "id": "people_2",

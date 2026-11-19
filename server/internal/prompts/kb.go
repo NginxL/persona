@@ -52,9 +52,11 @@ func RenderKBCompressInput(in KBCompressInput) string { return render("kb/compre
 // KBPinnedPerson is a person whose confirmed facts constrain compression.
 type KBPinnedPerson struct{ Name, Pinned string }
 
-// KBProjectChat is a chat linked to a project, its summary clipped.
+// KBProjectChat is a chat linked to a project, its summary clipped, and its state at the source (open, merged, closed;
+// "" none reported) with the day it got there.
 type KBProjectChat struct {
-	ID, Summary string
+	ID, Summary    string
+	State, StateAt string
 }
 
 // KBProjectInput is a project's file, timeline and chats (kb/project_input).

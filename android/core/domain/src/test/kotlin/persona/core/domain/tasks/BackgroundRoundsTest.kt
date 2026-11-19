@@ -246,4 +246,37 @@ class BackgroundRoundsTest {
         val open = project(items, BackgroundFolding(rounds = false)).foreground
         assertTrue(folds(open).isEmpty())
     }
+
+    @Test fun antigravitySingleUnderscoreAndScopedPersonaToolsPromoteSupervisionVisibility() {
+        val source = MessageSource("conversation", "c2", "Release plan")
+        for (server in ProtocolCompatibility.personaServers) {
+            for (prefix in listOf("mcp_${server}_", "mcp_${server}_0c671287_", "mcp_${server}_55a1c59d_")) {
+                assertEquals("notify_user", supervisionTool("${prefix}notify_user"))
+                assertEquals("ask_user", supervisionTool("${prefix}ask_user"))
+                assertEquals("task_review", supervisionTool("${prefix}task_review"))
+                assertEquals("supervision_finish", supervisionTool("${prefix}supervision_finish"))
+                assertTrue(persona.core.domain.isPersonaTool("${prefix}notify_user"))
+                assertEquals("notify_user", persona.core.domain.toolBaseName("${prefix}notify_user"))
+            }
+        }
+        assertNull(supervisionTool("mcp_persona_other_notify_user"))
+        val notified = listOf(
+            user(1, "Scheduled check", MessageSource("patrol", title = "Morning check")),
+            use(2, "mcp_persona_0c671287_notify_user"),
+            result(3, 2, "Notification sent."),
+            reply(4, "Notified the owner"),
+        )
+        val foreground = project(notified).foreground
+        assertTrue(folds(foreground).isEmpty())
+        assertTrue(foreground.any { it.id == "a4" })
+    }
+
+    @Test fun supervisesConversationMatchesOnlyMainAndLeaderIds() {
+        val leaders = setOf("lead-1", "lead-2")
+        assertTrue(BackgroundFolding.supervisesConversation("main", "main", leaders))
+        assertTrue(BackgroundFolding.supervisesConversation("lead-1", "main", leaders))
+        assertFalse(BackgroundFolding.supervisesConversation("sched-chat", "main", leaders))
+        assertFalse(BackgroundFolding.supervisesConversation("sched-chat", null, emptySet()))
+        assertFalse(BackgroundFolding.supervisesConversation("", "main", leaders))
+    }
 }

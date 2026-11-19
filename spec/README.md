@@ -28,7 +28,14 @@ spec/
     entries/          the Assistant's two composer entries, Needs you and In progress
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
+    todo-view/        a to-do's view (phase, section, reason, line, asks) the manager works out, schema/wire/todo-view
+    todo-counts/      the To-dos list's counts and places, schema/wire/todo-view
+    todo-rounds/      a to-do's conversation in rounds, its results and what changed since the owner looked, schema/wire/todo-view
+    todo-detail/      a to-do's page: which elements it draws, in order, and its one primary action
+    todo-layout/      the To-dos window rule: a window and what is wanted → its regions and their widths
     provider-import-link/ provider import links: what the web builds and what the hub reads
+    deep-links/       links to Persona's pages: the hub's paths and what each client opens for a link
+    agent-names/      what every client calls each coding agent (names.json)
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     stream-chunks/     the completed-block split of a streaming reply, checked against iOS by the pure Rust core
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS
@@ -65,6 +72,10 @@ spec/
 | entries | [README](fixtures/entries/README.md): which of the Assistant's two composer entries (Needs you, In progress) each task, Agent, plan and message card goes to, checked by the web app and Android (#3387) |
 | needs-you | [README](fixtures/needs-you/README.md): the Agents tab's Needs you section, one row per session that waits for the user, and what its header, filter and badge count, checked by iOS and Android (#3580) |
 | triage | [README](fixtures/triage/README.md): the To-dos page's sections (the status SOP), related rows and counts, checked by the web app and the hub (#3483) |
+| todo-view | [README](fixtures/todo-view/README.md): the view the manager works out for each to-do (phase, section, reason, line 2, times, marks, asks, steps) by the redesign's decision table, held to `schema/wire/todo-view.schema.json`, answered by the manager's projection (`server/internal/assistant/todo/projection`, `fixtures_test.go`) and read back by the generated Go, Kotlin and Swift types (#10226) |
+| todo-counts | [README](fixtures/todo-counts/README.md): a To-dos list's counts (N, open, in progress, rows per section), its places (All, Today, Upcoming, projects) and the order within each section, with the same schema and readers (#10226) |
+| todo-detail | [README](fixtures/todo-detail/README.md): a to-do's page (the paper) from what the item route answers and where it is shown: its elements in order, its one primary action and whom its composer addresses, with a guard that everyday pages name no engine, runtime, model, path, repository or session id; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: iOS will replay it from its paper (#10465), the web and Android from their stages |
+| todo-layout | [README](fixtures/todo-layout/README.md): the To-dos window rule, a window, its text size and what the owner asked for → the sidebar, list, paper and conversation regions with their forms and widths, every window of the redesign's table included; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: each will replay it with its own pure function, iOS first (#10465) |
 | sync | [README](fixtures/sync/README.md): stories of one chat on one or more devices (sends, cards, reconnects, hub restarts, wakes, long chats) with faults, checked at every step by Go, the clients and the end-to-end runs (#1073) |
 | stream-chunks | [README](fixtures/stream-chunks/README.md): the pure Rust projection of iOS `StreamChunks.split`, with source-cited Apple cases (#8607) |
 | tool-names | [README](fixtures/tool-names/README.md): a tool no table names in words ("GitHub · Create issue"), what its call is about, a shell's command line and its arguments as a key/value list, checked by Android; iOS's own tests hold the same cases until it reads them (#4339) |
@@ -72,6 +83,7 @@ spec/
 | fold-sources | [README](fixtures/fold-sources/README.md): the web pages a run of work's successful web calls used, read by the hub for a fold and by the web for the same calls unfolded (#9132) |
 | input-clip | [README](fixtures/input-clip/README.md): the hub and runtime SDK's third tool-input pass, bounding encoded objects by dropping array tails and then object fields (#2907) |
 | provider-import-link | [README](fixtures/provider-import-link/README.md): provider import links (cindy v1), the payload and fragment the web builds for a provider and what the hub reads from a link, checked by Go, the mock hub and the web app (#5420) |
+| deep-links | [README](fixtures/deep-links/README.md): the route table of `docs/protocol/deep-links.md` (#9926): the paths the hub's builder writes, and the page each client opens for a web link to a paired hub, an app link (`persona://open<path>`) or an older form, checked by the hub, iOS, the web and the desktop app (Android with #9932) |
 | star-prompt | [README](fixtures/star-prompt/README.md): when the GitHub star prompts show, the empty Agents pill, the milestone card after enough Agents started and the onboarding toast, checked by the web app and Android (#5761; iOS with #5910) |
 | meeting-echo | [README](fixtures/meeting-echo/README.md): which transcript lines of a meeting are Persona's own answer heard by the microphone (they overlap a stretch it spoke in and their words match what it said; a stretch saved without text keeps the time rule), checked by the hub and the iOS app (#5905) |
 | minutes-overview | [README](fixtures/minutes-overview/README.md): the minutes' summary card (#6563), which places of a text are bold (each `strong` entry's first occurrence after the one before), how a client cleans a malformed overview and when it falls back to the minutes as before, and the hub's Markdown of the same minutes, checked by the hub, the mock hub, the iPhone and the web |

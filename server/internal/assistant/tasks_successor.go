@@ -44,7 +44,7 @@ func (s *Service) startTaskSuccessor(ctx context.Context, t Todo, last proto.Ses
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 	defer cancel()
 	prompt := prompts.RenderTaskSuccessor(prompts.TaskSuccessor{Previous: agentLabel(last), PreviousID: last.SessionID,
-		LastReply: clip(last.LastText, 2000), Text: text})
+		LastReply: clip(last.LastText, 2000), Files: prompts.RenderTaskFiles(answerLanguage(s.hello(ctx).Locale)), Text: text})
 	prompt = s.withTodoDecisions(sctx, t.ID, prompt)
 	params := map[string]any{"cwd": last.Cwd, "launcher": last.Launcher, "model": "", "effort": "", "tab_name": t.Title,
 		"prompt": prompt}
@@ -88,6 +88,11 @@ type taskStart struct {
 func (s *Service) claimTaskStart(id string) (cur *taskStart, ok bool) {
 	s.tasks.mu.Lock()
 	defer s.tasks.mu.Unlock()
+	return s.claimTaskStartLocked(id)
+}
+
+// claimTaskStartLocked is claimTaskStart under tasks.mu.
+func (s *Service) claimTaskStartLocked(id string) (cur *taskStart, ok bool) {
 	if cur := s.tasks.retrying[id]; cur != nil {
 		return cur, false
 	}

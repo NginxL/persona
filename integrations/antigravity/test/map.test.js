@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { MCP_SERVER_NAMES } from '../../runtime-sdk/lib/compat.js'
 import {
   agyModeToPersona,
   cleanGenericOutput,
   cleanUserText,
+  mapToolCall,
   mapToolInput,
   mapToolName,
   personaModeToAgy,
@@ -65,6 +67,56 @@ describe('antigravity transcript and tool mapping', () => {
       }),
       { file_path: '/tmp/a.txt', old_string: 'old', new_string: 'new' },
     )
+  })
+
+  it('normalizes Antigravity eager, scoped, compatibility, and proxied Persona MCP tool names', () => {
+    for (const server of MCP_SERVER_NAMES) {
+      for (const prefix of [`mcp_${server}`, `mcp_${server}_0c671287`, `mcp_${server}_55a1c59d`]) {
+        assert.equal(mapToolName(`${prefix}_notify_user`), 'mcp__persona__notify_user')
+        assert.equal(mapToolName(`${prefix}_ask_user`), 'mcp__persona__ask_user')
+        assert.equal(mapToolName(`${prefix}_task_review`), 'mcp__persona__task_review')
+        assert.equal(mapToolName(`${prefix}_supervision_finish`), 'mcp__persona__supervision_finish')
+        assert.equal(mapToolName(`${prefix}_persona_settings`), 'mcp__persona__persona_settings')
+      }
+      assert.deepEqual(
+        mapToolCall(`mcp_${server}_0c671287_persona_call`, {
+          name: 'task_review',
+          arguments: { todo_id: 'todo_1', verdict: 'accepted' },
+        }),
+        {
+          toolName: 'mcp__persona__task_review',
+          toolInput: { todo_id: 'todo_1', verdict: 'accepted' },
+        },
+      )
+      assert.deepEqual(mapToolCall(`mcp_${server}_persona_call`, {}), {
+        toolName: 'mcp__persona__persona_call',
+        toolInput: {},
+      })
+    }
+    assert.equal(mapToolName('mcp_github_create_issue'), 'mcp_github_create_issue')
+    assert.equal(mapToolName('mcp__github__create_issue'), 'mcp__github__create_issue')
+    assert.equal(mapToolName('mcp_persona_other_notify_user'), 'mcp__persona__other_notify_user')
+
+    const { items } = stepsToItems([
+      {
+        step_index: 0,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-18T10:00:00Z',
+        tool_calls: [
+          { name: 'mcp_persona_0c671287_notify_user', args: { message: 'Reminder ready' } },
+          {
+            name: 'mcp_persona_55a1c59d_persona_call',
+            args: { name: 'task_review', arguments: { todo_id: 'todo_1', verdict: 'accepted' } },
+          },
+        ],
+      },
+    ])
+    assert.equal(items[0].tool_name, 'mcp__persona__notify_user')
+    assert.deepEqual(items[0].tool_input, { message: 'Reminder ready' })
+    assert.equal(items[1].tool_name, 'mcp__persona__task_review')
+    assert.deepEqual(items[1].tool_input, { todo_id: 'todo_1', verdict: 'accepted' })
   })
 
   it('maps transcript steps into ordered Persona items with paired tool results', () => {

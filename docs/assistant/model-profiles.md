@@ -1,6 +1,6 @@
 # Model profiles
 
-A model profile is an editable, named configuration. It holds default bindings for the five model categories, selected model fields of managed launchers, and named execution tiers: the [Agent presets](#agent-presets-tiers). It does not hold credentials, endpoints, permissions, or the main chat's runtime.
+A model profile is an editable, named configuration. It holds default bindings for the six model categories (including Translation), selected model fields of managed launchers, and named execution tiers: the [Agent presets](#agent-presets-tiers). It does not hold credentials, endpoints, permissions, or the main chat's runtime.
 
 ## Switch in conversation
 

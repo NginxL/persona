@@ -265,7 +265,8 @@ func decodeTrashID(s string) (trashID, error) {
 }
 
 // trashDirs is where this system's trash keeps files, and (freedesktop) the .trashinfo of each: macOS ~/.Trash,
-// Linux $XDG_DATA_HOME/Trash or ~/.local/share/Trash.
+// Linux $XDG_DATA_HOME/Trash or ~/.local/share/Trash. Windows has a Recycle Bin on each drive instead, which toTrash
+// and restoreOne find for each item (trash_windows.go), so none here.
 func (n *Node) trashDirs() (files, info string, err error) {
 	if n.home == "" {
 		return "", "", errors.New("no home folder")
@@ -279,6 +280,8 @@ func (n *Node) trashDirs() (files, info string, err error) {
 			base = filepath.Join(n.home, ".local", "share")
 		}
 		return filepath.Join(base, "Trash", "files"), filepath.Join(base, "Trash", "info"), nil
+	case "windows":
+		return "", "", nil
 	}
 	return "", "", fmt.Errorf("there is no trash to move files to on %s", runtime.GOOS)
 }
@@ -345,8 +348,11 @@ func (n *Node) undoTrash(trashed []map[string]string, cause error) error {
 }
 
 // toTrash moves real into the trash under its own name, or "name 2.ext"… when the trash has one; on Linux the
-// .trashinfo is written first (it reserves the name, as the freedesktop spec says).
+// .trashinfo is written first (it reserves the name, as the freedesktop spec says). On Windows the Recycle Bin names it.
 func (n *Node) toTrash(real, shown string) (string, error) {
+	if runtime.GOOS == "windows" {
+		return toRecycleBin(real, shown)
+	}
 	files, info, err := n.trashDirs()
 	if err != nil {
 		return "", err
@@ -429,8 +435,18 @@ func (n *Node) restoreFiles(ids []string) (map[string]any, error) {
 }
 
 // restoreOne puts t back from the trash folder files (and drops its .trashinfo from info), checking the place again.
+// On Windows t is in the Recycle Bin of its drive, with its $I file beside it.
 func (n *Node) restoreOne(files, info string, t trashID) error {
-	from := filepath.Join(files, t.Name)
+	from, infoFile := filepath.Join(files, t.Name), ""
+	if info != "" {
+		infoFile = filepath.Join(info, t.Name+".trashinfo")
+	}
+	if runtime.GOOS == "windows" {
+		var err error
+		if from, infoFile, err = recycledAt(t.Real, t.Name); err != nil {
+			return errNotFound(t.Shown)
+		}
+	}
 	if _, err := os.Lstat(from); err != nil {
 		return errNotFound(t.Shown)
 	}
@@ -446,8 +462,8 @@ func (n *Node) restoreOne(files, info string, t trashID) error {
 		}
 		return explainRename(t.Shown, err)
 	}
-	if info != "" {
-		_ = os.Remove(filepath.Join(info, t.Name+".trashinfo"))
+	if infoFile != "" {
+		_ = os.Remove(infoFile)
 	}
 	return nil
 }

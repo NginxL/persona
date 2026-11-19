@@ -8,5 +8,7 @@
   "relevance": "関連度 {value}/100",
   "collapse": "折りたたむ",
   "project_kind": "{kind}プロジェクト",
-  "points_other": "ポイント {count} 件"
+  "points_other": "ポイント {count} 件",
+  "open_imported_lark": "Lark の議事録",
+  "open_imported": "元の議事録"
 }

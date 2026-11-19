@@ -583,6 +583,53 @@ final class PersonaStore {
     }
 }
 
+#if os(iOS)
+extension PersonaStore {
+    /// A package's dot frames for `states`, read and decoded off the main actor, each file once (the call's pages keep
+    /// them: `CallAssistant`); a state whose file is missing is left out. Nothing for a built-in or a package not on the
+    /// phone.
+    func decodedFrames(_ p: Persona, _ states: [PersonaState]) async -> [PersonaState: PersonaFrames] {
+        guard let manifest = p.manifest else { return [:] }
+        let folder = directory(p)
+        let wanted = states.compactMap { state in
+            manifest.dotState(state).map { CallFramesFile(state: state, url: folder.appending(path: $0.file), fps: $0.fps) }
+        }
+        return await Task.detached(priority: .userInitiated) {
+            guard FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) else { return [:] }
+            var byFile: [URL: PersonaFrames] = [:]
+            var out: [PersonaState: PersonaFrames] = [:]
+            for file in wanted {
+                guard let frames = byFile[file.url] ?? PersonaFrames(url: file.url, fps: file.fps) else { continue }
+                byFile[file.url] = frames
+                out[file.state] = frames
+            }
+            return out
+        }.value
+    }
+
+    /// A package's face `points` wide at `scale` (its thumbnail while the package is not on the phone), read and
+    /// prepared for display off the main actor, as `avatar` would on the main one. Nil for a built-in or when there is
+    /// neither.
+    func decodedFace(_ p: Persona, points: CGFloat, scale: CGFloat) async -> UIImage? {
+        guard let file = p.manifest?.avatarFile(points: points, scale: scale) else { return nil }
+        let folder = directory(p), thumbnail = thumbnail(p)
+        return await Task.detached(priority: .userInitiated) {
+            let onPhone = FileManager.default.fileExists(atPath: folder.path(percentEncoded: false))
+            let url = onPhone ? folder.appending(path: file) : thumbnail
+            guard let raw = UIImage(contentsOfFile: url.path(percentEncoded: false)) else { return nil }
+            return raw.preparingForDisplay() ?? raw
+        }.value
+    }
+}
+
+/// One state's frames file, for `decodedFrames`.
+private nonisolated struct CallFramesFile: Sendable {
+    var state: PersonaState
+    var url: URL
+    var fps: Double?
+}
+#endif
+
 /// A dot state's frames and the time one loop takes.
 final class PersonaFrames: Sendable {
     let images: [UIImage]

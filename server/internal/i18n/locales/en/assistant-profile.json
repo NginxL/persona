@@ -7,5 +7,7 @@
   "agent_names_unavailable": "Couldn't read the saved Agent names. Your name hasn't been changed. Try again.",
   "bad_agent_naming_max": "Choose a whole number of name changes from 1 to 1000.",
   "bad_agent_naming_interval": "Choose a whole number of hours from 1 to 8760, or turn periodic updates off.",
-  "bad_minutes_days": "minutes_days must be 0 (forever) or a whole number of days from 1 to 3650."
+  "bad_minutes_days": "minutes_days must be 0 (forever) or a whole number of days from 1 to 3650.",
+  "bad_idle_auto_compact_minutes": "idle_auto_compact_minutes must be a whole number from 1 to 1440.",
+  "bad_idle_auto_compact_tokens": "idle_auto_compact_tokens must be a whole number from 10000 to 10000000."
 }

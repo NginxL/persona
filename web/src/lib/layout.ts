@@ -95,6 +95,9 @@ export const SIDEBAR_DEFAULT = 284;
 export const SIDEBAR_MIN = 240;
 export const SIDEBAR_MAX = 480;
 
+/** Space between the Web shell columns at desktop widths (#7522). */
+export const PANEL_GAP = 6;
+
 /** What the conversation beside the side panel keeps at the least (#5148): its input box and header still fit. */
 export const CHAT_MIN = 440;
 /** The narrowest the side panel is drawn on a wide screen (views/SidePanel.tsx). */
@@ -168,3 +171,12 @@ export function useSidebarWidth(): number {
 export function sidebarWidth(want: number, room: number) {
   return Math.round(Math.max(SIDEBAR_MIN, Math.min(want, SIDEBAR_MAX, Math.max(SIDEBAR_DEFAULT, room))));
 }
+
+/** Changes panel columns: preserve the former tree default and leave readable diff space (#10477). */
+export const CHANGES_TREE_DEFAULT = 192;
+export const CHANGES_TREE_MIN = 160;
+export const CHANGES_TREE_MAX = 480;
+export const CHANGES_DIFF_MIN = 160;
+/** Deep indentation yields space to the file name and its count rather than hiding the entire name. */
+export const CHANGES_TREE_INDENT = 12;
+export const CHANGES_TREE_INDENT_MAX_SHARE = 0.4;

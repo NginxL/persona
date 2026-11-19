@@ -7,7 +7,8 @@ import XCTest
 /// `TEST_RUNNER_PERSONA_SHOTS=<dir>` saves the bar over the failed bubble, named by the simulator's appearance.
 final class PendingBubbleMenuTests: XCTestCase {
     private var app: XCUIApplication!
-    private let widget = "a1f3c2d4-0000-4000-8000-000000000001"
+    // Idle: a message written while the agent works goes to the queue strip instead (#6220).
+    private let review = "a1f3c2d4-0000-4000-8000-000000000006"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -25,7 +26,7 @@ final class PendingBubbleMenuTests: XCTestCase {
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         // Sent once the socket is up (a fresh install pairs first): sent before, it waits for the network instead.
-        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + widget, "-openSendMessage", message, "-openSendDelay", "8"]
+        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + review, "-openSendMessage", message, "-openSendDelay", "8"]
         app.launchPinned()
         let notNow = app.alerts.buttons["先不发"]
         XCTAssertTrue(notNow.waitForExistence(timeout: 25), "no draft alert:\n\(app.debugDescription)")
@@ -36,7 +37,7 @@ final class PendingBubbleMenuTests: XCTestCase {
         XCTAssertTrue(bubble.waitForExistence(timeout: 5), "the failed bubble is not there")
         let copy = app.buttons["复制"]
         settle()
-        // Now and then a press lands while the list still moves (a tick of the working row above), which only stops it.
+        // Now and then a press lands while the list still moves (the header folds into its slim bar), which only stops it.
         for _ in 0..<3 where !copy.exists {
             centre(of: bubble).press(forDuration: 0.8)
             _ = copy.waitForExistence(timeout: 3)
@@ -59,8 +60,14 @@ final class PendingBubbleMenuTests: XCTestCase {
         paste.tap()
         XCTAssertEqual(field.value as? String, message, "the composer did not get what Copy took")
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: message.count + 2)) // no draft left behind
-        try failedMark(nextTo: message).tap() // still there to resend; deleted, not left for the next run
-        app.buttons["删除"].tap()
+        // Still there to resend; delete it rather than leave it for the next run.
+        // Dismiss the keyboard so the list can grow and the mark is not under the chat's top bar.
+        let dismissKeyboard = app.buttons["shell-composer-dismiss-keyboard"]
+        if dismissKeyboard.exists { dismissKeyboard.tap() }
+        let delete = app.buttons["删除"]
+        try failedMark(nextTo: message).tap()
+        XCTAssertTrue(delete.waitForExistence(timeout: 3), "no Delete on the failed mark:\n\(app.debugDescription)")
+        delete.tap()
         XCTAssertTrue(bubble.waitForNonExistence(timeout: 5), "Delete left the failed message")
     }
 
@@ -72,7 +79,7 @@ final class PendingBubbleMenuTests: XCTestCase {
         let message = "这条没发出去，长按删除它 \(Int(Date.now.timeIntervalSince1970) % 100_000)"
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
-        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + widget, "-openSendMessage", message, "-openSendDelay", "8"]
+        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + review, "-openSendMessage", message, "-openSendDelay", "8"]
         app.launchPinned()
         let notNow = app.alerts.buttons["先不发"]
         XCTAssertTrue(notNow.waitForExistence(timeout: 25), "no draft alert:\n\(app.debugDescription)")
@@ -111,9 +118,9 @@ final class PendingBubbleMenuTests: XCTestCase {
         XCTAssertTrue(bubble.waitForNonExistence(timeout: 5), "the mark's Delete left the failed message")
         sleep(2) // the outbox is written 300 ms after a change
         app.terminate()
-        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + widget] // the same hub (its chats kept); nothing sent
+        app.launchArguments = ["-pairURL", pair, "-openSession", "macbook/" + review] // the same hub (its chats kept); nothing sent
         app.launchPinned()
-        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "给天气 App 加一个主屏幕小组件")).firstMatch
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "看一下 PR #42")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 25), "the chat did not open again:\n\(app.debugDescription)")
         sleep(3) // the outbox is restored at launch: a message it brought back would be on screen by now
         XCTAssertFalse(app.staticTexts[message].exists, "the deleted message came back after a relaunch")
@@ -125,8 +132,8 @@ final class PendingBubbleMenuTests: XCTestCase {
         XCTAssertFalse(app.buttons["删除"].exists, "Delete on a message the hub has")
     }
 
-    /// Long-presses `bubble` until `item` of its bar shows. Now and then a press lands while the list still moves (a tick
-    /// of the working row above), which only stops it.
+    /// Long-presses `bubble` until `item` of its bar shows. Now and then a press lands while the list still moves as the
+    /// header folds into its slim bar, which only stops it.
     @MainActor private func press(_ bubble: XCUIElement, until item: XCUIElement) {
         for _ in 0..<3 where !item.exists {
             centre(of: bubble).press(forDuration: 0.8)
@@ -147,7 +154,7 @@ final class PendingBubbleMenuTests: XCTestCase {
     /// inside the window too: the session's first message is above it on screen, so frames that say otherwise are
     /// mirrored back.
     @MainActor private func centre(of bubble: XCUIElement) -> XCUICoordinate {
-        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "给天气 App 加一个主屏幕小组件")).firstMatch
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "看一下 PR #42")).firstMatch
         let window = app.windows.firstMatch.frame
         var f = bubble.frame
         let flipped = (first.exists && first.frame.minY > f.minY) || !window.contains(CGPoint(x: f.midX, y: f.midY))

@@ -357,6 +357,11 @@ final class Dictation {
     /// Stands in for asking the person for the microphone and speech recognition (tests hold a start inside that wait);
     /// nil asks the system.
     @ObservationIgnored var permission: (() async -> Bool)?
+    /// Why dictation does not start now: a system call is live (`LiveCallGate`), and dictation's own audio session would
+    /// cut the call's microphone. Nil while it may. The tests' own stands in for the gate.
+    @ObservationIgnored var callGate: () -> String? = { LiveCallGate.dictationRefusal }
+    /// Why a start now would be refused at once (the call is on), for the mic's tap and hold to say before anything opens.
+    var callRefusal: String? { callGate() }
     #if DEBUG
     /// `-showDictationSample "<words>"`: hears these words, one every beat, instead of the microphone (simulators
     /// may have none), for screenshots and recordings of the composer's mic. Without `permission` nothing is asked.
@@ -395,6 +400,11 @@ final class Dictation {
     /// (a tap, then a hold, or a send, while the system still asks; #3407). A newer start takes over from an older one
     /// already listening, which would otherwise hold the microphone and fail it as in use.
     func start(hints: [String] = [], update: @escaping (String) -> Void, failed: @escaping (String) -> Void = { _ in }) {
+        // A live system call keeps the microphone and its audio session: refused at once, nothing opens, the call goes on.
+        if let refusal = callGate() {
+            failed(refusal)
+            return
+        }
         let turn = UUID()
         startTurn = turn
         heard = ""
@@ -417,6 +427,9 @@ final class Dictation {
         var granted = true
         if let permission { granted = await permission() } else if sample == nil { granted = await Self.allowed() }
         guard startTurn == turn else { return nil }
+        // A system call that went live during that wait (an urgent call answered) keeps the microphone and its session:
+        // refused, nothing claimed or opened (the call manager's voice does not claim `RecordingMicrophone`).
+        if let refusal = callGate() { return refusal }
         guard granted else { return String(localized: "No access to the microphone or speech recognition. Turn it on in Settings › Persona.") }
         if isListening { stopListening() }
         #if DEBUG
@@ -430,20 +443,29 @@ final class Dictation {
         }
         guard RecordingMicrophone.shared.claim(microphoneOwner) else { return String(localized: "The microphone is in use. Stop the recording or dictation first.") }
         #if os(iOS) || os(visionOS) // a Mac has no audio session to configure: the engine takes the input as it is
-        // On the audio queue, after any deactivation a closing bar left there (`stop(settling:)`).
-        let opened: Bool = await withCheckedContinuation { c in
+        // On the audio session's queue, after any deactivation a closing bar left there (`stop(settling:)`), and in order
+        // with a system call's own category (`LiveCallGate.sessionQueue`): a call that went live before this block runs
+        // has the session, and this touches nothing.
+        let opened: SessionOpening = await withCheckedContinuation { c in
             Self.audioQueue.async {
+                guard !LiveCallGate.liveNow else { return c.resume(returning: .call) }
                 do {
                     let session = AVAudioSession.sharedInstance()
                     try session.setCategory(.record, mode: .measurement, options: .duckOthers)
                     try session.setActive(true, options: .notifyOthersOnDeactivation)
-                    c.resume(returning: true)
+                    c.resume(returning: .opened)
                 } catch {
-                    c.resume(returning: false)
+                    c.resume(returning: .failed)
                 }
             }
         }
-        guard opened else {
+        // A call live now has the session (its category was queued after this one's): the microphone goes back and the
+        // session stays as the call has it.
+        if opened == .call || callGate() != nil {
+            RecordingMicrophone.shared.release(microphoneOwner)
+            return callGate() ?? LiveCallGate.dictationLine
+        }
+        guard opened == .opened else {
             RecordingMicrophone.shared.release(microphoneOwner)
             return String(localized: "Couldn't open the microphone")
         }
@@ -456,7 +478,7 @@ final class Dictation {
         do { try engine.start() } catch {
             engine.inputNode.removeTap(onBus: 0)
             #if os(iOS) || os(visionOS)
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            if callGate() == nil { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
             #endif
             RecordingMicrophone.shared.release(microphoneOwner)
             return String(localized: "Couldn't open the microphone")
@@ -480,6 +502,12 @@ final class Dictation {
         }
         return nil
     }
+
+    #if os(iOS) || os(visionOS)
+    /// How dictation's session opening went on the audio session's queue: opened, failed, or not tried because a system
+    /// call is live.
+    private nonisolated enum SessionOpening: Sendable { case opened, failed, call }
+    #endif
 
     #if DEBUG
     private func startSample(_ sample: String, update: @escaping (String) -> Void) -> String? {
@@ -548,11 +576,17 @@ final class Dictation {
         update = nil
         isListening = false
         #if os(iOS) || os(visionOS)
+        // A system call that went live while dictating (an urgent call answered) has the session now: it stays active.
+        guard callGate() == nil else { return }
         if settling {
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 try? await Task.sleep(for: Theme.DictationBar.settle)
-                guard RecordingMicrophone.shared.isFree else { return } // someone took it meanwhile: theirs now
-                Self.audioQueue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+                // Someone took the microphone meanwhile, or a call went live: theirs now.
+                guard RecordingMicrophone.shared.isFree, (self?.callGate() ?? LiveCallGate.dictationRefusal) == nil else { return }
+                Self.audioQueue.async {
+                    guard !LiveCallGate.liveNow else { return }
+                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                }
             }
         } else {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -561,8 +595,8 @@ final class Dictation {
     }
 
     #if os(iOS) || os(visionOS)
-    /// Dictation's audio session calls, in order, off the main thread.
-    private static let audioQueue = DispatchQueue(label: "persona.dictation.audio-session")
+    /// Dictation's audio session calls, in order, off the main thread, on the queue a system call sets its category on.
+    private static var audioQueue: DispatchQueue { LiveCallGate.sessionQueue }
     #endif
 
     private static func allowed() async -> Bool {

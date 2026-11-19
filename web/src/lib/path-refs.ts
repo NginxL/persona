@@ -47,7 +47,8 @@ export function findPathRefs(text: string, limit = 40): PathRef[] {
   }
   for (const m of text.matchAll(TEXT)) {
     const ref = fromMatch(m, m.index);
-    if (ref && !out.some((r) => r.start === ref.start && r.end === ref.end)) out.push(ref);
+    // A whole code path owns its final dots; do not offer a different, shortened filename if it is missing.
+    if (ref && !out.some((r) => r.start === ref.start && (r.end === ref.end || /^\.+$/.test(text.slice(ref.end, r.end))))) out.push(ref);
   }
   out.sort((a, b) => a.start - b.start || b.end - a.end);
   return out.slice(0, limit);
@@ -55,35 +56,28 @@ export function findPathRefs(text: string, limit = 40): PathRef[] {
 
 /** The path a whole code span is (`/tmp/a.md`, `src/a.ts:12`, a home path with Chinese folder and file names), or undefined. */
 export function codePathRef(code: string): PathRef | undefined {
-  const lead = code.length - code.trimStart().length;
   const t = code.trim();
   if (!t || t.startsWith("//") || t.includes("://")) return undefined;
+  const start = code.indexOf(t);
   const w = WHOLE.exec(t);
   if (w) {
-    const ref = fromMatch(w, 0);
-    if (ref && ref.path.split("/").filter(Boolean).length >= (ref.path.startsWith("~") ? 1 : 2)) return shift(ref, lead);
+    const ref = fromMatch(w, start, false);
+    if (ref && ref.path.split("/").filter(Boolean).length >= (ref.path.startsWith("~") ? 1 : 2)) return ref;
   }
-  for (const m of t.matchAll(TEXT)) {
-    if (m.index !== 0 || m[0].length !== t.length) break;
-    const ref = fromMatch(m, 0);
-    if (ref) return shift(ref, lead);
-  }
+  const m = t.matchAll(TEXT).next().value;
+  if (m?.[0] === t) return fromMatch(m, start);
   return undefined;
 }
 
-function shift(r: PathRef, by: number): PathRef {
-  return { ...r, start: r.start + by, end: r.end + by };
-}
-
-function fromMatch(m: RegExpMatchArray, at: number): PathRef | undefined {
+function fromMatch(m: RegExpMatchArray, at: number, trimPunctuation = true): PathRef | undefined {
   let path = m[1];
-  const lineText = m[0].slice(path.length);
+  const hasLine = m[0] !== path;
   // A sentence's full stop (or an ellipsis) is not part of the path, unless the path is only dots.
-  if (!lineText) path = path.replace(/(?<=[^./])\.+$/, "");
+  if (!hasLine && trimPunctuation) path = path.replace(/(?<=[^./])\.+$/, "");
   if (!path || path === "~" || path === "/" || /^~?\/+$/.test(path)) return undefined;
   const num = (s?: string) => (s ? Number(s) : undefined);
   const line = num(m[2] ?? m[4]);
-  return { start: at, end: at + (lineText ? m[0].length : path.length), path, line: line || undefined, col: line ? num(m[3]) : undefined };
+  return { start: at, end: at + (hasLine ? m[0].length : path.length), path, line: line || undefined, col: line ? num(m[3]) : undefined };
 }
 
 /** Each path once, in order, for asking the machine. */

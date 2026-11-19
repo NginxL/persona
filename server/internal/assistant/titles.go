@@ -397,12 +397,13 @@ func (s *Service) makeTitle(ctx context.Context, started time.Time, first, reply
 	}
 	locale := s.hello(ctx).Locale
 	retry, max, room := "", titleTopicMax(locale), titleMaxTokens
-	system := prompts.RenderSessionTitle(prompts.SessionTitle{Language: answerLanguage(locale), TopicMax: max})
+	titlePrompt := prompts.SessionTitle{Language: answerLanguage(locale), TopicMax: max}
+	system := prompts.RenderSessionTitle(titlePrompt)
 	model := s.purposeModel("assistant.title")
 	var failed, cut, misformed bool // each once
 	for {
 		cctx, cancel := context.WithTimeout(ctx, titleCallTimeout)
-		input := prompts.RenderSessionTitleInput(prompts.SessionTitleInput{First: first, Reply: reply, Retry: retry, Source: hint})
+		input := prompts.RenderSessionTitleInput(prompts.SessionTitleInput{SessionTitle: titlePrompt, First: first, Reply: reply, Retry: retry, Source: hint})
 		r, err := model.Chat(cctx, ai.Request{System: system, Messages: []ai.Message{{Role: ai.RoleUser, Content: input}}, MaxTokens: room})
 		cancel()
 		switch {

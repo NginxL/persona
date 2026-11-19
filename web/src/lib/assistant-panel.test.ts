@@ -9,6 +9,7 @@ import { NEW_CONVERSATION, pickEffort, pickLauncher, pickModel } from "./assista
 import { assistantPick, assistantPillView, assistantSetup, type AssistantChat } from "./assistant-models";
 import { assistantPanel, assistantPickOf } from "./assistant-panel";
 import type { LauncherModels } from "./launcher-models";
+import { panelSections } from "./model-panel";
 import type { AssistantLaunchers, ModelList } from "./session-models";
 import type { Session } from "./types";
 
@@ -90,9 +91,33 @@ describe("the setup a Persona chat's next message runs on", () => {
     expect(view(chat({ session: session({ model_pick: { launcher: "claude" } }) })).model).toBe("Default (recommended)");
     expect(view(chat({ session: session({ model_pick: { launcher: "codex", model: "gpt-5.5" } }) }))).toMatchObject({ engine: "codex", model: "5.5" });
   });
+  it("treats an older node's Chinese default placeholder exactly like an empty launcher model", () => {
+    const withModel = (model?: string): AssistantLaunchers => ({
+      launchers: [{ name: "claude", source: "builtin", ...(model ? { model } : {}) }],
+      def: { provider: "claude" },
+      unavailable: [],
+    });
+    const c = chat({ isMain: true, session: session({ model: undefined }) });
+    const emptyCatalog = (): ModelList => ({ list: { agent: "claude", models: [] } });
+    const view = (launchers: AssistantLaunchers) => {
+      const setup = assistantSetup(c, launchers);
+      return {
+        setup,
+        pill: assistantPillView(c, setup, launchers, emptyCatalog()),
+        panel: assistantPanel(setup, launchers, emptyCatalog),
+      };
+    };
+    expect(view(withModel("默认"))).toEqual(view(withModel()));
+  });
 });
 
 describe("the panel's providers", () => {
+  it("names the configured default launcher exactly as the hub does, with a readable default model", () => {
+    const { providers } = assistantPanel(assistantSetup(chat({ isMain: true }), info), info, listOf);
+    expect(providers.find((p) => p.id === "claude")).toMatchObject({ isDefault: true, defaultModel: "opus 5.5" });
+    expect(providers.find((p) => p.id === "relay")?.isDefault).toBe(false);
+  });
+
   it("what can run Persona chats, each with its list; what can't, off with the hub's reason (not hidden)", () => {
     const { providers, state } = assistantPanel(assistantSetup(chat({ isMain: true }), info), info, listOf, { typed: true });
     expect(providers.map((p) => [p.id, p.name, p.engine, p.unavailable ?? ""])).toEqual([
@@ -159,6 +184,37 @@ describe("the panel's providers", () => {
     const { providers, state } = assistantPanel(assistantSetup(c, info), info, withList, { fast: true, fastOn: true });
     expect(providers.find((p) => p.id === "codex")!.models![0].fast).toBe(true);
     expect(state.current).toMatchObject({ provider: "codex", model: "gpt-5.5", fast: true });
+  });
+});
+
+describe("a gateway provider's folded list (#10365)", () => {
+  // what the hub sends for the captured catalog: opus, fable, sonnet and haiku all ran the gateway's one model and all read
+  // "Opus 5.5"; the concrete model's row carries them, and the gateway's other route of it says its route
+  const gateway: LauncherModels = {
+    agent: "claude",
+    models: [
+      { id: "default", name: "Default (recommended)", default: true, resolved: "claude-opus-5-5", efforts: ALL },
+      { id: "claude-opus-5-5", name: "Opus 5.5", description: "Custom Opus model (claude-opus-5-5)", aliases: ["opus", "fable", "sonnet", "haiku"], efforts: ALL },
+      { id: "kiro/claude-opus-5-5", name: "Opus 5.5 (kiro)", description: "From gateway" },
+    ],
+  };
+  const gw: AssistantLaunchers = { launchers: [{ name: "gateway-api", source: "persona", display_name: "Gateway API" }], def: { provider: "gateway-api" }, unavailable: [] };
+  const lists = (name: string): ModelList => (name === "gateway-api" ? { list: gateway } : {});
+
+  it("one Opus 5.5 row in All, a pick saved as an alias on it, and picking it keeps the concrete model", () => {
+    const c = chat({ session: session({ launcher: "gateway-api", model_pick: { launcher: "gateway-api", model: "sonnet" } }) });
+    const setup = assistantSetup(c, gw);
+    const { providers, state } = assistantPanel(setup, gw, lists, { typed: true });
+    expect(state.current).toEqual({ provider: "gateway-api", model: "claude-opus-5-5", effort: "medium" });
+    const sections = panelSections({ providers, state, view: { kind: "all" }, query: "", favorites: [], recent: [], overrides: {} });
+    const rows = sections.flatMap((s) => s.rows);
+    expect(rows.map((r) => [r.model.id, r.model.name, r.current])).toEqual([
+      ["claude-opus-5-5", "Opus 5.5", true],
+      ["default", "Default (recommended)", false],
+      ["kiro/claude-opus-5-5", "Opus 5.5 (kiro)", false],
+    ]);
+    expect(assistantPickOf({ provider: "gateway-api", model: "kiro/claude-opus-5-5" }, gateway, state.current)).toEqual({ launcher: "gateway-api", model: "kiro/claude-opus-5-5" });
+    expect(assistantPickOf({ provider: "gateway-api", model: "claude-opus-5-5", effort: "medium" }, gateway, state.current)).toBeNull();
   });
 });
 

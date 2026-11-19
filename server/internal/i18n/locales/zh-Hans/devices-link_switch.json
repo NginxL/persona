@@ -1,0 +1,7 @@
+{
+  "forbidden": "只有拥有完整权限的设备或管理页面可以把这台电脑切换到 Persona Link",
+  "in_progress": "这台电脑正在切换到 Persona Link",
+  "unavailable": "这台电脑现在不能切换到 Persona Link",
+  "save_failed": "无法保存切换到 Persona Link 的记录，切换没有开始，请重试",
+  "deploy_refused": "这台电脑正在切换到 Persona Link，完成后再更新它的节点"
+}

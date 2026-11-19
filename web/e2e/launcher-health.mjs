@@ -84,6 +84,8 @@ async function openPanel(page, tag) {
     if (i === 60) fail(`${tag}: the panel's lists did not load`);
     await page.waitForTimeout(150);
   }
+  // The catalog is one disclosure per launcher; these existing checks exercise the model actions below them.
+  while (await panel.locator('[data-panel-launcher][aria-expanded="false"]').count()) await panel.locator('[data-panel-launcher][aria-expanded="false"]').first().click();
   return panel;
 }
 
@@ -129,7 +131,7 @@ async function run(browser, size, theme) {
   if (await blocked.count()) {
     // MOCK_LAUNCHER_HEALTH=default: Model settings' default runs work_gw, so following them (still the choice) carries
     // its warning, and the line under the box says what runs this time (was: the Default chip marked, work_gw's line first)
-    if ((await follow.getAttribute("aria-selected")) !== "true") fail(`${tag}: the follow row is not the choice`);
+    if ((await follow.getAttribute("aria-pressed")) !== "true") fail(`${tag}: the follow row is not the choice`);
     if (!followSays.includes(WORDS.reason)) fail(`${tag}: the follow row doesn't carry work_gw's warning: ${followSays}`);
     if (JSON.stringify(lit) !== JSON.stringify(["model:work_gw\ndefault"])) fail(`${tag}: the row lit is ${JSON.stringify(lit)}, want work_gw's Default (it runs)`);
     await page.keyboard.press("Escape");

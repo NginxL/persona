@@ -56,7 +56,7 @@ func TestCodexDaemonSocketGone(t *testing.T) {
 	if c := n.launcherCheck(context.Background(), "codex"); c.OK || c.Agent != "codex" || !strings.Contains(c.Error, "codex app-server daemon restart") {
 		t.Fatalf("check %+v", c)
 	}
-	if _, err := n.startCodex(context.Background(), nil, home, "codex", []string{"codex"}, "hi", "", "", ""); refusalCode(err) != "codex_daemon_socket_gone" {
+	if _, err := n.startCodex(context.Background(), nil, home, "codex", []string{"codex"}, modelExecution{}, "hi", "", "", ""); refusalCode(err) != "codex_daemon_socket_gone" {
 		t.Fatalf("start: %v", err)
 	}
 	if n.codexOnSharedDaemon([]string{"codex", "-c", `model="x"`}) || n.codexOnSharedDaemon([]string{"codex", "--remote", "ws://127.0.0.1:1"}) {

@@ -13,6 +13,16 @@ final class ComposerKeyboardTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] != nil else {
             throw XCTSkip("needs the isolated composer mock hub (PERSONA_MOCK_HUB)")
         }
+        let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"]!
+        let data = try Data(contentsOf: URL(string: hub + "/api/v1/sessions")!)
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let rows = try XCTUnwrap(root?["sessions"] as? [[String: Any]])
+        let models = Dictionary(uniqueKeysWithValues: rows.map { ($0["session_id"] as? String ?? "", $0["model"] as? String ?? "") })
+        let agentID = String(agent.split(separator: "/").last!)
+        let assistantID = String(assistant.split(separator: "/").last!)
+        let message = "ComposerKeyboardTests requires scripts/mock/composer_hub.py; scripts/mock/mock_hub.py is a different fixture"
+        XCTAssertEqual(models[agentID], "gpt-6.1-sol-codex-mini-preview-2026-11-05", message)
+        XCTAssertEqual(models[assistantID], "gpt-6.1-sol", message)
     }
 
     override func tearDown() {

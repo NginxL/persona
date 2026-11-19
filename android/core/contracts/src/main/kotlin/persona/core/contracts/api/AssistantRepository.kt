@@ -46,6 +46,8 @@ data class AssistantSnapshot(
      * the app. Null until the hub has made it and from an older hub.
      */
     val backgroundSupervisor: String? = null,
+    /** Whether scheduled task and background-supervisor chats belong in Recent; null from an older hub. */
+    val recentTaskChats: Boolean? = null,
 ) {
     /**
      * What each current leader's row shows (the tree's `running` and `counts.needs_you`, #4352, #6626), by conversation
@@ -63,4 +65,8 @@ object AssistantSpace {
 interface AssistantRepository {
     val assistant: StateFlow<AssistantSnapshot>
     suspend fun refresh()
+    /** Apply the setting's optimistic value or rollback to the selected snapshot, when the implementation supports it. */
+    suspend fun updateRecentTaskChats(value: Boolean?) {}
+    /** Capture the selected assistant for one optimistic write and its later outcome. */
+    suspend fun recentTaskChatsUpdater(): suspend (Boolean?) -> Unit = { updateRecentTaskChats(it) }
 }

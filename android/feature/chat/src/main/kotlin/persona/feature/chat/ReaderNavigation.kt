@@ -47,7 +47,9 @@ internal fun WorkCollapseOverlay(lines: List<ChatLine>, list: LazyListState, row
     modifier: Modifier = Modifier) {
     val byId = remember(lines) { lines.associateBy { it.id } }
     val current by remember(lines, list) {
+        val hasOpenWork = lines.any { it is ChatLine.Work && it.open }
         derivedStateOf {
+            if (!hasOpenWork) return@derivedStateOf null
             val layout = list.layoutInfo
             val visible = layout.visibleItemsInfo.filter {
                 it.offset < layout.viewportEndOffset && it.offset + it.size > layout.viewportStartOffset

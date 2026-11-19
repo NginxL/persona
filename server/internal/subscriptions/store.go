@@ -27,6 +27,8 @@ type Store interface {
 	UpdateSubscription(ctx context.Context, s Subscription, prev int64) (bool, error)
 	// DeleteSubscription removes it with its dedup keys and pending items.
 	DeleteSubscription(ctx context.Context, id string) error
+	// DeleteSubscriptionAt removes it only while its stored revision is prev.
+	DeleteSubscriptionAt(ctx context.Context, id string, prev int64) (bool, error)
 	// LeaseSubscription holds id for a run until until, if no other run holds it at now; false when one does.
 	LeaseSubscription(ctx context.Context, id string, now, until time.Time) (bool, error)
 	// SeenKeys says which of uids the subscription has seen.
@@ -135,10 +137,25 @@ func (m *MemStore) UpdateSubscription(_ context.Context, s Subscription, prev in
 func (m *MemStore) DeleteSubscription(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.delete(id)
+	return nil
+}
+
+func (m *MemStore) DeleteSubscriptionAt(_ context.Context, id string, prev int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.subs[id]
+	if !ok || cur.Revision != prev {
+		return false, nil
+	}
+	m.delete(id)
+	return true, nil
+}
+
+func (m *MemStore) delete(id string) {
 	delete(m.subs, id)
 	delete(m.seen, id)
 	m.items = slices.DeleteFunc(m.items, func(it Held) bool { return it.SubscriptionID == id })
-	return nil
 }
 
 func (m *MemStore) LeaseSubscription(_ context.Context, id string, now, until time.Time) (bool, error) {

@@ -46,7 +46,7 @@ enum VoiceSample: String, CaseIterable {
 
     @MainActor static func start(_ sample: VoiceSample, key: SessionKey, model: AppModel) {
         let main = model.session(key)?.assistant == true
-        let label = VoiceEntry.label(model.session(key), model: model)
+        let label = VoiceEntry.label(key, model: model)
         Task {
             await VoiceCalls.shared.start(key, extensionID: "voice", surface: .phone,
                                           deps: deps(sample, frames: frames(sample, key: key, main: main, label: label)))
@@ -186,7 +186,8 @@ enum VoiceSample: String, CaseIterable {
         func close() { lock.withLock { handler = nil } }
     }
 
-    /// Plays nothing; for `speaking` it says the voice plays and how loud, for `ended` that a phone call took the audio.
+    /// Plays nothing; for `speaking` it says the voice plays and how loud, for `ended` that a phone call took the audio and
+    /// did not give it back (an interruption alone only pauses the voice chat, #9887).
     @MainActor private final class SampleAudio: VoiceAudio {
         let sample: VoiceSample
         private var task: Task<Void, Never>?
@@ -201,6 +202,7 @@ enum VoiceSample: String, CaseIterable {
                 switch sample {
                 case .ended:
                     events(.interrupted)
+                    events(.interruptionEnded(shouldResume: false))
                 case .speaking:
                     events(.playing(true))
                     var t = 0.0

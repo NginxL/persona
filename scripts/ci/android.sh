@@ -9,6 +9,8 @@ usage() {
     '       scripts/ci/android.sh --help' \
     'Requires Bash, Python 3, timeout (or gtimeout), JAVA_HOME pointing to JDK 21,' \
     'and ANDROID_HOME (or ANDROID_SDK_ROOT) pointing to an installed Android SDK.' \
+    'Swift builds the source-pinned Refract CLI for the explicit About Version regeneration check in lane 0.' \
+    'The check fetches that exact public commit, verifies its deterministic source archive and never skips.' \
     'Also requires rustup and NDK 29.0.14206865: core:rustcore tests build the host JNI library;' \
     'core:rustcore-android packages arm64-v8a and x86_64 for the debug APK.' \
     'SDK setup: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools" "ndk;29.0.14206865"' \
@@ -136,14 +138,18 @@ run_check() {
 
 # The checker tests and resource checks run in the lane that runs lint.
 if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
+  cd "$ROOT"
+  run_check 'Refract About Version regeneration' python3 -I scripts/app/refract_about_version.py check --download
   cd "$ROOT/scripts/ci"
   run_check 'Android shard coverage tests' python3 -B test_android_shards.py
   cd "$ROOT/scripts/app"
   run_check 'translation checker tests' python3 -B test_android_i18n_check.py
   run_check 'token checker tests' python3 -B test_android_token_baseline.py
+  run_check 'motion checker tests' python3 -B test_android_motion_baseline.py
   run_check 'slot order checker tests' python3 -B test_android_slot_order.py
   run_check 'translation resources and literal baseline' python3 -B android_i18n_check.py
   run_check 'design token baseline' python3 -B android_token_baseline.py
+  run_check 'motion literal baseline' python3 -B android_motion_baseline.py
   run_check 'design-system slot order' python3 -B android_slot_order.py
   run_check 'generated design tokens' python3 -B "$ROOT/scripts/assets/gen_tokens.py" --check \
     --kotlin "$ROOT/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"

@@ -31,6 +31,9 @@ export interface AgentModel {
   custom?: boolean;
   /** Exact catalog reference price in USD per one million tokens, when the hub knows it. */
   price?: PanelPrice;
+  /** The other spellings the hub folded into this row: they run the same model with the same context window here (Claude
+   *  Code's tier aliases on a gateway whose tiers name one model, #10365). Each still picks this row (`listedModel`). */
+  aliases?: string[];
 }
 
 /** Whether this catalog row natively offers Codex's Fast tier. */
@@ -145,11 +148,17 @@ export async function providerModels(provider: string, opts: { manager?: string;
   }
 }
 
-/** What is typed in the search, as an id to use when no model has exactly that id and the hub would take it (#1644,
- *  lib/model-id.ts): "Model configuration" and "New agent" take ids the list lacks. */
+/** What is typed in the search, as an id to use when no model has exactly that id (or that alias) and the hub would take
+ *  it (#1644, lib/model-id.ts): "Model configuration" and "New agent" take ids the list lacks. */
 export function customModel(models: AgentModel[], query: string): string {
   const id = cleanModelId(query);
-  return validModelId(id) && !models.some((m) => m.id === id) ? id : "";
+  return validModelId(id) && !listedModel(models, id) ? id : "";
+}
+
+/** The row of `models` that `id` picks: the one with that id, else the one the hub folded it into (`aliases`), so a model
+ *  saved as `opus` still finds its row after the hub lists it under the concrete model's id (#10365). */
+export function listedModel<M extends Pick<AgentModel, "id" | "aliases">>(models: readonly M[], id: string): M | undefined {
+  return models.find((m) => m.id === id) ?? models.find((m) => m.aliases?.includes(id));
 }
 
 /** The agent takes a model ID typed by hand (#1644): Claude Code's `--model` / `/model` and Codex's `--model` take any
@@ -260,12 +269,12 @@ export function matches(fields: (string | undefined)[], query: string): boolean 
   return query.toLocaleLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word));
 }
 
-/** What the open list shows for `query` (name, id, resolved model, description; every word): "Default" first when it
- *  matches, then the rest in the agent's order. */
+/** What the open list shows for `query` (name, id, resolved model, folded aliases, description; every word): "Default"
+ *  first when it matches, then the rest in the agent's order. */
 export function modelRows(models: AgentModel[], query: string, followed: ModelBinding = {}): { showDefault: boolean; rows: AgentModel[] } {
   const d = defaultModel(models);
   const showDefault = !query.trim() || matches([t("lib-launcher-models.default"), "default", defaultDetail(models, followed), d && modelName(d), d?.name, d?.id, d?.resolved, d?.description], query);
-  const rows = models.filter((m) => m !== d && matches([modelName(m), m.name, m.id, m.resolved, m.description], query));
+  const rows = models.filter((m) => m !== d && matches([modelName(m), m.name, m.id, m.resolved, ...(m.aliases ?? []), m.description], query));
   return { showDefault, rows };
 }
 
@@ -280,7 +289,7 @@ export function effortChoices(list: LauncherModels | null | undefined, model: st
   const unknown = rule === "listed" ? [] : ALL_EFFORTS;
   if (!list?.models.length) return unknown;
   const id = model || followed.model;
-  const m = list.models.find((x) => x.id === id) ?? (id ? undefined : defaultModel(list.models));
+  const m = (id ? listedModel(list.models, id) : undefined) ?? (id ? undefined : defaultModel(list.models));
   // a typed ID (listed as typed before, or not at all): what it takes is not known
   return m && !m.custom ? (m.efforts ?? []) : unknown;
 }

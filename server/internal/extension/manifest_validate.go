@@ -141,6 +141,18 @@ func (m *Manifest) Validate() error {
 		if name == "error_reports" && !m.Permissions.ErrorReports {
 			bad("contributes.error_reports needs permissions.error_reports (the user agrees that it gets the error and crash reports)")
 		}
+		if name == "repository_providers" {
+			// One host is one provider's, in a manifest as across extensions (claimClashes).
+			claimed := map[string]string{}
+			for _, it := range m.RepositoryProviders() {
+				for _, h := range it.Hosts {
+					if other, ok := claimed[h]; ok && other != it.ID {
+						bad("contributes.repository_providers: the host %q is in both %s and %s", h, other, it.ID)
+					}
+					claimed[h] = it.ID
+				}
+			}
+		}
 		if name == "auth_relay" && !m.Permissions.AuthRelay {
 			bad("contributes.auth_relay needs permissions.auth_relay (the user agrees that it completes the authorization links their Agents stop at)")
 		}

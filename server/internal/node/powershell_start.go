@@ -82,8 +82,21 @@ func windowsPaneShellError(shells ...string) error {
 	return nil
 }
 
-// powerShellPane reports only the singleton sentinel made by windowsPaneShellDecision. Adopted stacks remain main's
-// raw programs and never select the handoff.
+// windowsAdoptedPaneShells is what a start in an adopted pane (Run Agent Here, a stopped session's own terminal, a
+// launcher or engine switch) reads on Windows. names are the programs in front of the pane, innermost last. Only an
+// innermost PowerShell or pwsh, under any of its Windows names, becomes the sentinel a new PowerShell pane gets, so
+// the start takes the same Git Bash handoff (#9854). Every other stack, Git Bash started from PowerShell included,
+// stays the raw programs and keeps main's bytes. The list itself is not changed: the shell-prompt checks before a
+// start still read it with the shared shellProgram, and takesAssign is not taught these names.
+func windowsAdoptedPaneShells(names []string) []string {
+	if len(names) > 0 && windowsPowerShellProgram(names[len(names)-1]) {
+		return []string{windowsPowerShellPane}
+	}
+	return names
+}
+
+// powerShellPane reports only the singleton sentinel made by windowsPaneShellDecision or windowsAdoptedPaneShells.
+// A shell's name never selects the handoff by itself.
 func powerShellPane(shells ...string) bool {
 	return len(shells) == 1 && shells[0] == windowsPowerShellPane
 }

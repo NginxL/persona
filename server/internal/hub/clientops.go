@@ -165,15 +165,15 @@ func clientOpRetry(kind string, body []byte) bool {
 		_ = json.Unmarshal(body, &res)
 		return res.Code == assistantwire.CodeAssistantOffline
 	}
-	if kind != "inbox_reply" && kind != "inbox_handoff" && kind != "choose" && kind != "assistant_start" {
+	if kind != "inbox_reply" && kind != "inbox_handoff" && kind != "choose" && kind != "assistant_start" && kind != "clarify" {
 		return false
 	}
 	var res struct {
 		Code string `json:"code"`
 	}
 	_ = json.Unmarshal(body, &res)
-	if kind == "choose" || kind == "assistant_start" { // No request reached the manager; the same op can safely retry.
-		return res.Code == assistantwire.CodeAssistantOffline
+	if kind == "choose" || kind == "assistant_start" || kind == "clarify" { // No request reached the manager; the same op can safely retry.
+		return res.Code == assistantwire.CodeAssistantOffline || kind == "clarify" && res.Code == assistantwire.CodeAssistantInDoubt
 	}
 	return res.Code == assistantwire.CodeAssistantOffline || res.Code == assistantwire.CodeAssistantInDoubt
 }

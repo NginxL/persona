@@ -10,6 +10,7 @@
 // groups. Loaded with the panel, not with the composer.
 import { t } from "../i18n";
 import { agentId, agentName, providerAgent } from "./agent-kind";
+import { explicitLauncherModel } from "./compatibility";
 import type { AssistantSetup } from "./assistant-models";
 import { ALL_EFFORTS, defaultModel, modelName, modelSupportsFast, typedModelOffered, type AgentModel, type LauncherModels } from "./launcher-models";
 import { validModelId } from "./model-id";
@@ -24,6 +25,7 @@ function panelModel(m: AgentModel, engine: string, catalogFast: boolean): PanelM
   const out: PanelModel = { id: m.id, name: modelName(m), efforts: m.efforts ?? (m.custom && engine === "claude" ? ALL_EFFORTS : []) };
   if (m.description) out.description = m.description;
   if (m.resolved) out.resolved = m.resolved;
+  if (m.aliases?.length) out.aliases = m.aliases;
   if (m.default_effort) out.defaultEffort = m.default_effort;
   if (catalogFast && modelSupportsFast(m)) out.fast = true;
   if (m.custom) out.custom = true;
@@ -59,7 +61,12 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
   const providers: PanelProvider[] = launchers.map((l) => {
     const kind = agentId(providerAgent(l.agent_type || l.agent || "claude", l.name));
     const e = listOf(l.name);
-    const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: kind, models: null };
+    const isDefault = info?.def?.provider === l.name;
+    const configuredModel = explicitLauncherModel(l.model);
+    const configured = (isDefault && info?.def?.model) || configuredModel;
+    const defaultRow = currentModelRow(e.list?.models ?? [], configured) ?? defaultModel(e.list?.models ?? []);
+    const defaultName = defaultRow ? (defaultRow.resolved ? modelLabel(defaultRow.resolved) : modelName(defaultRow)) : configured ? modelLabel(configured) : undefined;
+    const p: PanelProvider = { id: l.name, name: providerTitle(l), engine: kind, models: null, isDefault, defaultModel: defaultName };
     if (e.list === undefined) {
       if (e.error) p.error = e.error;
       else p.loading = true;
@@ -68,7 +75,7 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
       // a launcher that fixes its own --model takes no model with a pick: what it runs by default, only
       if (e.list?.locked) models = models.filter((m) => m.id === defaultModel(e.list?.models ?? [])?.id);
       // no list to read (a direct API the computer can't ask, an older hub): the model it is configured with
-      if (!models.length && l.model) models = [{ id: l.model, name: modelLabel(l.model), efforts: kind === "claude" ? ALL_EFFORTS : [] }];
+      if (!models.length && configured) models = [{ id: configured, name: modelLabel(configured), efforts: kind === "claude" ? ALL_EFFORTS : [] }];
       p.models = models;
     }
     // the provider it runs on stays as it is, whatever its kind: it is what the panel says the chat runs
@@ -91,7 +98,7 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
 
   const own = providers.find((p) => p.id === setup.provider);
   const row = own?.models ? currentModelRow(listOf(setup.provider).list?.models ?? [], setup.model) : undefined;
-  const model = row?.id ?? setup.model ?? launchers.find((l) => l.name === setup.provider)?.model;
+  const model = row?.id ?? setup.model ?? explicitLauncherModel(launchers.find((l) => l.name === setup.provider)?.model);
   if (o.fast && model && own?.models) own.models = own.models.map((m) => (m.id === model ? { ...m, fast: true } : m));
   const currentRow = own?.models?.find((m) => m.id === model);
   const canFast = Boolean(currentRow?.fast || o.fast);

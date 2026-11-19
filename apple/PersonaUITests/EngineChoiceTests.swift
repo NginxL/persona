@@ -27,6 +27,14 @@ final class EngineChoiceTests: XCTestCase {
         "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
     }
 
+    /// Opens the pairing link from outside the app; it asks "Connect to <host>?" before it pairs (#9929): Connect.
+    @MainActor private func openPairLink() {
+        app.open(URL(string: pair)!)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "the pairing link did not ask before pairing")
+        alert.buttons["连接"].tap()
+    }
+
     @MainActor private func shot(_ name: String) throws {
         let screenshot = app.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
@@ -75,7 +83,7 @@ final class EngineChoiceTests: XCTestCase {
         app.launchArguments = ["-openWelcome", "YES", "-pairURL", ""]
         app.launchPinned()
         XCTAssertTrue(app.buttons["welcome.pair"].waitForExistence(timeout: 10))
-        app.open(URL(string: pair)!)
+        openPairLink()
         XCTAssertTrue(app.buttons["engine.save"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["这台电脑用哪个引擎"].exists)
         try shot("pairing")
@@ -83,7 +91,7 @@ final class EngineChoiceTests: XCTestCase {
         app.buttons["engine.save"].tap()
         pairedRoot()
         XCTAssertEqual(try current("server"), "herdr-core")
-        app.open(URL(string: pair)!)
+        openPairLink()
         XCTAssertTrue(app.buttons["engine.save"].waitForExistence(timeout: 10))
         // Pairing again preselects the configured engine; confirming keeps it.
         XCTAssertTrue(app.buttons["engine.option.herdr-core"].isSelected)
@@ -151,7 +159,7 @@ final class EngineChoiceTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.staticTexts["离线，暂无检测信息"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["engine.option.herdr"].tap()
-        app.buttons["engine.save"].tap()
+        confirmEngine()
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertEqual(try current("nas"), "herdr")
     }
@@ -162,6 +170,12 @@ final class EngineChoiceTests: XCTestCase {
         app.launchPinned()
         XCTAssertTrue(app.buttons["welcome.pair"].waitForExistence(timeout: 10))
         app.buttons["welcome.pair"].tap()
+        let scanOrToken = app.buttons["扫码或其他配对方式"]
+        XCTAssertTrue(scanOrToken.waitForExistence(timeout: 10), "no scan-or-token pairing method")
+        scanOrToken.tap()
+        let otherWays = app.buttons["pair.other"]
+        XCTAssertTrue(otherWays.waitForExistence(timeout: 10), "no manual pairing entry")
+        otherWays.tap()
         let address = app.textFields["服务器地址"]
         XCTAssertTrue(address.waitForExistence(timeout: 10))
         address.tap()
@@ -187,7 +201,7 @@ final class EngineChoiceTests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["-openWelcome", "YES", "-pairURL", ""]
         app.launchPinned()
-        app.open(URL(string: pair)!)
+        openPairLink()
         XCTAssertTrue(app.buttons["engine.save"].waitForExistence(timeout: 15))
         app.buttons["engine.option.herdr-core"].tap()
         app.buttons["engine.save"].tap()

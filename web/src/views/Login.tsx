@@ -10,6 +10,8 @@ import { t } from "../i18n";
 import { tRich } from "../i18n/rich";
 import type { PasswordState } from "../lib/password";
 
+import { BrowserLoginQR } from "./BrowserLoginQR";
+
 const PasswordLogin = lazy(() => import("./PasswordLogin").then((m) => ({ default: m.PasswordLogin })));
 
 const code = "whitespace-nowrap rounded-[5px] bg-field px-1 py-0.5 font-mono text-[11.5px] text-ink-2 shadow-hairline";
@@ -36,6 +38,7 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
   const [masterError, setMasterError] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [noHub, setNoHub] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   useEffect(() => void rememberHub(here()), []);
 
   const submit = (from: "link" | "master") => async (e: React.FormEvent) => {
@@ -123,6 +126,10 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
         <p className="text-center text-[11.5px] leading-relaxed text-ink-3">{t("login.credential_note")}</p>
 
         <div className="mt-5 flex flex-col gap-1">
+          {/* A code is made only once this is opened, by someone who means to scan it (#10291). */}
+          <Disclosure open={qrOpen} onToggle={() => setQrOpen((v) => !v)} label={t("login.qr_open")} id="login-qr">
+            {qrOpen && <div className="px-1 pb-2"><BrowserLoginQR onDone={onDone} /></div>}
+          </Disclosure>
           <Disclosure open={noHub} onToggle={() => setNoHub((v) => !v)} label={t("login.no_hub")} id="login-no-hub">
             <div className="space-y-1.5 px-3 pb-2 text-[12px] leading-relaxed text-ink-2">
               <p>{t("login.no_hub_what")}</p>

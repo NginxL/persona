@@ -51,6 +51,10 @@ Continuation filenames may append `_<segment UUID>` after the thread UUID. The a
 | FileChange | One `Edit` per file, input includes `diff` (unified diff, rendered by the App's `UnifiedDiffView`) |
 | McpToolCall | `mcp__<server>__<tool>` |
 | ImageView | `Read` |
+| Extension `web.search` | `WebSearch` / `WebFetch` (below) |
+| Extension `clock.sleep` | `sleep`, input `duration` (`25s`, `1m30s`) and `duration_ms`; a run of sleeps folds with the work around it |
+| SubAgentActivity (`started` / `interacted` / `completed`) | `subagent`, input `name` (the last segment of `agent_path`), `event`, `agent_path`, `agent_thread_id`, and on `started` the `model` and `reasoning_effort` Codex gave the subagent; the activity line follows `event` (dispatching, messaging, finished) |
+| CollabAgentToolCall | `wait_agent` for `wait`, otherwise the record's `tool`; input `receiver_thread_ids` / `receiver_agents`, result `agents_states`, `status: failed` marks failure; the `wait` records seen so far carry none of the three, so a wait shows without a subject or a count |
 | ContextCompaction | "Context compacted" notice |
 | `event_msg/turn_aborted` | "Interrupted" notice |
 | `turn_context` / `token_count` | Model, approval policy, context tokens |
@@ -63,11 +67,33 @@ strip `<in-app-browser-context>` (browser state automatically attached by the Co
 `<environment_context>`, `<INSTRUCTIONS>`, `<skill>`, `<turn_aborted>`, `<subagent_notification>`, `<realtime_delegation>`,
 and `<codex_internal_context>` appear only in response_item (model input), not in the chat.
 
-`response_item` is the model wire format for the same content and is skipped. Extension `web.search` displays as `WebSearch` (search, query input) / `WebFetch` (`action.type=openPage`, URL input), with one "title  URL" per result. SubAgentActivity, other Extensions (image generation), and CollabAgentToolCall remain recognizable event notices; the original session history is still authoritative for full content.
+`response_item` is the model wire format for the same content and is skipped. Extension `web.search` displays as `WebSearch` (search, query input) / `WebFetch` (`action.type=openPage`, URL input), with one "title  URL" per result. A coordinating chat's `clock.sleep`, SubAgentActivity and CollabAgentToolCall are finished tool calls, not notices (#10436): the apps draw them as ordinary calls ("Call subagent · review_api") and they fold into the turn's work, so a chat that delegates shows its prompt, one folded work row and its reply rather than a line per sleep or subagent ping. The subagents themselves are their own threads, listed under the chat. Other Extensions (image generation) and item types Persona does not know remain recognizable event notices; the original session history is still authoritative for full content.
 
 The Persona assistant ("Persona" tab) can also use Codex launchers through `codex app-server`; see `docs/assistant/assistant.md` ("Codex").
 
 Multiple existing app-server instances on one computer (desktop App, separate `CODEX_HOME`s, multiple clients reading / writing / approving) are integrated into the existing Agents list. See [`codex-app-server.md`](codex-app-server.md) for how that works and its limits; the source research behind it is in [the archive](../archive/integrations/codex-app-server-research.md). Discovering history requires no herdr; only instances exposing a protected Unix / loopback WebSocket endpoint support live connection and control. External stdio is explicitly read-only.
+
+## Visualize
+
+Codex's visualize plugin asks the model to write a self-contained HTML fragment (no network access of its own: no `fetch` / XHR, everything inlined, under 1 MB) and marks it inside an AgentMessage's text with private-use runes:
+
+`<U+E200>visualize<U+E202>{"path":"<abs>.html","mode":"wide"?,"title"?}<U+E201>`
+
+(`U+E200` opens, `U+E202` separates the tag from the JSON payload, `U+E201` closes.) The files live under `$CODEX_HOME/visualizations/YYYY/MM/DD/<codex session id>/`; `mode` is absent (the Codex client's 736 px frame) or `"wide"` (1024 px), and `title` is optional. The Codex client renders the fragment inline where the marker stood; without handling it, a reader sees only the file path as text.
+
+Persona's transcript parser (`server/internal/transcript/codex_visualize.go`) splits each marker out of the AgentMessage text: the words before, between and after the markers stay one or more ordinary `text` items, and each well-formed marker becomes its own `visualization` item (`proto.Visualization{path, mode, title}`), in order. A marker is kept verbatim as text when its JSON is invalid, its path is relative, its mode is unknown, its title is overlong, or it is not closed; blank lines around a marker are collapsed. The item never carries the fragment's bytes, only the file reference.
+
+Only the session's own completed AgentMessages are scanned. Markers also appear verbatim where one thread reads another's history — inside `codex_app` `read_thread` DynamicToolCall output, `custom_tool_call_output` snapshots and a compacted rollout's `guardian_history` — but those stay part of the tool result: they reference another session's files and repeat on every read, so re-emitting them would duplicate items the owning thread already produced.
+
+The node serves the bytes through `session.visualization`, and the hub through `GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization` (`docs/protocol/protocol.md`, "Sessions"). The node resolves symlinks and only returns a file that:
+
+- is inside `$CODEX_HOME/visualizations`, with the fixed `YYYY/MM/DD/<session id>/<file>` shape;
+- belongs to the requested session: the directory's id is the session id or its main thread's;
+- is a regular file of at most 1 MiB (`visualizationMaxBytes`).
+
+Anything else answers `not_found`, so a marker cannot name an arbitrary file on the computer. The hub marks the response `text/html; charset=utf-8` and privately cacheable.
+
+The web client renders the item with `views/chat/VisualizationCard.tsx`: it fetches the fragment once when scrolled on screen and runs it in the same offline QuickJS sandbox as assistant HTML cards (`web/src/lib/html-runtime`, an `allow-scripts`-only iframe, no same-origin access), with every `persona.*` bridge call refused. The frame follows the fragment's height up to 640 px and is torn down off screen; a wide card may take 1024 px, another 736 px. Fetch and runtime failures show the file name and Retry. A Markdown export writes a `_[Visualization: <title or file name>]_` placeholder because the interactive frame has no Markdown form.
 
 ## Sessions on the daemon (app-server route)
 
@@ -95,6 +121,12 @@ not screen reading or typing into the terminal. Panes it cannot join retain the 
   - Async questions (`request_user_input_async`) are messages, not requests. Recognize them from rollout as before ("Questions and approvals"); send the answer envelope as an app-server message (`turn/start` / `turn/steer`).
   - Phone messages use `turn/start` when idle or `turn/steer` with the current turn while working (for a turn already running before connection, read it once with `thread/read`).
     No terminal typing: computer input drafts stay untouched, neither swallowed nor mixed into the message.
+  - `/compact` alone (spaces around it allowed, no photos) compacts the thread with `thread/compact/start`, the call the TUI's own `/compact` makes (#10188, `node/codex_remote_compact.go`).
+    The app-server runs no slash commands: sent as a turn, `/compact` reached the model as words. Codex writes the rollout's `compacted` line and its `ContextCompaction` item, so the session shows
+    the same "Context compacted" notice as a terminal compaction and no user message. While a turn runs it is refused with `codex_compact_busy`, nothing sent and nothing steered: Codex's compaction
+    replaces a running turn instead of waiting for it, and the TUI refuses `/compact` mid-turn too. A thread the node last saw resting is read again (`thread/read`) just before, so a turn
+    begun at the computer since is not cut short; an app-server without the method refuses it (`codex_refused`). Anything more (`/compact now`, a photo) is a message as before. Other slash
+    commands still go to the model as text; panes on the terminal route type `/compact` into the TUI as before.
   - The thread's turn on the app-server counts over herdr's state: a pane herdr calls done / idle / unknown is listed Working while the app-server runs a turn in it,
     from the reply to `turn/start` on (#4865, `docs/protocol/agent-states.md`, "Codex").
   - Thinking effort can be changed on the phone (permission mode cannot); see "Thinking effort" below.
@@ -108,7 +140,7 @@ not screen reading or typing into the terminal. Panes it cannot join retain the 
   Persona does not block the TUI: requests also go to it, so users can answer on the computer at any time.
 - **Visible routing**: sessions carry `codex_route` (`app_server` / `terminal`) and `codex_route_note` (why terminal). The App's "Session Info" shows "Connection: app-server (structured)"
   or "Terminal (screen reading)" plus the reason. Node logs record every successful / failed join.
-- **Tests**: `node/codex_daemon_test.go` (auto-join on a synthetic app-server, messages, async answers, approval cards, denial reasons, join retry, socket alias);
+- **Tests**: `node/codex_daemon_test.go` (auto-join on a synthetic app-server, messages, async answers, approval cards, denial reasons, join retry, socket alias), `node/codex_remote_compact_test.go` (`/compact`);
   real Codex: `scripts/test/test-codex.sh` with `PERSONA_CODEX_DAEMON_BINS` (`docs/operations/testing.md`, "Codex integration"), starts a test-only `codex app-server --listen unix://…` in isolated herdr
   (does not touch the active daemon; node discovery is disabled and recognizes only this one), with the TUI connected using `--remote`.
 
@@ -273,7 +305,9 @@ The node joins as another bus client (`server/internal/node/codex_desktop.go`):
 
 `node/codexapp_new.go`. New Agent with the launcher `codex-app` starts the chat in the Codex App: it is in the App's sidebar (in the project its folder is in, or among the chats in no project), and the App runs it from its first message on. No client needs a release: it is a launcher like a runtime's, and needs no terminal engine (the start goes to the App before the engine check).
 
-- **Offered:** `launchers.list` has `{name: "codex-app", source: "codex_app", agent: "codex"}` when the App runs for the node's Codex home (its bus socket is there) and a Codex CLI is found: the one the App bundles (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex` on a Mac, the same version as the App's own app-server), else one on PATH or where Codex installs. A login-shell launcher of that name runs instead.
+- **Offered:** `launchers.list` has `{name: "codex-app", source: "codex_app", agent: "codex"}` when the App runs for the node's Codex home (its bus socket is there) and a Codex CLI is found: the one the App bundles (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex` on a Mac, the same version as the App's own app-server), else one on PATH or where Codex installs. A login-shell launcher of that name runs instead. It is only an explicit pick: where a
+  launcher is chosen for a start (a default the computer lacks), plain `codex` and the machine's other launchers come first and
+  `codex-app` is never chosen.
 - **Why this way:** `codex://new` only fills the App's composer. The App's sidebar lists any chat in its Codex home from an interactive source (`thread/list` with no `sourceKinds`: cli, vscode, …; no originator filter locally), `codex://threads/<id>` opens one, and a follower runs a turn in one it has loaded (above).
 - **The start:**
   1. The App's codex starts the chat with no model request: `codex app-server` over stdio in the folder (`CODEX_HOME` the node's), `initialize` as client `persona_codex_app`, `thread/start {cwd}`, then `thread/name/set` with the title, which writes the rollout (Codex writes a chat at its first turn otherwise; a chat with no message is not in the App's sidebar), and the app-server ends. It resumes nothing. The title is the first line of the first message (or the start's `name_hint`), spaces folded, at most 40 characters.
@@ -309,7 +343,11 @@ Since 2026-11-02, choosing a Codex launcher in the phone's "New Chat" starts a n
 Since 2026-11-12 the message is optional: with none, Codex opens in its tab and waits for one ("Starting without a first message" below).
 The entry point is the same as Claude's (machine, directory, launcher); subsequent behavior uses "Sessions on the daemon" above (bare `codex` 0.163 joins automatically) or the terminal route below.
 
-- **Which launchers are Codex launchers**: `codex` on PATH adds a launcher named `codex`. Aliases in `~/.zshrc` that run a single `codex` command are listed after Claude launchers (can have preceding
+- **Which launchers are Codex launchers**: `codex` on PATH adds a launcher named `codex`. On a Mac where the login shell finds
+  no `codex` and has no alias or function of that name, the CLI the ChatGPT app bundles is that launcher, run by its absolute path
+  (`bundledCodexCLI` in `node/codexapp_new.go`, #10437); its base name is still `codex`, so herdr recognizes the pane, `codex-start`
+  runs it and the effort check treats it as plain `codex`. `agentExecutable("codex")` finds it last too. Without this, such a Mac
+  offered only `codex-app`, so its Codex Agents ran as Codex App chats outside herdr on the App's model. Aliases in `~/.zshrc` that run a single `codex` command are listed after Claude launchers (can have preceding
   `export A=1;`, `VAR=… codex`, or wrappers such as `env` / `command`; arguments are retained, model taken from `-m` / `--model` / `-c model=…`).
   They carry `agent: "codex"` in the launcher list and are marked "Codex" on the App's launchers page (`parseCodexAliases` in `launchers.go`). Unsupported: shell functions running Codex
   under other names (rejected with an explanation, `codex_launcher`), aliases doing additional work (`cd x && codex`, not listed), and the internal Codex fork.
@@ -359,6 +397,13 @@ The entry point is the same as Claude's (machine, directory, launcher); subseque
 - for a bare `codex` on non-Windows, the login shell defines no `codex` function. Native starts preserve that
   function (#4876), whose own profile or overrides may change the effort before Persona's arguments. A bounded
   shell-resolution check does not call the function; an error or timeout keeps the explicit effort flag.
+- the `codex` that runs is the Codex CLI itself: for a bare `codex`, the first one on the PATH of that same interactive
+  shell (codex-start's shell, with herdr's pane variables `HERDR_ENV=1`, `TERM_PROGRAM=herdr` and `HERDR_AGENT=codex`,
+  since an rc file may put another `codex` first only in engine panes); a launcher's path is checked as it is. After
+  symlinks it must be a native (Mach-O / ELF) program, npm's `@openai/codex/bin/codex.js`, or the `/bin/sh` shim a
+  desktop app bundles as `codex-cli/bin/codex`, which only execs `../CodexCLI.app/Contents/MacOS/codex` next to it.
+  Any other script may set its own `CODEX_HOME` or `--profile`, so the effort in `~/.codex/config.toml` would not apply
+  (#10432). On Windows this check is skipped.
 
   Otherwise the flag stays (`node/codex_start_effort.go`, #4860). The creation UI still offers no permission mode / thinking effort selector; effort can be changed in-chat after joining app-server (see "Thinking effort"). Resuming an existing session: see "Resuming from the phone" below.
 - **In the conversation's folder**: the file also names the directory (`dir`), and `codex-start` changes to it (and sets `PWD` to it when the shell had one) before it runs the words, for a resume too.
@@ -442,7 +487,7 @@ A Codex thread nothing runs comes back in a new tab of the engine with `codex re
 on a message to it (the message goes in as the resume's prompt, nothing typed) or on `session.start` with `resume_session_id` (no message unless the start brings one).
 Code: `node/codex_resume.go`, `node/retire.go` (`resumeOther`, `resumeCodex`); #1700, #5220.
 
-- **Started by Persona**: the launcher, directory and model it ran with (node state). A terminal read-only start also retains `app_mode: plan`, so a later resume or message uses the same read-only CLI flags. A fresh `plan` resume applies and saves that constraint too; conflicting launcher flags are refused before opening a tab.
+- **Started by Persona**: the launcher, directory, model and effort it ran with (node state; #10434). The effort recorded is the one the start asked for, even when the start left out `-c model_reasoning_effort` because Codex's config already runs that effort; the resume leaves it out again in that case, so it stays on the shared app-server. A terminal read-only start also retains `app_mode: plan`, so a later resume or message uses the same read-only CLI flags. A fresh `plan` resume applies and saves that constraint too; conflicting launcher flags are refused before opening a tab.
 - **Natively archived threads**: after the resume's stop-cause, writer and permission checks pass, restore through the existing native archive route (`thread/unarchive` or `codex unarchive`) before opening the terminal. Otherwise Codex's archive confirmation can block the first prompt. A failed, unsupported or unconfirmed restore refuses the start without opening a tab; Persona never moves the rollout or edits Codex's database itself. Supervisor resumes still refuse user, unknown and missing stop causes.
 - **Started elsewhere** (`codex` in a terminal, since closed; listed as a "Codex history" row): the directory from its rollout's `session_meta`,
   the launcher the start gave (or the hub's "New Agent" one for a message) when it runs Codex, otherwise plain `codex`. From then on it is Persona's:
@@ -454,8 +499,8 @@ Code: `node/codex_resume.go`, `node/retire.go` (`resumeOther`, `resumeCodex`); #
 - **Switching an Agent between the engines** (#5054, [claude-integration.md](claude-integration.md) "Switching a running Agent to another engine"): a Codex Agent Persona started (or resumed) in a terminal can move to Claude Code like a Claude Code Agent moves to Codex.
   It is quit with Ctrl+C in its pane; once only a shell is in front and no Codex CLI holds its rollout (an app-server that keeps the thread loaded does not count: nothing of the other engine writes it), Claude Code starts in that shell.
   When the conversation comes back to Codex, the thread it ran in is resumed in the same pane with `codex resume <id> -- <handoff and message>` through the launcher picked, when that launcher runs Codex in the thread's home and nothing has the thread open (the rules above: an app-server that still has it loaded keeps it from being resumed); otherwise a fresh thread takes the conversation with the whole handoff.
-  The resume runs in the thread's directory with the switch's mode (plan as read-only flags, bypassPermissions as the bypass flags), the model picked (`--model`) and the effort picked (`-c model_reasoning_effort`); the record then names that launcher. A switch that fails brings the Codex back on its own launcher with `codex resume <id>` in the same pane, its record's model and mode kept.
-- **Tests**: `node/codex_resume_test.go` (history row sendable / view only while held, resume on a message and on a start, Codex App thread refused), `node/retire_test.go`.
+  The resume runs in the thread's directory with the switch's mode (plan as read-only flags, bypassPermissions as the bypass flags), the model picked (`--model`) and the effort picked (`-c model_reasoning_effort`, left out when Codex's config already runs it); the record then names that launcher, model and effort. A switch that fails brings the Codex back on its own launcher with `codex resume <id>` in the same pane, its record's model, effort and mode kept.
+- **Tests**: `node/codex_resume_test.go` (history row sendable / view only while held, resume on a message and on a start, Codex App thread refused), `node/codex_resume_model_test.go` (model and effort recorded at the start and run again on a resume), `node/retire_test.go`.
 
 ## Archive
 
@@ -589,6 +634,17 @@ with its own tag and "Message the Agent" input label. Code: `server/internal/nod
 - **Infer state independently**: a braille spinner before the terminal title (`terminal_title`, not the stripped version) or "esc to interrupt" on screen = Working;
   numbered choices such as "› 1." = Needs you (a "Terminal is asking you" card). Otherwise report `done`, and the hub determines Unread / Seen from whether it has been read. Read the screen at most every 2 seconds.
 - **Same file layout as Codex**, rooted at `~/.trae/cli`: `sessions/YYYY/MM/DD/rollout-*.jsonl` and `session_index.jsonl` (thread names for titles).
+- **Paginated history (TRAE CLI 0.215)**: `state_<n>.sqlite` and `thread_history_<n>.sqlite` can be authoritative even when a rollout remains.
+  The node uses the existing paginated reader, with the system `sqlite3` 3.33 or newer, to list and read these conversations, including stored items
+  of a running turn and stopped conversations. Databases are opened read-only; generated transcripts stay in the node's private state directory.
+  Per-thread projection revisions keep unrelated database writes from rebuilding every transcript. Older schemas retain the database-stamp fallback.
+  Full history is projected only when its conversation is read or watched; listing sessions uses cached summaries and does not convert cold histories.
+  Live writer locks and process ancestry select one main conversation per pane; nested exec and guardian threads cannot replace it.
+  A fresh start excludes all historical IDs, and an asynchronous request waits for the CLI's actual thread instead of preallocating a Claude ID.
+- **Conversation directory and terminal container**: the session's cwd comes from its TRAE metadata, not the host workspace.
+  Orca may put a terminal for an unregistered directory in its active workspace and then change into the requested directory. Its workspace ID
+  still describes that physical container; it does not change where the CLI reads or writes. Register the project in Orca when its terminal
+  should belong to that project. Task permission handling remains as documented in [Read-only planned tasks](../assistant/todos.md#read-only-planned-tasks).
 - **Newer rollout format**: user messages and replies are in `history_mutation.display_completions[].item` (same item structure as `item_completed`),
   while tool calls remain in `event_msg/item_completed`. The same item may appear in both places within a turn (deduplicate by id within the turn). A `history_mutation` line may span hundreds of KB to 1 MB
   (full context after compaction); decode only `display_completions`. `task_started` / `task_complete` are recorded in `Meta.TurnOpen`.

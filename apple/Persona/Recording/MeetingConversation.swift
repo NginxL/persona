@@ -126,10 +126,8 @@ final class MeetingConversation {
         self.sync = sync
     }
 
-    #if DEBUG
-    /// A replayed meeting's state (`MeetingReplay`, #9417), as the hub's reads would have left it.
+    /// A replayed meeting's state (`MeetingReplay`, #9417, #10589), as the hub's reads would have left it.
     func replace(_ id: UUID, _ m: Meeting) { if meetings[id] != m { meetings[id] = m } }
-    #endif
 
     /// From `MeetingRecorder.start`: hears the room of every upload `200` (`RecordingSync.onRoom`).
     func start() {
@@ -355,6 +353,7 @@ final class MeetingConversation {
     /// `PUT /api/v1/recordings/{id}/private`; returns the stored value; throws APIError.
     @discardableResult
     func setPrivate(_ id: UUID, _ value: Bool) async throws -> Bool {
+        try Self.refuseReplayed(id)
         guard let api = deps.api() else { throw URLError(.notConnectedToInternet) }
         let path = Self.path(id, "private")
         let data = try await afterUpload(id) { try await api.request("PUT", path, body: PrivateMark(privateMark: value)) }
@@ -372,7 +371,7 @@ final class MeetingConversation {
     /// words than the hub takes (`tooLong`: the bar says so before, nothing is cut).
     @discardableResult
     func sendJustMe(_ entry: RecordingEntry, text: String, images: [ImagePayload] = []) -> UUID? {
-        guard !Self.tooLong(text) else { return nil }
+        guard !ReplayedMeeting.holds(entry.id), !Self.tooLong(text) else { return nil }
         let words = Self.trimmed(text)
         guard !words.isEmpty || !images.isEmpty else { return nil }
         let send = JustMe(id: UUID(), recordingID: entry.id, text: words, images: images, at: deps.now(), state: .sending)
@@ -399,6 +398,7 @@ final class MeetingConversation {
     /// were no words or images, or more words than `…/followup` takes on its way there (`followupLimited`).
     @discardableResult
     func sendFollowup(_ recording: UUID, text: String, images: [ImagePayload] = []) -> UUID? {
+        guard !ReplayedMeeting.holds(recording) else { return nil }
         let route = followupKey(recording).map { FollowupSend.Route.messages($0) } ?? FollowupSend.Route.followup
         if route == .followup, Self.tooLong(text) { return nil }
         let words = Self.trimmed(text)
@@ -538,13 +538,18 @@ final class MeetingConversation {
         return String(localized: "Couldn't change Private Meeting. Try again.")
     }
 
+    /// The replayed meeting (`ReplayedMeeting`, #10589) is on no hub: nothing about it is sent (`APIClient` would refuse
+    /// it too), and nothing waits for an upload that never comes.
+    nonisolated static func refuseReplayed(_ id: UUID) throws {
+        guard ReplayedMeeting.holds(id) else { return }
+        throw APIError(status: 409, message: String(localized: "A replayed meeting stays on this iPhone."), fields: ["code": ReplayedMeeting.refusal])
+    }
+
     // MARK: Reading
 
     private func read(_ id: UUID, _ wanted: Wanted) async {
-        #if DEBUG
-        // A replayed meeting (`MeetingReplay`, #9417) is on no hub: its tape is what the room holds.
-        if MeetingReplay.holds(id) { return }
-        #endif
+        // A replayed meeting (`ReplayedMeeting`, #9417, #10589) is on no hub: its tape is what the room holds.
+        if ReplayedMeeting.holds(id) { return }
         guard let api = deps.api() else { return }
         var query: [String: String] = [:]
         if case .parts(let parts) = wanted {

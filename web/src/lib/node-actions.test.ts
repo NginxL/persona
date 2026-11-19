@@ -471,3 +471,15 @@ describe("the nodes of the two trees", () => {
     expect(shellsOnly([{ ...sp, tabs: [sp.tabs[0]] }])).toEqual([]);
   });
 });
+
+
+describe("session menus keep pane operations in the terminal toolbar (#10239)", () => {
+  it.each(["herdr", "orca", "tern", "botmux"])("removes pane controls for a %s session", (host) => {
+    const node = sessionNode({ machine_id: "m1", session_id: "s1", pane_id: "w1:p1", space_kind: host, cwd: "/project" } as Session, true);
+    const items = keys(nodeActions(node, deps()));
+    for (const key of ["node-split", "node-close-pane", "node-copy-id"]) expect(items).not.toContain(key);
+    expect(items).toContain("node-copy-session");
+    if (host === "herdr") expect(items).toContain("node-git");
+    expect(keys(nodeActions({ ...node, paneId: undefined }, deps()))).not.toContain("node-split");
+  });
+});

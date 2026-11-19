@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { UsageAccount } from "../lib/usage-windows";
-import { UsageBars, UsagePopover } from "./UsageBars";
+import { onDraftEvent, type DraftEvent } from "../lib/drafts";
+import { type UsageAccount } from "../lib/usage-windows";
+import { UsageBars } from "./UsageBars";
+import { UsagePopover } from "./UsagePopover";
+import { unconnectedUsageProviders } from "./UsageUnconnected";
 
 const NOW = new Date(2026, 10, 5, 10, 0, 0).getTime();
 const H = 3600_000;
@@ -33,6 +39,24 @@ describe("the sidebar's usage strip", () => {
     expect(html).toMatch(/bg-orange[^>]*style="width:85%/);
     expect(html).toMatch(/bg-accent[^>]*style="width:60%/);
     expect(html).toContain('aria-expanded="false"');
+  });
+  it("opens its details on intent, including the gateway's retained-number warning", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<UsageBars accounts={[account("a", 10, 20, { problem: "unreachable" })]} now={NOW} />));
+      expect(host.querySelector("[role=dialog]")).toBeNull();
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
+      await vi.waitFor(() => expect(host.querySelector("[role=dialog]")?.textContent).toContain("5h"));
+      const dialog = host.querySelector("[role=dialog]");
+      expect(dialog?.textContent).toContain("网关暂时读不到，显示的是上次的数字");
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-usage-bars] > button")!.click());
+      expect(host.querySelector("[role=dialog]")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
   });
   it("marks a stale account", () => {
     expect(renderToStaticMarkup(<UsageBars accounts={[account("a", 10, 20, { stale: true })]} now={NOW} />)).toContain("数据已过期");
@@ -116,5 +140,46 @@ describe("where the numbers came from (#2595)", () => {
   it("puts the sources in the tooltip of a sidebar bar", () => {
     const html = renderToStaticMarkup(<UsageBars accounts={mixed().slice(0, 1)} now={NOW} />);
     expect(html).toContain("来源：MacBook · Relay");
+  });
+  it("lists active providers without usage data and hands setup off to the assistant on click", () => {
+    const live = [account("c", 40, 75, { provider: "codex", name: "Codex Pro", local: true })];
+    const unconnected = unconnectedUsageProviders(
+      [
+        { name: "claude" },
+        { name: "codex", agent: "codex" },
+        { name: "agy", agent: "agy" },
+      ],
+      live,
+    );
+    expect(unconnected).toEqual([
+      { id: "claude", title: "Claude Code", agent: "claude" },
+      { id: "agy", title: "Antigravity", agent: "agy" },
+    ]);
+
+    const strip = renderToStaticMarkup(<UsageBars accounts={live} unconnected={unconnected} now={NOW} />);
+    expect(strip).toContain("Codex Pro");
+    expect(strip).toContain("Claude Code");
+    expect(strip).toContain("Antigravity");
+    expect(strip).toContain("未接入");
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const events: DraftEvent[] = [];
+    const off = onDraftEvent("persona-new", (e) => events.push(e));
+    let closed = false;
+    try {
+      act(() => root.render(<UsagePopover accounts={live} unconnected={unconnected} now={NOW} onClose={() => { closed = true; }} />));
+      expect(host.textContent).toContain("让助手接入");
+      act(() => host.querySelector<HTMLButtonElement>("[data-usage-connect=claude]")!.click());
+      expect(closed).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: "replace" });
+      expect((events[0] as { text: string }).text).toContain("Claude Code");
+    } finally {
+      off();
+      act(() => root.unmount());
+      host.remove();
+    }
   });
 });

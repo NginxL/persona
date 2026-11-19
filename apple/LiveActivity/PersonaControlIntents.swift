@@ -8,7 +8,10 @@ import Foundation
 struct OpenPersonaAssistantIntent: AppIntent {
     nonisolated static let title: LocalizedStringResource = "Open Persona Assistant"
     nonisolated static let description = IntentDescription("Opens Persona's assistant page so you can talk or type.")
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
 
     nonisolated init() {}
 
@@ -24,7 +27,10 @@ struct OpenPersonaAssistantIntent: AppIntent {
 struct OpenPersonaDictationIntent: AppIntent {
     nonisolated static let title: LocalizedStringResource = "Dictate to Persona"
     nonisolated static let description = IntentDescription("Opens a new conversation and starts dictation.")
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
 
     nonisolated init() {}
 
@@ -48,7 +54,10 @@ struct OpenPersonaDictationIntent: AppIntent {
 struct OpenPersonaAgentsIntent: AppIntent {
     nonisolated static let title: LocalizedStringResource = "Open Persona Agents"
     nonisolated static let description = IntentDescription("Opens the Agents tab in Persona.")
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
 
     nonisolated init() {}
 

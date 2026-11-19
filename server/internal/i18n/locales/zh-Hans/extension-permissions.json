@@ -105,6 +105,9 @@
   "secret_provider_title": "提供密钥的值",
   "secret_provider_more_title": "提供密钥的值（新增）",
   "secret_provider_detail": "你的设置里填了 {schemes} 引用，或你在手机上批准把某个引用交给 Agent 时，Persona 向它要值。它会知道用的是哪个引用、用在哪里，看不到你别的密钥",
+  "repository_provider_title": "查找仓库和链接",
+  "repository_provider_more_title": "查找仓库和链接（新增）",
+  "repository_provider_detail": "你添加 {hosts} 上的仓库，或你和你的 Agent 在待办的工作中添加或提到那里的地址时，Persona 请它读取地址、检查仓库并查找链接。它会知道这些地址，不会知道其他网站上的",
   "assistant_data_title": "往助手读的内容里加它写的东西",
   "assistant_data_detail": "它的程序写的文字可以进助手的说明和技能、Agent 的项目背景，或收件箱的分拣和起草，各有大小上限。每一项都能在它的详情里单独关掉"
 }

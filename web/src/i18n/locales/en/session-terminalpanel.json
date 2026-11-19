@@ -34,5 +34,7 @@
   "stopped": "This Agent has stopped. Resume runs it again in this terminal.",
   "stopped_closed": "This Agent has stopped and its terminal was closed. Resume runs it again in a new tab.",
   "resume": "Resume",
-  "resume_failed": "Couldn't resume this Agent. {error}"
+  "resume_failed": "Couldn't resume this Agent. {error}",
+  "close_this_pane": "Close this pane",
+  "pane_actions": "Pane actions"
 }

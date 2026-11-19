@@ -220,6 +220,8 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 			return
 		}
 	}()
+	runtimeHost := node.NewRuntimeHost(b.Version, "")
+	runtimeHost.EnableAutoCompanions()
 	err = node.AttachWithTransport(ctx, func() (*node.Node, error) {
 		n, err := node.New(b.Version)
 		if err == nil {
@@ -228,7 +230,7 @@ func runResident(ctx context.Context, b Build, supervised bool) error {
 			n.Program = b.Program
 		}
 		return n, err
-	}, conns, node.NewRuntimeHost(b.Version, ""), transport)
+	}, conns, runtimeHost, transport)
 	cancel()
 	<-workerDone
 	tstop()

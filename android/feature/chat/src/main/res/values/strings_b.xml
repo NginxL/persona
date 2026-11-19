@@ -97,6 +97,7 @@
     <string name="chat_composer_attachment_gone">The attachment is gone or lost its read permission. Remove it and pick it again</string>
     <string name="chat_composer_upload_failed">Upload failed. Try again; your text is kept</string>
     <string name="chat_composer_add">Add attachments and quick messages</string>
+    <string name="chat_composer_hide_keyboard">Hide keyboard</string>
     <string name="chat_composer_dictate">Dictate</string>
     <string name="chat_composer_interrupt_requested">Interrupt requested; queued messages are kept</string>
     <string name="chat_composer_interrupt_unknown">Interrupt not confirmed yet. Check the terminal before doing anything else</string>
@@ -255,10 +256,8 @@
     <string name="chat_menu_select">Select</string>
     <string name="chat_menu_quote">Quote</string>
     <string name="chat_menu_share">Share</string>
-    <string name="chat_menu_hand_to_persona">Hand to Persona</string>
     <string name="chat_menu_context">Use as context</string>
     <string name="chat_menu_edit">Edit</string>
-    <string name="chat_menu_handoff_ask">Take a look at this message and tell me how to handle it.</string>
     <string name="chat_menu_context_title">%1$s · Message</string>
     <string name="chat_draft_read_failed">Couldn\'t read the draft; your typing stays on this page for now</string>
     <string name="chat_draft_save_failed">Couldn\'t save the draft. Your typing is still on this page; don\'t quit the app</string>
@@ -268,6 +267,7 @@
     <string name="chat_source_conversation">Conversation</string>
     <string name="chat_source_patrol">Routine check</string>
     <string name="chat_source_followup">Follow-up</string>
+    <string name="chat_source_scheduled_task">Sent by a scheduled task</string>
     <string name="chat_source_supervision">Supervision</string>
     <string name="chat_source_unknown">Source</string>
     <string name="chat_source_expand">Show more</string>
@@ -491,10 +491,13 @@
     <string name="chat_doc_pdf">PDF document</string>
     <string name="chat_doc_other">Document</string>
     <string name="chat_turn_fix_not_logged_in">Model not connected: Claude Code CLI isn\'t signed in</string>
+    <string name="chat_turn_fix_not_logged_in_launcher">Model not connected: %1$s isn\'t signed in</string>
     <string name="chat_turn_fix_not_logged_in_detail">The Claude desktop app\'s sign-in doesn\'t count for it. Run claude auth login in a terminal on that computer, or use an API key instead.</string>
     <string name="chat_turn_fix_auth_failed">Model not connected: the key is wrong</string>
+    <string name="chat_turn_fix_auth_failed_launcher">Model not connected: the key for %1$s is wrong</string>
     <string name="chat_turn_fix_auth_failed_detail">The key is wrong or has expired; use one that works.</string>
     <string name="chat_turn_fix_model_route">Model not connected: this model can\'t be used</string>
+    <string name="chat_turn_fix_model_route_launcher">Model not connected: this model isn\'t available on %1$s</string>
     <string name="chat_turn_fix_model_route_detail">The model name is wrong, or the model isn\'t available right now; try another one.</string>
     <string name="chat_turn_fix_action">Fix it</string>
 </resources>

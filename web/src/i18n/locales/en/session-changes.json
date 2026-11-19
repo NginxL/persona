@@ -12,5 +12,7 @@
   "loading_fold": "Loading this file’s edits…",
   "fold_failed": "The edits could not be loaded completely.",
   "retry": "Retry",
-  "empty": "No edits in this scope yet"
+  "empty": "No edits in this scope yet",
+  "resize_label": "Resize edited files",
+  "resize_title": "Drag or use arrow keys to resize; double-click or Enter to reset"
 }

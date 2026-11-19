@@ -34,6 +34,8 @@ nonisolated enum ServerEvent: Sendable {
     case items(SessionKey, [Item], backlog: Bool, hasMore: Bool?, span: ItemSpan, moreAfter: Bool)
     case screen(SessionKey, text: String, status: SessionStatus)
     case delta(SessionKey, text: String)
+    /// Claude's current status line; nil clears it on recovery, turn end or unwatch.
+    case live(SessionKey, SessionLive?)
     case interaction(Interaction)
     /// assistant: what the assistant answered and why, when it answered the question for the user (#544).
     case interactionResolved(String, assistant: AssistantAnswer?)
@@ -111,6 +113,7 @@ nonisolated enum ServerEvent: Sendable {
         var sessionID: String?
         var machines: [Machine]?
         var sessions: [Session]?
+        var live: SessionLive?
         var upsert: [Session]?
         var remove: [String]?
         var revision: String?
@@ -199,7 +202,7 @@ nonisolated enum ServerEvent: Sendable {
         var since: JSONValue?
 
         enum CodingKeys: String, CodingKey {
-            case type, machines, sessions, upsert, remove, revision, items, backlog, text, status, interaction, id, name, args, event, message, error, revs, fleet, history
+            case type, machines, sessions, live, upsert, remove, revision, items, backlog, text, status, interaction, id, name, args, event, message, error, revs, fleet, history
             case features, epoch, seq, full, cols, rows, data, unsupported, state, desktops, mesh, channel, build, update, item, view, action, key, conversation, plan
             case plugin, badge, invalidate, cwd, dirs, git, operation, auth, source, conversations, account, reason, answers, resolution, manager
             case effective, changed, since
@@ -262,6 +265,9 @@ nonisolated enum ServerEvent: Sendable {
         case "delta":
             guard let key else { return nil }
             return .delta(key, text: e.text ?? "")
+        case "live":
+            guard let key else { return nil }
+            return .live(key, e.live)
         case "interaction": return e.interaction.map { .interaction(Elicitation.withFieldOrder($0, from: data)) }
         case "interaction_resolved":
             guard let id = e.id else { return nil }
@@ -360,6 +366,7 @@ nonisolated extension ServerEvent {
             return .items(k(key), items, backlog: backlog, hasMore: hasMore, span: span, moreAfter: moreAfter)
         case .screen(let key, let text, let status): return .screen(k(key), text: text, status: status)
         case .delta(let key, let text): return .delta(k(key), text: text)
+        case .live(let key, let live): return .live(k(key), live)
         case .interaction(let ix): var ix = ix; ix.group = group; return .interaction(ix)
         case .hookEvent(let key, let event, let message, let lastText):
             return .hookEvent(k(key), event: event, message: message, lastText: lastText)
@@ -643,7 +650,7 @@ final class LiveConnection {
         if config != given { self.config = config }
         var comps = URLComponents(url: config.url.appending(path: "/api/v1/ws"), resolvingAgainstBaseURL: false)!
         comps.scheme = config.url.scheme == "https" ? "wss" : "ws"
-        comps.queryItems = Self.queryItems(cursor, sessionList: usesSessionList, extensionStream: usesExtensionUIStream)
+        comps.queryItems = Self.queryItems(cursor, sessionList: usesSessionList, extensionStream: usesExtensionUIStream, sessionLive: true)
         var req = URLRequest(url: HubTransport.resolve(comps.url!, hub: config.url))
         config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
@@ -664,10 +671,10 @@ final class LiveConnection {
 
     /// The socket URL's query: session lists as deltas (an older hub ignores the question and sends whole lists), the
     /// extensions' install steps (`extension_operation`, #3307), the managers' roster changes (`managers`,
-    /// docs/assistant/managers.md), Persona Link entries in the `desktops` event (`desktops_link`, `DesktopDevice`), and
-    /// where to resume the broadcasts from once a hello gave a stream.
-    static func queryItems(_ cursor: EventCursor, sessionList: Bool = false, extensionStream: Bool = false) -> [URLQueryItem] {
-        [URLQueryItem(name: "features", value: (extensionStream ? "extension_ui_stream_v1," : "") + (sessionList ? "sessions_list," + SessionListChanges.feature + "," : "") + "sessions_delta,extension_operations,managers,desktops_link," + HubNaming.feature)] + cursor.queryItems
+    /// docs/assistant/managers.md), Persona Link entries in the `desktops` event (`desktops_link`, `DesktopDevice`),
+    /// Claude's live status (`session_live`), and where to resume the broadcasts from once a hello gave a stream.
+    static func queryItems(_ cursor: EventCursor, sessionList: Bool = false, extensionStream: Bool = false, sessionLive: Bool = false) -> [URLQueryItem] {
+        [URLQueryItem(name: "features", value: (extensionStream ? "extension_ui_stream_v1," : "") + (sessionLive ? "session_live," : "") + (sessionList ? "sessions_list," + SessionListChanges.feature + "," : "") + "sessions_delta,extension_operations,managers,desktops_link," + HubNaming.feature)] + cursor.queryItems
     }
 
     private func heartbeat(_ t: URLSessionWebSocketTask, _ gen: Int) {

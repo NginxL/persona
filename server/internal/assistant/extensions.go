@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -75,6 +79,9 @@ type ExtensionTools interface {
 	// ConnectorTool says whether name is a connector's tool (an extension's), not Cua's or ego's: what a guest
 	// conversation may be given (guest.go).
 	ConnectorTool(name string) bool
+	// ToolAccess classifies an extension-owned tool without executing it. Read-only connector tools and subscription
+	// reads may be used by an Inbox handling chat; writes, computer control and unknown extension actions may not.
+	ToolAccess(name string) (known, readOnly bool)
 	AssistantSummary(ctx context.Context, tool, summary string) (string, bool)
 	AssistantLark(ctx context.Context) (proto.AssistantLark, error)
 	// AnswerComputerElicit answers the node's computer.elicit (LCU runtime confirmations on the phone/web cards).
@@ -110,6 +117,11 @@ func (s *Service) SetExtensions(e ExtensionTools) {
 		s.refs = r
 	}
 	s.trans, _ = e.(transcribers)
+	s.repoExt, _ = e.(repository.Extensions)
+	s.repoStarted = nil
+	if started, ok := e.(interface{ Started() <-chan struct{} }); ok && s.repoExt != nil {
+		s.repoStarted = started.Started()
+	}
 	s.transcriptionReadinessReset()
 }
 
@@ -117,6 +129,39 @@ func (s *Service) SetExtensions(e ExtensionTools) {
 // waited for like a hook's; ctx ending withdraws it.
 func (s *Service) AskCard(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
 	return s.askHub(ctx, ix)
+}
+
+// AskPreparedCard is the extensions' prepared-assistant-operation bridge. Only
+// callers that supply an executable owner operation get CanClarify.
+func (s *Service) AskPreparedCard(ctx context.Context, ix proto.Interaction, op approvalops.Operation) (approvalops.Outcome, error) {
+	return s.waitPreparedCard(ctx, ix, op)
+}
+
+// askPreparedHub coordinates a hub-owned retained setting. Only its opaque ID
+// and replacement scope are public; the apply closure remains in the hub.
+func (b *BusHub) askPreparedHub(ctx context.Context, ix proto.Interaction, replacement string) (approvalops.Outcome, error) {
+	op := approvalops.Operation{
+		Replacement: replacement,
+		Denied:      "The user declined the change: nothing changed.",
+		Unanswered:  prompts.RenderSettingUnanswered(),
+		Apply: func(ctx context.Context, r proto.Resolution) (string, error) {
+			var out assistantwire.FleetApprovalApplyResult
+			err := b.client.Call(ctx, assistantwire.MethodFleetApprovalApply, assistantwire.FleetApprovalApply{InteractionID: ix.ID, Resolution: r}, &out)
+			if err != nil {
+				return "", busError(err)
+			}
+			if out.Stale {
+				return "", approvalops.ErrStale
+			}
+			return out.Text, nil
+		},
+		Discard: func(ctx context.Context, status string) {
+			ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			_ = b.client.Call(ctx, assistantwire.MethodFleetApprovalDiscard, assistantwire.FleetApprovalDiscard{InteractionID: ix.ID, Status: status}, nil)
+		},
+	}
+	return b.svc.waitPreparedCard(ctx, ix, op)
 }
 
 // mainMachine is where the assistant's conversations run (the extensions give only it the skills' gated commands).

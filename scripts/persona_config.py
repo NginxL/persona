@@ -73,6 +73,11 @@ def env(cfg: dict) -> dict:
         # Where the personad built here looks for its updates (-X main.updateURL): publish.update_url, else <site_url>/dl.
         "PERSONA_UPDATE_URL": update_url(cfg),
         "PERSONA_WRANGLER": os.path.expanduser(get(cfg, "publish.wrangler", "")),
+        # Existing opt-in entitlements: each feature's include selects the generated file and contributes its property.
+        # Siri's later include then replaces that path with its own generated file when its overlay is on.
+        "PERSONA_CARPLAY_VOICE": "YES" if opted_in(cfg, "app.carplay_voice") else "NO",
+        "PERSONA_HEALTH_BACKGROUND_DELIVERY": "YES" if opted_in(cfg, "app.health_background_delivery") else "NO",
+        "PERSONA_HOMEKIT": "YES" if opted_in(cfg, "app.homekit") else "NO",
         # Meta glasses (docs/apple/meta-glasses.md): the project.yml include that adds the Meta Wearables SDK is on only for YES.
         "PERSONA_META_WEARABLES": "YES" if get(cfg, "app.meta_wearables.enabled", False) is True else "NO",
         # Siri calls (docs/apple/siri.md "Calling Persona"): the project.yml include that adds the SiriKit extension is on

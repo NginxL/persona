@@ -662,7 +662,11 @@ struct KBRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.m) {
+            // A recording that stands for an imported meeting too (#8872): the app it came from in the corner.
             KBAvatar(entry: entry)
+                .overlay(alignment: .bottomTrailing) {
+                    if let imported = entry.imported { KBImportedBadge(imported: imported) }
+                }
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
                     // Two lines: documents and meetings are told apart by the end of their titles.
@@ -686,6 +690,7 @@ struct KBRow: View {
         }
         .padding(.vertical, Theme.Space.xs)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(entry.imported?.notesTitle ?? "")
     }
 
     private func badges(tags: Int) -> some View {
@@ -873,6 +878,14 @@ struct KnowledgeDetailView: View {
             if let d = detail?.detail {
                 if let query, let matches = detail?.matches { found(matches, query: query, chat: d.kind == KBKind.chats.rawValue ? d.id : nil) }
                 if let facts = ItemFacts(kind: d.kind, meta: d.meta), !facts.isEmpty { factsSection(facts) }
+                // A recording that stands for an imported meeting too (#8872): its notes in the app, opened in this one.
+                if let imported = d.importedMeeting {
+                    Section {
+                        KBImportedNotesButton(imported: imported) { url in
+                            if model.assistantMain ?? model.assistantCurrent != nil { link = LinkTarget(url: url) } else { openURL(url) }
+                        }
+                    }
+                }
                 if !Self.debugLower, let agents = detail?.agents, !agents.isEmpty {
                     Section {
                         ForEach(agents) { s in

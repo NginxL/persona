@@ -65,8 +65,40 @@ type Meeting struct {
 	// Transcription is the meeting's transcription mode and, in hub mode, its state and timeline (#3862 phase 5,
 	// transcription.go): nil until an upload named a mode.
 	Transcription *MeetingTranscription `json:"transcription,omitempty"`
+	// Handoffs are the meeting's hand-offs to Agents after it (#8852, POST …/handoff), oldest first, the last
+	// MeetingHandoffsKept: whether each went, and why not. No part of their own: the apps read them with the detail and
+	// from the hand-off's answer.
+	Handoffs []MeetingHandoff `json:"handoffs,omitempty"`
 	// Revs are the parts' revisions (PartRoom, PartPrivate, PartFollowup, PartTranscription): each only goes up.
 	Revs map[string]int64 `json:"revs,omitempty"`
+}
+
+// MeetingHandoff is one hand-off of a meeting to an Agent (#8852): when, to which session (and the title the app
+// showed for it), whether the transcript went too, and its state: HandoffSent, or HandoffFailed with Problem.
+type MeetingHandoff struct {
+	ID         string    `json:"id"`
+	At         time.Time `json:"at"`
+	MachineID  string    `json:"machine_id"`
+	SessionID  string    `json:"session_id"`
+	Title      string    `json:"title,omitempty"`
+	Transcript bool      `json:"transcript,omitempty"`
+	State      string    `json:"state"`
+	Problem    string    `json:"problem,omitempty"`
+}
+
+// Hand-off states and how many a meeting keeps.
+const (
+	HandoffSent         = "sent"
+	HandoffFailed       = "failed"
+	MeetingHandoffsKept = 20
+)
+
+// AddHandoff appends h, keeping the last MeetingHandoffsKept.
+func (m *Meeting) AddHandoff(h MeetingHandoff) {
+	m.Handoffs = append(m.Handoffs, h)
+	if n := len(m.Handoffs); n > MeetingHandoffsKept {
+		m.Handoffs = slices.Clone(m.Handoffs[n-MeetingHandoffsKept:])
+	}
 }
 
 // MeetingRoom is a room meeting's room conversation.
@@ -168,6 +200,7 @@ func (m Meeting) Clone() Meeting {
 		out.Followup = &f
 	}
 	out.Transcription = m.Transcription.clone()
+	out.Handoffs = slices.Clone(m.Handoffs)
 	return out
 }
 
@@ -588,6 +621,9 @@ func metaWithMeeting(raw []byte, m *Meeting) []byte {
 	}
 	if v := m.TranscriptionView(nil); v != nil {
 		set("transcription", v)
+	}
+	if len(m.Handoffs) > 0 {
+		set("handoffs", m.Handoffs)
 	}
 	out, err := json.Marshal(meta)
 	if err != nil {

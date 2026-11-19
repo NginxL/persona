@@ -18,6 +18,7 @@ import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.PairingService
 import persona.core.contracts.api.SessionsRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -138,7 +139,8 @@ class NotificationRuntime @Inject constructor(
                     .forEach { (tag, before) -> notifier.retractAssistant(tag, before) }
             }
         }
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairing.restore()
             combine(pairing.isPaired, Notify.foreground, requests.capsule, requests.overlayVisible, HubService.runningState) {
                     paired, foreground, capsule, overlay, running ->
                 paired to (!running && mayStartResidentConnection(paired, journal.userStopped, foreground,
@@ -166,16 +168,26 @@ class NotificationRuntime @Inject constructor(
 
     fun onForeground() {
         start()
-        if (!pairing.isPaired.value) return
-        resume()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairing.restore()
+            if (pairing.isPaired.value) resumeAfterRestore()
+        }
     }
 
     fun onUserInteraction() {
         start()
-        if (pairing.isPaired.value && (journal.userStopped || !HubService.running)) resume()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairing.restore()
+            if (pairing.isPaired.value && (journal.userStopped || !HubService.running)) resumeAfterRestore()
+        }
     }
 
-    fun resume() {
+    fun resume() = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        pairing.restore()
+        resumeAfterRestore()
+    }
+
+    private fun resumeAfterRestore() {
         journal.resume()
         notifier.dismissStopped()
         if (pairing.isPaired.value) {

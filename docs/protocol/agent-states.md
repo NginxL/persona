@@ -19,7 +19,7 @@ whether there's a pending interaction, and whether the user has looked at it in 
 
 List order (each client's rank: web `lib/format.ts`, iOS / Mac `AgentListOrder.rank`, Android `agentRank`): Needs you → Unread → Awaiting reply → Working → Just finished → Seen → Unknown → Not running.
 
-Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply right after Unread on Android.
+Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply and then Just finished right after Unread on Android.
 iOS / Mac tab rows (`TabPanes.swift`) go by `AgentState.priority` instead: Needs you → Unread → Working → Seen → Unknown → Not running.
 
 ### Awaiting your reply (#5096)
@@ -95,8 +95,9 @@ session therefore carries `work.just_finished` (`state` is unchanged; older apps
   meeting or a stretch of focused work; the setting changes it.
 - **Not counted**: no push, badge, Needs you count, Live Activity or widget count changes, and the assistant's snapshot
   still lists these turns under "Done (within 24 hours)".
-- **Clients** (#9751): the web first. The shared Rust sort core with HarmonyOS, Android and iOS / Mac follow in their
-  own issues; until then they show these rows as Seen, as before.
+- **Clients** (#9751): the web, and Android (#9786, `docs/android/android-design.md` 2.4), whose open chat keeps its row in
+  this place until it is left, as it keeps an Unread one. The shared Rust sort core with HarmonyOS and iOS / Mac follow
+  in their own issues; until then they show these rows as Seen, as before.
 
 ### Codex (#4865)
 
@@ -216,6 +217,10 @@ They count as background work just like background commands: the Agent is Workin
 - **Where it's read from**: the Workflow tool result in the transcript, "Workflow launched in background. Task ID: … Run ID: wf_…" (`turn_duration`'s `pendingWorkflowCount` also says some are running),
   and Monitor's "Monitor started (task …, expires in 30m …)". The end is the notification for the same task id (with `<status>`) or `TaskStop`. node's background scan reads the whole transcript, so nothing is missed by only reading the tail.
   The result alone starts a run: that scan skips lines over 64 KiB, and a call with its script inline is as long as the script (#6003).
+- **A Monitor event is not its end** (#10356). A notification parsed as `kind: monitor`, `status: event` keeps the
+  running task's ID, description and `expires_at`, including after repeated events. A stream-ended notification or
+  `TaskStop` still removes it; node's existing expiry filter still excludes an expired Monitor. Commands and Agent
+  notifications keep their own lifecycle rules. This uses the existing background inventory and wire fields.
 - **Progress is on disk**: `<session>/subagents/workflows/<run>/journal.jsonl` (one `started` line per agent, with label and phase; `result` means it came back), and in the same directory `agent-<id>.jsonl` / `.meta.json` (each agent's conversation, read as a sub-Agent).
   When done it writes `<session>/workflows/<run>.json` (status, error, duration); the `meta` of the script `<session>/workflows/scripts/<name>-<run>.js` has the name and phases.
 - **Session field** `workflows` (`docs/protocol/protocol.md`): name, status, current phase, finished / started counts, duration, the sub-agent list and each one's last line. While running it's also put into `background` (kind `workflow`), so old clients and old hubs can still tell "there's background work".

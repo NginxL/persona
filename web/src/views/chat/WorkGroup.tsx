@@ -31,6 +31,8 @@ const PlanCard = lazy(() => import("./PlanCard").then((m) => ({ default: m.PlanC
 const ThinkingRow = lazy(() => import("./ThinkingRow").then((m) => ({ default: m.ThinkingRow })));
 // A child session's card (#5120) the same way: drawn only once the work summary it sits in is opened.
 const ChildSessionCard = lazy(() => import("./ChildSessionCard").then((m) => ({ default: m.ChildSessionCard })));
+// A Codex visualization fragment (#10321) the same way: its runtime is a lazy chunk off the first screen.
+const VisualizationCard = lazy(() => import("./VisualizationCard"));
 
 export interface WorkProps {
   mid: string;
@@ -240,6 +242,12 @@ export const StepView = memo(function StepView({ step, p, live, fade }: { step: 
       return (
         <div className="py-1">
           <Thumb item={step.item} mid={p.mid} sid={p.sid} />
+        </div>
+      );
+    case "visualization":
+      return (
+        <div className="py-1">
+          <Suspense fallback={null}><VisualizationCard item={step.item} mid={p.mid} sid={p.sid} /></Suspense>
         </div>
       );
     case "fold":

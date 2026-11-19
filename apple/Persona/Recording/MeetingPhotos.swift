@@ -351,6 +351,7 @@ final class MeetingPhotos {
 
     /// `DELETE …/photos/{n}`; throws APIError; refreshes after. Its JPEG on this phone goes too.
     func delete(_ recording: UUID, n: Int) async throws {
+        try MeetingConversation.refuseReplayed(recording)
         guard let api = deps.api() else { throw URLError(.notConnectedToInternet) }
         do {
             _ = try await api.request("DELETE", Self.path(recording, "photos/\(n)"))
@@ -629,6 +630,7 @@ final class MeetingPhotos {
     }
 
     private func post(_ photo: Local) async throws -> MeetingPhoto {
+        try MeetingConversation.refuseReplayed(photo.recordingID)
         guard let api = deps.api() else { throw URLError(.notConnectedToInternet) }
         let file = photo.file.map { Self.photosFolder(deps.folder(photo.recordingID)).appending(path: $0) }
         let memory = pending[photo.id]
@@ -717,7 +719,8 @@ final class MeetingPhotos {
 
     /// One `GET …/photos`; whether its list was applied.
     private func read(_ recording: UUID) async -> Bool {
-        guard let api = deps.api() else { return false }
+        // The replayed meeting (`ReplayedMeeting`, #10589) has no photos on any hub.
+        guard !ReplayedMeeting.holds(recording), let api = deps.api() else { return false }
         let began = storeCount
         let data: Data
         do {
@@ -877,7 +880,7 @@ final class MeetingPhotos {
         if let mine, let data = pending[mine.id] { return data }
         let file = Self.photosFolder(deps.folder(recording)).appending(path: mine?.file ?? Self.fileName(photoID.lowercased()))
         if let data = await Task.detached(priority: .userInitiated, operation: { Self.read(file) }).value { return data }
-        guard let n, let api = deps.api() else { return nil }
+        guard let n, !ReplayedMeeting.holds(recording), let api = deps.api() else { return nil }
         return try? await api.request("GET", Self.path(recording, "photos/\(n)"), timeout: 60)
     }
 

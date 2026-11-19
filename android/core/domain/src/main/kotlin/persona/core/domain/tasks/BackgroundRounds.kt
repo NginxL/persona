@@ -6,6 +6,7 @@ import kotlinx.serialization.json.contentOrNull
 import persona.core.contracts.Item
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.MessageSource
+import persona.core.contracts.canonicalMcpToolName
 import persona.core.domain.injectedOf
 import persona.core.domain.isPersonaTool
 import persona.core.domain.lines.ChatLine
@@ -42,16 +43,20 @@ data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: Str
         /** The id of the line that stands for the round [roundId] (its first input's id). */
         fun lineId(roundId: String): String = "bg-$roundId"
 
+        /** Whether conversation [sessionId] is the main conversation or one of the hub's leader (direction) conversations. */
+        fun supervisesConversation(sessionId: String, main: String?, leaders: Set<String> = emptySet()): Boolean {
+            if (sessionId.isBlank()) return false
+            if (!main.isNullOrBlank() && sessionId == main) return true
+            return sessionId in leaders
+        }
+
         /**
          * Whether conversation [sessionId] folds its background rounds (#4314, #6595): the main conversation or one of
          * the hub's leader (direction) conversations, while the switch is on. A hub that omits the switch means on;
          * an ordinary side conversation never folds.
          */
-        fun foldsConversation(sessionId: String, main: String?, on: Boolean, leaders: Set<String>): Boolean {
-            if (!on || sessionId.isBlank()) return false
-            if (!main.isNullOrBlank() && sessionId == main) return true
-            return sessionId in leaders
-        }
+        fun foldsConversation(sessionId: String, main: String?, on: Boolean, leaders: Set<String>): Boolean =
+            on && supervisesConversation(sessionId, main, leaders)
     }
 }
 
@@ -67,7 +72,8 @@ data class BackgroundRound(
 }
 
 /** Only Persona's visibility tools, not similarly named tools of another MCP server (web `supervisionTool`). */
-fun supervisionTool(name: String?): String? {
+fun supervisionTool(rawName: String?): String? {
+    val name = rawName?.let(::canonicalMcpToolName)
     val bare = if (name != null && name.startsWith("mcp__") && isPersonaTool(name)) name.substringAfterLast("__") else name
     return bare?.takeIf { it in setOf("notify_user", "ask_user", "supervision_finish", "task_review") }
 }

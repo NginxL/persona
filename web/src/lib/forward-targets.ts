@@ -1,7 +1,7 @@
 // Forward to's lists (#3899, iOS ForwardTargets): which chats a forward may go to, the recent ones first, the rest by
 // computer, and what a search finds. Built from the sessions this page already holds; nothing is fetched. No DOM here.
 import { sessionCan, stateOf } from "./format";
-import { agentLabel, displayTitle } from "./mentions";
+import { agentLabel, displayTitle, folderName } from "./mentions";
 import type { Session } from "./types";
 
 /** Recent targets shown at most (ForwardMemory keeps more). */
@@ -25,11 +25,6 @@ export function takesForward(s: Session, from: string, ended: boolean, online: (
   if (keyOf(s) === from || !sessionCan(s, "send") || s.space === "health" || s.archived) return false;
   if (s.assistant) return true;
   return online(s.machine_id) && (ended || stateOf(s) !== "offline");
-}
-
-function folderName(cwd?: string): string {
-  const parts = (cwd ?? "").replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || "";
 }
 
 /** A row's second line: who answers there and its project, and its computer where rows mix computers. */

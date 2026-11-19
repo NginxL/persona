@@ -1,0 +1,9 @@
+{
+  "shell_start_timeout": "シェルの初期化が{wait}以内に完了しませんでした。",
+  "assistant_ready_timeout": "起動準備を開始してから{wait}待ちましたが、アシスタントの起動応答がありませんでした。",
+  "control_write_timeout": "{wait}待ちましたが、アシスタントが設定リクエストを読み取りませんでした。",
+  "control_response_timeout": "{wait}待ちましたが、アシスタントが設定リクエストを確認しませんでした。",
+  "attempts_exhausted": "アシスタントの起動に{attempts}回失敗しました（合計{wait}）。{reason}",
+  "stopped_by_node": "設定を確認できなかったため、コンピューターがアシスタントを停止しました：{reason}",
+  "not_delivered": "メッセージは配信されていません"
+}

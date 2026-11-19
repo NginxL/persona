@@ -18,7 +18,7 @@ const ompOfflineRefusal = "这个 omp 会话已停止，Persona 还不能恢复�
 // ompOfflineMethods are the calls ompOfflineCalls answers. Only these look a session up among the stopped ones, so
 // the other calls never wait on a scan of omp's session files.
 var ompOfflineMethods = map[string]bool{
-	"session.items": true, "session.item": true, "session.image": true,
+	"session.items": true, "session.item": true, "session.image": true, "session.visualization": true,
 	"session.watch": true, "session.unwatch": true, "session.send": true,
 }
 
@@ -39,7 +39,7 @@ func (n *Node) ompOfflineCalls(method, id string) (any, error, bool) {
 	case "session.items":
 		return map[string]any{"items": []proto.Item{{ID: "omp#0", Seq: 1, Role: "system", Kind: "notice",
 			Text: transcript.OmpStoppedNotice, TS: time.Now().UTC()}}, "has_more": false, "history": "omp-disk:" + id, "to_seq": 1}, nil, true
-	case "session.item", "session.image":
+	case "session.item", "session.image", "session.visualization":
 		return nil, fmt.Errorf("no item"), true
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true

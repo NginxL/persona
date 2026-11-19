@@ -77,12 +77,16 @@ import Synchronization
         }
         end()
         guard Self.supported else { return note(String(localized: "This device doesn't support Picture in Picture")) }
-        let audio = AVAudioSession.sharedInstance()
-        do {
-            try audio.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
-            try audio.setActive(true)
-        } catch {
-            note(String(localized: "Couldn't start the audio session: \(error.localizedDescription)"))
+        // A live system call keeps its audio session (docs/apple/calls.md): the playback category would cut the call's
+        // microphone. The small window still gets its source; whether the system offers it then is its own call.
+        if !LiveCallGate.callIsLive {
+            let audio = AVAudioSession.sharedInstance()
+            do {
+                try audio.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                try audio.setActive(true)
+            } catch {
+                note(String(localized: "Couldn't start the audio session: \(error.localizedDescription)"))
+            }
         }
         guard let window = Self.mainWindow() else { return note(String(localized: "Can't find the app's main window")) }
         let session = VNC.hold(ref)

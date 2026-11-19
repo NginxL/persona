@@ -11,7 +11,9 @@ import persona.core.contracts.api.HubConnection
 import persona.core.contracts.api.PairingService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +48,7 @@ class FleetFeed @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutable = MutableStateFlow(FleetState())
     private var started = false
+    @Volatile private var startup: Job? = null
 
     /** The latest fleet of the current pairing; empty when there is none. */
     val state: StateFlow<FleetState> = mutable.asStateFlow()
@@ -53,26 +56,32 @@ class FleetFeed @Inject constructor(
     /** Whether a hub is paired: the widget and the tile say "Not paired" otherwise. */
     val paired: StateFlow<Boolean> get() = pairing.isPaired
 
-    /**
-     * Call at process start once the pairing is restored (Notify.install and the app do; later calls do nothing): fleet
-     * events are hot and missed until something listens.
-     */
+    /** Call once at process start; the first snapshot and collectors wait for the pairing restore. */
     @Synchronized fun start() {
         if (started) return
         started = true
-        mutable.value = restore()
-        scope.launch { connection.events.collect { if (it is FleetEvent) publish(it.fleet) } }
-        scope.launch {
-            connection.state.collect { state ->
-                // Paired with another hub since: the previous one's agents must not show.
-                if (preferences.getString(KEY_PAIRING, null)?.let { it != source.pairing() } == true) clear()
-                if (state != ConnectionState.Online) return@collect
-                try { withTimeoutOrNull(FETCH_TIMEOUT_MILLIS) { source.fetch() }?.let(::publish) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { Log.w(TAG, "Fleet fetch failed: ${failure.javaClass.simpleName}") }
+        startup = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairing.restore()
+            mutable.value = restore()
+            scope.launch { connection.events.collect { if (it is FleetEvent) publish(it.fleet) } }
+            scope.launch {
+                connection.state.collect { state ->
+                    // Paired with another hub since: the previous one's agents must not show.
+                    if (preferences.getString(KEY_PAIRING, null)?.let { it != source.pairing() } == true) clear()
+                    if (state != ConnectionState.Online) return@collect
+                    try { withTimeoutOrNull(FETCH_TIMEOUT_MILLIS) { source.fetch() }?.let(::publish) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { Log.w(TAG, "Fleet fetch failed: ${failure.javaClass.simpleName}") }
+                }
             }
+            scope.launch { pairing.isPaired.collect { if (!it) clear() } }
         }
-        scope.launch { pairing.isPaired.collect { if (!it) clear() } }
+    }
+
+    /** Waits until the saved snapshot is visible, not only until the pairing restore has finished. */
+    suspend fun settled() {
+        start()
+        startup?.join()
     }
 
     @Synchronized internal fun publish(fleet: FleetState) {

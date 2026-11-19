@@ -76,6 +76,7 @@ func (n *Node) setBackground(s *proto.Session, m quickMeta) {
 		running[w.TaskID] = w.Running
 	}
 	s.Background = nil
+	s.SetBackgroundEnded(m.bgEnded)
 	for _, t := range m.bg {
 		switch {
 		case t.Kind == "agent":

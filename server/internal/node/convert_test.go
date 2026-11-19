@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,11 +58,39 @@ func TestConvertWritesAPDFOnceAndReusesIt(t *testing.T) {
 	if err != nil || again.Path != got.Path {
 		t.Fatalf("second = %+v, %v", again, err)
 	}
-	if b, _ := os.ReadFile(calls); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "--headless") {
+	if b, _ := os.ReadFile(calls); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "--headless") ||
+		!strings.Contains(string(b), "-env:UserInstallation=file:///") {
 		t.Fatalf("soffice ran %q", b)
 	}
 	if _, err := n.convertFile(context.Background(), proto.FileConvertRequest{Path: "~/旧 文档 (1).doc", To: "docx"}); err == nil {
 		t.Fatal("converted to something other than pdf")
+	}
+}
+
+// LibreOffice's private profile is a file URL on every system: a Windows drive path is file:///C:/…, never
+// file://C:/…, which names a host "C:" (#9934); macOS and Linux keep file:///tmp/…. Both shapes run everywhere.
+func TestLibreOfficeProfileURL(t *testing.T) {
+	for _, c := range []struct {
+		path    string
+		windows bool
+		want    string
+	}{
+		{"/tmp/persona-soffice-1/profile", false, "file:///tmp/persona-soffice-1/profile"},
+		{"/var/folders/x y/T/persona-soffice-1/profile", false, "file:///var/folders/x%20y/T/persona-soffice-1/profile"},
+		{`C:\Users\me\AppData\Local\Temp\persona-soffice-1\profile`, true, "file:///C:/Users/me/AppData/Local/Temp/persona-soffice-1/profile"},
+		{`C:\Users\A B\AppData\Local\Temp\persona-soffice-1\profile`, true, "file:///C:/Users/A%20B/AppData/Local/Temp/persona-soffice-1/profile"},
+		{`C:\Users\EXAMPL~1\AppData\Local\Temp\100%#\profile`, true, "file:///C:/Users/EXAMPL~1/AppData/Local/Temp/100%25%23/profile"},
+		{`D:\temp\persona-soffice-1\profile`, true, "file:///D:/temp/persona-soffice-1/profile"},
+		{`\\server\share\temp\profile`, true, "file://server/share/temp/profile"},
+	} {
+		got := fileURL(c.path, c.windows)
+		if got != c.want {
+			t.Errorf("fileURL(%q, windows=%v) = %q, want %q", c.path, c.windows, got, c.want)
+		}
+		u, err := url.Parse(got)
+		if err != nil || u.Scheme != "file" || (c.windows && !strings.HasPrefix(c.path, `\\`) && u.Host != "") {
+			t.Errorf("%q is not a local file URL: %+v %v", got, u, err)
+		}
 	}
 }
 

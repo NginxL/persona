@@ -46,6 +46,9 @@ export interface PlanTask {
   /** The failed start's coded refusal and its details (as a session's start_error_code / start_error_args). */
   error_code?: string;
   error_args?: Record<string, string>;
+  /** Its launcher could not start on that computer: the others there a Retry may start it with, the first suggested
+   *  (#10365, "Use … instead"). The hub's; absent from an older hub and for any other failure. */
+  retry_with?: string[];
   /** The brief the task will be held to (#3822, lib/brief.ts): the card shows it, and "Start" confirms it. Absent from
    *  a hub before briefs and on a plan made before them. */
   brief?: TaskBrief;
@@ -109,6 +112,36 @@ export interface BriefRow {
   /** accept: a conclusion's verdict (left out for a deployed task); decide waits for the user's decision, and Accept takes `recommend`. */
   outcome?: TodoAsk["outcome"];
   recommend?: string;
+}
+
+/** What a `BriefRow` field says when it is text: the value if it is a string, nothing otherwise. The rows come off the
+ *  wire and out of to-dos whose own `ask.from` is an object (`TodoAsk["from"]`), so a field typed `string` is not
+ *  proof the value is one: drawn into a line it would read `[object Object]`. */
+function text(v: unknown): string | undefined {
+  return typeof v === "string" && v ? v : undefined;
+}
+
+/** A row as drawn: only the fields it has, each of the type it is declared with. A field of another type is dropped. */
+export function briefRow(raw: unknown): BriefRow | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const id = text(r.id);
+  if (!id) return undefined;
+  const row: BriefRow = { id, title: text(r.title) ?? "", waited_s: typeof r.waited_s === "number" && Number.isFinite(r.waited_s) ? r.waited_s : 0 };
+  for (const key of ["detail", "from", "link", "asked_at", "verdict", "recommend"] as const) {
+    const v = text(r[key]);
+    if (v) row[key] = v;
+  }
+  if (r.nudged === true) row.nudged = true;
+  const outcome = text(r.outcome);
+  if (outcome) row.outcome = outcome;
+  return row;
+}
+
+/** The accept row of a to-do's open ask, as its Needs you card draws it. Built field by field, never from the ask
+ *  itself: `ask.from` is an object (where the task came from), `BriefRow.from` is the name of who asked. */
+export function askRow(todo: Pick<Todo, "id" | "title">, ask: TodoAsk, now = Date.now()): BriefRow {
+  return { id: todo.id, title: todo.title, waited_s: Math.max(0, (now - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at };
 }
 
 export interface BriefFailed {
@@ -193,9 +226,10 @@ export function briefBody(it: FeedItem): BriefBody | undefined {
   const b = it.kind === "brief" ? it.body : undefined;
   if (!b || typeof b !== "object") return undefined;
   const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-  const waiting = list<BriefRow>(b.waiting);
-  const accept = list<BriefRow>(b.accept);
-  const later = list<BriefRow>(b.later);
+  const rows = (v: unknown): BriefRow[] => list<unknown>(v).map(briefRow).filter((row): row is BriefRow => !!row);
+  const waiting = rows(b.waiting);
+  const accept = rows(b.accept);
+  const later = rows(b.later);
   const failed = list<BriefFailed>(b.failed);
   const done = list<BriefBody["done"][number]>(b.done);
   const progress = list<BriefBody["progress"][number]>(b.progress);
@@ -675,14 +709,16 @@ export const retryKey = (todoId: string) => `retry:${todoId}`;
  * "Retry" on a task whose agent did not start (#1396): the hub starts the same task again (its plan's machine, directory,
  * prompt, launcher, model and permission) in the same todo, which it reopens at once — the card shows it starting
  * where it was. Taps while one is on its way do nothing; the hub starts one agent however many arrive. On a task the
- * model service cut off (#1516) it is "Continue": the hub tells its agent to go on, once.
+ * model service cut off (#1516) it is "Continue": the hub tells its agent to go on, once. `on`: "Use … instead", the
+ * launcher (and model) of the same computer to start it on (#10365), sent by lib/start-retry.ts retryOnLauncher, which
+ * checks the hub takes it.
  */
-export async function retryTask(todo: Todo) {
+export async function retryTask(todo: Todo, on?: { launcher: string; model?: string }) {
   const key = retryKey(todo.id);
   if (st.busy[key]) return;
   set({ busy: { ...st.busy, [key]: true } });
   try {
-    const res = await api<{ todo: Todo }>(`/todos/${enc(todo.id)}/retry`, { method: "POST" });
+    const res = await api<{ todo: Todo }>(`/todos/${enc(todo.id)}/retry`, on ? { method: "POST", json: on } : { method: "POST" });
     if (res.todo) putTodo(res.todo);
     void refreshTodos();
   } finally {

@@ -4,6 +4,7 @@ import { api, ApiError, credentialOwner, enc, errorText } from "./api";
 import type { MenuNode } from "./node-actions";
 import { navigate } from "./router";
 import { defaultManager, MANAGER_HEADER } from "./manager-choice";
+import { folderName } from "./mentions";
 import { getState } from "./store";
 import type { WorkspaceTarget } from "./workspace-target";
 
@@ -247,10 +248,11 @@ export function agentBranch(nameHint: string): string {
 }
 
 /** What names the agent's branch: its prompt, or its folder's name when the prompt has no ASCII letters or digits to
- *  name a branch with (a prompt in Chinese makes persona/<folder>, not persona/agent). */
+ *  name a branch with (a prompt in Chinese makes persona/<folder>, not persona/agent). A Windows computer's folder is
+ *  read by its own separator, so C:\code\app makes persona/app (#9911). */
 export function agentNameHint(prompt: string, cwd: string): string {
   const p = prompt.trim();
-  return branchSlug(p) ? p : (cwd.trim().replace(/\/+$/, "").split("/").pop() ?? "");
+  return branchSlug(p) ? p : folderName(cwd.trim());
 }
 
 /** Null when the computer cannot say (an older node, offline): the switch and the cleanup then stay out of the way.

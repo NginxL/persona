@@ -112,7 +112,8 @@ func acceptCardKey(id string, asked time.Time) string {
 // settles the work, not the telling: the card is how the owner hears of it, so it still goes out, saying the supervisor
 // checked it (#9253). The owner's own pass, or a decision settled, leaves nothing to tell.
 func acceptCardDue(a *acceptAsk) bool {
-	return a != nil && !a.AskedAt.IsZero() && a.MessageID == "" && !a.NoCard && (a.AcceptedAt.IsZero() || a.BySupervisor)
+	return a != nil && !a.AskedAt.IsZero() && a.MessageID == "" && !a.NoCard && (a.AcceptedAt.IsZero() || a.BySupervisor) &&
+		a.RecheckAt.IsZero()
 }
 
 type acceptBook struct {

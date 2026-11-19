@@ -57,7 +57,7 @@ const (
 type nodePackage struct {
 	// Version is what a node running it reports: the hub's version for its own builds, the release's otherwise.
 	Version string
-	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode: what it is
+	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode, or programConnector (connector_package.go): what it is
 	// Fallback: not of the hub's version (the newest release this manager drives).
 	Fallback   bool
 	goos, arch string
@@ -295,8 +295,11 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 	return nil
 }
 
-// lookupPackage finds k's build (see the order above).
+// lookupPackage finds k's build (see the order above; the connector's: lookupConnector).
 func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage, error) {
+	if k.program == programConnector {
+		return d.lookupConnector(ctx, k)
+	}
 	if k.goos == "" || k.arch == "" {
 		return nodePackage{}, i18n.Err("devices-deploy.os_unknown")
 	}
@@ -429,8 +432,11 @@ func fileFor(f update.File, plat string) bool {
 
 // fileProgram is the kind of program a release download is, by its name.
 func fileProgram(f update.File) string {
-	if strings.HasPrefix(f.Name, nodeproto.ProgramPersonaNode+"-") {
+	switch {
+	case strings.HasPrefix(f.Name, nodeproto.ProgramPersonaNode+"-"):
 		return nodeproto.ProgramPersonaNode
+	case strings.HasPrefix(f.Name, programConnector+"-"):
+		return programConnector
 	}
 	return nodeproto.ProgramPersonad
 }
@@ -523,9 +529,12 @@ type packageCacheEntry struct {
 }
 
 // cacheNames are the cache's file names for k's builds, the ones of its own kind first: personad runs a persona-node
-// device's file too.
+// device's file too. The connector is its own build only.
 func cacheNames(k packageKey) []string {
 	plat := k.goos + "-" + k.arch
+	if k.program == programConnector {
+		return []string{programConnector + "-" + plat}
+	}
 	names := []string{"personad-" + plat}
 	if k.program == nodeproto.ProgramPersonaNode {
 		names = append([]string{nodeproto.ProgramPersonaNode + "-" + plat}, names...)
@@ -765,7 +774,7 @@ func checkPackagePlatform(path, goos, goarch, program string) error {
 	if builtOS != goos || builtArch != goarch {
 		return fmt.Errorf("built for %s/%s, not %s/%s", builtOS, builtArch, goos, goarch)
 	}
-	if !strings.HasSuffix(info.Path, "/cmd/"+program) { // the main package: server/cmd/personad or cmd/persona-node
+	if !strings.HasSuffix(info.Path, "/cmd/"+program) { // the main package: server/cmd/personad, persona-node or persona-link
 		return fmt.Errorf("it is %s, not %s", info.Path, program)
 	}
 	return nil

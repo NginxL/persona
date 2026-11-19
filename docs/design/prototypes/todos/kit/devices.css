@@ -1,0 +1,185 @@
+/*
+ * Device chrome: screens, status bars, the Dynamic Island, home indicators, the iPhone Duo side column and
+ * tab bar, creases and hinges, iPad window controls and a minimal browser window. Sizes in pt (CSS px).
+ * Kit.device() sets --dev-w, --dev-h, --dev-bg, --safe-top, --safe-bottom, --kb-h, --side-w, --chrome-top.
+ */
+.dev {
+  position: relative;
+  width: var(--dev-w);
+  height: var(--dev-h);
+  overflow: hidden;
+  background: var(--dev-bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  letter-spacing: var(--track-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  flex: none;
+  --face-bg: #F4E6DA;
+  --face-lines: #1C1C1E;
+}
+[data-theme=dark] .dev { --face-bg: #2C2C2E; --face-lines: #EDEDED; }
+.dev *, .dev *::before, .dev *::after { box-sizing: border-box; }
+.dev-screen { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+.dev-content {
+  position: absolute;
+  top: var(--chrome-top);
+  left: 0;
+  right: var(--side-w);
+  bottom: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* ---------- status bars ---------- */
+.dev-status {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between;
+  pointer-events: none; color: var(--ink); letter-spacing: -.01em;
+}
+.dev-time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dev-status-r { display: inline-flex; align-items: center; gap: 6px; }
+.dev-batt {
+  position: relative; display: inline-block; width: 25px; height: 12px; padding: 1.5px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 38%, transparent);
+}
+.dev-batt::after {
+  content: ""; position: absolute; right: -3.5px; top: 3.2px; width: 1.6px; height: 3.8px; border-radius: 0 1px 1px 0;
+  background: color-mix(in srgb, currentColor 40%, transparent);
+}
+.dev-batt i { display: block; height: 100%; border-radius: 2px; background: currentColor; }
+
+.dev-status--iphone { height: 54px; align-items: flex-start; padding-top: 20px; }
+.dev-status--iphone .dev-time { width: 138px; padding-left: 10px; text-align: center; font-size: 17px; line-height: 22px; }
+.dev-status--iphone .dev-status-r { width: 138px; justify-content: center; padding-right: 8px; gap: 6px; height: 22px; }
+.dev-island {
+  position: absolute; top: 11px; left: 50%; width: 126px; height: 37px; margin-left: -63px;
+  border-radius: 19px; background: #000;
+}
+[data-theme=dark] .dev-island { box-shadow: 0 0 0 .5px rgba(255, 255, 255, .06); }
+
+.dev-status--ipad { height: 24px; padding: 0 22px; font-size: 14px; }
+.dev-status--ipad .dev-date { font-weight: 500; margin-left: 4px; }
+.dev-status--ipad .dev-pct { font-size: 13px; font-weight: 600; }
+.dev-status--ipad .dev-batt { width: 24px; }
+
+.dev-status--duo { height: 38px; padding: 0 24px 0 26px; font-size: 15px; }
+.dev-status--duo .dev-status-r { gap: 6px; }
+
+.dev-status--android { height: 28px; padding: 0 20px; font-size: 14px; font-weight: 500; letter-spacing: 0; }
+.dev-status--android .dev-time { font-weight: 500; }
+.dev-abatt { display: inline-block; width: 9px; height: 15px; border-radius: 2px; background: color-mix(in srgb, currentColor 35%, transparent); position: relative; overflow: hidden; }
+.dev-abatt i { position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: currentColor; }
+
+/* ---------- home indicators ---------- */
+.dev-home {
+  position: absolute; bottom: 8px; left: 50%; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px;
+  background: var(--ink); z-index: 40; opacity: .92; pointer-events: none;
+}
+.dev--ipad11-landscape .dev-home, .dev--ipad13-landscape .dev-home,
+.dev--ipad11-portrait .dev-home, .dev--ipad13-portrait .dev-home { width: 300px; margin-left: -150px; height: 5px; }
+.dev--duo-outer .dev-home, .dev--duo-inner-landscape .dev-home, .dev--duo-inner-portrait .dev-home { width: 140px; margin-left: -70px; }
+.dev-home--android { width: 108px; height: 4px; margin-left: -54px; bottom: 10px; border-radius: 2px; opacity: .8; }
+
+/* ---------- creases and hinges ---------- */
+.dev-crease { position: absolute; z-index: 12; pointer-events: none; }
+.dev-crease--v { top: 0; bottom: 0; left: calc(50% - .5px); width: 1px; background: rgba(0, 0, 0, .07); box-shadow: 0 0 6px rgba(0, 0, 0, .05); }
+.dev-crease--h { left: 0; right: 0; top: calc(50% - .5px); height: 1px; background: rgba(0, 0, 0, .07); box-shadow: 0 0 6px rgba(0, 0, 0, .05); }
+[data-theme=dark] .dev-crease--v, [data-theme=dark] .dev-crease--h { background: rgba(255, 255, 255, .07); box-shadow: 0 0 6px rgba(255, 255, 255, .03); }
+.dev-crease.is-half::before { content: ""; position: absolute; }
+.dev-crease--v.is-half::before { top: 0; bottom: 0; left: -36px; right: -36px; background: linear-gradient(90deg, transparent, rgba(0, 0, 0, .035) 40%, rgba(0, 0, 0, .09) 50%, rgba(255, 255, 255, .04) 55%, transparent); }
+.dev-crease--h.is-half::before { left: 0; right: 0; top: -36px; bottom: -36px; background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .035) 40%, rgba(0, 0, 0, .09) 50%, rgba(255, 255, 255, .04) 55%, transparent); }
+[data-theme=dark] .dev-crease--v.is-half::before { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .02) 40%, rgba(0, 0, 0, .5) 50%, rgba(255, 255, 255, .03) 55%, transparent); }
+[data-theme=dark] .dev-crease--h.is-half::before { background: linear-gradient(180deg, transparent, rgba(255, 255, 255, .02) 40%, rgba(0, 0, 0, .5) 50%, rgba(255, 255, 255, .03) 55%, transparent); }
+.dev-crease.is-hinge { background: rgba(0, 0, 0, .12); }
+[data-theme=dark] .dev-crease.is-hinge { background: rgba(255, 255, 255, .12); }
+
+/* ---------- iPad window controls (iPadOS 26) ---------- */
+.dev-wc { position: absolute; top: 40px; left: 22px; z-index: 30; display: flex; gap: 8px; pointer-events: none; }
+.dev-wc i { width: 12px; height: 12px; border-radius: 50%; background: #FF5F57; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .15); }
+.dev-wc i:nth-child(2) { background: #FEBC2E; }
+.dev-wc i:nth-child(3) { background: #28C840; }
+
+/* ---------- keyboard host ---------- */
+.dev-kb { position: absolute; left: 0; right: var(--side-w); bottom: 0; height: var(--kb-h); z-index: 25; }
+
+/* ---------- iPhone Duo side column (outer display, inner display on its side) ---------- */
+/* 84 pt down the right edge; its items centre 49 pt from the edge (84 less the 14 pt strip, halved, plus the strip). */
+.dev-side { position: absolute; top: 0; right: 0; bottom: 0; width: var(--duo-col); z-index: 30; }
+.dev-side > * { position: absolute; left: 35px; transform: translateX(-50%); }
+.dev-camera { top: 16px; width: 13px; height: 13px; border-radius: 50%; background: #050505; box-shadow: 0 0 0 2px rgba(0, 0, 0, .06); }
+[data-theme=dark] .dev-camera { box-shadow: 0 0 0 1px rgba(255, 255, 255, .08); }
+.dev-side-status {
+  top: 14px; display: flex; flex-direction: column; align-items: center; gap: 7px; color: var(--ink);
+}
+.dev-side-status.has-camera { top: 42px; }
+.dev-side-status .dev-time { font-size: 15px; letter-spacing: -.02em; margin-bottom: 1px; }
+.dev-side-back, .dev-side-search, .dev-side-rail {
+  width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--ink);
+  background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), var(--glass-shadow);
+}
+.dev-side-search { position: absolute; }
+.dev-side-actions {
+  display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 30px; width: 60px;
+  background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), var(--glass-shadow);
+}
+.dev-side-item {
+  height: 52px; border-radius: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; color: var(--ink);
+}
+.dev-side-item.is-active { color: var(--accent); background: var(--accent-tint); }
+.dev-side-label { font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; max-width: 54px; overflow: hidden; text-overflow: ellipsis; }
+.dev-side-foot { bottom: 16px; display: flex; flex-direction: column-reverse; gap: 12px; align-items: center; }
+.dev-side-foot .dev-side-rail { position: static; width: 44px; height: 44px; }
+.dev-side-foot .dev-side-rail .dev-side-label { display: none; }
+.dev-side-foot .dev-side-rail .k-face { --s: 44px !important; }
+
+/* ---------- iPhone Duo tab bar (symbol over name, the chosen one on the theme color) ---------- */
+.dev-tabbar {
+  display: flex; gap: 2px; padding: 4px; border-radius: 34px;
+  background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), var(--glass-shadow);
+}
+.dev-tabbar--v { flex-direction: column; }
+.dev-tab-item {
+  width: 56px; height: 56px; border-radius: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; color: var(--ink); position: relative;
+}
+.dev-tabbar--h .dev-tab-item { width: 72px; }
+.dev-tab-well { position: relative; display: grid; place-items: center; width: 26px; height: 24px; }
+.dev-tab-name { font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0; color: var(--ink-2); white-space: nowrap; }
+.dev-tab-item.is-on { background: var(--accent); color: #fff; }
+.dev-tab-item.is-on .dev-tab-name { color: #fff; }
+.dev-tab-count {
+  position: absolute; top: -6px; right: -10px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: #FF3B30; color: #fff; font-size: 12px; font-weight: 600; line-height: 18px; text-align: center; letter-spacing: 0;
+  box-shadow: 0 0 0 1.5px var(--dev-bg);
+}
+.dev-foot-tabs { position: absolute; left: 0; right: 0; bottom: 18px; z-index: 30; display: flex; justify-content: center; }
+
+/* ---------- minimal browser window (web) ---------- */
+.dev-browser { position: absolute; top: 0; left: 0; right: 0; height: 76px; z-index: 30; background: #DFE1E5; color: #3C4043; letter-spacing: 0; }
+[data-theme=dark] .dev-browser { background: #1F2023; color: #C4C7C5; }
+.dev-browser-tabs { height: 36px; display: flex; align-items: flex-end; gap: 6px; padding: 0 10px; }
+.dev-lights { display: flex; gap: 8px; align-self: center; margin: 0 14px 0 4px; }
+.dev-lights i { width: 12px; height: 12px; border-radius: 50%; background: #FF5F57; }
+.dev-lights i:nth-child(2) { background: #FEBC2E; }
+.dev-lights i:nth-child(3) { background: #28C840; }
+.dev-tab {
+  height: 30px; width: 236px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 9px 9px 0 0;
+  background: #FFFFFF; font-size: 12px; color: #1F1F1F;
+}
+.dev-tab > span:nth-child(2) { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-theme=dark] .dev-tab { background: #35363A; color: #E3E3E3; }
+.dev-tab-plus { align-self: center; padding: 4px; opacity: .7; }
+.dev-browser-bar { height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: #FFFFFF; border-bottom: 1px solid #DADCE0; }
+[data-theme=dark] .dev-browser-bar { background: #35363A; border-bottom-color: #1F2023; }
+.dev-url {
+  flex: 1; height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 15px;
+  background: #F1F3F4; font-size: 13px; color: #202124;
+}
+[data-theme=dark] .dev-url { background: #202124; color: #E3E3E3; }

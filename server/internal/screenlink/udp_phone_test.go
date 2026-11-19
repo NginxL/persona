@@ -17,26 +17,32 @@ import (
 // onto the flow, rebuilds each message from its fragments and parity, hands messages on in order, acknowledges them,
 // asks again for what is missing, and can give a frame up.
 type udpPhone struct {
-	t    *testing.T
-	conn *net.UDPConn
-	keys *udpKeys
-	out  *udpSealer
-	flow [8]byte
+	t      *testing.T
+	shared *phone // the same ordered receiver and assembler the TCP carriers use
+	parent *carrier
+	conn   *net.UDPConn
+	keys   *udpKeys
+	out    *udpSealer
+	flow   [8]byte
 
-	mu        sync.Mutex
-	recv      replayWindow
-	ch        byte
-	expected  uint64
-	msgs      map[uint64]*rxMessage
-	got       []byte
-	drop      func(udpFragmentHead) bool // simulated loss of fragments, by what they are
-	nacks     int
-	rebuilt   int
-	ctl       chan []byte
-	ratio     int
-	autoAsk   bool
-	lastHeard time.Time
-	stop      chan struct{}
+	mu            sync.Mutex
+	recv          replayWindow
+	ch            byte
+	expected      uint64
+	msgs          map[uint64]*rxMessage
+	got           []byte
+	drop          func(udpFragmentHead) bool // simulated loss of fragments, by what they are
+	dropResets    int
+	dropResetAcks int // resets reach the receiver, but their acknowledgement is lost
+	resetLost     chan struct{}
+	nacks         int
+	rebuilt       int
+	ctl           chan []byte
+	ratio         int
+	autoAsk       bool
+	lastHeard     time.Time
+	stop          chan struct{}
+	onError       func() // the released phone leaves a flow whose ordered receiver or assembler rejects a message
 }
 
 type rxMessage struct {
@@ -77,6 +83,7 @@ func openUDPLink(t *testing.T, limits Limits) *udpLink {
 	s, relay := r.reg.Open("pair1", local)
 	t.Cleanup(s.End)
 	p := newPhone(t, true)
+	t.Cleanup(p.checkHealthy)
 	p.carry(relay)
 	paths := readPaths(t, p.next(TypePaths))
 	if paths.UDP != 1 {
@@ -107,12 +114,18 @@ func openUDPLink(t *testing.T, limits Limits) *udpLink {
 	}
 	nodeAt, _ := net.ResolveUDPAddr("udp", net.JoinHostPort(paths.Candidates[0].Addr, strconv.Itoa(ready.Port)))
 	l := &udpLink{s: s, p: p, direct: direct, dc: dc, helper: helper, ss: ss, id: id, paths: paths, ready: ready, nodeAt: nodeAt}
-	l.up = newUDPPhone(t, dc, ready, nodeAt)
+	l.up = newUDPPhone(t, p, dc, ready, nodeAt)
 	l.up.ch = id
+	l.up.parent = direct
+	l.up.onError = func() {
+		if tr := udpFlowTransport(s); tr != nil {
+			tr.flow.closeTransport()
+		}
+	}
 	return l
 }
 
-func newUDPPhone(t *testing.T, dc *tls.Conn, ready UDPReady, to *net.UDPAddr) *udpPhone {
+func newUDPPhone(t *testing.T, p *phone, dc *tls.Conn, ready UDPReady, to *net.UDPAddr) *udpPhone {
 	t.Helper()
 	var flow [8]byte
 	raw, err := base64.RawURLEncoding.DecodeString(ready.Flow)
@@ -134,8 +147,8 @@ func newUDPPhone(t *testing.T, dc *tls.Conn, ready UDPReady, to *net.UDPAddr) *u
 		t.Fatal(err)
 	}
 	_ = conn.SetReadBuffer(4 << 20)
-	u := &udpPhone{t: t, conn: conn, keys: keys, flow: flow, out: &udpSealer{aead: keys.toNode, iv: keys.ivNode, flow: flow},
-		msgs: map[uint64]*rxMessage{}, ctl: make(chan []byte, 256), autoAsk: true, stop: make(chan struct{})}
+	u := &udpPhone{t: t, shared: p, conn: conn, keys: keys, flow: flow, out: &udpSealer{aead: keys.toNode, iv: keys.ivNode, flow: flow},
+		msgs: map[uint64]*rxMessage{}, ctl: make(chan []byte, 256), resetLost: make(chan struct{}, 16), autoAsk: true, stop: make(chan struct{})}
 	t.Cleanup(func() { close(u.stop); conn.Close() })
 	go u.read()
 	go u.tick()
@@ -192,6 +205,8 @@ func (u *udpPhone) use(ch byte, off uint64) []byte {
 	u.mu.Lock()
 	if ch == u.ch {
 		u.expected = off
+		u.shared.rewind(ch, off)
+		u.shared.startFlow(ch, u.parent)
 	}
 	u.mu.Unlock()
 	for i := 0; i < 20; i++ {
@@ -206,6 +221,12 @@ func (u *udpPhone) use(ch byte, off uint64) []byte {
 	}
 	u.t.Fatal("no resumed")
 	return nil
+}
+
+// leaveFlow models the phone itself leaving a dead UDP path, rather than the node closing the flow transport.
+func (u *udpPhone) leaveFlow() {
+	_ = u.conn.Close()
+	u.shared.leaveFlow(u.ch)
 }
 
 // ping asks for parity at ratio (ten-thousandths) and returns the pong's counters: data, parity, resent bytes.
@@ -264,6 +285,12 @@ func (u *udpPhone) read() {
 		case udpReset:
 			off := binary.BigEndian.Uint64(body[2:])
 			u.mu.Lock()
+			if u.dropResets > 0 {
+				u.dropResets--
+				u.mu.Unlock()
+				u.resetLost <- struct{}{}
+				continue
+			}
 			if off >= u.expected {
 				u.expected = off
 				for o := range u.msgs {
@@ -272,6 +299,7 @@ func (u *udpPhone) read() {
 					}
 				}
 			}
+			u.shared.reset(body[1], off)
 			u.mu.Unlock()
 			u.ctl <- body
 			u.deliver()
@@ -335,43 +363,57 @@ func (u *udpPhone) fragment(h udpFragmentHead, frag []byte) {
 	}
 	u.rebuilt += missing
 	b.done = shards[:b.data]
-	u.deliverLocked()
+	moved, failed := u.deliverLocked()
+	if moved && !failed {
+		go u.send(chanOffsetBody(udpAck, u.ch, u.expected))
+	}
 }
 
 func (u *udpPhone) deliver() {
 	u.mu.Lock()
-	u.deliverLocked()
+	_, failed := u.deliverLocked()
+	expected := u.expected
+	dropAck := u.dropResetAcks > 0
+	if dropAck {
+		u.dropResetAcks--
+	}
 	u.mu.Unlock()
+	if !failed && !dropAck {
+		// flowReset acknowledges every reset, also when no buffered message became deliverable.
+		go u.send(chanOffsetBody(udpAck, u.ch, expected))
+	}
 }
 
-// deliverLocked hands on every whole message that is next in line, then acknowledges.
-func (u *udpPhone) deliverLocked() {
-	moved := false
+// deliverLocked hands on every whole message that is next in line. A rejected message leaves the flow and is not
+// counted as delivered or acknowledged.
+func (u *udpPhone) deliverLocked() (moved, failed bool) {
 	for {
 		m := u.msgs[u.expected]
 		if m == nil {
-			break
+			return moved, false
 		}
 		layout := udpBlocks(m.length)
 		var msg []byte
 		for bi := range layout {
 			b := m.blocks[uint16(bi)]
 			if b == nil || b.done == nil {
-				return
+				return moved, false
 			}
 			for _, s := range b.done {
 				msg = append(msg, s...)
 			}
 		}
 		msg = msg[:m.length]
+		if _, err := u.shared.acceptUDP(u.ch, u.expected, msg); err != nil {
+			if u.onError != nil {
+				go u.onError()
+			}
+			return moved, true
+		}
 		u.got = append(u.got, msg...)
 		delete(u.msgs, u.expected)
 		u.expected += uint64(m.length)
 		moved = true
-	}
-	if moved {
-		ack := chanOffsetBody(udpAck, u.ch, u.expected)
-		go u.send(ack)
 	}
 }
 

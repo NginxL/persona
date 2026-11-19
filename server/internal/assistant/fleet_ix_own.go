@@ -77,6 +77,16 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 	now := map[string]bool{}
 	for _, ix := range list {
 		now[ix.ID] = true
+		f.mu.Lock()
+		p := f.interactions[ix.ID]
+		clarified := p != nil && p.prepared != nil && p.prepared.clarified && !p.prepared.terminal
+		f.mu.Unlock()
+		if clarified {
+			// The original caller has already returned Clarifying and the durable
+			// journal owns the eventual report. Another snapshot waiter would only
+			// read history, return "clarifying" and log that expected state again.
+			continue
+		}
 		if q := f.asked[ix.ID]; q != nil {
 			if q.ended.IsZero() || time.Since(q.ended) < askAgainAfter || s.answerKept(ix.ID) {
 				continue

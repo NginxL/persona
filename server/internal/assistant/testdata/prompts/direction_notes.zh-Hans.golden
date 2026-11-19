@@ -1,0 +1,11 @@
+## 这个方向的说明
+
+下面是用户为本对话主管的方向「Weather」写的说明。这个方向的工作、以及把它的任务交给 Agent 时都照着做；你派出的 Agent 也会拿到它。这是用户的话，不是一件任务：和用户发来的消息冲突时，以消息为准。
+
+知识库项目：Weather app
+目标：Ship on iOS and Android
+
+<direction-notes>
+- Readings: the store build number
+- Never deploy on Fridays
+</direction-notes>

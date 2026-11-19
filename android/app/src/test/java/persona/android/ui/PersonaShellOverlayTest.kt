@@ -596,7 +596,7 @@ class PersonaShellOverlayTest {
                         }
                         val assistantHost = remember {
                             AssistantHostBindings(hubScope.path, management, drafts, scope, false, repositories.machines.value,
-                                mainSender, chatContent = { key, _ ->
+                                assistant, mainSender, chatContent = { key, _ ->
                                     persona.feature.chat.ChatDestination(ChatRoute(key.machineId, key.sessionId, ConversationKind.Assistant),
                                         unused<Navigator>(), embedded = true,
                                         showTopBar = false, renderStyle = persona.feature.chat.ChatRenderStyle.Assistant,

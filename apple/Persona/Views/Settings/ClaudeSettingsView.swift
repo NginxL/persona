@@ -2,17 +2,40 @@ import SwiftUI
 import PersonaWire
 
 /// Claude Code's /config options (a whitelist of ~/.claude/settings.json keys) on each machine.
-/// Which agent's settings a page edits: Claude Code's settings.json or Codex's config.toml (the node keeps a whitelist
-/// of each, claudeconfig.go / codexconfig.go).
+/// Which agent's settings a page edits: Claude Code's settings.json, Codex's config.toml, or Antigravity's settings.json
+/// (the node keeps a whitelist of each, claudeconfig.go / codexconfig.go / agyompconfig.go).
 enum AgentSettingsKind {
-    case claude, codex
+    case claude, codex, agy
 
-    var title: String { self == .claude ? String(localized: "Claude Code Settings") : String(localized: "Codex Settings") }
+    var title: String {
+        switch self {
+        case .claude: String(localized: "Claude Code Settings")
+        case .codex: String(localized: "Codex Settings")
+        case .agy: String(localized: "Antigravity Settings")
+        }
+    }
 
     var footer: String {
         switch self {
         case .claude: String(localized: "This edits ~/.claude/settings.json on that machine and changes only the settings below. New Claude sessions pick them up; running sessions usually need a restart.")
         case .codex: String(localized: "This edits ~/.codex/config.toml on that machine and changes only the settings below; everything else in the file (model providers, project trust, and so on) stays as is. New Codex sessions pick them up.")
+        case .agy: String(localized: "This edits ~/.gemini/antigravity-cli/settings.json on that machine and changes only the settings below. New Antigravity (agy) sessions pick them up.")
+        }
+    }
+
+    func read(from api: APIClient, machine: String) async throws -> [APIClient.ClaudeSetting] {
+        switch self {
+        case .claude: try await api.claudeSettings(machine: machine)
+        case .codex: try await api.codexSettings(machine: machine)
+        case .agy: try await api.agySettings(machine: machine)
+        }
+    }
+
+    func write(to api: APIClient, machine: String, key: String, value: JSONValue) async throws -> [APIClient.ClaudeSetting] {
+        switch self {
+        case .claude: try await api.setClaudeSetting(machine: machine, key: key, value: value)
+        case .codex: try await api.setCodexSetting(machine: machine, key: key, value: value)
+        case .agy: try await api.setAgySetting(machine: machine, key: key, value: value)
         }
     }
 }
@@ -145,7 +168,7 @@ struct ClaudeSettingsView: View {
         loading = true
         defer { loading = false }
         do {
-            let result = agent == .claude ? try await api.claudeSettings(machine: ref.id) : try await api.codexSettings(machine: ref.id)
+            let result = try await agent.read(from: api, machine: ref.id)
             guard ref == self.ref, !Task.isCancelled else { return }
             settings = result
             settingsRef = ref
@@ -164,8 +187,7 @@ struct ClaudeSettingsView: View {
         var failed: [String] = []
         for target in targets {
             do {
-                let list = agent == .claude ? try await api.setClaudeSetting(machine: target.id, key: key, value: value)
-                    : try await api.setCodexSetting(machine: target.id, key: key, value: value)
+                let list = try await agent.write(to: api, machine: target.id, key: key, value: value)
                 if target == selected, selected == ref { settings = list }
             } catch {
                 if !error.isCancellation { failed.append(String(localized: "\(model.machine(target)?.title ?? target.id): \(error.localizedDescription)")) }

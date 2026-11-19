@@ -24,6 +24,7 @@ registerHooks({
       export const i18n = {getSystemLanguage(){return 'zh-CN';}};
       export const rcp = {};
       export const socket = {};
+      export const connection = {};
       export const relationalStore = {};
       export const util = {TextEncoder:class {static create(){return new this();}encodeInto(value){return new TextEncoder().encode(value);}},generateRandomUUID:()=> 'synthetic-id'};
       export const tr = key => key;

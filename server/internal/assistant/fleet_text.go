@@ -184,13 +184,14 @@ func workLogLine(sess proto.Session) string {
 }
 
 // claudeLiveTexts are what the node says about a Claude session outside Persona's terminals (proto/claudelive.go),
-// with their keys.
+// with their keys. The pre-#5965 attention sentence stays as an alias so an older node is still localized (#5965).
 var claudeLiveTexts = map[string]string{
-	proto.ReadOnlyClaudeBg:        "read_only_claude_bg",
-	proto.ReadOnlyClaudeNoInbox:   "read_only_claude_no_inbox",
-	proto.ReadOnlyClaudeInbox:     "read_only_claude_inbox",
-	proto.AttentionClaudeComputer: "attention_claude_computer",
-	proto.AttentionClaudeAnswer:   "attention_claude_answer",
+	proto.ReadOnlyClaudeBg:                  "read_only_claude_bg",
+	proto.ReadOnlyClaudeNoInbox:             "read_only_claude_no_inbox",
+	proto.ReadOnlyClaudeInbox:               "read_only_claude_inbox",
+	proto.AttentionClaudeComputer:           "attention_claude_computer",
+	proto.AttentionClaudeComputerBefore5965: "attention_claude_computer",
+	proto.AttentionClaudeAnswer:             "attention_claude_answer",
 }
 
 // claudeLiveText is one of them in l; anything else stays as it is.

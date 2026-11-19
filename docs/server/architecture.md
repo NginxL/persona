@@ -73,7 +73,7 @@ A single binary `personad`, four modes:
 
 The hub only handles communication: app and other clients ↔ managers, hub ↔ hub (linked hubs), connections (WebSocket, node / connector links), pairing and auth, the admin UI, push delivery, and various relays.
 Business logic lives in the managers (`server/internal/assistant`, `devices`, `extmgr`; see `docs/server/machines.md`, `docs/extensions/extensions.md` ("Who owns what"), `docs/assistant/assistant.md`):
-the data for the assistant, Inbox, to-dos, usage limits, board, extensions and devices, plus model calls (triage, titles, summaries, judgments). The hub forwards these endpoints to the managers as-is (`assistantwire.Routes`, `devicewire.Routes`, `extwire.Routes`).
+the data for the assistant, Inbox, to-dos, usage limits, board, extensions and devices, plus model calls (triage, titles, summaries, judgments). The hub forwards these endpoints to the managers as-is (`assistantwire.Routes`, `devicewire.Routes`, `extwire.Routes`), except the merged lists, which it joins, adding up the to-dos' `counts` and joining their places over the JSON as the managers send it (`server/internal/hub/ownership_lists.go`, `server/internal/hub/todo_view.go`); it never works out a to-do's phase.
 An ordinary route goes as one `http.request` on the bus, its body read whole (a body of 1 MiB or more goes on a relay stream of its own beside the bus, `http.request_streamed`, so the bus is not held up behind it: `docs/protocol/protocol.md` "Forwarding App requests"); a route that upgrades to a WebSocket cannot, so the extensions' routes and the assistant's
 WebSocket routes (`assistantwire.SocketRoutes`: a meeting's audio socket, `docs/assistant/meeting-minutes.md` "Audio from the phone") go over a relay stream instead
 (`extwire.MethodAccept`): the manager dials the relay and serves the request there, and later ones while the hub keeps the stream open (`docs/extensions/extensions.md` ("Who owns what")), and the manager's extensions layer hands the assistant's to it
@@ -97,7 +97,7 @@ The parts (the hub, the managers, the node on each computer, extensions) talk on
 
 | Package | What it carries |
 | --- | --- |
-| `assistantwire`, `devicewire`, `extwire` | The bus between the hub and a manager: methods, events, routes the hub relays, extension scopes and manifest types the bus carries |
+| `assistantwire`, `devicewire`, `extwire` | The bus between the hub and a manager: methods, events, routes the hub relays, extension scopes and manifest types the bus carries; in `assistantwire` also the To-dos view, counts and places, generated from `schema/wire/todo-view.schema.json` (`server/internal/assistantwire/todo_view_gen.go`, never edited by hand) |
 | `kbwire` | Knowledge-base entities, identity hints, updates and chat context as they cross the bus and the connector protocol |
 | `connectorwire` | Inbox things and replies, conversation batches, posts and snapshots from connectors (`docs/protocol/connector-protocol.md`) |
 | `aiwire` | A model setting (`aiwire.Config`) |

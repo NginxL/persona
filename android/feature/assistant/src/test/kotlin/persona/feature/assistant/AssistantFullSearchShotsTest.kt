@@ -12,10 +12,17 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -23,6 +30,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.Session
+import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import java.io.File
@@ -63,7 +71,12 @@ class AssistantFullSearchShotsTest {
         File(out(), "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    private fun mainResult() = rule.onNode(
+        hasText("Main conversation") and hasAnyAncestor(hasTestTag("full-search-list"))
+    )
+
     @Test fun emptySearchInEveryStyle() {
+        var opened: SessionKey? = null
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
         rule.setContent {
@@ -71,8 +84,8 @@ class AssistantFullSearchShotsTest {
                 Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
                     AssistantFullSearch(
                         chats = chats, known = chats, searchOn = false, management = null, hubKey = "test",
-                        words = words, mainName = "Persona", mainKey = chats.first().key,
-                        onOpen = {}, onDismiss = {}, overlay = false,
+                        words = words, mainKey = chats.first().key,
+                        onOpen = { opened = it }, onDismiss = {}, overlay = false,
                     )
                 }
             }
@@ -81,12 +94,40 @@ class AssistantFullSearchShotsTest {
         rule.onNodeWithTag("full-search-field").assertIsDisplayed()
         rule.onNodeWithTag("full-search-close").assertIsDisplayed()
         rule.onNodeWithText("Recent").assertIsDisplayed()
+        mainResult().assertIsDisplayed()
+        rule.onNodeWithText("Today's plan is ready.").assertDoesNotExist()
         rule.onNodeWithText("Weekend trip").assertIsDisplayed()
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
             capture("full-search-empty-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
+        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("full-search-field")))
+            .performTextReplacement("Main conversation")
+        rule.onNodeWithText("Weekend trip").assertDoesNotExist()
+        mainResult().performClick()
+        assertEquals(chats.first().key, opened)
+    }
+
+    @Test @Config(fontScale = 2f)
+    fun drawsTheMainResultAtLargestTextSize() {
+        var dark by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
+                    AssistantFullSearch(
+                        chats = chats, known = chats, searchOn = false, management = null, hubKey = "test",
+                        words = words, mainKey = chats.first().key, initialQuery = "Main conversation",
+                        onOpen = {}, onDismiss = {}, overlay = false,
+                    )
+                }
+            }
+        }
+        mainResult().assertIsDisplayed()
+        capture("full-search-main-glass-light-large-text")
+        dark = true
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        capture("full-search-main-glass-dark-large-text")
     }
 
     @Test fun filledSearchInEveryStyle() {
@@ -97,7 +138,7 @@ class AssistantFullSearchShotsTest {
                 Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("shot")) {
                     AssistantFullSearch(
                         chats = chats, known = chats, searchOn = false, management = null, hubKey = "test",
-                        words = words, mainName = "Persona", mainKey = chats.first().key,
+                        words = words, mainKey = chats.first().key,
                         onOpen = {}, onDismiss = {}, initialQuery = "bags", overlay = false,
                     )
                 }

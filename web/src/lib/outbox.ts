@@ -20,6 +20,7 @@ import { echoed, isEcho, type Seen, type Sent } from "./echo";
 import { parseUserText, type ChatLine, type UserMessage } from "./turns";
 import type { AssistantInfo, Item } from "./types";
 import { beginMessageSend, settleMessageEcho } from "./message-send";
+import { assertDelivered, isKept, showKept, type KeptReply } from "./undelivered";
 
 export interface OutboxImage {
   mime: string;
@@ -379,13 +380,21 @@ async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: st
   const key = outboxKey(mid, sid);
   try {
     // stays sending through a gap (a hub restart); the client_msg_id is the op id
-    const r = await inSendOrder(key, () => apiOp<({ launcher_note?: string; waits_on_computer?: boolean } & DeliveryReply) | undefined>(`${sessionPath(mid, sid)}/messages`, {
+    const r = await inSendOrder(key, () => apiOp<({ launcher_note?: string; waits_on_computer?: boolean } & DeliveryReply & KeptReply) | undefined>(`${sessionPath(mid, sid)}/messages`, {
       ...flight.request,
       method: "POST",
       opId: e.id,
       json: { text: e.text, images: e.images.length ? e.images : undefined, client_msg_id: e.id, launcher: e.launcher || undefined, model: e.model || undefined, clear_draft: clearDraft },
     }));
     if (!flight.current()) return true;
+    assertDelivered(r); // a bare operation receipt is no delivery (#10194)
+    if (isKept(r)) {
+      // the assistant keeps it and sends it by itself: the row's bubble shows it on every device from now on
+      flight.finish("failed");
+      write(key, list(key).filter((x) => x.id !== e.id));
+      showKept(mid, sid, r?.undelivered);
+      return true;
+    }
     flight.finish("delivered");
     update(key, e.id, { state: "sent", acceptedAt: Date.now(), error: undefined, code: undefined, clearable: undefined });
     showLauncherNote(`${mid}/${sid}`, r?.launcher_note);

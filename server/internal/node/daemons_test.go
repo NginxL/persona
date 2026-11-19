@@ -310,7 +310,7 @@ func TestDaemonIsARuntimeUnderTheConfigNames(t *testing.T) {
 		t.Fatalf("a daemon ran the assistant, or chose its own instance: %+v", hello)
 	}
 	res, _, _ := d.hellod()
-	if f, _ := json.Marshal(res["features"]); string(f) != `["prefer_running","start_params"]` {
+	if f, _ := json.Marshal(res["features"]); string(f) != `["prefer_running","start_params","usage"]` {
 		t.Fatalf("features told to the daemon: %s", f)
 	}
 

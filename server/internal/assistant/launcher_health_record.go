@@ -299,7 +299,7 @@ func (s *Service) healthChanged(ctx context.Context, r LauncherHealth, before st
 // about launcher health. Other failures count, with one shared follow-up check to tell a blink from a broken launcher.
 // A terminal-shell failure (errKindNotInTerminal) skips the check: the login shell is where the launcher already works.
 func (s *Service) recordStartFailure(ctx context.Context, machine, launcher string, err error) {
-	if err == nil || launcher == "" || transientStartErr(err) || errors.Is(err, ErrNoDevice) || startRefused(err) || startStalled(err) {
+	if err == nil || launcher == "" || proto.IsExternalLauncher(launcher) || transientStartErr(err) || errors.Is(err, ErrNoDevice) || startRefused(err) || startStalled(err) {
 		return
 	}
 	if startWaitEnded(err) {

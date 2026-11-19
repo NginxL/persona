@@ -41,10 +41,24 @@ async function boundedBody(stream: ReadableStream<Uint8Array> | null, signal: Ab
   return result;
 }
 
+// The check SDK marks only its own requests with the check's proxy URL. The broker address stays fixed; only its
+// credential crosses this outer request, never in guest JSON or in the upstream request the broker makes.
+function settingsCheckAuthorization(options?: RequestInit): string {
+  const proxy = (options as (RequestInit & { proxy?: unknown }) | undefined)?.proxy;
+  if (proxy == null || proxy === "") return "";
+  if (typeof proxy !== "string") throw new Error("invalid settings check proxy");
+  const u = new URL(proxy);
+  if (u.protocol !== "http:" || u.username !== "ext" || !u.password) throw new Error("invalid settings check proxy");
+  return "Basic " + btoa(`${u.username}:${u.password}`);
+}
+
 // Deno checks fetch TARGET permissions even with a proxy-aware HttpClient. Therefore
 // only the registered loopback broker is permitted, and it invokes existing egress policy.
 Object.defineProperty(globalThis, "fetch", { configurable: false, writable: false,
   value: async (input: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
+    const authorization = settingsCheckAuthorization(options);
+    const brokerHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (authorization) brokerHeaders["Proxy-Authorization"] = authorization;
     if (++pendingFetches > 64) { pendingFetches--; throw new Error("too many pending fetches"); }
     try {
       let request = new Request(input, options);
@@ -57,7 +71,7 @@ Object.defineProperty(globalThis, "fetch", { configurable: false, writable: fals
         const url = new URL(request.url);
         if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("invalid fetch target");
         const response = await nativeFetch(proxy + "/__persona_runtime_fetch", {
-          method: "POST", signal, redirect: "manual", headers: { "Content-Type": "application/json" },
+          method: "POST", signal, redirect: "manual", headers: brokerHeaders,
           body: JSON.stringify({ url: url.href, method: request.method, headers: Object.fromEntries(request.headers), body }),
         });
         if ([301,302,303,307,308].includes(response.status) && response.headers.has("location")) {

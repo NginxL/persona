@@ -1,0 +1,12 @@
+<resources>
+    <string name="settings_browser_login_scan">ブラウザのログインコードを読み取る</string>
+    <string name="settings_browser_login_invalid">パソコンのログイン画面のコードを読み取ってください。</string>
+
+    <string name="settings_browser_login_title">このブラウザへのログインを許可しますか？</string>
+    <string name="settings_browser_login_loading">ログイン要求を確認しています…</string>
+    <string name="settings_browser_login_failed">コードが期限切れか、別の Persona のものです。パソコンで更新してください。</string>
+    <string name="settings_browser_login_details">%1$s に Persona へのアクセスを許可しますか？自分が使っているブラウザだけを承認してください。デバイスから取り消せます。</string>
+    <string name="settings_browser_login_allow">ログインを許可</string>
+    <string name="settings_browser_login_cancel">キャンセル</string>
+    <string name="settings_browser_login_source">接続元 %1$s · %2$d 秒前の要求</string>
+</resources>

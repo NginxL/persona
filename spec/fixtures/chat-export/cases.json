@@ -12,6 +12,7 @@
   "result": "Result",
   "error": "Error",
   "image": "Image",
+  "visualization": "Visualization",
   "cut": "{n} more characters not included",
   "cutUnknown": "Some text was not included.",
   "partial": "Some messages could not be read. Earliest retained message: {from}."
@@ -332,6 +333,37 @@
     }
    ],
    "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## You · 2026-11-14 10:01\n\nRun the tests\n\n## Claude Code · 2026-11-14 10:05\n\nAll 12 pass. The config looks like this:\n\n```ts\nexport default {}\n```\n\nDone.\n"
+  },
+  {
+   "name": "visualization",
+   "why": "a Codex visualization fragment has no Markdown form: a named placeholder under the agent's heading, by its title else its file name, even without work steps",
+   "work": false,
+   "partial": false,
+   "items": [
+    {
+     "id": "u20#0",
+     "seq": 20,
+     "role": "assistant",
+     "kind": "visualization",
+     "ts": "2026-11-14T10:10:00Z",
+     "visualization": {
+      "path": "/home/u/.codex/visualizations/2026/11/14/sess/sales.html",
+      "mode": "wide",
+      "title": "Quarterly sales"
+     }
+    },
+    {
+     "id": "u21#0",
+     "seq": 21,
+     "role": "assistant",
+     "kind": "visualization",
+     "ts": "2026-11-14T10:11:00Z",
+     "visualization": {
+      "path": "/home/u/.codex/visualizations/2026/11/14/sess/chart.html"
+     }
+    }
+   ],
+   "markdown": "# Fix the login redirect\n\n- Agent: Claude Code\n- Computer: MacBook\n- Folder: ~/code/app\n- Exported: 2026-11-14 18:00\n\n## Claude Code · 2026-11-14 10:10\n\n_[Visualization: Quarterly sales]_\n\n_[Visualization: chart.html]_\n"
   },
   {
    "name": "partial",

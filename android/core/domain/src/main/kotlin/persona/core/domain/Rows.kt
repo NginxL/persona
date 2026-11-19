@@ -1,6 +1,7 @@
 package persona.core.domain
 
 import persona.core.contracts.ProtocolCompatibility
+import persona.core.contracts.canonicalMcpToolName
 
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
@@ -61,7 +62,9 @@ fun cleanText(s: String, photo: String): String {
 }
 
 /** A tool's own name without its MCP prefix (iOS `ToolPresentation.baseName`): "mcp__persona__agent_read" → "agent_read". */
-fun toolBaseName(name: String): String = if (name.startsWith("mcp__")) name.substringAfterLast("__") else name
+fun toolBaseName(rawName: String): String = canonicalMcpToolName(rawName).let { name ->
+    if (name.startsWith("mcp__")) name.substringAfterLast("__") else name
+}
 
 /**
  * The word for a tool call (iOS `ToolPresentation.verb`): a name the table knows, else its name in words ([toolWords]:
@@ -86,7 +89,8 @@ fun namedToolVerb(name: String): CoreText? {
 }
 
 /** The MCP server of a tool's full name ("mcp__persona__agent_read" → "persona"), null for any other tool. */
-fun toolServer(name: String): String? {
+fun toolServer(rawName: String): String? {
+    val name = canonicalMcpToolName(rawName)
     if (!name.startsWith("mcp__")) return null
     val rest = name.removePrefix("mcp__")
     val i = rest.lastIndexOf("__")

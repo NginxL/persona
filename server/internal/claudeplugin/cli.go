@@ -98,6 +98,14 @@ func SameDir(a, b string) bool {
 	return a == b
 }
 
+func unsupportedJSONFlag(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unknown option") && strings.Contains(message, "--json")
+}
+
 // listed is one plugin in `claude plugin list --json`.
 type listed struct {
 	ID      string `json:"id"`
@@ -140,9 +148,13 @@ type cli struct {
 }
 
 // do runs a --json command. A failure the CLI reports as "already in the goal state" is success; one saying the
-// plugin or marketplace is not there is errNotFound.
+// plugin or marketplace is not there is errNotFound. An older CLI that does not know --json gets one retry without it.
 func (c cli) do(ctx context.Context, args ...string) error {
 	out, err := c.run(ctx, c.exe, c.dir, append(args, "--json")...)
+	if unsupportedJSONFlag(err) {
+		_, err = c.run(ctx, c.exe, c.dir, args...)
+		return err
+	}
 	r, ok := parseResult(out)
 	switch {
 	case ok && r.Outcome == "ok":

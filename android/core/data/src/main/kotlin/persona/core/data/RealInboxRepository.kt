@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import java.time.Instant
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
 enum class LarkWindowSyncState { Cached, Syncing, Complete, Incomplete, Failed }
 
@@ -96,7 +97,7 @@ class RealInboxRepository(
     private val agentHandOffLock = Mutex()
     /** A synchronous read-through cache of the journal; the real outbox commits new delivery evidence before publishing. */
     private val agentHandOffs = mutableMapOf<String, InboxAgentHandOff>()
-    /** Record attempts in this repository owner; durable delivered/recorded flags decide what may be replayed. */
+    /** In-flight record requests in this repository owner. */
     private val recordingAgentHandOffs = mutableSetOf<String>()
     // Access order is maintained when a window is opened.
     private val windows = LinkedHashMap<String, Window>(16, 0.75f, true)
@@ -158,7 +159,17 @@ class RealInboxRepository(
                     if (transport != null) restore(transport)
                 }
                 if (transport != null) {
-                    replayBufferedAgentHandOffs(transport.scope)
+                    // Watch from transport acquisition: a disconnect hidden by startup IO means the first Online
+                    // replay must retry, not coalesce, the buffered attempt. This child ends with the transport owner.
+                    val startupReconnects = AtomicInteger(0)
+                    val startupWatcher = CoroutineScope(coroutineContext).launch(start = CoroutineStart.UNDISPATCHED) {
+                        var online = false
+                        (hubConnection?.state ?: flowOf(ConnectionState.Online)).collect { state ->
+                            if (state == ConnectionState.Online) online = true
+                            else if (online) startupReconnects.incrementAndGet()
+                        }
+                    }
+                    val startupReplay = replayBufferedAgentHandOffs(transport.scope)
                     sendLock.withLock {
                         val saved = journal.update(transport.scope) { document ->
                             var restored = document.copy(outbox = document.outbox.map {
@@ -176,10 +187,19 @@ class RealInboxRepository(
                         if (owns(transport)) publishLocal(saved)
                     }
                     // One collector owns startup and reconnect recovery for this transport.
+                    var starting = true
                     (hubConnection?.state ?: flowOf(ConnectionState.Online)).collectLatest { state ->
                         if (state == ConnectionState.Online) {
-                            replayAgentHandOffs(transport)
-                            recoverReplies(transport)
+                            val alreadyReplayed = if (starting && startupReconnects.get() == 0) startupReplay else emptySet()
+                            try {
+                                replayAgentHandOffs(transport, alreadyReplayed)
+                                recoverReplies(transport)
+                            } finally {
+                                if (starting) {
+                                    starting = false
+                                    startupWatcher.cancel()
+                                }
+                            }
                         }
                     }
                 }
@@ -663,8 +683,8 @@ class RealInboxRepository(
         return parsed.copy(item = parsed.item.copy(id = appId), manager = owner.manager)
     }
 
-    private suspend fun agentHandOffDelivered(delivery: AuthoritativeMessageDelivery) {
-        val transport = connection.current.value ?: return
+    private suspend fun agentHandOffDelivered(delivery: AuthoritativeMessageDelivery): String? {
+        val transport = connection.current.value ?: return null
         val handOff = agentHandOffLock.withLock {
             // The common path is synchronous: the pending request is cached, or the real outbox already committed and
             // carried its metadata. Only a restored owner with neither needs to touch the journal here.
@@ -692,7 +712,7 @@ class RealInboxRepository(
             // Only the originating inbox scope accepts outbox-carried metadata; the Agent may be on another hub group.
             delivered
         }
-        if (handOff == null) return
+        if (handOff == null) return null
         AuthoritativeMessageDeliveries.acknowledge(delivery)
         if (!handOff.recorded) {
             if (!delivery.originCommitted) try {
@@ -714,15 +734,20 @@ class RealInboxRepository(
             }
             scheduleAgentHandOffRecord(handOff, transport)
         }
+        return handOff.request.operationId
     }
 
-    private suspend fun replayBufferedAgentHandOffs(scope: String) {
-        AuthoritativeMessageDeliveries.replay(scope).forEach { agentHandOffDelivered(it) }
+    private suspend fun replayBufferedAgentHandOffs(scope: String): Set<String> {
+        val replayed = mutableSetOf<String>()
+        AuthoritativeMessageDeliveries.replay(scope).forEach { delivery ->
+            agentHandOffDelivered(delivery)?.let(replayed::add)
+        }
+        return replayed
     }
 
     /** Replay only durable authoritative evidence, never a restored Sent/Shown outbox state. */
-    private suspend fun replayAgentHandOffs(transport: InboxAssistantTransport) {
-        replayBufferedAgentHandOffs(transport.scope)
+    private suspend fun replayAgentHandOffs(transport: InboxAssistantTransport, alreadyReplayed: Set<String> = emptySet()) {
+        val coalesced = alreadyReplayed + replayBufferedAgentHandOffs(transport.scope)
         journal.reconcileAgentHandOffDeliveries(transport.scope)
         val restored = journal.read(transport.scope).agentHandOffs
         val pending = agentHandOffLock.withLock {
@@ -733,13 +758,16 @@ class RealInboxRepository(
                 agentHandOffs[it.request.operationId]?.takeUnless { current -> current.recorded }
             }
         }
-        pending.forEach { scheduleAgentHandOffRecord(it, transport) }
+        pending.filter { it.request.operationId !in coalesced }.forEach { scheduleAgentHandOffRecord(it, transport) }
     }
 
     private suspend fun scheduleAgentHandOffRecord(handOff: InboxAgentHandOff, transport: InboxAssistantTransport) {
         if (!owns(transport)) return
         val id = handOff.request.operationId
-        if (!agentHandOffLock.withLock { recordingAgentHandOffs.add(id) }) return
+        val scheduled = agentHandOffLock.withLock {
+            if (handOff.recorded || agentHandOffs[id]?.recorded == true) false else recordingAgentHandOffs.add(id)
+        }
+        if (!scheduled) return
         scope.launch {
             try {
                 // Use the route committed before enqueue. recordOf(null) here could send a restored manager-owned item

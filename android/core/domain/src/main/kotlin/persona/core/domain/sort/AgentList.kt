@@ -189,25 +189,28 @@ data class AgentMachineGroup(
 
 /**
  * State First's order, the index into By Status's sections ([AgentStateSections], iOS `AgentListOrder.rank`): Needs You →
- * Unread → Awaiting Reply → Working → Waiting in the background ([AgentSession.waitsInBackground]) → Waiting → Muted → Seen.
+ * Unread → Awaiting Reply → Working → Waiting in the background ([AgentSession.waitsInBackground]) → Just finished →
+ * Waiting → Muted → Seen.
  * Muted agents that are working, finished-unread or waiting rank as Muted; a muted one that only waits for the user's
- * reply is just Seen ([AgentSession.awaitsReply]); one that needs you stays first.
+ * reply or is just finished is just Seen ([AgentSession.awaitsReply], [AgentSession.justFinished]); one that needs you stays first.
  */
 fun agentRank(session: AgentSession, mutes: AgentPreferences = AgentPreferences()): Int = when {
     session.state == AgentState.NeedsYou -> 0
     (session.state == AgentState.Working || session.state == AgentState.Unread ||
-        session.isQuiet && session.heldInList || session.isWaiting) && mutes.mutes(session) -> 6
+        session.isQuiet && session.heldInList || session.isWaiting) && mutes.mutes(session) -> 7
     session.state == AgentState.Unread || session.isQuiet && session.heldInList -> 1
     session.awaitsReply(mutes) -> 2
     session.state == AgentState.Working -> if (session.waitsInBackground) 4 else 3
-    session.isWaiting -> 5
-    else -> 7
+    session.isWaiting -> 6
+    session.justFinished(mutes) -> 5
+    else -> 8
 }
 
 /** By Status's sections in rank order ([agentRank]): each one's key (its group is `state/<key>`) and title (iOS `stateTitles`). */
 val AgentStateSections: List<Pair<String, CoreText.Key>> = listOf("needs" to CoreText.Key.StateNeedsYou, "unread" to CoreText.Key.StateUnread,
     "awaiting" to CoreText.Key.StateAwaitingReply, "working" to CoreText.Key.StateWorking, "background" to CoreText.Key.StateBackgroundWaiting,
-    "waiting" to CoreText.Key.StateWaiting, "muted" to CoreText.Key.StateMuted, "idle" to CoreText.Key.StateIdle)
+    "just_finished" to CoreText.Key.StateJustFinished, "waiting" to CoreText.Key.StateWaiting,
+    "muted" to CoreText.Key.StateMuted, "idle" to CoreText.Key.StateIdle)
 
 /** By Status's Seen, the long tail: it starts folded, and its id is kept in the folds once it is opened (iOS `foldedByDefault`). */
 const val StateSeenGroup = "state/idle"

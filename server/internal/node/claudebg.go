@@ -189,6 +189,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 				s.Capabilities = &proto.SessionCapabilities{Read: true}
 			}
 			s.Capabilities.Terminal = true
+			s.Capabilities.Send = true         // the owner's message can be typed here even with no inbox (#5965)
+			s.Capabilities.PluginInput = false // this pane, not the plugin, carries the owner's input
+			s.ReadOnlyReason = ""
 			livePanes[pane] = true // its dialog read is kept while the claude lives (forgetDialogs)
 			// Its own status file says waiting when a dialog has the keyboard, but a build that does not: a resting
 			// claude's screen is read, as for a pane (dialogstatus.go).
@@ -292,12 +295,13 @@ func (n *Node) outsideClaude(id string) (claudeProc, bool) {
 	return claudeProc{}, false
 }
 
-// sendOutside sends text to a session a claude outside Persona's panes has open, through its peer inbox; handled
-// false when no such claude has it, or it has no inbox (an older Claude Code): the caller goes on as before, and
-// start refuses it as open elsewhere (openElsewhereRefusal). Nothing else is tried: a second claude --resume would
-// write the same transcript. A send counts once the session wrote that it took the message (peerTaken); one it did
-// not take in time — held for the person at the computer, dropped as a duplicate — is reported as not confirmed
-// (delivered unknown), so the app neither shows it as sent nor resends it by itself.
+// sendOutside sends text to a session a claude outside Persona's panes has open, through its peer inbox. A verified
+// owner's ordinary message to a claude in tmux is left for send's usual pane path instead; anyone else's message there
+// still needs the inbox and is refused without one, never typed. With no pane and no inbox, handled is false and the
+// caller refuses the session as open elsewhere (openElsewhereRefusal). Nothing starts a second claude --resume on the
+// same transcript. A send counts once the session wrote that it took the message (peerTaken); one it did not take in
+// time — held for the person at the computer, dropped as a duplicate — is reported as not confirmed (delivered
+// unknown), so the app neither shows it as sent nor resends it by itself.
 func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.Image) (handled bool, err error) {
 	return n.sendOutsidePriority(ctx, id, text, images, "")
 }
@@ -309,8 +313,19 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 	if !ok {
 		return false, nil
 	}
+	pane := outsidePane(c)
+	if pane != "" && strings.HasPrefix(strings.TrimSpace(text), "/") {
+		// Keep the inbox's command refusal on the tmux route too: exitAgent knows only Persona's own agents.
+		return true, refusal(peerCommand, peerCommandMsg, nil)
+	}
+	if forced == "" && pane != "" && ownerDeliveryOf(ctx) != nil {
+		return false, nil // the owner's own words go through send's ordinary tmux-pane checks and confirmation (#5965)
+	}
 	p, has := peerOf(c)
 	if !has {
+		if pane != "" {
+			return true, refusal(peerUnsupported, peerNoInboxMsg, nil) // nobody else's words may be typed into the pane
+		}
 		return false, nil
 	}
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {

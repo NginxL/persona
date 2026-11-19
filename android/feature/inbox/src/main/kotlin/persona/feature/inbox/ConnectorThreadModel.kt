@@ -105,9 +105,14 @@ internal class ConnectorThreadModel(private val api: ConnectorsManagement, val i
     suspend fun reach(messageId: String): Boolean {
         val have = state.value.page ?: return false
         return try {
-            val (page, found) = reachMessage(have, messageId) { before -> withContext(pins) { api.connectorThread(id, thread, before) } }
-            mutable.update { it.copy(page = page) }
-            found
+            reachMessage(have, messageId) { before ->
+                withContext(pins) { api.connectorThread(id, thread, before) }.also { older ->
+                    // Each page read goes in front of the page as it is when it comes, so a reload meanwhile (a new
+                    // message) stays; only while the page still starts where it was read from (#9935).
+                    mutable.update { s -> s.page?.takeIf { it.before == before }?.let { s.copy(page = mergeOlder(it, older)) } ?: s }
+                }
+            }
+            state.value.page?.messages?.any { it.id == messageId } == true
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

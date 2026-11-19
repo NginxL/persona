@@ -135,10 +135,27 @@ func TestSettingsCheckProxy(t *testing.T) {
 
 	source := mk("notes", "config:gateway_url")
 	source.Manifest.Runtime = &extension.Runtime{Mode: extension.RuntimeDeno}
+	proxy, sourceCred, sourceRevoke := ps.checkProxy(source, config)
+	if sourceRevoke == nil {
+		t.Fatal("a source runtime's settings check has no candidate credential")
+	}
+	u, err = url.Parse(proxy)
+	if sourcePassword, _ := u.User.Password(); err != nil || sourcePassword != sourceCred || sourceCred == "" {
+		t.Fatalf("a source runtime's check proxy %q does not carry its candidate credential", proxy)
+	}
+	if got := connectThrough(t, px.Addr(), sink, sourceCred); got != http.StatusOK {
+		t.Fatalf("a source runtime's candidate address with its check credential: %d", got)
+	}
+	if got := connectThrough(t, px.Addr(), sink, own); got != http.StatusForbidden {
+		t.Fatalf("the ordinary credential acquired the source check's candidate: %d", got)
+	}
+	sourceRevoke()
+	if got := connectThrough(t, px.Addr(), sink, sourceCred); got != http.StatusProxyAuthRequired {
+		t.Fatalf("a source runtime's credential after its check: %d", got)
+	}
 	for name, q := range map[string]*extension.Extension{
-		"no config: entry":           mk("notes", "api.example.com"),
-		"not behind the proxy":       mk("elsewhere", "config:gateway_url"),
-		"a source runtime (#1180's)": source,
+		"no config: entry":     mk("notes", "api.example.com"),
+		"not behind the proxy": mk("elsewhere", "config:gateway_url"),
 	} {
 		if proxy, _, revoke := ps.checkProxy(q, config); revoke != nil || proxy != "" {
 			t.Errorf("%s: check proxy %q", name, proxy)

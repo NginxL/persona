@@ -95,6 +95,8 @@ class SettingsParityShotsTest {
         override suspend fun setClaudeSetting(machineId: String, key: String, value: kotlinx.serialization.json.JsonElement) = claudeSettings(machineId)
         override suspend fun codexSettings(machineId: String) = emptyList<ClaudeSetting>()
         override suspend fun setCodexSetting(machineId: String, key: String, value: kotlinx.serialization.json.JsonElement) = emptyList<ClaudeSetting>()
+        override suspend fun agySettings(machineId: String) = emptyList<ClaudeSetting>()
+        override suspend fun setAgySetting(machineId: String, key: String, value: kotlinx.serialization.json.JsonElement) = emptyList<ClaudeSetting>()
         override suspend fun claudeDirs(machineId: String) = ClaudeDirsState(
             dirs = listOf(
                 ClaudeDir("/home/me/.claude", isDefault = true, source = "default", running = 2, sessions = 48),

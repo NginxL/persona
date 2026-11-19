@@ -54,6 +54,9 @@ class AssistantSettingsEntriesTest {
         override val assistant = MutableStateFlow(AssistantSnapshot())
         override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
         override suspend fun refresh() = Unit
+        override suspend fun updateRecentTaskChats(value: Boolean?) {
+            assistant.value = assistant.value.copy(recentTaskChats = value)
+        }
         override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) = error("No sends in settings")
         override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = error("No sends in settings")
     }
@@ -78,11 +81,11 @@ class AssistantSettingsEntriesTest {
                 val scope = rememberCoroutineScope()
                 val legacy = scenario !in listOf("claude", "codex")
                 val config = AssistantConfig(manager = "assistant".takeUnless { legacy },
-                    launcher = if (scenario == "codex") "codex" else "claude", timezone = "Asia/Shanghai",
+                    launcher = if (scenario == "codex") "codex" else "claude", timezone = "Asia/Shanghai", recentTaskChats = false,
                     permissionDefaults = if (legacy) null else
                         AssistantPermissionDefaults(1, "assistant", AssistantPermissionDefaults.MODES))
                 val management = remember(scenario) { AssistantSettingsManagerTest.Hub(mutableMapOf("assistant" to config)) }
-                val host = AssistantHostBindings("test/settings", management, drafts, scope, null, emptyList(), conversations, { _, _ -> })
+                val host = AssistantHostBindings("test/settings", management, drafts, scope, null, emptyList(), conversations, conversations, { _, _ -> })
                 val shownRoster = when (scenario) {
                     "no-roster" -> null
                     "single" -> roster.copy(managers = roster.managers.take(1))
@@ -120,6 +123,9 @@ class AssistantSettingsEntriesTest {
                 File(out, name).outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
             }
         }
+        rule.onNodeWithText("显示定时任务的对话").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(true, conversations.assistant.value.recentTaskChats)
         assertEquals(emptyList<OutboxMessage>(), conversations.outbox.value)
     }
 }

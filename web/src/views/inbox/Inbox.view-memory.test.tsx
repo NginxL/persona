@@ -27,7 +27,8 @@ vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: () => undefined
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined }));
 vi.mock("./LarkThread", () => ({ LarkThread: () => <div data-chat-body />, chatOfItem: () => ({}) }));
 
-import { resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { reloadInbox, resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { t } from "../../i18n";
 import { resetInboxViewMemoryForTests } from "../../lib/inbox-view-memory";
 import { settleRosterDefault } from "../../lib/manager-choice";
 import { Inbox } from "./Inbox";
@@ -59,11 +60,34 @@ const show = async (id?: string) => {
 const rowLink = (id: string) => host.querySelector<HTMLAnchorElement>(`[data-item="${id}"] a`)!;
 const search = () => host.querySelector<HTMLInputElement>('input[aria-label]')!;
 const fyiToggle = () => host.querySelector<HTMLButtonElement>('[data-section="fyi"] > div > button[aria-expanded]')!;
+// the section bar (#9053): its choices, and the one chosen
+const barChoice = (id: string) => host.querySelector<HTMLButtonElement>(`[data-bar-choice="${id}"]`)!;
+const chosen = () => host.querySelector<HTMLElement>('[data-bar-choice][aria-checked="true"]')?.dataset.barChoice;
+const sectionsShown = () => [...host.querySelectorAll<HTMLElement>("[data-section]")].map((el) => el.dataset.section);
 const chainToggle = () => host.querySelector<HTMLButtonElement>("[data-chain-toggle]")!;
 const chainRows = () => host.querySelectorAll("[data-chain-entry]");
 const originalToggle = () => host.querySelector<HTMLButtonElement>('[data-testid="inbox-original-row-toggle"]')!;
 const originalOpen = () => host.querySelector('[data-event-body="embedded"]') !== null;
 const listScroll = () => host.querySelector<HTMLElement>("[data-inbox-list-scroll]")!;
+const collapsedOpen = () => host.querySelector('[data-section="noise"] button[aria-expanded]')?.getAttribute("aria-expanded");
+const backButton = () => host.querySelector<HTMLButtonElement>(`header button[aria-label="${t("inbox-inbox.back_to_inbox")}"]`)!;
+const done = (id: string): InboxItem => ({ ...item(id, "action"), done_at: "2026-11-09T05:00:00Z", done_by: "user" });
+const reload = async () => {
+  await act(async () => { await reloadInbox(); });
+  await flush();
+};
+// jsdom lays nothing out: what the page draws is what this says. Wide: the list beside the opened item; narrow: the
+// item takes the list's place, and the list has it back when the item closes (as Inbox.keyboard.test.tsx)
+const layout = (shape: "wide" | "narrow") => {
+  const pane = (name: string) => host.querySelector(`section[aria-label="${t(name)}"]`);
+  Object.defineProperty(Element.prototype, "checkVisibility", {
+    configurable: true,
+    value(this: Element) {
+      if (shape === "wide") return true;
+      return location.pathname !== "/inbox" ? !pane("inbox-inbox.list")?.contains(this) : !pane("inbox-inbox.detail")?.contains(this);
+    },
+  });
+};
 const setSearch = async (value: string) => {
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
   await act(async () => {
@@ -73,6 +97,13 @@ const setSearch = async (value: string) => {
 };
 const openItem = async (id: string) => {
   act(() => rowLink(id).click());
+  expect(location.pathname).toBe(`/inbox/${id}`);
+  await show(id);
+};
+// an item opened from inside the Inbox: the open item's Related line (as a line of its chain does)
+const openRelated = async (id: string) => {
+  const line = [...host.querySelectorAll<HTMLButtonElement>("[data-event-related] button")].find((b) => b.textContent === `chat ${id}`)!;
+  act(() => line.click());
   expect(location.pathname).toBe(`/inbox/${id}`);
   await show(id);
 };
@@ -109,6 +140,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  delete (Element.prototype as { checkVisibility?: unknown }).checkVisibility;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   resetInboxViewMemoryForTests();
@@ -167,6 +199,9 @@ describe("Inbox history-entry view memory", () => {
     await act(async () => history.pushState(null, "", "/inbox/a1"));
     await show("a1");
     expect(search().value).toBe("");
+    // on Needs you, the section bar's start (#9053); All has FYI open as at first
+    expect(chosen()).toBe("action");
+    await act(async () => barChoice("all").click());
     expect(fyiToggle().getAttribute("aria-expanded")).toBe("true");
     expect(chainRows()).toHaveLength(3);
     expect(listScroll().scrollTop).toBe(0);
@@ -176,6 +211,8 @@ describe("Inbox history-entry view memory", () => {
     root = createRoot(host);
     await show("a1");
     expect(search().value).toBe("");
+    expect(chosen()).toBe("action");
+    await act(async () => barChoice("all").click());
     expect(fyiToggle().getAttribute("aria-expanded")).toBe("true");
     expect(chainRows()).toHaveLength(3);
   });
@@ -230,6 +267,177 @@ describe("Inbox history-entry view memory", () => {
     expect(search().value).toBe("chat");
     expect(fyiToggle().getAttribute("aria-expanded")).toBe("false");
     expect(chainRows()).toHaveLength(3);
+  });
+
+  // the section bar (#9053): its choice is the entry's, as the search is
+  it("keeps the section bar's choice with the entry: Back brings it back, a fresh navigation opens on Needs you", async () => {
+    expect(chosen()).toBe("action");
+    expect(sectionsShown()).toEqual(["action"]);
+    await act(async () => barChoice("fyi").click());
+    expect(sectionsShown()).toEqual(["fyi"]);
+    await openItem("f1");
+    expect(chosen()).toBe("fyi"); // kept while the Inbox is open
+
+    await leaveForChat();
+    await backToItem("f1");
+    expect(chosen()).toBe("fyi");
+
+    await leaveForChat();
+    await act(async () => history.pushState(null, "", "/inbox"));
+    await show();
+    expect(chosen()).toBe("action");
+  });
+
+  // the section bar's landing (docs/assistant/inbox.md "Section bar"): an item from outside the Inbox (a link, ⌘K, a
+  // Needs-you line elsewhere, a reload) lands the list where it lives, for good; one from inside (another item's chain or
+  // relations) moves only a list beside it, and Back or closing returns that list to the choice it had
+  it("lands the list on an item opened from outside the Inbox, and leaves it there when the item closes", async () => {
+    layout("narrow");
+    calls.items = [...calls.items, done("d1"), item("n1", "noise")];
+    await reload();
+    // a link from elsewhere, or a reload, on the item's address: no list under it
+    await act(async () => root.render(<div>chat</div>));
+    await act(async () => history.replaceState(null, "", "/inbox/d1"));
+    await show("d1");
+    expect(chosen()).toBe("done");
+    await act(async () => backButton().click());
+    expect(location.pathname).toBe("/inbox");
+    await show();
+    expect(chosen()).toBe("done"); // on a phone, closing it shows the list where the item lives
+    expect(host.querySelector('[data-section="done"] [data-item="d1"]')).not.toBeNull();
+
+    // ⌘K over the list to a collapsed one: All with Collapsed open, and so it stays after Back
+    await act(async () => history.pushState(null, "", "/inbox/n1"));
+    await show("n1");
+    expect(chosen()).toBe("all");
+    expect(collapsedOpen()).toBe("true");
+    await act(async () => popped(() => history.back()));
+    await show();
+    expect(chosen()).toBe("all");
+    expect(collapsedOpen()).toBe("true");
+  });
+
+  it("leaves a list hidden under the item alone for an item opened from inside, and Back finds it on its choice", async () => {
+    layout("narrow");
+    calls.items = [{ ...item("a1", "action"), related: [{ id: "d1", title: "chat d1" }] }, item("a2", "action"), item("f1", "fyi"), done("d1")];
+    await reload();
+    await openItem("a1");
+    await openRelated("d1");
+    expect(chosen()).toBe("action"); // not moved: it isn't shown
+    expect(sectionsShown()).toEqual(["action"]);
+    await act(async () => popped(() => history.back()));
+    await show("a1");
+    expect(chosen()).toBe("action");
+    // closing the item instead: the list as it was
+    await openRelated("d1");
+    await act(async () => popped(() => backButton().click()));
+    expect(location.pathname).toBe("/inbox");
+    await show();
+    expect(chosen()).toBe("action");
+    expect(sectionsShown()).toEqual(["action"]);
+  });
+
+  it("moves a list beside the item to one opened from inside, and Back returns it to the choice it had", async () => {
+    layout("wide");
+    calls.items = [{ ...item("a1", "action"), related: [{ id: "d1", title: "chat d1" }] }, item("a2", "action"), item("f1", "fyi"), done("d1")];
+    await reload();
+    await openItem("a1");
+    expect(chosen()).toBe("action"); // the list shows it: no move
+    await openRelated("d1");
+    expect(chosen()).toBe("done");
+    expect(host.querySelector('[data-section="done"] [data-item="d1"] a')?.getAttribute("aria-current")).toBe("page");
+    await act(async () => popped(() => history.back()));
+    await show("a1");
+    expect(chosen()).toBe("action");
+    // Done in the item's header, or ‹: back to the list, on the choice it had
+    await openRelated("d1");
+    expect(chosen()).toBe("done");
+    await act(async () => popped(() => backButton().click()));
+    expect(location.pathname).toBe("/inbox");
+    await show();
+    expect(chosen()).toBe("action");
+  });
+
+  // an item a link opened has no list under it, yet what its Related line opens is from inside the Inbox
+  it("takes an item opened from a linked item as opened from inside", async () => {
+    layout("wide");
+    calls.items = [{ ...item("a1", "action"), related: [{ id: "d1", title: "chat d1" }] }, item("a2", "action"), item("f1", "fyi"), done("d1")];
+    await reload();
+    await act(async () => root.render(<div>chat</div>));
+    await act(async () => history.replaceState(null, "", "/inbox/a1"));
+    await show("a1");
+    expect(chosen()).toBe("action");
+    await openRelated("d1");
+    expect(chosen()).toBe("done");
+    await act(async () => backButton().click()); // no list under either: the list takes the item's place
+    expect(location.pathname).toBe("/inbox");
+    await show();
+    expect(chosen()).toBe("action");
+  });
+
+  // what an inside landing changed is undone with it: Collapsed folds again and the list scrolls back where it was
+  it("folds Collapsed again and puts the scroll back when the list goes back from a landing", async () => {
+    layout("wide");
+    calls.items = [{ ...item("a1", "action"), related: [{ id: "n1", title: "chat n1" }] }, item("a2", "action"), item("f1", "fyi"), item("n1", "noise")];
+    await reload();
+    await act(async () => {
+      listScroll().scrollTop = 120;
+      listScroll().dispatchEvent(new Event("scroll"));
+    });
+    await openItem("a1");
+    await openRelated("n1");
+    expect(chosen()).toBe("all");
+    expect(collapsedOpen()).toBe("true");
+    await act(async () => {
+      listScroll().scrollTop = 400;
+      listScroll().dispatchEvent(new Event("scroll"));
+    });
+    await act(async () => popped(() => backButton().click()));
+    await show();
+    expect(chosen()).toBe("action");
+    expect(listScroll().scrollTop).toBe(120);
+    await act(async () => barChoice("all").click());
+    expect(collapsedOpen()).toBe("false");
+  });
+
+  // a search typed after an inside landing takes over from it: closing the item leaves the search on All, and clearing
+  // the search goes back to the choice the reader had, not to the one the item moved the list to
+  it("lets a search typed after a landing put aside the choice the reader had before it", async () => {
+    layout("wide");
+    calls.items = [{ ...item("a1", "action"), related: [{ id: "d1", title: "chat d1" }] }, item("a2", "action"), item("f1", "fyi"), done("d1")];
+    await reload();
+    await openItem("a1");
+    await openRelated("d1");
+    expect(chosen()).toBe("done");
+    await setSearch("chat");
+    expect(chosen()).toBe("all");
+    await act(async () => popped(() => backButton().click()));
+    await show();
+    expect(search().value).toBe("chat");
+    expect(chosen()).toBe("all");
+    await setSearch("");
+    expect(chosen()).toBe("action");
+  });
+
+  // an old done item sits in a group Done keeps folded at first: the landing opens it, so its row is in sight, and from
+  // outside the group stays open when the item closes
+  it("opens the folded group a landed item is in", async () => {
+    layout("narrow");
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    calls.items = [...calls.items, { ...item("d0", "action"), done_at: daysAgo(0), done_by: "user" }, { ...item("d40", "action"), done_at: daysAgo(40), done_by: "user" }];
+    await reload();
+    await act(async () => history.pushState(null, "", "/inbox/d40"));
+    await show("d40");
+    expect(chosen()).toBe("done");
+    const groupOpen = () => {
+      const row = host.querySelector('[data-item="d40"]')!;
+      return row.closest("[inert]") === null && row.closest("[data-group]")!.querySelector("button[aria-expanded]")!.getAttribute("aria-expanded") === "true";
+    };
+    expect(groupOpen()).toBe(true);
+    await act(async () => backButton().click());
+    await show();
+    expect(chosen()).toBe("done");
+    expect(groupOpen()).toBe(true);
   });
 
   it("does not replace history for search, folds, scrolling, chain expansion, or original expansion", async () => {

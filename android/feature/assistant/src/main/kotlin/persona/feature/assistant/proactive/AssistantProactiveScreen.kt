@@ -175,19 +175,24 @@ internal fun ProactiveScreen(
                 if (targetState.size >= initialState.size) pageTransitions.push else pageTransitions.pop
             },
         ) { stack ->
-            val page = stack.last()
-            holder.SaveableStateProvider(page.key) {
-                when (page) {
-                    ProactivePage.Overview -> OverviewPage(state, machines, now, zone, ::pop, actions)
-                    is ProactivePage.EditRoutine -> TaskEditorPage(page.id, null, state, store, now, zone, ::pop, onOpenConversation,
-                        onAllRuns = { push(ProactivePage.RunList(it)) }, onRunNow = runTask, onModelConfiguration = onModelConfiguration)
-                    is ProactivePage.AddRoutine -> TaskEditorPage(null, RoutineTemplates.getOrNull(page.template)?.draft(say) ?: BlankTask,
-                        state, store, now, zone, ::pop, onOpenConversation, onAllRuns = { push(ProactivePage.RunList(it)) }, onRunNow = runTask,
-                        onModelConfiguration = onModelConfiguration)
-                    ProactivePage.FollowupList -> FollowupsPage(state, machines, now, zone, ::pop, actions)
-                    is ProactivePage.RunList -> RunsPage(state, page.ref, now, zone, ::pop, actions)
+            val pageBody: @Composable () -> Unit = {
+                val page = stack.last()
+                holder.SaveableStateProvider(page.key) {
+                    when (page) {
+                        ProactivePage.Overview -> OverviewPage(state, machines, now, zone, ::pop, actions)
+                        is ProactivePage.EditRoutine -> TaskEditorPage(page.id, null, state, store, now, zone, ::pop, onOpenConversation,
+                            onAllRuns = { push(ProactivePage.RunList(it)) }, onRunNow = runTask, onModelConfiguration = onModelConfiguration)
+                        is ProactivePage.AddRoutine -> TaskEditorPage(null, RoutineTemplates.getOrNull(page.template)?.draft(say) ?: BlankTask,
+                            state, store, now, zone, ::pop, onOpenConversation, onAllRuns = { push(ProactivePage.RunList(it)) }, onRunNow = runTask,
+                            onModelConfiguration = onModelConfiguration)
+                        ProactivePage.FollowupList -> FollowupsPage(state, machines, now, zone, ::pop, actions)
+                        is ProactivePage.RunList -> RunsPage(state, page.ref, now, zone, ::pop, actions)
+                    }
                 }
             }
+            // Always wrapped. This page is already inside Root's chrome; the inner modifier sees that and does not
+            // dim a second time. Outside Glass the modifier is identity, and the Box keeps editor state across a style change.
+            Box(Modifier.fillMaxSize().glassPageChrome()) { pageBody() }
         }
         notice?.let { message ->
             JNotice(message, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = pagePadding, vertical = Tokens.Space.l),

@@ -30,6 +30,7 @@ export function exportWords(persona: string): ExportWords {
     result: text("result"),
     error: text("error"),
     image: text("image"),
+    visualization: text("visualization"),
     cut: (n) => text("cut", { n }),
     cutUnknown: text("cut_unknown"),
     partial: (from) => text("partial", { from }),

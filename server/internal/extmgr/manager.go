@@ -27,6 +27,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/nwverse/persona/server/internal/agents"
+	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extwire"
@@ -93,6 +94,9 @@ type Options struct {
 	// Ask shows a card on the phones and waits for its answer, in the assistant's interaction queue (its askHub);
 	// ctx ending withdraws the card. nil: the hub is asked (tests).
 	Ask func(ctx context.Context, ix proto.Interaction) (proto.Resolution, error)
+	// AskPrepared retains an assistant-owned mutation through clarification. It is separate from Ask so runtime-owned
+	// coding-Agent permission cards cannot accidentally acquire a second execution path.
+	AskPrepared func(context.Context, proto.Interaction, approval.Operation) (approval.Outcome, error)
 	// AssistantMachine is where the assistant's conversations run ("" while not known).
 	AssistantMachine func() string
 	// AssistantTools are the assistant's tools now (a connector's tool may not shadow one).
@@ -335,6 +339,34 @@ func (h *Manager) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 		return proto.Resolution{}, errAssistantOffline
 	}
 	return h.opts.Ask(ctx, ix)
+}
+
+func (h *Manager) waitPrepared(ctx context.Context, ix proto.Interaction, op approval.Operation) (approval.Outcome, error) {
+	if h.opts.AskPrepared != nil {
+		return h.opts.AskPrepared(ctx, ix, op)
+	}
+	if h.opts.Ask == nil {
+		return approval.Outcome{}, errAssistantOffline
+	}
+	// Embedders that predate AskPrepared keep their original one-shot approval
+	// behavior. The production assistant supplies AskPrepared for clarification.
+	r, err := h.opts.Ask(ctx, ix)
+	if err != nil {
+		return approval.Outcome{}, err
+	}
+	switch {
+	case r.UserAllowed():
+		text, err := op.Apply(ctx, r)
+		return approval.Outcome{Text: text}, err
+	case r.UserDenied():
+		text := op.Denied
+		if text == "" {
+			text = "The user declined the change: nothing changed."
+		}
+		return approval.Outcome{Text: text}, nil
+	default:
+		return approval.Outcome{Text: op.Unanswered}, nil
+	}
 }
 
 // callAssistant asks the assistant in this process (Options.Assistant).

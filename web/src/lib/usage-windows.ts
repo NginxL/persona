@@ -71,8 +71,6 @@ export function pace(w: UsageWindow, now = Date.now()): Pace | null {
   return { expected, state: diff > PACE_TOLERANCE ? "over" : diff < -PACE_TOLERANCE ? "under" : "on" };
 }
 
-export const PACE_LABEL: Record<PaceState, string> = { over: tr("usage.pace_over"), under: tr("usage.pace_under"), on: tr("usage.pace_on") };
-
 type Countdown = { kind: "due" | "clock" | "span"; text: string };
 
 /** When a window starts over: the span ("45m", "2d 3h", "5d" with no hours left over; each language's own units, "2 天 3 小时"),
@@ -147,22 +145,6 @@ export function sourceNames(a: UsageAccount): string[] {
   return [...machines, ...(a.sources ?? [])];
 }
 
-/** What the gateway could not do, in words; "" when nothing went wrong or the hub sends a reason this build doesn't know. */
-export function problemText(a: UsageAccount): string {
-  switch (a.problem) {
-    case "rejected":
-      return tr("usage.problem_rejected");
-    case "unreachable":
-      return tr("usage.problem_unreachable");
-    case "failed":
-      return tr("usage.problem_failed");
-    case "error":
-      return tr("usage.problem_error");
-    default:
-      return "";
-  }
-}
-
 /** The plan to write beside the name, unless the name already says it ("Codex Pro" and plan "pro"). */
 export function planNote(a: UsageAccount): string {
   const plan = (a.plan ?? "").trim();
@@ -177,6 +159,12 @@ export function topAccounts(accounts: UsageAccount[], n = 2): UsageAccount[] {
 }
 
 export const isWarn = (percent: number) => percent >= WARN_PERCENT;
+
+export interface UnconnectedProvider {
+  id: string;
+  title: string;
+  agent: string;
+}
 
 const emptyAccounts: UsageAccount[] = [];
 let usageAccounts = emptyAccounts;

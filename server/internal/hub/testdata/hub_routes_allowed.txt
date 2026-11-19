@@ -84,6 +84,7 @@ GET /api/v1/sessions/{mid}/{sid}/info
 GET /api/v1/sessions/{mid}/{sid}/items
 GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full
 GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image
+GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization
 GET /api/v1/sessions/{mid}/{sid}/screen
 GET /api/v1/skills
 GET /api/v1/ws
@@ -103,6 +104,7 @@ POST /api/v1/admin/machines
 POST /api/v1/admin/machines/{id}/connector
 POST /api/v1/admin/machines/{id}/link-pair
 POST /api/v1/admin/machines/{id}/reconnect
+POST /api/v1/admin/machines/{mid}/link-switch # admin relay to the computer's manager (link_switch.go)
 POST /api/v1/admin/password
 POST /api/v1/admin/peers
 POST /api/v1/admin/peers/code
@@ -123,6 +125,7 @@ POST /api/v1/hub/update
 POST /api/v1/hub/update/backups/{id}/apply # hub installation administration: shared self-update transaction
 POST /api/v1/hub/update/check
 POST /api/v1/interactions/{id}/choose
+POST /api/v1/interactions/{id}/clarify # owner-only relay to the prepared operation's manager, like resolve
 POST /api/v1/interactions/{id}/reanswer
 POST /api/v1/interactions/{id}/resolve
 POST /api/v1/looks/uploads # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
@@ -231,3 +234,10 @@ GET /api/v1/admin/password-login
 POST /api/v1/admin/password-login/register/start
 POST /api/v1/admin/password-login/register/finish
 PUT /api/v1/admin/password-login
+
+# Browser sign-in belongs to the hub authentication boundary.
+/api/v1/auth/browser-login/
+POST /api/v1/auth/browser-login/start
+POST /api/v1/auth/browser-login/poll
+POST /api/v1/auth/browser-login/confirm
+POST /api/v1/auth/browser-login/approve

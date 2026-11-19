@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"runtime"
 	"slices"
 	"strconv"
@@ -581,21 +580,13 @@ func isKey(b []byte, i int) bool {
 	return i < len(b) && b[i] == ':'
 }
 
-// scrubWriter is the node's connection with the values hidden in every line it writes (Serve). rpc.Peer writes
-// one whole line a call.
-type scrubWriter struct {
-	w io.Writer
-	s *secretScrubber
-}
-
-func (w scrubWriter) Write(p []byte) (int, error) {
-	if !w.s.active() {
-		return w.w.Write(p)
+// filter is the node connection's rpc.Peer.LineFilter (Serve): every line it writes with the values hidden, once there
+// are some, just before the line goes out (framed, as its first frame does).
+func (s *secretScrubber) filter(line []byte) []byte {
+	if !s.active() {
+		return line
 	}
-	if _, err := w.w.Write(w.s.line(p)); err != nil {
-		return 0, err
-	}
-	return len(p), nil
+	return s.line(line)
 }
 
 // scrubBytes is b, raw bytes the node sends as base64 (the full herdr client's), with the handed-over values hidden.
@@ -669,8 +660,12 @@ func (n *Node) withSecretTicket(line, launcher, ticket string, q func(string) st
 // process outlives a connection, so the values it hides stay hidden when its manager reconnects. A node that serves
 // one connection (--stdio) would forget them while its Agents still run.
 func (n *Node) capabilities() []string {
-	if n.keeper != nil {
-		return nodeproto.Announced
+	capabilities := slices.Clone(nodeproto.Announced)
+	if n.keeper == nil {
+		capabilities = slices.DeleteFunc(capabilities, func(c string) bool { return c == nodeproto.SecretEnv })
 	}
-	return slices.DeleteFunc(slices.Clone(nodeproto.Announced), func(c string) bool { return c == nodeproto.SecretEnv })
+	if n.external != nil {
+		capabilities = append(capabilities, nodeproto.ExternalLauncherInventory)
+	}
+	return capabilities
 }

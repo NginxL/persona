@@ -1,9 +1,38 @@
 # Lessons: Claude Code, Codex, and herdr
 
+## A deferred action on an agent belongs to its process, not its session id (#10296)
+
+- A session id outlives its Claude Code process: the owner quits and resumes, Persona's Resume starts a new one, a crash is resumed. A queued restart into Full access, keyed by session id alone for a day, quit a claude that resumed the conversation later in Default and restarted it in Full access.
+- Bind anything that waits to act on "the agent" to the process it was decided for: pid plus start mark (`hookTurns.process`, else `sessions/<pid>.json` via `liveClaudes`), checked with `processAlive` at every look and again right before acting. Drop it once that process is gone or the hooks report another one; refuse it where the process cannot be told.
+- Keep the wait short. "Once this turn ends" is not "whenever this conversation next runs".
+
+## Project MCP enums only in agy's tool declarations (#9944)
+
+agy can turn a valid boolean enum such as `task_review`'s `evidence.ready: enum [true]` into an empty Gemini string
+enum and reject the whole request. In its proxy's matched `tools/list` responses, omit enum constraints that are not
+nonempty arrays of nonempty strings. Walk schema keywords, not arbitrary objects: a property named `enum` is still
+a property, and defaults, examples and constants are data. Keep call arguments and the server's schema and validation
+unchanged. Regress with the real tool schema and proxy wire flow; a `tools/call` result containing `tools` is not a list.
+
 - Keep Codex app-server ancestry as raw thread IDs until session decoration maps it into home-scoped public IDs
   (#9393). Mapping a secondary home's parent twice leaves the child orphaned. Model-facing Agent lists must reuse
   `folded_under` and the parent's folded state too; fixing the client list alone still leaves helper rows in
   `agents_list` and the main chat's counts. Do not hide an unknown-parent session by its title or subagent flag alone.
+
+## Compact unattended delivery from actual context and user activity (#8658)
+
+Supervision and scheduled messages are inputs but are not user activity. Keep their structured source when deciding
+whether the owner has been away; reset the idle clock when the owner's input arrives, before a send lock can wait.
+Claude's `result.usage` and `modelUsage` aggregate requests and cannot stand in for context size. Use the last
+main-model request's input plus cache-read and cache-creation tokens, or `compact_boundary`'s `post_tokens`.
+Wait for the compaction command's result, not just its boundary, before writing the next message: the result still
+ends that command. Persist the attempt latch with the session, and rearm only after user activity or a context drop
+below the threshold followed by another idle interval. Failed compactions must not turn every background wake into
+another summary attempt.
+
+Node-only JSON round trips do not prove this state survives a restart. The manager decodes `state.put` through
+`db.NodeSession`, then writes the `node_model` settings value and projects it back for `state.load`. Carry the opaque
+idle state through every boundary, and test the real manager entry points against Postgres after reopening the store.
 
 ## An acknowledged Enter does not confirm Codex consumed a message (#8354)
 
@@ -37,6 +66,27 @@ Persist reuse separately from creation and keep its machine/path on retry; do no
 
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
+## Local adapter metadata is not execution authority (#7940)
+
+A runtime's model-list hooks belong to its session driver; they are not a configuration-only plugin. Reuse the
+native CLI lifecycle for a local connection adapter instead of creating a second session owner. Only trusted
+node-local configuration may name the executable: an inventory, a hub-supplied launcher name or a client scope
+field must never become a shell command. Keep the latest directory revision separate from the actual process
+binding so a refresh cannot interrupt a turn or silently change a model. Materialize an external default selection
+into its exact model ID when it is saved; otherwise a remote default change becomes an unintended conversation edit.
+
+A freshly loaded registry is not evidence that a saved target was deleted. Ordinary directory reads may remain
+nonblocking, but validation of a specific persisted pick must join one bounded inventory load on a miss and then
+repeat identity, scope and capability checks. Cover a completely cold registry and resident connection handover
+with an already-running process; fixtures that always prewarm inventory hide both failures.
+
+Pin connection environment in one final settings file while preserving Persona's hooks, MCP and permission fields;
+process environment alone does not establish the intended precedence, and appending a second `--settings` can drop
+the first. Let the node own the private output directory so group termination still removes credential files when
+the adapter's cleanup cannot run. A required or unknown agent sandbox is unsupported until the bootstrap has a
+verified sandbox boundary, not a reason to execute without it. Test initialization and control acknowledgments before
+user input, not just that a wrapper process exists.
+
 - A native terminal Codex start must preserve a user's same-name `codex()` function (#4876), not just find the executable. `codex-start` used to bypass it, losing launcher environment while a normal terminal command worked; the assistant app-server fix (#3707) did not cover this path. Pass the launcher and prompt as positional arguments to the interactive shell, never interpolate them as shell code, and keep the shell inside the agent sandbox.
   Fake-launcher tests must isolate rc paths such as `ZDOTDIR`, not just `HOME`: an inherited rc directory can otherwise load the user's real startup file and change the fake executable or flags.
   A native launcher must prefer the user's supported login shell even when another shell's rc file exists; test with both rc files present, not just one.
@@ -59,6 +109,13 @@ have no parent metadata at all. Use `task_spawn` for a separate session on the c
 around missing task tools by extracting the hub token. Codex's shared daemon may carry an old pane environment, so
 its per-turn `CODEX_THREAD_ID` must resolve unambiguously in the node's registry before a CLI handoff. Unknown
 threads must not fall back to whichever task an inherited pane happens to run.
+
+The task handoff footer must describe the Agent that will actually run (#9846). Fit and health detours can change
+both machine and family. Source matters too: a Codex terminal has no injected Persona MCP server, while Paseo's
+Codex bridge does. A login shell need not have `personad` on PATH. Render after selection; give known terminal
+callers the node's reported absolute executable as data for the existing scoped CLI. Bound the metadata read;
+unavailable metadata or unknown capabilities omit unverified hints, not the assignment.
+Keep the existing project context, approval snapshot and attachment order intact.
 
 - A guest conversation's session id and tools are registered before the node starts it: Claude Code lists the
   Persona MCP server's tools as it starts, a later `guestSet` makes that first list empty, and a connected MCP server
@@ -163,10 +220,14 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
 - AskUserQuestion: a PermissionRequest hook returning `decision.behavior: allow` + `updatedInput.answers` answers on the user's behalf (real pty on 2.1.319). Persona's PreToolUse lets the terminal dialog open and PermissionRequest waits for the phone; PostToolUse removes `answers` to find the call, then completes every waiter of its exact `tool_use_id` (including one that arrived before PermissionRequest). Don't complete by question text or an empty-id wildcard: a late receipt would cancel the next identical question. Keep the PreToolUse pairing by hook attempt: a resume must reuse its assignment, not consume a newer pending id, and overlapping first / resumed requests need the same binding. After a Node replacement, recover only an unambiguous recent transcript tool_use / tool_result; several possible calls hand that ambiguous generation to the terminal and withdraw its restored cards until each PostToolUse arrives, rather than guess or wait for an unmatchable Post. Standby replay must restore Pre / Permission / Post even when stale event reports are filtered, retained for the hook + reconnect lifetime, not the two-minute `hook.decided` dedup window. Don't route receipts through `decisions.decide`: after a phone answer they would be saved for and wrongly suppress that next question (#2382).
 - ExitPlanMode: uses PermissionRequest, not PreToolUse. `allow` must carry `updatedInput` + `updatedPermissions:[{type:setMode,...}]`
   to work; plain `{behavior:allow}` still shows the TUI dialog. `deny` + `message` delivers feedback to the model as tool_result.
+- A recorded post-plan mode must reach the interaction, not only the node's session state: the clients' legacy primary actions hard-code different modes. Put `plan_then` on the card, show that one mode, and normalize the answer in the manager as well as the hook so old clients cannot make history disagree with Claude's actual `setMode` (#3784). Terminal decisions use `answered_by: "terminal"`; a dismissal alone also covers other hand-backs and does not prove the source.
 - A read-only `task_plan` task on Claude starts in `bypassPermissions` and carries its read-only constraint in the first prompt (#4864). Codex read-only tasks keep the plan-mode sandbox; traex and omp start with no mode at all, so the hub must not send `plan`, a default mode or a tier's effort to them, or the node refuses the start (#7559); the work agents pi, cursor and agy (`proto.WorkAgentTypes`) get none either, but the node ignores rather than refuses one, so the hub drops a caller's instead of refusing it (#8151); a read-only task for one of them is refused when it is planned instead, since sending no mode would bypass the node's `plan` refusal and leave only the prompt line (#8316). Name the agents that take no modes (`proto.NoModeAgentTypes`, `proto.WorkAgentTypes`) rather than the ones that do: Paseo providers report the agent `paseo` and take `bypassPermissions` through their bridge (#8141), and an allow-list of Claude and Codex would drop it. If a read-only task is already in plan mode, resolve its `ExitPlanMode` request with a denial and instructions to return findings before registering a card; allowing the exit would lift that constraint. Look up the task's saved `readonly` value, including a reused topic to-do whose plan carries its binding instead of `Todo.PlanID` (#3985).
 - After approving a plan in `herdr`, the `PermissionRequest` hook may not exit promptly, and `interaction.cancel` may not reach hub (2026-11-01: the transcript already had a successful `ExitPlanMode` tool_result, session working, phone still needs_you). On sessions / revs changes, hub reads bounded transcript pages for pending plans and ends them using the matching tool_use_id's tool_result. For old hooks without an id, accept only a unique ExitPlanMode call within 30 seconds before creation, with a result no earlier than card creation. Ambiguous matches, offline nodes, "working" alone, or model text never clear it. A 30-second timer covers lost events; per-card rate limiting and single-flight avoid duplicate disk reads.
   Cleanup only removes stale cards, broadcasts `interaction_resolved`, and records dismissed history; it doesn't fabricate phone approval, permission mode, or answers. A still-waiting hook receives only Dismiss, not allow. New plans, questions / tool permissions aren't affected by old plan results. Regressions: `assistant/fleet_cards_test.go` (missing tool_use_id, cross-page matching, local deny / interrupt, fake approval text, old/new card races, App push and persistence).
 - Tool permissions have the same issue (#3563): answering the terminal permission dialog doesn't end PermissionRequest, leaving the phone card until timeout. Permission cards likewise end from the tool_use_id's tool_result, but require an exact id (don't guess for id-less cards); don't collect phone-answered (claimed) cards, to avoid rewriting resolved as dismissed.
+- TRAE startup, identity and history are separate checks (#7559). A new task can work while SQLite-only history remains unreadable.
+  Test both retained rollouts and paginated-only history; exclude existing thread IDs before a fresh start, and do not preallocate a Claude ID.
+  An Orca workspace can merely contain a terminal that changed directory: derive the TRAE session cwd from its metadata and preserve the real container separately.
 - Hooks in `--settings <file>` are read only at startup; matcher changes require restarting claude. The hook script itself is reread on every execution.
 - `herdr agent wait` may return agent_not_found before herdr recognizes the Agent: poll `agent get` after startup.
 - On computers without herdr's claude integration, `agent list` lacks session ids (fallback in `docs/integrations/claude-integration.md`).
@@ -183,6 +244,9 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   and records discovered directories in the database. Put rarely running profiles in `machines[].claude_config_dirs` in `hub.json` (`server/internal/node/claudedirs.go`).
   The old workaround symlinked `~/.claude/projects` and `sessions` to a profile; existing symlinks are fine (deduped by real path), but no more are needed.
   Symptoms of a missed directory: assistant resume says "Session ID … is already in use", transcript not found in the App, herdr Agents can't be mapped to sessions.
+- Auto memory follows the config directory too: a conversation given its own profile gets its own `projects/<encoded cwd>/memory`, with nothing
+  saying so. Whatever must be one memory across profiles needs `autoMemoryDirectory` in the start's `--settings` (ignored in checked-in project
+  settings, known from Claude Code 2.1.74) and a merge of the copies made before it (#9440; `docs/assistant/assistant.md`, "One memory").
   Conversely, automation running claude with its own `CLAUDE_CONFIG_DIR` is discovered and remembered by hub, flooding lists with hundreds of offline sessions. Deleting `claude_dirs/<machine>` records doesn't help
   (the next scan reports it again); use "Mute configuration directory" (`docs/integrations/claude-integration.md`, #676).
 - After node discovered all config directories (PR #12), a machine with over ten Agents and hundreds of MB of transcripts read disk continuously at about 20 MB/s: every herdr event rebuilt session lists,
@@ -247,6 +311,12 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   an empty box without a transcript receipt is ambiguous,
   not permission to paste again. A later follow-up's timestamp can show it was queued after work began; do not
   attribute the original submission to that follow-up without a terminal-key receipt.
+- A prompt of pictures only has no words to compare (#10179, from the web): its box held `[Image #n]<attached_images>`
+  and the photo's `path:` line, `pendingPrompt` saw nothing of its own, no recovery Enter went in, the window ended and
+  the send answered 200, and the leftover refused every later send to the pane as a draft for 11 minutes. Its own
+  `path:` line names the upload the send just saved under a fresh random name, so it identifies the prompt
+  (`ownPictures`); a chip alone is still nothing to tell by. Claude Code before 2.1.316 drops the `path:` lines, so
+  such a box there is not recovered.
 - Never confirm a first image prompt from quick metadata alone (#4794): its head stops at 256 KB and tail at
   384 KB, so a multi-megabyte user row can be absent from both. A real disposable Agent's normal start recorded
   the same image prompt three times while confirmation believed it had been dropped. Capture a full incremental
@@ -339,6 +409,22 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   (`~/.config/herdr/herdr.sock`) can't see each other. If "sessions opened locally through App remote aren't found", check herdr-core `terminal.list` first, not only the classic socket.
   When using both on a computer, select engine `herdr-both`: node refreshes both hosts in parallel, isolates events per host (`watcherSignals`), and always creates / resumes sessions through classic herdr
   (`docs/integrations/engines.md` ("Host sets"), `docs/plans/plan-orca-support.md` ("Combined engine")). Don't return to "refresh asks every host sequentially": a 2-second herdr-core delay slows herdr too.
+
+## Starting a headless conversation clean without changing its id (2026-11-14, #7315, Claude Code 2.1.322)
+
+Measured in `-p --input-format stream-json` against a local mock of the model API (`TestAssistantRoundLive`, build tag `roundlive`):
+
+- **`/clear` changes the session id.** Sent as a message, it answers `conversation_reset`, then a new `system/init` with a new `session_id`, and every later turn goes to `<new id>.jsonl`. The node keeps only the version and the tools of `init`, so it would go on resuming the old id with the full history while the new turns never reached the conversation's row. Following a clear would take an id indirection through the node's state, the transcript lookup, `--resume`, hooks and usage.
+- **`--session-id <an existing id>` is refused** ("Session ID … is already in use"), and `--resume --fork-session` makes a new id by definition (its help text).
+- **`--resume <id> --resume-session-at <uuid>` keeps the id and the file**: the request holds the messages up to that line and the new message, the turn is appended to the same file as a branch from that line, and a later plain `--resume` goes on from the latest branch. It is a print-mode flag (ignored interactively) and undocumented, so it is gated on the version it was measured on, the anchor is checked first, and a refused start is retried without it.
+- **It reaches only ancestors of the latest leaf**: any other uuid ends the process at once ("No message found with message.uuid of …"). A compaction starts a new chain (`compact_boundary` with a null parent), so the first turn is no ancestor any more: a conversation whose rounds start at the first turn must never be compacted, and one compacted before has to be replaced.
+- **Anchor at the end of the first turn, not its first message**: anchored at the user line, the request has the start message and the round's next to each other with no answer between them, one prompt to the model, which then also reads the start message (a role notice that needs only an acknowledgement and no tools) as part of the round. The round also becomes the latest chain, so the first turn's end is no ancestor any more.
+- **`--tools` without `ToolSearch` adds a `DeferredToolPlaceholder`** tool to the request, whatever the conversation started with (measured after a start on the default tools and after one on `--tools Bash,Read,Write,Skill`); with `ToolSearch` listed and nothing deferred the request carries only the built-ins named. Changing the tools on a resume also adds a user message listing the tools no longer available.
+- **A refused anchor looks like output**: the process prints one `result` line on stdout (`error_during_execution`, `is_error`, `num_turns: 0`, the reason in `errors`) with no `system/init` before it, says it on stderr too and exits 1. A reader that takes any stdout line for a started process misses the refusal and reports the message delivered while no process read it, so the node counts a round's process started only at its `init` and takes a result before that for no start and no turn (`readAssistant`, `TestAssistantSendSuperviseRoundStartFailureRetriesPlain` with that line).
+- **A process started with fewer tools keeps them until something restarts it**: the tools are fixed when the process starts (`--tools`, `--mcp-config`, `PERSONA_TOOL_SET`), so a switch that stops asking for the narrow set changes nothing in a process already running, and every later turn there goes on without the rest. The node therefore compares, on every send, the tool set the message needs with the one the process was started with, and replaces an idle process that differs (a plain `--resume`, no round state). A busy one must neither be cut nor take the message: a model switch lets the busy process take the message and switches at the next idle one (#1554), but here that message, and every turn after it until a later message, would still run without the rest of the tools. Holding the message at the node until the process is idle looked like the fix, but a second queue in front of Claude Code's own lost messages (a send answered as delivered whose later delivery failed, or whose connection ended), reordered them, and needed a trigger of its own for every way work can end. The node instead reports a round's process as working until it settled, so the manager's persisted relay queue keeps supervision messages back. A message that needs every tool and comes anyway (the owner's, a relay racing the row) while the process runs a turn waits for that turn inside its send, up to 30 s (the node's RPC carries no deadline; the hub and the manager give a message 90 s), then goes into a plain resume with every tool, and a Stop meanwhile ends the round at once. After that Stop the message still waits until the process exited: one that holds on past the wait's bound, or prints its turn's result on its way out, otherwise looked like a working process to join, and the message written into its closed input was lost. That bounded wait is not the queue above: the send holds the conversation's locks and answers only once the message went in, so nothing is reported delivered early and later messages wait behind it in order. Past 30 s, or with only background tasks running (they may run for hours), the message joins the process once on the round's tools and has it let go once it settled (`TestRoundProcessWorkingKeepsSupervisionQueued`, `TestAMessageWaitsForTheRoundsTurnAndGetsEveryTool`, `TestStopWhileAMessageWaitsForTheRound`, `TestAMessageWaitsForAStoppedRoundToExit`, `TestAMessageThatJoinsARoundProcessRetiresIt`). The first version only acted when a round was asked for, so turning `assistant.background_supervisor_keeps_context` on left the narrowed, never-compacted process in place.
+- **Not busy is not idle**: before replacing a headless claude for a reason of the node's own, check everything a new process would lose, not just the turn flag and background tasks. The user's `/compact` runs with no busy flag (`assistantCompact`), and a turn's `result` clears busy while a message Claude Code queued behind that turn (`command_lifecycle` `queued`) has not started yet: a restart in that gap ends the compaction unfinished or drops a message Claude Code already accepted, which only the old process's input list knew about. Silence is not idle either: Claude Code says `queued` within a millisecond of a write, so remember a message before writing it (a lifecycle line for an id the node does not know yet is dropped), and count it until a lifecycle line says what became of it; and while the line reader handles a slow line (a `result`'s transcript refresh), the lines behind it, a turn's `init` among them, wait unread, so measure the quiet from when the reader is back at the pipe. Whatever cancels and rewrites a process's input (the queue edit) holds the same lock as whatever lets the process go (`assistantLife`), or the process is let go between the cancel and the rewrite. The round's checks share one definition (`workingLocked`).
+- **A turn starts before anything streams**: in `-p` stream-json, Claude Code says `command_lifecycle` `started` 3 ms after the previous turn's `result`, prints a `system/init` as every turn begins, and its first `message_start` comes only once the model answers, seconds later. A turn it starts by itself for a finished background task's notification has no lifecycle line at all: its `init` comes 7 ms after a `result`, or 26 ms after `background_tasks_changed` emptied the list. A node that counts a turn only from `message_start` sees an idle process for seconds while a turn runs, and a restart then cuts it. So `started` and every `init` after the first mark the process busy. Since nothing announces Claude Code's own turn before its `init`, the three stops a supervision round brings about wait until the process is not working and printed nothing for a second (`assistantSettle`), then take the last look and stop it in one step under the lock the line reader marks turns with (`stopSettled`): a fresh round stopping the conversation's process, a message that needs every tool replacing a round's process, and a retired round's process being let go (`roundSettled`); a round's process also reports itself working until then. No other node action waits for the settle: the idle reaper and idle compaction keep their own checks after minutes without activity, and a restart for a model, mode or instructions change still goes by the busy flag and background tasks (measured on 2.1.322 against a local mock of the model API; `TestAStartedTurnIsNotCut`, `TestLaterInitIsATurn`).
+- **Resume cost grows with the file**: the first request came 0.24 s after the process started with a 0.4 MB transcript, 0.47 s at 32 MiB and about 0.8 s at 128 MiB (synthetic lines of about 4 KiB; real transcripts that large were not measured and may parse slower; the node's anchor scan 0.09 s and 0.35 s). The file only grows (a compaction appends to it too) and every round now restarts the process, which reads all of it, so the background supervisor is replaced past 32 MiB (`backgroundTranscriptLimit`).
 
 ## `ANTHROPIC_BASE_URL` is the gateway root: Claude Code adds `/v1/messages` (2026-11-12, #4886)
 
@@ -483,6 +569,14 @@ oh-my-zsh asks "[oh-my-zsh] Would you like to update? [Y/n]" while `~/.zshrc` lo
 
 The node now waits for the new tab's shell to settle before typing (`node/shellsettle.go`): only shells in front of the pane (no `git` or `nvm` an rc file runs) and the screen unchanged for 600 ms, at most 15 s. A question on the last line is never answered for the user: after 20 s the start ends with `shell_waiting` and the tab is kept open for 10 minutes. A typed line the shell still answers for (`rejects` / `rejectedLine` in `node/shellmiss.go`) is typed once more right away instead of waiting out `claudeStartWait`. Avoid fixed sleeps before typing into a fresh shell; read its screen and foreground processes instead.
 
+Waiting made the question certain to show, and a kept tab nobody could reach left the start failed for good (#10365): the phone could not type into it, a resend got the stored error for 10 minutes, and a Retry opened another tab that stopped on the same question. Three things together fix it:
+
+- **Turn the question off where it is asked**: what the node types arrives after the rc files ran, so it cannot help. The start tab is created with `DISABLE_AUTO_UPDATE=true` + `DISABLE_UPDATE_PROMPT=true` (never the second alone: that updates silently) and `POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true` in its shell's environment, in the same create that gives it the Agent mark `PERSONA_AGENT=1` (#10111; herdr's `tab.create` `env`, asked again without it by a herdr that refuses the field; the Herdr App's `terminal.run` `env`), and the start line unsets them again, keeping the mark, so the Agent's environment stays the user's. A second way to hand a new shell variables (ours first carried them on the context and probed `--help`) was folded into the one #10111 added: one `host.EnvLauncher` create, one old-herdr fallback. Never put them in the herdr server's environment: the user's own tabs would stop updating.
+- **Let the owner answer**: a question no variable turns off is still never answered *for* the user, but its answers go with `shell_waiting` (`questionChoices`) and a full device's pick is typed into the kept tab by `start.continue`, only while the same question is still the tab's last line and only one of the offered keys; never anything into a password prompt. The record goes back to starting under the same id (`startLog.restart`), so a resend waits for the new start instead of the old error.
+- **A retry in the kept tab fails fast**: one whose question is still open ends with `shell_waiting` at once and a renewed `kept_until`, instead of a new tab with the same question. After an answer, though, the question stays the last non-blank line until the shell prints its prompt (oh-my-zsh only moves the cursor), so that start waits it out as a new tab does. That holds for anything typed into the kept tab since its start failed, the assistant's `start.keys` too (`keptStart.typed`): its remedy is keys and then a Retry, often within a second, and a fast fail there spent a retry and invited the same key again, typed at the prompt.
+- **A key that shows after the question is not always a line waiting for Enter**: compinit's `read -q` echoes the key with no newline and has already read it (measured in a pty, 2026-11-18). An Enter "for the echo" goes to whatever reads next: a later `[Y/n]` takes its default, or the prompt gets an empty command. Questions known to read one key (`shellAsk.SingleKey`: compinit, zsh-newuser-install, powerlevel10k's wizard, oh-my-zsh's update question) get the key alone; only a line reader, or one not known (a bare `[Y/n]`), is watched for the echo.
+- **A question answered at the computer is no refusal**: the card's answer then types nothing (an answer at the prompt could run as a command) and the start runs again in the tab all the same, where the shell settles or the question there now ends it with its own answers. A `prompt_changed` refusal ("refresh before answering") left every button on the card failing until the tab closed, though the words had offered the computer as an equal way.
+
 ## Recheck a kept tab after terminal lookup (2026-11-17, #9633)
 
 A stalled Orca Agent can bind its pane while the closer looks up the terminal. A check made before that lookup
@@ -546,6 +640,8 @@ other engines' panes (Orca) keep their original error.
 - **The model service returns 200 with empty content, and the turn ends silently** (measured 2026-11-05, one gateway upstream account): the transcript contains no assistant item and no `isApiErrorMessage`, error, or `stop_reason`;
   Claude Code inserts an `isMeta` "[Your previous response had no visible output. Please continue…]" and retries once; another empty response ends the turn without terminal error, so there is no `turn_error`.
   Tasks once wrote "completed" receipts, sent done notifications, and auto-closed (#2349). Now inspect the turn's items: no reply, tool call, or image counts as interrupted.
+  A verdict that only reaches the receipt is not enough: the Agent's row still said done, so the task read "done, not seen" on every client, in the snapshot and in `agents_list` (#10187). Everything that counts a task interrupted keys on the row's `turn_error`, so the hub puts its own verdict there (`turn_error_kind` `no_output` / `stopped`, `silent_turns.go`) and keeps Session Triage from treating it as a model error.
+  Persona's own Stop (`stopReporting`'s Esc to a task Agent mid first request) can end a turn with no output and no "[Request interrupted by user]" line, so the transcript alone reads it as a model failure; the hub notes the agents it interrupts and calls such a turn stopped.
 - **Codex writes no reply when interrupted by the model service** (measured 2026-11-05, Codex 0.166, fake service returning 503): rollout has only this turn's `task_complete`, with `last_agent_message`
   `null` and the error in `error` (`{"message":"unexpected status 503 …","codex_error_info":{"http_connection_failed":{"http_status_code":503}}}`);
   app-server reports `turn/completed` with `turn.status: "failed"` + `turn.error` (camelCase `codexErrorInfo`). Last-text-only `turn_error` is always empty for Codex:
@@ -621,6 +717,7 @@ Quota can recover before the reported reset. Skipping every on-demand probe unti
 ## Claude status line (2026-11-05, #1963)
 
 - Working Claude draws `✻ Frosting… (16m 15s · ↓ 22.8k tokens · thinking with xhigh effort)` above the input box: spinner characters change each frame, parenthesized segments may be absent or reordered (`thought for 1s`, `esc to interrupt`), and ↑ means input tokens. An identical line quoted in the conversation isn't a status line; take the last line above the input box (`screen.AboveInputBox`, `node/claudestatus.go`). When a pane is scrolled up, visible content has no status line.
+- A model retry does not use the ordinary `verb… (…)` grammar: 2.1.326 draws `✻ 429 <error> · retrying in 4s · attempt 5/10` (a 500 has the same shape, and an early line can be only `API Error`). Parse the observed error and attempts before the normal spinner pattern, leave the countdown out, and clear on normal work, line removal, turn end and unwatch; elapsed time alone is not error evidence (#887).
 
 ## Changing Codex app-server effort: validate levels yourself; `null` means model default (2026-11-04, #1709)
 
@@ -1134,6 +1231,16 @@ Native settings and `session/new` can disagree even when the configured model is
 IDs against the catalog and apply the configured default explicitly to new sessions and availability checks. Preserve
 explicit caller choices and the native state of resumed conversations. Announce a model only after ACP accepts it.
 
+## A long-running agy acp keeps the account it saw (#10368)
+
+`agy acp` kept the model list it read when the plan lapsed after the user renewed and signed in again: `session/set_model`
+failed with `Unknown model ID` until the process was restarted, and each `session/new` published the stale list over the
+five-minute `agy models` discovery. Treat a discovery that began after the ACP process started as the newer source, and
+compare by process generation rather than wall-clock time. Pending requests do not show who uses the process: a call
+between two requests, or a native read over HTTP, has none. Hold a lease for each call, turn and read, replace only when
+no other lease is held, with no await between that check and the replacement, and make new users wait for it. Retry once,
+and test with a fake whose ACP side reads the account once at startup.
+
 ## Codex speed has separate native metadata (#3865)
 
 Reasoning effort and speed are independent. Read `serviceTiers` rather than deriving Fast support from a model name,
@@ -1272,6 +1379,11 @@ The peer inbox frames every message as another session's, and no wording in it m
 it: the same "I approve: create the file" was refused through the inbox and when a plugin submitted it framed, and
 accepted only through `$.prompt.submit({ asUser: true })` (Claude Code 2.1.291, 2.1.299 and 2.1.308). Do not try to
 argue the model round in the inbox prompt (#5965). Things that cost time while measuring it:
+
+- An outside Claude's tmux pane is terminal input too, and takes precedence over both plugin and inbox for a verified
+  owner's ordinary message. Let it fall through to the ordinary pane checks and transcript confirmation rather than
+  adding a second typing path; a message without that verified mark must never fall through when the inbox is absent.
+  Keep `plugin_input` off that row because the pane, not the plugin, now carries its owner's message (#5965).
 
 - A `claude` started from inside a desktop-app session inherits that host's provider variables
   (`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, its `ANTHROPIC_BASE_URL`) but not its credentials, and answers "Not logged

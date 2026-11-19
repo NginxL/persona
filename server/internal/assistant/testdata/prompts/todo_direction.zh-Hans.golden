@@ -1,0 +1,9 @@
+<persona-context kind="context" title="方向 · Weather · 说明" url="">
+这件事属于方向「Weather」。下面是用户给这个方向所有任务写的说明，照着做；和任务本身的要求冲突时，以任务为准。
+
+知识库项目：Weather app
+目标：Ship on iOS and Android
+
+- Readings: the store build number
+- Never deploy on Fridays
+</persona-context>

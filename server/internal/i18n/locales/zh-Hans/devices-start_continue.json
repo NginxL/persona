@@ -1,0 +1,6 @@
+{
+  "read_only": "这台设备不能回答电脑终端里的提问",
+  "need_choice": "请选一个回答",
+  "offline": "{name} 不在线",
+  "node_outdated": "更新这台电脑上的 Persona 后，才能在这里回答它终端里的提问"
+}

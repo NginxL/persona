@@ -17,6 +17,38 @@ import (
 // contextBlockRe is one attributed block (the bare snapshot, ContextRe, is dropped before this).
 var contextBlockRe = lazyre.New(`(?s)(<` + compat.ContextPattern() + `\b[^>]*>)(.*?)(</` + compat.ContextPattern() + `>)`)
 
+var contextAttrRe = lazyre.New(`\s+(\w+)="([^"]*)"`)
+
+const interjectTitle = "插话" // i18n-ignore: canonical model-context title, not UI copy.
+
+// StripInterject removes the node's model-only mid-turn acknowledgement note
+// from presentation and echo matching. Keep owner-selected context inspectable;
+// the input written to the model is unchanged. The canonical title is pinned by
+// node.TestInterjectNote and recognized by the clients for older servers.
+func StripInterject(s string) string {
+	// Ordinary snapshots can be large. Avoid scanning and copying their blocks
+	// unless the canonical title (possibly encoded as numeric entities) can occur.
+	if !strings.Contains(s, "-context") || (!strings.Contains(s, interjectTitle) && !strings.Contains(s, "&#")) {
+		return s
+	}
+	return contextBlockRe.ReplaceAllStringFunc(s, func(block string) string {
+		kind, title := "context", ""
+		head := block[:strings.IndexByte(block, '>')]
+		for _, attr := range contextAttrRe.FindAllStringSubmatch(head, -1) {
+			switch attr[1] {
+			case "kind":
+				kind = html.UnescapeString(attr[2])
+			case "title":
+				title = html.UnescapeString(attr[2])
+			}
+		}
+		if kind == "context" && title == interjectTitle {
+			return ""
+		}
+		return block
+	})
+}
+
 // legacyLarkAgentRe is a Feishu /agent prompt as hub wrote it before the instructions moved into a block: an intro line,
 // then a request heading (what was asked), a context heading (blocks, plus a loose line or two), and a how-to heading (the rules).
 var legacyLarkAgentRe = lazyre.New(`(?s)^([^\n]*(?:用 /agent 叫你|又(?:发|写)了一条 /agent 请求)[^\n]*)\n+## 请求\n+(.*?)\n+## 上下文\n+(.*)\n+## 怎么做\n+(.*?)\s*$`)

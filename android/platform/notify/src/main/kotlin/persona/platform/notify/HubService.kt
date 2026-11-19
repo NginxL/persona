@@ -21,6 +21,7 @@ import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.SessionsRepository
 import persona.core.contracts.api.VerifiedSessionsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,71 +83,78 @@ open class HubService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        if (starts.promoted() || journal.userStopped || !pairing.isPaired.value) {
+        if (starts.promoted() || journal.userStopped) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        running = true
-        if (!observing) {
-            observing = true
-            scope.launch {
-                fleet.start()
-                // Only finished agents left for a while: back to the connection line (the hub's fleet stays as it is).
-                val quiet = fleet.state.map { FleetSummary.phase(it) == FleetSummary.DONE }.distinctUntilChanged()
-                    .transformLatest { done ->
-                        emit(false)
-                        if (done) { delay(FleetSummary.DONE_LINGER_MILLIS); emit(true) }
-                    }.stateIn(this, SharingStarted.Eagerly, false)
-                // "Show details on lock screen" decides whether names show at all (OngoingStatus.from); any other preference may change how
-                // the same content is drawn (visibility, promotion), so a change redraws.
-                launch {
-                    notificationPreferences.preferences.collect { preferences ->
-                        show(OngoingStatus.from(connection.state.value, fleet.state.value, quiet.value,
-                            details = preferences?.lockDetails == true, pending = interactions.pending.value))
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            pairing.restore()
+            if (!pairing.isPaired.value) {
+                stopSelf(startId)
+                return@launch
+            }
+            running = true
+            if (!observing) {
+                observing = true
+                scope.launch {
+                    fleet.settled()
+                    // Only finished agents left for a while: back to the connection line (the hub's fleet stays as it is).
+                    val quiet = fleet.state.map { FleetSummary.phase(it) == FleetSummary.DONE }.distinctUntilChanged()
+                        .transformLatest { done ->
+                            emit(false)
+                            if (done) { delay(FleetSummary.DONE_LINGER_MILLIS); emit(true) }
+                        }.stateIn(this, SharingStarted.Eagerly, false)
+                    // "Show details on lock screen" decides whether names show at all (OngoingStatus.from); any other preference may change how
+                    // the same content is drawn (visibility, promotion), so a change redraws.
+                    launch {
+                        notificationPreferences.preferences.collect { preferences ->
+                            show(OngoingStatus.from(connection.state.value, fleet.state.value, quiet.value,
+                                details = preferences?.lockDetails == true, pending = interactions.pending.value))
+                        }
+                    }
+                    // The open cards say whether the first permission may be allowed from here (#4987).
+                    combine(connection.state, fleet.state, quiet, notificationPreferences.preferences, interactions.pending) { state, snapshot, done, preferences, pending ->
+                        OngoingStatus.from(state, snapshot, done, details = preferences?.lockDetails == true, pending = pending)
+                    }.throttleOngoing().collect { status ->
+                        if (status != shown) show(status)
                     }
                 }
-                // The open cards say whether the first permission may be allowed from here (#4987).
-                combine(connection.state, fleet.state, quiet, notificationPreferences.preferences, interactions.pending) { state, snapshot, done, preferences, pending ->
-                    OngoingStatus.from(state, snapshot, done, details = preferences?.lockDetails == true, pending = pending)
-                }.throttleOngoing().collect { status ->
-                    if (status != shown) show(status)
-                }
-            }
-            scope.launch {
-                val delivery = NotificationDelivery(interactions, sessions, ::suppressed,
-                    notifier::postInteraction, notifier::postNotify, notifier::retract,
-                    notificationPreferences::refreshPreferences, notifier::deliveredRequests)
-                Notify.events.notificationEvents().collect { event ->
-                    try {
-                        // Bound refresh work without terminating observation on a transient HTTP failure.
-                        withTimeout(8_000) { delivery.accept(event) }
-                    } catch (failure: Exception) {
-                        if (failure is CancellationException && failure !is kotlinx.coroutines.TimeoutCancellationException) throw failure
-                        Log.w(TAG, "Notification refresh failed: ${failure.javaClass.simpleName}")
+                scope.launch {
+                    val delivery = NotificationDelivery(interactions, sessions, ::suppressed,
+                        notifier::postInteraction, notifier::postNotify, notifier::retract,
+                        notificationPreferences::refreshPreferences, notifier::deliveredRequests)
+                    Notify.events.notificationEvents().collect { event ->
+                        try {
+                            // Bound refresh work without terminating observation on a transient HTTP failure.
+                            withTimeout(8_000) { delivery.accept(event) }
+                        } catch (failure: Exception) {
+                            if (failure is CancellationException && failure !is kotlinx.coroutines.TimeoutCancellationException) throw failure
+                            Log.w(TAG, "Notification refresh failed: ${failure.javaClass.simpleName}")
+                        }
                     }
                 }
-            }
-            // Requests answered elsewhere while a reconnect did not resume (#3401).
-            scope.launch(Dispatchers.Default) {
-                InteractionNotificationReconciler(notifier::showingRequests, notifier::retract)
-                    .run(interactions.pending, connection.state.map { it == ConnectionState.Online },
-                        sessions.machines.map { list -> list.mapTo(HashSet()) { GroupKeys.namespaceOf(it.id) } })
-            }
-            // "Finished" notifications left by an earlier process, for sessions seen meanwhile (#4088).
-            (sessions as? VerifiedSessionsRepository)?.let { verified ->
+                // Requests answered elsewhere while a reconnect did not resume (#3401).
                 scope.launch(Dispatchers.Default) {
-                    // Process start on the wall clock (postTime's clock); a clock change since then only shifts the cut-off.
-                    val since = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
-                    StaleDoneNotifications(notifier::showingDone, { verified.verifiedSessions().values.flatten() }, notifier::retractDone, since)
-                        .run(connection.state.map { it == ConnectionState.Online }.distinctUntilChanged())
+                    InteractionNotificationReconciler(notifier::showingRequests, notifier::retract)
+                        .run(interactions.pending, connection.state.map { it == ConnectionState.Online },
+                            sessions.machines.map { list -> list.mapTo(HashSet()) { GroupKeys.namespaceOf(it.id) } })
                 }
+                // "Finished" notifications left by an earlier process, for sessions seen meanwhile (#4088).
+                (sessions as? VerifiedSessionsRepository)?.let { verified ->
+                    scope.launch(Dispatchers.Default) {
+                        // Process start on the wall clock (postTime's clock); a clock change since then only shifts the cut-off.
+                        val since = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime())
+                        StaleDoneNotifications(notifier::showingDone, { verified.verifiedSessions().values.flatten() }, notifier::retractDone, since)
+                            .run(connection.state.map { it == ConnectionState.Online }.distinctUntilChanged())
+                    }
+                }
+                scope.launch {
+                    pairing.isPaired.collect { if (!it && !starts.deferStop()) stopSelf() }
+                }
+                // Network changes are the connection's own business (it reconnects only when the network really changed,
+                // #4139); a second callback here tore every change down twice and an online connection down at each start.
+                ResidentConnection.resume(connection)
             }
-            scope.launch {
-                pairing.isPaired.collect { if (!it && !starts.deferStop()) stopSelf() }
-            }
-            // Network changes are the connection's own business (it reconnects only when the network really changed,
-            // #4139); a second callback here tore every change down twice and an online connection down at each start.
-            ResidentConnection.resume(connection)
         }
         return START_STICKY
     }

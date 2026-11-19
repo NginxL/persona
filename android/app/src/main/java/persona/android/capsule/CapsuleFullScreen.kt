@@ -25,7 +25,10 @@ internal data class CapsulePresentation(
 @Composable
 internal fun CapsuleFullScreen(runtime: CapsuleRuntime, onReturn: () -> Unit) {
     val presentation by runtime.presentation.collectAsState()
-    val current = presentation ?: return
+    val current = presentation ?: run {
+        androidx.compose.runtime.LaunchedEffect(runtime) { runtime.leaveFullScreen() }
+        return
+    }
     val content by current.source.content.collectAsState()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val active = lifecycle.isAtLeast(Lifecycle.State.RESUMED) && LocalWindowInfo.current.isWindowFocused

@@ -331,6 +331,9 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 		return
 	}
 	close(prog.done)
+	if id := r.Ext["clarify"]; id != "" {
+		s.clarificationChannelEnded(id, r.ID)
+	}
 	s.channelsChanged()
 	if ts, ok := sink.(channelTyping); ok && !others {
 		ts.typing(ctx, false)

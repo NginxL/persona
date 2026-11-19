@@ -57,4 +57,14 @@ struct ComposerModesTitleTests {
         #expect(SessionModes.composerTitle(model: nil, effort: "很高") == .init(model: "思考", effort: "很高"))
         #expect(SessionModes.composerTitle(model: nil, effort: nil) == nil)
     }
+
+    @Test func starterLauncherLegacyDefaultMatchesAnEmptyModel() {
+        let modes = StarterComposer.ShellModes(launcher: .constant("old"), mode: .constant(""), effort: .constant(""))
+        let app = AppModel()
+        let legacy = StarterModesMenu.title(modes: modes, launchers: [Launcher(name: "old", model: "默认")], model: app)
+        #expect(legacy == StarterModesMenu.title(modes: modes, launchers: [Launcher(name: "old")], model: app))
+        #expect(legacy?.model != "默认")
+        let explicit = StarterModesMenu.title(modes: modes, launchers: [Launcher(name: "old", model: "claude-opus-5-5")], model: app)
+        #expect(explicit?.model == "Opus 5.5")
+    }
 }

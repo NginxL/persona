@@ -130,6 +130,7 @@ type Peer struct {
 	wsem         chan struct{}
 	nextID       atomic.Int64
 	pingActivity atomic.Int64 // unix nanoseconds; the latest input that can explain a late pong (PingActivity)
+	lastWrite    atomic.Int64 // unix nanoseconds; the latest write that went through (LastWrite)
 	writeWaiters atomic.Int64
 	mu           sync.Mutex
 	pending      map[string]chan message
@@ -151,6 +152,26 @@ type Peer struct {
 	// then (sorted; a method twice for two calls): they fail with ErrDropped or ErrClosed, which alone says nothing of
 	// what was cut off. Called from Close, outside the peer's lock; set it before Serve or any call.
 	OnClose func(err error, inflight []string)
+
+	// LineFilter, when set, rewrites each line this side writes, newline included, just before it goes out (the node
+	// hides the values handed to Agent starts, node/secretenv.go); it must keep the line one line. Once lanes are on,
+	// the frame writer calls it while other goroutines write. LineWritten, when set, is told of each line as it was
+	// encoded (before LineFilter) once all of it is written. Set both before Serve or any call.
+	LineFilter  func([]byte) []byte
+	LineWritten func([]byte)
+	// OnLanes, when set, is told once this side's output is framed (lanes.go), whenever that is: an answer to
+	// UpgradeLanes after its caller stopped waiting still switches. Set it before Serve.
+	OnLanes func()
+
+	// Lanes (lanes.go): the table EnableLanes set (nil: this peer never frames), the frame writer once either direction
+	// is framed (mu), set as out once this side's output is, this side's rpc.lanes call until its answer is read (mu),
+	// whether this side answered one (mu), and closed once this side's output is framed.
+	lanes      laneTable
+	lw         *laneWriter
+	out        atomic.Pointer[laneWriter]
+	lanesCall  string
+	lanesAsked bool
+	lanesUp    chan struct{}
 
 	running map[string]context.CancelFunc // requests being handled, by id: what a cancelEvent ends
 	// Only bounded peers couple accepted work to closure; legacy peers retain their cancellation semantics.
@@ -194,6 +215,16 @@ func New(prefix string, w io.Writer) *Peer {
 // line that cannot be decoded still counts, as nothing shows it is not a reply.
 func (p *Peer) PingActivity() time.Time {
 	ns := p.pingActivity.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
+// LastWrite is when this peer last wrote to its transport and the write went through: a line, or framed, a batch of
+// frames. Zero before the first. A writer held up for good (a peer that stopped reading) shows as no progress.
+func (p *Peer) LastWrite() time.Time {
+	ns := p.lastWrite.Load()
 	if ns == 0 {
 		return time.Time{}
 	}
@@ -283,13 +314,16 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 		maximum = p.Limits.FrameBytes
 	}
 	act := &readActivity{r: r}
-	sc := newLineReader(act, maximum)
+	lr := newLineReader(act, maximum)
 	// lastReply is when the latest reply, or line that could be one (it did not decode), arrived. The middle of a frame
 	// counts only while that frame is still arriving (lineReader.middle); when the line is whole, activity goes back to
 	// the last reply, so a large request or event the other side started cannot keep clearing misses once it is
-	// through: a pong behind it would then be the next line and arrive as a reply.
-	var lastReply int64
-	sc.middle = func() { p.pingActivity.Store(act.at) }
+	// through: a pong behind it would then be the next line and arrive as a reply. Framed (lanes.go), a line's frames
+	// in between count the same way (frameReader.middle).
+	var lastReply, middleAt int64
+	lr.middle = func() { middleAt = act.at; p.pingActivity.Store(act.at) }
+	var sc lineSource = lr
+	framed := false
 	for sc.Scan() {
 		readAt := act.at
 		var m message
@@ -305,10 +339,27 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 		// A reply counts before any synchronous callback can block, and with no caller left too: one that comes after its
 		// ping gave up still shows that the ping got there. A deadline alone does not count: only the rest of its raw
 		// read, classified now, can prove later activity. The same read-ahead applies behind an ordinary request/event.
-		if replyMessage(m) && !deadlineMessage(m) || bufferedActivity(sc.buffered()) {
+		if p.lanes != nil && m.Event == lanesMethod {
+			// The other side's last line: frames follow, and what was read behind it is not lines.
+			if !framed && p.answeredLanes() {
+				sc, framed = p.framedInput(lr, act, maximum), true
+			}
+			continue
+		}
+		if replyMessage(m) && !deadlineMessage(m) || sc.aheadActivity() {
 			lastReply = readAt
 		}
-		p.pingActivity.Store(lastReply)
+		activity := lastReply
+		if middleAt > activity && sc.holding() {
+			// Framed, lines finish while a long one goes on arriving beside them: the activity its middle gave stands
+			// until it is whole, as it does with lines, where nothing finishes in between.
+			activity = middleAt
+		}
+		p.pingActivity.Store(activity)
+		if p.lanes != nil && m.Method == lanesMethod && m.ID != "" { // the other side asks for frames
+			go p.answerLanes(m)
+			continue
+		}
 		switch {
 		case m.Method != "":
 			// Registered before the handler starts: a cancel right behind the request finds it.
@@ -347,7 +398,17 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 			}
 			delete(p.pending, m.ID)
 			delete(p.methods, m.ID)
+			lanesAnswer := m.ID == p.lanesCall
+			if lanesAnswer {
+				p.lanesCall = ""
+			}
 			p.mu.Unlock()
+			// The answer to this side's rpc.lanes is the other side's last line, whether or not its caller still
+			// waits: frames follow it, and this side's own output follows suit.
+			if lanesAnswer && !framed && lanesAccepted(m) {
+				sc, framed = p.framedInput(lr, act, maximum), true
+				go p.switchOutput(message{Event: lanesMethod, Params: lanesMarker})
+			}
 		}
 	}
 	err := sc.Err()
@@ -394,17 +455,18 @@ func (p *Peer) handle(ctx context.Context, m message) {
 			out.Result = b
 		}
 	}
-	if err := p.write(out); errors.Is(err, errFrameBudget) {
+	r := p.lanes.reply(m.Method)
+	if err := p.write(out, r); errors.Is(err, errFrameBudget) {
 		// The request must get an error, not a permanently unresolved promise.
 		// If even the error cannot fit, disconnect so all pending calls fail.
-		if err := p.write(message{ID: m.ID, Error: &Error{Message: errFrameBudget.Error()}}); err != nil {
+		if err := p.write(message{ID: m.ID, Error: &Error{Message: errFrameBudget.Error()}}, r); err != nil {
 			p.Close(err)
 		}
 	}
 }
 
-func (p *Peer) write(m message) error {
-	return p.writeContext(context.Background(), m)
+func (p *Peer) write(m message, r route) error {
+	return p.writeContext(context.Background(), m, r)
 }
 
 // encodeLine is marshal(m) and its newline, encoded into one buffer: the same bytes and errors without copying the
@@ -439,8 +501,8 @@ func plainEncoder(w io.Writer) *json.Encoder {
 	return enc
 }
 
-func (p *Peer) writeContext(ctx context.Context, m message) error {
-	_, err := p.writeContextObserved(ctx, m)
+func (p *Peer) writeContext(ctx context.Context, m message, r route) error {
+	_, err := p.writeContextObserved(ctx, m, r)
 	return err
 }
 
@@ -450,14 +512,18 @@ type writeObservation struct {
 }
 
 // writeContextObserved also reports whether this message had to wait behind another writer before reaching the wire,
-// and how much of the caller's deadline remained when the write finished.
-func (p *Peer) writeContextObserved(ctx context.Context, m message) (writeObservation, error) {
+// and how much of the caller's deadline remained when the write finished. r is where it goes once the output is framed
+// (lanes.go).
+func (p *Peer) writeContextObserved(ctx context.Context, m message, r route) (writeObservation, error) {
 	b, err := encodeLine(m)
 	if err != nil {
 		return writeObservation{}, err
 	}
 	if p.Limits.FrameBytes > 0 && len(b) > p.Limits.FrameBytes {
 		return writeObservation{}, errFrameBudget
+	}
+	if lw := p.out.Load(); lw != nil {
+		return p.writeFramed(ctx, lw, b, r)
 	}
 	// Wait for the writer, but not past the caller or the connection: the write ahead may never finish. A write
 	// already under way cannot be interrupted. Try the immediate acquisition first so delayed means another write held
@@ -480,6 +546,12 @@ func (p *Peer) writeContextObserved(ctx context.Context, m message) (writeObserv
 			return observation, NotSent(ErrClosed)
 		}
 	}
+	if lw := p.out.Load(); lw != nil { // framed while this line waited: it goes as frames
+		<-p.wsem
+		framedObservation, err := p.writeFramed(ctx, lw, b, r)
+		framedObservation.delayed = framedObservation.delayed || observation.delayed
+		return framedObservation, err
+	}
 	defer func() { <-p.wsem }()
 	// Both may have become ready together and select picks at random: check again so a cancelled request never
 	// reaches the wire.
@@ -491,11 +563,31 @@ func (p *Peer) writeContextObserved(ctx context.Context, m message) (writeObserv
 		return observation, NotSent(ErrClosed)
 	default:
 	}
-	_, err = p.w.Write(b)
+	err = p.writeLine(b)
 	if deadline, ok := ctx.Deadline(); ok {
 		observation.remaining = deadline.Sub(time.Now())
 	}
 	return observation, err
+}
+
+// writeLine writes b, a whole line, as a line (the caller holds wsem): through LineFilter, all of it or an error, then
+// LineWritten.
+func (p *Peer) writeLine(b []byte) error {
+	line := b
+	if p.LineFilter != nil {
+		line = p.LineFilter(b)
+	}
+	n, err := p.w.Write(line)
+	if err == nil && n != len(line) {
+		err = io.ErrShortWrite // a writer that breaks io.Writer's rule must not pass for one that wrote the line
+	}
+	if err == nil {
+		p.lastWrite.Store(time.Now().UnixNano())
+	}
+	if err == nil && p.LineWritten != nil {
+		p.LineWritten(b)
+	}
+	return err
 }
 
 // Call sends a request and decodes the result into out (if non-nil). Params that are Appended are written straight
@@ -542,7 +634,7 @@ func (p *Peer) Call(ctx context.Context, method string, params any, out any) err
 		}
 		req = message{ID: id, Method: method, Params: raw}
 	}
-	writeObservation, err := p.writeContextObserved(ctx, req)
+	writeObservation, err := p.writeContextObserved(ctx, req, p.lanes.request(method))
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil && errors.Is(err, cerr) {
 			return notWrittenError{err} // waited for the writer (a long write ahead) and gave up: never on the wire
@@ -555,7 +647,7 @@ func (p *Peer) Call(ctx context.Context, method string, params any, out any) err
 	case <-ctx.Done():
 		if p.Cancels[method] {
 			params, _ := json.Marshal(map[string]string{"id": id})
-			_ = p.write(message{Event: cancelEvent, Params: params})
+			_ = p.write(message{Event: cancelEvent, Params: params}, controlRoute)
 		}
 		if writeObservation.delayed {
 			return writeDelayedError{err: ctx.Err(), remaining: writeObservation.remaining}
@@ -587,9 +679,10 @@ func (p *Peer) Notify(event string, params any) error {
 // NotifyContext bounds waiting for the writer. Once writing starts, the transport owner must close a stalled
 // connection to interrupt it; cancellation alone cannot stop an arbitrary io.Writer.
 func (p *Peer) NotifyContext(ctx context.Context, event string, params any) error {
+	r := p.lanes.eventRoute(event)
 	if raw, ok := params.(Marshaled); ok {
 		if line, ok := marshaledLine(event, raw); ok {
-			return p.writeContext(ctx, message{line: line})
+			return p.writeContext(ctx, message{line: line}, r)
 		}
 		params = json.RawMessage(raw)
 	}
@@ -597,13 +690,13 @@ func (p *Peer) NotifyContext(ctx context.Context, event string, params any) erro
 	// with the same errors, so the line is the same without encoding them twice (a computer's session list each time
 	// it changes). An empty one is what json.Marshal says it is (an error).
 	if raw, ok := params.(json.RawMessage); ok && len(raw) > 0 {
-		return p.writeContext(ctx, message{Event: event, Params: raw})
+		return p.writeContext(ctx, message{Event: event, Params: raw}, r)
 	}
 	raw, err := marshal(params)
 	if err != nil {
 		return err
 	}
-	return p.writeContext(ctx, message{Event: event, Params: raw})
+	return p.writeContext(ctx, message{Event: event, Params: raw}, r)
 }
 
 func (p *Peer) Close(err error) {

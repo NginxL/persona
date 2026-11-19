@@ -226,11 +226,12 @@ func codexDraft(raw, plain []string, i int, noColor bool) string {
 		end--
 	} else if end > i+2 {
 		last := strings.TrimSpace(plain[end-1])
-		if (strings.HasPrefix(last, "? for shortcuts") || strings.HasPrefix(last, "← for agents · ? for shortcuts")) &&
-			codexStatusRE.MatchString(plain[end-2]) {
+		if strings.HasPrefix(last, "? for shortcuts") || strings.HasPrefix(last, "← for agents · ? for shortcuts") {
 			// Match the status/path and shortcut footer together at the bottom, not model names or hint text
-			// inside a multiline draft. Real text above this pair remains protected from remote input.
-			end -= 2
+			// inside a multiline draft. Real text above the footer remains protected from remote input.
+			if s := codexStatusStart(plain, i, end-1); s >= 0 {
+				end = s
+			}
 		}
 	}
 	for k := i; k < end; k++ {
@@ -256,6 +257,35 @@ func codexDraft(raw, plain []string, i int, noColor bool) string {
 		return ""
 	}
 	return draft
+}
+
+// codexStatusWrapRows is how many rows a status row may take once the pane wraps it (model · path · thread title ·
+// profile on a narrow pane).
+const codexStatusWrapRows = 4
+
+// codexStatusStart is the first row of the status row that ends right above hint, or -1. A status row wider than
+// the pane wraps onto indented rows, so it is matched with those rows joined back, which also covers a wrap that
+// falls before the path. Rows at or above the › row at i are never part of it. The status row starts with the model
+// and its separator, so a row that starts with a separator (a continuation) or has none cannot start it: a draft
+// line such as "some text" above "· /work/example" stays a draft.
+func codexStatusStart(plain []string, i, hint int) int {
+	for k := hint - 1; k > i && k >= hint-codexStatusWrapRows; k-- {
+		t := strings.TrimSpace(plain[k])
+		if t == "" || !strings.HasPrefix(plain[k], "  ") {
+			return -1
+		}
+		if strings.HasPrefix(t, "·") || !strings.Contains(t, " ·") {
+			continue
+		}
+		joined := plain[k]
+		for _, l := range plain[k+1 : hint] {
+			joined += " " + strings.TrimSpace(l)
+		}
+		if codexStatusRE.MatchString(joined) {
+			return k
+		}
+	}
+	return -1
 }
 
 // undimmed is a colored row's text without its dim runs.

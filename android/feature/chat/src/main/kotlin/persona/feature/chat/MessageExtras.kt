@@ -41,23 +41,35 @@ internal fun cutText(text: String): String {
     return if (at >= 0) text.substring(0, at) else text
 }
 
-/** "12 KB", "3.4 MB": decimal units, like iOS `ByteCountFormatter`. */
-internal fun formatBytes(bytes: Long, resources: Resources): String = when {
-    bytes >= 1_000_000_000 -> String.format(Locale.ROOT, "%.1f GB", bytes / 1e9)
-    bytes >= 1_000_000 -> String.format(Locale.ROOT, "%.1f MB", bytes / 1e6)
-    bytes >= 1_000 -> "${bytes / 1000} KB"
-    else -> resources.getQuantityString(R.plurals.chat_bytes, bytes.toInt(), bytes.toInt())
+/**
+ * "12 KB", "3.4 MB": decimal units, like iOS `ByteCountFormatter`. Rounded before the unit is picked, as the machine pages'
+ * `MetricFormat.bytes`: kilobytes to the nearest, and a size that rounds up to the next unit is shown in it (999,999 bytes
+ * is 1.0 MB, not 1000 KB; 999.95 MB is 1.0 GB, not 1000.0 MB) (#9890).
+ */
+internal fun formatBytes(bytes: Long, resources: Resources): String {
+    val kb = (bytes + 500) / 1_000
+    val mbTenths = (bytes + 50_000) / 100_000
+    return when {
+        bytes < 1_000 -> resources.getQuantityString(R.plurals.chat_bytes, bytes.toInt(), bytes.toInt())
+        kb < 1_000 -> "$kb KB"
+        mbTenths < 10_000 -> String.format(Locale.ROOT, "%.1f MB", mbTenths / 10.0)
+        else -> String.format(Locale.ROOT, "%.1f GB", (bytes + 50_000_000) / 100_000_000 / 10.0)
+    }
 }
 
-/** "Just now", "5 min ago", "3 hr ago", "Yesterday 17:05", "Oct 3", in the language of [resources]. */
+/**
+ * "Just now", "5 min ago", "3 hr ago", "Yesterday 17:05", "Oct 3", in the language of [resources]. Yesterday is the day
+ * before [now]'s in [zone], as on iOS and the web, not any time 24 to 48 hours back (#9878).
+ */
 internal fun relativeTime(time: Instant, now: Instant, resources: Resources, zone: ZoneId = ZoneId.systemDefault()): String {
     val seconds = Duration.between(time, now).seconds.coerceAtLeast(0)
     val locale = resources.configuration.locales[0]
+    val yesterday = time.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate().minusDays(1)
     return when {
         seconds < 60 -> resources.getString(R.string.chat_time_just_now)
         seconds < 3600 -> (seconds / 60).toInt().let { resources.getQuantityString(R.plurals.chat_time_minutes_ago, it, it) }
         seconds < 86_400 -> (seconds / 3600).toInt().let { resources.getQuantityString(R.plurals.chat_time_hours_ago, it, it) }
-        seconds < 2 * 86_400 -> resources.getString(R.string.chat_time_yesterday, LocalizedFormats.format(time, LocalizedFormats.TIME, locale, zone))
+        yesterday -> resources.getString(R.string.chat_time_yesterday, LocalizedFormats.format(time, LocalizedFormats.TIME, locale, zone))
         else -> LocalizedFormats.format(time, LocalizedFormats.MONTH_DAY, locale, zone)
     }
 }

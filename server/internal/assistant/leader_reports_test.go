@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -131,15 +132,15 @@ func TestLeaderReportsStuckOncePerDay(t *testing.T) {
 	e.s.todos.mu.Unlock()
 	start := time.Now()
 
-	if got := e.reports(start.Add(23*time.Hour), true); len(got) != 0 {
-		t.Fatalf("under a day: %+v", got)
+	if got := e.reports(start.Add(119*time.Minute), true); len(got) != 0 {
+		t.Fatalf("under two hours: %+v", got)
 	}
-	got := e.reports(start.Add(25*time.Hour), true)
+	got := e.reports(start.Add(121*time.Minute), true)
 	if len(got) != 1 || got[0].Todo != idle || got[0].Kind != "stuck" || !strings.Contains(got[0].Text, "Stopped unfinished") {
 		t.Fatalf("stuck: %+v", got)
 	}
 	first := got[0].ID
-	if got = e.reports(start.Add(26*time.Hour), true); len(got) != 0 {
+	if got = e.reports(start.Add(3*time.Hour), true); len(got) != 0 {
 		t.Fatalf("stuck again within the day: %+v", got)
 	}
 	// Only the loop reads stuck tasks (it asks the machines): a change's read does not.
@@ -173,5 +174,78 @@ func TestLeaderReportsStuckWaitingAndEndedLeader(t *testing.T) {
 	e.review(b, reviewAccepted, "")
 	if got = e.reports(time.Now().Add(80*time.Hour), true); len(got) != 0 {
 		t.Fatalf("an ended leader's tasks: %+v", got)
+	}
+}
+
+func TestTaskStuckEstimateBoundaries(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name        string
+		supervision *Supervision
+		after       time.Duration
+	}{
+		{"no supervision", nil, 2 * time.Hour},
+		{"no estimate", &Supervision{}, 2 * time.Hour},
+		{"short estimate", &Supervision{ExpectMinutes: 30}, 2 * time.Hour},
+		{"long estimate", &Supervision{ExpectMinutes: 180}, 270 * time.Minute},
+		{"maximum estimate", &Supervision{ExpectMinutes: 1440}, 36 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Todo{Supervision: tc.supervision, Agents: []TodoAgent{{SessionID: "worked"}}}
+			tr := todoTriage{Section: triageOther, Last: now.Add(-tc.after)}
+			if taskStuck(task, tr, true, now.Add(-time.Nanosecond)) {
+				t.Fatal("stuck before threshold")
+			}
+			if !taskStuck(task, tr, true, now) {
+				t.Fatal("not stuck at threshold")
+			}
+			if taskStuck(task, tr, false, now) {
+				t.Fatal("offline task reported stuck")
+			}
+			task.DoneAt = &now
+			if taskStuck(task, tr, true, now) {
+				t.Fatal("completed task reported stuck")
+			}
+			task.DoneAt, task.Agents = nil, nil
+			if taskStuck(task, tr, true, now) {
+				t.Fatal("not-started task reported stuck")
+			}
+			tr.Section = triageWaiting
+			if !taskStuck(task, tr, true, now) {
+				t.Fatal("waiting task not stuck at threshold")
+			}
+		})
+	}
+	t.Run("sub-day reports", checkLeaderStuckSubDayWording)
+}
+
+// A short task can be stuck within its first day. The localized report must not turn
+// that signal into a one-day age claim; the supervision and briefing have P1 goldens.
+// Keep these cases under the existing estimate-boundary test: the shared runner partitions
+// top-level names round-robin, so adding a new name would reassign unrelated tests.
+func checkLeaderStuckSubDayWording(t *testing.T) {
+	now := time.Now().UTC()
+	task := Todo{Title: "Example task", Supervision: &Supervision{ExpectMinutes: 180},
+		Agents: []TodoAgent{{SessionID: "worked"}}}
+	last := now.Add(-270 * time.Minute)
+	for _, section := range []string{triageWaiting, triageOther} {
+		t.Run(section, func(t *testing.T) {
+			if !taskStuck(task, todoTriage{Section: section, Last: last}, true, now) {
+				t.Fatal("short task must be stuck at 270 minutes, before its first day")
+			}
+			for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+				t.Run(string(lang), func(t *testing.T) {
+					report := leaderReportText(lang, assistantwire.LeaderStuck, task, "", section)
+					for _, wrongAge := range []string{"over a day", "一天", "1 日以上"} {
+						if strings.Contains(report, wrongAge) {
+							t.Errorf("report claims a day for 270 minutes: %s", report)
+						}
+					}
+					if !strings.Contains(report, task.Title) {
+						t.Errorf("report lost the task title: %s", report)
+					}
+				})
+			}
+		})
 	}
 }

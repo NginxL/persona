@@ -588,6 +588,8 @@ func newInboxHubWith(t *testing.T, kbo *KBOptions) *inboxHub {
 		t.Cleanup(s.kbEnd)
 	}
 	in.svc = s
+	// This fixture's synthetic translation model is exposed through legacy.kb, independently of screening.
+	setModel(t, s, purposeTranslate, ModelBinding{Provider: "legacy.kb"})
 	h := &inboxHub{Service: s, f: f, in: in, st: st}
 	h.inbox.init()
 	return h

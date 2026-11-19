@@ -28,7 +28,7 @@ vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: () => undefined
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined }));
 vi.mock("./LarkThread", () => ({ LarkThread: () => null, chatOfItem: () => ({}) }));
 
-import { resetInboxForTests, type InboxItem } from "../../lib/inbox";
+import { reloadInbox, resetInboxForTests, type InboxItem } from "../../lib/inbox";
 import { settleRosterDefault } from "../../lib/manager-choice";
 import { t } from "../../i18n";
 import { Inbox } from "./Inbox";
@@ -60,6 +60,8 @@ const title = () => detail().querySelector<HTMLElement>("h2[data-item-title]")!;
 // Done in the opened item's header, which goes back to the list
 const headerDone = () => [...detail().querySelectorAll("button")].find((b) => b.textContent?.trim() === "已处理")!;
 const doneSection = () => host.querySelector<HTMLElement>('[data-section="done"]')!;
+// the section bar opens on Needs you (#9053); All stacks Done under the open sections, where it folds
+const showAll = () => act(() => host.querySelector<HTMLButtonElement>('[data-bar-choice="all"]')!.click());
 // narrow: the opened item and the list take turns, and what is in the hidden one is not drawn
 const narrow = () => {
   drawn = (el) => (location.pathname !== "/inbox" ? !list().contains(el) : !detail().contains(el));
@@ -157,8 +159,10 @@ describe("the opened item and its row by keyboard on a narrow page (audit item 7
   });
 
   // Done from the item files it under Done: its row there is a new one. The focus goes to the row now in its place, not
-  // after it into Done, and the list does not scroll there (with Done open, it jumped to the Done section)
-  it.each([["open"], ["folded"]])("after Done in the item's header, with Done %s, comes back to the row now in its place", async (fold) => {
+  // after it into Done, and the list does not scroll there (with Done open, it jumped to the Done section); under the
+  // Needs you choice, where Done is not drawn, the list stays on Needs you
+  it.each([["open"], ["folded"], ["not shown"]])("after Done in the item's header, with Done %s, comes back to the row now in its place", async (fold) => {
+    if (fold !== "not shown") showAll();
     if (fold === "open") {
       await act(async () => doneSection().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
       await flush();
@@ -175,11 +179,17 @@ describe("the opened item and its row by keyboard on a narrow page (audit item 7
     expect(location.pathname).toBe("/inbox");
     if (fold === "open") expect(doneSection().querySelector('[data-item="a1"]')).not.toBeNull();
     expect(document.activeElement).toBe(rowLink("a2"));
+    if (fold === "not shown") {
+      expect(host.querySelector('[data-bar-choice="action"]')?.getAttribute("aria-checked")).toBe("true");
+      expect(doneSection()).toBeNull();
+      return;
+    }
     const scrolled = vi.mocked(Element.prototype.scrollIntoView).mock.contexts as Element[];
     expect(scrolled.filter((el) => doneSection().contains(el))).toEqual([]);
   });
 
   it("leaves a wide page's list alone after Done in the item's header, with Done open", async () => {
+    showAll();
     await act(async () => doneSection().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
     await flush();
     act(() => rowLink("a1").click());
@@ -201,5 +211,36 @@ describe("the opened item and its row by keyboard on a narrow page (audit item 7
     act(() => link.click());
     await render("a1");
     expect(document.activeElement).toBe(link);
+  });
+
+  // an item opened from outside the Inbox (a link, ⌘K) lands the list on Done, where it lives, and the list stays there
+  // (#9053): back on it, the focus is on the item's row in Done
+  it("comes back to the item's row in the section an item from outside landed the list on", async () => {
+    narrow();
+    await act(async () => history.pushState(null, "", "/inbox/d1"));
+    await render("d1");
+    expect(host.querySelector('[data-bar-choice="done"]')?.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(title());
+    await act(async () => popped(() => history.back()));
+    await render();
+    expect(location.pathname).toBe("/inbox");
+    expect(host.querySelector('[data-bar-choice="done"]')?.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(rowLink("d1"));
+  });
+
+  // its row gone from the section the list landed on (moved back out of Done while open), nothing of it is drawn to
+  // return to: the focus goes to the section bar's choice, not the page
+  it("comes back to the section bar's choice when the item's row is no longer in the section shown", async () => {
+    narrow();
+    await act(async () => history.pushState(null, "", "/inbox/d1"));
+    await render("d1");
+    expect(host.querySelector('[data-bar-choice="done"]')?.getAttribute("aria-checked")).toBe("true");
+    calls.items = calls.items.map((it) => ((it as InboxItem).id === "d1" ? { ...(it as InboxItem), done_at: undefined, done_by: undefined } : it));
+    await act(async () => { await reloadInbox(); });
+    await flush();
+    await act(async () => popped(() => history.back()));
+    await render();
+    expect(location.pathname).toBe("/inbox");
+    expect(document.activeElement).toBe(host.querySelector('[data-bar-choice="done"]'));
   });
 });

@@ -32,7 +32,7 @@ private fun AssistantSettingsPage(navigator: Navigator) {
         }
         return
     }
-    AssistantSettingsScreen(management, host.machines, onBack = navigator::back,
+    AssistantSettingsScreen(management, host.machines, onBack = navigator::back, conversations = host.conversations,
         onOpenConversation = { navigator.navigate(ChatRoute(it.machineId, it.sessionId, ConversationKind.Assistant)) },
         onModelConfiguration = { purpose, owner -> navigator.navigate(persona.core.navigation.ModelPurposeRoute(purpose, owner)) },
         onStandingAuthorizations = { navigator.navigate(SettingsPageRoute(SettingsPage.StandingAuthorizations)) })

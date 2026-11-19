@@ -1,0 +1,19 @@
+.session-overview {
+  order: -1;
+  max-block-size: 45%;
+  border-block-end: 1px solid var(--line);
+}
+
+@container session (min-width: 47.5rem) {
+  .session-workspace:has(> .session-overview) {
+    flex-direction: row;
+  }
+
+  .session-overview {
+    order: 0;
+    max-block-size: none;
+    inline-size: calc(var(--spacing) * 84);
+    border-block-end: 0;
+    border-inline-start: 1px solid var(--line);
+  }
+}

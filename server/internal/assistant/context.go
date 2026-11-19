@@ -28,12 +28,13 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 		return ContextResult{}
 	}
+	background := s.isBackground(ctx, p.SessionID)
 	snapshot := ""
 	if !s.cleanRoundSession(p.SessionID) { // a granted schedule's round reads nothing from outside (schedule_grant.go)
-		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID))
+		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
 	}
 	c := prompts.AssistantContext{Snapshot: snapshot, Owner: s.owner(ctx),
-		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: s.isBackground(ctx, p.SessionID)}
+		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}
 	switch {
 	case c.Main:
 		cfg := s.settings(ctx)
@@ -46,6 +47,7 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 	case c.Leader:
 		c.LeaderName = s.leaderNames(ctx, []string{p.SessionID})[p.SessionID]
+		c.LeaderStatus = s.directionStatus(ctx, p.SessionID)
 	}
 	text := prompts.RenderAssistantContext(c)
 	errs, receipts := s.viewErrors(ctx, p)
@@ -71,8 +73,8 @@ type contextState struct {
 // snapshotWait (the last one did), a message does not wait at all: the read it starts would come too late for it
 // anyway, and is there for the next message (#8948). Each source has a short deadline; a slow one is left out. The
 // sources are read once for every conversation: scope ("" for all of them, snapshotScope) picks the tasks this one's
-// lists show.
-func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
+// lists show, and background leaves out what only the main conversation acts on (backgroundSnapshot).
+func (s *Service) contextSnapshot(ctx context.Context, scope string, background bool) string {
 	cs := &s.live
 	cs.mu.Lock()
 	snap, at, took := cs.snap, cs.at, cs.took
@@ -110,7 +112,20 @@ func (s *Service) contextSnapshot(ctx context.Context, scope string) string {
 	out := *snap
 	out.Now = time.Now().In(s.location(ctx))
 	out.ModelProfile = s.modelProfileContext(ctx)
-	return fitSnapshot(scopeSnapshot(out, scope))
+	out = scopeSnapshot(out, scope)
+	if background {
+		out = backgroundSnapshot(out)
+	}
+	return fitSnapshot(out)
+}
+
+// backgroundSnapshot is snap for the background supervisor (#7315): without what only the main conversation acts on,
+// its plan cards waiting for Start (only it withdraws them, toolTaskPlanWithdraw), the owner's unread chats and the
+// iPhone line. Their tools are not among a round's (supervise_round.go roundToolNames), and its supervision needs none
+// of them.
+func backgroundSnapshot(snap prompts.Snapshot) prompts.Snapshot {
+	snap.Plans, snap.PlansTotal, snap.Chats, snap.NoPhone = nil, 0, nil, true
+	return snap
 }
 
 // snapshotScope is whose tasks conversation id's snapshot lists (#8666): "" for every task in the main conversation,
@@ -310,6 +325,17 @@ func (s *Service) snapshotStale() {
 	cs.mu.Unlock()
 }
 
+// snapshotOld makes the next message take a new snapshot, waiting for it no longer than for any snapshot past
+// snapshotFresh: what changed (a scheduled run's outcome) is news, but the snapshot held is not wrong to read meanwhile.
+func (s *Service) snapshotOld() {
+	cs := &s.live
+	cs.mu.Lock()
+	if old := time.Now().Add(-snapshotFresh); cs.at.After(old) {
+		cs.at = old
+	}
+	cs.mu.Unlock()
+}
+
 // ProfileChanged makes the next message take a new snapshot (the time zone changed), and the settings be read again
 // (the hub's defaults for them changed, or someone changed them behind the assistant's back).
 func (s *Service) ProfileChanged(context.Context) {
@@ -341,8 +367,8 @@ func snapshotAgentGroup(c proto.Session, now time.Time) snapshotAgentGroupKind {
 	recent := now.Sub(c.UpdatedAt) < 24*time.Hour
 	w := c.Work
 	switch {
-	case c.State == proto.StateNeedsYou:
-		return snapshotAgentNeedsYou
+	case c.State == proto.StateNeedsYou, silentRow(c):
+		return snapshotAgentNeedsYou // a turn with no output is the owner's to continue, not finished (#10187)
 	case c.State == proto.StateWorking:
 		return snapshotAgentWorking
 	case c.AwaitsReply && c.State == proto.StateIdle && recent:
@@ -386,6 +412,9 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 			}
 			if a.Line == "" && c.AwaitsReply {
 				a.Line = c.Asks // what it asks (#5096)
+			}
+			if silentRow(c) {
+				a.Line = c.TurnError // why it is the owner's: no output, or Persona's Stop (#10187)
 			}
 			a.Line = clip(oneLine(a.Line), 160)
 			group := snapshotAgentGroup(c, now)
@@ -578,8 +607,8 @@ func (s *Service) snapshotSchedule(ctx context.Context, loc *time.Location, now 
 			routinesTotal++
 			if len(routines) < 8 {
 				r := prompts.SnapshotRoutine{Label: clip(t.label(), 30), Rule: ruleText(t, loc)}
-				if !t.LastRun.IsZero() {
-					r.LastAt, r.LastStatus = t.LastRun.In(loc), t.LastStatus
+				if at := t.lastShown(); !at.IsZero() { // the outcome's own run, not one still starting (#10182)
+					r.LastAt, r.LastStatus = at.In(loc), t.LastStatus
 					if t.LastStatus == runFailed || t.LastStatus == runSkipped {
 						r.LastWhy = clip(oneLine(t.LastError), 60)
 					}

@@ -308,9 +308,17 @@ func (e *Engine) mergeProjects(keepSlug, dropSlug, why string, manual bool) erro
 		keep.Aliases = append(keep.Aliases, a)
 	}
 	addProjectAliases(keep, drop.Aliases, taken)
-	keep.People = addUnique(keep.People, drop.People...)
-	keep.Chats = addUnique(keep.Chats, drop.Chats...)
-	keep.Items = addUnique(keep.Items, drop.Items...)
+	// Not what the user took off keep; and what they took off drop stays off keep, unless keep has it (rec.Excluded).
+	keep.People = addUnique(keep.People, keep.kept("people", drop.People)...)
+	keep.Chats = addUnique(keep.Chats, keep.kept("chats", drop.Chats)...)
+	keep.Items = addUnique(keep.Items, keep.kept("items", drop.Items)...)
+	for _, list := range []string{"people", "chats", "items"} {
+		for _, id := range drop.Excluded[list] {
+			if !slices.Contains(*keep.list(list), id) && !keep.excludes(list, id) {
+				rec.exclude(list, id)
+			}
+		}
+	}
 	keep.Dirs = addUnique(keep.Dirs, drop.Dirs...)
 	keep.Keywords = addUnique(keep.Keywords, drop.Keywords...)
 	keep.Moments = mergeMoments(keep.Moments, drop.Moments)
@@ -372,6 +380,17 @@ func (e *Engine) mergeProjects(keepSlug, dropSlug, why string, manual bool) erro
 	if err := e.Store.putEntity(KindProject, keep.Slug, keep, &keep.Tagging, manual); err != nil {
 		return err
 	}
+	if len(rec.Excluded) > 0 { // tagging only: an automatic merge's write keeps keep's own exclusions as they were
+		err := e.Store.editTagging(KindProject, keep.Slug, func(t *Tagging) bool {
+			for list, ids := range rec.Excluded {
+				t.exclude(list, ids...)
+			}
+			return true
+		})
+		if err != nil {
+			return err
+		}
+	}
 	if mergedSummary != "" {
 		if err := e.Store.putSummary(KindProject, keep.Slug, mergedSummary, true); err != nil {
 			return err
@@ -379,20 +398,27 @@ func (e *Engine) mergeProjects(keepSlug, dropSlug, why string, manual bool) erro
 	}
 	// Who named drop names keep.
 	swap := func(ref string, list []string) ([]string, bool) {
+		to := keep.Slug
+		if list, member := refList(ref); keep.excludes(list, member) {
+			to = "" // the user took it off keep: it stops naming drop and does not name keep
+		}
 		changed := false
 		var out []string
 		for _, s := range list {
 			if s == drop.Slug {
-				s, changed = keep.Slug, true
+				s, changed = to, true
 			}
 			out = addUnique(out, s)
 		}
-		if changed && !slices.Contains(list, keep.Slug) {
+		if changed && to != "" && !slices.Contains(list, keep.Slug) {
 			rec.Moved = append(rec.Moved, ref)
 		}
 		return out, changed
 	}
 	if err := e.relinkRefs(drop, manual, swap); err != nil {
+		return err
+	}
+	if err := e.excludeBack(keep.Slug, rec.Excluded, true); err != nil {
 		return err
 	}
 	drop.Status, drop.MergedInto, drop.Merge, drop.Dirty = "merged", keep.Slug, rec, false
@@ -414,6 +440,44 @@ func projectRefs(p *Project) []string {
 		refs = append(refs, KindPerson+"/"+id)
 	}
 	return append(refs, p.Items...)
+}
+
+// refList is the list of a project's that names ref ("<kind>/<id>"), and the id it names it by there.
+func refList(ref string) (list, member string) {
+	kind, id, _ := strings.Cut(ref, "/")
+	switch kind {
+	case KindChat:
+		return "chats", id
+	case KindPerson:
+		return "people", id
+	}
+	return "items", ref
+}
+
+// excludeBack records (on) or lifts the reverse side of exclusions a merge gave the project slug: each chat, person
+// and item in links stops (or may again) name it (exclude.go). Tagging only, so an automatic merge records it too.
+func (e *Engine) excludeBack(slug string, links map[string][]string, on bool) error {
+	for _, list := range []string{"people", "chats", "items"} {
+		for _, member := range links[list] {
+			kind, id := list, member
+			if list == "items" {
+				kind, id, _ = strings.Cut(member, "/")
+			}
+			err := e.Store.editTagging(kind, id, func(t *Tagging) bool {
+				had := t.excludes("projects", slug)
+				if on {
+					t.exclude("projects", slug)
+				} else {
+					t.include("projects", slug)
+				}
+				return had != on
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // relinkRefs gives each of p's chats, people and items the projects f makes of its own, and writes the ones f changes.

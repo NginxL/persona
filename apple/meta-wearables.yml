@@ -4,7 +4,8 @@
 # no Bluetooth or local-network permission strings, and no menu entry, so the App Store build is unchanged.
 # Why it is opt-in: the SDK needs Xcode 26.4+ (Swift 6.3), while the repo still builds with Xcode 26.0, and the
 # ExternalAccessory / Bluetooth / local-network keys below are extra review surface for App Store and TestFlight.
-# Dictionaries merge and arrays append, so the keys here add to the ones in project.yml.
+# Packages and dependencies merge into project.yml. The Info.plist overlay is applied to the built plist instead, like the
+# commit stamp: XcodeGen's `info:` would rewrite the tracked source plist and stop an unattended release's cleanliness check.
 packages:
   MWDAT:
     url: https://github.com/facebook/meta-wearables-dat-ios
@@ -16,19 +17,30 @@ targets:
         product: MWDATCore
       - package: MWDAT
         product: MWDATCamera
-    info:
-      path: Persona/Resources/Info.plist
-      properties:
-        # The URL the Meta AI app calls back to (registration and camera permission); the app's own URL scheme
-        # (CFBundleURLSchemes in project.yml: persona) is the one it is sent to.
-        MWDAT:
-          AppLinkURLScheme: "persona://"
-          # Filled from config.json app.meta_wearables by scripts/persona_config.py xcconfig (0: Developer Mode).
-          MetaAppID: $(PERSONA_META_APP_ID)
-          ClientToken: $(PERSONA_META_CLIENT_TOKEN)
-          TeamID: $(DEVELOPMENT_TEAM)
-        UISupportedExternalAccessoryProtocols: [com.meta.ar.wearable]
-        UIBackgroundModes: [bluetooth-central, bluetooth-peripheral, external-accessory]
-        NSBluetoothAlwaysUsageDescription: "Persona connects to your Meta glasses over Bluetooth when you ask it to take a photo with them, for example a whiteboard you want to attach to a message."
-        NSLocalNetworkUsageDescription: "Persona finds your Meta glasses on the local network when you ask it to take a photo with them, for example to attach a photo of a receipt to a message."
-        NSBonjourServices: [_bonjour._tcp]
+    # Add the SDK's keys after the built Info.plist is written and before it is signed. Values come from Config.xcconfig;
+    # array entries are appended once so repeated builds preserve the base modes without duplicating the Meta ones.
+    postBuildScripts:
+      - name: Meta glasses in the Info.plist
+        basedOnDependencyAnalysis: false
+        inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
+        script: |
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          plutil -type MWDAT "$plist" >/dev/null 2>&1 || plutil -insert MWDAT -dictionary "$plist"
+          # The URL the Meta AI app calls back to; CFBundleURLSchemes in project.yml already registers persona://.
+          plutil -replace MWDAT.AppLinkURLScheme -string "persona://" "$plist"
+          plutil -replace MWDAT.MetaAppID -string "$PERSONA_META_APP_ID" "$plist"
+          plutil -replace MWDAT.ClientToken -string "$PERSONA_META_CLIENT_TOKEN" "$plist"
+          plutil -replace MWDAT.TeamID -string "$DEVELOPMENT_TEAM" "$plist"
+          append_string() {
+            plutil -type "$1" "$plist" >/dev/null 2>&1 || plutil -insert "$1" -array "$plist"
+            if ! plutil -extract "$1" json -o - "$plist" | grep -Fq "\"$2\""; then
+              plutil -insert "$1" -string "$2" -append "$plist"
+            fi
+          }
+          append_string UISupportedExternalAccessoryProtocols com.meta.ar.wearable
+          append_string UIBackgroundModes bluetooth-central
+          append_string UIBackgroundModes bluetooth-peripheral
+          append_string UIBackgroundModes external-accessory
+          append_string NSBonjourServices _bonjour._tcp
+          plutil -replace NSBluetoothAlwaysUsageDescription -string "Persona connects to your Meta glasses over Bluetooth when you ask it to take a photo with them, for example a whiteboard you want to attach to a message." "$plist"
+          plutil -replace NSLocalNetworkUsageDescription -string "Persona finds your Meta glasses on the local network when you ask it to take a photo with them, for example to attach a photo of a receipt to a message." "$plist"

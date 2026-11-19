@@ -180,11 +180,11 @@ describe("Persona's main row with an unsent draft (#5568)", () => {
   const props = { reg: () => () => {}, hover: () => {}, go: () => () => {}, main };
   const draft = () => host.querySelector("[data-draft]")?.textContent;
 
-  it("shows it under Persona when the main conversation is not open", () => {
+  it("shows it under Main chat when the main conversation is not open", () => {
     localStorage.setItem("draft:hub/main", "明天的日程帮我排一下");
     act(() => root.render(<PersonaRow {...props} active={false} />));
     expect(draft()).toBe("草稿：明天的日程帮我排一下");
-    expect(host.textContent).toContain("Persona");
+    expect(host.textContent).toContain("主对话");
   });
 
   it("not while the main conversation is open", () => {

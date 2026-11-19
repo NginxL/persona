@@ -90,6 +90,8 @@ class OkHttpHubConnection(
      * Asked per request; null for the mesh's hubs, which are not paired here.
      */
     private val access: (hubId: String) -> HubAccess? = { null },
+    /** GroupRuntime defers the first dial until its data and reconciliation collectors are installed. */
+    private val connectOnCreation: Boolean = true,
 ) : HubConnection, ConnectionDiagnosticsSource, AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val lock = Any()
@@ -199,7 +201,11 @@ class OkHttpHubConnection(
     /** Where the next socket resumes from: the stream and its last broadcast seen. */
     internal val resumePoint: Pair<String, Long>? get() = eventStream?.let { it to lastEventSeq.get() }
 
-    init { http.access = ::accessFor; updateDiagnostics { it }; reconnect() }
+    init {
+        http.access = ::accessFor
+        updateDiagnostics { it }
+        if (connectOnCreation) reconnect()
+    }
 
     /**
      * The service token a request to [url] carries: that of the paired hub one of whose HTTPS candidates has its origin,

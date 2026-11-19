@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/subscriptions"
@@ -619,25 +620,68 @@ func (h *Manager) saveCreate(ctx context.Context, by asker, a saveArgs) (any, er
 	if err := checkSchedule(after, p); err != nil {
 		return nil, err
 	}
-	text := subscriptionsui.Card(ctx, h.subs, h.subscriptionCardEnv(), subscriptionsui.Change{Action: "create", After: after, Source: src,
-		Connector: h.subscriptionConnectorName(a.Connector), DryRun: &dr})
-	if res, ok := h.askSubscriptionCard(ctx, by, after.Label, "create", text); !ok {
-		return res, nil
-	}
-	created, err := h.subs.Create(ctx, subscriptions.CreateRequest{Connector: a.Connector, Source: a.Source, Recipe: r, Label: deref(a.Label)},
-		subscriptionActor)
+	existingBefore, _, err := h.subs.List(ctx, subscriptions.Filter{Connector: a.Connector})
 	if err != nil {
 		return nil, err
 	}
-	p.Label = nil // given to Create
-	if !emptyPatch(created, p) {
-		p.Revision = created.Revision
-		if created, err = h.subs.Update(ctx, created.ID, p, subscriptionActor); err != nil {
-			return map[string]any{"saved": true, "subscription": nil, "warning": "made with both destinations off; its other settings failed: " + err.Error()}, nil
+	beforeIDs := map[string]bool{}
+	for _, candidate := range existingBefore {
+		if candidate.Source == a.Source && candidate.Label == after.Label {
+			beforeIDs[candidate.ID] = true
 		}
 	}
-	return map[string]any{"saved": true, "subscription": subscriptionLine(created), "warnings": dr.Warnings,
-		"undo": "subscription_save with action delete (the user confirms again)"}, nil
+	text := subscriptionsui.Card(ctx, h.subs, h.subscriptionCardEnv(), subscriptionsui.Change{Action: "create", After: after, Source: src,
+		Connector: h.subscriptionConnectorName(a.Connector), DryRun: &dr})
+	return h.askSubscriptionCard(ctx, by, after.Label, "create", text, "create\x00"+a.Connector+"\x00"+a.Source+"\x00"+after.Label,
+		func(ctx context.Context) (string, error) {
+			// The source's name, limits and defaults are part of the visible
+			// proposal. Rebuild them now; a changed proposal needs a fresh card.
+			currentSource := h.cachedSource(ctx, a.Connector, a.Source)
+			if currentSource == nil {
+				return "", approval.ErrStale
+			}
+			currentMin := 0
+			if currentSource.MinIntervalSeconds != nil {
+				currentMin = *currentSource.MinIntervalSeconds
+			}
+			currentBase := subscriptions.Subscription{Connector: a.Connector, Source: a.Source, SourceName: currentSource.Name,
+				Label: currentSource.Name, Recipe: *recipe, IntervalSeconds: subscriptions.DefaultInterval(recipe.Mode, currentMin), SourceMin: currentMin}
+			if recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
+				currentBase.DailyAt = "08:00"
+			}
+			currentAfter := subscriptions.Patched(currentBase, p)
+			if currentAfter.Label != after.Label || currentAfter.SourceName != after.SourceName ||
+				currentAfter.IntervalSeconds != after.IntervalSeconds || currentAfter.DailyAt != after.DailyAt ||
+				!subscriptions.SameRecipe(currentAfter.Recipe, after.Recipe) {
+				return "", approval.ErrStale
+			}
+			existing, _, err := h.subs.List(ctx, subscriptions.Filter{Connector: a.Connector})
+			if err != nil {
+				return "", err
+			}
+			for _, candidate := range existing {
+				if candidate.Source == a.Source && candidate.Label == after.Label && !beforeIDs[candidate.ID] {
+					// The draft's before-state gains no new equivalent subscription.
+					// One created while the owner was reading or asking makes it stale.
+					return "", approval.ErrStale
+				}
+			}
+			created, err := h.subs.Create(ctx, subscriptions.CreateRequest{Connector: a.Connector, Source: a.Source, Recipe: r, Label: deref(a.Label)},
+				subscriptionActor)
+			if err != nil {
+				return "", err
+			}
+			p.Label = nil // given to Create
+			if !emptyPatch(created, p) {
+				p.Revision = created.Revision
+				if created, err = h.subs.Update(ctx, created.ID, p, subscriptionActor); err != nil {
+					return subscriptionApplyJSON(map[string]any{"saved": true, "subscription": nil,
+						"warning": "made with both destinations off; its other settings failed: " + err.Error()})
+				}
+			}
+			return subscriptionApplyJSON(map[string]any{"saved": true, "subscription": subscriptionLine(created), "warnings": dr.Warnings,
+				"undo": "subscription_save with action delete (the user confirms again)"})
+		})
 }
 
 func deref(s *string) string {
@@ -698,19 +742,41 @@ func (h *Manager) saveUpdate(ctx context.Context, by asker, a saveArgs, cur subs
 	text := subscriptionsui.Card(ctx, h.subs, h.subscriptionCardEnv(), subscriptionsui.Change{Action: "update", Before: &cur, After: after,
 		Source: h.cachedSource(ctx, cur.Connector, cur.Source), Connector: h.subscriptionConnectorName(cur.Connector), DryRun: dr,
 		Existing: cmpOr(p.Existing, subscriptions.ExistingDigest)})
-	if res, ok := h.askSubscriptionCard(ctx, by, cur.Label, "update", text); !ok {
-		return res, nil
-	}
-	saved, err := h.subs.Update(ctx, cur.ID, p, subscriptionActor)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{"saved": true, "subscription": subscriptionLine(saved), "previous": previousOf(cur, p),
-		"undo": "subscription_save update with previous and the new revision puts it back (the user confirms again)"}
-	if dr != nil {
-		out["warnings"], out["existing"] = dr.Warnings, cmpOr(p.Existing, subscriptions.ExistingDigest)
-	}
-	return out, nil
+	return h.askSubscriptionCard(ctx, by, cur.Label, "update", text, cur.ID, func(ctx context.Context) (string, error) {
+		// Get is the immediate precondition check; Update repeats the same
+		// revision predicate atomically in the store.
+		current, _, err := h.subs.Get(ctx, cur.ID)
+		if err != nil {
+			if subscriptionConflict(err) {
+				return "", approval.ErrStale
+			}
+			return "", err
+		}
+		if current.Revision != cur.Revision {
+			return "", approval.ErrStale
+		}
+		currentAfter := subscriptions.Patched(current, p)
+		if currentAfter.Label != after.Label || currentAfter.IntervalSeconds != after.IntervalSeconds ||
+			currentAfter.DailyAt != after.DailyAt || currentAfter.ToInbox != after.ToInbox || currentAfter.ToKB != after.ToKB ||
+			currentAfter.TriageRules != after.TriageRules || currentAfter.FallbackTier != after.FallbackTier ||
+			!subscriptions.SameRecipe(currentAfter.Recipe, after.Recipe) {
+			return "", approval.ErrStale
+		}
+		p.Revision = current.Revision
+		saved, err := h.subs.Update(ctx, current.ID, p, subscriptionActor)
+		if subscriptionConflict(err) {
+			return "", approval.ErrStale
+		}
+		if err != nil {
+			return "", err
+		}
+		out := map[string]any{"saved": true, "subscription": subscriptionLine(saved), "previous": previousOf(current, p),
+			"undo": "subscription_save update with previous and the new revision puts it back (the user confirms again)"}
+		if dr != nil {
+			out["warnings"], out["existing"] = dr.Warnings, cmpOr(p.Existing, subscriptions.ExistingDigest)
+		}
+		return subscriptionApplyJSON(out)
+	})
 }
 
 // previousOf are cur's values of what p changes: the arguments that put it back.
@@ -746,29 +812,69 @@ func previousOf(cur subscriptions.Subscription, p subscriptions.Patch) map[strin
 func (h *Manager) saveDelete(ctx context.Context, by asker, a saveArgs, cur subscriptions.Subscription) (any, error) {
 	text := subscriptionsui.Card(ctx, h.subs, h.subscriptionCardEnv(), subscriptionsui.Change{Action: "delete", After: cur,
 		Source: h.cachedSource(ctx, cur.Connector, cur.Source), Connector: h.subscriptionConnectorName(cur.Connector), DeleteData: a.DeleteData})
-	if res, ok := h.askSubscriptionCard(ctx, by, cur.Label, "delete", text); !ok {
-		return res, nil
-	}
-	if err := h.subs.Delete(ctx, cur.ID, a.DeleteData, subscriptionActor); err != nil {
-		return nil, err
-	}
-	return map[string]any{"saved": true, "deleted": cur.ID, "deleted_data": a.DeleteData}, nil
+	return h.askSubscriptionCard(ctx, by, cur.Label, "delete", text, cur.ID, func(ctx context.Context) (string, error) {
+		current, _, err := h.subs.Get(ctx, cur.ID)
+		if err != nil {
+			if subscriptionConflict(err) {
+				return "", approval.ErrStale
+			}
+			return "", err
+		}
+		if current.Revision != cur.Revision {
+			return "", approval.ErrStale
+		}
+		if err := h.subs.DeleteAt(ctx, current.ID, current.Revision, a.DeleteData, subscriptionActor); err != nil {
+			if subscriptionConflict(err) {
+				return "", approval.ErrStale
+			}
+			return "", err
+		}
+		return subscriptionApplyJSON(map[string]any{"saved": true, "deleted": current.ID, "deleted_data": a.DeleteData})
+	})
 }
 
-// askSubscriptionCard asks the user to approve text on the phone, in the conversation by. ok false: not approved, and
-// the answer says how it ended (only the user's own answer counts: an expired, closed or proxy-answered card is no
-// decline).
-func (h *Manager) askSubscriptionCard(ctx context.Context, by asker, label, action, text string) (any, bool) {
+// askSubscriptionCard retains one prepared mutation through clarification. Its
+// apply returns the successful tool response as JSON; non-approval responses
+// keep the existing {saved:false, why} shape. No captured resolution is reused.
+func (h *Manager) askSubscriptionCard(ctx context.Context, by asker, label, action, text, replacement string,
+	apply func(context.Context) (string, error)) (any, error) {
 	shown, _ := json.Marshal(map[string]string{"subscription": label, "action": action})
-	r, _ := h.approveCard(ctx, by, "subscription_save", text, shown)
-	switch {
-	case r.UserAllowed():
-		return nil, true
-	case r.UserDenied():
-		h.logf("subscription %s: declined on the phone", action)
-		return map[string]any{"saved": false, "why": "The user declined on the phone: nothing changed. Do not retry unless they ask."}, false
+	now := time.Now().UTC()
+	ix := proto.Interaction{ID: "ix_" + randomHex(6), MachineID: by.machine, SessionID: by.session,
+		Kind: proto.IxPermission, ToolName: "subscription_save", Summary: text, ToolInput: shown, SessionTitle: "Persona",
+		Cwd: h.askerCwd(by), CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
+	outcome, err := h.waitPrepared(ctx, ix, approval.Operation{
+		Replacement: by.machine + "\x00" + by.session + "\x00subscription\x00" + replacement,
+		Denied:      "The user declined on the phone: nothing changed. Do not retry unless they ask.",
+		Unanswered:  prompts.RenderSettingUnanswered(),
+		Apply: func(ctx context.Context, _ proto.Resolution) (string, error) {
+			return apply(ctx)
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"saved": false, "why": prompts.RenderSettingUnanswered()}, false
+	if outcome.Clarifying {
+		return outcome.Text, nil
+	}
+	var out any
+	if json.Unmarshal([]byte(outcome.Text), &out) == nil {
+		return out, nil
+	}
+	if outcome.Text == "The user declined on the phone: nothing changed. Do not retry unless they ask." {
+		h.logf("subscription %s: declined on the phone", action)
+	}
+	return map[string]any{"saved": false, "why": outcome.Text}, nil
+}
+
+func subscriptionApplyJSON(v any) (string, error) {
+	raw, err := json.Marshal(v)
+	return string(raw), err
+}
+
+func subscriptionConflict(err error) bool {
+	var e *subscriptions.Error
+	return errors.As(err, &e) && (e.Code == subscriptions.CodeConflict || e.Code == subscriptions.CodeNotFound)
 }
 
 // subscriptionCardEnv is the card's language and zone: the user's.

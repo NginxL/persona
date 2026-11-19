@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -56,6 +57,65 @@ func TestMainChatPickerListsOnlyWhatRunsTheAssistant(t *testing.T) {
 	}
 	if got := strings.Join(pickerNames(t, s, "agent.new"), ","); got != "claude,cx,cc-relay,agy-rt,traex,gw,codex-gw" {
 		t.Fatalf("agent.new: %s", got)
+	}
+}
+
+// Every client replays these candidates: an assistant-purpose read adds the eligible Messages API provider and keeps
+// the declared runtime, but not managed Codex. New Agent keeps its generic launcher answer (Direct APIs are not Agents).
+func TestMainChatPickerReplaysSharedLauncherFixture(t *testing.T) {
+	var fixture struct {
+		Version int `json:"version"`
+		Cases   []struct {
+			Name       string `json:"name"`
+			Candidates []struct {
+				Name      string `json:"name"`
+				Kind      string `json:"kind"`
+				API       string `json:"api"`
+				Agent     string `json:"agent"`
+				Source    string `json:"source"`
+				BaseURL   string `json:"base_url"`
+				Model     string `json:"model"`
+				Assistant bool   `json:"assistant"`
+			} `json:"candidates"`
+			Assistant []string `json:"assistant"`
+			AgentNew  []string `json:"agent_new"`
+		} `json:"cases"`
+	}
+	raw, err := os.ReadFile("../../../spec/fixtures/assistant-launchers/cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.Version != 1 || len(fixture.Cases) != 1 {
+		t.Fatalf("fixture version/cases: %d/%d", fixture.Version, len(fixture.Cases))
+	}
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			f := newFakeHub().withMachine()
+			s := newTestService(t, f)
+			var managed []storedLauncher
+			for _, c := range tc.Candidates {
+				switch c.Kind {
+				case "runtime":
+					f.launcherList = append(f.launcherList, proto.Launcher{Name: c.Name, Source: c.Source, Agent: c.Agent, Model: c.Model, Assistant: c.Assistant})
+				case "api", "launcher":
+					managed = append(managed, storedLauncher{ManagedLauncher: proto.ManagedLauncher{
+						Kind: c.Kind, API: c.API, Name: c.Name, Agent: c.Agent, BaseURL: c.BaseURL, Model: c.Model,
+					}})
+				default:
+					t.Fatalf("candidate %s has unknown kind %q", c.Name, c.Kind)
+				}
+			}
+			putLaunchers(t, s, managed...)
+			if got := pickerNames(t, s, "assistant"); !slices.Equal(got, tc.Assistant) {
+				t.Fatalf("assistant choices = %v, want %v", got, tc.Assistant)
+			}
+			if got := pickerNames(t, s, "agent.new"); !slices.Equal(got, tc.AgentNew) {
+				t.Fatalf("generic New Agent choices = %v, want %v", got, tc.AgentNew)
+			}
+		})
 	}
 }
 
@@ -224,5 +284,33 @@ func TestMainChatPointsAnAgentLauncherAtTheAssistantDeclaredForIt(t *testing.T) 
 	}
 	if p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "ok", Params: map[string]any{"text": "hi", "launcher": "grok-chat"}}); err != nil || p["launcher"] != "grok-chat" {
 		t.Fatalf("the declared assistant runtime: %v %v", p, err)
+	}
+}
+
+// Plain CLI fallbacks for agy and omp (Source "zshrc", Assistant false when their companion runtime is away) stay out
+// of the assistant picker and in unavailable; once the companion connects with Assistant true, agy is offered.
+func TestPlainAgyAndOmpRequireConnectedAssistantRuntime(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.launcherList = []proto.Launcher{
+		{Name: "claude"},
+		{Name: "agy", Source: "zshrc", Agent: "agy"},
+		{Name: "omp", Source: "zshrc", Agent: "omp"},
+	}
+	s := newTestService(t, f)
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "agy-gw", Agent: "agy", BaseURL: "https://gw.example", Model: "m1"}})
+	if got := strings.Join(pickerNames(t, s, "assistant"), ","); got != "claude" {
+		t.Fatalf("assistant without runtime: %s", got)
+	}
+	if got := strings.Join(pickerNames(t, s, "agent.new"), ","); got != "claude,agy,omp,agy-gw" {
+		t.Fatalf("agent.new without runtime: %s", got)
+	}
+
+	f.launcherList = []proto.Launcher{
+		{Name: "claude"},
+		{Name: "agy", Source: "agy", Agent: "agy", Assistant: true},
+		{Name: "omp", Source: "zshrc", Agent: "omp"},
+	}
+	if got := strings.Join(pickerNames(t, s, "assistant"), ","); got != "claude,agy,agy-gw" {
+		t.Fatalf("assistant with agy runtime: %s", got)
 	}
 }

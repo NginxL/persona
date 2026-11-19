@@ -38,7 +38,29 @@ export interface DesktopDeepLink {
   readonly route?: string;
 }
 
-/** Deep links are data, never automatic pairing or navigation to an arbitrary web origin. */
+/** The query keys a page of the route table reads (docs/protocol/deep-links.md); an app link's others (`hub`, and
+ *  anything that would act, such as a token) are not handed on. */
+const ROUTE_KEYS = new Set(["at", "view", "work", "machine", "manager", "id", "mode", "date", "range", "tab", "purpose", "channel", "extension", "connector", "plugin", "state"]);
+
+/** A route to hand to the web app: one leading "/", never "//", no backslash or control character, staying on the hub. */
+function safeRoute(route: string): boolean {
+  if (!route.startsWith("/") || route.startsWith("//") || route.includes("\\") || /[\u0000-\u001f\u007f]/.test(route)) return false;
+  try {
+    return new URL(route, "https://desktop.invalid/").origin === "https://desktop.invalid";
+  } catch { return false; }
+}
+
+/** The path with only the query keys a page reads, or undefined when it is no route to hand on. */
+function pageRoute(path: string, query: URLSearchParams): string | undefined {
+  const kept = new URLSearchParams();
+  for (const [key, value] of query) if (ROUTE_KEYS.has(key) && value) kept.append(key, value);
+  const route = path + (kept.size ? `?${kept}` : "");
+  return safeRoute(route) ? route : undefined;
+}
+
+/** Deep links are data, never automatic pairing or navigation to an arbitrary web origin. A page link is
+ *  persona://open<path> (the route table's app link: the hub's web path after persona://open) or the first form,
+ *  persona://open?route=<path>; the web app in the window opens the path (and refuses what is no page of it). */
 export function parseDeepLink(raw: string): DesktopDeepLink | undefined {
   let url: URL;
   try { url = new URL(raw); } catch { return undefined; }
@@ -46,14 +68,19 @@ export function parseDeepLink(raw: string): DesktopDeepLink | undefined {
   if (url.username || url.password || url.port) return undefined;
   if (url.host === "link") return { kind: "pair-link", url: raw };
   if (url.host === "pair") return { kind: "pair-app", url: raw };
-  if (url.host !== "open" || url.hash || url.searchParams.size !== 1) return undefined;
-  const route = url.searchParams.get("route");
-  if (!route || !route.startsWith("/") || route.startsWith("//") || route.includes("\\") || /[\u0000-\u001f\u007f]/.test(route)) return undefined;
-  try {
-    const target = new URL(route, "https://desktop.invalid/");
-    if (target.origin !== "https://desktop.invalid") return undefined;
-  } catch { return undefined; }
-  return { kind: "open", url: raw, route };
+  if (url.host !== "open" || url.hash) return undefined;
+  if (url.pathname) {
+    const route = pageRoute(url.pathname, url.searchParams);
+    return route ? { kind: "open", url: raw, route } : undefined;
+  }
+  if (url.searchParams.size !== 1) return undefined;
+  // The first form carries a whole path with its query: the same keys go on as from the path form, so no `add=1`
+  // or token gets through it either (#10281). Its fragment is ignored, as the web's reading of it does.
+  const carried = url.searchParams.get("route");
+  if (!carried || !safeRoute(carried)) return undefined;
+  const inner = new URL(carried, "https://desktop.invalid/");
+  const route = pageRoute(inner.pathname, inner.searchParams);
+  return route ? { kind: "open", url: raw, route } : undefined;
 }
 
 export function hubRoute(hub: HubAddress, route: string): string {

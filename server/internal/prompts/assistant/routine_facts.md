@@ -18,7 +18,13 @@ Persona 算好的事实（这次开跑时的快照，数字以此为准，别改
 - 收件箱里今天到点的（含已经到点但还没回看的，以及看过 3 次没动静或到了再看时间的；同样只给你看，要在回答里逐条提）：{{range .}}
   - {{.Title}}{{with .Who}}；在等：{{.}}{{end}}{{with .Next}}；下一步：{{.}}{{end}}{{end}}{{end}}{{with .Leaders}}
 - 各方向（每个主管一行；有工作记账的进度卡工具就发卡，没有才在早晚报里每个方向照着各写一行，卡住的写明卡在哪、谁来解）：{{range .}}
-  - {{.Name}}：在办 {{.Open}} 件{{if .Waiting}}，等用户拍板 {{.Waiting}} 件{{end}}{{if .Stuck}}，卡住超过一天 {{.Stuck}} 件{{end}}{{if or .Reached .Doing .NeedsYou}}；主管今天的小结：{{with .Reached}}达成 {{.}}；{{end}}{{with .Doing}}在做 {{.}}；{{end}}{{with .NeedsYou}}要用户做 {{.}}{{end}}{{else}}；主管今天还没写小结{{end}}{{end}}{{end}}{{with .Briefs}}
+  - {{.Name}}：在办 {{.Open}} 件{{if .Waiting}}，等用户拍板 {{.Waiting}} 件{{end}}{{if .Stuck}}，卡住 {{.Stuck}} 件{{end}}{{if or .Reached .Doing .NeedsYou}}；主管今天的小结：{{with .Reached}}达成 {{.}}；{{end}}{{with .Doing}}在做 {{.}}；{{end}}{{with .NeedsYou}}要用户做 {{.}}{{end}}{{else}}；主管今天还没写小结{{end}}{{end}}{{end}}{{with .Directions}}
+- 各方向停着的事（这些是 Persona 按任务账本、会话和卡片算好的，不要漏掉、不要改数字；等用户的行优先，owner 行全部列出，非 owner 行折叠时会写「另 N 件」）：{{range .}}
+  - {{.Name}}：在办 {{.Open}} 件，活动 {{.Active}} 件，未派发 {{.Undispatched}} 件{{range .Waits}}
+    - {{.Line}}{{with .Link}} {{.}}{{end}}{{end}}{{if .More}}
+    - 另 {{.More}} 件，打开该方向查看：{{.Link}}{{end}}{{end}}{{end}}{{with .DisabledRoutines}}
+- 已关闭的每日收尾和巡检（每个一行；没记到关闭时间的必须照写「关闭时间未记录」，不能拿最后运行时间代替）：{{range .}}
+  - {{.Line}}{{end}}{{end}}{{with .Briefs}}
 - 派出去的事里要说的（用用户当初的原话开头，每件一行；没列出来的不需要用户做什么、也没有变化，不要提）：{{range .}}
   - {{if .Words}}{{.Date}} 你说：「{{.Words}}」{{else}}{{.Date}} {{if eq .By "leader"}}主管{{else if eq .By "routine"}}定时任务{{else if eq .By "hub"}}Persona{{else if eq .By "unknown"}}（没记下是谁要的）{{else}}助手{{end}}发起：{{.Goal}}{{end}} → {{.Now}}{{with .Status}}（Agent 自己的说法：{{if eq . "done"}}做完了{{else if eq . "blocked"}}卡住了{{else}}没做完{{end}}）{{end}}{{with .Need}}；要用户：{{.}}{{end}}{{if .Decide}}；等用户拍板{{end}}{{with .Parked}}；搁置中，等你定优先级：{{.}}{{end}}{{if .Overdue}}；已超过约定时间{{end}}{{range .Scope}}；范围调整：{{.}}{{end}}{{end}}{{end}}{{with .BriefsDone}}
 - 上次简报以来结束的（只在这一次说，逐条标准的结果照写）：{{range .}}

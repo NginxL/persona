@@ -98,6 +98,12 @@ func (h *Hub) moveMachine(ctx context.Context, mid, to string) (from string, err
 	if h.knownEntry(mid) == nil {
 		return "", errNotMovable
 	}
+	// Not while it switches, and no switch begins until the move is done (link_switch.go).
+	release, err := h.holdLinkSwitch(ctx, mid)
+	if err != nil {
+		return h.entryOwner(mid), err
+	}
+	defer release()
 	h.moving.managers.RLock() // not while its manager is being removed (removingManager)
 	defer h.moving.managers.RUnlock()
 	d := &h.devices

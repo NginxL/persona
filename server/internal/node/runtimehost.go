@@ -55,6 +55,9 @@ type RuntimeHost struct {
 	orca orcaBridgeState
 	// cindy runs the Cindy bridge while the machine's engine is Cindy (cindybridge.go).
 	cindy cindyBridgeState
+	// agy runs the Antigravity CLI companion when agy is installed and autoCompanions is enabled (agybridge.go).
+	agy            agyBridge
+	autoCompanions bool
 }
 
 // NewRuntimeHost is a runtime socket at path (RuntimeSocketPath when empty) for a resident node; Attach starts it.
@@ -116,6 +119,9 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 	}
 	rh.ctx = ctx
 	rh.startDaemons(ctx)
+	if rh.autoCompanions {
+		rh.setAgyBridge(true)
+	}
 	go func() {
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
@@ -193,6 +199,9 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	}
 	if n := rh.current(); n != nil {
 		n.notifySessions()
+		if rh.autoCompanions && n.peer != nil {
+			_ = n.peer.Notify("launchers.changed", map[string]any{})
+		}
 	}
 }
 
@@ -229,6 +238,11 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			}
 		}
 		rh.logger.Printf("runtime %s %s #%d connected", hello.Runtime, hello.Version, h.serial)
+		if rh.autoCompanions && (hello.Launcher != "" || len(hello.Launchers) > 0) {
+			if n := rh.current(); n != nil && n.peer != nil {
+				_ = n.peer.Notify("launchers.changed", map[string]any{})
+			}
+		}
 		// features: what this node does beyond the first protocol. prefer_running: when two runtimes list a session, the
 		// one running it answers for it (runtimes_registry.go recomputeOwners), so a runtime may list sessions it only
 		// has on disk.
@@ -244,7 +258,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// sessions over (runtimecontrol.go). workspaces: runtime.workspaces is kept and, for a runtime with
 		// caps.workspaces that is the machine's engine, listed as its catalog and asked to make worktrees
 		// (runtimeworkspaces.go).
-		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces"}
+		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
 			features = append(features, "leader_tools")
 		}
@@ -332,7 +346,11 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			return n.assistantGateTool(ctx, g, p.SessionID, p.Args), nil
 		}
 		var res json.RawMessage
-		err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}, &res)
+		params := map[string]any{"name": p.Name, "args": p.Args, "session_id": p.SessionID, "assistant": assistant, "guest": n.guestOf(p.SessionID) != nil}
+		if origin := n.assistantOrigin(p.SessionID); origin != "" {
+			params["origin"] = origin
+		}
+		err := n.peer.Call(ctx, "mcp.call", params, &res)
 		return res, err
 	}
 	return nil, fmt.Errorf("unknown method %s", method)
@@ -354,6 +372,9 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 		}
 		if json.Unmarshal(params, &p) == nil {
 			h.setLaunchers(cleanLaunchers(p.Launchers))
+			if rh.autoCompanions && n != nil && n.peer != nil {
+				_ = n.peer.Notify("launchers.changed", map[string]any{})
+			}
 		}
 		return
 	}

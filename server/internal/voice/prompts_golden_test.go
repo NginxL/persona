@@ -223,7 +223,7 @@ func TestGoldenVoiceTurnPrompts(t *testing.T) {
 			// What it wrote before the model service failed it.
 			"partial_error": {Status: "done", To: "Claude Code", Tasks: []string{x.task}, Answer: x.answer, Failure: "error"},
 		}
-		for _, kind := range []string{"not_logged_in", "auth_failed", "model_route", "rate_limited", "transient", "retried", "error"} {
+		for _, kind := range []string{"not_logged_in", "auth_failed", "model_route", "rate_limited", "transient", "retried", "no_output", "error"} {
 			reports["error_"+kind] = prompts.VoiceReport{Status: "failed", To: "Claude Code", Tasks: []string{x.task}, Failure: kind}
 		}
 		for name, rep := range reports {

@@ -149,3 +149,17 @@ type MeetingFollowupSeed struct {
 func RenderMeetingFollowupSeed(d MeetingFollowupSeed) string {
 	return render("meeting/followup_seed", d)
 }
+
+// MeetingHandoff is a meeting handed to an Agent after it (meeting/handoff, #8852): its name, calendar title, start,
+// minutes (Markdown) and, when the owner asked, its transcript (Cut: its middle left out); Text is the owner's line.
+type MeetingHandoff struct {
+	Title, Calendar, Started string
+	Minutes                  string
+	Transcript               string
+	Cut                      bool
+	Text                     string
+}
+
+func RenderMeetingHandoff(d MeetingHandoff) string {
+	return render("meeting/handoff", d)
+}

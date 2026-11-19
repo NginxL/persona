@@ -287,8 +287,8 @@ func pickFor(t *testing.T, n *Node, id string, params map[string]any) error {
 
 // The user's next message moves the conversation to Codex: the claude is quit in its pane and Codex started in the
 // same shell through codex-start, in the conversation's folder, with the handoff block and then the user's words as
-// its first message (nothing typed a second time). The new thread's record names the Claude Code stretch it continues,
-// the old session's names none, and the list shows the conversation once: the Codex row, with the conversation's
+// its first message (nothing typed a second time). The new thread's record names the Claude Code stretch it continues
+// and the model and effort picked (what a resume runs), the old session's names none, and the list shows the conversation once: the Codex row, with the conversation's
 // title. The to-do the claude's pane was linked to is handed on (persona_from), and the pane Persona opened for the
 // old session is marked as the new one's.
 func TestEngineSwitchToCodexOnTheUsersNextMessage(t *testing.T) {
@@ -297,7 +297,7 @@ func TestEngineSwitchToCodexOnTheUsersNextMessage(t *testing.T) {
 	agent["tokens"] = map[string]any{"persona_todo_ref": "todo-1@m1/" + sidA, personaTabToken: sidA}
 	f.reply("session.snapshot", snapshot(nil, nil, []any{agent}, nil))
 	title := rowOf(t, n, sidA).Title
-	if err := pick(t, n, map[string]any{"launcher": "cx", "model": "gpt-6"}); err != nil {
+	if err := pick(t, n, map[string]any{"launcher": "cx", "model": "gpt-6", "effort": "max"}); err != nil {
 		t.Fatal(err)
 	}
 	f.reset()
@@ -320,7 +320,7 @@ func TestEngineSwitchToCodexOnTheUsersNextMessage(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("codex-start files: %+v", got)
 	}
-	if got[0].Dir != cwd || !strings.Contains(strings.Join(got[0].Argv, " "), " launch cx --model gpt-6") {
+	if got[0].Dir != cwd || !strings.Contains(strings.Join(got[0].Argv, " "), " launch cx --model gpt-6 -c model_reasoning_effort=max") {
 		t.Errorf("codex-start runs %q in %q", got[0].Argv, got[0].Dir)
 	}
 	checkHandoffBlock(t, got[0].Prompt, "claude", "codex", "gpt-6", false, "hello")
@@ -330,7 +330,7 @@ func TestEngineSwitchToCodexOnTheUsersNextMessage(t *testing.T) {
 	}
 	st, ok := n.state.get(switchedThread)
 	if !ok || len(st.EngineHistory) != 1 || st.EngineHistory[0].SessionID != sidA || st.EngineHistory[0].Agent != "claude" ||
-		st.EngineHistory[0].Until.Before(before) || st.PendingSwitch != nil || st.Launcher != "cx" || st.Model != "gpt-6" {
+		st.EngineHistory[0].Until.Before(before) || st.PendingSwitch != nil || st.Launcher != "cx" || st.Model != "gpt-6" || st.ModelEffort != "max" {
 		t.Fatalf("the new thread's record = %+v (%v)", st, ok)
 	}
 	if old, _ := n.state.get(sidA); old.EngineHistory != nil || old.PendingSwitch != nil {

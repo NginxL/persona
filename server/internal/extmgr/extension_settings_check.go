@@ -150,11 +150,8 @@ func (ps *extensions) settingsCheck(ctx context.Context, p *extension.Extension,
 // whose requests reach the addresses config would name, in place of the saved ones, until revoke or the check's time
 // is up; the program's ordinary requests keep the saved ones (#1180). cred is the credential, to keep it out of a
 // refusal. Nothing (revoke nil) when the program is not held to the proxy, or no config: entry of its granted
-// permissions.network names an address; nor for a source runtime, whose fetches go through its broker (#1180).
+// permissions.network names an address.
 func (ps *extensions) checkProxy(p *extension.Extension, config json.RawMessage) (proxy, cred string, revoke func()) {
-	if p.Manifest.Runtime.IsDeno() {
-		return "", "", nil
-	}
 	granted := &extension.Manifest{Permissions: extension.Permissions{Network: p.Record.Granted.Network}}
 	if len(granted.Permissions.ConfiguredNetworks()) == 0 {
 		return "", "", nil

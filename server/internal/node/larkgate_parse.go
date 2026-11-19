@@ -108,6 +108,7 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			v.deny = child.deny
 		}
 		v.unknown = v.unknown || child.unknown || child.unparsed && larkCLIRe.MatchString(cmd)
+		v.dynamic = v.dynamic || child.dynamic
 		v.cliWrite = v.cliWrite || child.cliWrite
 		v.unread = append(v.unread, child.unread...)
 	}
@@ -369,9 +370,11 @@ func classifyLarkAt(cmd string, gates []proto.CommandGate, cwd string, risk lark
 			v.other, seg.program = true, true
 			// Inline Python that can start nothing holds lark-cli's name as data (#8148); it may write it to a file.
 			inert := inertPythonCode(words)
-			if larkCLIRe.MatchString(s.Text) && !inert || dynamicCommandName(name) {
+			dynamicName := dynamicCommandName(name)
+			if larkCLIRe.MatchString(s.Text) && !inert || dynamicName {
 				v.unknown = true // an interpreter, wrapper or script may invoke the CLI
 			}
+			v.dynamic = v.dynamic || dynamicName
 			if inert && larkCLIRe.MatchString(s.Text) {
 				if files, ok := pythonWrites(words); ok {
 					seg.notes = append(seg.notes, files...)

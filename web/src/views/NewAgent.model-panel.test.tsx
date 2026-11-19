@@ -117,8 +117,12 @@ async function open() {
 
 async function openPanel() {
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
   await flush();
   expect(panel()).not.toBeNull();
+  // These caller tests inspect model actions; disclose the catalog first.
+  for (const header of document.body.querySelectorAll<HTMLButtonElement>('[data-panel-launcher][aria-expanded="false"]')) act(() => header.click());
+  await flush();
 }
 
 /** Opens the panel and picks a row by its key (`model:<launcher>\n<id>`); the panel closes once the form took it. */
@@ -149,11 +153,11 @@ describe("New agent's model panel (#5104)", () => {
     expect(pill().title).toBe("Claude Code · Opus 5.5 · claude · 高");
     expect(pill().querySelector("[data-pill-engine]")!.getAttribute("data-pill-engine")).toBe("claude");
     await openPanel();
-    expect(follow().getAttribute("aria-selected")).toBe("true");
+    expect(follow().getAttribute("aria-pressed")).toBe("true");
     expect(follow().textContent).toBe("跟随模型配置claude · Opus 5.5 · 高");
     // the row lit is the launcher's Default row, named after the model the settings run
     const lit = row("model:claude\ndefault");
-    expect(lit.getAttribute("aria-selected")).toBe("true");
+    expect(lit.getAttribute("aria-pressed")).toBe("true");
     expect(lit.textContent).toContain("默认：Opus 5.5");
     act(() => pill().click());
     start();
@@ -173,9 +177,9 @@ describe("New agent's model panel (#5104)", () => {
     expect(panel()).toBeNull();
     expect(pill().title).toBe("Claude Code · Sonnet 5 · claude · 高");
     await openPanel();
-    expect(follow().getAttribute("aria-selected")).toBe("false");
-    expect(row("model:claude\nsonnet").getAttribute("aria-selected")).toBe("true");
-    expect(row("model:claude\ndefault").getAttribute("aria-selected")).toBe("false");
+    expect(follow().getAttribute("aria-pressed")).toBe("false");
+    expect(row("model:claude\nsonnet").getAttribute("aria-pressed")).toBe("true");
+    expect(row("model:claude\ndefault").getAttribute("aria-pressed")).toBe("false");
     act(() => pill().click());
     start();
     expect(launched[0]).toMatchObject({ launcher: "claude", model: "sonnet", effort: "high" });

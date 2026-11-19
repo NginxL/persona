@@ -88,5 +88,7 @@
   "config_dir_legacy": "这台电脑的",
   "config_dir_hint": "选「这台电脑的」，新对话就沿用在那台电脑上运行 claude 时的登录和设置，包括 ~/.claude 里的网关；已开始的对话保持不变",
   "supervise_description": "跟进并验收 Persona 派出的任务，让主对话随时能回你。可以用比主对话更便宜或更强的模型。",
-  "agents": "Agents"
+  "agents": "Agents",
+  "usage_other": "近 7 天：{calls} 次调用 · {tokens} tokens",
+  "usage_detail": "近 7 天（UTC）：输入 {input}、输出 {output}、缓存写入 {cache_write}、缓存读取 {cache_read} tokens，失败 {failures} 次。显示的 tokens 是输入 + 输出 + 缓存写入，不含缓存读取。"
 }

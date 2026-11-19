@@ -9,5 +9,12 @@
   "duplicate_repo": "Choose each repository once.",
   "duplicate_alias": "Choose a different directory name for each repository.",
   "duplicate_link": "This issue or pull request is already linked.",
-  "link_repository_mismatch": "Use an issue or pull request link from this repository."
+  "link_repository_mismatch": "Use an issue or pull request link from this repository.",
+  "no_provider": "{provider} isn't installed. Saved links are kept; install it in Settings › Extensions to add new ones.",
+  "provider_off": "{provider} is off or not running. Saved links are kept; turn it on in Settings › Extensions to add new ones.",
+  "provider_not_found": "{provider} can't find this issue or pull request. Check the link.",
+  "provider_not_signed_in": "{provider} isn't signed in. Check its settings in Settings › Extensions.",
+  "provider_refused": "{provider} refused: {why}",
+  "provider_failed": "{provider} couldn't look up this link: {why}",
+  "providers_starting": "Extensions are still starting, so new links can't be looked up yet. Saved links are kept; try again in a moment."
 }

@@ -252,7 +252,7 @@ func (s *Service) switchNowOrQueue(ctx context.Context, it *switchItem, t switch
 	if it.plan == switchContinued {
 		text = prompts.RenderAgentLimitContinue()
 		if _, theirs, err := s.supervisedElsewhere(ctx, self, it.m, it.c); err == nil && theirs {
-			text = prompts.RenderSideConversation(prompts.SideConversation{From: self, Text: text})
+			text = prompts.RenderSideConversation(text)
 		}
 	}
 	err := s.moveAgent(ctx, it.m, it.c, t, text)

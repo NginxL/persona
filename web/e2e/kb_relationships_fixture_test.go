@@ -40,7 +40,7 @@ func TestWebRelationshipFixtures(t *testing.T) {
 		if !slices.Contains(project.Items, "docs/d_1") || beforeItem.ID != "d_1" || len(beforeProject.Links) != 1 || beforeProject.Links[0].ID != "d/1" {
 			t.Fatal("unexpected raw/storage/response identity contract")
 		}
-		_, err = e.ApplyUser(KindDoc, "d/1", UserUpdate{Update: Update{RemoveProjects: []string{"project"}}})
+		_, err = e.ApplyUser(KindDoc, "d/1", UserUpdate{Update: Update{RemoveProjects: []string{"project"}}, LockLists: new(false)})
 		must(err)
 		out["item"] = map[string]any{"beforeProject": beforeProject, "beforeItem": beforeItem, "afterProject": read(e, KindProject, "project"), "afterItem": read(e, KindDoc, "d/1")}
 	}()
@@ -59,7 +59,7 @@ func TestWebRelationshipFixtures(t *testing.T) {
 		_, err := e.ApplyUser(kind, rawID, UserUpdate{Update: Update{Projects: []string{"project"}}})
 		must(err)
 		beforeProject, beforeEntity := read(e, KindProject, "project"), read(e, kind, rawID)
-		_, err = e.ApplyUser(KindProject, "project", UserUpdate{Update: update})
+		_, err = e.ApplyUser(KindProject, "project", UserUpdate{Update: update, LockLists: new(false)})
 		must(err)
 		out[kind] = map[string]any{"beforeProject": beforeProject, "beforeEntity": beforeEntity, "afterProject": read(e, KindProject, "project"), "afterEntity": read(e, kind, rawID)}
 	}
@@ -82,7 +82,7 @@ func TestWebRelationshipFixtures(t *testing.T) {
 		}
 		e.ObserveChanges()
 		t.Cleanup(func() { _ = os.Chmod(personDir, 0700) })
-		update := UserUpdate{Update: Update{RemovePeople: []string{"person"}}}
+		update := UserUpdate{Update: Update{RemovePeople: []string{"person"}}, LockLists: new(false)}
 		_, err = e.ApplyUser(KindProject, "project", update)
 		must(os.Chmod(personDir, 0700))
 		if err == nil {

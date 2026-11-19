@@ -32,6 +32,11 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 	if n.runtimeAssistant(id) {
 		return refusal("unsupported", "这个对话由 runtime 运行，不能在这里压缩", nil)
 	}
+	if saved, ok := n.state.get(id); ok && proto.IsExternalLauncher(saved.Launcher) {
+		var finish func()
+		ctx, finish = n.beginExternalStartup(ctx, id)
+		defer finish()
+	}
 	defer n.assistantLife.lock(id)() // not while a send or a restore has this conversation's process (model_restore.go)
 	n.mu.Lock()
 	p := n.procs[id]
@@ -61,17 +66,40 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		if cwd == "" {
 			cwd = identity.AssistantDir(n.home)
 		}
-		if _, err := n.assistantAgent(ctx, launcher); err != nil {
-			return err
+		if !proto.IsExternalLauncher(launcher) {
+			if _, err := n.assistantAgent(ctx, launcher); err != nil {
+				return err
+			}
+			n.stopAssistant(id)
 		}
-		n.stopAssistant(id)
 		var err error
 		// A guest (a meeting's room too) starts as on any resume: spawnClaude reads its tools and kind from its record
 		// (no built-in tools, strict MCP config, project setting sources, its own settings and profile), and
 		// spawnAssistant refuses one whose launcher runs another agent by now.
-		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions}
-		if _, current := n.assistantModel(ctx, id); current.SupervisionResolved {
+		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions, Origin: st.Origin}
+		resolved, current := n.assistantModel(ctx, id)
+		if proto.IsExternalLauncher(launcher) {
+			if resolved != launcher || current.External == nil {
+				return externalRefusal(ctx, "adapter_scope_required")
+			}
+			// Refresh execution authority, not the conversation's saved profile or unresolved policy.
+			execution.Model, execution.Effort = current.Model, current.Effort
+			execution.UseEffort, execution.Fingerprint = current.UseEffort, current.Fingerprint
+			execution.Runtime, execution.IsMain, execution.External = current.Runtime, current.IsMain, current.External
+			execution.MainCompactWindow = n.mainWindowOn(launcher, current.IsMain, current.MainCompactWindow)
+			if err := n.checkExternalAssistant(ctx, id, launcher, execution, false); err != nil {
+				return err
+			}
+			if _, err := n.assistantAgent(ctx, launcher); err != nil {
+				return err
+			}
+			n.stopAssistant(id)
+		}
+		if current.SupervisionResolved {
 			execution.SupervisionInstructions = current.SupervisionInstructions
+		}
+		if proto.IsExternalLauncher(launcher) {
+			execution.StartupContext = ctx
 		}
 		if p, err = n.spawnAssistant(id, cwd, launcher, true, false, execution); err != nil {
 			return err
@@ -81,6 +109,19 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 			n.state.put(id, st)
 		}
 	}
+	if proto.IsExternalLauncher(p.launcher) && ctx.Err() != nil {
+		return externalAdapterError(ctx, ctx.Err())
+	}
+	if err := n.compactAssistantProc(ctx, p); err != nil {
+		return err
+	}
+	return finishExternalStartup(ctx)
+}
+
+// compactAssistantProc starts an in-place compaction while assistantLife is held.
+// Both the user's request and idle-aware delivery use the same completion reporting.
+func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc) error {
+	id := p.id
 	p.mu.Lock()
 	p.compacting, p.compacted, p.manual = true, true, true
 	p.lastActive = time.Now()
@@ -100,7 +141,7 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		n.compactionEnded(id, "没能开始压缩："+err.Error())
 		return err
 	}
-	n.logger.Printf("assistant %s: compacting, as the user asked", short(id))
+	n.logger.Printf("assistant %s: compacting in place", short(id))
 	return nil
 }
 

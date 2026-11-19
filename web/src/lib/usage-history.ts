@@ -134,3 +134,77 @@ export function calendarLayout(days: UsageDay[], weeks: number): CalendarLayout 
   }
   return { columns, today: [weeks - 1, row(last)], months };
 }
+
+/** One hour on the clock in the user's zone (a day the clocks change has 23 or 25 of them). */
+export interface UsageHour extends Omit<UsageDay, "date"> {
+  /** Unix seconds of its start. */
+  t: number;
+  /** Its day, 2006-01-02. */
+  date: string;
+  /** 0–23 on the clock. */
+  hour: number;
+}
+
+/** A computer's share of the hours; `name` empty for a computer no longer there. */
+export interface UsageMachineShare extends Omit<UsageDay, "date"> {
+  id: string;
+  name: string;
+}
+
+/** An agent's share of the hours (#9984): `Session.agent`'s names; "" for usage the hub kept before it counted agents
+ *  apart. */
+export interface UsageAgentShare extends Omit<UsageDay, "date"> {
+  agent: string;
+}
+
+export interface UsageHours {
+  zone: string;
+  hours: UsageHour[];
+  machines: UsageMachineShare[];
+  /** Absent from an older hub. */
+  agents?: UsageAgentShare[];
+  total: Omit<UsageDay, "date">;
+  stored?: boolean;
+}
+
+/** The last `days` days (1–7) by the hour, oldest first, the last the hour under way. */
+export async function fetchUsageHours(days = 7): Promise<UsageHours> {
+  const res = await api<{ usage: UsageHours }>(`/usage/hours?days=${days}`);
+  return res.usage;
+}
+
+export interface HourLayout {
+  /** The days, a row each, oldest first (the last is today). */
+  dates: string[];
+  /** `[row][hour]`: the step of each hour (0–4), -1 for an hour still to come today. */
+  levels: number[][];
+  /** `[row][hour]`: its tokens (an hour that comes twice adds into its square). */
+  tokens: number[][];
+}
+
+/**
+ * Where each hour of the last days goes (the iPhone's UsageHourLayout): a row a day, a column an hour on the clock;
+ * the hour that comes twice on the day the clocks go back adds into its square, the one a day skips stays empty;
+ * today's hours after the one under way are still to come (-1). The steps rank every hour that is not to come.
+ */
+export function hourLayout(hours: UsageHour[]): HourLayout {
+  const dates: string[] = [];
+  for (const h of hours) if (dates[dates.length - 1] !== h.date) dates.push(h.date);
+  const row = new Map(dates.map((d, i) => [d, i]));
+  const tokens = dates.map(() => Array.from({ length: 24 }, () => 0));
+  const seen = dates.map(() => Array.from({ length: 24 }, () => false));
+  for (const h of hours) {
+    const r = row.get(h.date);
+    if (r === undefined || h.hour < 0 || h.hour > 23) continue;
+    tokens[r][h.hour] += dayTotal({ ...h, date: h.date });
+    seen[r][h.hour] = true;
+  }
+  const last = hours.length ? hours[hours.length - 1].hour : 23;
+  const toCome = (r: number, c: number) => r === dates.length - 1 && c > last && !seen[r][c];
+  const flat: number[] = [];
+  dates.forEach((_, r) => tokens[r].forEach((v, c) => !toCome(r, c) && flat.push(v)));
+  const steps = heatLevels(flat);
+  let i = 0;
+  const levels = dates.map((_, r) => tokens[r].map((_, c) => (toCome(r, c) ? -1 : steps[i++])));
+  return { dates, levels, tokens };
+}

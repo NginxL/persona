@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/aiwire"
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -33,6 +34,16 @@ func (n *Node) launcherCheck(ctx context.Context, name string, models ...string)
 	if len(models) > 0 {
 		model = models[0]
 	}
+	return n.launcherCheckWith(ctx, name, launcherCheckOpts{model: model})
+}
+
+// launcherCheckWith is launcherCheck with what launchers.check asked for: with assistantTurn, a claude launcher's
+// check runs as the assistant runs a turn of conversation (launchercheck_assistant.go).
+func (n *Node) launcherCheckWith(ctx context.Context, name string, o launcherCheckOpts) proto.LauncherCheck {
+	if proto.IsExternalLauncher(name) {
+		return proto.LauncherCheck{Agent: "claude", Error: externalRefusal(ctx, "adapter_probe_unsupported").Error()}
+	}
+	model := o.model
 	if model != "" && !proto.ValidModelID(model) {
 		return proto.LauncherCheck{Error: "invalid model"}
 	}
@@ -78,8 +89,19 @@ func (n *Node) launcherCheck(ctx context.Context, name string, models ...string)
 	// The flag that keeps the run off the disk goes between before and after: a transcript per check, a hundred a day on
 	// each computer, filled the newest offline sessions the list keeps and pushed the user's own Agents out (#2959).
 	before, noSave, after := checkArgs(agent, prompt)
+	if agent == "claude" {
+		model = n.claudeModelArg(name, model) // what a start of it passes (#10365)
+	}
 	if model != "" {
 		after += " --model " + shellQuote(model)
+	}
+	turn := assistantCheck{}
+	if o.assistantTurn && agent == "claude" {
+		if turn, err = n.assistantCheckFor(ctx, name, o, dir); err != nil {
+			return proto.LauncherCheck{Agent: agent, Error: err.Error()}
+		}
+		defer turn.cleanup()
+		after += turn.args
 	}
 	if agent == "claude" {
 		// No hooks: the check is no session of the user's, and Persona's own hooks can hold it past the timeout (#3412;
@@ -90,12 +112,21 @@ func (n *Node) launcherCheck(ctx context.Context, name string, models ...string)
 		if err := os.WriteFile(ours, []byte(`{"disableAllHooks":true}`), 0o600); err != nil {
 			return proto.LauncherCheck{Error: err.Error()}
 		}
-		after += scriptSettingsFlag(n.claudeSettings(ctx, name, ours, dir))
+		settings, err := turn.withSettings(n.claudeSettings(ctx, name, ours, dir, turn.profile()...), dir, n.home)
+		if err != nil {
+			return proto.LauncherCheck{Agent: agent, Error: err.Error()}
+		}
+		after += scriptSettingsFlag(settings)
 	}
 	ctx, cancel := context.WithTimeout(ctx, launcherCheckTimeout)
 	defer cancel()
+	script := n.launcherInDirScript
+	if turn.on {
+		script = turn.inDirScript(n)
+	}
 	run := func(flag string) (string, error) {
-		cmd := loginShell(ctx, n.launcherInDirScript(name, dir, before+flag+after))
+		cmd := loginShell(ctx, script(name, dir, before+flag+after))
+		cmd.Env = turn.env // nil (the node's own) but for an assistant turn
 		killGroupOnCancel(cmd)
 		out, err := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), err
@@ -111,7 +142,7 @@ func (n *Node) launcherCheck(ctx context.Context, name string, models ...string)
 		start = time.Now()
 		text, err = run("")
 	}
-	res := proto.LauncherCheck{Agent: agent, Millis: int(time.Since(start).Milliseconds())}
+	res := proto.LauncherCheck{Agent: agent, Millis: int(time.Since(start).Milliseconds()), AssistantTurn: turn.on}
 	if ctx.Err() != nil {
 		// What it printed before the time ran out usually names the cause (an upstream 401 or 402, a proxy that
 		// refuses, a host that does not resolve); with nothing printed, how the command ended (#5951).
@@ -126,6 +157,10 @@ func (n *Node) launcherCheck(ctx context.Context, name string, models ...string)
 	if agent == "claude" {
 		if r, ok := claudeResult(text); ok {
 			res.Model, res.Answer = r.model, clipText(r.result, 200)
+			if turn.on && r.subtype == "error_max_turns" {
+				// The model answered with a tool call, which the one turn allowed did not run: the request went through.
+				r.isError, res.Answer = false, ""
+			}
 			if r.isError {
 				res.Error = clipText(redactCheck(r.result), 400)
 				// A result that is only its kind (error_during_execution…) says nothing of why; what claude printed
@@ -214,10 +249,12 @@ func withoutResultLines(text string) string {
 
 type claudeOut struct {
 	result  string
+	subtype string
 	isError bool
 	bare    bool // an error whose result was empty: it says only its subtype
 	model   string
 	millis  int
+	usage   aiwire.Usage
 }
 
 // claudeResult reads `claude -p --output-format json`'s answer: the last line that holds a JSON object, from its first
@@ -248,13 +285,19 @@ func claudeResultJSON(body string) (claudeOut, bool) {
 		Subtype    string                     `json:"subtype"`
 		DurationMS int                        `json:"duration_ms"`
 		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+		Usage      json.RawMessage            `json:"usage"`
 	}
 	if json.Unmarshal([]byte(strings.TrimSpace(body)), &r) != nil || (r.Result == "" && r.Subtype == "" && r.ModelUsage == nil) {
 		return claudeOut{}, false
 	}
-	c := claudeOut{result: r.Result, isError: r.IsError || (r.Subtype != "" && r.Subtype != "success"), millis: r.DurationMS}
+	c := claudeOut{result: r.Result, subtype: r.Subtype, isError: r.IsError || (r.Subtype != "" && r.Subtype != "success"), millis: r.DurationMS}
 	if c.isError && c.result == "" {
 		c.result, c.bare = r.Subtype, true
+	}
+	// Missing or malformed usage must not turn a valid answer into an error.
+	var usage aiwire.Usage
+	if len(r.Usage) > 0 && json.Unmarshal(r.Usage, &usage) == nil {
+		c.usage = usage
 	}
 	for m := range r.ModelUsage {
 		if c.model == "" || len(m) > len(c.model) { // the main model; the small one is usually a prefix-free other name

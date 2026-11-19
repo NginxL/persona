@@ -2,7 +2,7 @@
 // with the agents waiting on you at the head of "Needs you". Wide: the list (380px) and the opened item side by side;
 // narrow: the opened item takes the list's place, with a way back. "Select" (top right) picks several items to mark them
 // done at once (#2059).
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { TodoDialogHost } from "./InboxTodoDialog";
 import { useInbox, refreshInbox, loadRoutedItem, type InboxItem } from "../../lib/inbox";
 import { useScope } from "../../lib/current-assistant";
@@ -62,6 +62,9 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
   const listBox = useRef<HTMLElement>(null);
   const detailBox = useRef<HTMLElement>(null);
   useNarrowItemFocus(id, manager, listBox, detailBox);
+  // a wide page draws the list and the item's pane side by side; a narrow one only one of them, whether or not an item is
+  // open, so it is told while the address changes (an item opened from inside moves only a list beside it, #9053)
+  const listBeside = useCallback(() => shown(listBox.current) && shown(detailBox.current), []);
   // Esc there goes back to the list as ‹ does: not over a dialog or a menu, nor in a field (Esc is its own there), and not
   // on a wide page, where the list is beside the item
   useEffect(() => {
@@ -95,7 +98,7 @@ export function Inbox({ id, manager, onToggleSidebar }: { id?: string; manager?:
       </header>
       <div className="flex min-h-0 flex-1">
         <section ref={listBox} aria-label={t("inbox-inbox.list")} className={cx("min-h-0 w-full flex-col @3xl:flex @3xl:w-[380px] @3xl:shrink-0 @3xl:border-r @3xl:border-line", id ? "hidden" : "flex")}>
-          <InboxList key={view.revision} selected={item ?? (id ? { id, manager } : undefined)} picked={picked} onPicked={setPicked} />
+          <InboxList key={view.revision} selected={item ?? (id ? { id, manager } : undefined)} routed={item} picked={picked} onPicked={setPicked} listBeside={listBeside} />
         </section>
         <section ref={detailBox} tabIndex={-1} aria-label={t("inbox-inbox.detail")} className={cx("min-h-0 min-w-0 flex-1 flex-col outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent @3xl:flex", id ? "flex" : "hidden")}>
           {id ? <InboxDetail item={item} loaded={loaded && !routing} /> : <DetailPlaceholder />}
@@ -174,6 +177,9 @@ function useNarrowItemFocus(id: string | undefined, manager: string | undefined,
       el.scrollIntoView?.({ block: "nearest" });
       return;
     }
+    // none of them drawn any more (the item, from outside, landed the list on its section and is in Done, #9053): the
+    // section bar's choice, at the top of the list the reader is back on
+    list?.querySelector<HTMLElement>('[data-bar-choice][aria-checked="true"]')?.focus({ preventScroll: true });
   });
 }
 

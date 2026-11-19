@@ -13,8 +13,10 @@ import (
 // #4926). A round the owner did not start (a supervision message, a scheduled task or follow-up, another
 // conversation's message, a task's notice) can sit behind a long foreground command for minutes. When the owner's own
 // message reaches a conversation on such a round, it carries interject_background whatever the setting says, so the
-// node moves the running command to the background and the model reads the owner at once. For a round the owner
-// started, the setting decides as before.
+// node moves the running command to the background and the model reads the owner at once. On a round of the
+// background supervisor the node first waits for the round's turn to end, up to 30 s, so the owner's message goes into
+// a process with every tool (node/assistant_round.go awaitRoundTurn); only past that does it preempt the round. For a
+// round the owner started, the setting decides as before.
 //
 // A mark per conversation says which message started the round it is on. It is set when the manager sends a
 // background message into a conversation not seen working (call), and it lasts as long as that round: every message

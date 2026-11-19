@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, credentialOwner, enc, errorText } from "../../lib/api";
 import { decisionLaterKey, decisionRound } from "../../lib/assistant-entries";
-import { later } from "../../lib/feed";
+import { askRow, later } from "../../lib/feed";
 import { defaultManager, MANAGER_HEADER, shownManager } from "../../lib/manager-choice";
 import { getState, putTodo, refreshTodos } from "../../lib/store";
 import { latestReview } from "../../lib/supervision";
@@ -14,6 +14,7 @@ import { Button, toast } from "../../ui/atoms";
 import { AcceptRow } from "./Brief";
 import { BriefingMark } from "./BriefingMark";
 import { DecisionRow } from "./DecisionRow";
+import { FailedTaskRow } from "./FailedTaskRow";
 import RuleSuggestionLine from "./RuleSuggestionLine";
 import type { RuleCard } from "../../lib/rule-suggestion";
 
@@ -92,7 +93,7 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
   const rule = { id: todo.id + (ask?.asked_at ?? ""), suggestion: ask?.suggestion, headers: { [MANAGER_HEADER]: manager } };
   if (ask && askOptions(ask).length) return <><DecisionRow todo={todo} ask={ask} rowKey={rowKey} hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} footer={controls} /><RuleSuggestionLine of={rule} /></>;
   return <><div data-needs-row={rowKey} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-field px-3 py-2.5">
-    {ask ? <><AcceptRow stacked hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} secondary={<span data-decision-actions className="contents">{buttons}</span>} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} />{ask.for_briefing && <BriefingMark />}</> : <>
+    {ask ? <><AcceptRow stacked hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} secondary={<span data-decision-actions className="contents">{buttons}</span>} row={askRow(todo, ask)} />{ask.for_briefing && <BriefingMark />}</> : <>
       <div className="flex min-w-0 items-center gap-2 text-sm"><button type="button" onClick={open} className="min-w-0 flex-1 truncate text-left font-medium hover:underline">{todo.title}</button><span className="shrink-0 text-xs text-ink-2">{t("assistant-tasks.review_needs_user")}</span></div>
       {(review?.reason || review?.note) && <p data-decision-legacy className="whitespace-pre-wrap text-sm select-text [overflow-wrap:anywhere]">{review.reason || review.note}</p>}
       {review?.recommend && <p className="text-xs text-ink-2">{t("assistant-brief.recommend", { option: review.recommend })}</p>}
@@ -107,13 +108,16 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
 export type NeedsYouPartProps =
   /** A task's decision in the tray. */
   | { decision: Todo; rowKey?: string; hideTitle?: boolean }
+  /** A task whose Agent did not start, in the tray (#10365). */
+  | { failed: Todo; rowKey: string; countsOpenAttr: { "data-counts-open"?: string } }
   /** The suggested rule of a plan card or a passed-up question, under it. */
   | { rule: RuleCard };
 
 /** What views/assistant/Tasks loads, with the first card that draws one and not with the first screen
- *  (startup-preload's budget): a decision's row, or a suggested rule's line (#5802). One chunk behind one component,
- *  so the first screen names one file for both. */
+ *  (startup-preload's budget): a decision's row, a failed start's row (#10365), or a suggested rule's line (#5802). One
+ *  chunk behind one component, so the first screen names one file for all. */
 export default function NeedsYouParts(props: NeedsYouPartProps) {
   if ("decision" in props) return <TaskDecision todo={props.decision} rowKey={props.rowKey} hideTitle={props.hideTitle} />;
+  if ("failed" in props) return <FailedTaskRow todo={props.failed} rowKey={props.rowKey} countsOpenAttr={props.countsOpenAttr} />;
   return <RuleSuggestionLine of={props.rule} />;
 }

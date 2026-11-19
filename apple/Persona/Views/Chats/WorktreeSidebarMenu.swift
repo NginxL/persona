@@ -9,7 +9,13 @@ struct WorktreeSidebarMenu: View, Equatable {
     nonisolated let parent: HostWorkspace?
     nonisolated let sessions: [Session]
     nonisolated let agent: Session?
+    #if os(iOS)
+    /// Each Agent's menu reads its own facts (`AgentActionMenuReader`): built here, they made the list observe the
+    /// machines and links of every Agent in it (#10231).
+    nonisolated let handlers: AgentMenuHandlers
+    #else
     nonisolated let menus: [AgentRowMenu]
+    #endif
     var open: (HostWorkspace) -> Void
     var newSession: (HostWorkspace) -> Void
     var newChild: (HostWorkspace) -> Void
@@ -19,9 +25,15 @@ struct WorktreeSidebarMenu: View, Equatable {
     nonisolated static func == (a: Self, b: Self) -> Bool {
         a.workspace.key == b.workspace.key && a.workspace.title == b.workspace.title && a.workspace.cwd == b.workspace.cwd
             && a.workspace.online == b.workspace.online && a.workspace.available == b.workspace.available
-            && a.parent?.key == b.parent?.key && a.agent?.key == b.agent?.key && a.menus == b.menus
+            && a.parent?.key == b.parent?.key && a.agent?.key == b.agent?.key && sameMenus(a, b)
             && a.sessions.map { [$0.key.path, $0.title] } == b.sessions.map { [$0.key.path, $0.title] }
     }
+
+    #if os(iOS)
+    nonisolated private static func sameMenus(_ a: Self, _ b: Self) -> Bool { a.handlers === b.handlers }
+    #else
+    nonisolated private static func sameMenus(_ a: Self, _ b: Self) -> Bool { a.menus == b.menus }
+    #endif
 
     var body: some View {
         Section {
@@ -82,7 +94,11 @@ struct WorktreeSidebarMenu: View, Equatable {
     }
 
     @ViewBuilder private func agentMenu(_ session: Session) -> some View {
+        #if os(iOS)
+        AgentActionMenuReader(session: session, handlers: handlers)
+        #else
         if let menu = menus.first(where: { $0.key == session.key }) { menu.equatable() }
+        #endif
     }
 
     #if os(macOS)

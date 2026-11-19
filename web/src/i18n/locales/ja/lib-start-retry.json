@@ -1,0 +1,5 @@
+{
+  "start_code_launcher_terminal": "{launcher} はこのコンピューターのターミナルで開始できません",
+  "start_code_worktree_path_taken": "前回の試行で作られた作業場所が残っています",
+  "retry_launcher_unsupported": "このハブはまだ別のランチャーで再試行できません。ハブの Persona を更新するか、そのまま再試行してください。"
+}

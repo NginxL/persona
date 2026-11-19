@@ -215,7 +215,30 @@ func (s *Service) noteStop(machine, sid string, p map[string]any) {
 // is a timer: a goroutine asleep through it would hold a stack per pending turn end (#2472).
 func (s *Service) notifyFinished(machine, id string, gen int) {
 	t := s.notifyTimings()
-	time.AfterFunc(t.doneDelay(), func() { s.notifyFinishedNow(machine, id, gen, t) })
+	s.afterTurnCompletion(t.doneDelay(), func() { s.notifyFinishedNow(machine, id, gen, t) })
+}
+
+// afterTurnCompletion owns a delayed completion so a fixture can stop one still pending and drain one already running
+// before its log and store close. fleet.mu closes the Add/Wait teardown window, as it does for screen upgrades.
+func (s *Service) afterTurnCompletion(delay time.Duration, run func()) {
+	s.fleet.mu.Lock()
+	defer s.fleet.mu.Unlock()
+	if s.fleet.completionStopped {
+		return
+	}
+	s.fleet.completionRuns.Add(1)
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		s.fleet.mu.Lock()
+		delete(s.fleet.completionTimers, timer)
+		s.fleet.mu.Unlock()
+		defer s.fleet.completionRuns.Done()
+		run()
+	})
+	if s.fleet.completionTimers == nil {
+		s.fleet.completionTimers = map[*time.Timer]struct{}{}
+	}
+	s.fleet.completionTimers[timer] = struct{}{}
 }
 
 // notifyFinishedNow is notifyFinished once its delay is over, with the timings it was read with.
@@ -317,6 +340,9 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 	}
 	place := s.pushPlace(machine, sess)
 	head, text := doneAlert(s.lang(context.Background()), sess)
+	if report && strings.HasPrefix(head, "⚠️") && s.briefOf(id) != nil {
+		return // the scheduled-run watcher sends the one fixed-facts fallback, not this model error
+	}
 	// A routine with facts says the counts it worked out (briefing.go) when it ended normally and asks nothing: a question
 	// is what the owner acts on, and a health conversation says only that there is news.
 	if !strings.HasPrefix(head, "⚠️") && !strings.HasPrefix(head, "⏳") && !sess.AwaitsReply && spaceOf(sess) != SpaceHealth {
@@ -429,6 +455,10 @@ func doneAlert(l i18n.Lang, sess proto.Session) (head, text string) {
 	if e := strings.TrimSpace(sess.TurnError); e != "" && sess.TurnErrorKind == proto.TurnErrorUsageLimit {
 		// Not "the model service failed": the subscription's limit, which the user goes on from after it resets.
 		head, text = "⚠️ "+title, i18n.T(l, "push.usage_limit", i18n.Args{"error": e})
+	} else if e != "" && sess.TurnErrorKind == proto.TurnErrorStopped {
+		head, text = title, e // the owner's own Stop (silent_turns.go): not news of a failure, nor of a finished turn
+	} else if e != "" && sess.TurnErrorKind == proto.TurnErrorNoOutput {
+		head, text = "⚠️ "+title, e // the hub's sentence for it, in l: it says the turn had no output (silent_turns.go)
 	} else if e != "" {
 		head, text = "⚠️ "+title, interruptedSummary+"："+e
 	} else if assistantwire.CutOff(text) {

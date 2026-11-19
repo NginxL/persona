@@ -327,6 +327,23 @@ func TestConfigureNodeSaysClaudeStartDir(t *testing.T) {
 	}
 }
 
+// hub.json machines[].extra_path reaches the node on connect (#10127); unset it is [], so a list taken out of hub.json
+// is taken out of the node's PATH on the next connect.
+func TestConfigureNodeSaysExtraPath(t *testing.T) {
+	_, _, m, _ := dirsHub(t)
+	f := connectDirsNode(t, m)
+	ctx := context.Background()
+	m.configureNode(ctx, m.peer, nil, true)
+	m.cfg.ExtraPath = []string{"~/.cargo/bin", "/opt/tools/bin"}
+	m.configureNode(ctx, m.peer, nil, true)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.configure) != 2 || string(f.configure[0]["extra_path"]) != `[]` ||
+		string(f.configure[1]["extra_path"]) != `["~/.cargo/bin","/opt/tools/bin"]` {
+		t.Fatalf("extra_path in node.configure: %v", f.configure)
+	}
+}
+
 // faultyDirsStore fails or holds reads of claude_dirs/<id>: failNext makes the next one fail; hold, when set, makes the
 // next one read, then signal entered and wait for release before returning what it read.
 type faultyDirsStore struct {

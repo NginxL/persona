@@ -60,6 +60,7 @@ type larkVerdict struct {
 	unsure   bool   // a command-word substitution prevents bypass and requires whole-command confirmation
 	unparsed bool   // the command could not be split into its parts at all
 	unknown  bool   // a CLI call or indirect execution could not be classified
+	dynamic  bool   // an expansion supplies an executable name
 	cliWrite bool   // a lark-cli call that is not a known read, even in a command the gate cannot follow
 	unread   []int  // gates (indexes in the config's Gates) called in a way the gate could not read
 }
@@ -90,6 +91,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	}
 	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
 	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
+	if n.assistantOrigin(session) == originInbox && inboxLarkOutbound(cfg, v, analysisCommand) {
+		return "deny", inboxLarkRefusal, nil
+	}
 	if v.deny != "" {
 		return "deny", v.deny, nil
 	}
@@ -148,7 +152,11 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			ix.Kind = proto.IxPermission
 			title := wholeCommandTitle(cfg.Gates, v, analysisCommand, g, write)
 			if title != "" {
-				ix.ToolName, ix.Summary = title, "以你的身份在"+title+"上写（命令较复杂，整条显示）\n"+prettyBody(command)
+				what := "写"
+				if wholeCommandReads(v, write) {
+					what = "读"
+				}
+				ix.ToolName, ix.Summary = title, "以你的身份在"+title+"上"+what+"（命令较复杂，整条显示）\n"+prettyBody(command)
 			} else {
 				// Nothing in the command names a gate or lark-cli: an expansion names a command (`$A POST /api/…`),
 				// which could be anything, the CLI included. Still asked, as the ordinary Bash card it is (#4890).
@@ -306,6 +314,16 @@ func callTitle(gates []proto.CommandGate, c larkCall) string {
 		return gates[c.Gate].Title
 	}
 	return "飞书" // lark-cli
+}
+
+// wholeCommandReads says whether every call the gate identified is an ordinary read. An opaque non-Lark part may
+// still need the whole-command card, but does not turn those identified reads into writes. Zero calls, an explicit
+// write, an outbound/delete action, an unknown CLI risk or an expanded command name keeps the existing wording.
+func wholeCommandReads(v larkVerdict, write bool) bool {
+	if write || v.cliWrite || v.dynamic || len(v.calls) == 0 {
+		return false
+	}
+	return !slices.ContainsFunc(v.calls, func(c larkCall) bool { return !larkRead(c) || !larkBypassSafe(c) })
 }
 
 // wholeCommandTitle is what a whole-command card names as the place the command acts on, from what the command

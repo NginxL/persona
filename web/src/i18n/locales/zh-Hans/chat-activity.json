@@ -13,5 +13,14 @@
   "output_not_running": "已不在运行列表中",
   "output_failed": "暂时读不到输出",
   "open_output_file": "作为文件打开",
+  "command_status": "状态",
+  "command_runtime": "运行时长",
+  "command_started": "开始时间",
+  "command": "命令",
+  "command_show_more": "显示完整命令",
+  "command_show_less": "收起",
+  "output": "输出",
+  "output_lines": "{count} 行",
+  "output_tail_lines": "最近 {count} 行",
   "output_tail": "这里只显示最近的输出，可作为文件打开查看更早内容。"
 }

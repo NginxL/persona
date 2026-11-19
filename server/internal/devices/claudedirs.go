@@ -107,6 +107,15 @@ func (m *Machine) withClaudeDirs(ctx context.Context, params any) any {
 	return fields
 }
 
+// extraPath is hub.json's machines[].extra_path for node.configure: [] when unset, so a list taken out of hub.json
+// leaves the node's PATH too (#10127).
+func (m *Machine) extraPath() []string {
+	if m.cfg.ExtraPath == nil {
+		return []string{}
+	}
+	return m.cfg.ExtraPath
+}
+
 // usageWindows is hub.json's machines[].usage_windows: the machine's node reads the agents' subscription rate-limit
 // windows unless it says false (#2432).
 func (m *Machine) usageWindows() bool { return m.cfg.UsageWindows == nil || *m.cfg.UsageWindows }
@@ -120,7 +129,7 @@ func (m *Machine) configureNode(ctx context.Context, peer *rpc.Peer, hub *device
 	params := map[string]any{"machine_id": m.cfg.ID, "claude_dirs": m.claudeDirs(ctx),
 		"claude_dirs_blocked": m.blockedClaudeDirsParam(ctx), "botmux": m.botmux(ctx), "claude_start_dir": m.cfg.ClaudeStartDir,
 		"herdr_autostart": m.herdrAutostart(ctx), "herdr_autoinstall": m.cfg.HerdrAutoinstall, "claude_global_hooks": m.cfg.ClaudeGlobalHooks,
-		"usage_windows": m.usageWindows(), "claude_live_replies": m.liveReplies(ctx)}
+		"usage_windows": m.usageWindows(), "claude_live_replies": m.liveReplies(ctx), "extra_path": m.extraPath()}
 	// The sessions it lists however quiet are the assistant's to say (its profile); before it said, the node keeps
 	// what it has.
 	if keep, ok := m.d.keptOn(m.cfg.ID); ok {

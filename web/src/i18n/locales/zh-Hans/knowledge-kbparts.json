@@ -8,5 +8,7 @@
   "relevance": "与我相关 {value} 分",
   "collapse": "收起",
   "project_kind": "{kind}项目",
-  "points_other": "{count} 条知识点"
+  "points_other": "{count} 条知识点",
+  "open_imported_lark": "飞书会议纪要",
+  "open_imported": "原会议纪要"
 }

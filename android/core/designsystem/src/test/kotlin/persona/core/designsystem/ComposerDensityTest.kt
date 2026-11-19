@@ -2,7 +2,9 @@ package persona.core.designsystem
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
@@ -15,6 +17,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.Density
@@ -28,6 +31,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.designsystem.icons.PhIcons
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
@@ -41,6 +45,41 @@ class ComposerDensityTest {
     @Test fun homeGlassFrameUsesBubbleCornersInCompactOnly() = assertBubbleCornerScale(home = true)
 
     @Test fun fallbackGlassFrameUsesBubbleCornersInCompactOnly() = assertBubbleCornerScale(home = false)
+
+    @Test fun compactAgentComposerPlacesItsControlsWithoutEmptyAccessorySpace() {
+        var expanded by mutableStateOf(false)
+        rule.setContent {
+            LayoutDensity.apply(LayoutDensity.Standard)
+            PersonaTheme(style = AppStyle.Glass, reduceMotion = true) {
+                ComposerFrame(
+                    modifier = Modifier.width(360.dp).testTag("frame"),
+                    expanded = expanded,
+                    useShellSurface = true,
+                    accessory = {},
+                    leading = {
+                        JIconButton(PhIcons.Plus, null, {}, Modifier.testTag("attach"))
+                        if (expanded) JIconButton(PhIcons.Keyboard, null, {}, Modifier.testTag("keyboard"))
+                    },
+                ) { Box(Modifier.size(40.dp)) }
+            }
+        }
+
+        val idle = rule.onNodeWithTag("frame").getUnclippedBoundsInRoot()
+        val idleAttach = rule.onNodeWithTag("attach").getUnclippedBoundsInRoot()
+        assertEquals(64f, (idle.bottom - idle.top).value, 0.5f)
+        assertEquals(38f, ((idleAttach.right + idleAttach.left) / 2 - idle.left).value, 0.5f)
+        assertEquals(32f, ((idleAttach.top + idleAttach.bottom) / 2 - idle.top).value, 0.5f)
+
+        rule.runOnIdle { expanded = true }
+        val open = rule.onNodeWithTag("frame").getUnclippedBoundsInRoot()
+        val openAttach = rule.onNodeWithTag("attach").getUnclippedBoundsInRoot()
+        val keyboard = rule.onNodeWithTag("keyboard").getUnclippedBoundsInRoot()
+        assertEquals(116f, (open.bottom - open.top).value, 0.5f)
+        assertEquals(42f, ((openAttach.right + openAttach.left) / 2 - open.left).value, 0.5f)
+        assertEquals(48f, (keyboard.right - keyboard.left).value, 0.5f)
+        assertEquals(0f, (keyboard.left - openAttach.right).value, 0.5f)
+        assertEquals(36f, (open.bottom - (keyboard.bottom + keyboard.top) / 2).value, 0.5f)
+    }
 
     @Test fun writesHomeGlassFramesForInspection() {
         var compact by mutableStateOf(false)

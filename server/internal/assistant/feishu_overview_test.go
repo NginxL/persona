@@ -58,7 +58,7 @@ func TestTasksCommandShowsOverviewCard(t *testing.T) {
 			for _, want := range []string{"等你拍板", "在途任务", "主对话的问题", "手工建的任务",
 				`"default_url":"https://hub.example.com/persona/asm"`,
 				`"default_url":"https://hub.example.com/s/server/pane"`,
-				`"default_url":"https://hub.example.com/todos?id=todo_1"`} {
+				`"default_url":"https://hub.example.com/todos/todo_1"`} {
 				if !strings.Contains(card, want) {
 					t.Fatalf("card missing %q:\n%s", want, card)
 				}
@@ -128,7 +128,7 @@ func TestTasksOverviewPaginatesWithinBudget(t *testing.T) {
 		}
 		all.WriteString(card)
 	}
-	if !strings.Contains(all.String(), "todos?id=todo_00") || !strings.Contains(all.String(), "todos?id=todo_24") {
+	if !strings.Contains(all.String(), "todos/todo_00") || !strings.Contains(all.String(), "todos/todo_24") {
 		t.Fatal("first/last task lost across the cards")
 	}
 }
@@ -145,8 +145,8 @@ func TestTasksOverviewListsManualTodos(t *testing.T) {
 	s.botCommand(context.Background(), FeishuFeatures{}, "om", "/tasks", "", "")
 	card := (*posts)[0]["card"].(string)
 	for _, want := range []string{"随手记下的手工任务", "Agent 在做的任务",
-		`"default_url":"https://hub.example.com/todos?id=todo_manual"`,
-		`"default_url":"https://hub.example.com/todos?id=todo_agent"`,
+		`"default_url":"https://hub.example.com/todos/todo_manual"`,
+		`"default_url":"https://hub.example.com/todos/todo_agent"`,
 		`"default_url":"https://hub.example.com/s/server/pane"`} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("card missing %q:\n%s", want, card)

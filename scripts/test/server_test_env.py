@@ -78,6 +78,13 @@ def clean_environment(environment):
     return cleaned
 
 
+def with_trimpath(goflags):
+    """GOFLAGS with -trimpath added unless it already sets the flag, -trimpath=false included (go_trimpath.sh)."""
+    if any(flag.lstrip("-").split("=", 1)[0] == "trimpath" for flag in goflags.split()):
+        return goflags
+    return (goflags + " -trimpath").strip()
+
+
 def run_tests(config_file, command, environment=None):
     database = test_database_url(config_file)
     parent = os.environ if environment is None else environment
@@ -87,7 +94,7 @@ def run_tests(config_file, command, environment=None):
     # must not inherit it. Keep runtime/profile isolation in both environments.
     toolchain_environment = dict(environment)
     toolchain_environment.update({key: value for key, value in parent.items() if key.upper() in PROXY_VARIABLES})
-    result = subprocess.run(["go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH"],
+    result = subprocess.run(["go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOFLAGS"],
                             env=toolchain_environment, capture_output=True, text=True, timeout=30)
     if result.returncode:
         raise ValueError("could not resolve Go build cache locations")
@@ -99,14 +106,28 @@ def run_tests(config_file, command, environment=None):
         if not isinstance(value, str) or not value:
             raise ValueError("invalid Go build cache locations")
         environment[key] = value
+    # The temporary HOME below hides a `go env -w GOFLAGS`, so the effective value goes on explicitly, with -trimpath:
+    # without it the cache key holds each checkout's directory and no two checkouts share a compiled package (#10614).
+    goflags = caches.get("GOFLAGS") or ""
+    if not isinstance(goflags, str):
+        raise ValueError("invalid Go build flags")
+    environment["GOFLAGS"] = with_trimpath(goflags)
     temp_dir = "/tmp" if os.path.isdir("/tmp") else None
-    with tempfile.TemporaryDirectory(prefix="pst-", dir=temp_dir) as directory:
-        home = Path(directory).resolve()
-        temporary = home / "tmp"
-        temporary.mkdir()
-        environment.update(HOME=str(home), TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary),
-                           GOTMPDIR=str(temporary), PERSONA_TEST_DATABASE_URL=database, JARVIS_TEST_DATABASE_URL=database)
-        return subprocess.run(command, env=environment).returncode
+    # Go makes t.TempDir()'s directories, its build directory and the test binary with the process's umask. Under 002
+    # (Ubuntu's default for a user with their own group) they are group-writable, and node's external adapter refuses
+    # its own test fixtures there (external_adapter_unix.go). The tests run as on a 022 host (#10280).
+    previous = os.umask(0o022)
+    os.umask(previous | 0o022)
+    try:
+        with tempfile.TemporaryDirectory(prefix="pst-", dir=temp_dir) as directory:
+            home = Path(directory).resolve()
+            temporary = home / "tmp"
+            temporary.mkdir()
+            environment.update(HOME=str(home), TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary),
+                               GOTMPDIR=str(temporary), PERSONA_TEST_DATABASE_URL=database, JARVIS_TEST_DATABASE_URL=database)
+            return subprocess.run(command, env=environment).returncode
+    finally:
+        os.umask(previous)
 
 
 def main():

@@ -341,8 +341,8 @@ struct TokenDayLine: View {
 
 // MARK: - Page
 
-/// The card's page: today, the last 7 and 30 days; the calendar with its key; the last 7 days by the hour; by computer
-/// and by kind.
+/// The card's page: today, the last 7 and 30 days; the calendar with its key; the last 7 days by the hour; by computer,
+/// by agent (an older hub sends no agents: no section) and by kind.
 struct TokenUsagePage: View {
     @State private var usage = TokenUsageModel()
     @State private var pickedDay: String?
@@ -367,6 +367,11 @@ struct TokenUsagePage: View {
                 if let hours = usage.hours {
                     section(String(localized: "Last 7 Days by the Hour")) { UsageHourGrid(hours: hours, picked: $pickedHour) }
                     section(String(localized: "By Computer · Last 7 Days")) { machines(hours) }
+                    if hours.agents.contains(where: { $0.tokens.total > 0 }) {
+                        section(String(localized: "By Agent · Last 7 Days", comment: "Token usage page: each coding agent's tokens over the last week")) {
+                            agents(hours)
+                        }
+                    }
                     section(String(localized: "By Kind · Last 7 Days")) { kinds(hours.total) }
                     Text("Input, output, cache write and cache read added up: the same count as Today on the Machines page.")
                         .font(Theme.Font.label)
@@ -438,6 +443,35 @@ struct TokenUsagePage: View {
                         .font(Theme.Font.secondary.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
                         .gridColumnAlignment(.trailing)
                 }
+            }
+        }
+    }
+
+    /// Each agent's tokens, as the computers': its mark and name, a bar against the largest, the number. Usage the hub
+    /// stored before it kept agents apart has no agent: a row of its own, named so, without a mark.
+    private func agents(_ hours: UsageHours) -> some View {
+        let top = Double(hours.agents.first?.tokens.total ?? 0)
+        return Grid(alignment: .leading, horizontalSpacing: Theme.Space.m, verticalSpacing: Theme.Space.s) {
+            ForEach(hours.agents.filter { $0.tokens.total > 0 }) { a in
+                let kind = AgentKind(usageAgent: a.agent)
+                GridRow {
+                    HStack(spacing: Theme.Space.s) {
+                        if let kind {
+                            AgentMark(kind: kind).accessibilityHidden(true) // the name says it
+                            Text(kind.name).font(Theme.Font.body).lineLimit(1)
+                        } else {
+                            Text(String(localized: "Not Split (Before the Update)",
+                                        comment: "Token usage page, By Agent: usage the hub kept before it counted each agent apart"))
+                                .font(Theme.Font.body).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .layoutPriority(1) // at large text sizes the bar gives way before the name does
+                    MeterBar(fraction: top > 0 ? Double(a.tokens.total) / top : 0, color: Theme.accent)
+                    Text(TokenFormat.short(a.tokens.total))
+                        .font(Theme.Font.secondary.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+                        .gridColumnAlignment(.trailing)
+                }
+                .accessibilityElement(children: .combine)
             }
         }
     }

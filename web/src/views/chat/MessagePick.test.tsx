@@ -105,14 +105,17 @@ describe("picking messages in a chat", () => {
     expect(boxes()[1].getAttribute("aria-label")).toBe("Three times.");
   });
 
-  it("opens no menu while picking", () => {
+  it("opens no menu while picking", async () => {
     renderChat(undefined);
-    const rightClick = () => act(() => host.querySelector("p")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 })));
-    rightClick();
+    const rightClick = () => act(async () => {
+      host.querySelector("p")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }));
+      await vi.dynamicImportSettled();
+    });
+    await rightClick();
     expect(document.querySelector('[role="menu"]')).not.toBeNull(); // as it does when not picking
     renderChat(pick);
     expect(document.querySelector('[role="menu"]')).toBeNull(); // the open one closes as picking starts
-    rightClick();
+    await rightClick();
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
@@ -196,7 +199,7 @@ describe("the pick bar", () => {
     localStorage.removeItem(INCLUDE_KEY);
   });
 
-  it("is started from the message menu's last row, Select messages (#9469)", () => {
+  it("is started from the message menu's last row, Select messages (#9469)", async () => {
     const forward = vi.fn();
     const chat: ChatActions = { draftKey: "m/s", canCompose: true, speaker: "Agent", title: "Network tests", forward, images: () => [] };
     act(() =>
@@ -209,7 +212,10 @@ describe("the pick bar", () => {
       ),
     );
     const words = host.querySelector<HTMLElement>("[data-words]")!;
-    act(() => void words.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })));
+    await act(async () => {
+      words.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await vi.dynamicImportSettled();
+    });
     const last = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].at(-1)!;
     expect(last.textContent).toBe("Select messages");
     act(() => last.click());

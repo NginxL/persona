@@ -20,7 +20,6 @@ import {
   kindOf,
   knownZone,
   LIST_KINDS,
-  mergeMeetingLists,
   recordingKindTag,
   linkGroups,
   markParts,
@@ -71,15 +70,6 @@ describe("kinds", () => {
 });
 
 describe("the meetings list (#8871)", () => {
-  it("merges the imported meetings and the recordings, tags once each", () => {
-    const m = { items: [e("m1", { kind: "meetings" })], tags: ["周会", "客户"] };
-    const r = { items: [e("r1", { kind: "recordings", recording_kind: "note" })], tags: ["周会", "旅行"] };
-    const out = mergeMeetingLists(m, r);
-    expect(out.items?.map((x) => x.id)).toEqual(["m1", "r1"]);
-    expect(out.tags).toEqual(["周会", "客户", "旅行"]);
-    expect(mergeMeetingLists({ items: null }, { items: null, tags: null })).toEqual({ items: [], tags: [] });
-  });
-
   it("marks only notes and all-day recordings", () => {
     expect(recordingKindTag(e("n", { kind: "recordings", recording_kind: "note" }))).toBe("笔记");
     expect(recordingKindTag(e("d", { kind: "recordings", recording_kind: "day" }))).toBe("全天录音");

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "id": "acme-code",
+  "name": "Acme Code",
+  "version": "1.0.0",
+  "description": "Repositories, issues and merge requests on Acme Code, for the repository catalog and to-dos.",
+  "engines": {"persona": ">=202611060000", "extension_protocol": 1},
+  "runtime": {"command": {"linux-amd64": "bin/acme-code-linux-amd64", "darwin-arm64": "bin/acme-code-darwin-arm64"}},
+  "activation_events": ["on_startup"],
+  "contributes": {"repository_providers": [{"id": "acme", "name": "Acme Code", "hosts": ["code.acme.test", "ssh.code.acme.test"],
+    "link_kinds": [{"kind": "pull_request", "label": "MR"}, {"kind": "issue", "label": "Issue"}]}]},
+  "secrets": [{"name": "token", "title": "Access token", "required": true}],
+  "permissions": {"network": ["code.acme.test"]}
+}

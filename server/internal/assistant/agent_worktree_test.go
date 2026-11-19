@@ -23,6 +23,9 @@ func TestAgentStartInANewWorktree(t *testing.T) {
 		f.worktrees[1]["branch"] != "fix/Login" || f.worktrees[1]["path"] != "/wt/app/fix-login" {
 		t.Fatalf("worktree calls %v", f.worktrees)
 	}
+	if f.worktrees[1]["for_agent"] != true { // the node marks its first shell as Persona's (#10624)
+		t.Fatalf("worktree.create without for_agent: %v", f.worktrees[1])
+	}
 	if len(f.starts) != 1 || f.starts[0]["cwd"] != "/wt/app/fix-login" || f.starts[0]["workspace_id"] != "ws-new" {
 		t.Fatalf("starts %v", f.starts)
 	}

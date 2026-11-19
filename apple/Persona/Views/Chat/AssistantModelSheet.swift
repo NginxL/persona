@@ -103,7 +103,7 @@ nonisolated enum AssistantModelChoice {
 
     /// The configured-model row for a launcher with no readable catalog or no models of its own.
     static func configuredFallback(_ launcher: Launcher, models: [AgentModel], locked: String?) -> ConfiguredFallback? {
-        guard models.isEmpty, let id = launcher.model?.emptyAsNil else { return nil }
+        guard models.isEmpty, let id = launcher.model?.emptyAsNil, id != "默认" else { return nil } // i18n-ignore: legacy wire value, never displayed
         return ConfiguredFallback(id: id, sendsDefault: locked != nil)
     }
 
@@ -388,7 +388,7 @@ struct AssistantModelSheet: View {
                 // A real Default row comes from the catalog. Add one only when the current setup has no such row.
                 if selected != nil, configured == nil, !models.contains(where: { $0.isDefault }) {
                     row(launcher: launcher.name, modelID: "", title: String(localized: "Default [Prompt Composer 844b8c]"),
-                        detail: launcher.model, ticked: selected == "", locked: nil)
+                        detail: launcher.model == "默认" ? nil : launcher.model, ticked: selected == "", locked: nil) // i18n-ignore: legacy wire value, never displayed
                 }
                 if let locked {
                     Label(locked, systemImage: Theme.Icon.locked)
@@ -442,7 +442,8 @@ struct AssistantModelSheet: View {
 
     private func row(launcher: String, modelID: String, title: String, detail: String?, ticked: Bool,
                      locked: String?, custom: Bool = false) -> some View {
-        Button {
+        let second = launcherModelRowDetail(owner: launcher, detail: detail)
+        return Button {
             Haptics.tap()
             Task {
                 if await panel.choose(launcher: launcher, model: modelID.isEmpty ? nil : modelID, session: session) {
@@ -454,8 +455,8 @@ struct AssistantModelSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(title).font(custom ? Theme.Font.heading.monospaced() : Theme.Font.heading)
                         .foregroundStyle(.primary).lineLimit(1)
-                    if let detail {
-                        Text(detail).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    if let second {
+                        Text(second).font(Theme.Font.label.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: Theme.Space.s)

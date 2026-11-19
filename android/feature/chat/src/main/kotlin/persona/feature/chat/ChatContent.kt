@@ -38,6 +38,7 @@ import coil3.fetch.SourceFetchResult
 import coil3.key.Keyer
 import coil3.request.Options
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownBlockQuote
 import com.mikepenz.markdown.compose.elements.MarkdownBulletList
 import com.mikepenz.markdown.compose.elements.MarkdownOrderedList
@@ -48,6 +49,15 @@ import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownDimens
 import com.mikepenz.markdown.model.markdownPadding
+import com.mikepenz.markdown.model.ImageTransformer
+import com.mikepenz.markdown.model.MarkdownAnnotator
+import com.mikepenz.markdown.model.MarkdownAnimations
+import com.mikepenz.markdown.model.MarkdownColors
+import com.mikepenz.markdown.model.MarkdownDimens
+import com.mikepenz.markdown.model.MarkdownPadding
+import com.mikepenz.markdown.model.MarkdownTypography
+import org.intellij.markdown.ast.ASTNode
+import com.mikepenz.markdown.model.State as MarkdownResult
 import persona.core.contracts.Item
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatRepository
@@ -59,7 +69,9 @@ import persona.core.designsystem.row
 import persona.core.domain.lines.*
 import androidx.compose.runtime.key
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 
@@ -114,7 +126,9 @@ private fun ChatMarkdownCards(text: String, id: String, fences: List<persona.cor
 @Composable
 private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, color: Color, viewKeys: ((Int) -> String)? = null,
     streaming: Boolean? = null) {
-    val fences = remember(text) {
+    val ancillaryStream = remember(id, streaming == true) { AssistantAncillaryStream { _, _ -> } }
+    val ancillary = if (streaming == true) ancillaryStream.update(text, linkable = emptySet()) else null
+    val fences = ancillary?.cards ?: remember(text) {
         if (persona.core.domain.views.AssistantFences.mentions(text)) persona.core.domain.views.AssistantFences.blocks(text) else emptyList()
     }
     if (fences.isNotEmpty()) return ChatMarkdownCards(text, id, fences, bodyStyle, color, viewKeys, streaming)
@@ -123,30 +137,61 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
     val actions = LocalChatRowActions.current
     val presence = actions?.paths
     val open = actions?.openPath
-    val asked = remember(text, presence) { if (presence == null) emptyList() else PathLinks.asked(text) }
+    val asked = if (presence == null) emptyList() else ancillary?.paths ?:
+        remember(text, presence) { PathLinks.asked(text) }
     if (presence != null && asked.isNotEmpty()) LaunchedEffect(presence, asked) { presence.ask(asked) }
     val linkable = if (presence == null || open == null) emptySet() else asked.filterTo(LinkedHashSet(), presence::linkable)
-    val source = remember(text, linkable) { PathLinks.markdown(text, linkable) }
+    val source = if (streaming == true) ancillaryStream.update(text, linkable = linkable).linkedMarkdown
+        else remember(text, linkable) { PathLinks.markdown(text, linkable) }
     // Keep this message's rendered Markdown while its next parse runs. Falling back to raw text on each delta
     // repeatedly changes block geometry. A different message or cache must start with its own state.
-    val parsed by key(id, cache) {
-        produceState(cache.cached(id, source), source, streaming) {
-            value = cache.parse(id, source, streaming)
+    val render by key(id, cache) {
+        produceState(cache.cachedRenderState(id, source), source, streaming) {
+            value = cache.parseRenderState(id, source, streaming)
         }
     }
+    val parsed = render?.result
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val outer = LocalUriHandler.current
     val uriHandler = remember(outer, open) { if (open == null) outer else PathLinks.handler(outer, open) }
-    // Inline code a tap copies, in the body's color on its well; inside a path's link it stays the link's (#2984).
+    // Linked code opens its target; elsewhere a tap copies the code.
     val copy = rememberCopy()
-    val codeSpan = inlineCodeStyle(color)
+    val codeInk = if (color == palette.ink) palette.replyCodeInk else Color.Unspecified
     // …except in a message whose words "Select" has selected in place: a tap there is the selection's (#4210).
     val selecting = LocalSelectionAbove.current
-    val annotator = remember(codeSpan, copy, selecting) { copyingCode(codeSpan, if (selecting) null else { words: String -> copy(words, null) }) }
+    val root = (parsed as? MarkdownResult.Success)?.node
+    val annotator = remember(codeInk, copy, selecting) {
+        DelegatingMarkdownAnnotator(copyingCode(root, codeInk, if (selecting) null else { words: String -> copy(words, null) }))
+    }
+    annotator.delegate = remember(root, codeInk, copy, selecting) {
+        copyingCode(root, codeInk, if (selecting) null else { words: String -> copy(words, null) })
+    }
+    val components = remember(color, bodyStyle, palette, type) {
+        markdownComponents(
+            orderedList = { model -> MarkdownOrderedList(model.content, model.node, depth = model.listDepth,
+                markerModifier = { firstBaselineAligned().padding(end = 8.dp.dense) },
+                listModifier = { firstBaselineAligned(Modifier.weight(1f)) }) },
+            unorderedList = { model -> MarkdownBulletList(model.content, model.node, depth = model.listDepth,
+                markerModifier = { firstBaselineAligned().padding(end = 8.dp.dense) },
+                listModifier = { firstBaselineAligned(Modifier.weight(1f)) }) },
+            table = { model -> ReadableMarkdownTable(model.content, model.node, model.typography.table,
+                enabled = !LocalInPicture.current) },
+            codeFence = { model ->
+                MarkdownFence(model.content.substring(model.node.startOffset, model.node.endOffset), color, bodyStyle) {
+                    // A card fence the hub's rules do not take as standalone (in a list or a quote): an example, drawn as
+                    // code. Standalone ones never get here (ChatMarkdownCards).
+                    CodeText(it.code, it.language, syntax = true, bar = true)
+                }
+            },
+            codeBlock = { model -> CodeText(model.content.substring(model.node.startOffset, model.node.endOffset).trimIndent(), bar = true) },
+            blockQuote = { model -> ReplyQuote(bodyStyle) { MarkdownBlockQuote(model.content, model.node) } },
+        )
+    }
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
-        if (parsed == null) ChatLinkText(text, Modifier.fillMaxWidth(), bodyStyle.copy(color = color))
-        else Markdown(parsed!!, modifier = Modifier.fillMaxWidth(), imageTransformer = rememberMathImages(color, bodyStyle),
+        val current = render
+        if (parsed == null || current == null) ChatLinkText(text, Modifier.fillMaxWidth(), bodyStyle.copy(color = color))
+        else DrawParsedMarkdown(current, modifier = Modifier.fillMaxWidth(), imageTransformer = rememberMathImages(color, bodyStyle),
             annotator = annotator,
             // Text grows at its measured size; the library's default spring trails each streamed line wrap.
             animations = markdownAnimations(animateTextSize = { this }),
@@ -154,7 +199,7 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
             dimens = markdownDimens(blockQuoteThickness = Dp(0f)), // none (a hairline still draws a pixel)
             padding = markdownPadding(blockQuote = PaddingValues(start = Tokens.Space.m), blockQuoteBar = PaddingValues.Absolute()),
             colors = markdownColor(text = color, codeBackground = palette.sunken,
-                inlineCodeBackground = palette.sunken, dividerColor = palette.line,
+                inlineCodeBackground = palette.sunken.copy(alpha = 0f), dividerColor = palette.line,
                 tableBackground = palette.surface, darkTheme = palette.dark,
                 highlightText = palette.ink, highlightBackground = palette.marker),
             typography = markdownTypography(h1 = type.largeTitle, h2 = type.title, h3 = type.headline,
@@ -163,25 +208,46 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
                 quote = type.callout.copy(color = palette.ink2), ordered = bodyStyle,
                 bullet = bodyStyle, list = bodyStyle, table = bodyStyle, alertTitle = type.bodyStrong,
                 textLink = TextLinkStyles(SpanStyle(color = palette.accent, textDecoration = TextDecoration.Underline))),
-            components = markdownComponents(
-                orderedList = { model -> MarkdownOrderedList(model.content, model.node, depth = model.listDepth,
-                    markerModifier = { firstBaselineAligned().padding(end = 8.dp.dense) },
-                    listModifier = { firstBaselineAligned(Modifier.weight(1f)) }) },
-                unorderedList = { model -> MarkdownBulletList(model.content, model.node, depth = model.listDepth,
-                    markerModifier = { firstBaselineAligned().padding(end = 8.dp.dense) },
-                    listModifier = { firstBaselineAligned(Modifier.weight(1f)) }) },
-                table = { model -> ReadableMarkdownTable(model.content, model.node, model.typography.table,
-                    enabled = !LocalInPicture.current) },
-                codeFence = { model ->
-                    MarkdownFence(model.content.substring(model.node.startOffset, model.node.endOffset), color, bodyStyle) {
-                        // A card fence the hub's rules do not take as standalone (in a list or a quote): an example, drawn as
-                        // code. Standalone ones never get here (ChatMarkdownCards).
-                        CodeText(it.code, it.language, syntax = true, bar = true)
-                    }
-                },
-                codeBlock = { model -> CodeText(model.content.substring(model.node.startOffset, model.node.endOffset).trimIndent(), bar = true) },
-                blockQuote = { model -> ReplyQuote(bodyStyle) { MarkdownBlockQuote(model.content, model.node) } },
-            ))
+            components = components)
+    }
+}
+
+private class DelegatingMarkdownAnnotator(
+    var delegate: MarkdownAnnotator,
+) : MarkdownAnnotator {
+    override val annotate: (AnnotatedString.Builder, String, ASTNode) -> Boolean = { builder, content, node ->
+        delegate.annotate?.invoke(builder, content, node) == true
+    }
+    override val config get() = delegate.config
+}
+
+@Composable
+private fun DrawParsedMarkdown(
+    render: ChatMarkdownRenderState,
+    modifier: Modifier,
+    imageTransformer: ImageTransformer,
+    annotator: MarkdownAnnotator,
+    animations: MarkdownAnimations,
+    dimens: MarkdownDimens,
+    padding: MarkdownPadding,
+    colors: MarkdownColors,
+    typography: MarkdownTypography,
+    components: MarkdownComponents,
+) {
+    val result = render.result
+    val stable = render.stable
+    if (stable != null && result is MarkdownResult.Success) {
+        val state = remember(render) {
+            stable.state.update(result, stable.stableCount)
+            stable.state
+        }
+        Markdown(state, modifier = modifier, imageTransformer = imageTransformer, annotator = annotator,
+            animations = animations, dimens = dimens, padding = padding, colors = colors, typography = typography,
+            components = components)
+    } else {
+        Markdown(result, modifier = modifier, imageTransformer = imageTransformer, annotator = annotator,
+            animations = animations, dimens = dimens, padding = padding, colors = colors, typography = typography,
+            components = components)
     }
 }
 
@@ -294,6 +360,18 @@ internal fun ChatPicture(session: SessionKey, item: Item, loader: ImageLoader, a
  * group's plan ([latestPlan]): its TodoWrite is the full plan card, with earlier updates retained as ordinary steps.
  * [waiting]: the turn waits on you ([turnWaitsOnYou]); a running work line then reads "Waiting for you".
  */
+/** Collect a row's own stream inside this scope, so another delta cannot recompose its siblings. */
+@Composable
+private fun WithLiveText(item: Item, update: ChatTextUpdate?, live: StateFlow<String>?, streaming: Boolean,
+    content: @Composable (ChatTextUpdate?) -> Unit) {
+    if (update != null || live == null && !streaming) content(update)
+    else if (live == null) content(ChatTextUpdate(item.text.orEmpty(), streaming = true))
+    else {
+        val text by live.collectAsStateWithLifecycle()
+        content(ChatTextUpdate(text, streaming = true))
+    }
+}
+
 @Composable
 internal fun ChatLineContent(
     line: ChatLine, session: SessionKey, loader: ImageLoader, recordedDuration: Long?,
@@ -302,6 +380,8 @@ internal fun ChatLineContent(
     onFullText: (Item) -> Unit,
     style: ChatRenderStyle = ChatRenderStyle.Agent,
     textUpdates: Map<String, ChatTextUpdate> = emptyMap(),
+    liveText: Map<String, StateFlow<String>> = emptyMap(),
+    streamingItemIds: Set<String> = emptySet(),
     userImages: List<Item> = emptyList(),
     imagesInUserBubble: Boolean = false,
     workRunning: Boolean = false,
@@ -315,6 +395,8 @@ internal fun ChatLineContent(
     hideTaskPrompts: Boolean = false,
     /** This line is the turn's error and the hub named its fix ([TurnErrorFix]): an answer, a notice or an API error draws the card. */
     turnFix: TurnErrorFix? = null,
+    /** The session's launcher, named in the card's title when known. */
+    turnLauncher: String? = null,
     /** Opens the session's terminal: the live work line's mark on Glass ([ChatTerminalPlaces.onWorkLine]). */
     onTerminal: (() -> Unit)? = null,
 ) {
@@ -325,7 +407,7 @@ internal fun ChatLineContent(
             line is ChatLine.Row && (line.row.type == "reply" || line.row.type == "notice") -> line.row.item?.item?.text
             else -> null
         }
-        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw)
+        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw, turnLauncher)
     }
     when (line) {
         is ChatLine.Row -> when (line.row.type) {
@@ -339,14 +421,16 @@ internal fun ChatLineContent(
                         images = userPictures(userImages, session, loader))
                 }
             }
-            "reply" -> line.row.item?.item?.let {
-                val hideCloseout = closeoutReply == line.row.id && textUpdates[it.id]?.streaming != true
-                // only the block goes; a reply that said nothing else is not drawn at all
-                if (!hideCloseout || !onlyCloseout(textUpdates[it.id]?.text ?: it.text, cut = it.fullSize != null)) {
-                    MessageContent(it, false, textUpdates[it.id], boxed = true, hideCloseout = hideCloseout)
-                    val usage = LocalReplyUsage.current[it.id]
-                    // A reply still streaming has no total yet (the web hides the bar while the turn is live).
-                    if (usage != null && textUpdates[it.id]?.streaming != true) ReplyUsageFooter(it, usage)
+            "reply" -> line.row.item?.item?.let { item ->
+                WithLiveText(item, textUpdates[item.id], liveText[item.id], item.id in streamingItemIds) { update ->
+                    val hideCloseout = closeoutReply == line.row.id && update?.streaming != true
+                    // only the block goes; a reply that said nothing else is not drawn at all
+                    if (!hideCloseout || !onlyCloseout(update?.text ?: item.text, cut = item.fullSize != null)) {
+                        MessageContent(item, false, update, boxed = true, hideCloseout = hideCloseout)
+                        val usage = LocalReplyUsage.current[item.id]
+                        // A reply still streaming has no total yet (the web hides the bar while the turn is live).
+                        if (usage != null && update?.streaming != true) ReplyUsageFooter(item, usage)
+                    }
                 }
             }
             "thinking" -> if (!style.hidesThoughts()) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
@@ -369,7 +453,15 @@ internal fun ChatLineContent(
             val round = line.payload as? persona.core.domain.tasks.BackgroundRound
             if (round != null) BackgroundRoundLine(round, onToggle) else AssistantExtraLine(line.payload, LocalAssistantTaskHost.current)
         }
-        is ChatLine.ApiError -> ApiErrorLine(line)
+        is ChatLine.ApiError -> WithLiveText(line.item.item, textUpdates[line.item.id],
+            liveText[line.item.id], line.item.id in streamingItemIds) { update ->
+            if (update == null) ApiErrorLine(line)
+            else {
+                val text = update.text
+                ApiErrorLine(line.copy(item = line.item.copy(item = line.item.item.copy(text = text)),
+                    info = persona.core.domain.lines.ApiErrorInfo.parse(text) ?: line.info))
+            }
+        }
         is ChatLine.UserImages -> if (!imagesInUserBubble) UserBubbleFrame {
             line.images.forEach { ChatPicture(session, it.item, loader, alignEnd = true) }
         }
@@ -390,7 +482,8 @@ internal fun ChatLineContent(
         }
         // Every open step sits on the work line's rail, the plan and its items too (Glass, iOS's timeline, #4339 C5).
         is ChatLine.Step -> Box(Modifier.fillMaxWidth().workRail(lastWorkStep)) {
-            WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+            WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates,
+                liveText, streamingItemIds, workRunning, lastWorkStep, plan)
         }
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp.row).clickable(role = Role.Button) { onToggle(line.groupId) })
@@ -427,7 +520,8 @@ internal fun AssistantFoldLine(label: String, open: Boolean, modifier: Modifier 
 @Composable
 private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, onFold: (Item) -> Unit,
     folding: Set<String>, errors: Map<String, String>, onFullText: (Item) -> Unit,
-    style: ChatRenderStyle, textUpdates: Map<String, ChatTextUpdate>, running: Boolean, last: Boolean, plan: LinePlan? = null) {
+    style: ChatRenderStyle, textUpdates: Map<String, ChatTextUpdate>, liveText: Map<String, StateFlow<String>>,
+    streamingItemIds: Set<String>, running: Boolean, last: Boolean, plan: LinePlan? = null) {
     when (step) {
         is WorkItem.Folded -> {
             val item = step.item.item
@@ -533,9 +627,15 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
             }
         }
 
-        is WorkItem.Narration -> MessageContent(step.item.item, false, textUpdates[step.item.id])
+        is WorkItem.Narration -> WithLiveText(step.item.item, textUpdates[step.item.item.id],
+            liveText[step.item.item.id], step.item.item.id in streamingItemIds) { update ->
+            MessageContent(step.item.item, false, update)
+        }
         is WorkItem.Thought -> if (step.item.kind == "thinking") {
-            if (!style.hidesThoughts()) ThoughtContent(textUpdates[step.item.id]?.text ?: step.item.text.orEmpty(), step.item.id, style.collapseThoughts, last)
+            if (!style.hidesThoughts()) WithLiveText(step.item.item, textUpdates[step.item.id],
+                liveText[step.item.id], step.item.id in streamingItemIds) { update ->
+                ThoughtContent(update?.text ?: step.item.text.orEmpty(), step.item.id, style.collapseThoughts, last)
+            }
         }
         else step.item.compaction?.let { TimelineMark(it.label.text()) }
             ?: step.item.takeIf { it.task != null }?.let { TaskNoteLine(it, last, onFullText) }

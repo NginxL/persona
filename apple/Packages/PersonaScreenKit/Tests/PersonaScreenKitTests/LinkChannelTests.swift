@@ -13,9 +13,10 @@ final class LinkChannelTests: XCTestCase {
         XCTAssertThrowsError(try r.accept(Data("z".utf8), at: 9)) { e in
             XCTAssertEqual(e as? LinkReceiver.Failure, .gap(expected: 5, got: 9))
         }
-        r.reset(to: 20)
+        XCTAssertTrue(r.reset(to: 20))
         XCTAssertEqual(r.offset, 20)
-        r.reset(to: 3)
+        XCTAssertFalse(r.reset(to: 20), "a reset at the offset changes nothing (#10005)")
+        XCTAssertFalse(r.reset(to: 3))
         XCTAssertEqual(r.offset, 20, "a reset never goes back")
     }
 

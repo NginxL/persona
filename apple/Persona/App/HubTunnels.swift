@@ -221,15 +221,17 @@ extension AppModel {
         for h in registry.hubs where !keep.contains(h.group) { closeTunnels(h.id, forget: false) }
     }
 
-    /// The group a call to Persona is on (#9290): the call goes on in the background, and its voice's socket may go
-    /// through one of the group's tunnels, so none of them closes for the background while it is on.
+    /// The group a system call is on (#9290), or the phone's voice chat on iOS (#9887 one button: it goes on in the
+    /// background too): its voice's socket may go through one of the group's tunnels, so none of them closes for the
+    /// background while it is on.
     var callTunnelGroup: String? {
         #if DEBUG
         let calls = voiceCallsForTests ?? .shared
         #else
         let calls = VoiceCalls.shared
         #endif
-        guard let call = calls.current, call.surface == .call, !call.phase.isEnded else { return nil }
+        guard let call = calls.current, !call.phase.isEnded,
+              call.surface == .call || (call.surface == .phone && VoiceCalls.keepsChatAway && call.meeting == nil) else { return nil }
         return call.key.group
     }
 

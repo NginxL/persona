@@ -482,7 +482,7 @@ struct ButtonRowInsets: ViewModifier {
         } else if let edges {
             content.listRowInsets(EdgeInsets(top: Theme.Space.flush, leading: edges.leading, bottom: Theme.Space.flush, trailing: edges.trailing))
         } else {
-            content.listRowInsets(.vertical, Theme.Space.flush)
+            content.listRowVerticalInsets(Theme.Space.flush)
         }
         #else
         content.listRowInsets(edges)

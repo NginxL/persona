@@ -10,7 +10,7 @@ import PackageDescription
 // out of the shipped `PersonaCore` library.
 let package = Package(
     name: "PersonaCore",
-    platforms: [.iOS(.v26), .macOS(.v26)],
+    platforms: [.iOS(.v18), .macOS(.v26)],
     products: [
         .library(name: "PersonaCore", targets: ["PersonaCore"]),
         .library(name: "PersonaCoreTestSupport", targets: ["PersonaCoreTestSupport"]),

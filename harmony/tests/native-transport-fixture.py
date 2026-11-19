@@ -197,7 +197,8 @@ def main():
                 if path.endswith('large-ws'):
                     self.wfile.write(b'\x81\x7f' + struct.pack('!Q', 2 * 1024 * 1024))
                 else:
-                    hello = json.dumps({'type': 'hello', 'hub_id': HUB_ID, 'features': []}).encode()
+                    hello = json.dumps({'type': 'hello', 'hub_id': HUB_ID, 'features': [],
+                                        'fixture_identity': self.identity()}).encode()
                     half = len(hello) // 2
                     self.wfile.write(frame(1, hello[:half], False) + frame(0, hello[half:]))
                 while True:

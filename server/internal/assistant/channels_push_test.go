@@ -159,7 +159,7 @@ func TestExtensionPushDoesNotSuppressFeishuMirrorOrRetry(t *testing.T) {
 	s.channelPush("server", "s1", "Status", "The notification")
 	ctx := context.Background()
 	m := &mirrorSend{target: botTarget{MachineID: "server", SessionID: "s1"}, main: true, answer: "The full answer", turn: "a1"}
-	if !s.mirrorStillDue(ctx, m) {
+	if due, err := s.mirrorStillDue(ctx, m); !due || err != nil {
 		t.Fatal("a successful extension push suppressed a Lark mirror retry")
 	}
 	s.feishuMirror(ctx, "server", "s1")
@@ -167,7 +167,7 @@ func TestExtensionPushDoesNotSuppressFeishuMirrorOrRetry(t *testing.T) {
 		t.Fatalf("a successful extension push suppressed the Lark mirror: %v", got)
 	}
 	s.feishuPush("server", "s1", "Status", "The notification")
-	if s.mirrorStillDue(ctx, m) {
+	if due, err := s.mirrorStillDue(ctx, m); due || err != nil {
 		t.Fatal("a delivered Lark push must suppress its own mirror retry")
 	}
 	s.feishuMirror(ctx, "server", "s1")

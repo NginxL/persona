@@ -243,7 +243,16 @@ func (s *Service) stopCancelledAgent(ctx context.Context, id, machine, session s
 		return
 	}
 	machine = c.MachineID
-	if c.Status != proto.StatusOffline {
+	closed := false
+	if !agentCloseBusy(c) && s.closeEndedTerminals(ctx) {
+		// A cancelled task ends its idle Agent's session: with the owner's close-on-end setting its terminal goes
+		// too (#10355); a busy one is only stopped below and keeps its terminal.
+		var err error
+		if closed, err = s.closeEndedTerminal(ctx, machine, session, proto.StopUser); err != nil {
+			s.logf("task %s cancelled: close agent %s/%s: %v", id, machine, short(session), err)
+		}
+	}
+	if c.Status != proto.StatusOffline && !closed {
 		cctx, cancel := context.WithTimeout(ctx, agentArchiveCloseTimeout)
 		err := s.call(cctx, machine, deviceSessionStop, map[string]any{"session_id": session}, nil)
 		if re := (*rpc.Error)(nil); errors.As(err, &re) && re.Code == "no_terminal" {
@@ -289,14 +298,19 @@ func (s *Service) endSessionCards(machine, session string) {
 	s.fleet.mu.Lock()
 	var ids []string
 	for id, p := range s.fleet.interactions {
-		if p.ix.SessionID == session && s.sameMachine(p.ix.MachineID, machine) && !p.claimed {
-			p.claimed = true
+		if p.ix.SessionID == session && s.sameMachine(p.ix.MachineID, machine) && (p.prepared != nil || !p.claimed) {
+			if p.prepared == nil {
+				p.claimed = true
+			}
 			ids = append(ids, id)
 		}
 	}
 	s.fleet.mu.Unlock()
 	s.feishuDetach(ids)
 	for _, id := range ids {
+		if s.endPreparedByID(id, "cancelled", "The conversation that owned this approval ended; nothing changed.") {
+			continue
+		}
 		s.recordEnd(id, "cancelled", nil)
 		s.finishInteraction(id)
 	}

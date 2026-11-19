@@ -17,9 +17,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -43,8 +41,8 @@ import persona.core.navigation.Navigator
 import java.io.File
 
 /**
- * Where "Requests and history" is (#4338 A1): on Glass a page at the end of ⋯ after Machines, as iOS keeps its pages
- * there, and no row in the list; Brief and Board keep the row (decision 8). The page and its ⋯ sheet in every style,
+ * Where "Requests and history" is (#4338 A1): on Glass a page in list settings after Machines; Brief and Board keep
+ * the list row (decision 8). The page and its list settings sheet in every style,
  * light and dark, written to `build/requests-menu-shots/` (or `-Dpersona.shots=<dir>`).
  */
 @RunWith(AndroidJUnit4::class)
@@ -64,18 +62,19 @@ class RequestsMenuShotsTest {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
         show({ style }, { dark })
-        // The list first, then its ⋯ sheet: a sheet is a window of its own, captured on its own.
+        // The list first, then its settings sheet in a separate window.
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             rule.runOnIdle { style = s; dark = d }
             rule.waitForIdle()
             save(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap(), "list", s, d)
         }
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.runOnIdle { style = AppStyle.Glass }
+        rule.reselectAgentsTab()
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             rule.runOnIdle { style = s; dark = d }
             rule.waitForIdle()
             save(rule.onNode(isDialog()).captureToImage().asAndroidBitmap(), "menu", s, d)
-            // One way there in every style: the item in ⋯ on Glass, the row under the sheet on Brief and Board.
+            // One way there in every style: the item in the sheet on Glass, the row under it on Brief and Board.
             assertEquals("$s", 1, rule.onAllNodesWithText("Requests and history").fetchSemanticsNodes().size)
         }
     }
@@ -114,7 +113,7 @@ class RequestsMenuShotsTest {
         }))
         rule.setContent {
             PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
-                CompositionLocalProvider(LocalHomeChrome provides HomeChrome(emptyList(), "Agents", onSelect = {}, leading = {})) {
+                CompositionLocalProvider(LocalHomeChrome provides agentsHomeChrome) {
                     Box(Modifier.testTag("shot").width(400.dp).height(1100.dp).background(PersonaTheme.palette.background)) {
                         AgentsScreen(model, Nowhere, AgentsMetadata())
                     }

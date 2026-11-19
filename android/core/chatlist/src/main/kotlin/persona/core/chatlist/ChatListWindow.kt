@@ -8,6 +8,7 @@ class ChatListWindow<T>(
 ) {
     private var frozen: LinkedHashMap<String, T>? = null
     private var boundary: T? = null
+    private var heldCount: Int? = null
 
     val isFrozen: Boolean get() = frozen != null
 
@@ -17,7 +18,7 @@ class ChatListWindow<T>(
         boundary = items.maxWithOrNull(order)
     }
 
-    @Synchronized fun follow() { frozen = null; boundary = null }
+    @Synchronized fun follow() { frozen = null; boundary = null; heldCount = null }
 
     /** Preserve frozen values while admitting older pages and holes anywhere before the boundary. */
     @Synchronized fun items(live: List<T>): List<T> {
@@ -27,11 +28,16 @@ class ChatListWindow<T>(
         return snapshot.values.sortedWith(order)
     }
 
-    /** A measured visible boundary also counts messages already loaded below the current viewport. */
-    @Synchronized fun newMessageCount(live: List<T>, below: T? = null, lastRead: T? = null): Int {
+    /**
+     * A measured visible boundary also counts messages already loaded below the current viewport. While [defer] holds,
+     * keep the last count: streaming deltas must not rescan the transcript on the main thread. The next settled call,
+     * or [follow], restores the exact count under the original rule.
+     */
+    @Synchronized fun newMessageCount(live: List<T>, below: T? = null, lastRead: T? = null, defer: Boolean = false): Int {
         if (frozen == null) return 0
+        if (defer) heldCount?.let { return it }
         val end = listOfNotNull(below ?: boundary, lastRead).maxWithOrNull(order) ?: return 0
-        return live.distinctBy(id).count { order.compare(it, end) > 0 && countsAsUnread(it) }
+        return live.distinctBy(id).count { order.compare(it, end) > 0 && countsAsUnread(it) }.also { heldCount = it }
     }
 }
 

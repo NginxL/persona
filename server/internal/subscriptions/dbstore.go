@@ -15,6 +15,7 @@ type DB interface {
 	CreateSubscription(ctx context.Context, r db.SubscriptionRow) error
 	UpdateSubscription(ctx context.Context, r db.SubscriptionRow, prev int64) (bool, error)
 	DeleteSubscription(ctx context.Context, id string) error
+	DeleteSubscriptionAt(ctx context.Context, id string, prev int64) (bool, error)
 	LeaseSubscription(ctx context.Context, id string, now, until time.Time) (bool, error)
 	SubscriptionSeen(ctx context.Context, id string, uids []string) (map[string]bool, error)
 	CommitSubscriptionRun(ctx context.Context, id string, merge func(data []byte, revision int64) ([]byte, error),
@@ -139,6 +140,10 @@ func (d *DBStore) UpdateSubscription(ctx context.Context, s Subscription, prev i
 
 func (d *DBStore) DeleteSubscription(ctx context.Context, id string) error {
 	return d.db.DeleteSubscription(ctx, id)
+}
+
+func (d *DBStore) DeleteSubscriptionAt(ctx context.Context, id string, prev int64) (bool, error) {
+	return d.db.DeleteSubscriptionAt(ctx, id, prev)
 }
 
 func (d *DBStore) LeaseSubscription(ctx context.Context, id string, now, until time.Time) (bool, error) {

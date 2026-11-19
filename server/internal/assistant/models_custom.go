@@ -98,7 +98,7 @@ func (s *Service) ModelUsed(ctx context.Context, p assistantwire.ModelUsed) {
 // listed id or what one resolves to): only what had to be typed is worth offering again. Nor for a launcher that takes
 // no model (takesTypedModel). With the list unknown (a failed call) it is kept: the apps offer a typed id there too.
 func (s *Service) rememberCustomModel(ctx context.Context, machine, launcher, model string) {
-	if machine == "" || launcher == "" || !proto.ValidModelID(model) || s.store() == nil {
+	if machine == "" || launcher == "" || proto.IsExternalLauncher(launcher) || !proto.ValidModelID(model) || s.store() == nil {
 		return
 	}
 	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -155,16 +155,19 @@ func takesTypedModel(res proto.LauncherModels) bool {
 	return res.Locked == "" && (res.Agent == "claude" || res.Agent == "codex")
 }
 
-// listsModel: model is one of res's ids or what one of its aliases resolves to.
+// listsModel: model is one of res's ids, what one of its aliases resolves to, or a spelling folded into one of its rows
+// (proto.AgentModel.Aliases: a pick saved as "opus" before its row became the concrete model's, #10365).
 func listsModel(res proto.LauncherModels, model string) bool {
-	return slices.ContainsFunc(res.Models, func(m proto.AgentModel) bool { return m.ID == model || m.Resolved == model })
+	return slices.ContainsFunc(res.Models, func(m proto.AgentModel) bool {
+		return m.ID == model || m.Resolved == model || slices.Contains(m.Aliases, model)
+	})
 }
 
 // withCustomModels adds the ids remembered for launcher name on machine to its /model list, after its own entries
 // and without the ones it lists itself (custom: true; no efforts: they are not known). A list of a launcher that takes
 // no typed model is left as it is.
 func (s *Service) withCustomModels(ctx context.Context, machine, name string, res proto.LauncherModels) proto.LauncherModels {
-	if !takesTypedModel(res) {
+	if proto.IsExternalLauncher(name) || !takesTypedModel(res) {
 		return res
 	}
 	custom := s.customModels(ctx, machine, name)
@@ -176,6 +179,9 @@ func (s *Service) withCustomModels(ctx context.Context, machine, name string, re
 		seen[m.ID] = true
 		if m.Resolved != "" {
 			seen[m.Resolved] = true
+		}
+		for _, a := range m.Aliases {
+			seen[a] = true
 		}
 	}
 	desc := mc(s.requestCtxLang(ctx), "custom_model_description")

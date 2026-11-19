@@ -721,6 +721,23 @@ func (h *Manager) ConnectorTool(name string) bool {
 	return h.connectors != nil && h.connectors.Offers(name)
 }
 
+// ToolAccess classifies every tool CallTool can dispatch, without running it. Connector reads are declared by the
+// connector; its Actions are writes. Subscription dry runs only read, while save/run can change or notify. Computer,
+// browser and iPhone control are actions for this policy even when an individual invocation only observes.
+func (h *Manager) ToolAccess(name string) (known, readOnly bool) {
+	if h.connectors != nil && h.connectors.Offers(name) {
+		return true, h.connectors.ReadOnly(name)
+	}
+	switch {
+	case isComputerTool(name), isBrowserTool(name), isIPhoneTool(name):
+		return true, false
+	case isSubscriptionTool(name):
+		return true, name == "subscription_list" || name == "subscription_get" ||
+			name == "subscription_sources" || name == "subscription_dry_run"
+	}
+	return false, false
+}
+
 // AssistantSummary is the text a gated command's card shows, as its extension names what the ids are; false: none.
 func (h *Manager) AssistantSummary(ctx context.Context, tool, summary string) (string, bool) {
 	if !h.ready(ctx) || h.extensions == nil {

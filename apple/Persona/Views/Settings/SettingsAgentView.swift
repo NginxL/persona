@@ -15,6 +15,11 @@ struct SettingsAgentView: View {
                 }
                 .lineLimit(1)
                 .accessibilityIdentifier("settings-agent-codex")
+                NavigationLink(value: SettingsPage.agy) {
+                    SettingsRow(title: String(localized: "Antigravity Settings"), symbol: Theme.Icon.options, tint: Theme.Hue.blue)
+                }
+                .lineLimit(1)
+                .accessibilityIdentifier("settings-agent-agy")
                 NavigationLink(value: SettingsPage.triage) {
                     SettingsRow(title: String(localized: "Session Triage"), symbol: Theme.Icon.triage, tint: Theme.ai)
                 }

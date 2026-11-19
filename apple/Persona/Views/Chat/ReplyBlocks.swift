@@ -49,6 +49,8 @@ struct ReplyCodeBlock: View {
                     .fontDesign(.monospaced)
                     .padding(Theme.Space.m)
             }
+            // As tall as its lines, whatever height it is offered, as the paragraphs are (a table's cut rows, #10012).
+            .fixedSize(horizontal: false, vertical: true)
             // A scroll view clips to its frame plus the safe area beside it: on the iPhone Duo's displays, whose status
             // bar runs down the side, long lines were drawn past the block and under that bar (#8212).
             .clipped()

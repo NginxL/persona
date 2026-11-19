@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, attentionReason, baseName, externalLink, failureReason, failureText, sessionPreview } from "./format";
+import { ago, attentionReason, baseName, bytes, externalLink, failureReason, failureText, sessionPreview } from "./format";
 import { formatRelative } from "../i18n";
 import type { Session } from "./types";
 
@@ -108,5 +108,36 @@ describe("baseName", () => {
 
   it("keeps a backslash that is part of a name anywhere else", () => {
     expect(baseName("/home/me/odd\\name")).toBe("odd\\name");
+  });
+});
+
+// File sizes (the Files panel, the file viewer, chat file cards…): the unit and the decimals follow the figure as it is
+// shown, after rounding, as the machine pages' bytesBin does (#9969; Android #9900, #9917).
+describe("bytes", () => {
+  it("moves up a unit once the rounded figure reaches 1024", () => {
+    expect(bytes(1_047_551)).toBe("1023 KB");
+    expect(bytes(1_048_064)).toBe("1.0 MB");
+    expect(bytes(1_048_575)).toBe("1.0 MB");
+    expect(bytes(1023)).toBe("1023 B");
+    expect(bytes(1023.5)).toBe("1.0 KB");
+    expect(bytes(1023.5 * 1024 ** 2)).toBe("1.0 GB");
+  });
+
+  it("drops the decimal once the figure rounds to 100", () => {
+    expect(bytes(102_348)).toBe("99.9 KB");
+    expect(bytes(102_350)).toBe("100 KB");
+    expect(bytes(99.96 * 1024 ** 2)).toBe("100 MB");
+  });
+
+  it("reads every other size as before", () => {
+    expect(bytes(undefined)).toBe("—");
+    expect(bytes(Number.NaN)).toBe("—");
+    expect(bytes(0)).toBe("0 B");
+    expect(bytes(512)).toBe("512 B");
+    expect(bytes(1024)).toBe("1.0 KB");
+    expect(bytes(1536)).toBe("1.5 KB");
+    expect(bytes(10 * 1024 ** 2)).toBe("10.0 MB");
+    expect(bytes(250 * 1024 ** 2)).toBe("250 MB");
+    expect(bytes(3 * 1024 ** 5)).toBe("3072 TB");
   });
 });

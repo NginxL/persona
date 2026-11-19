@@ -25,7 +25,7 @@ import PersonaWire
         let old = URL(string: "https://hub.example.com/prefix/\(LegacyNames.conversationPath)/c1?at=i2")!
         #expect(HubPageLink.page(old, hubs: [hub]) == .conversation(id: "c1", item: "i2"))
         #expect(HubPageLink.page(URL(string: "https://other.example.com/\(LegacyNames.conversationPath)/c1")!, hubs: [hub]) == nil)
-        #expect(HubPageLink.page(path: [LegacyNames.conversationPath, "new"], query: []) == nil)
+        #expect(HubPageLink.page(path: [LegacyNames.conversationPath, "new"], query: []) == .newConversation) // as the web router reads it
         #expect(HubPageLink.page(path: [LegacyNames.conversationPath, "c1", "extra"], query: []) == nil)
     }
 

@@ -19,20 +19,26 @@ import (
 // launcherListing is a node's launchers.list: the launchers, and the shell and rc file they came from ("" from an
 // older node).
 type launcherListing struct {
+	Source    string           `json:"source,omitempty"`
 	Launchers []proto.Launcher `json:"launchers"`
 	Shell     string           `json:"shell"`
 	RCFile    string           `json:"rc_file"`
 }
 
 // listLaunchers asks one machine for its list, giving it launcherSyncTimeout; an offline machine is not asked.
-func (s *Service) listLaunchers(ctx context.Context, d Device) (launcherListing, error) {
+// Ordinary lists never load external sources; those use their own handshake-gated, source-scoped RPC.
+func (s *Service) listLaunchers(ctx context.Context, d Device, refresh ...bool) (launcherListing, error) {
 	var res launcherListing
 	if !d.Online {
 		return res, apierr.ErrOffline
 	}
 	cctx, cancel := context.WithTimeout(ctx, launcherSyncTimeout)
 	defer cancel()
-	err := s.call(cctx, d.ID, DeviceLaunchersList, map[string]any{}, &res)
+	params := map[string]any{}
+	if len(refresh) > 0 && refresh[0] {
+		params["refresh"] = true
+	}
+	err := s.call(cctx, d.ID, DeviceLaunchersList, params, &res)
 	if err != nil && cctx.Err() != nil && ctx.Err() == nil {
 		err = context.DeadlineExceeded
 	}
@@ -54,6 +60,9 @@ func launcherSyncState(ctx context.Context, err error) (state, reason string) {
 // not list, the agent the user said it runs. The node runs a launcher it does not list only when it is vouched for
 // like this (configured, node runnableLauncher).
 func (s *Service) configuredLauncher(ctx context.Context, machine, name string) (ConfiguredLauncher, bool) {
+	if proto.IsExternalLauncher(name) {
+		return ConfiguredLauncher{}, false
+	}
 	for _, l := range s.hello(ctx).Models.Launchers[machine] {
 		if l.Name == name {
 			return l, true
@@ -82,7 +91,8 @@ func machineSource(source string) bool { return source == "zshrc" || source == "
 // listedRCLauncher: Settings › Model providers lists l from a computer's list. A runtime's launcher without model
 // configuration (DSH, node/runtimes.go) is not.
 func listedRCLauncher(l proto.Launcher) bool {
-	return l.Source == "" || machineSource(l.Source) || l.Agent == "agy" || l.Agent == "omp"
+	return !proto.IsExternalLauncher(l.Name) && l.Source != proto.ExternalLauncherSource &&
+		(l.Source == "" || machineSource(l.Source) || l.Agent == "agy" || l.Agent == "omp")
 }
 
 // launcherViews is the whole list: managed first (newest last), then ~/.zshrc ones by name; hidden ones flagged.
@@ -184,11 +194,13 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 // providers and what starts elsewhere whatever the host. A provider kept in Persona and plain claude are not added
 // then (the engine would run one of its own in their place), and one named like an engine provider is that provider;
 // only a managed Antigravity launcher, which its own runtime runs on any host, still is.
+type machineLauncherListing struct {
+	Launchers   []proto.LauncherEnvelope `json:"launchers"`
+	HostRuntime bool                     `json:"host_runtime"`
+}
+
 func (s *Service) machineLaunchersOn(ctx context.Context, machine, host string) (list []proto.Launcher, hostRuntime bool, err error) {
-	var res struct {
-		Launchers   []proto.LauncherEnvelope `json:"launchers"`
-		HostRuntime bool                     `json:"host_runtime"`
-	}
+	var res machineLauncherListing
 	params := map[string]any{}
 	if host != "" {
 		params["host"] = host
@@ -196,16 +208,27 @@ func (s *Service) machineLaunchersOn(ctx context.Context, machine, host string) 
 	if err := s.call(ctx, machine, DeviceLaunchersList, params, &res); err != nil {
 		return nil, false, err
 	}
+	list, hostRuntime = s.machineLaunchersFrom(ctx, machine, res)
+	return list, hostRuntime, nil
+}
+
+func (s *Service) machineLaunchersFrom(ctx context.Context, machine string, res machineLauncherListing) ([]proto.Launcher, bool) {
+	d, _ := s.device(ctx, machine)
 	hidden := s.hiddenLaunchers(ctx)
 	// Only the providers in this computer's scope: one out of it is not named to the node, whose own launcher by
 	// that name (if any) is what runs there.
-	managed := slices.DeleteFunc(slices.Clone(s.storedLaunchers(ctx)), func(m storedLauncher) bool { return !s.usableOn(ctx, m, machine) })
+	managed := slices.DeleteFunc(slices.Clone(s.storedLaunchers(ctx)), func(m storedLauncher) bool {
+		return proto.IsExternalLauncher(m.Name) || !s.usableOn(ctx, m, machine)
+	})
 	if res.HostRuntime {
 		managed = slices.DeleteFunc(managed, func(m storedLauncher) bool { return m.Agent != "agy" })
 	}
 	out := make([]proto.Launcher, 0, len(res.Launchers)+len(managed))
 	for _, envelope := range res.Launchers {
 		l := proto.Launcher(envelope)
+		if (proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource) && !d.ExternalInventory {
+			continue // a historical snapshot never replaces the current node's enabled-source handshake
+		}
 		if slices.Contains(hidden, l.Name) || slices.ContainsFunc(managed, func(m storedLauncher) bool { return m.Name == l.Name }) {
 			continue
 		}
@@ -222,19 +245,19 @@ func (s *Service) machineLaunchersOn(ctx context.Context, machine, host string) 
 	codexHere := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "codex" && l.RunHere })
 	// The node leaves plain claude out when its shell has another Claude launcher. devices.list's version is the
 	// same installation signal used by the built-in provider and Agent-start fallback, and works with older nodes.
-	d, _ := s.device(ctx, machine)
 	if !res.HostRuntime && d.ClaudeVersion != "" && !slices.Contains(hidden, "claude") &&
 		!slices.ContainsFunc(out, func(l proto.Launcher) bool { return l.Name == "claude" }) {
 		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
 	}
+	agyAssistant := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant })
 	for _, m := range managed {
 		if m.Kind == "api" {
 			continue
 		}
-		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy",
+		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy" && agyAssistant,
 			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere, Pi: m.PiAPI() != ""})
 	}
-	return out, res.HostRuntime, nil
+	return out, res.HostRuntime
 }
 
 // pickerLaunchers is what machine can start, as New Agent's picker lists it: machineLaunchers with hub.json's
@@ -275,10 +298,12 @@ func (s *Service) assistantProviders(ctx context.Context, machine string, picker
 	p.MachineID = machine
 	stored := s.storedLaunchers(ctx)
 	current := slices.Clone(picker)
+	agyAssistant := picker == nil || slices.ContainsFunc(picker, func(l ConfiguredLauncher) bool { return cmp.Or(l.AgentType, l.Agent) == "agy" && l.Assistant })
 	for _, managed := range stored {
 		if !slices.ContainsFunc(current, func(l ConfiguredLauncher) bool { return l.Name == managed.Name }) {
 			current = append(current, ConfiguredLauncher{Launcher: proto.Launcher{
 				Name: managed.Name, BaseURL: managed.BaseURL, Model: managed.Model, Source: "persona", Agent: managed.Agent,
+				Assistant: managed.Agent == "agy" && agyAssistant,
 			}})
 		}
 	}
@@ -358,6 +383,13 @@ func (s *Service) launcherModelSet(ctx context.Context, machine, launcher string
 			set[x.Resolved] = true
 			aliases[x.ID] = x.Resolved
 		}
+		// a folded row's other spellings (oneRowPerModel) stand for the model it runs
+		for _, a := range x.Aliases {
+			set[a] = true
+			if a != cmp.Or(x.Resolved, x.ID) {
+				aliases[a] = cmp.Or(x.Resolved, x.ID)
+			}
+		}
 		if x.Default && defaultModel == "" {
 			defaultModel = x.ID
 			if x.Resolved != "" {
@@ -402,7 +434,7 @@ func (s *Service) launcherModelResolution(ctx context.Context, machine, launcher
 }
 
 // askLauncherModels is machine's node's /model list of launcher name (node/launcher_models.go), with the models of
-// the plugin gateway behind it.
+// the plugin gateway behind it, one row per model (oneRowPerModel).
 func (s *Service) askLauncherModels(ctx context.Context, machine, name string, refresh bool) (proto.LauncherModels, error) {
 	var res proto.LauncherModels
 	params := map[string]any{"refresh": refresh}
@@ -415,7 +447,7 @@ func (s *Service) askLauncherModels(ctx context.Context, machine, name string, r
 	if res.Models == nil {
 		res.Models = []proto.AgentModel{}
 	}
-	res = s.presetModels(ctx, machine, name, res)
+	res = s.oneRowPerModel(ctx, name, s.presetModels(ctx, machine, name, res))
 	for i, m := range res.Models {
 		id := m.ID
 		if m.Resolved != "" {

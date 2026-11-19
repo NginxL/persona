@@ -189,6 +189,9 @@ func TestOwnershipRoutesByManager(t *testing.T) {
 	if code, out := ownershipGet(t, h, srv, http.MethodPost, "/api/v1/interactions/ix-b/resolve", nil); code != http.StatusOK || out["who"] != "m-0a0b0c" {
 		t.Fatalf("resolve: %d %v", code, out)
 	}
+	if code, out := ownershipGet(t, h, srv, http.MethodPost, "/api/v1/interactions/ix-b/clarify", nil); code != http.StatusOK || out["who"] != "m-0a0b0c" {
+		t.Fatalf("clarify: %d %v", code, out)
+	}
 	// Choosing also follows the card's manager, even if the request names another.
 	rev := askRev(proto.Question{Question: "Which option?", Options: []proto.QuestionOption{{Label: "First"}}})
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/interactions/ix-b/choose", strings.NewReader(`{"option":0,"rev":"`+rev+`"}`))

@@ -68,6 +68,8 @@ struct MeetingPageBar: View {
     private enum Target { case room, justMe, followup }
 
     private var target: Target { mode == .after ? .followup : justMe ? .justMe : .room }
+    /// What the bar offers: a replayed tape (#10589) only Pause and End.
+    private var offers: MeetingRoomOffers { .of(entry.id) }
     private var role: MeetingAttendance { entry.attendance?.role ?? .off }
     /// The last upload's `200` had no `room`: an older manager took the meeting with Persona off (`RecordingSync`).
     private var roomMissing: Bool { sync.roomMissing.contains(entry.id) }
@@ -104,16 +106,18 @@ struct MeetingPageBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if mode == .live { justMeRow }
-            MeetingQuestionField(text: $draft, focus: focus, placeholder: placeholder, sendLabel: String(localized: "Send"),
-                                 canSend: canSend, disabled: fieldDisabled, showsInstead: showsTalk,
-                                 send: send) {
-                plus
-                voiceButton
-            } instead: {
-                talkButton
+            if mode == .live, offers.justMe { justMeRow }
+            if offers.ask {
+                MeetingQuestionField(text: $draft, focus: focus, placeholder: placeholder, sendLabel: String(localized: "Send"),
+                                     canSend: canSend, disabled: fieldDisabled, showsInstead: showsTalk,
+                                     send: send) {
+                    plus
+                    voiceButton
+                } instead: {
+                    talkButton
+                }
             }
-            if let caption {
+            if offers.ask, let caption {
                 Text(caption).font(Theme.Font.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("meeting-ask-caption")
@@ -355,16 +359,18 @@ struct MeetingPageBar: View {
         return HStack(alignment: .top, spacing: Theme.Space.xs) {
             MeetingRoomButton(title: pauseTitle, symbol: paused ? Theme.Icon.run : Theme.Icon.pause) { togglePause() }
                 .accessibilityIdentifier("recording-pause")
-            MeetingRoomButton(title: String(localized: "Bookmark"), symbol: Theme.Icon.pin) { addBookmark() }
-                .accessibilityIdentifier("recording-bookmark")
-            if canAddPhotos {
+            if offers.bookmark {
+                MeetingRoomButton(title: String(localized: "Bookmark"), symbol: Theme.Icon.pin) { addBookmark() }
+                    .accessibilityIdentifier("recording-bookmark")
+            }
+            if canAddPhotos, offers.photos {
                 Menu { photoButtons } label: {
                     MeetingRoomButton(title: String(localized: "Photo [Meeting Room]"), symbol: Theme.Icon.camera) {}
                         .allowsHitTesting(false)
                 }
                 .accessibilityIdentifier("meeting-room-photo")
             }
-            if entry.roomMeeting {
+            if entry.roomMeeting, offers.persona {
                 MeetingRoomButton(title: String(localized: "Speaker [Meeting Room]"),
                                   symbol: role.speaks ? Theme.Icon.answersAloud : Theme.Icon.answersOnScreen, on: role.speaks) {
                     // Out loud or on screen; out loud turns echo cancellation on too where the experiment is on (`setSpeaks`, B2).
@@ -390,11 +396,17 @@ struct MeetingPageBar: View {
                     confirmingStop = true
                 }
                 // On the button, so the question points at End.
-                .confirmationDialog("End the Meeting?", isPresented: $confirmingStop, titleVisibility: .visible) {
-                    Button("End and Write the Minutes", role: .destructive) { MeetingRecorder.shared.stop(recordingID: entry.id.uuidString) }
+                .confirmationDialog(offers.replayClock ? String(localized: "End the Replay?") : String(localized: "End the Meeting?"),
+                                    isPresented: $confirmingStop, titleVisibility: .visible) {
+                    Button(offers.replayClock ? String(localized: "End Replay") : String(localized: "End and Write the Minutes"),
+                           role: .destructive) { MeetingRecorder.shared.stop(recordingID: entry.id.uuidString) }
                     Button("Keep Going [Meeting Room]", role: .cancel) {}
                 } message: {
-                    Text("The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.")
+                    if offers.replayClock {
+                        Text("The minutes are the tape's. Nothing is written to your hub.")
+                    } else {
+                        Text("The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.")
+                    }
                 }
         }
     }

@@ -32,6 +32,10 @@ const (
 // a restart of its node comes back within minutes.
 var orphanOfflineAfter = 10 * time.Minute
 
+// orphanReconnectWait is how long after its node connected again a computer's agents are not taken as gone: a node
+// that started over (an ssh node whose link dropped) lists its agents again only once it has found them.
+var orphanReconnectWait = 2 * time.Minute
+
 // TodoOrphan says an open to-do has nobody working on it: why, and since when the manager has seen it so.
 type TodoOrphan struct {
 	Reason string    `json:"reason"`
@@ -43,17 +47,21 @@ type TodoOrphan struct {
 }
 
 // orphanAgent is one agent of a to-do as the pass found it: whether its computer answers, whether that computer lists
-// the session, and the session.
+// the session, the session, and when its computer's node connected (zero: not known).
 type orphanAgent struct {
 	machine, session  string
 	reachable, listed bool
 	c                 proto.Session
+	connected         time.Time
 }
 
 // agentGone says why a is not working and will not by itself ("": it works, or something pending brings it back).
 func agentGone(a orphanAgent, now time.Time) string {
 	if !a.reachable {
 		return orphanOffline
+	}
+	if !a.connected.IsZero() && now.Sub(a.connected) < orphanReconnectWait {
+		return "" // its node connected again a moment ago: it may not list the agent as it is yet
 	}
 	if !a.listed {
 		return orphanClosed // its computer no longer lists it: nothing runs it
@@ -68,8 +76,8 @@ func agentGone(a orphanAgent, now time.Time) string {
 		return "" // a card waits for the user, or input waits to go in
 	case wakePending(c) || usageLimitWaiting(c, now):
 		return "" // the manager wakes or continues it
-	case c.TurnError != "":
-		return orphanError
+	case c.TurnError != "" && !proto.SilentTurnKind(c.TurnErrorKind):
+		return orphanError // not the hub's word on a turn with no output, which no error ended (silent_turns.go)
 	}
 	return orphanClosed
 }
@@ -135,6 +143,9 @@ func (s *Service) orphanAgents(ctx context.Context, t Todo, reachable map[string
 		}
 		oa := orphanAgent{machine: a.MachineID, session: a.SessionID, reachable: reachable[a.MachineID]}
 		if oa.reachable {
+			if s.devs != nil {
+				oa.connected = s.devs.ConnectedAt(a.MachineID)
+			}
 			if _, asked := lists[a.MachineID]; !asked && !failed[a.MachineID] {
 				got, err := s.sessions(ctx, a.MachineID)
 				if err != nil {

@@ -16,7 +16,10 @@ struct CallPersonaIntent: AppIntent {
         categoryName: "Chat",
         searchKeywords: ["Persona", "call", "phone", "voice", "talk"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
 
     nonisolated init() {}
 

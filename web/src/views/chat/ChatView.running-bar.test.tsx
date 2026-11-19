@@ -93,6 +93,18 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     act(() => { transcript.streaming = ""; });
   });
 
+  it("shows Processing feedback on a brand-new working Persona conversation before its first transcript item arrives", async () => {
+    const { noteSent } = await import("../../lib/outbox");
+    transcript.items = [];
+    noteSent("hub", "c1", { text: "Inspect the current workspace" });
+    captured.session = { machine_id: "hub", session_id: "c1", title: "", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z" } as Session;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant starting />));
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(sendFeedback()?.getAttribute("data-message-feedback")).toBe("processing");
+    expect(inStreamIndicator()).not.toBeNull();
+  });
+
   // The sending / awaiting window (an outbox message on its way, before the hub reports working) is covered end to end in
   // ChatView.failure.test.tsx, which drives the real message-send feedback and asserts the dock bar is null while the
   // in-stream "sending"/"processing" feedback is the one indicator.

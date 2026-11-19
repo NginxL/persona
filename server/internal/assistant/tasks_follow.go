@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"strings"
@@ -263,12 +264,20 @@ func (s *Service) closedTurnReopens(t Todo, mid, sid string) closedTurn {
 }
 
 type receiptBody struct {
-	Title   string         `json:"title"`
-	State   string         `json:"state"` // done, failed, interrupted
-	Summary string         `json:"summary,omitempty"`
-	PR      string         `json:"pr,omitempty"`
-	Machine string         `json:"machine,omitempty"`
-	Review  *receiptReview `json:"review,omitempty"`
+	Title   string `json:"title"`
+	State   string `json:"state"` // done, failed, interrupted
+	Summary string `json:"summary,omitempty"`
+	PR      string `json:"pr,omitempty"`
+	Machine string `json:"machine,omitempty"`
+	// Files: what the agent handed over this turn (task_files.go, #10511): name and where it is on the conversation's
+	// computer, or why it could not come. Clients that do not know it ignore it.
+	Files  []taskFile     `json:"files,omitempty"`
+	Review *receiptReview `json:"review,omitempty"`
+	// MachineID and SessionID name the run whose turn this is (#10465), so a reader of the to-do's history can give the
+	// receipt to that run instead of guessing from the computer's name. Absent where no run started (a failed start)
+	// and on older receipts.
+	MachineID string `json:"machine_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 	// Criteria: a done receipt's list of its brief's criteria as they stood when the agent stopped (#3822,
 	// briefCriteriaNow): met or not met as the supervision ledger tracks them (#3635: the agent's reports and the
 	// reviews), unchecked while pending there, or dropped by a scope change.
@@ -314,6 +323,34 @@ type receiptReview struct {
 
 // interruptedSummary is an interrupted task's receipt: the error itself is no conclusion (#1516).
 const interruptedSummary = assistantwire.InterruptedSummary
+
+// quietTurnKind is what a turn, read as items, is when it had no output at all: proto.TurnErrorStopped when Persona's
+// Stop interrupted it (stopped: stopFor found that Stop), proto.TurnErrorNoOutput when nothing did (silentTurn). "" for
+// a turn with output, one the user stopped themselves (Esc: theirs to go on with), or one that could not be read.
+func quietTurnKind(items []proto.Item, stopped bool) string {
+	none, userStopped := turnWithoutOutput(items)
+	switch {
+	case !none:
+		return ""
+	case stopped:
+		return proto.TurnErrorStopped // Claude Code may write the interrupted notice for Persona's Esc, or nothing
+	case userStopped:
+		return ""
+	}
+	return proto.TurnErrorNoOutput
+}
+
+// sameTurnRow: now is agent row last still, stopped: nothing was written to its transcript since (the same Rev, or the
+// same time where the node gives no Rev).
+func sameTurnRow(now, last proto.Session) bool {
+	if now.Status == proto.StatusWorking || now.Starting {
+		return false
+	}
+	if now.Rev != 0 || last.Rev != 0 {
+		return now.Rev == last.Rev
+	}
+	return now.UpdatedAt.Equal(last.UpdatedAt)
+}
 
 // silentTurnErrorIn is the interrupted receipt's detail for a turn with no output at all (silentTurn, #2349), in l.
 // Not kept in a package variable: that would read the catalogs whenever personad starts, a hook too (#1308).
@@ -414,6 +451,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		if text == "" {
 			text, kind = turnError(c)
 		}
+		if proto.SilentTurnKind(kind) {
+			text = "" // the hub's own word on a turn with no output, from a look before (silent_turns.go): its items say it again
+		}
 		if text != "" && (cut.SessionID == "" || c.UpdatedAt.After(cut.UpdatedAt)) {
 			cut = c
 			cut.TurnError, cut.TurnErrorKind = text, kind
@@ -435,7 +475,8 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		if _, closed := turnEndOf(items); !closed {
 			return settleLater // it went on since the sweep read it
 		}
-		if cut.SessionID == "" && taskTurnAwaitingAnswer(items) && !silentTurn(items) {
+		_, stopped := s.stopFor(last.MachineID, last.SessionID, s.taskStretch(t))
+		if cut.SessionID == "" && taskTurnAwaitingAnswer(items) && quietTurnKind(items, stopped) == "" {
 			return settleHeld // stopped between its tools and its answer: held as below, with no start taken for it
 		}
 		if !heard {
@@ -464,8 +505,14 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	defer s.taskJudging(t.ID, -1)
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	name := machine
-	if m, ok := s.device(cctx, machine); ok {
+	// The computer named is the one of the run the receipt names (#10465), not of the session whose end set this off:
+	// with a task's Agents on two computers the two can differ.
+	run := last
+	if cut.SessionID != "" {
+		run = cut
+	}
+	name := cmp.Or(run.MachineID, machine)
+	if m, ok := s.device(cctx, name); ok {
 		name = m.Name
 	}
 	if !s.taskWorkCurrent(t.ID, since) || !s.taskRuntimeSettled(cctx, t) {
@@ -481,7 +528,15 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		}
 	}
 	end, named := turnEndOf(items)
+	quiet := "" // the turn had no output: proto.TurnErrorNoOutput, or proto.TurnErrorStopped (silent_turns.go)
+	// The Stop that interrupted this turn, if one did: read once, it classifies the turn and is the one its receipt
+	// spends, never a newer one (stopFor, forgetStop).
+	stop, stopped := s.stopFor(last.MachineID, last.SessionID, since)
+	if read {
+		quiet = quietTurnKind(items, stopped)
+	}
 	if cut.SessionID != "" {
+		s.forgetStop(last.MachineID, last.SessionID, stop)
 		if _, again := s.takeTurn(cctx, t, last, items, end, named, since, turnInterrupted); again {
 			return settleTaken // this very turn was taken up before: no second receipt
 		}
@@ -491,7 +546,7 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		where := [2]string{cut.MachineID, cut.SessionID}
 		body := receiptBody{Title: t.Title, State: "interrupted", Summary: i18n.T(s.lang(cctx), "assistant-tasks.interrupted"), Machine: name,
 			Error: clip(strings.TrimSpace(cut.TurnError), 300)}
-		s.appendInterrupted(cctx, t, body, false)
+		s.appendInterrupted(cctx, t, SessionRef{MachineID: cut.MachineID, SessionID: cut.SessionID}, body, false)
 		if s.closedWhileRead(t.ID) {
 			return settleTaken
 		}
@@ -499,7 +554,7 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		s.taskReport(t, reportInterrupted, name, where, body.Error, nil)
 		return settleTaken
 	}
-	if read && taskTurnAwaitingAnswer(items) && !silentTurn(items) {
+	if read && taskTurnAwaitingAnswer(items) && quiet == "" {
 		// Do not consume this stretch's receipt while the runtime is between tools and its answer.
 		s.tasks.mu.Lock()
 		if !s.tasks.working[t.ID].After(since) {
@@ -519,18 +574,43 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		}
 		return settleLater
 	}
-	if read && silentTurn(items) {
-		if _, again := s.takeTurn(cctx, t, last, items, end, named, since, turnInterrupted); again {
-			return settleTaken // this very turn was taken up before: no second receipt
+	if quiet != "" {
+		// The verdict is the turn's that was read: the row must not have moved while its transcript was (the row was
+		// taken before the read). Moved, it is looked at again, the row and the transcript read together.
+		if now, ok := s.session(cctx, last.MachineID, last.SessionID); !ok || !sameTurnRow(now, last) {
+			s.releaseReceipt(ctx, t.ID, machine, sid, reserved)
+			return settleLater
+		}
+		s.forgetStop(last.MachineID, last.SessionID, stop)
+		// The ledger keeps the verdict with the turn, for a manager started again (silent_turns.go).
+		if e, again := s.takeTurnAs(cctx, t, last, items, end, named, since, turnInterrupted, quiet); again {
+			// This very turn was taken up before: no second receipt. Its verdict is on the row all the same, where the
+			// ledger has it (just put there for a turn taken without it) and the row does not show it yet.
+			if m, ok := s.quietMarks(last.MachineID)[last.SessionID]; e.Silent != "" && (!ok || !m.holds(last)) {
+				s.markQuietTurn(last, e.Silent)
+			}
+			return settleTaken
+		}
+		// The Agent's row says so too, not "done" (#10187).
+		s.markQuietTurn(last, quiet)
+		l := s.lang(cctx)
+		if quiet == proto.TurnErrorStopped {
+			// The owner stopped the conversation that handed the task out, and Persona's Stop interrupted the Agent before
+			// it had any output (stopReporting): stopped, not failed. A receipt that says so, with "Continue" on its card;
+			// no notice or report, which that conversation does not get until the owner talks in it again.
+			s.logf("task %s: stopped with its conversation before the turn had any output", t.ID)
+			body := receiptBody{Title: t.Title, State: "interrupted", Summary: i18n.T(l, "assistant-tasks.stopped"), Machine: name,
+				Error: quietTurnText(l, quiet), Cause: causeStopped}
+			s.appendInterrupted(cctx, t, SessionRef{MachineID: last.MachineID, SessionID: last.SessionID}, body, true)
+			return settleTaken
 		}
 		// No reply and no tool call, yet no error either (the model service answered 200 with nothing in it): no end
 		// of the work. Interrupted, as a cut-off turn is, with nothing to judge or close (#2349).
 		s.logf("task %s: interrupted: the turn had no output", t.ID)
 		where := [2]string{last.MachineID, last.SessionID}
-		l := s.lang(cctx)
 		body := receiptBody{Title: t.Title, State: "interrupted", Summary: i18n.T(l, "assistant-tasks.interrupted"), Machine: name,
 			Error: silentTurnErrorIn(l)}
-		s.appendInterrupted(cctx, t, body, true)
+		s.appendInterrupted(cctx, t, SessionRef{MachineID: last.MachineID, SessionID: last.SessionID}, body, true)
 		if s.closedWhileRead(t.ID) {
 			return settleTaken
 		}
@@ -543,12 +623,17 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	if _, answer := turnExchange(items); answer != "" {
 		text = answer
 	}
+	// A paged reply may have lost its tail (the file lines and the closeout are there): read the whole item.
+	text = s.taskAnswer(cctx, machine, sid, items, text)
 	if current, ok := s.todoNow(t.ID); !ok || current.Cancelled() || current.AgentAborted(machine, sid) {
 		s.logf("task %s: cancelled or agent %s/%s aborted: not issuing done receipt", t.ID, machine, sid)
 		return settleRefused
 	}
-	body := receiptBody{Title: t.Title, State: "done", Summary: clipMarkdown(text, 600), Machine: name,
-		Reroute: s.rerouteOfTask(cctx, t.ID, t.PlanID)}
+	s.forgetStop(last.MachineID, last.SessionID, stop) // a Stop that came after its output: this turn's
+	// The files it handed over (task_files.go, #10511): copied to the computer of the conversation that hears of it.
+	files := s.deliverTaskFiles(cctx, t, machine, s.conversationMachine(cctx, s.taskReceiver(cctx, t), ""), text)
+	body := receiptBody{Title: t.Title, State: "done", Summary: clipMarkdown(text, 600), Machine: name, Files: files,
+		MachineID: last.MachineID, SessionID: last.SessionID, Reroute: s.rerouteOfTask(cctx, t.ID, t.PlanID)}
 	// Persona follows up on a supervised stop through sigReview or sigIdle after judgment; the receipt need not wait.
 	// needs_user waits on the user instead. Read the latest todo in case it changed while reading the reply.
 	if current, ok := s.todoNow(t.ID); ok && current.DoneAt == nil {
@@ -607,7 +692,7 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		s.turnAgain(cctx, t, turn, last, text, since, worked)
 		return settleTaken
 	}
-	s.taskNotice(cctx, t, name, "done", "", clipMarkdown(text, 1500))
+	s.taskNoticeOf(cctx, t, name, "done", "", clipMarkdown(text, 1500), 0, files)
 	if s.advanceTaskReply(cctx, t, last.MachineID, last.SessionID, text) {
 		go s.askAcceptance(t, last.MachineID, last.SessionID, text) // verified, by the supervising assistant or the user (acceptance.go)
 	}
@@ -796,8 +881,11 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 		if err != nil {
 			return FeedItem{}, err
 		}
-		return s.appendFeed(ctx, conversation, feedRouted, todoID, map[string]string{"text": text,
-			"new_agent": started.SessionID, "new_agent_machine": started.MachineID})
+		body := map[string]string{"text": text, "new_agent": started.SessionID, "new_agent_machine": started.MachineID}
+		if started.SessionID != "" { // the run it reached (#10465); a start that named no session leaves it unknown
+			body["machine_id"], body["session_id"] = started.MachineID, started.SessionID
+		}
+		return s.appendFeed(ctx, conversation, feedRouted, todoID, body)
 	}
 	return s.sendToTaskAgent(ctx, conversation, todoID, pickTaskAgent(live), text, relay, guard)
 }
@@ -876,7 +964,8 @@ func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID stri
 	if err != nil {
 		return FeedItem{}, s.dialogRefusal(ctx, c, err) // a dialog_open refusal names the agent and the dialog (#7343)
 	}
-	body := map[string]string{"text": text}
+	// The run it went to (#10465), so a client can say which run the message reached.
+	body := map[string]string{"text": text, "machine_id": c.MachineID, "session_id": c.SessionID}
 	if relay != "" {
 		body["relay"] = relay
 	}

@@ -292,6 +292,10 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		out = append(out, s)
 		seen[s.SessionID] = true
 	}
+	for _, s := range n.traexSessions(seen) {
+		out = append(out, s)
+		seen[s.SessionID] = true
+	}
 	n.forgetDialogs(livePanes) // after every row that reads a pane's dialog, the tmux claudes' too
 	for _, s := range n.codexSessionsIn(seen, pass) {
 		out = append(out, s)

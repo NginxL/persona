@@ -108,7 +108,7 @@ func TestAcceptanceFeedbackGoesToTheAgent(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 	waitAcceptCard(t, s, todo.ID, posts)
-	if card := acceptCardOf(posts()); strings.Contains(card, "evil.example.com") || !strings.Contains(card, "/todos?id="+todo.ID) {
+	if card := acceptCardOf(posts()); strings.Contains(card, "evil.example.com") || !strings.Contains(card, "/todos/"+todo.ID) {
 		t.Fatalf("link:\n%s", card)
 	}
 	mid := askOf(s, todo.ID).MessageID

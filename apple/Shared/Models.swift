@@ -723,7 +723,7 @@ extension Launcher {
         let managed = source == "persona" || source == LegacyNames.product
         let machine = source == nil || source == "" || source == "zshrc" || source == "path" || source == "builtin"
         guard machine || managed, !(managed && agent == "codex") else { return false }
-        return agent == nil || agent == "" || agent == "claude" || agent == "codex" || agent == "agy"
+        return agent == nil || agent == "" || agent == "claude" || agent == "codex"
     }
 }
 
@@ -1123,6 +1123,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var queued: [String]?
     /// The last this many queued messages came from other conversations and arrive when this turn ends (#4342).
     var queuedRelayed: Int? = nil
+    /// In a Persona chat, the owner's messages that could not go in and that the assistant keeps and sends again by
+    /// itself, oldest first (#10194): drawn as the owner's bubbles marked not delivered, on every device.
+    var undelivered: [UndeliveredMessage]? = nil
     /// The user's own messages come first; only these can be edited, reordered, deleted or sent now.
     var ownQueuedCount: Int {
         let count = queued?.count ?? 0
@@ -1222,6 +1225,9 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// The extension whose token opened an assistant conversation (protocol.md「Origin of assistant chats」); nil for any
     /// other. Such a chat never attends a meeting (#2981).
     var openedBy: String? = nil
+    /// What of `origin` opened it (`origin_ref`): for Lark /agent and another extension's, that extension's id, which the
+    /// rows draw the icon of when `openedBy` is not there (`ConversationOpener`, #10358). Nil from hubs that do not say.
+    var originRef: String? = nil
     /// The last compaction the user asked for in an assistant conversation (POST …/compact, #1727): running, done or
     /// failed. Nil from hubs without `assistant_compact`, and before the first one.
     var compaction: CompactionRun? = nil
@@ -1455,6 +1461,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case queuedRelayed = "queued_relayed"
+        case undelivered
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
@@ -1480,7 +1487,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
              updatedAt = "updated_at", lastText = "last_text", asks, awaitsReply = "awaits_reply", backgroundWaiting = "background_waiting", backgroundWorking = "background_working", activity, activityAt = "activity_at", pendingInteractions = "pending_interactions", rev, suggestion, suggestionRisky = "suggestion_risky",
              starting, awaitingFirstMessage = "awaiting_first_message", startError = "start_error", startErrorCode = "start_error_code", startErrorArgs = "start_error_args", todo, quiet, hubGroup = "app_hub_group",
              attentionReason = "attention_reason", failureReason = "failure_reason",
-             turnError = "turn_error", turnErrorKind = "turn_error_kind", turnErrorCode = "turn_error_code", turnErrorResetsAt = "turn_error_resets_at", turnErrorResumes = "turn_error_resumes", externalURL = "external_url", channels, origin, openedBy = "opened_by", compaction, work,
+             turnError = "turn_error", turnErrorKind = "turn_error_kind", turnErrorCode = "turn_error_code", turnErrorResetsAt = "turn_error_resets_at", turnErrorResumes = "turn_error_resumes", externalURL = "external_url", channels, origin, originRef = "origin_ref", openedBy = "opened_by", compaction, work,
              runtime, runtimeFallback = "runtime_fallback", manager, modelFallback = "model_fallback", modelRestore = "model_restore"
     }
 
@@ -1564,6 +1571,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         stateSince = try c.decodeIfPresent(Date.self, forKey: .stateSince)
         queued = try c.decodeIfPresent([String].self, forKey: .queued)
         queuedRelayed = try c.decodeIfPresent(Int.self, forKey: .queuedRelayed)
+        undelivered = try? c.decodeIfPresent([UndeliveredMessage].self, forKey: .undelivered) // a malformed one never hides the row
         background = try c.decodeIfPresent([BackgroundTask].self, forKey: .background)
         listWaiting = try c.decodeIfPresent(Bool.self, forKey: .listWaiting)
         listBackgroundCount = try c.decodeIfPresent(Int.self, forKey: .listBackgroundCount)
@@ -1608,6 +1616,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         channels = try c.decodeIfPresent([String].self, forKey: .channels)
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
         openedBy = try c.decodeIfPresent(String.self, forKey: .openedBy)
+        originRef = try? c.decodeIfPresent(String.self, forKey: .originRef) // an odd one never drops the session
         compaction = try? c.decodeIfPresent(CompactionRun.self, forKey: .compaction) // an odd one never drops the session
         work = try? c.decodeIfPresent(WorkState.self, forKey: .work) // an odd one never drops the session
         hubGroup = try c.decodeIfPresent(String.self, forKey: .hubGroup)
@@ -1632,6 +1641,37 @@ nonisolated struct LenientText: Codable, Hashable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         if let value { try c.encode(value) } else { try c.encodeNil() }
+    }
+}
+
+/// One of `Session.undelivered`: the owner's message the assistant keeps after it could not go in (#10194).
+nonisolated struct UndeliveredMessage: Codable, Hashable, Sendable, Identifiable {
+    /// Its client_msg_id.
+    var id: String
+    var text: String
+    /// How many pictures it carries.
+    var images: Int? = nil
+    var at: Date
+    /// `waiting`: sent again by itself; `failed`: it gave up (Retry / Delete).
+    var state: String
+    var attempts: Int? = nil
+    var nextAt: Date? = nil
+    var error: String? = nil
+
+    var gaveUp: Bool { state == "failed" }
+
+    /// The row's kept messages to draw: not one the transcript has (`landed`: its items' client_msg_ids) nor one this
+    /// phone still draws as sending or arriving (`drawn`: those bubbles' ids), compared case-insensitively. The row can
+    /// come before the send's answer, or lag behind the transcript's line (web `shownUndelivered`).
+    static func shown(_ list: [UndeliveredMessage]?, landed: [String], drawn: [String]) -> [UndeliveredMessage] {
+        guard let list, !list.isEmpty else { return [] }
+        let skip = Set((landed + drawn).map { $0.lowercased() })
+        return list.filter { !skip.contains($0.id.lowercased()) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, images, at, state, attempts, error
+        case nextAt = "next_at"
     }
 }
 
@@ -2619,6 +2659,8 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     /// Whether this question's runtime can release its waiter without an answer (`cancel` on Resolution).
     var canCancel: Bool?
     var plan: String?
+    /// The permission mode a plan-mode start goes on in after approval (#3784). Older hubs and sessions omit it.
+    var planThen: String?
     var toolInput: JSONValue?
     var summary: String?
     var screen: String?
@@ -2724,6 +2766,7 @@ nonisolated struct Interaction: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, kind, questions, plan, summary, screen, cwd, dialog, secret, fields, agent, reason, delegating, delegate, manager
         case suggestion, canCancel = "can_cancel"
+        case planThen = "plan_then"
         case machineID = "machine_id", sessionID = "session_id", sessionTitle = "session_title", taskTitle = "task_title",
              createdAt = "created_at", expiresAt = "expires_at", toolName = "tool_name", toolUseID = "tool_use_id",
              toolInput = "tool_input", alwaysLabel = "always_label", alwaysKeys = "always_keys", alwaysHonored = "always_honored",

@@ -28,6 +28,7 @@
   "checkout_unverified": "无法确认 {path} 中的分支 {branch} 是否可安全复用：{reason}",
   "checkout_in_use": "分支 {branch} 已在 {path} 检出，正在被 Agent {owner} 使用",
   "checkout_dirty": "分支 {branch} 已在 {path} 检出，且有未提交的改动；请明确选择该工作区，或保存改动后重试",
+  "path_taken": "检出路径 {path} 已存在且不是空目录；Persona 不会复用或覆盖它",
   "dirty": "此工作树有未提交的改动",
   "github_unavailable": "部分 GitHub 来源未能加载，请检查 Orca 的 GitHub 连接或重新搜索。",
   "workspace_ambiguous": "工作区身份不明确，请刷新 Orca 后重试",

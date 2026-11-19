@@ -17,6 +17,9 @@ dialog offers are in [web.md](../../../docs/web/web.md), "Exporting a conversati
   left out, and so is a text with nothing in it. `conversation`
 - A picture is `_[Image]_`. Text the hub still carries cut (`full_size`, in UTF-8 bytes) gets an unnumbered warning: the missing character count is unknown.
   `conversation`
+- A Codex visualization fragment (`visualization`) cannot be represented in Markdown: it is `_[Visualization: <name>]_`,
+  the name being its title or, without one, its file name; `_[Visualization]_` when neither is known. It is kept even
+  without work steps. `conversation`
 - Without work steps only what was said is written: thinking, tool calls and their results are left out. `work_off`
 - With work steps, they go inside the agent's part in order: thinking in `<details>` titled Thinking; each tool call in
   `<details>` titled with its name and what it was given (the first of `command`, `pattern`, `file_path`, `path`, `url`,

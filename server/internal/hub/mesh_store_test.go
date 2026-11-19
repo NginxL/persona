@@ -300,6 +300,22 @@ func (s *meshStore) PairTokenByHash(context.Context, string) (*db.PairToken, err
 func (s *meshStore) RedeemPairToken(context.Context, string, db.DeviceToken, string) (bool, error) {
 	return false, nil
 }
+
+// MachineLinkInUse is db.DB's without pairing codes (this store keeps none): a live link credential.
+func (s *meshStore) MachineLinkInUse(_ context.Context, machine string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tokens {
+		if t.MachineID == machine && t.Role == roleLink && !s.revoked[t.ID] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *meshStore) RevokeLinkPair(context.Context, string, string) (string, bool, error) {
+	return "", false, nil
+}
 func (s *meshStore) PutInboxItem(context.Context, string, []byte, time.Time, *time.Time) error {
 	return nil
 }

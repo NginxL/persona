@@ -191,7 +191,10 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", err
 		}
-		ignored := kb.Unsupported(a.Kind, a.Update)
+		if a.LockLists == nil { // a removal keeps out just that link; locking a whole list is the user's choice in the app
+			a.LockLists = new(false)
+		}
+		ignored := kb.UserUnsupported(a.Kind, a.UserUpdate)
 		id, err := e.ApplyUser(a.Kind, a.ID, a.UserUpdate)
 		if err != nil {
 			return "", err
@@ -547,11 +550,12 @@ func (s *Service) toolInboxDraft(ctx context.Context, self string, args json.Raw
 }
 
 // recordingsAt is what kb_get adds to calendar item kind/id (meetings or events, id as stored): the recordings matched
-// to it by time (kb/minutes.go matchRecordings), which hold its minutes; "" when there are none.
+// to it by time (kb/minutes.go matchRecordings), as their calendar item or their imported meeting (#8872), which hold
+// its minutes; "" when there are none.
 func (s *Service) recordingsAt(ctx context.Context, e *kb.Engine, kind, id string) string {
 	var at []kb.Entry
 	for _, r := range e.Store.Recordings() {
-		if r.Meeting != nil && r.Meeting.Kind == kind && kb.SafeID(r.Meeting.ID) == id {
+		if matchedAt(r.Meeting, kind, id) || matchedAt(r.ImportedMeeting, kind, id) {
 			at = append(at, kb.Entry{Kind: kb.KindRecording, ID: r.ID, Name: r.Name, Updated: r.StartedAt})
 		}
 	}
@@ -564,6 +568,11 @@ func (s *Service) recordingsAt(ctx context.Context, e *kb.Engine, kind, id strin
 		fmt.Fprintf(&b, "- %s · %s %s\n", x.ID, x.Name, x.Extra)
 	}
 	return b.String()
+}
+
+// matchedAt says whether ref names calendar item kind/id (id as stored).
+func matchedAt(ref *kb.MeetingRef, kind, id string) bool {
+	return ref != nil && ref.Kind == kind && kb.SafeID(ref.ID) == id
 }
 
 // recordingLines is kb_list's first limit recordings newest first (what "the meeting just now" asks for), each saying

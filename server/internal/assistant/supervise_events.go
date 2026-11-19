@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // ---- what the task's events say ----
 
-// taskNotice is what happened to task t (state: done, needs, interrupted; ask, text as quietNotify has them):
-// a supervised task's supervisor gets a signal, any other quiet task's conversation its notice.
+// taskNotice is what happened to task t (state: done, needs, interrupted): a supervised task's supervisor gets a
+// signal, any other quiet task's conversation its notice.
 func (s *Service) taskNotice(ctx context.Context, t Todo, machine, state, ask, text string) {
-	s.taskNoticeOf(ctx, t, machine, state, ask, text, 0)
+	s.taskNoticeOf(ctx, t, machine, state, ask, text, 0, nil)
 }
 
 // taskStartFailed is taskNotice for task t's start that failed (reason) after start's retries (nil: none). Each
@@ -26,11 +27,12 @@ func (s *Service) taskStartFailed(ctx context.Context, t Todo, machine string, s
 	if start != nil {
 		attempt = start.Attempt
 	}
-	s.taskNoticeOf(ctx, t, machine, "failed", "", reason, attempt)
+	s.taskNoticeOf(ctx, t, machine, "failed", "", reason, attempt, nil)
 }
 
-// taskNoticeOf is taskNotice; attempt is a failed start's retries so far.
-func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask, text string, attempt int) {
+// taskNoticeOf is taskNotice; attempt is a failed start's retries so far, and files what a done turn handed over to
+// its conversation's computer (task_files.go, #10511), which a notice lists outside its text's clip.
+func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask, text string, attempt int, files []taskFile) {
 	if t.Supervision == nil {
 		if !t.Quiet {
 			if state == "failed" && t.Origin != "" {
@@ -38,7 +40,7 @@ func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask,
 			}
 			return
 		}
-		s.quietNotify(ctx, t, machine, state, ask, text)
+		s.quietNotify(ctx, t, machine, state, ask, text, files)
 		return
 	}
 	if state == "failed" && !t.Quiet && t.Origin != "" && !s.isMain(ctx, t.Origin) && !s.isLeader(ctx, t.Origin) &&
@@ -130,8 +132,13 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 	}
 	if err != nil {
 		// The judge failed (the model service, a reply that was no verdict): no word on whether it is finished, not
-		// "stopped short" (#3111). The supervisor reads the agent's reply and decides.
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: "判定模型出错"})
+		// "stopped short" (#3111). The supervisor reads the agent's reply and decides. No model set up for the judge is
+		// said as such, not as a model error that a retry might mend.
+		detail := "判定模型出错" // i18n-ignore: the supervision message is the assistant's prompt
+		if ai.IsNotConfigured(err) {
+			detail = "判定模型未配置" // i18n-ignore: the supervision message is the assistant's prompt
+		}
+		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: detail})
 		return
 	}
 	if c.Verdict == verdictNeedsUser {

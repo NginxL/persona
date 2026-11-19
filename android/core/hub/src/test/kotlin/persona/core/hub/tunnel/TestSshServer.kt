@@ -25,8 +25,10 @@ internal class TestSshServer(
     val hostKey: KeyPair = ed25519(),
 ) : AutoCloseable {
     val logins = AtomicInteger()
-    /** Every connection that got as far as the SSH handshake, logged in or not. */
+    /** Every accepted TCP socket, including a probe or an aborted connection. */
     val connections = AtomicInteger()
+    /** Connections that actually completed SSH key exchange: a new dial, not a bare TCP accept. */
+    val handshakes = AtomicInteger()
     @Volatile var accepting = true
     private val server = SshServer.setUpDefaultServer().apply {
         host = "127.0.0.1"
@@ -38,6 +40,9 @@ internal class TestSshServer(
         }
         addSessionListener(object : SessionListener {
             override fun sessionCreated(session: Session) { connections.incrementAndGet() }
+            override fun sessionEvent(session: Session, event: org.apache.sshd.common.session.SessionListener.Event) {
+                if (event == org.apache.sshd.common.session.SessionListener.Event.KexCompleted) handshakes.incrementAndGet()
+            }
         })
         forwardingFilter = if (forwarding) AcceptAllForwardingFilter.INSTANCE else RejectAllForwardingFilter.INSTANCE
         start()

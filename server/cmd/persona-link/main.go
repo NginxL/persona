@@ -94,6 +94,8 @@ func main() {
 		err = supervise(e, args)
 	case "ssh":
 		err = sshCmd(e, args)
+	case "proxy":
+		err = proxyCmd(e, args)
 	case "address":
 		err = address(args)
 	case "name":
@@ -145,7 +147,7 @@ var errUsage = errors.New("usage")
 // helpTopics are the subcommands `<sub> -h` answers for (supervise is not for people: its -h shows the whole usage).
 var helpTopics = map[string]bool{"pair": true, "mode": true, "node": true, "discover": true, "install": true,
 	"uninstall": true, "status": true, "reconnect": true, "logs": true, "log": true, "run": true, "supervise": true, "ssh": true,
-	"address": true, "name": true, "plugin": true}
+	"address": true, "name": true, "plugin": true, "proxy": true}
 
 // wantsHelp says whether args ask for help (-h, -help or --help anywhere).
 func wantsHelp(args []string) bool {
@@ -216,14 +218,14 @@ func optionalValue(args []string, i int, name string) (value string, next int, o
 func pairCmd(e *env, args []string) error {
 	var machine, raw, listen string
 	var addrs []string
-	var sshFlags sshPairFlags
+	var flags routeFlags
 	seen, passive := false, false
 	for i := 0; i < len(args); i++ {
 		if v, next, ok := optionalValue(args, i, "--listen"); ok {
 			passive, listen, i = true, v, next
 			continue
 		}
-		if next, ok, err := sshFlags.consume(args, i); ok || err != nil {
+		if next, ok, err := flags.consume(args, i); ok || err != nil {
 			if err != nil {
 				return err
 			}
@@ -249,15 +251,21 @@ func pairCmd(e *env, args []string) error {
 		}
 	}
 	if passive || len(addrs) > 0 {
-		if sshFlags.any() {
+		if flags.any() {
 			return link.NewTextError("link-cli.pair_listen_ssh", nil)
+		}
+		if flags.proxy.set {
+			return link.NewTextError("link-cli.listen_proxy", nil)
 		}
 		if seen || machine != "" {
 			return link.NewTextError("link-cli.pair_listen_machine", nil)
 		}
 		return pairListen(e, listen, addrs)
 	}
-	c, err := pairWithSSH(e, raw, machine, sshFlags)
+	if err := flags.proxy.save(e); err != nil {
+		return err
+	}
+	c, err := pairWithSSH(e, raw, machine, flags)
 	if err != nil {
 		return err
 	}
@@ -274,10 +282,10 @@ func pairCmd(e *env, args []string) error {
 
 // pair redeems a pairing link: raw, or read from stdin when raw is "" or "-" (with a prompt on a terminal).
 func pair(e *env, raw, machine string) (*link.Config, error) {
-	return pairWithSSH(e, raw, machine, sshPairFlags{})
+	return pairWithSSH(e, raw, machine, routeFlags{})
 }
 
-func pairWithSSH(e *env, raw, machine string, sshFlags sshPairFlags) (*link.Config, error) {
+func pairWithSSH(e *env, raw, machine string, flags routeFlags) (*link.Config, error) {
 	if raw == "" || raw == "-" {
 		in := bufio.NewReader(io.LimitReader(e.stdin, 16<<10))
 		if e.stdinIsTerminal() {
@@ -300,7 +308,7 @@ func pairWithSSH(e *env, raw, machine string, sshFlags sshPairFlags) (*link.Conf
 	if strings.TrimSpace(raw) == "" {
 		return nil, link.NewTextError("link-cli.pair_link_required", nil)
 	}
-	sshCfg, err := sshFlags.build(raw)
+	sshCfg, err := flags.build(raw)
 	if err != nil {
 		return nil, err
 	}

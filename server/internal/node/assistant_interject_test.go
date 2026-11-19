@@ -2,10 +2,13 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // interjectClaude is a claude that names version in its init, starts answering the first message and never finishes
@@ -38,7 +41,7 @@ func interjectLog(t *testing.T) string {
 
 // interjectSecond starts a conversation that stays busy answering "first", waits for its init, then sends "second".
 // It returns what the fake claude read after "first".
-func interjectSecond(t *testing.T, version string, on bool) string {
+func interjectSecond(t *testing.T, version string, on bool, images ...proto.Image) string {
 	t.Helper()
 	interjectClaude(t, version)
 	n := codexTestNode(t)
@@ -56,7 +59,7 @@ func interjectSecond(t *testing.T, version string, on bool) string {
 		defer p.mu.Unlock()
 		return p.claudeVersion == version
 	})
-	if _, err := n.assistantSend(context.Background(), id, "", "claude", "second", nil, "", "", modelExecution{Interject: on}); err != nil {
+	if _, err := n.assistantSend(context.Background(), id, "", "claude", "second", images, "", "", modelExecution{Interject: on}); err != nil {
 		t.Fatal(err)
 	}
 	cliWait(t, "the second message", func() bool { return strings.Contains(interjectLog(t), "second") })
@@ -65,6 +68,40 @@ func interjectSecond(t *testing.T, version string, on bool) string {
 	}
 	log := interjectLog(t)
 	return log[strings.Index(log, `"first"`):]
+}
+
+func TestAssistantImageInterjectionKeepsModelInstructions(t *testing.T) {
+	interjectSecond(t, "2.1.322", false, proto.Image{Mime: "image/png", Data: "iVBORw0KGgo="})
+	for _, line := range strings.Split(interjectLog(t), "\n") {
+		var input struct {
+			Type    string `json:"type"`
+			Message struct {
+				Content []struct{ Type, Text string }
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &input) != nil || input.Type != "user" {
+			continue
+		}
+		note, image, caption := -1, -1, -1
+		for i, b := range input.Message.Content {
+			if strings.Contains(b.Text, `title="插话"`) {
+				note = i
+			}
+			if b.Type == "image" {
+				image = i
+			}
+			if b.Text == "second" {
+				caption = i
+			}
+		}
+		if caption >= 0 {
+			if note < 0 || note >= image || image >= caption {
+				t.Fatalf("model input order note/image/caption = %d/%d/%d", note, image, caption)
+			}
+			return
+		}
+	}
+	t.Fatal("image interjection was not written to the model")
 }
 
 // A message to a conversation that is answering moves its foreground work to the background, after the message is

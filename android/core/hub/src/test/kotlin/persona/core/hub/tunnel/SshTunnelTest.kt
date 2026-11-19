@@ -107,6 +107,25 @@ class SshTunnelTest {
         }
     }
 
+    @Test fun closingBeforeStartPublishesItsPortStillUnlistensTheForward() = runBlocking {
+        LoopbackHub(hubId = "hub-a").use { hub ->
+            TestSshServer(identity).use { server ->
+                val tunnel = SshTunnel(server.route(hub.port), identity, timings)
+                val port = tunnel.start()
+                // The listener exists before start() can publish localPort. close() must use the session's
+                // forwarding list, not only that field, or a cancelled start leaves a live health-probe listener.
+                tunnel.javaClass.getDeclaredField("localPort").apply { isAccessible = true }.setInt(tunnel, 0)
+                tunnel.close()
+                assertTrue(!tunnel.alive)
+                val client = OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build()
+                val refused = runCatching {
+                    client.newCall(Request.Builder().url("http://127.0.0.1:$port/api/v1/health").build()).execute()
+                }.isFailure
+                assertTrue("the closed forwarding listener must refuse a new probe", refused)
+            }
+        }
+    }
+
     @Test fun theDeviceKeyIsAnOpenSshEd25519KeyThatSigns() {
         val line = identity.deviceKey.publicKey.split(' ')
         assertEquals(listOf("ssh-ed25519", "persona-test"), listOf(line[0], line[2]))

@@ -3,7 +3,7 @@
 // items were opened on the way; an item with no list under it puts the list in its place instead of adding an entry.
 import { afterEach, describe, expect, it } from "vitest";
 import { onOverlayEntry, openOverlay, overlayDepth } from "./back-close";
-import { backToInboxList, inboxReturnTo, openFromInbox, stepsToInbox } from "./inbox-nav";
+import { backToInboxList, inboxReturnTo, openedInInbox, openFromInbox, stepsToInbox } from "./inbox-nav";
 import { navigate } from "./router";
 
 /** Runs `go`, then waits for the Back it causes (history.go() is asynchronous). */
@@ -42,6 +42,21 @@ describe("Back from an Inbox item", () => {
     backToInboxList();
     expect(location.pathname).toBe("/inbox");
     expect(history.length - start).toBe(1);
+  });
+
+  // the section bar lands for good only on an opening from outside (docs/assistant/inbox.md "Section bar", #9053)
+  it("tells an item opened from inside the Inbox from one reached from outside", () => {
+    atList();
+    openFromInbox({ name: "inbox", id: "a" });
+    expect(openedInInbox(history.state)).toBe(true);
+    history.pushState(null, "", "/inbox/x"); // a link, ⌘K
+    expect(openedInInbox(history.state)).toBe(false);
+    openFromInbox({ name: "inbox", id: "y" }); // its related item: from inside, with no list under it either
+    expect(stepsToInbox(history.state)).toBe(0);
+    expect(openedInInbox(history.state)).toBe(true);
+    history.pushState(null, "", "/persona/c1");
+    openFromInbox({ name: "inbox", id: "z" }); // a Needs-you line in a chat
+    expect(openedInInbox(history.state)).toBe(false);
   });
 
   it("goes back past a menu open over the item, and the menu closes", async () => {

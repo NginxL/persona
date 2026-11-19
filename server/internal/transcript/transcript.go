@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // Limits keep huge tool outputs and images from flooding the phone. Parsing keeps up to maxTextLen of any text, what
@@ -42,11 +43,11 @@ type entry struct {
 	} `json:"compactMetadata"`
 	Content json.RawMessage `json:"content"`
 	Message *struct {
-		Role    string          `json:"role"`
-		Model   string          `json:"model"`
-		ID      string          `json:"id"`
-		Content json.RawMessage `json:"content"`
-		Usage   *claudeUsage    `json:"usage"`
+		Role    string                `json:"role"`
+		Model   string                `json:"model"`
+		ID      string                `json:"id"`
+		Content json.RawMessage       `json:"content"`
+		Usage   *tokenuse.ClaudeUsage `json:"usage"`
 	} `json:"message"`
 	AITitle        string `json:"aiTitle"`
 	CustomTitle    string `json:"customTitle"`
@@ -151,8 +152,8 @@ type Meta struct {
 	lastOutputTokens int
 	// usage: the request whose usage the latest reply lines put on items (item_usage.go). codexTotal: a rollout's
 	// latest running total of tokens; codexUsage: what the turn under way used so far.
-	usage      RequestUsage
-	codexTotal int64
+	usage      tokenuse.Request
+	codexTotal tokenuse.CodexTotal
 	codexUsage proto.TokenUsage
 	sawUser    bool // a user line was read: a subagent's own work began (a fork's copied context comes before it)
 	// Queue holds input typed while Claude works and not yet taken (queue-operation lines:
@@ -162,7 +163,10 @@ type Meta struct {
 	queued []queuedInput
 	// Background holds background shells / agents that have not reported back (see trackBackground).
 	Background []proto.BackgroundTask
-	bgPending  map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id
+	// BackgroundEnded holds recent shell / Monitor outcomes, oldest first, at most backgroundEndedKept.
+	BackgroundEnded []proto.BackgroundTask
+	bgPending       map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id
+	bgPendingIDs    [][]byte                        // the same ids, for readers that skip lines without a static marker
 	// fgBash: foreground Bash calls waiting for their result, which may say it was moved to the background by hand
 	// (Ctrl+B, or a message sent mid-turn: node/assistant_interject.go).
 	fgBash map[string]proto.BackgroundTask

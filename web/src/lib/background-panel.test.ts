@@ -45,6 +45,7 @@ describe("the rest", () => {
     expect(hasBackgroundWork(session([]), NOW)).toBe(false);
     expect(hasBackgroundWork({ ...session([]), loop: { kind: "interval" } } as Session, NOW)).toBe(true);
     expect(hasBackgroundWork({ ...session([]), background: [{ id: "b", kind: "shell" }] } as Session, NOW)).toBe(true);
+    expect(hasBackgroundWork({ ...session([]), background_ended: [{ id: "b", kind: "shell", status: "completed" }] } as Session, NOW)).toBe(true);
     expect(hasBackgroundWork(session([run("old", { started_at: ago(80), ended_at: ago(72) })]), NOW)).toBe(false);
   });
 });

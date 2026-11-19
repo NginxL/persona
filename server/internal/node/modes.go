@@ -315,7 +315,9 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 		// over (mode_restart.go, #6476). Any other pick drops such a restart that waits.
 		if n.needsModeRestart(id, mode) {
 			if err := n.restartable(ctx, id); err == nil {
-				n.queueModeRestart(id, mode)
+				if err := n.queueModeRestart(id, mode); err != nil {
+					return err
+				}
 				mode = ""
 				if effort == "" {
 					return nil
@@ -656,8 +658,17 @@ func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, ef
 			if !errors.As(err, &refused) {
 				// An unconfirmed request might still apply later. Retire this process so a late response
 				// cannot leave the conversation running with a setting the client was told had failed.
+				var timeout *assistantControlTimeoutError
+				if errors.As(err, &timeout) {
+					n.logf("assistant %s: control_timeout stage=%s wait_ms=%d", short(p.id), timeout.stage, timeout.wait.Milliseconds())
+				}
+				p.mu.Lock()
+				p.stopReason = err.Error()
+				p.mu.Unlock()
+				n.logf("assistant %s: control request %s failed after startup elapsed_ms=%d: %v; stopping process from node", short(p.id), field, time.Since(p.born).Milliseconds(), err)
 				p.stop()
-				return &assistantControlUnconfirmed{refusal("assistant_control_failed", err.Error(), nil)}
+				message := i18n.T(i18n.Default, "node-assistant-start.stopped_by_node", i18n.Args{"reason": err.Error()})
+				return &assistantControlUnconfirmed{error: refusal("assistant_control_failed", message, nil), cause: err}
 			}
 			return err
 		}

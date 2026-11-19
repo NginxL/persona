@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +63,24 @@ func remoteTarget(cfg MachineConfig, info proto.NodeInfo, bin string) string {
 	if cfg.RemoteBin != "" {
 		return cfg.RemoteBin
 	}
-	return "~/.persona/bin/personad"
+	return defaultRemoteBin
+}
+
+// gzipPipe is r gzipped as it is read, for an ssh's stdin. The caller closes it once ssh is done: exec copies a
+// non-*os.File Stdin in its own goroutine and never closes it, so once ssh exits early (auth failure, connect timeout,
+// the remote script failing, ctx done) nothing reads it, and the gzip writer would block for good (#2377). Closing it
+// makes that Write fail with io.ErrClosedPipe so it returns.
+func gzipPipe(r io.Reader) *io.PipeReader {
+	pr, pw := io.Pipe()
+	go func() {
+		zw, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
+		_, err := io.Copy(zw, r)
+		if err == nil {
+			err = zw.Close()
+		}
+		pw.CloseWithError(err)
+	}()
+	return pr
 }
 
 // errFallbackOnRedeploy: an update the manager makes by itself found a fallback build (the newest release, another
@@ -83,6 +101,9 @@ func (m *Machine) startAutoDeploy() error { return m.startDeployOf(true) }
 func (m *Machine) startDeployOf(auto bool) error {
 	if auto && !m.d.config().AutoUpdateNodes {
 		return errAutoNodeUpdatesDisabled
+	}
+	if m.d.linkSwitchUnfinished(m.cfg.ID) { // the switch replaces the node's connection and may install its service
+		return errLinkSwitchDeploy
 	}
 	m.mu.Lock()
 	if m.deploying {
@@ -141,8 +162,14 @@ func (m *Machine) startDeployOf(auto bool) error {
 	return nil
 }
 
+// deployExitWrapper is the deploy script's exit status when bin is a script (remote_bin a wrapper that sets the node's
+// environment, PERSONA_HOME say, and execs personad): replacing it would move the node to another data directory and
+// machine uid, so nothing is replaced and the owner updates the binary the wrapper runs.
+const deployExitWrapper = 5
+
 // deployScript is the remote command that installs the gzipped binary on stdin as bin and stops a resident node so
 // launchd restarts it. The staged binary must run `version` before it can replace the installed one or stop the node.
+// An installed file that is a script is never replaced (deployExitWrapper); one that is replaced is kept as bin.prev.
 // The pkill pattern is written so it does not match this ssh session's own command line.
 // personaNode: the binary is persona-node, which never replaces a file that is not persona-node already (a personad,
 // which may run a hub or a manager too, put there since the node said what it runs). The file says which it is in
@@ -159,6 +186,9 @@ func deployScript(bin string, personaNode bool) string {
 	}
 	return posixCommand("set -e; b=" + target + `; mkdir -p "$(dirname "$b")"; gzip -dc > "$b.new"; chmod 755 "$b.new"; ` + keep +
 		`if ! "$b.new" version >/dev/null; then rm -f "$b.new"; echo "$b failed its staged version check: keeping the current binary and node" >&2; exit 4; fi; ` +
+		`if [ -f "$b" ] && [ "$(head -c 2 "$b")" = '#!' ]; then rm -f "$b.new"; ` +
+		`echo "$b is a script, not personad: not replacing it (update the personad it runs instead)" >&2; exit ` + strconv.Itoa(deployExitWrapper) + `; fi; ` +
+		`if [ -f "$b" ]; then ln -f "$b" "$b.prev" 2>/dev/null || cp -p "$b" "$b.prev"; fi; ` +
 		`mv "$b.new" "$b"; pkill -f '` + residentNodePattern + `' || true`)
 }
 
@@ -221,21 +251,14 @@ func (m *Machine) deploy(ctx context.Context, bin, target string) error {
 	// what it runs); the device's file takes either program.
 	guard := isPersonaNodeBuild(bin) && !update.IsDeviceFile(remote)
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, deployScript(remote, guard))
-	pr, pw := io.Pipe()
-	// exec copies a non-*os.File Stdin in its own goroutine and never closes it: once ssh exits early (auth failure,
-	// connect timeout, the remote script failing, ctx done) nothing reads pr, and the gzip writer below would block on
-	// pw for good (#2377). Closing pr makes its Write fail with io.ErrClosedPipe so it returns.
+	pr := gzipPipe(f)
 	defer pr.Close()
 	cmd.Stdin = pr
-	go func() {
-		zw, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
-		_, err := io.Copy(zw, f)
-		if err == nil {
-			err = zw.Close()
-		}
-		pw.CloseWithError(err)
-	}()
 	if out, err := cmd.CombinedOutput(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == deployExitWrapper {
+			return i18n.Err("devices-deploy.wrapper", i18n.Args{"path": remote})
+		}
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
@@ -366,6 +389,9 @@ func (m *Machine) updateOnConnect(ctx context.Context) {
 	online, deploying, info := m.online, m.deploying, m.info
 	m.mu.Unlock()
 	if m.cfg.Kind == "local" || m.d.hubVersion() == "" || !online || deploying {
+		return
+	}
+	if m.d.linkSwitchUnfinished(m.cfg.ID) { // nothing recorded: the next connection after the switch looks again
 		return
 	}
 	// The hub's build, or the release's its platform resolves to. Not known while the release site is away: nothing is

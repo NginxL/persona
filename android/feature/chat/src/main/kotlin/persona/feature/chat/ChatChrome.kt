@@ -68,9 +68,10 @@ internal fun ChatHeader(
     sides: List<Session> = emptyList(),
     sideRollup: SideRollup = SideRollup(),
     onOpenSide: ((SessionKey) -> Unit)? = null,
+    menuOpen: MutableState<Boolean> = remember { mutableStateOf(false) },
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    var menu by remember { mutableStateOf(false) }
+    var menu by menuOpen
     var sharing by remember(session?.key, agentShares) { mutableStateOf<AgentShares?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var title by rememberSaveable { mutableStateOf("") }
@@ -344,17 +345,22 @@ internal fun headerStatus(state: StatusLineState, session: Session?): Status {
 /**
  * The slim bar an Agent chat's header folds into on Glass (iOS `compactChrome`, #4339 C4): back, the agent's mark, the
  * state's dot and the title, or "Connecting…" while the hub is out of reach; a tap opens the header again.
+ * The compact phone layout keeps the open header's session actions on the right.
  */
 @Composable
 internal fun ChatSlimHeader(
-    session: Session?, statusState: StatusLineState, connection: ConnectionState?, onBack: () -> Unit, onOpen: () -> Unit,
+    session: Session?, statusState: StatusLineState, connection: ConnectionState?, onBack: () -> Unit,
+    onMore: (() -> Unit)? = null, onOpen: () -> Unit,
 ) {
     val title = session?.displayTitle ?: stringResource(R.string.chat_chrome_title_default)
     val link = connectionTitle(connection)
     val haptics = rememberHaptics()
     ChatSlimBar(title, stringResource(R.string.chat_chrome_slim_open, link ?: title), onOpen = { haptics(Haptic.Tap); onOpen() },
         onBack = onBack, status = headerStatus(statusState, session), agentMark = session?.agentMark, linkText = link,
-        waiting = session?.let(::AgentSession)?.waitsInBackground == true)
+        waiting = session?.let(::AgentSession)?.waitsInBackground == true,
+        trailing = onMore?.let { open -> {
+            JIconButton(PersonaIcons.moreMenu, stringResource(R.string.chat_chrome_more), open, raised = false, tint = PersonaTheme.palette.accent)
+        } })
 }
 
 /** The states the line under the title names by its dot only (iOS `ChatView.quiet`). */

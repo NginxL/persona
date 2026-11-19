@@ -127,15 +127,22 @@ class LarkDocCommentsModel(val url: String, private val api: LarkDocCommentsApi,
     var failure by mutableStateOf<LarkDocCommentFailure?>(null)
     /** The id of the send being tried: a retry of the same words to the same place reuses it. */
     private var pending: Pair<String, String>? = null
+    /**
+     * Reads count up when asked for, a write's answer when it comes: [threads] shows the highest so far, so a slow read
+     * never takes back what a later one or a write's answer showed (#9936).
+     */
+    private var asked = 0
+    private var shown = 0
 
     fun threads(resolved: Boolean) = threads.orEmpty().filter { it.resolved == resolved }
 
     suspend fun load() {
+        val read = ++asked
         try {
-            threads = parseLarkDocComments(api.threads(url), unnamed)
-            loadFailed = false
+            val got = parseLarkDocComments(api.threads(url), unnamed)
+            if (read > shown) show(read, got)
         } catch (e: CancellationException) { throw e }
-        catch (_: Exception) { loadFailed = true }
+        catch (_: Exception) { if (read > shown) loadFailed = true }
     }
 
     val canSend: Boolean get() = !sending && draft.isNotBlank()
@@ -203,7 +210,13 @@ class LarkDocCommentsModel(val url: String, private val api: LarkDocCommentsApi,
     suspend fun people(query: String): List<LarkDocPerson> = api.people(url, query)
 
     private suspend fun settle(answer: JsonObject) {
-        if (answer["threads"] is JsonArray) { threads = parseLarkDocComments(answer, unnamed); loadFailed = false } else load()
+        if (answer["threads"] is JsonArray) show(++asked, parseLarkDocComments(answer, unnamed)) else load()
+    }
+
+    private fun show(answer: Int, list: List<LarkDocCommentThread>) {
+        shown = answer
+        threads = list
+        loadFailed = false
     }
 
     private fun failureOf(@StringRes action: Int, e: Exception): LarkDocCommentFailure {

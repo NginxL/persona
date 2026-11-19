@@ -51,8 +51,12 @@ type NodeSession struct {
 	// ModelRecovery: the node's own model recovery has the conversation on another model or its chain was exhausted
 	// (#7824). Opaque here like PendingSwitch; node-owned state, never a configured-model change.
 	ModelRecovery json.RawMessage `json:"model_recovery,omitempty"`
+	// IdleCompaction is the main chat's user-idle clock, actual context and attempt latch, owned by the node.
+	IdleCompaction json.RawMessage `json:"idle_compaction,omitempty"`
 	// FollowsSetting: a leader/supervisor conversation follows the main chat model setting (node/session_state.go).
 	FollowsSetting bool `json:"follows_setting,omitempty"`
+	// An empty assistant start has not delivered its first message or runtime instructions.
+	AwaitingFirstMessage bool `json:"awaiting_first_message,omitempty"`
 }
 
 func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSession) error {
@@ -88,7 +92,8 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			'started_at_unknown', $14::bool, 'guest', $17::jsonb, 'guest_kind', $18::text, 'config_dir', $19::text,
 			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb,
 			'model_recovery', $23::jsonb, 'follows_setting', $24::boolean,
-			'stop_cause', $25::text, 'stop_cause_at', $26::bigint), now() FROM saved
+			'stop_cause', $25::text, 'stop_cause_at', $26::bigint,
+			'awaiting_first_message', $27::boolean, 'idle_compaction', $28::jsonb), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = CASE
 			WHEN COALESCE((settings.value->>'stop_cause_at')::bigint, 0) > $26
 				OR (COALESCE((settings.value->>'stop_cause_at')::bigint, 0) = $26
@@ -98,7 +103,7 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 			ELSE EXCLUDED.value END, updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
 		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff,
-		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt)
+		modelRecovery, s.FollowsSetting, string(s.StopCause), s.StopCauseAt, s.AwaitingFirstMessage, jsonOrNil(s.IdleCompaction))
 	return err
 }
 
@@ -130,9 +135,13 @@ type nodeModel struct {
 	EngineHistory    json.RawMessage `json:"engine_history"`
 	PendingHandoff   json.RawMessage `json:"pending_handoff"`
 	ModelRecovery    json.RawMessage `json:"model_recovery"`
+	IdleCompaction   json.RawMessage `json:"idle_compaction"`
 	FollowsSetting   bool            `json:"follows_setting"`
 	StopCause        proto.StopCause `json:"stop_cause"`
 	StopCauseAt      int64           `json:"stop_cause_at"`
+
+	// Kept until the node confirms its first actual message was delivered.
+	AwaitingFirstMessage bool `json:"awaiting_first_message"`
 }
 
 // jsonOrNil is raw, or nil when it holds nothing (empty, or a JSON null).
@@ -164,7 +173,9 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.UltracodeProcess, s.PendingSwitch, s.EngineHistory = jsonOrNil(m.UltracodeProcess), jsonOrNil(m.PendingSwitch), jsonOrNil(m.EngineHistory)
 		s.PendingHandoff = jsonOrNil(m.PendingHandoff)
 		s.ModelRecovery = jsonOrNil(m.ModelRecovery)
+		s.IdleCompaction = jsonOrNil(m.IdleCompaction)
 		s.FollowsSetting = m.FollowsSetting
+		s.AwaitingFirstMessage = m.AwaitingFirstMessage
 		s.StopCause, s.StopCauseAt = m.StopCause, m.StopCauseAt
 		if m.StartedAtUnknown {
 			s.StartedAt = time.Time{}

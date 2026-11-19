@@ -185,6 +185,7 @@ Both sides ignore a message type they don't know.
 - Starts trying the next candidate every 300 ms, several concurrently; the first connection wins and late successes are closed. Each candidate has an 8-second timeout.
 - Away from home, even if LAN addresses fail or hang, it waits only another 300 ms before trying the next. These are configured values, not measured results.
 - With an optional SSH tunnel (`ssh` in `link.json`, see "[SSH tunnel](#ssh-tunnel)" below): **Always use SSH** dials only the tunnel; otherwise direct candidates are raced first and the tunnel is used if all fail (and tried first on the next reconnect when the tunnel was the last working route, while probing direct candidates every 2 minutes to switch back).
+- With an outbound HTTP(S) proxy (`proxy` in `link.json`, or `HTTPS_PROXY` / `ALL_PROXY`, see "[Outbound proxy](#outbound-proxy)" below): when every direct candidate fails, the candidates are raced through the proxy, before the SSH tunnel; it is sticky and switches back to direct the same way.
 
 **Hub name and linked group**
 - The hub includes `hub_name` in `endpoints`: `name` from hub.json, otherwise the short hostname of the hub machine; in Docker (where the hostname is a container id), `hub-<first 6 characters of hub_id>`
@@ -318,6 +319,19 @@ location /<prefix>/ {
 obtain this computer's link credentials and connect hub streams to its resident node. This is the same as accessing the web app in a browser: better than plaintext, weaker than pinning. The proxy-to-hub hop is plaintext and must be on a trusted network (same machine or LAN).
 Prefer the hub's own TLS and fingerprint when possible; when hub TLS is enabled, pairing links always carry `fp` and won't use system trust.
 
+## Outbound proxy
+
+A computer that reaches the internet only through an HTTP(S) proxy (common on company networks) can still use active mode: persona-link reaches the hub with an HTTP `CONNECT` through that proxy (#10659). Passive mode, the hub and the manager are unchanged.
+
+- **Which proxy**: `proxy` in `link.json` when it is set (`persona-link proxy <url>`, or `--proxy <url>` on `pair` and `install`, which saves it before pairing so the pairing goes through it too), else `HTTPS_PROXY`, then `ALL_PROXY` (each in lower case before upper case, as Go's `net/http` reads them) from persona-link's own environment. A launchd agent, systemd user service or scheduled task rarely has those variables, so on a service set the proxy with `persona-link proxy`. `persona-link proxy --off` (`"proxy": "off"`) uses no proxy, not even the environment's; `persona-link proxy --env` removes the setting again; `persona-link proxy` shows it. The URL is `http://` or `https://` with `[user:password@]host[:port]`; a bare `host:port` means `http://`, as for `HTTPS_PROXY`. SOCKS proxies are not supported: one in the environment is left to the programs it is for, and `persona-link proxy` refuses one (a hand-edited unusable `proxy` shows as invalid in `status` and fails only the proxy route). `NO_PROXY` / `no_proxy` exempts hub addresses, with Go's rules: `localhost` and loopback addresses never go through a proxy.
+- **Routing order**: direct candidates are raced first, unchanged; when all of them fail, the same candidates are raced through the proxy (LAN addresses last: a proxy rarely reaches them); then the SSH tunnel, when one is set. **Always use SSH** dials only the tunnel. The route that worked last (proxy or SSH) is dialed first on the next reconnect; while connected through the proxy, direct candidates are probed every 2 minutes (`link.DirectRetryEvery`) and on network changes, and the first one that answers takes over, as it does from the tunnel. A pinned hub that refuses the credential, on whichever route, ends the attempt. A proxy setting that cannot be used fails only the proxy route: direct candidates still work. Pairing tries the routes in the same order.
+- **Why the proxy comes before the tunnel**: the proxy is what the network itself asks for and needs nothing on the hub machine, no `ssh` process, keys or hardware-key touches; the tunnel stays the explicit fallback for a hub that is reachable only over SSH.
+- **One route for the link and its streams**: the link WebSocket and every Agent stream opened on it go through the same proxy, each with a `CONNECT` of its own.
+- **End-to-end TLS unchanged**: the hub's TLS handshake runs inside the tunnel with the check a direct connection uses, pinned to `fp` or checked against system CAs and the hub's host name when `trust` is `system`, so a wrong hub key is refused through the proxy with the same words as directly. The check is the HTTP transport's `tls.Config` (the pin in `VerifyConnection`) on every route. An `https://` proxy is checked first and separately, against system CAs and its own name; it can never stand in for the hub.
+- **Credentials**: proxy credentials stay in `link.json` (0600) and are sent only in each `CONNECT`'s `Proxy-Authorization` header (Basic), which an `http://` proxy receives in plain text, as with any HTTP proxy; prefer `https://` when the proxy offers it. `persona-link proxy`, `persona-link status` (text and `--json`) and errors show the proxy without its user name and password; the log says only `(proxy)`, never the proxy's address. A failing proxy has its own sentence (cannot reach it, its certificate is not trusted, it did not complete TLS, it refused with HTTP `<status>`, it did not open the connection, the setting is not a usable URL), shown as **Proxy** `<hub address>`: `<sentence>`; a tunnel that breaks later fails as the hub's handshake does, without the proxy's address.
+- **Status**: connected through the proxy, the status line has `"kind": "proxy"`, `address` the hub URL reached through it and `proxy` the proxy without credentials. `persona-link status` shows **Connected · Proxy** `<hub>` and lists the proxy after the direct addresses (marked **In use**); `status --json` also has `proxy`, the `link.json` setting without credentials, `off`, or `invalid`.
+- **Changing it while connected**: `persona-link proxy` does not interrupt the running link; the link reads `link.json` itself, and a new proxy setting reconnects a link on a fallback route (the proxy, or an SSH tunnel without **Always use SSH**, as the proxy comes before the tunnel). A direct link stays as it is.
+
 ## SSH tunnel
 
 When a hub machine exposes only SSH (port 22) — its HTTP and TLS ports listen on `127.0.0.1` only, with no open public port or reverse proxy — active-mode Persona Link can reach the hub's TLS port through an SSH tunnel (#3775), matching the apps' SSH tunnel ([network.md](network.md), "Connecting to hub through SSH").
@@ -364,7 +378,7 @@ When a hub machine exposes only SSH (port 22) — its HTTP and TLS ports listen 
 - **End-to-end TLS unchanged**: the TLS handshake (pinned to `fp`, or checked against system CAs and hostname when `trust` is `system`) still runs end to end through the tunnel to the hub's TLS port; a wrong hub key is refused identically to a direct connection. Over the tunnel, `hello.address` is left empty so the hub does not record the SSH server string as one of its own HTTPS URLs.
 - **Routing order**:
   - **Always use SSH** on: only the tunnel is dialed; direct hub candidates are skipped.
-  - **Always use SSH** off: direct candidates are raced first, and the tunnel is dialed when all of them fail. When the last working connection used the tunnel, the next reconnect dials the tunnel immediately instead of waiting for direct candidates to fail again, while probing direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes to switch back and close the tunnel once a direct address answers.
+  - **Always use SSH** off: direct candidates are raced first, then the outbound proxy when one is set (see "Outbound proxy"), and the tunnel is dialed when all of them fail. When the last working connection used the tunnel, the next reconnect dials the tunnel immediately instead of waiting for direct candidates to fail again, while probing direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes to switch back and close the tunnel once a direct address answers.
 - **Status and plain-word errors**: when connected through the tunnel, status reports `"kind": "ssh"` and `"address": "<server>"`, labelled **SSH** in `en`, `zh-Hans` and `ja` across `persona-link status` and the desktop setup status (and marked **In use** in the address list). Five failure modes each produce a distinct single-sentence explanation (`ssh_error` in the status line): no `ssh` command installed, authentication refused, server host key not trusted yet (with `ssh [-p <port>] <server>` to accept it once in a terminal), port forwarding refused by the server (`AllowTcpForwarding` / `permitopen`), and the hub not answering at `<target>`.
 
 ## Passive mode (the hub connects)
@@ -622,6 +636,127 @@ Without hub TLS, the web reports "The hub hasn't enabled a secure connection yet
 
 For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link install --pair -` pairs, installs and waits for connection in one command.
 
+## Switching from SSH
+
+A Linux computer the hub already reaches over SSH (`kind: ssh`) can move to Persona Link with one confirmed click (#10662), under
+**Switch to Persona Link** on its machine detail in the signed-in web app and on its row in the admin **Computers** page. The
+computer keeps its id and name, and so its pins, mutes, trust, settings and history, which are all stored by id. Afterwards it
+connects to the hub by itself, also from other networks. It is for people who manage their computers, so it sits with the
+machine's details, not in the Assistant. iOS and Android follow in #10671.
+
+**What it needs**: the hub takes Persona Link (`public.tls_listen` or an `https://` `public_url`, as for pairing). The computer
+must also meet all of these:
+
+- It runs Linux on amd64 or arm64.
+- It is online over SSH and confirmed as the user's.
+- It has a running systemd user manager with linger on (`/var/lib/systemd/linger/<user>`). Without linger the user's services stop
+  when the last session ends, and that would be the switch's own SSH session.
+- It has no Persona Link yet: no connector, no `link.json`, no `persona-link.service`, and none under the old names.
+- It has a node program (`~/.persona/bin/personad` or `persona-node`) or already a node service.
+- Its node uses the default `remote_bin` and data directory: no `PERSONA_HOME` in its ssh environment, and no separate
+  `~/.jarvis`.
+
+A Mac or Windows computer is not switched from here, because launchd over SSH is unreliable (see "The device's program", step 3)
+and Windows has no service install over SSH. Install Persona Link on such a computer itself. Each condition the computer does not
+meet shows as a plain reason instead of the button.
+
+**What happens** (the manager that carries the computer runs it, `server/internal/devices/link_switch.go`; the hub only does two
+steps, `devices.link_switch.begin` / `end`). The computer disconnects and reconnects once. Agents running in a terminal (herdr and
+the other engines) keep running, and their hooks reach the new node. A reply the assistant is writing on that computer at that
+moment is cut off, as when a node restarts.
+
+1. **Checking** (30 s): one read-only SSH command looks at the system, systemd and linger, the files above, and which node service
+   exists. Nothing changes, and a refusal ends here.
+2. **Installing**:
+   1. The manager sends the Persona Link build of the hub's version for that platform (from the hub's node builds or its release,
+      [node-update.md](node-update.md) "Node packages") over the same SSH access, so the computer downloads nothing. It is staged
+      as `~/.persona/bin/.persona-link-switch-<op>`, and its SHA-256 and `version` are checked (10 min).
+   2. The hub then checks that the machine's entry is still what the manager saw. It sets `kind: link` and leaves every other field,
+      `ssh_host` included. It makes one pairing code for this machine, ten minutes and single-use, which only the manager gets.
+   3. From here the manager no longer runs the node over SSH. One more SSH command (3 min) puts the staged file in place as
+      `~/.persona/bin/persona-link` (never over an existing one) and runs `persona-link install --pair -`, with the pairing link on
+      its stdin. The link never goes on a command line, into a log, an API answer or the manager's store. The installer redeems
+      the code, adds the node service `personad-node` only when the computer has none (an existing one is left unchanged), starts
+      `persona-link.service`, and waits for the connection.
+      Just before the installer runs, the same command checks again for a node service, or the backup of one
+      (`node-switch.backup`) that the installer may put back. If it finds one, it leaves a marker so a rollback never removes
+      that service. Where `timeout` exists, the installer gets 150 s, so it cannot outlive the SSH command and race a rollback.
+3. **Connecting** (90 s): done when the computer's node answers through Persona Link. If the installer failed before it
+   paired (no `link.json`), nothing can connect, and the switch fails at once.
+
+**When something fails**, the computer goes back to SSH:
+
+- **Before the hub step**, the manager removes the staged file.
+- **After the hub step**, the manager asks the hub to end the switch (`devices.link_switch.end`). The hub revokes this switch's
+  code and the credential it was traded for (the link closes with 4002) and puts the kind back to `ssh`.
+  - **Until the hub answers**, the manager touches nothing on the computer. Persona Link stays installed, so the computer
+    is not left with neither a link nor SSH. The switch shows as rolling back while the manager asks again: after 1 s, then
+    twice as long each time, up to every minute, and again after a restart. The asking is bounded to one hour from the
+    first try, a limit a restart does not reset. After that the manager stops and leaves the computer as it is. The
+    switch ends failed with `hub_unanswered`, saying it could not be undone, and **Redeploy** and automatic updates are
+    no longer held. A hub that does not know the call (`unknown_method`, an older build) ends it the same way at once.
+  - **When the hub has confirmed**, the manager removes over SSH only what this switch installed: the connector with its
+    `link.json` and unit (`persona-link uninstall --purge`), and the node service only if the computer had none before
+    (`persona-link node uninstall`). Both run only through the program this switch sent, recognized by its SHA-256, never
+    through a `persona-link` found there. Then it waits up to 2 minutes for the computer to answer over SSH again.
+- **If the hub refuses to undo it** (it cannot tie the request to this switch), the manager stops asking and leaves Persona
+  Link on the computer. If the hub has undone the switch but the computer is another manager's by now, or has been
+  removed, it answers `rolled_back_gone`. The manager then removes what this switch installed, as for any confirmed
+  rollback, but does not wait for the computer over SSH, since the computer is no longer its own.
+- **If any step cannot be confirmed**, the result says the switch could not be undone for sure, rather than that it was.
+
+The reason the switch failed is shown in plain words either way.
+
+**What the hub keeps** (`machine_audit`, action `link_switch`): one row per step of an operation, written before the step
+takes effect.
+
+- `begin`: before the kind changes.
+- `begun`: once the code exists, with its hash.
+- One final row: `succeeded`, `rolled_back` or `begin_failed`.
+
+How the hub uses these rows:
+
+- **Undoing**: an end is accepted only for the computer's latest operation, and its hash must be the one recorded for it.
+  A final row is final: a repeated rollback changes nothing, a rollback of a switch that succeeded answers
+  `already_succeeded`, and an operation id cannot begin twice.
+- **Survives a hub restart**: the rows stand in for the hub's memory. A hub that stops between changing the kind and making
+  the code can still be undone from the `begin` row.
+- **Bounded**: a switch counts as running for at most 30 minutes after its `begin` row.
+
+**Restarts and repeats**: only one switch per computer runs at a time. While one runs, the hub refuses these with 409, and the
+checks hold across a hub restart:
+
+- a second start (`in_progress`);
+- **Redeploy** of its node;
+- moving the computer to another manager, removing it, or removing its manager (`link_switch_in_progress`). A move or removal
+  that is already under way holds the computer, and a new switch is refused until it finishes.
+
+A device signed in with a pairing code it has not traded yet cannot start a switch (403).
+
+The manager writes down each step before it takes it (setting `link_switch.<machine id>`; the pairing link is never kept). A
+manager that restarts during a switch carries on as follows:
+
+- it finishes the switch if the computer connects through Persona Link before the deadline;
+- it rolls the switch back at once if the installer never ran;
+- it goes on asking the hub to end one it was rolling back;
+- it goes on telling the hub of a success the hub has not acknowledged yet.
+
+If the manager stops waiting for the hub's `begin`, the hub gives up the begin when it has not taken the computer yet.
+
+**The computer's own files**: the check, the transfer and the install refuse (`unsafe_permissions`) unless the home folder,
+`~/.persona` and its `bin` belong to the user, and none of them can be written by other users. A group-writable one is
+accepted only when the group is the user's own private group. The message says how to fix it, for example
+`chmod go-w ~ ~/.persona ~/.persona/bin`.
+After the build is put in place, its SHA-256 is checked once more before it runs.
+
+| Route | Who | Answer |
+| --- | --- | --- |
+| `POST /api/v1/machines/{mid}/link-switch` | a signed-in full device | 202 `{link_switch}`; 409 `{code}` (a reason above, or `in_progress`); 403 otherwise |
+| `POST /api/v1/admin/machines/{mid}/link-switch` | the admin page (session and CSRF) | the same, relayed to the machine's manager |
+
+Progress and the result come with the machine itself (`link_switch` in the machine list, [protocol.md](../protocol/protocol.md)),
+so every open client sees each step at once. A finished switch stays shown for an hour.
+
 
 ## Status line
 
@@ -643,6 +778,7 @@ Plain terminal output uses `i18n.Terminal()`: `PERSONA_LANG`, then `LC_ALL`, `LC
 - `pending` (planned, #4655): `true` means the hub is waiting for the user to confirm this computer in the App; absent means confirmed.
 - `waiting` / `refused` include `error` (candidate failures separated by "；", a full-width semicolon) and `retry` (next attempt time); when an SSH tunnel attempt failed, `ssh_error` carries `{code, server, target}` so localized surfaces render the sentence in `en`, `zh-Hans` or `ja`.
 - `ssh`: the active-mode SSH tunnel from `link.json` (`{server, target, always?}`), when configured; while connected through the tunnel, `kind` is `ssh` and `address` is `<server>`.
+- `proxy`: while connected through an outbound proxy (`kind` is `proxy`, `address` the hub URL reached through it), the proxy's URL without its user name and password (see "Outbound proxy").
 - `hub_name`, `mesh_hubs`: see "Hub name and linked group"; absent with old hubs.
 - `machine_name`: what the hub calls this computer (see "The computer's name"); absent with old hubs. `rename`: how the last rename asked of this persona-link went: `{id, name}` or `{id, code, error}`.
 - `pending`: meaningful only when `connected`; `true` means the hub is waiting for the user to confirm this computer (see "Pending confirmation"); absent or `false` means confirmed.

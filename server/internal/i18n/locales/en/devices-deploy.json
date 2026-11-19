@@ -7,6 +7,7 @@
   "package_bad": "The {os}/{arch} node build from the release did not check out, so it was not used: {err}",
   "package_moved": "A newer release, {version}, was published while the {os}/{arch} node build was downloading, so the download was not used. Try again to fetch the build from it.",
   "install_failed": "Could not install: {err}",
+  "wrapper": "{path} on this computer is a script (a wrapper that starts personad), not personad itself, so it was not replaced: that would drop the settings the wrapper makes, such as which data folder the node uses. Update the personad the wrapper runs instead.",
   "minutes_one": "{count} minute",
   "minutes_other": "{count} minutes",
   "seconds_one": "{count} second",

@@ -357,6 +357,12 @@ func (h *Hub) removeKeptMachine(ctx context.Context, mid string) (bool, error) {
 // editKeptMachine changes keys of a kept machine's entry (the admin page's connector address): got from its keeper,
 // changed, put back. false: no manager keeps mid.
 func (h *Hub) editKeptMachine(ctx context.Context, mid string, set map[string]any) (bool, error) {
+	return h.editKeptMachineIf(ctx, mid, nil, set)
+}
+
+// editKeptMachineIf is editKeptMachine when check, given the entry as its keeper has it now, answers nil (nil: always);
+// its error otherwise, nothing put (link_switch.go: a compare-and-swap).
+func (h *Hub) editKeptMachineIf(ctx context.Context, mid string, check func(json.RawMessage) error, set map[string]any) (bool, error) {
 	d := &h.devices
 	d.moving.Lock()
 	defer d.moving.Unlock()
@@ -367,6 +373,11 @@ func (h *Hub) editKeptMachine(ctx context.Context, mid string, set map[string]an
 	entry, err := h.keptEntryFull(ctx, o, mid)
 	if err != nil {
 		return true, err
+	}
+	if check != nil {
+		if err := check(entry); err != nil {
+			return true, err
+		}
 	}
 	obj, err := parseJSONObject(entry)
 	if err != nil {

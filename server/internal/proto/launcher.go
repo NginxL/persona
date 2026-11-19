@@ -34,6 +34,8 @@ type Launcher struct {
 	PermissionModes PermissionModeSet `json:"permission_modes,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
+	// External is a sanitized, machine-local adapter advertisement. It grants no execution authority.
+	External *ExternalLauncher `json:"external,omitempty"`
 	// AssistantFor: on an Assistant launcher, the Agent launcher of this computer it runs the assistant for, as the
 	// runtime declares it (the person who set it up says it is the same agent and account): integrations/grok's
 	// grok-chat for the Paseo provider grok, which only starts Agents. The main chat's picker points that one at it
@@ -93,6 +95,9 @@ type LauncherCheck struct {
 	Answer string `json:"answer,omitempty"`
 	Millis int    `json:"millis"`
 	Error  string `json:"error,omitempty"`
+	// AssistantTurn: the check ran as the assistant runs a turn of conversation (launchers.check assistant_turn, a node
+	// with launcher_check_assistant_turn, Claude Code launchers only); absent, it was the plain check.
+	AssistantTurn bool `json:"assistant_turn,omitempty"`
 }
 
 // ClaudeAuthStatus is what a node's claude.auth_status found: `claude auth status --json` run as the launcher runs
@@ -171,6 +176,10 @@ type AgentModel struct {
 	Custom bool `json:"custom,omitempty"`
 	// Price is the built-in catalog's exact-entry reference price; nil when unknown or inherited from another model.
 	Price *ModelPrice `json:"price,omitempty"`
+	// Aliases: the other spellings the manager folded into this row because they run the same model with the same
+	// context window on this launcher (Claude Code's tier aliases on a gateway whose tiers name one model, #10365,
+	// assistant/models_launchers_fold.go). Each still picks this row: a saved pick of one keeps working.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 type LauncherEnv struct {
@@ -364,12 +373,19 @@ func (l ManagedLauncher) MessagesBase() bool {
 	return l.API == "" || l.API == "messages"
 }
 
-// LaunchBaseURL is the Base URL as the provider's agent takes it: a Messages base through MessagesBaseURL, any other as
-// stored. The hub stores and delivers it, and the node launches with it, so a provider saved before the hub dropped a
-// trailing /v1 still reaches what Test connection called.
+// LaunchBaseURL is the Base URL as the provider's agent or direct API takes it: a Messages base through
+// MessagesBaseURL, a Chat Completions or Responses base through APIBaseURL, and any other as stored. The hub stores
+// and delivers it, and the node launches with it, so a provider saved before the hub dropped a trailing /v1 or pasted
+// endpoint path still reaches what Test connection called.
 func (l ManagedLauncher) LaunchBaseURL() string {
 	if l.MessagesBase() {
 		return MessagesBaseURL(l.BaseURL)
+	}
+	if l.AgentType() == "codex" {
+		return APIBaseURL(l.BaseURL, "responses")
+	}
+	if l.API == "chat" || l.API == "responses" {
+		return APIBaseURL(l.BaseURL, l.API)
 	}
 	return l.BaseURL
 }
@@ -384,27 +400,87 @@ func AnthropicAPI(base string) bool {
 	return err == nil && strings.EqualFold(u.Hostname(), AnthropicAPIHost)
 }
 
-// MessagesBaseURL is a gateway address as ANTHROPIC_BASE_URL takes it. Claude Code and the Anthropic SDKs add
-// /v1/messages themselves, so the /v1 many gateways put at the end of their documented address would make
-// /v1/v1/messages: the /v1 ending the path goes with any trailing slashes, a deployment prefix before it stays
-// ("https://gw/prefix/v1/" → "https://gw/prefix"). It is idempotent (a run of /v1 goes whole): the hub stores its
-// result and the node applies it again at launch, and both must reach what Test connection called. Anything else (no
-// host, a query) is only trimmed.
+// APIBaseURL normalizes a gateway Base URL for api ("messages"/empty, "responses", or "chat"), stripping a pasted
+// trailing endpoint path while keeping /v1 on OpenAI-compatible bases ("https://host/v1/v1/chat/completions" →
+// "https://host/v1/v1") and preserving bare /responses deployment prefixes ("https://gw/responses" stays unchanged;
+// "https://gw/v1/responses" → "https://gw/v1").
+func APIBaseURL(base, api string) string {
+	switch api {
+	case "", "messages":
+		return MessagesBaseURL(base)
+	case "chat":
+		return trimSinglePathSuffix(base, "/chat/completions")
+	case "responses":
+		return trimVersionedEndpointSuffix(base, "/responses")
+	default:
+		return strings.TrimRight(strings.TrimSpace(base), "/")
+	}
+}
+
+// MessagesBaseURL is a gateway address as ANTHROPIC_BASE_URL takes it. Unlike APIBaseURL for "chat" and "responses",
+// MessagesBaseURL produces an ANTHROPIC_BASE_URL without a trailing /v1: Claude Code (node/launcherenv.go) and
+// connection probes (assistant/models_probe.go) unconditionally append /v1/messages themselves, and saving plus
+// launch-time re-application require strict idempotence (MessagesBaseURL(got) == got; a run of /v1 goes whole).
+//
+// Normalization runs in two ordered phases: first strip a pasted /v1/messages endpoint suffix (only /messages
+// preceded by /v1, never a /messages deployment prefix), then strip any trailing /v1 segments so
+// "https://gw/prefix/v1/" → "https://gw/prefix" and both "https://gw/messages/v1" and
+// "https://gw/messages/v1/messages" → "https://gw/messages". Anything else (no host, a query) is only trimmed.
 func MessagesBaseURL(base string) string {
+	return trimBasePathSuffix(trimVersionedEndpointSuffix(base, "/messages"), "/v1")
+}
+
+func splitBaseURLPath(base string) (root, path string, ok bool) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	u, err := url.Parse(base)
 	if err != nil || u.Host == "" || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" {
-		return base
+		return base, "", false
 	}
 	authority := strings.Index(base, "//") + len("//")
 	slash := strings.IndexByte(base[authority:], '/')
 	if slash < 0 {
-		return base // no path
+		return base, "", false // no path
 	}
-	root, path := base[:authority+slash], base[authority+slash:]
+	return base[:authority+slash], base[authority+slash:], true
+}
+
+// trimVersionedEndpointSuffix drops a single pasted /v1<suffix> endpoint (e.g. /v1/messages or /v1/responses) while
+// keeping the preceding /v1 and leaving bare deployment prefixes ("https://gw/messages", "https://gw/responses") intact.
+func trimVersionedEndpointSuffix(base, suffix string) string {
+	root, path, ok := splitBaseURLPath(base)
+	if !ok {
+		return root
+	}
+	rest, found := strings.CutSuffix(path, suffix)
+	if !found {
+		return root + path
+	}
+	rest = strings.TrimRight(rest, "/")
+	if !strings.HasSuffix(rest, "/v1") {
+		return root + path
+	}
+	return root + rest
+}
+
+func trimSinglePathSuffix(base, suffix string) string {
+	root, path, ok := splitBaseURLPath(base)
+	if !ok {
+		return root
+	}
+	if rest, found := strings.CutSuffix(path, suffix); found {
+		return root + strings.TrimRight(rest, "/")
+	}
+	return root + path
+}
+
+func trimBasePathSuffix(base, suffix string) string {
+	root, path, ok := splitBaseURLPath(base)
+	if !ok {
+		return root
+	}
 	for {
-		rest, ok := strings.CutSuffix(path, "/v1")
-		if !ok {
+		rest, found := strings.CutSuffix(path, suffix)
+		if !found {
 			return root + path
 		}
 		path = strings.TrimRight(rest, "/")

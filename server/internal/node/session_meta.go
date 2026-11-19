@@ -31,6 +31,7 @@ type quickMeta struct {
 	goal         *proto.GoalInfo        // from backgroundTasks too: a goal is often set at the start of a long transcript
 	plan         *proto.PlanInfo        // from the same scan (bgPlan): a TodoWrite is often far back in a long turn
 	bg           []proto.BackgroundTask // from backgroundTasks: the tail alone misses tasks started earlier in a long turn
+	bgEnded      []proto.BackgroundTask // recent shell / Monitor outcomes from the same scan
 	bgWait       bool                   // bg and loop are not known yet (a big first read is running)
 	wf           []proto.Workflow       // workflow runs, as the transcript tells them (bgWorkflows)
 	wfScript     map[string]string      // their script files by run id
@@ -158,9 +159,12 @@ func (n *Node) meta(path string, st os.FileInfo) quickMeta {
 	// 384 KB tail and scan the new bytes: a dozen busy agents with large transcripts kept a node reading ~20 MB/s.
 	// A growing file's meta is re-read at most every metaMinInterval; the list's rev comes from stat, so it stays exact.
 	if ok && (m.size == st.Size() && m.mtime.Equal(st.ModTime()) || time.Since(m.readAt) < metaMinInterval) {
+		// Retention advances even when the transcript does not. The scan itself stays cached.
+		m.bgEnded = recentBackgroundEnded(m.bgEnded)
 		if m.bgWait { // the background read may be done now
 			m.bg, m.loop, m.goal, m.bgWait = n.backgroundTasks(path)
 			m.wf, m.wfScript = n.bgWorkflows(path)
+			m.bgEnded = n.bgEnded(path)
 			m.ultracode, m.ultracodeAt = n.bgUltracode(path)
 			m.plan = n.bgPlan(path)
 			n.mergeModelFallback(path, &m)
@@ -191,6 +195,7 @@ func (n *Node) meta(path string, st os.FileInfo) quickMeta {
 	m.readAt = time.Now()
 	m.bg, m.loop, m.goal, m.bgWait = n.backgroundTasks(path)
 	m.wf, m.wfScript = n.bgWorkflows(path)
+	m.bgEnded = n.bgEnded(path)
 	m.ultracode, m.ultracodeAt = n.bgUltracode(path)
 	m.plan = n.bgPlan(path)
 	n.mergeModelFallback(path, &m)

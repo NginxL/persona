@@ -59,7 +59,8 @@ func (n *Node) keptTabFreeLocked(pane string, k keptStart) bool {
 var errStartTabGone = refusal("start_tab_gone", "that tab is not a failed start's kept tab any more (it expired, or an agent runs there)", nil)
 
 // startKeys types text (as is, no enter) and then presses keys (Persona's key names: "enter", "esc", "ctrl+c", "y"…)
-// into the kept tab of a failed start on pane. Only such a tab takes them, and only a short answer.
+// into the kept tab of a failed start on pane. Only such a tab takes them, and only a short answer. The tab is marked
+// typed (keptStart.typed): the Retry that follows waits out a question the keys answered as in a new tab.
 func (n *Node) startKeys(ctx context.Context, pane, text string, keys []string) error {
 	if pane == "" || text == "" && len(keys) == 0 {
 		return errors.New("start.keys needs a pane and text or keys")
@@ -77,6 +78,7 @@ func (n *Node) startKeys(ctx context.Context, pane, text string, keys []string) 
 	if err != nil {
 		return err
 	}
+	n.markKeptTyped(pane) // before the keys: a start that claims the tab meanwhile waits too
 	if text != "" {
 		if err := h.SendText(ctx, ref, text); err != nil {
 			return err

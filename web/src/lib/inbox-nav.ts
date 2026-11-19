@@ -7,6 +7,9 @@ import { navigate, parse, routeAt, routePath, type Route } from "./router";
 
 const STEPS = "personaInboxSteps";
 const FROM = "personaInboxFrom";
+// an item opened from another item that has no list under it (one reached by a link): still an opening from inside the
+// Inbox (docs/assistant/inbox.md "Section bar"), though there is no list to go back to
+const INSIDE = "personaInboxInside";
 
 /** How many entries back the list is from the entry `state` belongs to; 0: no list under it. */
 export function stepsToInbox(state: unknown): number {
@@ -14,13 +17,20 @@ export function stepsToInbox(state: unknown): number {
   return typeof n === "number" && n > 0 ? n : 0;
 }
 
+/** Whether the item whose history entry `state` is was opened from inside the Inbox: from its list, or from another
+ *  item (its chain, its relations, another row beside it). Otherwise it came from outside: a link, ⌘K, a Needs-you
+ *  line elsewhere, a reload. The section bar lands on an outside opening's choice for good (#9053). */
+export function openedInInbox(state: unknown): boolean {
+  return stepsToInbox(state) > 0 || Boolean(state && typeof state === "object" && (state as Record<string, unknown>)[INSIDE] === true);
+}
+
 /** The history state of an item opened from the page showing now: one step from the list, one more than the item it was
- *  opened from, or none when that item has no list under it either. */
+ *  opened from, or, when that item has no list under it either, no steps but the mark of an opening from inside. */
 export function openedItemState(): Record<string, unknown> | null {
   const here = routeAt(location.href);
   if (here?.name === "inbox" && !here.id) return { [STEPS]: 1 };
   const n = stepsToInbox(history.state);
-  return n ? { [STEPS]: n + 1 } : null;
+  return n ? { [STEPS]: n + 1 } : here?.name === "inbox" ? { [INSIDE]: true } : null;
 }
 
 /** Opens `r` from an Inbox page; an item counts its way back to the list (`openedItemState`). A conversation or another

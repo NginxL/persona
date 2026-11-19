@@ -29,6 +29,10 @@ import UIKit
     /// How the hub transcribed it (#3862 phase 5, `detail.meta.transcription`): the mode, and in hub mode how far the hub
     /// is (the page says "being finished" until `final`) and the stretches it has no audio for. nil: no mode decided.
     private(set) var transcription: MeetingTranscriptionView?
+    /// The meeting imported from a connected app it stands for too (#8872), with its notes' link; nil without one.
+    private(set) var imported: KBImportedMeeting?
+    /// Its latest hand-off to an Agent (#8852, `detail.meta.handoffs`): where it went, or why it didn't; nil without one.
+    private(set) var handoff: MeetingHandoff?
     /// A write (Regenerate, Add to To-Dos) or the read-back after it is on its way: no other one starts meanwhile.
     private(set) var asking = false
     /// Bumped by Try Again: the page's polling starts over (its task is keyed on it).
@@ -46,8 +50,14 @@ import UIKit
             /// What the hub calls it and why (#8873).
             var name: String?
             var nameSource: String?
+            /// Its imported meeting's id (#8872): `links` has its notes' link.
+            var importedMeetingID: String?
+            /// Its latest hand-off to an Agent (#8852).
+            var handoff: MeetingHandoff?
+            struct Ref: Decodable { var id: String }
             enum CodingKeys: String, CodingKey {
                 case state = "minutes_state", trimmedAt = "trimmed_at", transcription, name, nameSource = "name_source"
+                case importedMeeting = "imported_meeting", handoffs
             }
 
             init(from decoder: Decoder) throws {
@@ -56,6 +66,9 @@ import UIKit
                 trimmedAt = try? c.decodeIfPresent(String.self, forKey: .trimmedAt)
                 name = try? c.decodeIfPresent(String.self, forKey: .name)
                 nameSource = try? c.decodeIfPresent(String.self, forKey: .nameSource)
+                importedMeetingID = (try? c.decodeIfPresent(Ref.self, forKey: .importedMeeting))?.id
+                // Read leniently: hand-offs this app can't read leave the rest as it was.
+                handoff = MeetingHandoff.latest(try? c.decodeIfPresent([Lossy<MeetingHandoff>].self, forKey: .handoffs))
                 // Read leniently: a `transcription` this app can't read leaves the rest of the page as it was.
                 transcription = MeetingTranscriptionView(try? c.decodeIfPresent(JSONValue.self, forKey: .transcription))
             }
@@ -63,6 +76,20 @@ import UIKit
         struct Detail: Decodable {
             var minutes: RecordingMinutes?
             var meta: Meta?
+            /// What it links to: its imported meeting among them, with its notes' link and connector (#8872).
+            var links: [KBEntry]?
+            enum CodingKeys: String, CodingKey { case minutes, meta, links }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                minutes = try c.decodeIfPresent(RecordingMinutes.self, forKey: .minutes)
+                meta = try c.decodeIfPresent(Meta.self, forKey: .meta)
+                // Read leniently: links this app can't read leave the minutes as they were.
+                links = try? c.decodeIfPresent([KBEntry].self, forKey: .links)
+            }
+
+            /// The imported meeting, when the hub named one and linked it with a link to open.
+            var imported: KBImportedMeeting? { KBImportedMeeting.of(id: meta?.importedMeetingID, links: links) }
         }
         var detail: Detail
     }
@@ -70,13 +97,17 @@ import UIKit
     /// Where `entry`'s minutes are now. `synced`: the hub has this revision of its text.
     func load(_ entry: RecordingEntry, synced: Bool) async {
         let meeting = entry.isMeeting
-        #if DEBUG && os(iOS)
-        // A replayed meeting (`MeetingReplay`, #9417): its tape's minutes once it ended, none before.
-        if MeetingReplay.holds(entry.id) {
-            state = entry.active ? .waitingForText : MeetingReplay.minutes(for: entry.id).map { .ready($0) } ?? .waitingForSync
+        // A replayed meeting (`ReplayedMeeting`, #9417, #10589): its tape's minutes once it ended, none before; never the
+        // hub's.
+        if ReplayedMeeting.holds(entry.id) {
+            #if os(iOS)
+            let tape = MeetingReplay.minutes(for: entry.id)
+            #else
+            let tape: RecordingMinutes? = nil
+            #endif
+            state = entry.active ? .waitingForText : tape.map { .ready($0) } ?? .waitingForSync
             return
         }
-        #endif
         if entry.active || !entry.transcribedAll {
             if case .ready = state { return } // a re-transcription keeps showing the minutes it has
             state = meeting ? .waitingForText : .none
@@ -91,6 +122,8 @@ import UIKit
             status = answer.detail.meta?.state
             trimmed = answer.detail.meta?.trimmedAt?.isEmpty == false
             if transcription != answer.detail.meta?.transcription { transcription = answer.detail.meta?.transcription }
+            if imported != answer.detail.imported { imported = answer.detail.imported }
+            if handoff != answer.detail.meta?.handoff { handoff = answer.detail.meta?.handoff }
             // The minutes' title names it from now on (#8873): read here, where the page waits for them.
             if let meta = answer.detail.meta { RecordingSync.shared.hubNamed(entry.id, name: meta.name, source: meta.nameSource) }
             #if os(iOS)
@@ -125,7 +158,7 @@ import UIKit
     /// Writes them again (`POST /api/v1/recordings/{id}/minutes`): after a failure, or when they missed something. Minutes
     /// shown stay while the new ones are written (Updating), as the hub keeps them.
     func regenerate(_ id: UUID) async {
-        guard let api = api(), !asking else { return }
+        guard !ReplayedMeeting.holds(id), let api = api(), !asking else { return }
         asking = true
         defer { asking = false }
         do {
@@ -164,7 +197,8 @@ import UIKit
     /// reads the recording back before anything else is sent. Minutes rewritten since they were shown (`409
     /// minutes_stale`) are shown as they are now, and nothing is sent again: the user sees the new ones first.
     func add(_ ids: [String], to entry: RecordingEntry, synced: Bool) async {
-        guard case .ready(let minutes) = state, let version = minutes.version, !ids.isEmpty, let api = api(), !asking else { return }
+        guard !ReplayedMeeting.holds(entry.id), case .ready(let minutes) = state, let version = minutes.version, !ids.isEmpty,
+              let api = api(), !asking else { return }
         asking = true
         defer { asking = false }
         struct Body: Encodable { var version: Int; var actions: [String] }

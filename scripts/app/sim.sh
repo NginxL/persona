@@ -17,7 +17,11 @@ SIM="${SIM:-$PERSONA_SIM}"
 # boots it slim (SIM_PROFILE picks the simslim profile; a booted one is used as it is), docs/operations/testing.md "Simulators"
 SIM=$(../scripts/app/sim-boot.sh "$SIM") || exit 1
 xcodegen generate -q
-xcodebuild -project Persona.xcodeproj -scheme Persona -destination "id=$SIM" -derivedDataPath ../build/DerivedData build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | sort -u
+# In a machine-wide xcode slot, so parallel worktrees queue instead of thrashing (#10714,
+# docs/operations/testing.md "Heavy build slots"). Only xcodebuild's output goes through the filter, which prints
+# nothing until the build ends: the slot's own lines reach stderr while it waits.
+python3 ../scripts/heavy_slot.py run --kind xcode -- sh -c 'exec "$@" 2>&1' sh \
+  xcodebuild -project Persona.xcodeproj -scheme Persona -destination "id=$SIM" -derivedDataPath ../build/DerivedData build | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | sort -u
 xcrun simctl uninstall "$SIM" "$PERSONA_BUNDLE_ID" 2>/dev/null || true
 xcrun simctl install "$SIM" ../build/DerivedData/Build/Products/Debug-iphonesimulator/Persona.app
 TOKEN=$(ssh "$PERSONA_HUB_SSH" "$RESOLVER

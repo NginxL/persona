@@ -296,7 +296,8 @@ Not migrated, staying in XCUITest permanently: `testScrollingTheLongList` (`XCTO
 - Loopback only: `127.0.0.1:<port>` (the simulator and the Mac share loopback).
 - One-time token: `launch` generates a random one each time, passes it to the App via the launch argument `-runtimeCLIToken`, and stores it in `~/.cache/personactl/<udid>.json` (0600); requests with the wrong token are rejected outright.
 - One request per connection: one line of JSON `{"token", "cmd", "args"}`, one line of JSON back. All commands run on the main thread (MainActor).
-- `scripts/release/release.sh` checks that `strings` of the Release binary contain no `runtimeCLI`, `RuntimeCLI` or `_AXSSetAutomationEnabled`.
+- `scripts/release/release.sh` checks that `strings` of the Release binary contain no `runtimeCLI`, `RuntimeCLI` or `_AXSSetAutomationEnabled`
+  (the names are `RUNTIME_CLI` in `scripts/release/debug_switches.py`, which reads all of the output, #10654).
 
 ## Adding commands
 

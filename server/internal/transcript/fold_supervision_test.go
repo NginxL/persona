@@ -11,7 +11,7 @@ import (
 )
 
 func TestSideConversationMarkerSurvivesTranscriptParsing(t *testing.T) {
-	text := prompts.RenderSideConversation(prompts.SideConversation{From: "another-conversation", Text: "Can you explain the unrelated change?"})
+	text := prompts.RenderSideConversation("Can you explain the unrelated change?")
 	for _, peer := range []bool{false, true} {
 		line := map[string]any{"type": "user", "uuid": "synthetic-user", "timestamp": "2026-11-01T12:00:00Z", "message": map[string]any{"role": "user", "content": text}}
 		if peer {
@@ -50,6 +50,11 @@ func TestFoldPreservesSupervisionVisibility(t *testing.T) {
 		{"legacy-explicit", "mcp__" + compat.MCPServer + "__supervision_finish", `{}`, `{"visibility":"user"}`, false, true},
 		{"legacy-accepted-review", "mcp__" + compat.MCPServer + "__task_review", `{"verdict":"accepted"}`, "Accepted.", false, true},
 		{"legacy-failed", "mcp__" + compat.MCPServer + "__notify_user", `{}`, "Not sent.", true, false},
+		{"agy-notification", "mcp_persona_notify_user", `{}`, "Notification sent.", false, true},
+		{"agy-scoped-notification", "mcp_persona_0c671287_notify_user", `{}`, "Notification sent.", false, true},
+		{"agy-scoped-finish", "mcp_persona_55a1c59d_supervision_finish", `{"visibility":"user"}`, `{"visibility":"user"}`, false, true},
+		{"agy-legacy-scoped-review", "mcp_" + compat.MCPServer + "_0c671287_task_review", `{"verdict":"accepted"}`, "Accepted.", false, true},
+		{"agy-other-server", "mcp_persona_other_notify_user", `{}`, "Not a Persona notification.", false, false},
 		{"decision-review", "task_review", `{"verdict":"needs_user"}`, "Decision card sent.", false, true},
 		{"rework", "task_review", `{"verdict":"rework"}`, "Sent back.", false, false},
 		{"other-server-notification", "mcp__example__notify_user", `{}`, "Not a Persona notification.", false, false},

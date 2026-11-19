@@ -442,8 +442,8 @@ private fun AgentRow(agent: WorkflowAgent, clock: State<Instant>, fresh: Boolean
     val label = agentLabel(agent)
     val reduce = PersonaTheme.reduceMotion
     val alpha = remember { Animatable(if (fresh && !reduce) 0f else 1f) }
-    val duration = PersonaTheme.motion.standard
-    LaunchedEffect(Unit) { if (alpha.value < 1f) alpha.animateTo(1f, tween(duration, easing = FastOutSlowInEasing)) }
+    // iOS WorkflowViews.swift:590: .animation(Theme.Motion.reveal, value: r.rows.map(\.id))
+    LaunchedEffect(Unit) { if (alpha.value < 1f) alpha.animateTo(1f, SharedMotion.reveal()) }
     val word = CoreText.of(when (state) {
         AgentState.Running -> CoreText.Key.WorkflowRunning
         AgentState.Done -> CoreText.Key.WorkflowCompleted

@@ -1,10 +1,18 @@
-Wake yourself up later: Persona sends `prompt` into this conversation (or a new one) as if the user wrote it, you do the work, and the user gets a push with your answer (with `push: "asked"`, only what you send with notify_user). `at` is RFC 3339 or relative ("30m", "2h", "1d"). For a recurring task pass `every` ("30m", "2h", at least 5m) once: Persona repeats it and the user sees, edits and stops it in the app; never schedule the next run from inside a run. For times an interval can't say, pass `cron` instead of `at` / `every`: a standard 5-field `minute hour day-of-month month day-of-week` in the user's time zone (`*/30 9-18 * * 1-5`, `0 10 1 * *`, or @hourly / @daily / @weekly / @monthly / @yearly; day of week 0 and 7 are Sunday; restricted day fields match either; runs at least 5 minutes apart). A bad expression is refused and the reply lists the next runs. An `every` task can take `until` (RFC 3339 or 30m / 2h / 1d, not a bare clock time): after it Persona turns the task off and records a skipped run. A one-off ignores `until`; omit it to keep an existing end time, null clears it. The task runs on Main chat's launcher, model and effort unless overridden with `launcher`, `model` and `effort`; permission mode stays the user's choice. A follow-up continuing this conversation (`new_conversation` false) runs on that conversation's launcher, so overrides require `new_conversation: true`. `inbox` is the user's setting for putting results in the Inbox: pass it only when requested. With `fresh_each_run: true`, a recurring task starts a new chat on every run and carries its state note.
+Wake yourself later with `prompt`; `new_conversation: true` uses its own chat. Wakes reset the message hop chain at most once per 10 minutes. `at` accepts RFC3339 or relative 30m/2h/1d. For repeats set `every` (5m-7d) once; never chain runs. Or use `cron` instead of at/every: 5 fields in the user's zone, at least 5m apart; @hourly/@daily/@weekly/@monthly/@yearly work. Day 0/7 is Sunday; restricted day fields match either. Inspect the reply's next runs. `until` cannot be a bare clock time.
+
+Runs inherit Main chat's launcher/model/effort; overrides require an own conversation, and permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat each run with its state note. See field descriptions for push and end-time edit rules.
+
+For approved recurring work advancing a supervised to-do, pass its explicit `todo_id`; do not guess from a title. Omission keeps an association; "" clears it; one-shots refuse it. Progress means new Agent answers, criterion-state changes or changed explicit progress reports. One no-progress run signals the supervisor; two ask Change approach / Keep waiting with the reason, even with `push: asked`. Get owner consent before creating or changing recurring work.
 
 ```json
 {
   "type": "object",
   "required": ["prompt"],
   "properties": {
+    "todo_id": {
+      "type": "string",
+      "description": "explicit supervised to-do this recurring follow-up advances; empty clears the association"
+    },
     "fresh_each_run": { "type": "boolean" },
     "at": {
       "type": "string",

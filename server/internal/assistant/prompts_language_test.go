@@ -83,12 +83,18 @@ func TestGoldenSessionTitleLanguage(t *testing.T) {
 		f := newFakeHub()
 		f.settings = &Settings{Timezone: "Asia/Shanghai"}
 		f.hello.Locale = c.locale
-		f.replies = []string{c.reply}
+		f.replies = []string{"invalid title", c.reply}
 		s := newTestService(t, f)
-		if got, _ := s.makeTitle(context.Background(), started, "搜索的时候搜索框和顶栏叠在一起了", "是两个组件一起用导致的。", ""); got != c.want {
+		if got, _ := s.makeTitle(context.Background(), started, "搜索的时候搜索框和顶栏叠在一起了", "是两个组件一起用导致的。", "extension / 例示"); got != c.want {
 			t.Fatalf("%s: %q", c.locale, got)
 		}
-		system := f.modelCalls()[0].System
+		calls := f.modelCalls()
+		if len(calls) != 2 {
+			t.Fatalf("%s: %d calls", c.locale, len(calls))
+		}
+		golden(t, "session_title.user."+c.locale, calls[0].User)
+		golden(t, "session_title.retry."+c.locale, calls[1].User)
+		system := calls[0].System
 		if c.locale == "zh-Hans" {
 			golden(t, "session_title.system", system)
 			continue

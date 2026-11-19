@@ -304,7 +304,7 @@ func withProviderModels(res proto.LauncherModels, l storedLauncher) proto.Launch
 // `models`), then those of the plugin preset behind it (managed: its preset or gateway; ~/.zshrc: the gateway the
 // node read from it).
 func (s *Service) presetModels(ctx context.Context, machine, name string, res proto.LauncherModels) proto.LauncherModels {
-	if res.Agent != "" && res.Agent != "claude" {
+	if proto.IsExternalLauncher(name) || res.Agent != "" && res.Agent != "claude" {
 		return res
 	}
 	presets := s.launcherPresets(ctx)

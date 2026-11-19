@@ -16,6 +16,7 @@ struct HandleNotificationIntent: AppIntent {
         categoryName: "Subscriptions",
         searchKeywords: ["Notification", "Inbox", "Subscription"]
     )
+    @available(iOS 26.0, *)
     nonisolated static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Title")

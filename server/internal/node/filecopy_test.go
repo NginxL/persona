@@ -63,6 +63,7 @@ func TestCopyIntoAFolder(t *testing.T) {
 	if err != nil || out["copied"].([]any)[0].(map[string]any)["to"] != "~/dest/a 2.txt" {
 		t.Fatalf("keep = %v, %v", out, err)
 	}
+	skipOnRecycleBin(t)
 	makeFile(t, filepath.Join(home, "proj", "a.txt"), "new a")
 	if _, err := makeCall(t, n, "file.copy", map[string]any{"paths": []string{"~/proj/a.txt"}, "dir": "~/dest", "conflict": "replace"}); err != nil {
 		t.Fatal(err)

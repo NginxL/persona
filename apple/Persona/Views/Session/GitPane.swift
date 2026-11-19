@@ -701,7 +701,7 @@ struct GitDiffSheet: View {
                 }
             }
             .navigationTitle(target.file.name)
-            .navigationSubtitle(target.file.folder.isEmpty ? String(localized: "Repository root") : target.file.folder)
+            .navigationSubtitleWhenSupported(target.file.folder.isEmpty ? String(localized: "Repository root") : target.file.folder)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
                 SheetClose { dismiss() }

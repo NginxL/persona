@@ -9,5 +9,7 @@
   "collapse": "Show less",
   "project_kind": "{kind} project",
   "points_one": "{count} point",
-  "points_other": "{count} points"
+  "points_other": "{count} points",
+  "open_imported_lark": "Lark Meeting Notes",
+  "open_imported": "Original Meeting Notes"
 }

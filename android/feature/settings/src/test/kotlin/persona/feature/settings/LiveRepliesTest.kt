@@ -288,4 +288,21 @@ class LiveRepliesTest {
         assertTrue(rule.onAllNodesWithText("实时回复").fetchSemanticsNodes().isEmpty())
         assertTrue(api.reads.isEmpty())
     }
+
+    @Test fun agyPageHidesLiveRepliesSection() {
+        val api = FakeApi()
+        val sessions = object : SessionsRepository {
+            override val machines = MutableStateFlow(listOf(box))
+            override val sessions = MutableStateFlow(emptyList<Session>())
+            override suspend fun refresh() {}
+        }
+        rule.setContent {
+            PersonaTheme {
+                ClaudeSettingsPage(sessions, api, onBack = {}, kind = AgentSettingsKind.Agy)
+            }
+        }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("实时回复").fetchSemanticsNodes().isEmpty())
+        assertTrue(api.reads.isEmpty())
+    }
 }

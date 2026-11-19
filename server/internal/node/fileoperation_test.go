@@ -98,6 +98,7 @@ func TestFileCopyOperationCancelRemovesPartialFile(t *testing.T) {
 }
 
 func TestFileCopyOperationCancelRestoresReplacedFile(t *testing.T) {
+	skipOnRecycleBin(t)
 	f := newUploadRPCFixture(t)
 	f.peer.Cancels = map[string]bool{"file.copy": true}
 	home := f.n.home

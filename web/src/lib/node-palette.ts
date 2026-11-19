@@ -107,7 +107,7 @@ export function nodesFor(ctx: PaletteContext): Where[] {
     const s = state.sessions[ctx.pane.mid]?.find((x) => x.session_id === ctx.pane!.sid);
     if (!s || s.assistant) return [];
     const online = machine(s.machine_id)?.online !== false;
-    const out: Where[] = [sectionOf(sessionNode(s, online), sessionTitle(s))];
+    const out: Where[] = [sectionOf(sessionNode(s, online, { sessionOnly: false }), sessionTitle(s))];
     if (s.space_id && s.space_name)
       out.push(sectionOf({ kind: "workspace", mid: s.machine_id, online, host: s.space_kind, label: s.space_name, workspaceId: s.workspace_id ?? s.space_id, paneId: s.pane_id, cwd: s.cwd, canWorktree: canWorktreeIn(s.machine_id, s.space_kind, s.workspace_id ?? s.space_id) }, s.space_name));
     return out;

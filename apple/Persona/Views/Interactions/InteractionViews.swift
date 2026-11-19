@@ -48,6 +48,14 @@ extension Interaction {
         return kind.title
     }
 
+    /// The one post-plan mode the card may approve (#3784). Absent, empty, `plan`, and unknown modes keep the legacy choices.
+    var recordedPlanThen: String? {
+        switch planThen {
+        case "default", "acceptEdits", "auto", "bypassPermissions": planThen
+        default: nil
+        }
+    }
+
     /// Whether the card offers Always: as the manager says where it does (`alwaysHonored`, #3590: its own cards keep
     /// nothing), else on a conversation's card, and on another agent's (Codex) only when it says what always allows.
     var offersAlways: Bool {
@@ -292,6 +300,33 @@ struct RecommendedTag: View {
 /// Set by a card's form while a field in it has the keyboard (on a Mac, the focus) and the form ends with what the
 /// field is for (the password card's Run and Decline): the card keeps that end in sight, also as the keyboard takes
 /// the page's room (#1581).
+/// How many of a question card's questions are not answered yet, as its form counts them (#9392): the card's folded line
+/// says it. Nil: the form does not count (BeautifulUI's card holds its answers itself).
+struct QuestionsLeft: PreferenceKey {
+    static let defaultValue: Int? = nil
+    static func reduce(value: inout Int?, nextValue: () -> Int?) { value = nextValue() ?? value }
+}
+
+/// Where each pending card's message is in the chat, for its View in Chat (#9392): the chat finds them and keeps this
+/// up to date; a card reads only its own. A class, so the environment holding it never changes and redraws no card.
+@Observable final class CardSources {
+    /// The message each card is about (the item's id), by the card's interaction id.
+    var items: [String: String] = [:]
+    /// Brings the chat to that message.
+    @ObservationIgnored var open: ((String) -> Void)?
+
+    /// What View in Chat does for the card, or nil where the chat has not found its message.
+    func opener(for interaction: String) -> (() -> Void)? {
+        guard let item = items[interaction], let open else { return nil }
+        return { open(item) }
+    }
+}
+
+extension EnvironmentValues {
+    /// The chat's `CardSources`; nil outside a chat (a card in a sheet), where a card has no View in Chat.
+    @Entry var cardSources: CardSources? = nil
+}
+
 struct CardFormKeepsEnd: PreferenceKey {
     static let defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
@@ -322,6 +357,10 @@ struct InteractionPanel: View {
     @State private var formPosition = ScrollPosition(edge: .top)
     /// The suggested rule's line under the form (#5802) while it is drawn: what of the card the form may not have.
     @State private var suggestionHeight: CGFloat = 0
+    /// The questions not answered yet in a question card of several (`QuestionsLeft`): the folded line says how many.
+    @State private var questionsLeft: Int?
+    /// The message the card is about, where the chat can find it (#9392): View in Chat goes there.
+    @Environment(\.cardSources) private var sources
 
     /// The form's cap while the keyboard is up (`cardFits`): the area less the card's header and margins; at least a tap
     /// target, so a sliver of a form never shows (a small iPhone with the shell's composer leaves the cards little more).
@@ -362,9 +401,11 @@ struct InteractionPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: 0) {
             if !headerAway { header }
-            if !collapsed {
+            // Folded, the form stays in the card at no height (#9392): a question of several keeps its page and its
+            // picks, and folding and unfolding animate its height, not a cut between two cards.
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if ownsScroll {
                     // These forms own their one scroll area and keep their answers outside it (#4839, #6605).
                     form.environment(\.cardFormCap, formCap)
@@ -398,7 +439,14 @@ struct InteractionPanel: View {
                                    card: .interaction(uid: interaction.uid, manager: interaction.manager),
                                    group: interaction.group, height: $suggestionHeight)
             }
+            .padding(.top, headerAway || collapsed ? 0 : Theme.Space.m)
+            .frame(height: collapsed ? 0 : nil, alignment: .top)
+            .clipped()
+            .opacity(collapsed ? 0 : 1)
+            .allowsHitTesting(!collapsed)
+            .accessibilityHidden(collapsed)
         }
+        .onPreferenceChange(QuestionsLeft.self) { questionsLeft = $0 }
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.m)
         .padding(.bottom, Theme.Space.l)
@@ -419,8 +467,30 @@ struct InteractionPanel: View {
                 VoiceAskMark(interaction: interaction) // Asking by Voice (docs/assistant/voice.md 1.2 H)
                 if collapsed {
                     Text(previewText).font(Theme.Font.secondary).foregroundStyle(.primary).lineLimit(1)
+                        .layoutPriority(-1)
+                    // How many of a card's several questions are still to answer (#9392).
+                    if let left = foldedQuestionsLeft {
+                        Text("\(left) left [Question Card]")
+                            .font(Theme.Font.captionMedium).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                            .accessibilityIdentifier("interaction-questions-left")
+                    }
                 }
                 Spacer(minLength: 4)
+                // Back to the message the card is about (#9392): the chat goes there and the card folds out of the way.
+                if !collapsed, let open = sources?.opener(for: interaction.id) {
+                    Button {
+                        Haptics.tap()
+                        withAnimation(Theme.Motion.standard) { collapsed = true }
+                        open()
+                    } label: {
+                        Text("View in Chat [Question Card]").lineLimit(1).fixedSize()
+                            .contentShape(.rect.inset(by: -Theme.Space.s)) // a finger's room without a taller row
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.Font.captionMedium)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityIdentifier("interaction-source")
+                }
                 if interaction.kind == .plan && !collapsed {
                     Button { showFullPlan = true } label: {
                         ThemedIcon(Theme.Icon.enlarge)
@@ -450,11 +520,19 @@ struct InteractionPanel: View {
                     .help("More")
                     #endif
                 }
-                ThemedIcon(Theme.Icon.expand)
-                    .font(Theme.Font.captionStrong)
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(collapsed ? 180 : 0))
-                    .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                // The fold, a button of its own (the whole row folds the card too): in a circle, so it reads as one.
+                Button(action: toggleFold) {
+                    ThemedIcon(Theme.Icon.expand)
+                        .font(Theme.Font.captionStrong)
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(collapsed ? 180 : 0))
+                        .scaledFrame(width: Theme.Size.wellXS, height: Theme.Size.wellXS)
+                        .background(Theme.Fill.chip, in: .circle)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(collapsed ? Text("Expand [Question Card]") : Text("Collapse [Question Card]"))
+                .accessibilityIdentifier("interaction-fold")
             }
             // A side session's card in its parent's chat says whose it is: "From Side Session · <title>" (#7944).
             if let from {
@@ -462,8 +540,20 @@ struct InteractionPanel: View {
             }
         }
         .contentShape(.rect)
-        .onTapGesture { withAnimation(Theme.Motion.standard) { collapsed.toggle() } }
+        .onTapGesture(perform: toggleFold)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+    }
+
+    private func toggleFold() {
+        Haptics.tap()
+        withAnimation(Theme.Motion.standard) { collapsed.toggle() }
+    }
+
+    /// Folded, a question card of several says how many are left: what the form reports, or all of them before it does.
+    private var foldedQuestionsLeft: Int? {
+        guard interaction.kind == .question, let count = interaction.questions?.count, count > 1 else { return nil }
+        let left = questionsLeft ?? count
+        return left > 0 ? left : nil
     }
 
     @ViewBuilder private var form: some View {
@@ -577,6 +667,7 @@ struct QuestionForm: View {
             }
         }
         .deliberateTap($dragged)
+        .preference(key: QuestionsLeft.self, value: questions.filter { answer($0) == nil }.count)
     }
 
     private var showsFooter: Bool { (needsFooter || canSkip) && !(stepped && reviewing) }
@@ -938,6 +1029,21 @@ struct PlanForm: View {
                 } label: { Text("Send Back [Notification Actions cd3150]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity) }
                     .themedButton(prominent: true)
             }
+        } else if let mode = interaction.recordedPlanThen {
+            Text(PlanTaskRow.permissionLabel(mode))
+                .font(Theme.Font.secondary)
+                .foregroundStyle(.secondary)
+            Button {
+                Task { await model.resolve(interaction, Resolution(approve: true, mode: mode)) }
+            } label: {
+                Text("Approve [Interaction Views 905819]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+            }
+            .themedButton(prominent: true)
+            .controlSize(.large)
+            Button { withAnimation { rejecting = true } } label: {
+                Text("Send Back [Notification Actions a20f13]").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+            }
+            .themedButton()
         } else {
             Button {
                 Task { await model.resolve(interaction, Resolution(approve: true, mode: "bypassPermissions")) }
@@ -2029,12 +2135,15 @@ struct BUIPlanForm: View {
     ]
 
     var body: some View {
-        ApprovalCard(questions: [ApprovalQuestion(String(localized: "Go ahead with this plan?"), choices: Self.choices,
+        let choices = interaction.recordedPlanThen.map { mode in
+            [ApprovalQuestion.Choice(String(localized: "Approve [Interaction Views 905819]"), detail: PlanTaskRow.permissionLabel(mode))]
+        } ?? Self.choices
+        ApprovalCard(questions: [ApprovalQuestion(String(localized: "Go ahead with this plan?"), choices: choices,
                                                   customPlaceholder: String(localized: "Send back with what to change…"))],
                      skipLabel: nil, sendLabel: String(localized: "Send"), sentMessage: String(localized: "Sent"),
                      options: .panel(maxHeight: formCap.isFinite && formCap > 0 ? formCap : nil)) { answers in
             Haptics.tap()
-            Task { await model.resolve(interaction, Self.resolution(answers)) }
+            Task { await model.resolve(interaction, Self.resolution(answers, recordedMode: interaction.recordedPlanThen)) }
         } context: { _ in
             // Its first lines, Show Full Text for the rest (#6605): it scrolled in a box of its own inside the card's scroll.
             CardPlan(plan: interaction.plan ?? "", lines: Self.planLines) { showFull = true }
@@ -2053,6 +2162,14 @@ struct BUIPlanForm: View {
         case 1: return Resolution(approve: true, mode: "acceptEdits")
         default: return Resolution(approve: false, feedback: "")
         }
+    }
+
+    static func resolution(_ a: ApprovalAnswers, recordedMode: String?) -> Resolution {
+        guard let recordedMode else { return resolution(a) }
+        let feedback = (a.custom[0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !feedback.isEmpty { return Resolution(approve: false, feedback: feedback) }
+        guard a.picks[0]?.first == 0 else { return Resolution(approve: false, feedback: "") }
+        return Resolution(approve: true, mode: recordedMode)
     }
 }
 

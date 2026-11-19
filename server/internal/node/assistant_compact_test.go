@@ -13,6 +13,28 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+func TestAssistantManualCompactionRejectsCanceledExternalRequest(t *testing.T) {
+	n := assistantNode(t)
+	const id = "11111111-2222-3333-4444-555555555555"
+	launcher := proto.ExternalLauncherName("example-adapter", "example-target")
+	in := &stdinBuf{}
+	p := &assistantProc{id: id, agent: "claude", launcher: launcher, stdin: in}
+	n.procs[id] = p
+	n.state.put(id, sessionState{Launcher: launcher})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if code := refusalCode(n.assistantCompact(ctx, id, false)); code != "adapter_unavailable" {
+		t.Fatalf("canceled external compaction: %q", code)
+	}
+	if in.Len() != 0 || p.compacting || p.compacted || p.manual {
+		t.Fatal("a canceled external compaction wrote input or changed the process")
+	}
+	if st, _ := n.state.get(id); st.Compaction != nil || n.externalStarts.has(id) {
+		t.Fatal("a canceled external compaction recorded a start or retained its startup token")
+	}
+}
+
 // The user's compaction: refused while the conversation answers or compacts, /compact sent otherwise; it is running
 // until the boundary comes (done), the turn ends without one (failed, with claude's words), or the process is gone.
 func TestAssistantManualCompaction(t *testing.T) {

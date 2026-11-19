@@ -323,6 +323,8 @@
     <string name="settings_row_claude_subtitle">各台电脑上的常用选项，可以一起改</string>
     <string name="settings_row_codex">Codex 设置</string>
     <string name="settings_row_codex_subtitle">各台电脑上 Codex 的常用选项，可以一起改</string>
+    <string name="settings_row_agy">Antigravity 设置</string>
+    <string name="settings_row_agy_subtitle">各台电脑上 Antigravity 的常用选项，可以一起改</string>
     <string name="settings_section_connectors">连接器</string>
     <string name="settings_row_phone_subtitle">通讯录、日历、照片、位置和剪贴板</string>
     <string name="settings_row_mail">邮箱</string>

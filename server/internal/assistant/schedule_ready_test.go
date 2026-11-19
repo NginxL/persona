@@ -299,3 +299,32 @@ func TestRoutineGoesOnceANewerHealthCheckAnswers(t *testing.T) {
 		t.Fatalf("the newer health check lets it go: %+v, sent %v", r, f.sends)
 	}
 }
+
+// The main conversation keeps a pick on another launcher than Main chat's, and its turn there failed: readiness judges
+// that launcher, the one its next turn runs (readinessTurnLauncher), and the chat waits for another model. A routine
+// on Main chat's launcher does not wait on that launcher's failure, as a task on a launcher of its own does not; one
+// on the pick's launcher does.
+func TestRoutineOnMainChatsLauncherDoesNotWaitOnThePicksFailure(t *testing.T) {
+	_, s, _ := readyMachine(t, proto.Session{SessionID: "m1", Assistant: true, Launcher: "gw", Model: "vendor/m2", State: proto.StateIdle,
+		LastText: routeText, UpdatedAt: time.Now().Add(-time.Minute)})
+	ctx := context.Background()
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", BaseURL: "https://gw.example", Model: "m1"}})
+	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.claude", Model: "model-a"})
+	morning := Task{ID: "morning", Title: "早报", Prompt: "x", Repeat: repeatDaily, Time: "09:00", Enabled: true}
+	gwJob := Task{ID: "gwjob", Title: "巡检", Prompt: "y", Repeat: repeatDaily, Time: "10:00", Enabled: true}
+	setTasks(s, morning, gwJob)
+	setModel(t, s, "task.gwjob", ModelBinding{Provider: "launcher.gw", Model: "vendor/m2"})
+	if err := s.setModelPick(ctx, "m1", &modelPick{MachineID: "server", Launcher: "gw", Model: "vendor/m2", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	r := s.readiness(ctx, false, readinessWaitGet)
+	if m := readinessStep(t, r, StepModel); r.Mode != ReadinessSetup || m.Code != proto.TurnErrorModelRoute || m.Launcher != "gw" || r.Launcher != "claude" {
+		t.Fatalf("the pick's failed turn: %s %s %+v", r.Mode, r.Launcher, m)
+	}
+	if ok, st := s.readyFor(ctx, morning, r); !ok {
+		t.Fatalf("a routine on Main chat's launcher waits on the pick's failure: %+v", st)
+	}
+	if ok, st := s.readyFor(ctx, gwJob, r); ok || st.ID != StepModel {
+		t.Fatalf("a routine on the pick's launcher goes: %+v", st)
+	}
+}

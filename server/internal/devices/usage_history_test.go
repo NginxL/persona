@@ -59,16 +59,20 @@ func TestUsageDayAndHourBounds(t *testing.T) {
 // usageHistoryMemStore keeps the history: it answers UsageSpans with spans and counts the hour rollups.
 type usageHistoryMemStore struct {
 	*usageMemStore
-	spans   []db.UsageSpan
-	bounds  []time.Time
-	machine bool
+	spans      []db.UsageSpan // what UsageSpans answers, and agentSpans by agent
+	agentSpans []db.UsageSpan
+	bounds     []time.Time
+	machine    bool // a call asked by machine
 }
 
 func (s *usageHistoryMemStore) RollupUsageHours(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
-func (s *usageHistoryMemStore) UsageSpans(_ context.Context, bounds []time.Time, byMachine bool) ([]db.UsageSpan, error) {
-	s.bounds, s.machine = bounds, byMachine
+func (s *usageHistoryMemStore) UsageSpans(_ context.Context, bounds []time.Time, by db.UsageBy) ([]db.UsageSpan, error) {
+	s.bounds, s.machine = bounds, s.machine || by == db.UsageByMachine
+	if by == db.UsageByAgent {
+		return s.agentSpans, nil
+	}
 	return s.spans, nil
 }
 
@@ -84,11 +88,11 @@ func TestUsageHistoryFromMemory(t *testing.T) {
 		buckets []proto.UsageBucket
 	}{
 		{"a", []proto.UsageBucket{
-			{Minute: minute - 60, Model: "opus", Launcher: "claude", Input: 1, CacheWrite: 2, CacheRead: 300, Output: 4, Requests: 1},
-			{Minute: minute - 3*3600, Model: "opus", Launcher: "claude", CacheRead: 1000, Output: 5, Requests: 2},
+			{Minute: minute - 60, Model: "opus", Launcher: "claude", Agent: "claude", Input: 1, CacheWrite: 2, CacheRead: 300, Output: 4, Requests: 1},
+			{Minute: minute - 3*3600, Model: "opus", Launcher: "claude", Agent: "claude", CacheRead: 1000, Output: 5, Requests: 2},
 			{Minute: minute - 10*3600, Model: "opus", Output: 70, Requests: 1}, // 23:30 yesterday
 		}},
-		{"b", []proto.UsageBucket{{Minute: minute - 30*60, Model: "gpt", Launcher: "codex", Input: 10, CacheRead: 90, Output: 9, Requests: 1}}},
+		{"b", []proto.UsageBucket{{Minute: minute - 30*60, Model: "gpt", Launcher: "codex", Agent: "codex", Input: 10, CacheRead: 90, Output: 9, Requests: 1}}},
 	} {
 		b, _ := json.Marshal(map[string]any{"full": true, "launchers": true, "buckets": m.buckets})
 		d.usage.apply(m.id, b, now)
@@ -117,6 +121,11 @@ func TestUsageHistoryFromMemory(t *testing.T) {
 	}
 	if hours.Total.Total() != today.Total()+70 || len(hours.Machines) != 2 || hours.Machines[0].ID != "a" || hours.Machines[1].Total() != 109 {
 		t.Fatalf("total %+v machines %+v", hours.Total, hours.Machines)
+	}
+	// Each agent's share, largest first; usage from an older node is under "".
+	if as := hours.Agents; len(as) != 3 || as[0].Agent != "claude" || as[0].Total() != 1312 || as[1].Agent != "codex" || as[1].Total() != 109 ||
+		as[2].Agent != "" || as[2].Output != 70 {
+		t.Fatalf("agents = %+v", as)
 	}
 }
 
@@ -148,6 +157,14 @@ func TestUsageHistoryFromStore(t *testing.T) {
 	if ms := hours.Machines; len(ms) != 2 || ms[0].ID != "gone" || ms[0].Name != "" || ms[1].Name != "Studio" || ms[1].Output != 7 {
 		t.Fatalf("machines = %+v", ms)
 	}
+	if len(hours.Agents) != 0 {
+		t.Fatalf("agents without usage by agent = %+v", hours.Agents)
+	}
+	st.agentSpans = []db.UsageSpan{{Span: 1, Agent: "codex", Output: 3}, {Span: 2, Agent: "claude", Output: 50}, {Span: 2, Agent: "codex", Output: 4},
+		{Span: 12, Agent: "pi", Output: 900}} // past the hours asked for
+	if hours, _ = d.usageHours(context.Background(), 1, now); len(hours.Agents) != 2 || hours.Agents[0].Agent != "claude" || hours.Agents[1].Output != 7 {
+		t.Fatalf("agents = %+v", hours.Agents)
+	}
 }
 
 func TestUsageHistoryRoutes(t *testing.T) {
@@ -174,8 +191,8 @@ func TestUsageHistoryRoutes(t *testing.T) {
 	if code, u := get("/api/v1/usage/days?days=371"); code != 200 || count(u["days"]) != 371 {
 		t.Fatalf("a year: %d %d", code, count(u["days"]))
 	}
-	if code, u := get("/api/v1/usage/hours"); code != 200 || count(u["hours"]) < 6*24+1 || string(u["machines"]) != "[]" {
-		t.Fatalf("hours: %d %d %s", code, count(u["hours"]), u["machines"])
+	if code, u := get("/api/v1/usage/hours"); code != 200 || count(u["hours"]) < 6*24+1 || string(u["machines"]) != "[]" || string(u["agents"]) != "[]" {
+		t.Fatalf("hours: %d %d %s %s", code, count(u["hours"]), u["machines"], u["agents"])
 	}
 	for _, bad := range []string{"/api/v1/usage/days?days=0", "/api/v1/usage/days?days=372", "/api/v1/usage/days?days=x", "/api/v1/usage/hours?days=8"} {
 		if code, _ := get(bad); code != http.StatusBadRequest {

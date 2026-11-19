@@ -11,6 +11,7 @@
   "workspace_resolving": "正在解析工作区路径…",
   "workspace_engine_path": "路径由机器的工作区引擎决定；可修改分支后重新预览。",
   "tray_needs_you": "要你处理",
+  "next_unanswered": "下一条等你回复",
   "tray_running": "进行中",
   "tray_empty_parked": "没有搁置中的事",
   "tray_review": "等 Persona 验收",

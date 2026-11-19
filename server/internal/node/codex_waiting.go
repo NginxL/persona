@@ -164,9 +164,9 @@ func codexSkipUpdateKeys(text string) []string {
 }
 
 // openCodexWait makes the waiting row of a Codex the start opened with no message and answers with it.
-func (n *Node) openCodexWait(ctx context.Context, pane, cwd, launcher, mode string, began time.Time) *proto.Session {
+func (n *Node) openCodexWait(ctx context.Context, pane, cwd, launcher, mode string, execution modelExecution, began time.Time) *proto.Session {
 	w := &codexWait{id: codexWaitID(), pane: pane, cwd: cwd, began: began}
-	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC()}
+	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort}
 	if mode == "plan" { // as a start with a message keeps it (codex_start.go), for the thread to take
 		st.AppMode = mode
 	}
@@ -637,8 +637,8 @@ func (n *Node) codexWaitNote(w *codexWait, note string) {
 	}
 }
 
-// attachCodexWait makes thread the session of w's pane: the start's record (launcher, directory, time, read-only mode,
-// creation receipt) moves to the thread, the pane is bound to it, and requests that still name the row go to it.
+// attachCodexWait makes thread the session of w's pane: the start's record (launcher, directory, model and effort, time,
+// read-only mode, creation receipt) moves to the thread, the pane is bound to it, and requests that still name the row go to it.
 func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how string) bool {
 	n.mu.Lock()
 	waits := n.codexWaiting[w.pane] == w
@@ -649,8 +649,8 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	// The thread's record first, then the pane moves to it in the same step that ends the wait: a list built in between
 	// would find the pane still bound to the row's id and make the row again (codexWaitOf).
 	st, _ := n.state.get(w.id)
-	n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, StartedAt: st.StartedAt, AppMode: st.AppMode,
-		CreationID: st.CreationID, Incarnation: st.Incarnation})
+	n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, Model: st.Model, ModelEffort: st.ModelEffort,
+		StartedAt: st.StartedAt, AppMode: st.AppMode, CreationID: st.CreationID, Incarnation: st.Incarnation})
 	n.mu.Lock()
 	if n.codexWaiting[w.pane] != w {
 		n.mu.Unlock()
@@ -670,6 +670,7 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	n.mu.Unlock()
 	n.state.setPane(w.id, "")
 	n.logf("codex %s: thread %s attached to row %s (%s)", w.pane, thread, w.id, how)
+	n.namePersonaTab(ctx, w.pane, thread)
 	_ = n.refreshHosts(ctx)
 	n.notifySessions()
 	return true
@@ -804,7 +805,7 @@ func (n *Node) codexWaitCalls(method, id string) (any, error, bool) {
 	switch method {
 	case "session.items":
 		return map[string]any{"items": []proto.Item{}, "has_more": false, "history": "codex-wait:" + id, "to_seq": 0}, nil, true
-	case "session.item", "session.image":
+	case "session.item", "session.image", "session.visualization":
 		return nil, fmt.Errorf("no item"), true
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true

@@ -58,6 +58,10 @@ const pillEffort = () => pill().querySelector("[data-pill-effort]")?.textContent
 const row = (key: string) => [...document.body.querySelectorAll<HTMLElement>("[data-panel-row]")].find((r) => r.dataset.panelRow === key)!;
 async function openPanel() {
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
+  await flush();
+  // These caller tests inspect model actions; disclose the catalog first.
+  for (const header of document.body.querySelectorAll<HTMLButtonElement>('[data-panel-launcher][aria-expanded="false"]')) act(() => header.click());
   await flush();
 }
 async function pick(key: string) {
@@ -181,7 +185,7 @@ describe("New agent's recent setups (#2134)", () => {
     expect(launched).toHaveLength(0);
     // the panel lights what the card put in
     await openPanel();
-    expect(row("model:work\nsonnet").getAttribute("aria-selected")).toBe("true");
+    expect(row("model:work\nsonnet").getAttribute("aria-pressed")).toBe("true");
     act(() => pill().click());
     // the form changed by hand: no longer that card
     await customizeCurrent();

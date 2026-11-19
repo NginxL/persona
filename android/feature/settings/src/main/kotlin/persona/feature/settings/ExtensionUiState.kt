@@ -466,14 +466,23 @@ internal class ExtensionViewModel(
 
     private fun currentState(): String? = state.value.view?.state ?: initialState
 
-    /** Draws it (again), with the extension's state of the last view. */
-    suspend fun load() {
+    /**
+     * Draws it (again), with the extension's state of the last view. [keepTyped]: a redraw the user did not ask for
+     * (`refresh_after`, `ui.invalidate`, back from a page pushed on it, its inbox item changed) keeps what is typed in the
+     * fields the new view still has, as on the web and iOS; the first draw, Retry, pull to refresh and a press that answers
+     * nothing take the extension's values.
+     */
+    suspend fun load(keepTyped: Boolean = false) {
         if (state.value.loading) return
         mutable.update { it.copy(loading = true) }
         try {
             val view = api.renderUi(extension, ui, context, currentState())
             // drawn again for the same page: the diffs loaded since stay (UI version 5)
-            mutable.update { it.copy(view = ExtensionCodeReview.keepLoaded(it.view, view), values = ExtensionViewText.fields(view), error = null, failure = null, unsupported = false) }
+            mutable.update {
+                val fresh = ExtensionViewText.fields(view)
+                it.copy(view = ExtensionCodeReview.keepLoaded(it.view, view), values = if (keepTyped) fresh + it.values.filterKeys { name -> name in fresh } else fresh,
+                    error = null, failure = null, unsupported = false)
+            }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: ExtensionUiUnsupported) { mutable.update { it.copy(unsupported = true, error = null) } }
         catch (_: ExtensionUiNotFound) { mutable.update { it.copy(unsupported = true, error = null) } }
@@ -486,7 +495,7 @@ internal class ExtensionViewModel(
      * comes back.
      */
     suspend fun invalidate() {
-        if (shown) load() else stale = true
+        if (shown) load(keepTyped = true) else stale = true
     }
 
     /**
@@ -497,7 +506,7 @@ internal class ExtensionViewModel(
         shown = on
         if (on && stale && state.value.view != null) {
             stale = false
-            load()
+            load(keepTyped = true)
         }
     }
 
@@ -512,7 +521,7 @@ internal class ExtensionViewModel(
         state.map(ExtensionViewText::refreshAt).distinctUntilChanged().collectLatest { at ->
             at ?: return@collectLatest
             delay((at - now()).coerceAtLeast(0))
-            load()
+            load(keepTyped = true)
         }
     }
 

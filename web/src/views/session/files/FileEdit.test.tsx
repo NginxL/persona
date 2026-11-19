@@ -132,4 +132,16 @@ describe("FileEdit", () => {
     expect(sent.slice(1).map((b) => [b.path, b.create])).toEqual([["/w/a 2.txt", true], ["/w/a 3.txt", true]]);
     expect(done).toEqual([true]);
   });
+
+  it("saves a copy beside a Windows computer's file, not in the session's folder (#9968)", async () => {
+    await act(async () => root.render(<FileEdit key="windows" mid="m1" cwd={"C:\\Users\\me"} file={file({ path: "C:\\Users\\me\\docs\\a.txt" })} text={"a\r\nb\r\n"} onDone={(c) => done.push(c)} />));
+    await appears(() => host.querySelector('[data-testid="code-editor"]'));
+    answers.push(() => Response.json({ error: "changed", code: "file_changed" }, { status: 409 }));
+    await type("y\n");
+    await click(t("files-editor.save"));
+    await appears(() => document.body.textContent?.includes(t("files-editor.changed_title", { name: "a.txt" })));
+    await click(t("files-editor.save_copy"));
+    await appears(() => done.length === 1);
+    expect(sent.slice(1).map((b) => [b.path, b.cwd, b.create])).toEqual([["C:\\Users\\me\\docs/a 2.txt", "C:\\Users\\me", true]]);
+  });
 });

@@ -3,6 +3,7 @@
 // after another route remounts the Inbox can put back what that entry showed. Updates never write browser history.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { uuid } from "./format";
+import type { BarChoice } from "./inbox-bar";
 import { takeReturn } from "./router";
 
 const ENTRY = "personaInboxView";
@@ -10,8 +11,12 @@ const SETTLE_MS = 1500;
 const READER = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
 type ChainPlace = { item: string; open: boolean };
+/** The section bar's choice (#9053), the one a search put aside, and the one an item opened from inside the Inbox moved
+ *  it from while the list was beside it (to go back to when that item closes; an outside opening's move stays). */
+export type BarMemory = { chosen: BarChoice; saved: BarChoice | null; landedFrom: BarChoice | null };
 type ViewState = {
   query: string;
+  bar: BarMemory;
   toggled: Set<string>;
   scrollTop: number;
   chain: ChainPlace | null;
@@ -27,6 +32,8 @@ export interface InboxViewMemory {
   readonly entryId: string | null;
   listQuery(): string;
   setListQuery(query: string): void;
+  listBar(): BarMemory;
+  setListBar(bar: BarMemory): void;
   listToggled(): Set<string>;
   setListToggled(toggled: ReadonlySet<string>): void;
   listScroll(): number;
@@ -47,12 +54,14 @@ let load = uuid();
 let nextEntry = 0;
 
 function emptyState(): ViewState {
-  return { query: "", toggled: new Set(), scrollTop: 0, chain: null, original: null };
+  // every visit opens on Needs you (docs/assistant/inbox.md "Section bar")
+  return { query: "", bar: { chosen: "action", saved: null, landedFrom: null }, toggled: new Set(), scrollTop: 0, chain: null, original: null };
 }
 
 function copyState(state: ViewState): ViewState {
   return {
     query: state.query,
+    bar: { ...state.bar },
     toggled: new Set(state.toggled),
     scrollTop: state.scrollTop,
     chain: state.chain ? { ...state.chain } : null,
@@ -103,6 +112,14 @@ class ViewMemory implements InboxViewMemory {
 
   setListQuery(query: string): void {
     this.state.query = query;
+  }
+
+  listBar(): BarMemory {
+    return { ...this.state.bar };
+  }
+
+  setListBar(bar: BarMemory): void {
+    this.state.bar = { ...bar };
   }
 
   listToggled(): Set<string> {
@@ -199,8 +216,9 @@ export function useInboxView(): InboxViewMemory {
   return shared ?? own.current;
 }
 
-/** Put a list back where its entry was, retrying while late items grow its content. The reader can take over at once. */
-function restoreList(el: HTMLElement, target: number): (() => void) | undefined {
+/** Put a list back where its entry was, retrying while late items grow its content. The reader can take over at once.
+ *  Also the Inbox list going back to where it was before an opened item moved it to another section (#9053). */
+export function restoreListScroll(el: HTMLElement, target: number): (() => void) | undefined {
   el.scrollTop = target;
   if (target === 0 || el.scrollTop >= target - 1) return undefined;
   let ro: ResizeObserver | undefined;
@@ -248,7 +266,7 @@ export function useInboxListScroll(
   useLayoutEffect(() => {
     const el = box.current;
     if (!el || !restoring.current) return;
-    return restoreList(el, view.listScroll());
+    return restoreListScroll(el, view.listScroll());
   }, [box, view, selectedKey]);
 
   useEffect(() => {

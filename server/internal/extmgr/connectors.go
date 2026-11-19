@@ -133,7 +133,7 @@ func (h *Manager) connectorRoutes(api *http.ServeMux) {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	// Settings › Connectors' switch: off, the connector stops and brings nothing in (Registry.SetEnabled); kept in
-	// settings.
+	// settings. An extension's connector restarts the extension (setConnectorEnabled).
 	api.HandleFunc("PUT /api/v1/connectors/{id}/settings", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if h.connectors.Get(id) == nil {
@@ -395,7 +395,9 @@ func (h *Manager) applyConnectorOptions(ctx context.Context, id string, raw json
 	return nil
 }
 
-// setConnectorEnabled switches a connector and keeps the choice for the next start.
+// setConnectorEnabled switches a connector and keeps the choice for the next start. A switch that changes an
+// extension's connector restarts that extension (connectorSwitched): its program learns which connectors are on only
+// at initialize.
 func (h *Manager) setConnectorEnabled(ctx context.Context, id string, on bool) error {
 	h.kbPostsMu.Lock()
 	was := h.connectors.Enabled(id)
@@ -410,18 +412,25 @@ func (h *Manager) setConnectorEnabled(ctx context.Context, id string, on bool) e
 	if was != on {
 		h.auditConnector(ctx, id, auditConnectorEnabled, map[string]any{"enabled": on})
 	}
-	if h.store == nil {
-		return nil
+	if h.store != nil {
+		var cs connectorSettings
+		if _, err := h.store.Setting(ctx, connectorSettingsKey, &cs); err != nil {
+			return err
+		}
+		if cs.Switch == nil {
+			cs.Switch = map[string]bool{}
+		}
+		cs.Switch[id] = on
+		if err := h.store.PutSetting(ctx, connectorSettingsKey, cs); err != nil {
+			return err
+		}
 	}
-	var cs connectorSettings
-	if _, err := h.store.Setting(ctx, connectorSettingsKey, &cs); err != nil {
-		return err
+	if was != on {
+		// After the choice is kept: the restart registers the connector again with the switch it reads from there
+		// (addExtensionConnector).
+		h.extensions.connectorSwitched(ctx, id, on)
 	}
-	if cs.Switch == nil {
-		cs.Switch = map[string]bool{}
-	}
-	cs.Switch[id] = on
-	return h.store.PutSetting(ctx, connectorSettingsKey, cs)
+	return nil
 }
 
 // setConnectorFeed turns one of a connector's feeds on or off and keeps the choice for the next start; turned on, the

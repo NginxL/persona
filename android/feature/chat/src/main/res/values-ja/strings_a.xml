@@ -334,6 +334,7 @@
     <string name="chat_tasks_interrupt_cause_auth">ログインまたはキーの拒否</string>
     <string name="chat_tasks_interrupt_cause_model_route">不明なモデル</string>
     <string name="chat_tasks_interrupt_cause_no_output">出力のないターン</string>
+    <string name="chat_tasks_interrupt_cause_stopped">会話と一緒に停止</string>
     <string name="chat_tasks_interrupt_batch">%1$s：%2$d 件のタスクが中断</string>
     <string name="chat_tasks_interrupt_batch_on">%2$s で%1$s：%3$d 件のタスクが中断</string>
     <string name="chat_tasks_interrupt_counts">→ 対応済み %1$d / 未対応 %2$d</string>

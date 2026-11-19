@@ -54,19 +54,19 @@ func TestTaskPromptCarriesTheCloseoutForm(t *testing.T) {
 	if err := s.putTriageSwitches(ctx, TriageSwitches{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	if p := start(edit); p != "修好登录" {
+	if p := start(edit); !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || strings.Contains(p, "收尾记录") {
 		t.Fatalf("the closeout switch is off, yet the prompt is %q", p)
 	}
 	if err := s.putTriageSwitches(ctx, TriageSwitches{Closeout: true}); err != nil {
 		t.Fatal(err)
 	}
-	if p := start(edit); p != "修好登录" {
+	if p := start(edit); !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || strings.Contains(p, "收尾记录") {
 		t.Fatalf("the triage is off, yet the prompt is %q", p)
 	}
 
 	closeoutOn(t, s)
 	p := start(edit)
-	if !strings.HasPrefix(p, "修好登录\n\n收尾记录") || !strings.Contains(p, `<closeout status="done|not_done|blocked"`) ||
+	if !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || !strings.Contains(p, "收尾记录") || !strings.Contains(p, `<closeout status="done|not_done|blocked"`) ||
 		strings.Contains(p, "交付：") {
 		t.Fatalf("closeout only:\n%s", p)
 	}

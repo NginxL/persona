@@ -22,6 +22,11 @@ type fakeClaudeIn struct {
 	taken    map[string]bool // ids claude took in already: cancel_async_message answers cancelled false
 	sendNow  string          // the interrupt's send_now answer
 	refuse   string          // an error for every control request (a Claude Code without them)
+	// queueAtOnce: claude says it queued a user message before the write returns, as its reader may get the line
+	// before the writer goes on (assistant_round_hold_test.go).
+	queueAtOnce bool
+	failUsers   error                        // the write of every user message fails with it
+	onControl   func(request map[string]any) // runs before a control request is answered, no lock held
 }
 
 type fakeUserLine struct {
@@ -46,8 +51,15 @@ func (f *fakeClaudeIn) Write(b []byte) (int, error) {
 	f.mu.Lock()
 	switch m.Type {
 	case "user":
+		if err := f.failUsers; err != nil {
+			f.mu.Unlock()
+			return 0, err
+		}
 		text, _ := m.Message.Content[len(m.Message.Content)-1]["text"].(string)
 		f.users = append(f.users, fakeUserLine{id: m.UUID, text: text})
+		if f.queueAtOnce {
+			defer f.p.commandLifecycle(m.UUID, "queued")
+		}
 	case "control_request":
 		f.controls = append(f.controls, m.Request)
 		a := assistantControlResponse{RequestID: m.RequestID, Subtype: "success"}
@@ -62,8 +74,12 @@ func (f *fakeClaudeIn) Write(b []byte) (int, error) {
 		}
 		answer = &a
 	}
+	onControl := f.onControl
 	f.mu.Unlock()
 	if answer != nil {
+		if onControl != nil {
+			onControl(m.Request)
+		}
 		f.p.controlResponse(*answer)
 	}
 	return len(b), nil

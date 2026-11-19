@@ -47,6 +47,9 @@ func listKeyFmt(list []proto.Session) string {
 			b.WriteString(t.ID + ",")
 		}
 		b.WriteString(fmt.Sprint(s.BackgroundWaiting) + "\n")
+		for _, t := range s.BackgroundEnded() {
+			fmt.Fprintf(&b, "ended:%s/%s/%d\n", t.ID, t.Status, unixOf(t.EndedAt))
+		}
 		for _, w := range s.Workflows {
 			fmt.Fprintf(&b, "workflow:%s/%s/%q/%d/%d/%d/%d\n", w.TaskID, w.Status, w.Phase, w.AgentsDone, w.AgentsStarted, w.AgentsRunning, w.AgentsFailed)
 			for _, a := range w.Agents {
@@ -248,12 +251,15 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"codex_route":      func(s *proto.Session) { s.CodexRoute = "terminal" },
 		"route_note":       func(s *proto.Session) { s.CodexRouteNote = "" },
 		"background":       func(s *proto.Session) { s.Background = append(s.Background, proto.BackgroundTask{ID: "b2"}) },
-		"bg_none":          func(s *proto.Session) { s.Background = nil },
-		"loop":             func(s *proto.Session) { s.Loop = &proto.LoopInfo{NextAt: act} },
-		"loop_none":        func(s *proto.Session) { s.Loop = nil },
-		"goal_status":      func(s *proto.Session) { s.Goal = &proto.GoalInfo{Status: "complete", Objective: "o", Reason: "r"} },
-		"goal_reason":      func(s *proto.Session) { s.Goal = &proto.GoalInfo{Status: "active", Objective: "o", Reason: "r\n2"} },
-		"goal_none":        func(s *proto.Session) { s.Goal = nil },
+		"background_ended": func(s *proto.Session) {
+			s.SetBackgroundEnded([]proto.BackgroundTask{{ID: "done", Status: "completed", EndedAt: &act}})
+		},
+		"bg_none":     func(s *proto.Session) { s.Background = nil },
+		"loop":        func(s *proto.Session) { s.Loop = &proto.LoopInfo{NextAt: act} },
+		"loop_none":   func(s *proto.Session) { s.Loop = nil },
+		"goal_status": func(s *proto.Session) { s.Goal = &proto.GoalInfo{Status: "complete", Objective: "o", Reason: "r"} },
+		"goal_reason": func(s *proto.Session) { s.Goal = &proto.GoalInfo{Status: "active", Objective: "o", Reason: "r\n2"} },
+		"goal_none":   func(s *proto.Session) { s.Goal = nil },
 		"plan_done": func(s *proto.Session) {
 			s.Plan = &proto.PlanInfo{Done: 4, Total: 5, Current: "Reproducing the crash", At: at}
 		},

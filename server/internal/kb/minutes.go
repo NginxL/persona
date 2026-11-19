@@ -108,7 +108,10 @@ const (
 	minutesCalendarAhead = 15 * time.Minute
 	// minutesMatchWait: a recording no calendar item matched is looked at again until this long after it ended, the
 	// calendar items being collected every half hour (a meeting's video call is listed once it has been held).
-	minutesMatchWait   = time.Hour
+	minutesMatchWait = time.Hour
+	// minutesImportWait: a matched recording with no imported meeting yet is looked at again until this long after it
+	// ended, for one a connected app imports later (#8872).
+	minutesImportWait  = 24 * time.Hour
 	minutesOneCall     = 16000 // runes of transcript read in one call; longer ones go in chunks
 	minutesChunk       = 12000
 	minutesMaxChunks   = 40
@@ -375,16 +378,22 @@ func (e *Engine) dropAudioAfterMinutes(id string, drop bool) {
 	}
 }
 
-// matchRecordings links each complete recording not matched at its current revision to the calendar item it overlaps;
-// one that none overlaps is looked at again until minutesMatchWait after it ended.
+// matchRecordings links each complete recording not matched at its current revision to the calendar item it overlaps
+// and to the imported meeting it overlaps; one that no calendar item overlaps is looked at again until
+// minutesMatchWait after it ended, and one matched without an imported meeting until minutesImportWait (#8872).
 func (e *Engine) matchRecordings(now time.Time) {
-	var due []string
+	var due, late []string
 	for _, r := range e.Store.Recordings() {
-		if r.Complete && r.MatchedRev < r.Revision && !r.Trimmed() && r.Kind != RecordingDay {
+		if !r.Complete || r.Trimmed() || r.Kind == RecordingDay {
+			continue
+		}
+		if r.MatchedRev < r.Revision {
 			due = append(due, r.ID)
+		} else if r.ImportedMeeting == nil && now.Sub(recordingEnd(r)) < minutesImportWait {
+			late = append(late, r.ID)
 		}
 	}
-	if len(due) == 0 {
+	if len(due) == 0 && len(late) == 0 {
 		return
 	}
 	events, meetings := e.Store.Items(KindEvent), e.Store.Items(KindMeeting)
@@ -393,8 +402,10 @@ func (e *Engine) matchRecordings(now time.Time) {
 		st.recMu.Lock()
 		r, ok := st.Recording(id)
 		if ok && r.Complete && r.MatchedRev < r.Revision && !r.Trimmed() && r.Kind != RecordingDay {
-			if old := r.Meeting; old != nil {
-				r.Items = removeStrings(r.Items, []string{old.Kind + "/" + old.ID})
+			for _, old := range []*MeetingRef{r.Meeting, r.ImportedMeeting} {
+				if old != nil {
+					r.Items = removeStrings(r.Items, []string{old.Kind + "/" + old.ID})
+				}
 			}
 			it := matchCalendar(r, events, meetings)
 			if it == nil && r.Meeting == nil && now.Sub(recordingEnd(r)) < minutesMatchWait {
@@ -406,6 +417,8 @@ func (e *Engine) matchRecordings(now time.Time) {
 				r.Meeting = &MeetingRef{Kind: it.Kind, ID: it.ID, Name: oneLine(it.Title)}
 				r.Items = addUnique(r.Items, it.Kind+"/"+it.ID)
 			}
+			r.ImportedMeeting = nil
+			r.linkImported(matchCalendar(r, meetings))
 			r.MatchedRev = r.Revision
 			r.Name = st.recordingName(r)
 			r.planMinutes()
@@ -415,6 +428,29 @@ func (e *Engine) matchRecordings(now time.Time) {
 		}
 		st.recMu.Unlock()
 	}
+	// An imported meeting that came after the match: linked alone, the calendar match and the minutes left as they are.
+	for _, id := range late {
+		st.recMu.Lock()
+		r, ok := st.Recording(id)
+		if ok && r.Complete && r.MatchedRev >= r.Revision && r.ImportedMeeting == nil && !r.Trimmed() && r.Kind != RecordingDay {
+			if it := matchCalendar(r, meetings); it != nil {
+				r.linkImported(it)
+				if err := st.putEntity(KindRecording, r.ID, r, &r.Tagging, false); err != nil {
+					e.logf("recording %s: link the imported meeting: %v", id, err)
+				}
+			}
+		}
+		st.recMu.Unlock()
+	}
+}
+
+// linkImported makes it (a meetings item, or nil) r's imported meeting, linked in Items.
+func (r *Recording) linkImported(it *Item) {
+	if it == nil {
+		return
+	}
+	r.ImportedMeeting = &MeetingRef{Kind: it.Kind, ID: it.ID, Name: oneLine(it.Title)}
+	r.Items = addUnique(r.Items, it.Kind+"/"+it.ID)
 }
 
 // matchCalendar is the calendar item r overlaps: one starting at most minutesCalendarAhead before r and before r

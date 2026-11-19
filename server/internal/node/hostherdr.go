@@ -42,6 +42,7 @@ var (
 	_ host.Controller   = (*herdrHost)(nil)
 	_ host.FullClienter = (*herdrHost)(nil)
 	_ host.Worktreer    = (*herdrHost)(nil)
+	_ host.EnvLauncher  = (*herdrHost)(nil)
 )
 
 // herdrPaneEnv is the variable herdr sets in every pane; herdrSessionEnv and herdrSocketEnv say which server's

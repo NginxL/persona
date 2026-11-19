@@ -45,6 +45,27 @@ enum RecordingSamples {
                                       location: "3 楼会议室", attendees: ["Ada", "Bo", "Cy", "Di"]),
         ]
     }
+
+    /// The made-up weekly meeting a reminder is for (#8731 G2, `-showMeetingReminder`), starting in a minute.
+    static func reminderMeeting() -> RecordingMeeting {
+        let start = Date.now.addingTimeInterval(MeetingReminders.lead)
+        return RecordingMeeting(eventID: "sample-weekly", title: "产品周会", start: start, end: start.addingTimeInterval(3600),
+                                location: "3 楼会议室", attendees: ["张三", "李四", "王五"])
+    }
+
+    /// `-showMeetingReminder start`: a reminder's Start with no microphone. The made-up meeting records under the
+    /// reminder's meeting and its name, attended as a real start would be (`MeetingAttendees.startAttendance`: a room
+    /// meeting with the meeting conversation), and its room opens.
+    static func startFromReminder(_ meeting: RecordingMeeting) {
+        RecordingLibrary.shared.restore(liveMeeting)
+        var live = RecordingEntry(id: liveMeeting, createdAt: .now, source: .phone, title: meeting.title ?? "", active: true)
+        live.meeting = meeting
+        let attendance = MeetingAttendees.startAttendance(AppModel.shared)
+        if attendance.room || attendance.sentRole.attends { live.attendance = attendance }
+        try? RecordingLibrary.shared.save(live)
+        RecordingCapture.shared.showSample(liveMeeting, elapsed: 1)
+        MeetingRecorder.openRecordings()
+    }
     #endif
 
     /// The meeting being recorded (`-showMeetingSample recording|paused|interrupted`).

@@ -1,0 +1,15 @@
+{
+  "merge_push_title": "Persona's memory is now one",
+  "merge_push_body": "Notes brought in from the other copy: {added}. Notes that differed: {conflicts}. The list is under “Memory merge report” on the assistant's Memory page.",
+  "merge_report_title": "Memory merge report",
+  "merge_report_description": "What was brought into this memory from the copies other conversations kept, and which notes differed",
+  "merge_report_intro": "Until now, some conversations kept a memory of their own that this page did not show. All conversations now share this one. The notes below came from the other copy. Where both had a note with the same file name and different content, the one modified later was kept. Nothing was deleted: the other copy is still where it was, and each merge saved a backup first. To change a result, edit the note on this page, or ask Persona to use the other version. You can delete this report when you are done with it.",
+  "merge_report_run": "Merged on {time}",
+  "merge_report_backup": "Backup of this memory as it was, and of the notes that were read: {path}",
+  "merge_report_added": "Notes brought in ({count})",
+  "merge_report_conflicts": "Notes that differed ({count})",
+  "merge_report_kept_copy": "Kept: the other copy's version, modified {copy_time}. It replaced this memory's version, modified {memory_time}.",
+  "merge_report_kept_memory": "Kept: this memory's version, modified {memory_time}. The other copy's version, modified {copy_time}, was not used.",
+  "merge_report_other": "The version that was not kept:",
+  "merge_report_truncated": "The text above is cut short; the whole file is in the backup."
+}

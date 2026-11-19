@@ -69,7 +69,7 @@ export function sourceOf(item: Item, injected: Injected | null): MessageSource |
 }
 
 export function sourceLabel(source: MessageSource): string {
-  return source.title?.trim() || t(`chat-messages.source_${["conversation", "patrol", "followup", "supervision"].includes(source.kind) ? source.kind : "other"}`);
+  return source.title?.trim() || t(`chat-messages.source_${["conversation", "patrol", "followup", "supervision", "scheduled_task"].includes(source.kind) ? source.kind : "other"}`);
 }
 
 /** Equal titles alone must not merge different originating conversations. */

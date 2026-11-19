@@ -1,4 +1,5 @@
 // Inbox keyboard, layout and long-list checks in a real browser (web usability audit items 15, 16, 34, 60, 71, 74, 84).
+// The list opens on Needs you (the section bar, #9053); the long-list checks choose All, every section stacked.
 // Usage: node web/e2e/inbox-keyboard-long-list.mjs <loopback-web-origin> <artifact-directory>
 // The origin is an exclusively owned web server (Vite, or `vite preview` of a production build for the timings) whose hub
 // is scripts/mock/mock_hub.py started with MOCK_INBOX_EXTRA=300 MOCK_INBOX_HISTORY=busy. Only the mock's invented data;
@@ -172,6 +173,7 @@ try {
   for (const [theme, width] of [["light", 1280], ["light", 390], ["dark", 1280], ["dark", 390]]) {
     const { context, p } = await page(theme, { width, height: width > 400 ? 820 : 844 });
     await p.goto(`${origin}/inbox`);
+    await p.locator('[data-bar-choice="all"]').click();
     await p.waitForFunction(() => document.querySelectorAll("main [data-item]").length > 300, null, { timeout: 60_000 });
     await p.locator('[data-section="done"] button[aria-expanded="false"]').first().click();
     const open = p.locator('main [data-section]:not([data-section="done"]) [data-item]');
@@ -202,13 +204,25 @@ try {
     await shot(p, `74-done-${width}-${theme}`);
     await context.close();
   }
-  // audit item 34: a phone opening a long Inbox draws its first rows first, the rest after (CPU 4x)
+  // audit item 34: a phone choosing All in a long Inbox draws its first rows first, the rest after (CPU 4x)
   {
     const { context, p } = await page("dark", { width: 390, height: 844, touch: true });
     const cdp = await context.newCDPSession(p);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
     await p.goto(`${origin}/inbox`);
     await p.locator("main [data-item]").first().waitFor({ timeout: 60_000 });
+    // Needs you first (its few rows); the first draw counted is All's, once it is chosen
+    await p.waitForTimeout(500);
+    const base = await p.locator("main [data-item]").count();
+    await p.evaluate((n) => {
+      window.__firstRows = 0;
+      const seen = new MutationObserver(() => {
+        const rows = document.querySelectorAll("main [data-item]").length;
+        if (rows > n) { window.__firstRows = rows; seen.disconnect(); }
+      });
+      seen.observe(document, { childList: true, subtree: true });
+    }, base);
+    await p.locator('[data-bar-choice="all"]').click();
     let rows = 0;
     for (let i = 0; i < 40; i++) {
       await p.waitForTimeout(250);

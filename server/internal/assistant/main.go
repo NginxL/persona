@@ -23,6 +23,7 @@ import (
 
 	"github.com/nwverse/persona/sdk/go/wire"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
@@ -396,6 +397,9 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		LauncherReferences: func(ctx context.Context) []extmgr.LauncherReference { return svc.launcherReferences(ctx) },
 		AssistantMachine:   func() string { return svc.mainMachine(context.Background()) },
 		Ask:                func(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) { return svc.AskCard(ctx, ix) },
+		AskPrepared: func(ctx context.Context, ix proto.Interaction, op approvalops.Operation) (approvalops.Outcome, error) {
+			return svc.AskPreparedCard(ctx, ix, op)
+		},
 		DialRelay: func(ctx context.Context, query string) (*websocket.Conn, error) {
 			return bus.DialAt(ctx, hub, token, httpClient, devicewire.RelayPath, query)
 		},

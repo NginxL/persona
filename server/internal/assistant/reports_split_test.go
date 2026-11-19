@@ -91,7 +91,7 @@ func TestReportCardsSplitAndRetryWholeBatch(t *testing.T) {
 	}
 	all, pos := body.String(), -1
 	for _, td := range ts {
-		link := `"default_url":"https://hub.example.com/todos?id=` + td.ID + `"`
+		link := `"default_url":"https://hub.example.com/todos/` + td.ID + `"`
 		if p := strings.Index(all, td.Title); p < 0 || p < pos || strings.Count(all, link) != 1 || !strings.Contains(fb.String(), td.Title) {
 			t.Fatalf("title, link or fallback lost for %s", td.ID)
 		}
@@ -137,7 +137,7 @@ func TestReportCardsRealJSONBudgetWithButtonRows(t *testing.T) {
 	}
 	body, pos := all.String(), -1
 	for i, td := range ts {
-		for _, link := range []string{`"default_url":"https://hub.example.com/todos?id=` + td.ID + `"`, fmt.Sprintf(`"default_url":"https://git.example.com/team/repo/pull/%02d"`, i+1), fmt.Sprintf(`"default_url":"https://hub.example.com/s/box/sess-%02d"`, i+1)} {
+		for _, link := range []string{`"default_url":"https://hub.example.com/todos/` + td.ID + `"`, fmt.Sprintf(`"default_url":"https://git.example.com/team/repo/pull/%02d"`, i+1), fmt.Sprintf(`"default_url":"https://hub.example.com/s/box/sess-%02d"`, i+1)} {
 			if strings.Count(body, link) != 1 {
 				t.Fatalf("link lost or repeated: %s", link)
 			}

@@ -67,6 +67,8 @@ beforeEach(async () => {
   root = createRoot(host);
   act(() => root.render(<Inbox onToggleSidebar={() => {}} />));
   await flush();
+  // the section bar opens on Needs you (#9053): these cases start on the stacked page, All
+  await click(choice("all"));
 });
 
 afterEach(() => {
@@ -74,6 +76,8 @@ afterEach(() => {
   host.remove();
   vi.unstubAllGlobals();
 });
+
+const choice = (id: string) => host.querySelector<HTMLButtonElement>(`[data-bar-choice="${id}"]`) ?? undefined;
 
 describe("inbox selection (#2059)", () => {
   it("Select turns the open items in sight into ticks; a click picks instead of opening", async () => {
@@ -132,6 +136,23 @@ describe("inbox selection (#2059)", () => {
     expect(boxes()).toHaveLength(0);
     expect(bar()).toBeNull();
     expect(button("选择")).toBeDefined();
+  });
+
+  // the section bar (#9053): Select All picks the chosen section's rows; picks under another choice stay picked, and the
+  // bar counts them as out of sight
+  it("under a choice, Select All picks its rows; picks survive a switch and are counted out of sight", async () => {
+    await click(button("选择"));
+    await click(host.querySelector('[data-item="f1"] [role="checkbox"]') ?? undefined);
+    await click(choice("action"));
+    expect(boxes().map((b) => b.closest("[data-item]")?.getAttribute("data-item"))).toEqual(["a1", "a2"]);
+    await click(button("全选"));
+    expect(bar()?.textContent).toContain("已选 3 项（1 项未显示）");
+    await click(choice("fyi"));
+    expect(boxes().map((b) => [b.closest("[data-item]")?.getAttribute("data-item"), b.getAttribute("aria-checked")])).toEqual([["f1", "true"]]);
+    expect(bar()?.textContent).toContain("已选 3 项（2 项未显示）");
+    await click(button("标为已处理"));
+    const bulk = calls.list.filter((c) => c.path === "/inbox/bulk");
+    expect((bulk[0].json as { items: { id: string }[] }).items.map((x) => x.id).sort()).toEqual(["a1", "a2", "f1"]);
   });
 
   it("Done and Esc both end selection without sending anything", async () => {

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -662,6 +663,18 @@ func (s *Service) resolveInteraction(ctx context.Context, ch, id string, r proto
 	}
 	err := s.appCall(ctx, AppInteractions, InteractionsResolve, map[string]any{"interaction_id": id, "resolution": r,
 		"action": action, "channel": ch}, &res)
+	return res.OK, err
+}
+
+// clarifyInteraction sends a question through the channel's owner-action
+// verification without resolving the card. The explicit reply target is the
+// card's own chat/message, never the bot's currently selected conversation.
+func (s *Service) clarifyInteraction(ctx context.Context, ch, id, text, clientMsgID, action, chatID, messageID string) (bool, error) {
+	var res struct {
+		OK bool `json:"ok"`
+	}
+	err := s.appCall(ctx, AppInteractions, assistantwire.InteractionsClarify, map[string]any{"interaction_id": id,
+		"text": text, "client_msg_id": clientMsgID, "action": action, "channel": ch, "chat_id": chatID, "message_id": messageID}, &res)
 	return res.OK, err
 }
 

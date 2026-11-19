@@ -1,6 +1,7 @@
 package link
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
@@ -34,6 +35,10 @@ const standInSSHDirEnv = "PERSONA_TEST_STANDIN_SSH_DIR"
 func TestMain(m *testing.M) {
 	if os.Getenv(standInSSHDirEnv) != "" && len(os.Args) > 2 && os.Args[1] == "-o" && os.Args[2] == "BatchMode=yes" {
 		os.Exit(standInSSHMain(os.Args[1:]))
+	}
+	// A developer's own proxy must not carry these tests' dials (proxy_test.go sets one where it wants one).
+	for _, name := range proxyEnv {
+		_ = os.Unsetenv(name)
 	}
 	os.Exit(m.Run())
 }
@@ -153,7 +158,7 @@ func pipeForwardConn(local net.Conn, targetAddr string) {
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(local, remote)
-		if tc, ok := local.(*net.TCPConn); ok {
+		if tc, ok := local.(interface{ CloseWrite() error }); ok {
 			_ = tc.CloseWrite()
 		}
 	}()
@@ -617,15 +622,44 @@ func newGatedDirectListener(t *testing.T, targetAddr string, startAllowed bool) 
 			if err != nil {
 				return
 			}
-			g.attempts.Add(1)
-			if !g.allowed.Load() {
-				_ = c.Close()
-				continue
-			}
-			go pipeForwardConn(c, targetAddr)
+			go g.serve(c, targetAddr)
 		}
 	}()
 	return g
+}
+
+// serve counts c as an attempt only when it opens with a TLS record: other programs on this machine probe local
+// ports too (a node's port scan, user agent persona-ports; docs/lessons/testing.md).
+func (g *gatedDirectListener) serve(c net.Conn, targetAddr string) {
+	first := make([]byte, 1)
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(c, first); err != nil || first[0] != 0x16 {
+		_ = c.Close()
+		return
+	}
+	_ = c.SetReadDeadline(time.Time{})
+	g.attempts.Add(1)
+	if !g.allowed.Load() {
+		_ = c.Close()
+		return
+	}
+	pipeForwardConn(&replayConn{Conn: c, r: io.MultiReader(bytes.NewReader(first), c)}, targetAddr)
+}
+
+// replayConn is a connection whose first bytes were already read, put back in front of the rest. It embeds the
+// net.Conn interface, not *net.TCPConn, whose WriteTo io.Copy would use around Read.
+type replayConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (c *replayConn) Read(b []byte) (int, error) { return c.r.Read(b) }
+
+func (c *replayConn) CloseWrite() error {
+	if tc, ok := c.Conn.(*net.TCPConn); ok {
+		return tc.CloseWrite()
+	}
+	return nil
 }
 
 func TestSSHRoutingOrderFallbackStickyReconnectAndDirectRecovery(t *testing.T) {

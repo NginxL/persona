@@ -101,13 +101,13 @@ func interactionPayloadIn(l i18n.Lang, ix proto.Interaction, machine string) map
 	return out
 }
 
-// askQuestion selects cards a notification can answer without opening the app.
+// askQuestion selects cards a notification can answer without opening the app: the manager's view of a to-do lets
+// the same cards be answered from its row (proto.Interaction.OneTapQuestion).
 func askQuestion(ix proto.Interaction) (proto.Question, bool) {
-	if ix.Kind != proto.IxQuestion || len(ix.Questions) != 1 || len(ix.Fields) > 0 ||
-		len(ix.Questions[0].Options) == 0 || inHealth(ix.Cwd) || ix.Private {
-		return proto.Question{}, false
+	if q, ok := ix.OneTapQuestion(); ok && !inHealth(ix.Cwd) {
+		return q, true
 	}
-	return ix.Questions[0], true
+	return proto.Question{}, false
 }
 
 // askRev binds an index to the question, selection mode and ordered full labels.

@@ -108,7 +108,8 @@ class HttpAssistantManagement private constructor(
     override suspend fun launcherModels(machineId: String, launcher: String): LauncherModels? = try {
         require(machineId.isNotBlank() && launcher.isNotBlank())
         JsonCodec.decodeFromJsonElement(request("GET",
-            listOf("api", "v1", "machines", machineId, "launchers", launcher, "models")))
+            listOf("api", "v1", "machines", machineId, "launchers", launcher, "models"),
+            query = mapOf("purpose" to "assistant")))
     } catch (failure: HubFailure) {
         if (failure.status == 404) null else throw failure
     }
@@ -149,6 +150,12 @@ class HttpAssistantManagement private constructor(
     override suspend fun unarchiveConversation(session: SessionKey) {
         require(session.sessionId.isNotBlank())
         assistant("POST", "conversations", session.sessionId, "unarchive", body = buildJsonObject { })
+    }
+    override suspend fun setConversationTags(session: SessionKey, tags: List<String>) {
+        require(session.sessionId.isNotBlank())
+        assistant("PUT", "conversations", session.sessionId, "tags", body = buildJsonObject {
+            put("tags", JsonArray(tags.map(::JsonPrimitive)))
+        })
     }
     override suspend fun searchChats(query: String, limit: Int): AssistantSearchAnswer? = try {
         val q = query.trim().take(200)

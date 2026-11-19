@@ -1,0 +1,14 @@
+{
+  "invalid_name": "Invalid browser name",
+  "invalid_replaces": "Invalid previous credential",
+  "busy": "Too many sign-ins are waiting. Try again in a few minutes",
+  "expired": "This sign-in has expired. Refresh the code and try again",
+  "not_waiting": "This sign-in isn't waiting for a number",
+  "number_mismatch": "That number didn't match, so this sign-in was cancelled",
+  "approver_revoked": "The device that allowed this sign-in is no longer signed in",
+  "device_required": "Allow this sign-in from a signed-in phone",
+  "other_hub": "This code belongs to another Persona",
+  "decided": "This sign-in has already been answered",
+  "update_required": "Update the Persona app to allow browser sign-in",
+  "unavailable": "Browser sign-in is temporarily unavailable"
+}

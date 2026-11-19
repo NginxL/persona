@@ -38,6 +38,7 @@ final class FrameStats: NSObject {
         last = 0
         shownAtLastFrame = StreamCadence.shown
         textChanges = []
+        LensCadence.frames = []
         cpuAtStart = Self.mainThreadCPU()
         let wake = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
             MainActor.assumeIsolated { FrameStats.shared.passStart = CACurrentMediaTime() }
@@ -97,6 +98,13 @@ final class FrameStats: NSObject {
         let gapMax: Double = gaps.last ?? 0
         let addedMax: Double = added.last ?? 0
         func q(_ v: [Double], _ p: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int(Double(v.count) * p))] }
+        // The tab bar lens's glide, frame to frame (ms): how far it went on, and how long the frame took. A new glide
+        // starts again from 0, so a step down is not one.
+        let lens = LensCadence.frames
+        let lensSteps = zip(lens, lens.dropFirst()).map { ($1.glide - $0.glide) * 1000 }.filter { $0 >= 0 }
+        let lensGaps = zip(lens, lens.dropFirst()).map { $1.date.timeIntervalSince($0.date) * 1000 }
+        let lensStepMax: Double = lensSteps.max() ?? 0
+        let lensGapMax: Double = lensGaps.max() ?? 0
         let result: [String: Any] = [
             "label": label,
             "frames": deltas.count,
@@ -125,6 +133,8 @@ final class FrameStats: NSObject {
             "text_changes": textChanges.count,
             "text_gap_p50_ms": q(gaps, 0.5), "text_gap_p95_ms": q(gaps, 0.95), "text_gap_max_ms": gapMax,
             "text_added_p50": q(added, 0.5), "text_added_p95": q(added, 0.95), "text_added_max": addedMax,
+            "lens_frames": lens.count, "lens_step_max_ms": lensStepMax, "lens_gap_max_ms": lensGapMax,
+            "lens_steps_ms": lensSteps.map { ($0 * 10).rounded() / 10 }, "lens_gaps_ms": lensGaps.map { ($0 * 10).rounded() / 10 },
         ]
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
@@ -157,6 +167,19 @@ extension FrameStats {
     static var shown = 0
 }
 
+/// iPhone Duo's tab bar lens as drawn (#9837): each frame it is drawn in, when and how far into its glide, written where
+/// it is drawn (`TabBarGlide.frame(at:)`) and read by `FrameStats`. How far the glide moved between two frames drawn is
+/// what the eye sees: a step much longer than a frame is a jump.
+@MainActor enum LensCadence {
+    static var frames: [(date: Date, glide: TimeInterval)] = []
+
+    /// Every bar on screen draws the same frame: noted once.
+    static func note(_ date: Date, _ glide: TimeInterval) {
+        if let last = frames.last, abs(last.date.timeIntervalSince(date)) < 0.001 { return }
+        frames.append((date, glide))
+    }
+}
+
 #if os(iOS) || os(visionOS)
 import UIKit
 
@@ -173,6 +196,10 @@ import UIKit
     /// before it taps and again for every wait, 55–70 ms each on the `assistant` suite's data, some of them while the
     /// strip moves (#5438). With this cue the measured frames are the app's.
     static let switchPages = "com.persona.perf.shell.switch"
+    /// A tab chosen as iPhone Duo's tab bar chooses it (`AppModel.selectHomeTab`, #9837): this prefix and the tab's raw
+    /// value (`com.persona.perf.tab.chats`), for the frames of its lens and its page switching.
+    static let chooseTab = "com.persona.perf.tab."
+    private static let chosenTabs: [AppTab] = [.assistant, .chats, .feishu]
     /// The Sidebar layout's column folded or brought back, with the animation its buttons use (#4206): a UI test's
     /// taps and waits inside the measured frames cost the app's main thread their accessibility snapshots.
     static let toggleSidebar = "com.persona.perf.sidebar.toggle"
@@ -187,14 +214,16 @@ import UIKit
             let n = name?.rawValue as String?
             DispatchQueue.main.async { MainActor.assumeIsolated { FrameProbe.handle(n) } }
         }
-        for name in [start, stop, glideNotice, switchPages, toggleSidebar] {
+        for name in [start, stop, glideNotice, switchPages, toggleSidebar] + chosenTabs.map({ chooseTab + $0.rawValue }) {
             CFNotificationCenterAddObserver(center, nil, callback, name as CFString, nil, .deliverImmediately)
         }
     }
 
     private static func handle(_ name: String?) {
         let stats = FrameStats.shared
-        if name == glideNotice {
+        if let name, name.hasPrefix(chooseTab), let tab = AppTab(rawValue: String(name.dropFirst(chooseTab.count))) {
+            AppModel.shared.selectHomeTab(tab)
+        } else if name == glideNotice {
             Task { await runGlide() }
         } else if name == toggleSidebar {
             sidebarToggle?()

@@ -30,5 +30,19 @@
   "undo": "Undo",
   "load_failed": "Could not load repositories: the response is missing or belongs to another assistant.",
   "save_unconfirmed": "The change is unconfirmed. Refresh repositories before trying again.",
-  "invalid_url": "Use a GitHub or GitLab HTTP(S) or git SSH link without credentials. Repository pages are accepted. Choose the provider for a self-hosted instance."
+  "invalid_url": "Use a GitHub or GitLab HTTP(S) or git SSH link without credentials. Repository pages are accepted. Choose the provider for a self-hosted instance.",
+  "sources": "Sources",
+  "sources_hint": "Where saved repositories can come from. Extensions can add sources for other code hosts.",
+  "builtin": "Built in",
+  "unavailable": "Unavailable",
+  "unavailable_hint": "{provider} is unavailable. The repository stays saved, and its name, aliases and purpose can still be edited; checking it or changing its address needs {provider}.",
+  "another_source": "Another source",
+  "previewing": "Reading the address with {provider}…",
+  "unchecked_extension": "Read by {provider}; existence not yet checked",
+  "check_hint_extension": "{provider} checks that the repository exists, with its own sign-in. Empty repositories are valid. A repository it can't confirm can't be saved.",
+  "option_unavailable": "{provider} (unavailable)",
+  "host_mismatch": "Use an address on {hosts} for {provider}, without credentials.",
+  "source_unavailable": "{provider} is unavailable, so it can't read this address now.",
+  "invalid_url_sources": "Use a GitHub or GitLab HTTP(S) or git SSH link, or an address on a host one of your sources lists, without credentials. Choose the provider for a self-hosted instance.",
+  "retry": "Try again"
 }

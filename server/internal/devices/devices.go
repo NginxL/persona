@@ -157,6 +157,7 @@ type Devices struct {
 	ring        chan struct{}
 
 	packages nodePackages // the node builds for the machines' platforms (packages.go)
+	switches linkSwitches // the switches of ssh computers to Persona Link (link_switch.go)
 
 	metrics metricsBook // the machines' monitoring (metrics.go)
 	usage   usageBook   // their token usage (metrics.go)
@@ -215,6 +216,7 @@ func (d *Devices) Run(ctx context.Context) error {
 	d.mu.Unlock()
 	d.loadWarm(ctx)
 	d.loadPathUIDs(ctx)
+	d.restoreRuntimeUsage(ctx, time.Now())
 	go d.reportLoop(mctx)
 	go d.probeServices(mctx)
 	go d.measureLoop(mctx)
@@ -230,6 +232,8 @@ func (d *Devices) Run(ctx context.Context) error {
 	d.workers.Add(1)
 	go func() { defer d.workers.Done(); d.runShareIngestion(mctx) }()
 	go d.usageGW.run(ctx) // the account-pool gateways (usagegateways.go)
+	// A switch to Persona Link a restart left (link_switch.go).
+	go d.resumeLinkSwitches(mctx)
 	// The hub's hand-over, or after ownListWait the manager's own list (ownlist.go) until it comes.
 	wait := time.NewTimer(d.ownWait)
 	select {
@@ -693,8 +697,12 @@ func (d *Devices) Call(ctx context.Context, p devicewire.NodeCall) (json.RawMess
 	if p.Method == "sessions.list" {
 		snapshot = new(sessionSnapshot)
 	}
+	modeSID, modeFrom, modeTo, recordMode := m.modeSetFrom(p, params) // the record of mode changes (mode_changes.go)
 	var out json.RawMessage
 	err := m.callWithSnapshot(ctx, p.Method, params, &out, snapshot)
+	if recordMode && err == nil {
+		m.recordModeSet(p.Actor, modeSID, modeFrom, modeTo, out)
+	}
 	d.observeCreationCall(p, params, out, preparation, err)
 	d.finishShareCall(ctx, p, receipt, out, err)
 	m.noteOpened(p.Method, params, err)

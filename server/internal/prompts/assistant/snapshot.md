@@ -13,7 +13,7 @@
 {{end}}{{with .Muted}}  - 已屏蔽（用户关了它们的通知，上面的数不算它们；别主动提，问到再说）：{{len .}} 个，agents_list state=muted 查
 {{end}}{{with .Working}}  - 工作中：{{if $.Omit.Working}}{{len .}} 个，{{template "assistant/snapshot_omitted" "agents_list"}}{{else}}{{range $i, $a := first 8 .}}{{if $i}}；{{end}}{{$a.Label}}{{with $a.Ultracode}}〔ultracode={{.}}{{if eq . "on"}}：每个实质任务都会跑多 Agent workflow，等结果时别催{{end}}〕{{end}}{{with $a.Plan}}（{{template "assistant/snapshot_plan" .}}）{{end}}{{end}}{{if gt (len .) 8}} 等 {{len .}} 个{{end}}{{end}}
 {{end}}{{with .Workflows}}  - 后台 workflow 在跑（这些 Agent 这一轮停着是在等结果，不是做完了，结果回来会叫醒它们；别关它们）：{{range $i, $w := first 6 .}}{{if $i}}；{{end}}{{$w.Agent}}（{{$w.Machine}}，session_id={{$w.Session}}）的{{template "assistant/snapshot_workflow" $w}}{{end}}{{if gt (len .) 6}} 等 {{len .}} 个{{end}}
-{{end}}{{if .Scoped}}{{template "assistant/snapshot_own_tasks" .}}{{else}}{{if .OpenTodosTotal}}- 开放待办索引（{{if $.Omit.OpenTodos}}仅列 ID{{else}}列出 ID 和标题{{end}}）：{{range $i, $t := .OpenTodos}}{{if $i}}；{{end}}{{$t.ID}}{{if not $.Omit.OpenTodos}}「{{$t.Title}}」{{with $t.Link}}（{{.}}）{{end}}{{end}}{{end}}{{if gt .OpenTodosTotal (len .OpenTodos)}}；其余用 todo_list 查{{end}}
+{{end}}{{if .Scoped}}{{template "assistant/snapshot_own_tasks" .}}{{else}}{{if .OpenTodosTotal}}- 开放待办索引（{{if $.Omit.OpenTodos}}仅列 ID{{else}}列出 ID 和标题{{end}}）：{{range $i, $t := .OpenTodos}}{{if $i}}；{{end}}{{$t.ID}}{{if not $.Omit.OpenTodos}}「{{$t.Title}}」{{with $t.Link}}（{{.}}）{{end}}{{end}}{{if $t.Failed}}（没开起来）{{end}}{{end}}{{if gt .OpenTodosTotal (len .OpenTodos)}}；其余用 todo_list 查{{end}}
 {{end}}{{with .Tasks}}- 优先显示的开放任务详情（含个人待办；最近结束的对话任务也会列出；task_plan；问已有结果看这里，不够用 agent_read 读它的对话；要它新查、新做或改方向才用 agent_send）：{{if $.Omit.Tasks}}{{len .}} 个，{{template "assistant/snapshot_omitted" "todo_list"}}
 {{else}}
 {{range .}}{{template "assistant/snapshot_task" .}}
@@ -21,7 +21,7 @@
 {{end}}{{with .Plans}}- 等用户点「开始」的计划（主对话里的卡片，用户点了才开工；汇报时要说；已在别处做完或用户说不做的，用 task_plan_withdraw 撤下并写理由）：{{range $i, $p := .}}{{if $i}}；{{end}}{{$p.At.Format "01-02 15:04"}} {{join $p.Titles "、"}}{{if gt $p.Tasks (len $p.Titles)}} 等 {{$p.Tasks}} 件{{end}}{{if $p.ID}}（{{$p.ID}}）{{end}}{{end}}{{if gt $.PlansTotal (len .)}} 等 {{$.PlansTotal}} 张{{end}}
 {{end}}{{with .Asked}}- 你用 ask_user 问过、到点没人回、转成待办在等用户拍板的（用户在待办里记了决定会作为新消息发给发问的对话；别再问，也别先按某个选项去做，除非用户已经在对话里直接答了）：{{if $.Omit.Asked}}{{len .}} 个，{{template "assistant/snapshot_omitted" "todo_list"}}{{else}}{{range $i, $a := .}}{{if $i}}；{{end}}「{{$a.Question}}」（{{$a.TodoID}}，{{$a.At.Format "01-02 15:04"}} 问的）{{end}}{{end}}
 {{end}}{{with .Unaccepted}}- {{if $.Scoped}}这个对话的任务里{{end}}等用户验收的（已部署的请验收，或任务的结论卡，用户还没回「通过」「OK」）：{{if $.Omit.Unaccepted}}{{if gt $.UnacceptedTotal (len .)}}{{$.UnacceptedTotal}}{{else}}{{len .}}{{end}} 个，{{template "assistant/snapshot_omitted" "todo_list"}}{{else}}{{range $i, $a := .}}{{if $i}}；{{end}}「{{$a.Title}}」：{{$a.Verdict}}{{with $a.Changed}}；{{.}}{{end}}{{with $a.Link}}（{{.}}）{{end}}，{{$a.Since.Format "01-02"}} 起{{end}}{{if gt $.UnacceptedTotal (len .)}} 等 {{$.UnacceptedTotal}} 个{{end}}{{end}}
-{{end}}{{if .PhoneOnline}}- iPhone：App 在线，phone_* 工具可用
+{{end}}{{if .NoPhone}}{{else if .PhoneOnline}}- iPhone：App 在线，phone_* 工具可用
 {{else}}- iPhone：App 不在前台，phone_* 工具会先尝试在后台唤醒 App，失败就请用户打开 App；要手机确认的写操作可以带 queue_if_offline 先排队（phone_write_queue_list 查看）
 {{end}}{{with .Apps}}- 各设备上的 Persona App 版本（各自最近一次连上 hub 时报的，App 不在前台也是这个版本）：{{range $i, $a := .}}{{if $i}}；{{end}}{{template "assistant/snapshot_app" $a}}{{end}}
 {{end}}{{with .KB}}- 知识库（kb_get 看详情）：{{if $.Omit.KB}}{{template "assistant/snapshot_omitted" "kb_get"}}

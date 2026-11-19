@@ -36,6 +36,16 @@ func (e *guestExt) ConnectorTool(name string) bool {
 	return name == "lark_chats" || name == "lark_agent_reply"
 }
 
+func (e *guestExt) ToolAccess(name string) (known, readOnly bool) {
+	switch name {
+	case "lark_chats":
+		return true, true
+	case "lark_agent_reply", "computer_run":
+		return true, false
+	}
+	return false, false
+}
+
 func (e *guestExt) AssistantSummary(context.Context, string, string) (string, bool) { return "", false }
 
 func (e *guestExt) AssistantLark(context.Context) (proto.AssistantLark, error) {

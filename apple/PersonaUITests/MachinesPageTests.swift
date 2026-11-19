@@ -41,6 +41,72 @@ final class MachinesPageTests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
     }
 
+    /// A card always has CPU / memory cells; only a loaded sample gives them numbers, rates and a memory total.
+    @MainActor private func waitForCurrentMetrics(_ app: XCUIApplication, _ card: XCUIElement, _ name: String) {
+        let numbers = ".*CPU.*[0-9][0-9.]*%.*(Memory|内存).*[0-9][0-9.]*%.*GB / .*GB.*↓.*↑.*"
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label MATCHES %@", numbers), object: card)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 20), .completed,
+                       "\(name) did not get its current metrics: \(card.label)\n\(app.debugDescription)")
+    }
+
+    /// Bring evidence into the shot without a settling sleep; swipes are bounded and a missing target stays a failure.
+    @MainActor private func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
+        let window = app.windows.firstMatch
+        for _ in 0..<12 where !element.isHittable || element.frame.maxY > window.frame.maxY - 24 {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(element.isHittable, "could not bring the metric evidence on screen:\n\(app.debugDescription)")
+    }
+
+    @MainActor private func openMachines(_ app: XCUIApplication) {
+        let drawer = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["assistant-sidebar-button", "work-sidebar-button"])).firstMatch
+        XCTAssertTrue(drawer.waitForExistence(timeout: 20), "no visible drawer button:\n\(app.debugDescription)")
+        drawer.tapCenter()
+        let item = app.buttons["sidebar-machines"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), app.debugDescription)
+        item.tap()
+    }
+
+    /// #4031: one poll loads every manager. Each assistant's page shows its own computers, so check the default's server
+    /// first, then the work assistant's MacBook. The old unscoped request leaves the MacBook at dashes instead of current metrics.
+    @MainActor func testNonDefaultManagerMetricsInLightAndDark() throws {
+        continueAfterFailure = false
+        let hub = try hub()
+        let text = ProcessInfo.processInfo.environment["PERSONA_TEXT_SIZE"].map { ["-UIPreferredContentSizeCategoryName", $0] } ?? []
+        let suffix = text.isEmpty ? "" : "-ax5"
+        for scheme in ["light", "dark"] {
+            var app = launch(hub, ["-ui.scheme", scheme, "-openAssistantManager", "assistant"] + text)
+            acceptIconAlert()
+            openMachines(app)
+            let server = card(app, "服务器")
+            XCTAssertTrue(server.waitForExistence(timeout: 20), "the default manager's server is missing:\n\(app.debugDescription)")
+            waitForCurrentMetrics(app, server, "the default manager's server")
+            app.terminate()
+
+            app = launch(hub, ["-ui.scheme", scheme, "-openAssistantManager", "m-3fa21c"] + text)
+            acceptIconAlert()
+            openMachines(app)
+
+            let macBook = card(app, "MacBook")
+            XCTAssertTrue(macBook.waitForExistence(timeout: 20), "工作's MacBook is missing:\n\(app.debugDescription)")
+            waitForCurrentMetrics(app, macBook, "工作's MacBook")
+            reveal(app, macBook)
+            XCTAssertFalse(XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch.exists,
+                           "a system alert covers the restored MacBook metrics")
+            shot("manager-metrics-macbook-" + scheme + suffix)
+
+            // The card is the overview regression; its detail also exposes the fixture's disk-backed current sample.
+            macBook.tap()
+            XCTAssertTrue(app.navigationBars["MacBook"].waitForExistence(timeout: 15), app.debugDescription)
+            let disk = anything(app, "710 GB / 1000 GB")
+            for _ in 0..<24 where !disk.exists { app.swipeUp(velocity: .slow) }
+            XCTAssertTrue(disk.waitForExistence(timeout: 5), "the MacBook's disk sample is missing:\n\(app.debugDescription)")
+            reveal(app, disk)
+            shot("manager-metrics-macbook-detail-" + scheme + suffix)
+            app.terminate()
+        }
+    }
+
     @MainActor func testListThenMachineThenRange() throws {
         let app = launch(try hub())
         let drawer = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["assistant-sidebar-button", "work-sidebar-button"]))

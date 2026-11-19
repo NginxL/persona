@@ -1,6 +1,47 @@
 {
   "valid": [
     {
+      "url": "HTTPS://github.com/Example/Project.git/",
+      "provider": "",
+      "identity": {
+        "provider": "github",
+        "instance_url": "https://github.com",
+        "path": "example/project",
+        "canonical_url": "https://github.com/example/project"
+      }
+    },
+    {
+      "url": "HtTp://github.com/example/Project",
+      "provider": "",
+      "identity": {
+        "provider": "github",
+        "instance_url": "https://github.com",
+        "path": "example/project",
+        "canonical_url": "https://github.com/example/project"
+      }
+    },
+    {
+      "url": "ssh.github.com:443/Example/Project.git",
+      "prefix": "SSH://git@",
+      "provider": "",
+      "identity": {
+        "provider": "github",
+        "instance_url": "https://github.com",
+        "path": "example/project",
+        "canonical_url": "https://github.com/example/project"
+      }
+    },
+    {
+      "url": "HtTpS://gitlab.com/group/Subgroup/Project/-/merge_requests/42",
+      "provider": "",
+      "identity": {
+        "provider": "gitlab",
+        "instance_url": "https://gitlab.com",
+        "path": "group/subgroup/project",
+        "canonical_url": "https://gitlab.com/group/subgroup/project"
+      }
+    },
+    {
       "url": "https://GitHub.com/Example/Project.git/",
       "provider": "",
       "identity": {

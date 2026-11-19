@@ -269,8 +269,9 @@ struct VoiceDeps {
             if surface == .call, oldValue != muted, !applyingCallMute { deps.callEvents?(.muted(muted)) }
         }
     }
-    /// A system call on hold (#9290: the system paused it, or its audio was interrupted): the microphone sends silence,
-    /// the voice is dropped and nothing plays, the quiet minutes stop counting. Only `PersonaCalls` sets it.
+    /// On hold: a system call the system paused or whose audio was interrupted (#9290, `PersonaCalls` sets it), or the
+    /// phone's voice chat paused by an interruption until it may go on (#9887). The microphone sends silence, the voice is
+    /// dropped and nothing plays, the quiet minutes stop counting, and an extension that takes `hold` hears it.
     private(set) var held = false
     /// When the call first connected (its first `ready`): what its duration counts from.
     private(set) var connectedAt: Date?
@@ -281,6 +282,10 @@ struct VoiceDeps {
     /// The voice is playing: changes only as it starts or stops, so a page can offer Stop Speaking without being drawn
     /// again on every phase (#3862 phase 4).
     private(set) var speaking = false
+    /// The owner said something and the voice has not begun to answer it yet (the call screen's Thinking, #9887): from the
+    /// owner's caption turning final until the voice plays or says anything, the owner speaks again, the connection
+    /// changes, or `thinkingAtMost` passed (an answer that never comes). Changes only as it starts or stops.
+    private(set) var thinking = false
     /// The extension said `ready` on the connection that is up: changes only as it connects, drops or ends, so the
     /// meeting page can send Talk to the call without being drawn again on every phase (#3862 phase 4).
     private(set) var connected = false
@@ -296,6 +301,8 @@ struct VoiceDeps {
     static let runLimit = 20
     /// The user's caption stops counting as 「在说」 this long after it last changed.
     static let hearingQuiet: Duration = .seconds(2)
+    /// The longest the voice is shown thinking before an answer (`thinking`): past it, it listens again.
+    static let thinkingAtMost: Duration = .seconds(8)
     static let idleCheck: Duration = .seconds(30)
 
     /// The rates the extension said last, per group and extension: the next call records at them before `ready`.
@@ -316,6 +323,8 @@ struct VoiceDeps {
     @ObservationIgnored private var playing = false
     @ObservationIgnored private var hearing = false
     @ObservationIgnored private var hearingTick = 0
+    /// The owner's line the voice was last shown thinking about (`thinking`): once for each.
+    @ObservationIgnored private var thoughtAbout: String?
     @ObservationIgnored private var resolved = false
     @ObservationIgnored private var format: VoiceAudioFormat
     @ObservationIgnored private let recent: [VoiceLine]
@@ -326,6 +335,20 @@ struct VoiceDeps {
     @ObservationIgnored private var epoch = 0
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var applyingCallMute = false
+    /// The phone's voice chat is paused by an interruption (a phone call, Siri, another app's audio), until its end says
+    /// it may go on (#9887).
+    @ObservationIgnored private(set) var pausedByInterruption = false
+    /// Rates a `ready` asked for while paused by an interruption (the first one came after it began, or a reconnect's):
+    /// the audio takes them as it comes back (`interruptionEnded`), not under the other audio (#9887).
+    @ObservationIgnored private var formatOnResume: VoiceAudioFormat?
+    /// The voice's levels reach `levels` (the orb's): not while the app is in the background, where nobody sees them.
+    @ObservationIgnored private var levelsShown = true
+    /// The app's word on the bound conversation (`deps.session`) is not kept up to date: in the background the app's
+    /// socket to the hub is closed (`AppModel.suspendLinks`), so the state it last said (working, perhaps) may long be
+    /// over while this call goes on there (#9887). The idle rule takes the voice connection's own word then (`targetBusy`).
+    @ObservationIgnored private(set) var sessionStale = false
+    /// Told once it ended, after everything went (`VoiceCalls`: the background tunnels of its group may close).
+    @ObservationIgnored var onEnded: (@MainActor (VoiceEnd) -> Void)?
 
     init(key: SessionKey, extensionID: String, surface: VoiceSurface, recent: [VoiceLine] = [], meeting: VoiceMeeting? = nil,
          deps: VoiceDeps) {
@@ -358,12 +381,16 @@ struct VoiceDeps {
         if meeting == nil {
             guard await deps.mic.request() else { return end(.permissionDenied, epoch: epoch) }
             guard isCurrent(epoch) else { return }
-            guard deps.microphone.claim(microphoneOwner, givingWay: { [weak self] in self?.end(.microphoneTaken) }) else {
-                return end(.microphoneBusy)
-            }
+            // A system call keeps the microphone (#9290 follow-up: nothing in the app ends it by itself): whatever else
+            // asks for it while the call is on is refused, rather than ending the call (dictation and recordings ask
+            // `LiveCallGate` first and say why). An in-app voice chat gives way, as before.
+            let claimed = surface == .call ? deps.microphone.claim(microphoneOwner)
+                : deps.microphone.claim(microphoneOwner, givingWay: { [weak self] in self?.end(.microphoneTaken) })
+            guard claimed else { return end(.microphoneBusy) }
         }
         uplink = VoiceUplink(gated: meeting != nil)
         uplink.isMuted = muted || held
+        uplink.levelsPaused = !levelsShown
         uplink.onLevel { @Sendable [weak self] level in
             Task { @MainActor in
                 guard let self, !self.phase.isEnded else { return }
@@ -435,9 +462,29 @@ struct VoiceDeps {
         link = .live
         levels.reset()
         if speaking { speaking = false }
+        if thinking { thinking = false }
         if held { held = false }
+        pausedByInterruption = false
+        formatOnResume = nil
         phase = .ended(reason)
         deps.callEvents?(.ended(reason))
+        onEnded?(reason)
+    }
+
+    /// The app went to the background (`on`) or came back (`VoiceCalls`): the levels stop there, and the app's word on
+    /// the conversation is not kept up to date there (`sessionStale`).
+    func appInBackground(_ on: Bool) {
+        showsLevels(!on)
+        sessionStale = on
+    }
+
+    /// Whether the voice's levels reach the orb: off in the background (nothing sees them there, and each is a hop to
+    /// the main actor 20 times a second), on again in front.
+    func showsLevels(_ on: Bool) {
+        guard levelsShown != on else { return }
+        levelsShown = on
+        uplink.levelsPaused = !on
+        if !on { levels.reset() }
     }
 
     private func end(_ reason: VoiceEnd, epoch: Int) {
@@ -605,6 +652,7 @@ struct VoiceDeps {
         if link != .live { link = .live }
         if askingID != nil { askingID = nil }
         if notice != nil { notice = nil }
+        think(false)
         let socket = deps.socket(VoiceEndpoint.request(api, extensionID: extensionID), api)
         self.socket = socket
         socket.open { [weak self] event in self?.received(event, generation: generation) }
@@ -741,7 +789,13 @@ struct VoiceDeps {
         timers["ready"]?.cancel()
         let wanted = VoiceAudioFormat(inputRate: r.inputRate, outputRate: r.outputRate)
         if wanted != format {
-            do { try audio?.reconfigure(wanted) } catch { return end(.audioFailed) }
+            if pausedByInterruption {
+                // Paused by an interruption (#9887): set up for these rates as the audio comes back. Now it would start
+                // the engine under the other audio, and a refusal would end the voice chat instead of pausing it.
+                formatOnResume = wanted
+            } else {
+                do { try audio?.reconfigure(wanted) } catch { return end(.audioFailed) }
+            }
             format = wanted
         }
         Self.formats[Self.formatKey(key.group, extensionID)] = wanted
@@ -786,6 +840,14 @@ struct VoiceDeps {
         }
         lastActivity = deps.clock.now
         if t.role == VoiceLine.user {
+            // Thinking once the owner's words are final (once for each line), unless the voice already began to answer
+            // them (a late caption goes before that answer: `before`); not while they still come.
+            if !t.final {
+                think(false)
+            } else if t.before == nil, !playing, !t.text.isEmpty, thoughtAbout != id {
+                thoughtAbout = id
+                think(true)
+            }
             hearing = !t.final
             hearingTick += 1
             let tick = hearingTick
@@ -796,8 +858,21 @@ struct VoiceDeps {
                     me.refreshPhase()
                 }
             }
+        } else if !t.text.isEmpty {
+            think(false)
         }
         refreshPhase()
+    }
+
+    /// Thinking starts or stops (`thinking`); started, it stops by itself after `thinkingAtMost`.
+    private func think(_ on: Bool) {
+        if thinking != on { thinking = on }
+        if on {
+            after(Self.thinkingAtMost, "thinking") { me in me.think(false) }
+        } else {
+            timers["thinking"]?.cancel()
+            timers["thinking"] = nil
+        }
     }
 
     private func update(_ run: VoiceRun) {
@@ -827,15 +902,44 @@ struct VoiceDeps {
         switch event {
         case .playing(let on):
             playing = on
-            if on { lastActivity = deps.clock.now }
+            if on {
+                lastActivity = deps.clock.now
+                think(false)
+            }
             refreshPhase()
         case .outputLevel(let level):
-            levels.set(output: level)
+            if levelsShown { levels.set(output: level) }
         case .interrupted:
-            // A system call holds instead: its manager hears it (#9290).
-            if surface == .call { deps.callEvents?(.interrupted) } else { end(.interrupted) }
+            if surface == .call {
+                // A system call holds instead: its manager hears it (#9290).
+                deps.callEvents?(.interrupted)
+            } else if surface == .phone, meeting == nil {
+                // The phone's voice chat pauses (#9887): on hold until the interruption is over.
+                pausedByInterruption = true
+                setHeld(true)
+            } else {
+                end(.interrupted)
+            }
         case .interruptionEnded(let resume):
-            if surface == .call { deps.callEvents?(.interruptionEnded(shouldResume: resume)) }
+            if surface == .call {
+                deps.callEvents?(.interruptionEnded(shouldResume: resume))
+            } else if pausedByInterruption {
+                pausedByInterruption = false
+                // Only when the system says the audio may go on, and the session comes back; else it ends as before, with
+                // Continue.
+                guard resume else { return end(.interrupted) }
+                // New rates that came meanwhile first: the audio, still interrupted, keeps them and comes back with them.
+                if let wanted = formatOnResume {
+                    formatOnResume = nil
+                    do { try audio?.reconfigure(wanted) } catch { return end(.audioFailed) }
+                }
+                do {
+                    try audio?.resume()
+                } catch {
+                    return end(.interrupted)
+                }
+                setHeld(false)
+            }
         case .reset:
             end(.audioReset)
         case .failed:
@@ -843,8 +947,14 @@ struct VoiceDeps {
         }
     }
 
-    /// Whether the bound conversation works or waits on the user: a call is not idle then.
+    /// Whether the bound conversation works or waits on the user: a call is not idle then. The app's word on it while it
+    /// is kept up to date. In the background (`sessionStale`) the voice connection's own, never a state from before
+    /// (#9887): the extension pauses the upstream while the conversation works on something the call waits for, and
+    /// only then (docs/assistant/voice.md 4.9: paused or waking), and asks about a card by voice while one waits on the
+    /// user. A finished task wakes it to say so, and the quiet minutes then count as for an idle conversation; so they
+    /// do with an extension that does not pause (no `suspend`), which says neither.
     private var targetBusy: Bool {
+        if sessionStale { return link == .paused || link == .waking || askingID != nil }
         guard let state = deps.session(key)?.state else { return false }
         return state == .working || state == .needsYou
     }

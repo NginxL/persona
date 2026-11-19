@@ -2,7 +2,10 @@ package assistant
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -46,4 +49,24 @@ func TestOwnerWordsAreToldToTheExtensions(t *testing.T) {
 	}
 	e.s.heard = nil // extensions that do not listen: nothing to tell, nothing breaks
 	e.s.UserSpoke(context.Background(), SessionRef{MachineID: "server", SessionID: "c1x1x1"})
+}
+
+func TestPreparedWebAnswerIsToldToTheExtensions(t *testing.T) {
+	ft := newFleetTestNoStore(t)
+	preparedTestConversation(ft)
+	ext := &heardExt{}
+	ft.s.SetExtensions(ext)
+	done := startPreparedTest(t, ft, "ix_owner_heard_web", "", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/interactions/ix_owner_heard_web/resolve", strings.NewReader(`{"allow":true}`))
+	w := httptest.NewRecorder()
+	ft.s.fleetHandler(http.NotFoundHandler()).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("web prepared answer: %d %s", w.Code, w.Body.String())
+	}
+	if got := ext.got(); !slices.Equal(got, []string{"s1"}) {
+		t.Fatalf("prepared web answer owner activity: %v", got)
+	}
+	if got := awaitPreparedTest(t, done); got.err != nil || got.out.Text != "applied" {
+		t.Fatalf("prepared web answer outcome = %+v, %v", got.out, got.err)
+	}
 }

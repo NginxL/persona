@@ -6,14 +6,15 @@ func RenderJSONOnly(system string) string { return render("tools/json_only", sys
 // RenderTabName names a new agent's herdr tab after its first message (tools/tab_name).
 func RenderTabName() string { return render("tools/tab_name", nil) }
 
-// RenderTranslateTexts and RenderTranslateMail translate into lang, the language's own name ("Simplified Chinese" written in Chinese): a JSON list of short
-// texts (tools/translate_texts) or one mail (tools/translate_mail).
-func RenderTranslateTexts(lang string) string { return render("tools/translate_texts", lang) }
-func RenderTranslateMail(lang string) string  { return render("tools/translate_mail", lang) }
+// Translation gives the model the language of its instructions and the independently requested target.
+type Translation struct{ Language, Target string }
 
-// RenderTranslateMailInput is the mail as the translation model reads it (tools/translate_mail_input).
-func RenderTranslateMailInput(subject, text string) string {
-	return render("tools/translate_mail_input", struct{ Subject, Text string }{subject, text})
+func RenderTranslateTexts(in Translation) string { return render("tools/translate_texts", in) }
+func RenderTranslateMail(in Translation) string  { return render("tools/translate_mail", in) }
+
+// RenderTranslateMailInput is the mail as the translation model reads it.
+func RenderTranslateMailInput(language, subject, text string) string {
+	return render("tools/translate_mail_input", struct{ Language, Subject, Text string }{language, subject, text})
 }
 
 // LauncherRunTurn is one turn of a conversation an API purpose sends to a launcher's CLI (tools/launcher_run_input).
@@ -43,7 +44,10 @@ func RenderSessionTitle(t SessionTitle) string { return render("tools/session_ti
 
 // SessionTitleInput is what the title model reads: the first exchange, and its last answer when that broke the format.
 // Source is the title the extension that opened the conversation gave it ("" for none, #3758): a hint, not the title.
-type SessionTitleInput struct{ First, Reply, Retry, Source string }
+type SessionTitleInput struct {
+	SessionTitle
+	First, Reply, Retry, Source string
+}
 
 func RenderSessionTitleInput(in SessionTitleInput) string {
 	return render("tools/session_title_input", in)

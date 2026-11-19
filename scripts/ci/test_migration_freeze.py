@@ -1,8 +1,9 @@
 """A migration already on the base branch cannot be edited, deleted or renamed.
 
-Comment-only and whitespace-only edits pass. A new file may be added. The cases build a
-throwaway repository; they do not touch this checkout's migrations.
+Comment-only and whitespace-only edits pass. A new file may be added, named by the UTC second it
+was written. The cases build a throwaway repository; they do not touch this checkout's migrations.
 """
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
@@ -16,6 +17,10 @@ import migration_freeze
 ROOT = Path(__file__).resolve().parents[2]
 HUB = "server/internal/db/migrations/hub/0001_init.sql"
 MANAGER = "server/internal/db/migrations/manager/0002_settings.sql"
+STAMPED = "server/internal/db/migrations/hub/20261119123000_extra.sql"
+NUMBERED = "server/internal/db/migrations/manager/0009_extra.sql"
+# A fixed now for the naming cases: STAMPED is a few hours before it.
+NOW = datetime(2026, 11, 19, 18, 0, 0, tzinfo=timezone.utc)
 ORIGINAL = "CREATE TABLE devices (\n    id int\n);\n"
 OTHER = "-- the manager's settings\nCREATE TABLE settings (id int);\n"
 
@@ -89,6 +94,77 @@ class CompareTests(unittest.TestCase):
         self.assertIn("add a new migration instead", edited)
         self.assertIn("add a new migration instead", deleted)
         self.assertTrue(edited.startswith("migration freeze: " + HUB))
+        for problem in (None, "is not named by the UTC second it was written"):
+            line = migration_freeze.describe_addition(NUMBERED, problem)
+            self.assertEqual(line.count("\n"), 0)
+            self.assertTrue(line.startswith("migration freeze: " + NUMBERED))
+            self.assertIn("YYYYMMDDHHMMSS_<name>.sql", line)
+            self.assertIn("$(date -u +%Y%m%d%H%M%S)_<name>.sql", line)
+        self.assertIn("numbers stopped at 0561", migration_freeze.describe_addition(NUMBERED, None))
+
+
+class NamingTests(unittest.TestCase):
+    def test_a_new_name_is_a_real_utc_second_from_the_switch_to_a_day_ahead(self):
+        for name in ("20261119123000_probe.sql", "20261118000000_first_second.sql", "20261120180000_a_day_ahead.sql",
+                     "20261119235959_end_of_day.sql"):
+            self.assertIsNone(migration_freeze.stamp_problem(name, NOW), name)
+        for name, problem in (
+                ("0562_probe.sql", "not named by the UTC second"),
+                ("202611191230_probe.sql", "not named by the UTC second"),
+                ("2026111912300_probe.sql", "not named by the UTC second"),
+                ("202611191230000_probe.sql", "not named by the UTC second"),
+                ("20261119123000_Probe.sql", "not named by the UTC second"),
+                ("20261119123000-probe.sql", "not named by the UTC second"),
+                ("20261119123000_probe.SQL", "not named by the UTC second"),
+                ("20261119123000.sql", "not named by the UTC second"),
+                ("20261301123000_probe.sql", "not start with a real UTC time"),
+                ("20260230123000_probe.sql", "not start with a real UTC time"),
+                ("20261119240000_probe.sql", "not start with a real UTC time"),
+                ("20261119126000_probe.sql", "not start with a real UTC time"),
+                ("20261119123060_probe.sql", "not start with a real UTC time"),
+                ("20261117235959_probe.sql", "before migrations were timestamped (2026-11-18 00:00:00 UTC)"),
+                ("20261120180001_probe.sql", "more than a day after now (20261119180000 UTC)"),
+                ("20271119123000_probe.sql", "more than a day after now")):
+            self.assertIn(problem, migration_freeze.stamp_problem(name, NOW) or "", name)
+
+    def test_the_frozen_numbered_files_are_this_checkout_s(self):
+        names = set()
+        for directory in migration_freeze.MIGRATION_DIRS:
+            for path in (ROOT / directory).iterdir():
+                if migration_freeze.NUMBERED_NAME.match(path.name):
+                    names.add(directory[len(migration_freeze.MIGRATIONS):] + "/" + path.name)
+        self.assertEqual(names, set(migration_freeze.NUMBERED))
+        self.assertEqual(122, len(migration_freeze.NUMBERED))
+        self.assertIn("manager/0561_model_usage.sql", migration_freeze.NUMBERED)
+
+    def test_a_new_file_is_timestamped_or_one_of_the_frozen_numbered_ones(self):
+        base = {HUB: ORIGINAL, MANAGER: OTHER}
+        frozen = {"hub/0001_init.sql", "manager/0002_settings.sql", "manager/0003_older.sql"}
+        older = "server/internal/db/migrations/manager/0003_older.sql"
+        current = dict(base)
+        current[STAMPED] = "CREATE TABLE extra (id int);\n"
+        current[older] = "CREATE TABLE older (id int);\n"
+        self.assertEqual(migration_freeze.addition_problems(base, [current, dict(current)], NOW, frozen), [])
+        current[NUMBERED] = "CREATE TABLE more (id int);\n"
+        self.assertEqual(migration_freeze.addition_problems(base, [current, dict(current)], NOW, frozen), [(NUMBERED, None)])
+        self.assertEqual(migration_freeze.addition_problems(base, [{NUMBERED: ""}, base], NOW, frozen), [(NUMBERED, None)])
+        # A frozen number in the other set is new there.
+        moved = "server/internal/db/migrations/hub/0003_older.sql"
+        self.assertEqual(migration_freeze.addition_problems(base, [{moved: ""}], NOW, frozen), [(moved, None)])
+        late = "server/internal/db/migrations/hub/20271119123000_late.sql"
+        self.assertEqual(migration_freeze.addition_problems(base, [{late: ""}], NOW, frozen),
+                         [(late, "is more than a day after now (20261119180000 UTC)")])
+
+    def test_files_of_one_version_in_a_set_collide(self):
+        files = [
+            "server/internal/db/migrations/hub/0421_hub_settings.sql",
+            "server/internal/db/migrations/manager/0421_machine_usage.sql",
+            "server/internal/db/migrations/hub/20261119123000_a.sql",
+            "server/internal/db/migrations/manager/20261119123000_b.sql",
+            "server/internal/db/migrations/manager/20261120123000_c.sql",
+            "server/internal/db/migrations/manager/20261120123000_d.sql",
+        ]
+        self.assertEqual(migration_freeze.colliding(files), set(files[4:]))
 
 
 class GitFreezeTests(unittest.TestCase):
@@ -140,8 +216,67 @@ class GitFreezeTests(unittest.TestCase):
     def test_a_comment_or_reindent_passes_and_a_new_file_passes(self):
         self.write(HUB, "-- added\r\nCREATE TABLE devices (id int);\n")
         self.assertEqual(0, self.run_check())
-        self.write("server/internal/db/migrations/hub/0009_extra.sql", "CREATE TABLE extra (id int);\n")
+        self.write(STAMPED, "CREATE TABLE extra (id int);\n")
         self.assertEqual(0, self.run_check())
+
+    def run_check_err(self, *args):
+        stderr = sys.stderr
+        try:
+            from io import StringIO
+            buf = StringIO()
+            sys.stderr = buf
+            code = self.run_check(*args)
+        finally:
+            sys.stderr = stderr
+        return code, buf.getvalue()
+
+    def test_a_new_numbered_migration_fails(self):
+        self.write(STAMPED, "CREATE TABLE extra (id int);\n")
+        self.write(NUMBERED, "CREATE TABLE more (id int);\n")
+        self.git("add", NUMBERED)
+        code, err = self.run_check_err()
+        self.assertEqual(1, code)
+        self.assertEqual(1, err.count(NUMBERED), err)
+        self.assertIn("numbers stopped at 0561", err)
+        self.assertNotIn(STAMPED, err)
+
+    def test_a_misnamed_timestamp_fails(self):
+        minute = "server/internal/db/migrations/hub/202611191230_extra.sql"
+        self.write(minute, "CREATE TABLE extra (id int);\n")
+        code, err = self.run_check_err()
+        self.assertEqual(1, code)
+        self.assertIn(minute + " is not named by the UTC second it was written", err)
+
+    def test_a_frozen_numbered_file_passes_against_an_older_base(self):
+        # The base is from before a numbered migration of the frozen set merged: it is new there, and still passes.
+        older = "server/internal/db/migrations/manager/0561_model_usage.sql"
+        self.write(older, "CREATE TABLE model_usage (id int);\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "numbered")
+        self.assertEqual(0, self.run_check("--base", "HEAD~1"))
+        self.write(NUMBERED, "CREATE TABLE more (id int);\n")
+        code, err = self.run_check_err("--base", "HEAD~1")
+        self.assertEqual(1, code)
+        self.assertNotIn(older, err)
+        self.assertIn(NUMBERED, err)
+
+    def test_one_of_two_files_of_one_version_may_be_renamed(self):
+        first = "server/internal/db/migrations/manager/20261119123000_first.sql"
+        later = "server/internal/db/migrations/manager/20261119123000_later.sql"
+        self.write(first, "CREATE TABLE first (id int);\n")
+        self.write(later, "CREATE TABLE later (id int);\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "both merged")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("mv", later, "server/internal/db/migrations/manager/20261119123001_later.sql")
+        self.assertEqual(0, self.run_check())
+        self.write(first, "CREATE TABLE first (id text);\n")
+        code, err = self.run_check_err()
+        self.assertEqual(1, code)
+        self.assertIn(first + " was edited", err)
+        (self.repo / HUB).unlink()
+        code, err = self.run_check_err()
+        self.assertIn(HUB + " was deleted or renamed", err)
 
     def test_an_edited_migration_fails(self):
         self.write(HUB, "CREATE TABLE devices (id text);\n")

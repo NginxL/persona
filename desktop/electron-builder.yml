@@ -14,6 +14,12 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
   grantFileProtocolExtraPrivileges: false
+# persona:// links (docs/protocol/deep-links.md, #9931): macOS hands a scheme only to an app whose Info.plist lists it
+# (CFBundleURLTypes), so the packaged app receives the links only with this entry; Windows registers it at run time
+# (src/main.ts, setAsDefaultProtocolClient).
+protocols:
+  - name: Persona
+    schemes: [persona]
 files:
   - dist/**
   - package.json

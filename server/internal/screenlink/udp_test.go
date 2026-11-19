@@ -35,6 +35,9 @@ func TestTheVideoRidesAUDPFlow(t *testing.T) {
 	if n := len(l.p.received(l.id)); n != 0 {
 		t.Fatalf("%d video bytes went over the relays too", n)
 	}
+	if n := l.p.rawTCPData(l.id); n != 0 {
+		t.Fatalf("%d raw video bytes went over TCP while UDP carried the channel", n)
+	}
 	go l.ss.Write(pattern(5000))
 	waitFor(t, "rfb on its relay", func() bool { return len(l.p.received(RFB)) == 5000 })
 	data, parity, resent := l.up.ping(0)
@@ -68,7 +71,7 @@ func TestLostPacketsAreRebuiltOrAskedForAgain(t *testing.T) {
 				return false
 			})
 			setLoss := func(on bool) { mu.Lock(); lossy = on; mu.Unlock() }
-			l.up = newUDPPhone(t, l.dc, l.ready, relay)
+			l.up = newUDPPhone(t, l.p, l.dc, l.ready, relay)
 			l.up.ch = l.id
 			l.up.prove()
 			l.up.use(l.id, 0)

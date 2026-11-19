@@ -27,6 +27,26 @@ func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBindi
 		}
 		return b, "inbox.triage", err // inheritedLabel names the connection and the model
 	}
+	if p.ID == "translate" {
+		b, err := s.resolveModel(ctx, "inbox.triage")
+		if err != nil {
+			return b, "inbox.triage", err
+		}
+		c, err := s.apiConfig(ctx, b)
+		if err == nil && messagesAPI(c.API) && strings.HasPrefix(c.Model, "claude-") {
+			b.Model = translationHaikuModel
+			if name, ok := strings.CutPrefix(b.Provider, "launcher."); ok {
+				for _, launcher := range s.storedLaunchers(ctx) {
+					if launcher.Name == name && launcher.HaikuModel != "" {
+						b.Model = launcher.HaikuModel
+						break
+					}
+				}
+			}
+			b.Effort = "off"
+		}
+		return b, "inbox.triage", nil
+	}
 	if p.Kind == "api" {
 		provider := "legacy.ai"
 		if p.ID == "inbox.triage" {
@@ -54,6 +74,8 @@ func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBindi
 	}
 	return ModelBinding{Provider: p.ID}, mc(l, "source_extension_default"), nil
 }
+
+const translationHaikuModel = "claude-haiku-5-5"
 
 // delegateModel is what "Answering agents' questions" runs on unless the user picks another (2026-11-05, the user's call): it decides for the
 // user whether an agent's question is theirs, a cheap triage model is not up to that.
@@ -94,9 +116,9 @@ func inheritedLabel(l i18n.Lang, p ModelPurpose, base ModelBinding, from string,
 		}
 	}
 	switch {
-	case p.ID == "agent.delegate" && (p.Override.Model != "" || model == ""):
+	case (p.ID == "agent.delegate" || p.ID == purposeTranslate) && (p.Override.Model != "" || model == ""):
 		return mc(l, "source_delegate_connection", i18n.Args{"provider": name}) // the model is the user's pick, or the connection's own
-	case p.ID == "agent.delegate":
+	case p.ID == "agent.delegate" || p.ID == purposeTranslate:
 		return mc(l, "source_delegate_default", i18n.Args{"provider": name, "model": model})
 	case ownModelRecord(p.ID), isExtensionPurpose(p.ID):
 		return purposeName(l, p.Parent)
@@ -138,7 +160,7 @@ func (s *Service) fallbackAPIProvider(ctx context.Context) string {
 	stored := s.storedLaunchers(ctx)
 	hidden := s.hiddenLaunchers(ctx)
 	usable := func(l storedLauncher) bool {
-		return !slices.Contains(hidden, l.Name) && l.BaseURL != "" && l.Model != "" && l.KeySealed != ""
+		return !proto.IsExternalLauncher(l.Name) && !slices.Contains(hidden, l.Name) && l.BaseURL != "" && l.Model != "" && l.KeySealed != ""
 	}
 	for _, l := range stored {
 		if l.Kind == "api" && usable(l) {
@@ -205,7 +227,11 @@ func (s *Service) resolveModelRecord(ctx context.Context, id string, r *modelRec
 		}
 		r = &read
 	}
-	return effectiveModel(p, base, r.Binding), nil
+	b := effectiveModel(p, base, r.Binding)
+	if err := checkExternalPurpose(b); err != nil {
+		return b, err
+	}
+	return b, nil
 }
 
 func launcherProvider(name string) string {
@@ -255,6 +281,9 @@ func chatEffortForModel(models []proto.ProviderModel, model, effort string) stri
 // apiConfig is the connection an API binding calls, with its key opened.
 func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, error) {
 	var c ai.Config
+	if err := checkExternalPurpose(b); err != nil {
+		return c, err
+	}
 	var providerModels []proto.ProviderModel
 	if strings.HasPrefix(b.Provider, "legacy.") {
 		c = s.legacyModelConfig(ctx, b.Provider)
@@ -268,7 +297,7 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 				if err := checkAPITransport(l.Kind, l.API, l.Proxy, l.NoProxy, l.HeadersSealed != ""); err != nil {
 					return c, err
 				}
-				c = ai.Config{API: l.API, BaseURL: l.BaseURL, Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
+				c = ai.Config{API: l.API, BaseURL: l.LaunchBaseURL(), Model: l.Model, ReasoningEffort: l.Effort, Bearer: l.BearerAuth(), ViaMachine: l.ViaMachine}
 				providerModels = l.Models
 				model, err := resolveAPITierAlias(l, cmp.Or(b.Model, l.Model))
 				if err != nil {
@@ -308,6 +337,9 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 	} else {
 		return c, i18n.Err("assistant-models.err_not_api")
 	}
+	if proto.IsExternalLauncher(c.RunLauncher) {
+		return c, i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if b.Model != "" {
 		c.Model = b.Model
 	}
@@ -325,6 +357,10 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 
 // purposeModel is purpose id's model, resolved at the start of every request.
 func (s *Service) purposeModel(id string) *ai.Client {
+	return s.purposeModelFor(id, "")
+}
+
+func (s *Service) purposeModelFor(id, operation string) *ai.Client {
 	return ai.NewResolved(func(ctx context.Context) (*ai.Client, error) {
 		b, err := s.resolveModel(ctx, id)
 		if err != nil {
@@ -334,7 +370,7 @@ func (s *Service) purposeModel(id string) *ai.Client {
 		if err != nil {
 			return nil, err
 		}
-		return s.aiClient(c), nil
+		return s.countedClient(id, operation, b.Provider, c), nil
 	})
 }
 

@@ -55,8 +55,8 @@ final class TokenCalendarUITests: XCTestCase {
         }
     }
 
-    /// The line opens Token Usage: the totals, the calendar with its key, the last week by the hour, by computer and by
-    /// kind.
+    /// The line opens Token Usage: the totals, the calendar with its key, the last week by the hour, by computer, by
+    /// agent and by kind.
     @MainActor func testTheLineOpensTokenUsage() {
         for scheme in ["light", "dark"] {
             launch(scheme)
@@ -69,8 +69,27 @@ final class TokenCalendarUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["按电脑 · 最近 7 天"].waitForExistence(timeout: 5), "\(scheme): no computers")
             XCTAssertTrue(app.staticTexts["按类别 · 最近 7 天"].exists, "\(scheme): no kinds")
             shot("page lower \(scheme)")
+            // By Agent (#10015): the demo's agents, and the usage kept before the hub counted agents apart.
+            XCTAssertTrue(app.staticTexts["按 Agent · 最近 7 天"].exists, "\(scheme): no agents")
+            XCTAssertTrue(app.staticTexts["Claude Code"].exists && app.staticTexts["未区分（更新前）"].exists,
+                          "\(scheme): the agents' names")
             app.terminate()
         }
+    }
+
+    /// By Agent at the largest text size the interface reaches (xxxLarge): every row on one line, within the screen.
+    @MainActor func testTokenUsageByAgentAtTheLargestInterfaceText() {
+        launch("light", textSize: "UICTContentSizeCategoryXXXL")
+        XCTAssertTrue(line.waitForExistence(timeout: 30), "no token calendar on the home")
+        line.tap()
+        XCTAssertTrue(app.navigationBars["Token 用量"].waitForExistence(timeout: 10), "no Token Usage page")
+        let heading = app.staticTexts["按 Agent · 最近 7 天"]
+        for _ in 0..<4 where !heading.isHittable { app.swipeUp() }
+        XCTAssertTrue(heading.waitForExistence(timeout: 5), "no agents")
+        let window = app.windows.firstMatch.frame
+        let name = app.staticTexts["未区分（更新前）"]
+        XCTAssertTrue(name.exists && name.frame.maxX <= window.maxX, "the not-split row runs off the screen: \(name.frame)")
+        shot("page agents xxxLarge")
     }
 
     /// At the largest text size the interface reaches (xxxLarge), the card keeps its squares and fits the screen.

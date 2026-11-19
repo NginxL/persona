@@ -31,7 +31,7 @@ struct PhoneSystemToolsTests {
 
     @Test func homeIsOfferedOnlyInABuildWithHomeKit() {
         #expect(PhoneDataSource.onThisDevice.contains(.home) == HomeAccess.isBuilt)
-        #expect(PhoneDataSource.onThisDevice.contains(.alarms))
+        #expect(PhoneDataSource.onThisDevice.contains(.alarms) == AlarmsAccess.isSupported) // AlarmKit: iOS 26 (#6730)
     }
 
     // MARK: - Calendar (#2276)

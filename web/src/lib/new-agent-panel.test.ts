@@ -70,6 +70,9 @@ describe("the panel's providers", () => {
     // a display name keeps its startup ID as secondary text (#5029); an rc alias has none
     expect(p.providers.map((x) => x.idNote)).toEqual([undefined, undefined, undefined, undefined, "p-relay"]);
     const claude = provider(p, "claude");
+    expect(claude.defaultModel).toBe("Sonnet 5.5");
+    expect(claude.isDefault).toBe(true);
+    expect(provider(p, "codex").isDefault).toBe(false);
     expect(claude.models?.map((m) => m.id)).toEqual(["default", "opus", "sonnet", "gateway/glm-5.3", "vendor/model-x"]);
     // the model settings run sonnet on claude: its Default row says so, and takes their effort as its default
     expect(claude.models?.[0]).toMatchObject({ name: "默认：Sonnet 5.5", providerDefault: true, defaultEffort: "high", efforts: ["low", "medium", "high"] });

@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // Machine monitoring (docs/server/machines.md) is the manager's: every node sends a sample every 10 s (sysmon); the manager
@@ -358,6 +359,7 @@ func roundPoint(p proto.MetricPoint) proto.MetricPoint {
 	}
 	p.CPU, p.Load = r(p.CPU, 10), r(p.Load, 100)
 	p.Mem, p.Swap, p.Rx, p.Tx, p.Disk = r(p.Mem, 1), r(p.Swap, 1), r(p.Rx, 1), r(p.Tx, 1), r(p.Disk, 1)
+	p.BatteryPercent, p.TempC = r(p.BatteryPercent, 10), r(p.TempC, 10)
 	return p
 }
 
@@ -458,6 +460,7 @@ type usageKey struct {
 	minute   int64
 	model    string
 	launcher string
+	agent    string
 }
 
 type machineUsage struct {
@@ -479,11 +482,12 @@ func (u *usageBook) apply(machine string, params json.RawMessage, now time.Time)
 	var p struct {
 		Buckets   []proto.UsageBucket `json:"buckets"`
 		Full      bool                `json:"full"`
+		Add       bool                `json:"add"`
 		Load      float64             `json:"load"`
 		CPUs      int                 `json:"cpus"`
 		Launchers bool                `json:"launchers"`
 	}
-	if json.Unmarshal(params, &p) != nil {
+	if json.Unmarshal(params, &p) != nil || p.Full && p.Add {
 		return false
 	}
 	u.mu.Lock()
@@ -492,19 +496,45 @@ func (u *usageBook) apply(machine string, params json.RawMessage, now time.Time)
 		u.machines = map[string]*machineUsage{}
 	}
 	m := u.machines[machine]
-	if m == nil || p.Full {
+	if m == nil {
 		m = &machineUsage{buckets: map[usageKey]proto.UsageBucket{}}
 		u.machines[machine] = m
 	}
-	for _, b := range p.Buckets {
-		m.buckets[usageKey{b.Minute, b.Model, b.Launcher}] = b
+	if p.Full {
+		for k := range m.buckets {
+			if k.agent == "" || tokenuse.FileMetered(k.agent) {
+				delete(m.buckets, k)
+			}
+		}
 	}
-	m.load, m.cpus, m.at, m.launchers = p.Load, p.CPUs, now, p.Launchers
-	cutoff := now.Add(-26*time.Hour).Unix() / 60 * 60
+	// Node batches were admitted against their processing minute. Retain the
+	// incoming delta even if this manager crossed a minute while it was in flight.
+	cutoff := now.Add(-usageNodeWindow).Truncate(time.Minute).Unix()
+	if p.Add {
+		cutoff -= int64(time.Minute / time.Second)
+	}
 	for k := range m.buckets {
 		if k.minute < cutoff {
 			delete(m.buckets, k)
 		}
+	}
+	for _, b := range p.Buckets {
+		k := usageKey{b.Minute, b.Model, b.Launcher, b.Agent}
+		if b.Minute < cutoff && !p.Add {
+			continue
+		}
+		if p.Add {
+			old := m.buckets[k]
+			b.Input += old.Input
+			b.Output += old.Output
+			b.CacheRead += old.CacheRead
+			b.CacheWrite += old.CacheWrite
+			b.Requests += old.Requests
+		}
+		m.buckets[k] = b
+	}
+	if !p.Add {
+		m.load, m.cpus, m.at, m.launchers = p.Load, p.CPUs, now, p.Launchers
 	}
 	return true
 }

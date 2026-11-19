@@ -63,7 +63,12 @@ nonisolated enum NotificationActions {
             ],
             intentIdentifiers: [], options: [])
         // Pairing receipts (#4199): Not you? Revoke, It's Mine / Not Mine (PairReceiptActions).
-        return Set([permission, plan, question, screen, elicitation, done, decide] + PairReceiptActions.categories)
+        var all = Set([permission, plan, question, screen, elicitation, done, decide] + PairReceiptActions.categories)
+        #if os(iOS)
+        // A calendar meeting's reminder (#8731 G2): Start (MeetingReminders).
+        all.insert(MeetingReminders.notificationCategory)
+        #endif
+        return all
     }
 
     /// What a button sends to the hub, or nil for a plain tap (and anything we don't know).

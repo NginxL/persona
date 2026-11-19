@@ -21,5 +21,6 @@
   "background_task": "バックグラウンドタスク",
   "more_workflows_other": "ほか {count} 件",
   "more_waits_other": "他 {count} 件",
-  "background_subtasks": "バックグラウンドのサブタスクが実行中、モデル使用量を消費しています…"
+  "background_subtasks": "バックグラウンドのサブタスクが実行中、モデル使用量を消費しています…",
+  "retrying": "再試行中（{attempt}/{max}）・{reason}…"
 }

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../i18n";
+import { Icon } from "../ui/icons";
 import type { AgentSession } from "../lib/agents";
 import type { Session } from "../lib/types";
 import { setAgentDetails } from "../lib/context-usage";
@@ -154,6 +155,14 @@ describe("a personal agent's row", () => {
 describe("Persona's main row", () => {
   const main: Session = { machine_id: "hub", session_id: "main", title: "Persona", cwd: "/", status: "idle", state: "idle", assistant: true };
   const props = { reg: () => () => {}, hover: () => {}, go: () => () => {}, main };
+  it("uses the existing home symbol and one Main chat line, without the assistant name or face", () => {
+    const html = renderToStaticMarkup(<PersonaRow {...props} active />);
+    const home = renderToStaticMarkup(<Icon name="home" size={14} stroke={1.8} className="shrink-0 text-ink" />);
+    expect(html).toContain(home);
+    expect(html).toContain(t("sidebar.main_chat"));
+    expect(html).not.toContain("flex-col\"><span class=\"truncate text-[13.5px] font-semibold text-ink\">Persona");
+    expect(html.replace(/<[^>]+>/g, "").match(new RegExp(t("sidebar.main_chat"), "g"))).toHaveLength(1);
+  });
   it("has a ⋯ for the conversation's menu when the main conversation is there", () => {
     const html = renderToStaticMarkup(<PersonaRow {...props} active={false} onMenu={() => {}} />);
     expect(html).toMatch(/<button [^>]*aria-label="对话的操作"[^>]*aria-haspopup="menu"/);

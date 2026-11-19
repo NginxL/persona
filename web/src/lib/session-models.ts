@@ -15,7 +15,7 @@ import { sessionCan, stateOf } from "./format";
 import { runsAssistant, type AssistantLauncher } from "./assistant-chat";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
-  defaultModel, forgetCustomModel, launcherModels, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
+  defaultModel, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
 } from "./launcher-models";
 import { canSwitchModel, isCurrentModel, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
@@ -214,6 +214,11 @@ function readLaunchers(mid: string): Promise<void> {
   return read;
 }
 
+/** Reuse this computer's catalog for the pill's launcher titles. Opening the panel refreshes it. */
+export function readAgentLauncherNames(mid: string): Promise<void> {
+  return machineLauncherList(mid) ? Promise.resolve() : readLaunchers(mid);
+}
+
 /** An opening of the panel on computer `mid` for a session of launcher `own`: every list read again behind the one shown,
  *  the session's own first. */
 export function readForPanel(mid: string, own: string): void {
@@ -320,6 +325,8 @@ export interface PillSetup {
   engineLabel?: string;
   /** The provider (launcher) name: its tile, and the tooltip. */
   provider: string;
+  /** Explicit Agent launcher name, matching its panel row; absent when only an inferred engine is known. */
+  launcherName?: string;
   /** The model's name; absent while not known (no reply yet and no list to say what the launcher runs by default). */
   model?: string;
   effort?: string;
@@ -355,7 +362,7 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
   const ps = s.pending_switch;
   if (!ps?.launcher || ps.launcher === sessionLauncher(s)) return null;
   const models = listOf(ps.launcher).list?.models ?? [];
-  const row = ps.model ? models.find((m) => m.id === ps.model) : defaultModel(models);
+  const row = ps.model ? listedModel(models, ps.model) : defaultModel(models);
   const to = pendingEngine(s);
   const out: PillSetup = { engine: to || sessionEngine(s), provider: ps.launcher, model: row ? modelName(row) : ps.model ? modelLabel(ps.model) : t("chat-modelpill.default_model") };
   const effort = ps.effort || (to ? row?.default_effort : s.effort);

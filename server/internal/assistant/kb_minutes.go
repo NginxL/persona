@@ -17,6 +17,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/deeplink"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 )
@@ -54,10 +55,7 @@ func (s *Service) minutesWritten(ctx context.Context, r kb.Recording, m kb.Minut
 
 // recordingLink is a recording's page in the web app at web (web/src/lib/router.ts), "" when web is.
 func recordingLink(web, id string) string {
-	if web == "" {
-		return ""
-	}
-	return web + "/kb/recordings/" + id
+	return deeplink.Web(web, deeplink.Recording(id))
 }
 
 func (s *Service) minutesRoutes(engine func(http.ResponseWriter, *http.Request) *kb.Engine) {

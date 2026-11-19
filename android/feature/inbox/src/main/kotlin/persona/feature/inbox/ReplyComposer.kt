@@ -27,6 +27,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -143,10 +144,17 @@ class ReplyComposer(
             repository.replyUpdates(target).collect {
                 val current = state.value
                 if (!current.loading && !current.sending) {
-                    val delivery = repository.replyStatus(target, current.draft.clientId)
-                    mutableState.value = if (delivery == ReplyDelivery.Sent)
-                        ReplyComposerState(draft = ReplyDraft(""), loading = false, sent = true)
-                    else current.copy(delivery = delivery)
+                    val clientId = current.draft.clientId
+                    val delivery = repository.replyStatus(target, clientId)
+                    // The answer is about the draft as it was when it was asked for: an edit (a new id) or a send
+                    // started meanwhile stays as it is (#9907).
+                    mutableState.update { now ->
+                        when {
+                            now.loading || now.sending || now.draft.clientId != clientId -> now
+                            delivery == ReplyDelivery.Sent -> ReplyComposerState(draft = ReplyDraft(""), loading = false, sent = true)
+                            else -> now.copy(delivery = delivery)
+                        }
+                    }
                 }
             }
         }

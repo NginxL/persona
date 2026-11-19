@@ -205,34 +205,8 @@ struct AgentRowMenu: View, Equatable {
     nonisolated var unread = false
     nonisolated var takeoverAvailable = false
     nonisolated var continueAvailable = false
-    nonisolated let actions: Actions
-
-    @MainActor final class Actions {
-        private var renameHandler: (Session) -> Void = { _ in }
-        private var closeHandler: (Session) -> Void = { _ in }
-        private var linkTodoHandler: (Session) -> Void = { _ in }
-        private var deleteHandler: (Session) -> Void = { _ in }
-        private var takeoverHandler: (Session) -> Void = { _ in }
-        private var continueHandler: (Session) -> Void = { _ in }
-
-        func update(rename: @escaping (Session) -> Void, close: @escaping (Session) -> Void, linkTodo: @escaping (Session) -> Void = { _ in },
-                    delete: @escaping (Session) -> Void = { _ in }, takeover: @escaping (Session) -> Void = { _ in },
-                    continueInNewSession: @escaping (Session) -> Void = { _ in }) {
-            renameHandler = rename
-            closeHandler = close
-            linkTodoHandler = linkTodo
-            deleteHandler = delete
-            takeoverHandler = takeover
-            continueHandler = continueInNewSession
-        }
-
-        func rename(_ s: Session) { renameHandler(s) }
-        func close(_ s: Session) { closeHandler(s) }
-        func linkTodo(_ s: Session) { linkTodoHandler(s) }
-        func delete(_ s: Session) { deleteHandler(s) }
-        func takeover(_ s: Session) { takeoverHandler(s) }
-        func continueInNewSession(_ s: Session) { continueHandler(s) }
-    }
+    /// The same handlers as iOS's `AgentActionMenu` (`ChatsView.rowActions`): the list's sheets and alerts.
+    nonisolated let actions: AgentMenuHandlers
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
         a.key == b.key && a.pinned == b.pinned && a.muted == b.muted && a.looping == b.looping && a.live == b.live
@@ -348,7 +322,7 @@ struct AgentRowMenu: View, Equatable {
 extension AgentRowMenu {
     /// The menu of a row's agent, its long-press menu (on iOS the only way to it since the row's ⋯ went, #2530). With
     /// the rows' swipes gone there (#1244), Interrupt and Mark as Seen are here too.
-    @MainActor init(_ s: Session, model: AppModel, actions: Actions) {
+    @MainActor init(_ s: Session, model: AppModel, actions: AgentMenuHandlers) {
         self.init(key: s.key, pinned: model.isPinned(s.key), muted: model.isMuted(s), looping: s.loop != nil, live: s.state.isLive,
                   terminal: s.canTerminal, renamable: s.canRename, closable: s.canClose, attachable: s.canAttach, deletable: s.canDelete,
                   paneActions: NodeMenu.offersPaneActions(s),

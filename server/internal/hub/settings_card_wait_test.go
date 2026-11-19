@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/extwire"
@@ -79,7 +80,38 @@ func playManager(t *testing.T, h *Hub, answer rpc.Handler) *playedManager {
 	})
 	conn := bus.NewConn(ctx, ws)
 	peer := rpc.New("s", conn)
-	peer.OnRequest = answer
+	peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method != assistantwire.MethodFleetAskPrepared {
+			return answer(ctx, method, params)
+		}
+		// Existing played managers still express their answer as fleet.ask's
+		// Resolution. Adapt that answer to the prepared outcome and consume the
+		// retained hub handle exactly as the real coordinator's apply bus call does.
+		raw, err := answer(ctx, assistantwire.MethodFleetAsk, params)
+		if err != nil {
+			return nil, err
+		}
+		encoded, _ := json.Marshal(raw)
+		var r proto.Resolution
+		if err := json.Unmarshal(encoded, &r); err != nil {
+			return nil, err
+		}
+		var in struct {
+			Interaction proto.Interaction `json:"interaction"`
+		}
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, err
+		}
+		switch {
+		case r.UserAllowed():
+			text, err := h.applyPreparedSetting(ctx, assistantwire.AssistantID, in.Interaction.ID, r)
+			return approval.Outcome{Text: text}, err
+		case r.UserDenied():
+			return approval.Outcome{Text: "The user declined the change: nothing changed."}, nil
+		default:
+			return approval.Outcome{Text: prompts.RenderSettingUnanswered()}, nil
+		}
+	}
 	peer.Cancels = map[string]bool{assistantwire.MethodApp: true}
 	go func() { _ = peer.Serve(ctx, conn) }()
 	if err := peer.Call(ctx, busHello, map[string]string{"id": assistantwire.AssistantID}, nil); err != nil {
@@ -177,6 +209,26 @@ func hubSettingCard() proto.Interaction {
 		SessionTitle: "Persona", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(15 * time.Minute).UTC()}
 }
 
+// waitPreparedSettingForTest keeps the original Resolution assertions pointed
+// at the production prepared-settings path. It adapts only the result shape;
+// every wait, deadline, cancellation and withdrawal still runs in the hub.
+func waitPreparedSettingForTest(h *Hub, ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
+	out, err := h.waitPreparedSetting(ctx, assistantwire.AssistantID, ix, "",
+		func(context.Context, proto.Resolution) (string, error) { return "applied", nil }, nil)
+	if err != nil {
+		return proto.Resolution{}, err
+	}
+	switch out.Text {
+	case "applied":
+		allow := true
+		return proto.Resolution{Allow: &allow}, nil
+	case prompts.RenderSettingUnanswered():
+		return proto.Resolution{Dismiss: true}, nil
+	default:
+		return proto.Resolution{}, fmt.Errorf("unexpected prepared-setting outcome: %+v", out)
+	}
+}
+
 // askedCard plays the manager for the hub's own card (fleet.ask): the user allows it after allowAfter (0: never), the
 // manager ends it at its expiry when expires is set, as its queue does, and it is withdrawn when the hub stops waiting.
 type askedCard struct {
@@ -226,7 +278,7 @@ func TestHubSettingCardWaitsItsWholeLife(t *testing.T) {
 		h.askVia = nil // the hub's own wait: fleet.ask to the manager on the bus
 		card := &askedCard{start: time.Now(), allowAfter: 14 * time.Minute, expires: true}
 		playManager(t, h, card.answer)
-		r, err := h.waitInteraction(context.Background(), hubSettingCard())
+		r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.UserAllowed() || waited != 14*time.Minute || card.withdrawnAfter() != 0 {
@@ -246,7 +298,7 @@ func TestHubSettingCardEndsWithItsExpiry(t *testing.T) {
 			h.askVia = nil
 			card := &askedCard{start: time.Now(), expires: true}
 			playManager(t, h, card.answer)
-			r, err := h.waitInteraction(context.Background(), hubSettingCard())
+			r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 			waited := time.Since(card.start)
 			synctest.Wait()
 			if err != nil || !r.Dismiss || r.UserAllowed() || r.UserDenied() || waited != 15*time.Minute || card.withdrawnAfter() != 0 {
@@ -261,7 +313,7 @@ func TestHubSettingCardEndsWithItsExpiry(t *testing.T) {
 			h.askVia = nil
 			card := &askedCard{start: time.Now()}
 			playManager(t, h, card.answer)
-			r, err := h.waitInteraction(context.Background(), hubSettingCard())
+			r, err := waitPreparedSettingForTest(h, context.Background(), hubSettingCard())
 			waited := time.Since(card.start)
 			synctest.Wait()
 			if err != nil || !r.Dismiss || r.UserAllowed() || r.UserDenied() || waited <= 15*time.Minute || waited > 16*time.Minute ||
@@ -283,7 +335,7 @@ func TestHubCardWithoutExpiryWaitsForTheManager(t *testing.T) {
 		playManager(t, h, card.answer)
 		ix := hubSettingCard()
 		ix.ExpiresAt = time.Time{}
-		r, err := h.waitInteraction(context.Background(), ix)
+		r, err := waitPreparedSettingForTest(h, context.Background(), ix)
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.UserAllowed() || waited != 25*time.Minute || card.withdrawnAfter() != 0 {
@@ -302,7 +354,7 @@ func TestHubSettingCardGoesWithItsCaller(t *testing.T) {
 		playManager(t, h, card.answer)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		r, err := h.waitInteraction(ctx, hubSettingCard())
+		r, err := waitPreparedSettingForTest(h, ctx, hubSettingCard())
 		waited := time.Since(card.start)
 		synctest.Wait()
 		if err != nil || !r.Dismiss || waited != 5*time.Minute || card.withdrawnAfter() != 5*time.Minute {

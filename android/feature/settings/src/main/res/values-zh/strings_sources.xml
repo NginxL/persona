@@ -316,6 +316,9 @@
     <string name="settings_src_codex_title">Codex 设置</string>
     <string name="settings_src_codex_demo">体验模式没有电脑上的 Codex 设置。</string>
     <string name="settings_src_codex_caption">改的是那台机器的 ~/.codex/config.toml，只动下面这几项，文件里别的配置（模型提供方、项目信任等）原样保留；新开的 Codex 会话生效。</string>
+    <string name="settings_src_agy_title">Antigravity 设置</string>
+    <string name="settings_src_agy_demo">体验模式没有电脑上的 Antigravity 设置。</string>
+    <string name="settings_src_agy_caption">改的是那台机器的 ~/.gemini/antigravity-cli/settings.json，只动下面这几项；新开的 Antigravity (agy) 会话生效。</string>
     <string name="settings_src_quota_read_failed">读不到额度：%1$s</string>
     <string name="settings_src_quota_title">额度</string>
     <string name="settings_src_quota_title_named">额度 · %1$s</string>

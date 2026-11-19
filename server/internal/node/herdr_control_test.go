@@ -27,6 +27,13 @@ func startHerdr(f *fakeHerdr, pane, status string) {
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 }
 
+// agentEnvParam is the env an Agent's new tab starts with (startShellEnv: the Agent mark and the startup switches), as
+// herdr's tab.create / workspace.create take it.
+var agentEnvParam = map[string]any{
+	"PERSONA_AGENT": "1", "DISABLE_AUTO_UPDATE": "true", "DISABLE_UPDATE_PROMPT": "true",
+	"POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD": "true",
+}
+
 // startCmd is the command a Claude start types into its herdr pane (and herdr's resume of it evals): the node's
 // directory in front and the assistant's environment left out (agentenv.go), herdr told the agent is Claude
 // (HERDR_AGENT), then the launcher with Persona's flags.
@@ -141,7 +148,7 @@ func TestHerdrStartInTheProjectsWorkspace(t *testing.T) {
 	assertTrace(t, f.trace(), []string{
 		call("workspace.list", nil),
 		call("session.snapshot", nil),
-		call("tab.create", map[string]any{"workspace_id": "w1", "cwd": cwd, "label": "agent-2", "focus": false}),
+		call("tab.create", map[string]any{"workspace_id": "w1", "cwd": cwd, "label": "agent-2", "focus": false, "env": agentEnvParam}),
 		markTab("w1:p2", startID),
 		call("pane.send_input", map[string]any{"pane_id": "w1:p2", "keys": []string{"Enter"},
 			"text": startCmd("claude", "--session-id "+startID+" --permission-mode plan --effort high", personaDir(home))}),
@@ -191,7 +198,7 @@ func TestHerdrStartCreatesTheWorkspaceAndResumes(t *testing.T) {
 	}
 	assertTrace(t, f.trace(), []string{
 		call("workspace.list", nil),
-		call("workspace.create", map[string]any{"cwd": cwd, "label": "fresh", "focus": false}),
+		call("workspace.create", map[string]any{"cwd": cwd, "label": "fresh", "focus": false, "env": agentEnvParam}),
 		call("tab.rename", map[string]any{"tab_id": "w7:t1", "label": "fix the build"}),
 		markTab("w7:p1", startID),
 		call("pane.send_input", map[string]any{"pane_id": "w7:p1", "keys": []string{"Enter"},
@@ -252,7 +259,7 @@ func TestHerdrStartIntoAGivenWorkspaceReturnsOnABlockedClaude(t *testing.T) {
 	waitCalls(t, f, "session.snapshot", 2)
 	assertTrace(t, f.trace(), []string{
 		call("session.snapshot", nil),
-		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": home, "label": "a very long tab name that goes p", "focus": false}),
+		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": home, "label": "a very long tab name that goes p", "focus": false, "env": agentEnvParam}),
 		markTab("w2:p5", startID),
 		// A managed launcher's start gets Persona's settings with its gateway merged in (#1336).
 		call("pane.send_input", map[string]any{"pane_id": "w2:p5", "keys": []string{"Enter"},
@@ -302,7 +309,7 @@ func TestHerdrStartNamesTheTabOnceItExists(t *testing.T) {
 	waitCalls(t, f, "session.snapshot", 2)
 	assertTrace(t, f.trace(), []string{
 		call("session.snapshot", nil),
-		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": home, "label": "agent-1", "focus": false}),
+		call("tab.create", map[string]any{"workspace_id": "w2", "cwd": home, "label": "agent-1", "focus": false, "env": agentEnvParam}),
 		markTab("w2:p6", startID),
 		call("tab.rename", map[string]any{"tab_id": "w2:t6", "label": "named early"}),
 		call("pane.send_input", map[string]any{"pane_id": "w2:p6", "keys": []string{"Enter"},
@@ -325,7 +332,7 @@ func TestHerdrStartFailsWhenTheTabCannotBeMade(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitCalls(t, f, "tab.create", 1)
-	assertTrace(t, f.trace(), []string{call("session.snapshot", nil), call("tab.create", map[string]any{"workspace_id": "w9", "cwd": home, "label": "agent-1", "focus": false})})
+	assertTrace(t, f.trace(), []string{call("session.snapshot", nil), call("tab.create", map[string]any{"workspace_id": "w9", "cwd": home, "label": "agent-1", "focus": false, "env": agentEnvParam})})
 	var s proto.Session
 	deadline := time.Now().Add(10 * time.Second)
 	for s.StartError == "" {
@@ -341,7 +348,7 @@ func TestHerdrStartFailsWhenTheTabCannotBeMade(t *testing.T) {
 		t.Errorf("listed %+v", s)
 	}
 	trace := slices.DeleteFunc(f.trace(), func(c string) bool { return c == call("session.snapshot", nil) })
-	assertTrace(t, trace, []string{call("tab.create", map[string]any{"workspace_id": "w9", "cwd": home, "label": "agent-1", "focus": false})})
+	assertTrace(t, trace, []string{call("tab.create", map[string]any{"workspace_id": "w9", "cwd": home, "label": "agent-1", "focus": false, "env": agentEnvParam})})
 }
 
 // withStartWaits shortens how long n's starts wait for the shell to run claude, then for claude's input box. Set on n
@@ -661,7 +668,7 @@ func TestHerdrSendResumesAnOfflineSession(t *testing.T) {
 	assertTrace(t, f.trace(), []string{
 		call("session.snapshot", nil), // is it running?
 		call("workspace.list", nil),
-		call("workspace.create", map[string]any{"cwd": cwd, "label": "proj", "focus": false}),
+		call("workspace.create", map[string]any{"cwd": cwd, "label": "proj", "focus": false, "env": agentEnvParam}),
 		call("tab.rename", map[string]any{"tab_id": "w7:t1", "label": "agent-1"}),
 		markTab("w7:p1", sidA),
 		call("pane.send_input", map[string]any{"pane_id": "w7:p1", "keys": []string{"Enter"},

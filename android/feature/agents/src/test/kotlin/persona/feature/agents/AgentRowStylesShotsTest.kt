@@ -36,7 +36,6 @@ import org.robolectric.annotation.Config
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
-import persona.core.designsystem.HomeChrome
 import persona.core.designsystem.LocalHomeChrome
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.sort.AgentGrouping
@@ -48,7 +47,7 @@ import java.io.File
 /**
  * The Agents list's row styles on Glass (#4338 A9, iOS `AgentRowStyles.swift`): Avatar, Two Lines, State Cards and
  * Compact List in By Repository and By Status, light and dark, on the sessions of `AgentRowContentShotsTest` (two
- * computers; needs you, working, background waiting, muted, unread, awaiting reply, seen). Then ⋯ › Display, and
+ * computers; needs you, working, background waiting, muted, unread, awaiting reply, seen). Then Display in list settings, and
  * Brief's Compact / Detailed left as they were. PNGs in `build/row-styles-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
@@ -88,11 +87,11 @@ class AgentRowStylesShotsTest {
     @Test fun glassLight() = shoot(dark = false)
     @Test fun glassDark() = shoot(dark = true)
 
-    /** Glass's ⋯ offers iOS's four under Display, one checked; Brief keeps Compact and Detailed (decision 8). */
+    /** Glass offers iOS's four under Display, one checked; Brief keeps Compact and Detailed (decision 8). */
     @Test fun displayInTheListSettings() {
         val model = open()
         val out = File(System.getProperty("persona.shots") ?: "build/row-styles-shots").also { it.mkdirs() }
-        rule.onNodeWithContentDescription("List settings").performClick()
+        rule.reselectAgentsTab()
         rule.waitForIdle()
         for (d in listOf(false, true)) {
             rule.runOnIdle { dark = d }
@@ -162,7 +161,7 @@ class AgentRowStylesShotsTest {
         }))
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
-                CompositionLocalProvider(LocalHomeChrome provides HomeChrome(emptyList(), "Agents", onSelect = {}, leading = {})) {
+                CompositionLocalProvider(LocalHomeChrome provides agentsHomeChrome) {
                     AgentsScreen(model, Nowhere, AgentsMetadata())
                 }
             }

@@ -15,6 +15,7 @@ open class ConnectionWatchdog(context: Context, parameters: WorkerParameters) : 
     override suspend fun doWork(): Result {
         val dependencies = Notify.dependencies(applicationContext)
         dependencies.journal().capture()
+        dependencies.pairing().restore()
         val exempt = applicationContext.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(applicationContext.packageName)
         return watchdogResult(

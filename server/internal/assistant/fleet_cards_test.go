@@ -1162,6 +1162,23 @@ func putPending(s *Service, p *pending) {
 	s.fleet.mu.Unlock()
 }
 
+func TestTerminalDismissalHistoryNamesTerminal(t *testing.T) {
+	ft := newFleetTest(t)
+	at := time.Now()
+	ix := proto.Interaction{ID: "terminal-plan", MachineID: "mac", SessionID: "session", Kind: proto.IxPlan,
+		ToolName: "ExitPlanMode", CreatedAt: at, ExpiresAt: at.Add(time.Hour), Resumable: true}
+	putPending(ft.s, &pending{ix: ix})
+	ft.s.record(ix)
+	ft.event("mac", "interaction.dismiss", map[string]any{"id": ix.ID})
+	status, res, err := ft.st.InteractionOutcome(context.Background(), ix.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "dismissed" || res == nil || res.AnsweredBy != "terminal" {
+		t.Fatalf("terminal dismissal history = %q %+v, want dismissed with answered_by terminal", status, res)
+	}
+}
+
 func TestTerminalPlanResultClearsTheCardWithoutApprovingAnything(t *testing.T) {
 	for _, trigger := range []string{"sessions", "revs"} {
 		t.Run(trigger, func(t *testing.T) {
@@ -1194,8 +1211,8 @@ func TestTerminalPlanResultClearsTheCardWithoutApprovingAnything(t *testing.T) {
 				t.Fatalf("session still asks for approval: %+v", sess)
 			}
 			status, res, _ := ft.st.InteractionOutcome(context.Background(), ix.ID)
-			if status != "dismissed" || res != nil {
-				t.Fatalf("must not record a made-up phone approval: %s %+v", status, res)
+			if status != "dismissed" || res == nil || res.AnsweredBy != "terminal" || res.Approve != nil || res.Mode != "" {
+				t.Fatalf("terminal decision must name its source without a made-up phone approval: %s %+v", status, res)
 			}
 			// finished tells the hub after the hook is released: wait for it rather than look once
 			waitFor(t, "the hub to get interaction_resolved", func() bool { return len(ft.toldOf(assistantwire.EventFleetResolved)) > 0 })
@@ -1257,8 +1274,9 @@ func TestTerminalPermissionResultClearsTheCard(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the hook stayed blocked")
 	}
-	if status, res, _ := ft.st.InteractionOutcome(context.Background(), ix.ID); status != "dismissed" || res != nil {
-		t.Fatalf("must not record a made-up phone answer: %s %+v", status, res)
+	if status, res, _ := ft.st.InteractionOutcome(context.Background(), ix.ID); status != "dismissed" || res == nil ||
+		res.AnsweredBy != "terminal" || res.Allow != nil || res.Always {
+		t.Fatalf("terminal decision must name its source without a made-up phone answer: %s %+v", status, res)
 	}
 	s.fleet.mu.Lock()
 	kept := s.fleet.interactions["perm-no-id"] == noID

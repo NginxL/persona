@@ -66,6 +66,7 @@ func TestWorkflowAndMonitorBackground(t *testing.T) {
 	}
 	// A TaskStop kills the other one.
 	ParseLine(11, []byte(`{"type":"assistant","uuid":"a4","timestamp":"2026-11-05T14:31:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu4","name":"TaskStop","input":{"task_id":"wq1"}}]}}`), meta)
+	ParseLine(12, []byte(`{"type":"user","uuid":"u4","timestamp":"2026-11-05T14:31:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu4","content":"Stopped task wq1"}]}}`), meta)
 	if w := meta.Workflows[1]; w.Running || w.Status != proto.WorkflowKilled {
 		t.Fatalf("stopped run: %+v", w)
 	}

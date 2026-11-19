@@ -7,7 +7,7 @@ import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { loadPages } from "../../lib/lazy-page";
-import { putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
+import { getState, putTodo, refresh, refreshTodos, reset, upsertSession } from "../../lib/store";
 import type { Todo } from "../../lib/todos";
 import { stateName } from "../../lib/state-labels";
 import { usageLimitLabel } from "../../lib/usage-limit";
@@ -292,6 +292,32 @@ describe("Assistant Needs you / In progress trays", () => {
     act(() => entry("needs").click());
     expect(host.querySelector('[data-needs-row="task:reused-todo"]')?.textContent).toContain("Carry on the work");
     delete getFeedState().plans[reuse.id];
+  });
+
+  it("offers a failed start's other launcher first in Needs you, with its code's short line, where the hub takes it (#10365)", async () => {
+    const reuse: TaskPlan = { id: "launcher-plan", conversation, state: "started", created_at: at, tasks: [{ title: "Reused", prompt: "Go on", cwd: "/demo", machine: "demo",
+      todo_id: "launcher-todo", error: "terminal", error_code: "launcher_missing", error_args: { where: "terminal", launcher: "work" }, retry_with: ["claude"] }] };
+    getFeedState().plans[reuse.id] = reuse;
+    const features = getState().features;
+    getState().features = [...features, "task_retry_launcher"];
+    moreTodos = [{ id: "launcher-todo", title: "Carry on the work", origin: conversation, created_at: at, updated_at: at, agents: [], done_at: at,
+      start_error: "Demo's terminal can't run the launcher's program; start agents where it can, or pick another launcher." }];
+    try {
+      await act(async () => {
+        await refreshTodos();
+      });
+      // the failed start's row comes with the tray's first one (TaskDecision's chunk), not with the first screen
+      await act(async () => { entry("needs").click(); await import("./TaskDecision"); });
+      const row = host.querySelector<HTMLElement>("[data-failed-task=launcher-todo]")!;
+      expect(row.textContent).toContain(t("lib-start-retry.start_code_launcher_terminal", { launcher: "work" }));
+      const buttons = [...row.querySelectorAll("button")].map((b) => b.textContent);
+      expect(buttons.slice(1)).toEqual([t("assistant-task-actions.use_launcher_instead", { launcher: "claude" }), t("assistant-tasks.retry"), t("assistant-tasks.remove")]);
+      await act(async () => row.querySelector<HTMLButtonElement>("[data-retry-launcher=claude]")!.click());
+      expect(writes).toContain("/api/v1/todos/launcher-todo/retry");
+    } finally {
+      getState().features = features;
+      delete getFeedState().plans[reuse.id];
+    }
   });
 
   it("says Not started on the owner's own to-do in the main conversation's In progress (#7552)", async () => {

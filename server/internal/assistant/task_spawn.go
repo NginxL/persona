@@ -44,25 +44,28 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	// Unknown permission is read-only, never the owner's writable default. Codex does not expose PermissionMode, so
 	// the persisted assignment supplies it when this is that assignment's original Agent.
 	mode := parent.PermissionMode
+	assigned := false
+	for _, agent := range t.Agents {
+		if agent.MachineID == machine && agent.SessionID == session && agent.active() &&
+			(agent.Source == "manual" || agent.Source == sourceLeader || agent.Source == sourceWorker) {
+			assigned = true
+		}
+	}
+	var assignment *PlanTask
+	if assigned {
+		if p, i, err := s.currentPlanAssignment(ctx, t); err == nil && p.Tasks[i].Machine == machine {
+			assignment = &p.Tasks[i]
+		}
+	}
 	if mode == "" {
 		mode = "plan"
-		assigned := false
-		for _, agent := range t.Agents {
-			if agent.MachineID == machine && agent.SessionID == session && agent.active() &&
-				(agent.Source == "manual" || agent.Source == sourceLeader || agent.Source == sourceWorker) {
-				assigned = true
-			}
-		}
-		if p, i, err := s.currentPlanAssignment(ctx, t); assigned && err == nil {
-			task := p.Tasks[i]
-			if task.Machine == machine && task.Permission != "" {
-				mode = task.Permission
-			}
+		if assignment != nil && assignment.Permission != "" {
+			mode = assignment.Permission
 		}
 	}
 	child := PlanTask{TodoID: t.ID, Title: a.Title, Prompt: a.Prompt, Machine: machine, Cwd: parent.Cwd,
-		Launcher: parent.Launcher, Model: parent.Model, Effort: parent.Effort, Permission: mode, Readonly: mode == "plan",
-		preservePermission: true}
+		Launcher: parent.Launcher, Model: s.taskSpawnModel(ctx, parent, assignment), Effort: parent.Effort,
+		Permission: mode, Readonly: mode == "plan", preservePermission: true}
 	// A caller disconnecting must not abandon a start before its ownership is recorded.
 	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
@@ -94,6 +97,15 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	out, _ := json.Marshal(map[string]string{"machine_id": mid, "session_id": sid, "todo_id": t.ID,
 		"supervisor": t.Supervision.Supervisor, "parent": machine + "/" + session})
 	return string(out), nil
+}
+
+// taskSpawnModel uses the original assignment's model only while its Agent remains on the assignment's launcher;
+// an empty assignment launcher means the start default. Every other caller keeps the parent's model unchanged (#10557).
+func (s *Service) taskSpawnModel(ctx context.Context, parent proto.Session, assignment *PlanTask) string {
+	if assignment != nil && assignment.Model != "" && s.startLauncher(ctx, assignment.Launcher) == parent.Launcher {
+		return assignment.Model
+	}
+	return parent.Model
 }
 
 func (s *Service) spawnTask(ctx context.Context, machine, session string) (Todo, bool) {

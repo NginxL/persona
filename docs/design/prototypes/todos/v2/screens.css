@@ -1,0 +1,374 @@
+/*
+ * Variant V2 · Rounds: styles. Every rule is scoped to [data-variant="V2"] so nothing leaks into other variants.
+ * Colors, type, spacing and radii come from kit/tokens.css; light and dark follow the tokens. Spacing on the 4-pt grid.
+ */
+
+/* ---------- the to-do page (B's order) ---------- */
+[data-variant="V2"] .v2-paper { display: flex; flex-direction: column; gap: 12px; padding: 0 0 36px; }
+[data-variant="V2"] .v2-paper.is-scrolled { padding-top: 8px; }
+/* a page scrolled to its foot: the end of the page sits just above the composer, the top has passed under the bar */
+[data-variant="V2"] .v2-paper.is-bottom { position: absolute; left: var(--page-margin); right: var(--page-margin); bottom: 0; padding-bottom: 12px; min-height: 100%; box-sizing: border-box; }
+[data-variant="V2"] .v2-head { display: flex; flex-direction: column; gap: 8px; }
+[data-variant="V2"] .v2-state { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+[data-variant="V2"] .v2-state-m { width: 24px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; }
+[data-variant="V2"] .v2-state .k-stl { flex: 1; min-width: 0; }
+[data-variant="V2"] .k-stl, [data-variant="V2"] .k-ac-body, [data-variant="V2"] .k-notes { text-wrap: pretty; }
+[data-variant="V2"] .v2-recap { padding-left: 36px; }
+[data-variant="V2"] .v2-brief { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--fs-secondary); line-height: 20px; letter-spacing: -.012em; }
+/* "More" follows its text: the brief shrinks only when it does not fit */
+[data-variant="V2"] .v2-brief-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-more { flex: none; color: var(--accent); font-weight: 600; }
+[data-variant="V2"] .v2-scope { margin-top: -4px; }
+[data-variant="V2"] .v2-steps .k-blk-h { min-height: 24px; }
+[data-variant="V2"] .v2-readable { max-width: 680px; margin-left: auto; margin-right: auto; }
+
+/* every block on the paper is named alike: Steps · Agents · Results · Conversation (13 semibold --ink-2) */
+[data-variant="V2"] .v2-blk { flex: none; font-size: var(--fs-caption); font-weight: 600; color: var(--ink-2); letter-spacing: -.004em; white-space: nowrap; }
+[data-variant="V2"] .k-res-h { color: var(--ink-2); }
+
+/* the one-line blocks: "Steps 2/5 ✓ Dates ✓ Flights ◉ Ryokan ›", "3 Agents ● Widget ◐ Notes ✓ Screens ⌄", "Results · … ›" */
+[data-variant="V2"] .v2-ss { display: flex; align-items: center; gap: 12px; min-height: 44px; min-width: 0; }
+[data-variant="V2"] .v2-ss-in {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; overflow: hidden; white-space: nowrap;
+  font-size: var(--fs-secondary); color: var(--ink); letter-spacing: -.012em;
+}
+[data-variant="V2"] .v2-ss-i { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+[data-variant="V2"] .v2-ss-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-chev { flex: none; display: flex; color: var(--ink-3); }
+[data-variant="V2"] .v2-sm { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+[data-variant="V2"] .v2-sm.is-done { color: var(--positive); }
+[data-variant="V2"] .v2-sm.is-done .k-ic { width: 16px !important; height: 16px !important; }
+[data-variant="V2"] .v2-sm.is-needs { border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--needs-dot); }
+[data-variant="V2"] .v2-sm.is-needs i { width: 8px; height: 8px; border-radius: 50%; background: var(--needs-dot); }
+[data-variant="V2"] .v2-sm.is-idle { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+[data-variant="V2"] .v2-sm.is-skipped { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-3); color: var(--ink-3); }
+
+/* Results: the strip of chips bleeds to the page edge, so the cut falls at the display (or pane) edge */
+[data-variant="V2"] .v2-res .k-res-in { margin-right: calc(-1 * var(--page-margin)); padding-right: var(--page-margin); }
+[data-variant="V2"] .v2-res .k-res-in.is-overflowing { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); }
+
+/* ---------- Conversation block and rounds (B's tree) ---------- */
+[data-variant="V2"] .v2-cb { display: flex; flex-direction: column; gap: 4px; }
+[data-variant="V2"] .v2-cb-h { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
+[data-variant="V2"] .v2-cb-all { font-size: var(--fs-secondary); font-weight: 600; color: var(--accent); letter-spacing: -.012em; white-space: nowrap; }
+[data-variant="V2"] .v2-rnd { padding: 4px 0 8px; min-width: 0; }
+[data-variant="V2"] .v2-rnd.is-bg { padding: 4px 0; }
+/* the owner's words run inline: "You · 10:02 “…” ✓" wraps under its start and keeps its ✓ after the last word; on the
+   paper at most 2 lines, in the whole Conversation in full */
+[data-variant="V2"] .v2-rnd-h {
+  font-size: var(--fs-secondary); line-height: 20px; letter-spacing: -.012em; min-width: 0; text-wrap: pretty;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+[data-variant="V2"] .v2-rnd.is-full .v2-rnd-h { display: block; -webkit-line-clamp: none; overflow: visible; }
+[data-variant="V2"] .v2-rnd-who { color: var(--ink-2); }
+[data-variant="V2"] .v2-rnd-q { color: var(--ink); }
+[data-variant="V2"] .v2-rnd-q.is-answer b { font-weight: 600; }
+[data-variant="V2"] .v2-nw { white-space: nowrap; }
+[data-variant="V2"] .v2-rnd-ok { display: inline-flex; margin-left: 4px; vertical-align: -1px; color: var(--ink-2); }
+[data-variant="V2"] .v2-rnd-st { margin-top: 0; font-size: var(--fs-caption); line-height: 20px; color: var(--ink-2); letter-spacing: -.004em; }
+/* Sending is brief, not faint: it keeps the caption contrast (§2.10) like every other message state */
+[data-variant="V2"] .v2-rnd-st.k-rd-st--faint { color: var(--ink-2); }
+[data-variant="V2"] .v2-rnd-items { margin: 4px 0 0 8px; display: flex; flex-direction: column; }
+[data-variant="V2"] .v2-it { position: relative; padding: 4px 0 4px 16px; min-width: 0; }
+/* the tree: ├ on every branch, └ (rounded) on the last */
+[data-variant="V2"] .v2-it::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 1px solid var(--separator); }
+[data-variant="V2"] .v2-it::after { content: ""; position: absolute; left: 0; top: 13px; width: 8px; border-top: 1px solid var(--separator); }
+[data-variant="V2"] .v2-it:last-child::before { bottom: auto; height: 13.5px; width: 8px; border-bottom: 1px solid var(--separator); border-bottom-left-radius: 6px; }
+[data-variant="V2"] .v2-it:last-child::after { display: none; }
+[data-variant="V2"] .v2-it .k-rd-reply {
+  font-size: var(--fs-secondary); line-height: 20px; letter-spacing: -.012em;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* in the tree a line wraps instead of cutting, so a relay keeps Send Now and a scope keeps Undo */
+[data-variant="V2"] .v2-it .k-rl { display: block; min-height: 18px; line-height: 18px; white-space: normal; text-wrap: pretty; }
+[data-variant="V2"] .v2-it .k-rl > span { display: inline; white-space: normal; overflow: visible; }
+[data-variant="V2"] .v2-it .k-rl > .k-ic, [data-variant="V2"] .v2-it .k-rl > .k-mark, [data-variant="V2"] .v2-it .k-rl > .k-spin { display: inline-block; vertical-align: -1px; margin-right: 4px; }
+[data-variant="V2"] .v2-it .k-rl > .k-mark { vertical-align: 1px; }
+[data-variant="V2"] .v2-it .k-rl .k-sep { margin: 0 4px; }
+[data-variant="V2"] .v2-it .k-rl > span.k-rl-btn { display: inline-flex; white-space: nowrap; height: 24px; vertical-align: middle; margin: -4px 0 -2px 8px; }
+[data-variant="V2"] .v2-scope .k-rl { display: block; white-space: normal; }
+[data-variant="V2"] .v2-scope .k-rl > span { display: inline; white-space: normal; }
+[data-variant="V2"] .v2-scope .k-rl .k-sep { margin: 0 4px; }
+[data-variant="V2"] .v2-it .k-rl-steps { padding-left: 16px; }
+[data-variant="V2"] .v2-rl-undone > .k-ic { color: var(--ink-2); }
+/* an answered ask and a run line that a newer round has replaced: past, in --ink-2, no tone */
+[data-variant="V2"] .v2-rl-done, [data-variant="V2"] .v2-rl-past { font-size: var(--fs-caption); color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V2"] .v2-rl-done > .k-ic { color: var(--ink-2); }
+[data-variant="V2"] .v2-rl-past > .k-ic { color: var(--ink-3); }
+[data-variant="V2"] .v2-rl-past b { font-weight: 600; }
+[data-variant="V2"] .v2-rl-done b { font-weight: 600; color: var(--ink); }
+/* the scope line's Undo looks like every other Undo: an accent link, not the line's green */
+[data-variant="V2"] .k-rl--scope .k-rl-undo { color: var(--accent); font-weight: 600; }
+[data-variant="V2"] .v2-added { display: flex; align-items: center; gap: 8px; font-size: var(--fs-caption); line-height: 20px; color: var(--ink-2); letter-spacing: -.004em; margin-bottom: -4px; }
+[data-variant="V2"] .v2-added > .k-ic { color: var(--ink-3); }
+
+/* the whole Conversation (V2-04, V2-09, V2-12). One anchoring rule: a thread shorter than the page starts under the
+   header (the filler takes the free space); a longer one keeps its latest round above the composer (the top is cut) */
+[data-variant="V2"] .v2-thread {
+  position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px 12px; overflow: hidden;
+}
+[data-variant="V2"] .v2-thread > * { flex: none; }
+[data-variant="V2"] .v2-thread > .v2-fill { flex: 1 1 0; min-height: 0; }
+/* a toast over the thread's foot: the thread rises above it, so it never covers the change it reports */
+[data-variant="V2"] .v2-has-toast .v2-thread { padding-bottom: 72px; }
+[data-variant="V2"] .v2-thread .k-rd-day { margin-top: 4px; }
+[data-variant="V2"] .v2-cf { padding: 4px 0 8px; }
+[data-variant="V2"] .v2-askrow { display: flex; align-items: center; min-height: 48px; min-width: 0; }
+[data-variant="V2"] .v2-askrow .k-al { flex: 1; min-width: 0; }
+[data-variant="V2"] .v2-askrow .k-stl { flex: 1; }
+/* one line: Options shrinks to a 32-pt chevron button beside OK ("[OK: Hanami] ⌄") */
+[data-variant="V2"] .v2-askrow.is-chev .k-ans-opt > span { display: none; }
+[data-variant="V2"] .v2-askrow.is-chev .k-ans-opt,
+[data-variant="V2"] .v2-pane .v2-fold-ask .k-ans-opt {
+  margin-left: 0; width: 32px; height: 32px; border-radius: 50%; justify-content: center; background: var(--fill-chip);
+}
+[data-variant="V2"] .v2-pane .v2-fold-ask .k-ans-opt > span { display: none; }
+[data-variant="V2"] .v2-askrow.is-chev .k-al { gap: 8px; }
+[data-variant="V2"] .v2-askrow.is-chev .k-al-t { flex: 0 1 auto; }
+/* two lines in a narrow column: "● Needs you · Which ryokan?" over "[OK: Hanami] Options ⌄" (V2-09) */
+[data-variant="V2"] .v2-askrow.is-two { flex-direction: column; align-items: stretch; padding-top: 4px; }
+[data-variant="V2"] .v2-askrow-t { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 24px; font-size: var(--fs-secondary); letter-spacing: -.012em; white-space: nowrap; }
+[data-variant="V2"] .v2-askrow-t .k-sep { margin: 0; }
+[data-variant="V2"] .v2-askrow-w { flex: none; color: var(--needs-text); font-weight: 600; }
+[data-variant="V2"] .v2-askrow-q { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--needs-text); font-weight: 600; }
+[data-variant="V2"] .v2-askrow.is-two .k-al { min-height: 44px; }
+[data-variant="V2"] .v2-askrow.is-two .k-al-t { display: none; }
+/* the full card is unfolded under the header: its buttons are the answer, so OK steps aside (drawn once) */
+[data-variant="V2"] .v2-askrow.is-open .k-ans--ok { display: none; }
+[data-variant="V2"] .v2-dropwrap { position: relative; }
+[data-variant="V2"] .v2-drop { position: absolute; left: 0; right: 0; top: 100%; z-index: 60; margin-top: 4px; }
+[data-variant="V2"] .v2-drop .k-ac { box-shadow: 0 0 0 .5px var(--card-stroke), 0 12px 36px rgba(0, 0, 0, .18); }
+/* one even dim behind the card: over the thread and the composer's fog, and over the header (whose own layer holds the
+   card above its dim) */
+[data-variant="V2"] .v2-dim { position: absolute; inset: 0; z-index: 6; background: var(--scrim); }
+[data-variant="V2"] .v2-opts .k-ph, [data-variant="V2"] .v2-opts .v2-colhead { z-index: 7; }
+[data-variant="V2"] .v2-opts .k-ph::before, [data-variant="V2"] .v2-opts .v2-colhead::before {
+  content: ""; position: absolute; inset: 0; z-index: 50; background: var(--scrim); pointer-events: none;
+}
+[data-variant="V2"] .v2-opts .k-ph::after, [data-variant="V2"] .v2-opts .v2-colhead::after { display: none; }
+[data-variant="V2"] .v2-colhead { position: relative; z-index: 4; flex: none; background: var(--pg-bg, var(--dev-bg)); box-shadow: inset 0 -.5px 0 var(--separator); }
+[data-variant="V2"] .v2-colhead > .k-nav { padding-bottom: 0; }
+[data-variant="V2"] .v2-colhead-in { padding: 0 16px; }
+[data-variant="V2"] .v2-convpage .k-ph { padding-bottom: 0; }
+
+/* Decisions and Results filters */
+[data-variant="V2"] .v2-dl { display: flex; flex-direction: column; padding: 8px 0; }
+[data-variant="V2"] .v2-dl-r { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; }
+[data-variant="V2"] .v2-dl-r + .v2-dl-r::before { content: ""; position: absolute; top: 0; left: 36px; right: 0; height: .5px; background: var(--separator); }
+[data-variant="V2"] .v2-dl-ic { width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--unread-tint); color: var(--positive); }
+[data-variant="V2"] .v2-dl-ic.is-doc { background: var(--fill-chip); color: var(--ink-2); border-radius: 8px; }
+[data-variant="V2"] .v2-dl-r > div { flex: 1; min-width: 0; }
+[data-variant="V2"] .v2-dl-t { font-size: var(--fs-body); line-height: 22px; letter-spacing: -.022em; }
+[data-variant="V2"] .v2-dl-s { font-size: var(--fs-caption); line-height: 18px; color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V2"] .v2-dl-chev { color: var(--ink-3); display: flex; align-self: center; }
+
+/* ---------- the Agents line (V2 rule 7) ---------- */
+[data-variant="V2"] .v2-pane .v2-ss-in, [data-variant="V2"] .v2-outer .v2-ss-in { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
+[data-variant="V2"] .v2-ag-rows { display: flex; flex-direction: column; }
+[data-variant="V2"] .v2-ag-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; padding-left: 4px; }
+[data-variant="V2"] .v2-ag-row::before { content: ""; position: absolute; top: 0; left: 20px; right: 0; height: .5px; background: var(--separator); }
+/* one 12-pt slot for every mark; the needs dot keeps its 9-pt circle inside it */
+[data-variant="V2"] .v2-ag-row > .k-spin, [data-variant="V2"] .v2-ag-row > .k-lm { width: 12px; flex: none; }
+[data-variant="V2"] .v2-ag-row > .k-mark { margin: 0 1.5px; }
+[data-variant="V2"] .v2-ag-t { flex: none; font-size: var(--fs-secondary); font-weight: 600; letter-spacing: -.012em; white-space: nowrap; }
+[data-variant="V2"] .v2-ag-m { flex: 1; min-width: 0; font-size: var(--fs-caption); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.004em; }
+[data-variant="V2"] .v2-ag-w { color: var(--tone); font-weight: 600; }
+[data-variant="V2"] .v2-ag-w.k-tone--idle { color: var(--ink-2); font-weight: 500; }
+[data-variant="V2"] .v2-ag-open { flex: none; font-size: var(--fs-secondary); font-weight: 600; color: var(--accent); white-space: nowrap; letter-spacing: -.012em; }
+[data-variant="V2"] .v2-ag-out { flex: none; font-size: var(--fs-caption); color: var(--ink-2); white-space: nowrap; }
+
+/* ---------- composer: the label above the field (V2 rule 6) ---------- */
+/* one look for every addressee label (To Persona, To Release notes ▾, Answer: … ×): the 28-pt capsule, one x */
+[data-variant="V2"] .k-tc-note { padding: 0 8px; overflow: visible; }
+[data-variant="V2"] .v2-lbl { display: inline-flex; align-items: center; gap: 8px; }
+[data-variant="V2"] .v2-lbl .k-ach { max-width: none; }
+[data-variant="V2"] .v2-mode { background: var(--fill-chip); color: var(--ink); }
+[data-variant="V2"] .v2-anchor { position: relative; display: inline-flex; }
+/* a label's menu opens above the label row, beside the chip that opened it (the chip stays in view) */
+[data-variant="V2"] .v2-lbl-menu { position: absolute; left: 0; bottom: calc(100% + 8px); width: 0; height: 0; }
+[data-variant="V2"] .v2-lbl-menu .k-menu { top: auto; bottom: 0; left: 0; right: auto; transform: none; }
+/* the field grows to 5 lines before it scrolls, so the start of a long draft stays readable */
+[data-variant="V2"] .k-tc-cap { align-items: flex-end; padding-top: 8px; padding-bottom: 8px; }
+[data-variant="V2"] .k-tc-f { line-height: 20px; padding-top: 8px; padding-bottom: 8px; }
+[data-variant="V2"] .k-tc-f.has-text { white-space: normal; direction: ltr; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+[data-variant="V2"] .k-tc-f.has-text .k-tc-in { display: inline; white-space: normal; }
+[data-variant="V2"] .k-tc-cap > .k-ach { align-self: center; }
+
+/* ---------- the page folded over the keyboard (V2 rule 8) ---------- */
+[data-variant="V2"] .v2-fold {
+  position: relative; z-index: 4; flex: none; padding: calc(max(var(--safe-top), 6px) + 4px) 16px 0;
+  background: var(--pg-bg, var(--dev-bg)); box-shadow: inset 0 -.5px 0 var(--separator);
+}
+/* the scroll edge: what passes under the folded bar blurs and fades (iOS 26), never a crisp half line */
+[data-variant="V2"] .v2-fold::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 24px; pointer-events: none;
+  background: linear-gradient(var(--pg-bg, var(--dev-bg)) 30%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  -webkit-mask-image: linear-gradient(#000 50%, transparent); mask-image: linear-gradient(#000 50%, transparent);
+}
+[data-variant="V2"] .v2-fold.is-duo { padding-top: 12px; }
+/* 44 tall, as every bar row: ‹ and ⋯ keep their place when the page folds (title 22 + state 20 fit) */
+[data-variant="V2"] .v2-fold-r1 { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+[data-variant="V2"] .v2-fold.is-duo .v2-fold-r1 { min-height: 56px; }
+[data-variant="V2"] .v2-fold-id { flex: 1; min-width: 0; }
+[data-variant="V2"] .v2-fold-t { font-size: var(--fs-heading); font-weight: 600; line-height: 22px; letter-spacing: -.022em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-fold-s { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--fs-caption); line-height: 20px; color: var(--ink-2); white-space: nowrap; overflow: hidden; letter-spacing: -.004em; }
+[data-variant="V2"] .v2-fold-s > .k-mark, [data-variant="V2"] .v2-fold-s > .k-spin { margin-right: 2px; flex: none; }
+[data-variant="V2"] .v2-fold-s .k-sep { margin: 0 2px; flex: none; }
+[data-variant="V2"] .v2-fold-s > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-fold-w { color: var(--tone); font-weight: 600; flex: none; }
+[data-variant="V2"] .v2-fold-one { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+[data-variant="V2"] .v2-fold-one .v2-fold-t { flex: 0 1 auto; min-width: 0; }
+[data-variant="V2"] .v2-fold-one .v2-fold-w { font-size: var(--fs-secondary); letter-spacing: -.012em; }
+[data-variant="V2"] .v2-fold-sep { color: var(--ink-3); flex: none; }
+[data-variant="V2"] .v2-fold-ask { min-height: 44px; display: flex; align-items: center; }
+[data-variant="V2"] .v2-fold-ask > * { flex: 1; min-width: 0; }
+[data-variant="V2"] .v2-fold-ask .k-al-t { flex: 0 1 auto; }
+[data-variant="V2"] .v2-al-done .k-ac.is-answered { padding: 12px 0; background: transparent; }
+
+/* the composer's fog: content passing under the floating composer fades over 36 pt (m18) */
+[data-variant="V2"] .k-page > .k-bottom { padding-top: 36px; margin-top: -36px; background: linear-gradient(180deg, transparent, var(--pg-bg, var(--dev-bg)) 34px); }
+/* the bottom scroll edge (iOS 26): what passes under the composer blurs as it fades */
+[data-variant="V2"] .k-page > .k-bottom::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 44px; z-index: -1; pointer-events: none;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(transparent, #000 70%); mask-image: linear-gradient(transparent, #000 70%);
+}
+/* a page scrolled to its foot (or folded over the keyboard): nothing passes under the composer, so no fog and no band */
+[data-variant="V2"] .v2-tail > .k-bottom, [data-variant="V2"] .v2-kbpage > .k-bottom,
+[data-variant="V2"] .v2-convpage > .k-bottom, [data-variant="V2"] .v2-sesspage > .k-bottom { padding-top: 8px; margin-top: 0; background: none; }
+[data-variant="V2"] .v2-tail > .k-bottom::before, [data-variant="V2"] .v2-kbpage > .k-bottom::before,
+[data-variant="V2"] .v2-convpage > .k-bottom::before, [data-variant="V2"] .v2-sesspage > .k-bottom::before { display: none; }
+[data-variant="V2"] .v2-outer .v2-paper.is-bottom { left: 12px; right: 12px; }
+[data-variant="V2"] .v2-kbpage .v2-paper.is-bottom { padding-bottom: 4px; }
+
+/* ---------- lists ---------- */
+[data-variant="V2"] .v2-bar { margin-top: 8px; }
+/* the chosen chip is at least as wide as it is tall (All). All is pinned at the end of the capsule, before the grouping
+   icon; the scrolling row is the chips' offset parent and its fade is set per frame after render (fitBar in screens.js) */
+[data-variant="V2"] .k-sbar-in { position: relative; }
+[data-variant="V2"] .k-sbar-trail .k-btn { color: var(--ink-2); }
+[data-variant="V2"].k-web .k-sbar-chip.is-on .k-sbar-pill { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); box-shadow: none; }
+[data-variant="V2"].k-web .k-sbar-chip.is-on .k-sbar-n { color: var(--accent); }
+[data-variant="V2"] .v2-opt-open .k-tr-ans .k-ans--ok { display: none; }
+[data-variant="V2"] .v2-row-chose { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--positive); font-weight: 500; }
+[data-variant="V2"] .v2-row-chose > span { overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-list { padding-bottom: 96px; }
+[data-variant="V2"] .v2-empty { padding-top: 96px; display: flex; flex-direction: column; align-items: center; }
+[data-variant="V2"] .v2-empty .k-empty { padding-bottom: 8px; }
+[data-variant="V2"] .v2-empty-more { font-size: var(--fs-secondary); font-weight: 600; color: var(--accent); letter-spacing: -.012em; }
+
+/* ---------- menus, alert ---------- */
+[data-variant="V2"] .v2-catch { position: absolute; inset: 0; z-index: 60; }
+[data-variant="V2"] .v2-catch.is-under { z-index: 3; }
+[data-variant="V2"] .v2-menu-at { position: absolute; z-index: 70; width: 0; height: 0; }
+[data-variant="V2"] .v2-alert {
+  position: absolute; z-index: 51; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 300px;
+  padding: 24px 20px 16px; border-radius: 34px; text-align: center;
+  background: var(--sheet-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 .5px var(--glass-stroke), 0 18px 50px rgba(0, 0, 0, .22);
+}
+[data-variant="V2"] .v2-alert-t { font-size: var(--fs-heading); font-weight: 600; letter-spacing: -.022em; }
+[data-variant="V2"] .v2-alert-b { margin-top: 8px; font-size: var(--fs-secondary); line-height: 20px; color: var(--ink-2); letter-spacing: -.012em; }
+[data-variant="V2"] .v2-alert-acts { display: flex; gap: 8px; margin-top: 20px; }
+[data-variant="V2"] .v2-alert-btn {
+  flex: 1 1 0; min-width: 0; height: 48px; border-radius: 24px; display: grid; place-items: center; white-space: nowrap;
+  background: var(--fill-chip); font-size: var(--fs-body); font-weight: 600; letter-spacing: -.022em; color: var(--ink);
+}
+[data-variant="V2"] .v2-alert-btn.is-danger { color: var(--danger); }
+
+/* ---------- an Agent's session ---------- */
+[data-variant="V2"] .v2-sess-st { display: flex; align-items: center; gap: 8px; min-height: 40px; min-width: 0; font-size: var(--fs-secondary); color: var(--ink-2); letter-spacing: -.012em; white-space: nowrap; }
+[data-variant="V2"] .v2-sess-st b { color: var(--ink); font-weight: 600; }
+[data-variant="V2"] .v2-sess-st .k-sep { margin: 0; }
+[data-variant="V2"] .v2-w { color: var(--tone); font-weight: 600; }
+/* the session is a chat surface: its latest text sits just above the plan card and the composer, as the thread does */
+[data-variant="V2"] .v2-sesspage .k-body { display: flex; flex-direction: column; }
+/* a short session starts under its header (V2-11, V1-06 wireframes); the plan card waits at the foot */
+[data-variant="V2"] .v2-sess { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px 0 12px; }
+[data-variant="V2"] .v2-sess-who { font-size: var(--fs-caption); font-weight: 600; color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V2"] .v2-sess-text { font-size: var(--fs-body); line-height: 1.42; letter-spacing: -.022em; }
+[data-variant="V2"] .v2-pending { margin: 0 4px 12px; }
+[data-variant="V2"] .v2-pending .k-ac { box-shadow: 0 0 0 .5px var(--card-stroke); }
+
+/* ---------- device chrome (kit requests; V2's frames follow §3.0.2 meanwhile) ---------- */
+/* the Duo outer display's home indicator is vertical, 5 × 134, on the right edge (it never crosses the content) */
+[data-variant="V2"].dev--duo-outer .dev-home { left: auto; right: 6px; top: 50%; bottom: auto; width: 5px; height: 134px; margin: -67px 0 0; }
+/* the Dynamic Island is always black, with no ring in dark */
+[data-theme=dark] [data-variant="V2"] .dev-island, [data-theme=dark] [data-variant="V2"].dev .dev-island { box-shadow: none; }
+/* the scrolled paper's inline title sits leading next to ‹ (as in the folded bar and the pinned header), 17 semibold */
+[data-variant="V2"] .v2-inline .k-nav-title { font-size: var(--fs-heading); }
+
+/* ---------- iPhone Duo ---------- */
+[data-variant="V2"] .v2-outer-top { flex: none; padding: 12px 12px 0; }
+[data-variant="V2"] .v2-outer .k-body { padding-left: 12px !important; padding-right: 12px !important; }
+[data-variant="V2"] .v2-outer-title { display: flex; align-items: center; min-height: 44px; margin-left: -4px; }
+[data-variant="V2"] .v2-over { position: absolute; inset: 0; z-index: 50; }
+/* E4: the side column's page items are 48-pt glass circles, symbols only, in one shared glass 4 pt apart */
+[data-variant="V2"] .dev-side-actions { width: 56px; padding: 4px; gap: 4px; border-radius: 28px; }
+[data-variant="V2"] .dev-side-item { width: 48px; height: 48px; border-radius: 24px; gap: 0; }
+[data-variant="V2"] .dev-side-actions .dev-side-label { display: none; }
+/* the selected Duo tab: accent symbol and name on a light accent lozenge (iOS 26 tab bars), not a filled button */
+[data-variant="V2"] .dev-tab-item.is-on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+[data-variant="V2"] .dev-tab-item.is-on .dev-tab-name { color: var(--accent); }
+
+/* a narrow ask card keeps every price: the line wraps instead of cutting */
+[data-variant="V2"] .k-ac-prices { -webkit-line-clamp: 2; }
+[data-variant="V2"] .k-ac-prices:has(.v2-pl) { display: block; overflow: hidden; }
+[data-variant="V2"] .v2-pl { display: flex; flex-wrap: wrap; margin-left: -16px; }
+[data-variant="V2"] .v2-pl > span { white-space: nowrap; }
+[data-variant="V2"] .v2-pl > span::before { content: "·"; display: inline-block; width: 16px; text-align: center; }
+/* Work details: named like every block on the paper (13 semibold --ink-2); its rows wrap rather than cut, each opens
+   something (›), and Done when draws its marks as the steps line does */
+[data-variant="V2"] .v2-wd .k-wd-line b { font-size: var(--fs-caption); font-weight: 600; color: var(--ink-2); letter-spacing: -.004em; }
+[data-variant="V2"] .k-wd-r { white-space: normal; padding: 8px 0; min-height: 36px; }
+[data-variant="V2"] .k-wd-r > span:nth-child(2) { overflow: visible; text-wrap: pretty; }
+[data-variant="V2"] .k-wd-r > .k-ic:last-child { color: var(--ink-3); flex: none; }
+[data-variant="V2"] .v2-dw { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 4px; }
+[data-variant="V2"] .v2-dw-i { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+[data-variant="V2"] .v2-dw-i .v2-sm { width: 14px; height: 14px; }
+[data-variant="V2"] .v2-dw-i .v2-sm.is-done .k-ic { width: 14px !important; height: 14px !important; }
+/* a 335-pt half: the one-line blocks keep 8 pt gaps so "3 Agents ● Widget ◐ Notes ✓ Screens" fits */
+[data-variant="V2"] .v2-pane .v2-ss, [data-variant="V2"] .v2-pane .v2-ss-in { gap: 8px; }
+
+/* the scroll edge under a pinned or column header: the thread passes under a short fog */
+[data-variant="V2"] .v2-convpage .k-ph::after, [data-variant="V2"] .v2-colhead::after, [data-variant="V2"] .v2-sesspage .k-ph::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 20px; pointer-events: none;
+  background: linear-gradient(var(--pg-bg, var(--dev-bg)), transparent);
+}
+
+/* Don't handle is recorded and undoable, but it is not an answer: the collapsed card is neutral */
+[data-variant="V2"] .v2-declined .k-ac.is-answered { color: var(--ink-2); }
+
+/* ---------- web (E6: radius card 10, control 8, chip 6; UI text from 13; chat body 15) ---------- */
+[data-variant="V2"].k-web { --r-cell: 10px; --fs-caption: 13px; --fs-label: 13px; }
+[data-variant="V2"].k-web .v2-state-m { width: 16px; height: 18px; }
+[data-variant="V2"].k-web .v2-recap { padding-left: 28px; }
+[data-variant="V2"].k-web .k-ac { border-radius: 10px; }
+[data-variant="V2"].k-web .k-ac-btn, [data-variant="V2"].k-web .k-ans, [data-variant="V2"].k-web .k-btn { border-radius: 8px; }
+[data-variant="V2"].k-web .k-btn--glass, [data-variant="V2"].k-web .k-btn-group {
+  border-radius: 8px; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+[data-variant="V2"].k-web .k-btn--glass.is-icon, [data-variant="V2"].k-web .k-btn-group .k-btn { color: var(--ink-2); }
+[data-variant="V2"].k-web .k-tch-c, [data-variant="V2"].k-web .k-tch-add, [data-variant="V2"].k-web .k-res-c, [data-variant="V2"].k-web .k-ach { border-radius: 6px; }
+[data-variant="V2"].k-web .k-tc-cap { border-radius: 12px; padding-top: 6px; padding-bottom: 6px; }
+[data-variant="V2"].k-web .k-tc-f { padding-top: 4px; padding-bottom: 4px; }
+[data-variant="V2"].k-web .v2-thread .v2-rnd-h, [data-variant="V2"].k-web .v2-thread .k-rd-reply, [data-variant="V2"].k-web .v2-sess-text { font-size: 15px; line-height: 22px; }
+[data-variant="V2"].k-web .v2-thread .v2-it::after { top: 15px; }
+[data-variant="V2"].k-web .v2-thread .v2-it:last-child::before { height: 15.5px; }
+[data-variant="V2"].k-web .v2-rnd-h { line-height: 20px; }
+/* what replaces the to-do in its 796 column keeps the paper's readable width (content ≤ 680, centred), bar controls included */
+[data-variant="V2"] .v2-webcol { position: absolute; top: 0; bottom: 0; left: 50%; width: min(100%, 712px); transform: translateX(-50%); }
+
+/* a 335-pt half: the owner's words on one line, cut before their ✓ (V2-08) */
+[data-variant="V2"] .v2-rnd-h.is-one { display: block; -webkit-line-clamp: none; }
+[data-variant="V2"] .v2-rnd-one { display: flex; align-items: baseline; min-width: 0; }
+[data-variant="V2"] .v2-rnd-one-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="V2"] .v2-rnd-one > .v2-rnd-ok { flex: none; align-self: center; }
+/* a pointer row has no buttons, so its line may take two lines where the list is narrow (never "open be…") */
+[data-variant="V2"] .v2-ptr .k-tr-line { align-items: flex-start; white-space: normal; }
+[data-variant="V2"] .v2-ptr .k-tr-line > .k-mark { margin-top: 5.5px; }
+[data-variant="V2"] .v2-ptr .k-tr-text { overflow: visible; text-wrap: pretty; }
+/* a row title that wraps keeps more than one word on its last line */
+[data-variant="V2"] .k-tr-title { text-wrap: pretty; }

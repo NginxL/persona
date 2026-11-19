@@ -51,7 +51,10 @@ const render = (isUser: boolean) =>
     </ChatActionsContext.Provider>,
   ));
 const openMenu = () =>
-  act(() => void document.querySelector('[data-testid="bubble"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
+  act(async () => {
+    document.querySelector('[data-testid="bubble"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    await vi.dynamicImportSettled();
+  });
 const items = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")];
 const save = () => items().find((i) => i.textContent?.includes(t("chat-messageactions.save_as_prompt")));
 
@@ -72,7 +75,7 @@ afterEach(() => {
 
 it("opens the editor filled with your message, named from its first words", async () => {
   render(true);
-  openMenu();
+  await openMenu();
   expect(save()).toBeTruthy();
   act(() => save()!.click());
   const name = () => document.querySelector<HTMLInputElement>('[data-testid="saved-prompt-name"]');
@@ -83,9 +86,9 @@ it("opens the editor filled with your message, named from its first words", asyn
   await until(() => expect(hub.posted).toEqual([{ name: "review-this-diff-2", text: "Review this diff for security issues." }]));
 });
 
-it("is not on a reply's menu", () => {
+it("is not on a reply's menu", async () => {
   render(false);
-  openMenu();
+  await openMenu();
   expect(items().length).toBeGreaterThan(0);
   expect(save()).toBeUndefined();
 });

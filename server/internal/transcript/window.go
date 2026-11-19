@@ -14,6 +14,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/tokenuse"
 )
 
 // Opening a big transcript cold (a node that just started, a session not opened for a while) used to parse all of it
@@ -393,7 +394,7 @@ func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) M
 	return Meta{Sidechain: f.meta.Sidechain, Codex: w.codex, notified: scratch.notified, taskCalls: scratch.taskCalls,
 		handbacks: scratch.handbacks, agentCalls: scratch.agentCalls, bashInput: bash,
 		Ultracode: ultra.Ultracode, UltracodeAt: ultra.UltracodeAt, UltracodeSince: ultra.UltracodeSince, ultracodeCommand: ultra.ultracodeCommand,
-		usage: usage, codexTotal: codexTotal, sawUser: b > 2}
+		usage: usage, codexTotal: tokenuse.CodexTotalFrom(codexTotal), sawUser: b > 2}
 }
 
 // codexTokenCount marks a rollout's token_count line (seedCodexTotal).

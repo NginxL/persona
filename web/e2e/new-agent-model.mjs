@@ -148,6 +148,8 @@ async function openPanel(page, tag) {
   await expectVisible(panel, `${tag}: the model panel`);
   // every launcher's list is read on opening (three at a time): the groups' spinners go
   await until(async () => (await panel.locator('[role="status"]').count()) === 0, `${tag}: the panel's lists did not load`);
+  // The catalog is one disclosure per launcher; these existing checks exercise the model actions below them.
+  while (await panel.locator('[data-panel-launcher][aria-expanded="false"]').count()) await panel.locator('[data-panel-launcher][aria-expanded="false"]').first().click();
   return panel;
 }
 
@@ -211,7 +213,7 @@ async function run(browser, pass) {
 
   let panel = await openPanel(page, tag);
   const follow = panel.locator("[data-follow-row]");
-  if ((await follow.getAttribute("aria-selected")) !== "true") fail(`${tag}: the follow row isn't checked`);
+  if ((await follow.getAttribute("aria-pressed")) !== "true") fail(`${tag}: the follow row isn't checked`);
   const followText = (await follow.textContent()) ?? "";
   if (!followText.includes(w.follow) || !followText.includes(FOLLOWED)) fail(`${tag}: the follow row says ${followText}`);
   if (!(await panel.locator(`${rowSel("claude", "default")}[data-current]`).count())) fail(`${tag}: claude's Default row isn't the one that runs`);
@@ -225,12 +227,12 @@ async function run(browser, pass) {
   for (const name of ["claude", "work_gw", "team_gw", "sonnetcc", "codex"]) {
     if (!groups.includes(name)) fail(`${tag}: no ${name} group in ${JSON.stringify(groups)}`);
   }
-  const cells = await panel.locator("[data-rail-cell]").evaluateAll((els) => els.map((e) => e.dataset.railCell));
-  for (const cell of ["recent", "favorites", "all", "claude", "work_gw", "team_gw", "sonnetcc", "codex"]) {
-    if (!cells.includes(cell)) fail(`${tag}: no ${cell} cell on the rail ${JSON.stringify(cells)}`);
+  const cells = await panel.locator("[data-panel-launcher]").evaluateAll((els) => els.map((e) => e.dataset.panelLauncher));
+  for (const cell of ["claude", "work_gw", "team_gw", "sonnetcc", "codex"]) {
+    if (!cells.includes(cell)) fail(`${tag}: no ${cell} launcher summary ${JSON.stringify(cells)}`);
   }
   await expectVisible(panel.getByRole("button", { name: w.configure }), `${tag}: Configure models`);
-  ok(`${tag}: the panel lists the presets, a group and a rail cell per launcher, and Configure models`);
+  ok(`${tag}: the panel lists the presets, a group and summary per launcher, and Configure models`);
 
   // the launchers that failed their check here: listed with why, rows off, How to fix (#1643)
   for (const [name, reason] of [["work_gw", w.terminal], ["team_gw", w.auth]]) {
@@ -289,7 +291,7 @@ async function run(browser, pass) {
   await until(async () => (await sw.getAttribute("aria-checked")) === "true", `${tag}: ultracode didn't turn on`);
   await pillReady(page, tag, { model: "model-chat", engine: "claude", effort: w.high });
   if (!(await pillOf(page).locator("[data-ultracode-mark]").count())) fail(`${tag}: no ultracode mark on the pill`);
-  if ((await panel.locator("[data-follow-row]").getAttribute("aria-selected")) !== "true") fail(`${tag}: an effort unchecked the follow row`);
+  if ((await panel.locator("[data-follow-row]").getAttribute("aria-pressed")) !== "true") fail(`${tag}: an effort unchecked the follow row`);
   await inWindow(page, tag);
   await shot("flyout");
   ok(`${tag}: the flyout of the row that runs sets the effort (High on the pill) and turns ultracode on (its mark on the pill)`);
@@ -335,21 +337,21 @@ async function run(browser, pass) {
   ok(`${tag}: on the Mac Studio the Codex pick falls back to the default, said under the box`);
 
   panel = await openPanel(page, tag);
-  if (await panel.locator('[data-rail-cell="codex"]').count()) fail(`${tag}: the Mac Studio's panel has codex`);
-  if ((await panel.locator("[data-follow-row]").getAttribute("aria-selected")) !== "true") fail(`${tag}: the follow row isn't checked after the fallback`);
+  if (await panel.locator('[data-panel-launcher="codex"]').count()) fail(`${tag}: the Mac Studio's panel has codex`);
+  if ((await panel.locator("[data-follow-row]").getAttribute("aria-pressed")) !== "true") fail(`${tag}: the follow row isn't checked after the fallback`);
   // a pick by hand, then the follow row takes it back
   await pickRow(panel.locator(rowSel("claude", "opus")));
   await page.locator("[data-model-panel]").waitFor({ state: "detached", timeout: 5000 }).catch(() => fail(`${tag}: the panel stayed after a pick`));
   await pillReady(page, tag, { model: "Opus 5.5", engine: "claude" });
   if (await dropped.count()) fail(`${tag}: the dropped note stays after a pick`);
   panel = await openPanel(page, tag);
-  if ((await panel.locator("[data-follow-row]").getAttribute("aria-selected")) !== "false") fail(`${tag}: the follow row is checked with Opus picked`);
+  if ((await panel.locator("[data-follow-row]").getAttribute("aria-pressed")) !== "false") fail(`${tag}: the follow row is checked with Opus picked`);
   if (!(await panel.locator(`${rowSel("claude", "opus")}[data-current]`).count())) fail(`${tag}: Opus isn't lit`);
   await panel.locator("[data-follow-row]").click();
   await page.locator("[data-model-panel]").waitFor({ state: "detached", timeout: 5000 }).catch(() => fail(`${tag}: the panel stayed after the follow row`));
   await pillReady(page, tag, { model: "model-chat", engine: "claude" });
   panel = await openPanel(page, tag);
-  if ((await panel.locator("[data-follow-row]").getAttribute("aria-selected")) !== "true") fail(`${tag}: the follow row isn't checked again`);
+  if ((await panel.locator("[data-follow-row]").getAttribute("aria-pressed")) !== "true") fail(`${tag}: the follow row isn't checked again`);
   await shot("follow");
   ok(`${tag}: a pick unchecks the follow row; the follow row goes back to Model settings' model`);
   await closePanel(page, tag);

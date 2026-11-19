@@ -6,6 +6,7 @@ The repo hard-codes nobody's machines, accounts, domains, or preferences. Everyt
 | --- | --- | --- | --- |
 | Build / deploy config | `~/.config/persona/config.json` on the dev machine (point elsewhere with `PERSONA_CONFIG`), template `config.example.json` at the repo root | `scripts/*` (via `scripts/persona_config.py`), XcodeGen (via the generated `apple/Config.xcconfig`) | The App's bundle id and team, the App Store Connect account, TestFlight testers, which machine / address the hub is on, machines to deploy to, simulators |
 | hub runtime config | `~/.persona/hub.json` on the hub machine (0600, contains the token and database password; written by `personad hub setup`, or generated automatically the first time the hub starts; `hub pair`, `hub peer`, `hub manager-code` and `hub assistant-token` only talk to a running hub: they need this file and never create it) | `personad hub` | Listen address, public address, which machines to connect, push timings, whether the hub starts the built-in manager |
+| Link config | `~/.persona/link.json` on each computer with Persona Link (0600, contains its credentials; written by `persona-link pair`, `ssh`, `proxy` and the running link) | `persona-link` | Active and passive pairings, hub addresses, the optional SSH tunnel ([link.md](link.md), "SSH tunnel") and outbound proxy (`proxy`: a URL or `"off"`, [link.md](link.md), "Outbound proxy") |
 | Manager config | `~/.persona/managers/assistant/manager.json` for the built-in manager, `~/.persona/managers/<id>/manager.json` for one made in the app (0600) | the manager (`personad assistant`, `personad manager run`) | Whose assistant it is and what it should know, where it runs by default, the AI gateway and models, the Agents' triage, question delegation and launcher health, the Inbox and its AI twin, the knowledge base, how long hook cards wait; connectors, extensions written by hand, bots, mail sign-ins and the Gmail proxy, Lark and lark-cli, usage sources ("manager.json" below) |
 
 The configs live outside the repo: releases run in a clean worktree (`docs/operations/release.md`), where anything outside the repo would be missing; it also avoids committing them by accident.
@@ -94,7 +95,7 @@ open ports, or a Tailscale account; the hub tries ssh first and falls back to ta
    ```
 
    `ssh_host` is the host name the **hub machine** uses to SSH to this one (each side has its own `~/.ssh/config`, so it can differ from `ssh` in step 1); `id` should match step 1;
-   `name` is the name shown in the App; `icon` is `server` / `laptop` / `desktop`. `remote_bin` is the path of `personad` on that computer; when omitted the hub uses `~/.persona/bin/personad` (the canonical binary the deploy script installs); set it if installed elsewhere.
+   `name` is the name shown in the App; `icon` is `server` / `laptop` / `desktop`. `remote_bin` is the path of `personad` on that computer; when omitted the hub uses `~/.persona/bin/personad` (the canonical binary the deploy script installs); set it if installed elsewhere. It may be a wrapper script that sets the node's environment and runs personad; **Redeploy** over ssh does not replace a script, so update the personad it runs by hand ([node-update.md](node-update.md) "Usage").
    Whose assistant it is and what it should know (`assistant.owner`, `assistant.notes`) go into the built-in manager's `~/.persona/managers/assistant/manager.json` (make it, 0600, if it isn't there yet; see "manager.json" below). For direct public access add `public.tls_listen` and `public.advertise` and open the TLS port per the [network doc](network.md); keep `public_url` as a reachable private-network address.
 
 4. **Restart the hub so it reads the new config**: `./scripts/deploy/deploy.sh <hub machine id>` (or `systemctl --user restart personad` on the hub machine).
@@ -283,6 +284,12 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
   aliases / functions in `~/.zshrc` and Persona-managed launchers keep their own settings. This directory is also added automatically to the session-search directories above. The node must also be this version; manual hub.json edits require a hub restart and take effect on reconnect.
 - `machines[].inbox_dir` (optional): this computer's **receive folder**, where files sent to it to keep land (from the phone with `dest=inbox`, and from another computer through `POST /api/v1/files/transfer`), e.g. `"~/Inbox"` (`~/` is that machine's home) or an absolute folder in the home.
   Omitted means `~/Downloads/Persona`. The node makes it when missing and refuses a folder the phone may not write to (outside the home, `~/.persona`, `~/Library`, key folders, links out of the home: 409 `read_only`), so a typo never creates a folder elsewhere ([file-transfer.md](../protocol/file-transfer.md)). Manual hub.json edits require a hub restart.
+- `machines[].extra_path` (optional): directories this computer's node puts in front of its PATH, for tools a service's PATH (launchd, systemd, an ssh session) does not have,
+  e.g. `["~/.cargo/bin", "/opt/tools/bin"]` (`~/` is that machine's home; other relative entries and `$VARIABLES` are ignored). The node also adds the shims directories of mise
+  (`$MISE_DATA_DIR`, else `$XDG_DATA_HOME/mise`, else `~/.local/share/mise`) and asdf (`$ASDF_DATA_DIR`, else `~/.asdf`) that exist, after the rest of its PATH, by itself: a repository whose `git-lfs` comes from mise
+  gets its worktrees without any setting (#10127). Both reach the herdr server the node starts too, after the system directories its login shell starts from
+  (`docs/integrations/engines.md` ("When herdr is not running")); a server already running keeps its PATH until it restarts. The node reads them itself, so no service file holds them
+  and rerunning `personad hub setup` or `node-launchd.sh install` keeps them. The node must also be this version; manual hub.json edits require a hub restart and take effect on reconnect.
 - `machines[].botmux` (optional): false means this computer's node neither lists botmux sessions nor runs botmux (no `botmux observe`, `botmux dashboard current`);
   omitted means the old behavior, listing sessions if botmux is installed (`docs/integrations/engines.md` ("botmux")). The node must also be this version; manual hub.json edits require a hub restart and take effect on reconnect.
   It is now only a default: "Also Show botmux Sessions" in machine details (the web in the page header, iOS under "Engine") is stored per machine in settings (`botmux/<machine id>`) and wins once set (#2575).
@@ -565,6 +572,40 @@ configuration and credentials in the private profiles; do not copy existing hist
 activation, verify the installed binary's version, checksum and `personad manager capabilities --json`, the four service
 environment values, durable ownership and the actual derived directory. After activation, verify a reply and a harmless
 Persona tool call through the dedicated node, then switch between both assistants and inspect both histories.
+
+## A local external model adapter
+
+An advanced, optional node integration can reuse connections managed by a local program. Set
+`PERSONA_LAUNCHER_ADAPTER_CONFIG` only in that node service's startup environment to the absolute path of a private
+JSON configuration file. With no value, no adapter file or executable is searched for. This is local configuration,
+not hub state: the hub, manager configuration messages and clients cannot register executable commands.
+
+```json
+{
+  "version": 1,
+  "id": "example",
+  "command": ["/absolute/path/to/interpreter", "/absolute/path/to/adapter-entry", "integration"],
+  "native_program": "/absolute/path/to/claude"
+}
+```
+
+Use a stable `id`. `command` is an argument array, not a shell command; the first entry and `native_program` must be
+trusted absolute executable paths. A compiled adapter can use a one-element command array. Interpreter-based tools
+must name their interpreter explicitly rather than depend on a service finding it through an `env` shebang.
+Keep the configuration 0600 in a directory other users cannot modify; symlink configuration files and unsafe owners
+or write permissions are rejected. The command and native executable are validated on this computer, never supplied
+by a model inventory or request. Restart that node to load a changed registry; no installer or production service
+configuration is changed automatically.
+
+The first supported use is an explicit main-chat model pick on POSIX using the Claude Code CLI without a required
+agent sandbox. Unsupported execution methods and sandbox combinations fail before the agent starts, without
+changing the policy. This source cannot become a global default, profile/tier, background-task model or coding Agent
+launcher. Existing connections and their defaults are unchanged. If a saved pick names a disabled adapter, restore
+that local configuration or reset the main chat's pick; Persona does not choose another connection silently.
+
+The inventory is sanitized metadata. Connection credentials stay on the executing computer; a bootstrap may use a
+0600 temporary settings file in a 0700 directory, removed at process exit or forced stop. Full protocol, cache and
+lifecycle rules: `docs/integrations/launchers.md` ("External model adapters").
 
 ## DDNS (public.ddns)
 

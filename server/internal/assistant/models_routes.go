@@ -40,6 +40,9 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 		return p, err
 	}
 	p.InheritedFrom = inheritedLabel(s.requestCtxLang(ctx), p, base, from, providers)
+	if isExtensionPurpose(p.ID) && !readOnly {
+		p.Candidates = s.purposeCandidates(ctx, p.ID, r.Candidates, p.Effective)
+	}
 	if p.Kind == "api" {
 		p.MachineID = s.settings(ctx).MachineID // where a launcher picked for it runs (models_run.go)
 	}
@@ -156,6 +159,7 @@ func (s *Service) modelConfigRoutes() {
 			}
 			purposes = append(purposes, p)
 		}
+		s.addModelUsage(ctx, purposes)
 		apierr.WriteJSON(w, map[string]any{"purposes": purposes, "providers": providers})
 	})
 	detail := func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +222,13 @@ func (s *Service) modelConfigRoutes() {
 			apierr.Write(w, 400, err)
 			return
 		}
+		var candidates *candidateSetting
+		if in.Candidates != nil {
+			if candidates, err = s.patchCandidates(ctx, p, in.Candidates); err != nil {
+				apierr.Write(w, 400, err)
+				return
+			}
+		}
 		if p.Kind == "launcher" { // passed to an agent as --model: a model id (#1644)
 			if err := checkModelID(b.Model); err != nil {
 				apierr.Write(w, 400, err)
@@ -254,7 +265,7 @@ func (s *Service) modelConfigRoutes() {
 				return
 			}
 		}
-		if err = s.saveModelRecord(ctx, id, p.Revision, b); err != nil {
+		if err = s.writeModelRecord(ctx, id, p.Revision, b, candidates, in.Candidates != nil); err != nil {
 			status := 500
 			if errors.Is(err, errModelConflict) {
 				status = 409

@@ -1,5 +1,39 @@
 # Lessons: hub / node and networking
 
+## Contribution identity must match both preview and commit (#10272)
+
+UI routes and switches identify a contribution by extension plus local ID. A global UI-ID conflict check can therefore
+make an unrelated disabled built-in block installation. Check both registry preview and plan commit: fixing only
+preview leaves the install broken. Exercise real installs, batched plans, upgrades, rollback and reload, while keeping
+non-UI contribution conflicts and within-manifest duplicate checks intact.
+
+## Empty assistant creation must not become a model turn
+
+Android allocates an assistant conversation before sending its queued message. The manager passed an empty prompt
+correctly, but the node appended its live snapshot and delivered a context-only turn. Check for text or images before
+requesting context or submitting model input, and keep the new conversation idle. Preserve deferred runtime instructions
+in the session record until the first successful delivery. A manager test with a fake node cannot catch this: exercise
+the real node against a recording CLI and runtime, including prewarmed sessions, whitespace, images and node restart.
+
+## Progress snapshots must be JSONB-safe (#9755)
+
+A Go map key joined with NUL marshals to `\u0000`, which PostgreSQL JSONB rejects with `22P05`.
+Hash a structured machine/session pair instead, validate snapshot strings before saving, and remove NUL from
+model-written summaries without altering literal backslash-u0000 text. Exercise multiple Agent answers against
+real PostgreSQL: an in-memory JSON store accepts the very payload the production database refuses.
+If saving an assessment fails, expose the error and signal supervision without counting undurable evidence.
+A history-write failure must not suppress escalation from an assessment already committed with its schedule.
+Progress also depends on identity and evidence quality, not just timestamps: use the persisted conversation origin
+to exclude every past patrol conversation, and retain per-Agent unreadable markers so a first successful read cannot
+invent progress. Retain older known evidence so partial node failures cannot hide a real change, without suppressing
+newly linked workers' genuine output. Equal-time runs need their distinct
+IDs and dispatch order when recovering a delayed history write. Recover a watcher's evicted history row under the
+same ID, within the existing cap; history retention must not determine whether a completed run is assessed.
+Runtime failures and their automatic retries belong to the scheduler's failure handling, not the no-progress count.
+Distinguish an assessment commit failure from its history projection failing: keep a committed result and its count
+while retrying the latter. A task-leader Agent reference is not a conversation identity; use the existing authority
+of the conversation above that leader for scheduler-triggered worker decisions, without taking over the worker.
+
 ## Journal recovery before changing live update files (#6921)
 
 A fence saying an update started cannot restore a Web directory renamed before `pending.json`
@@ -159,6 +193,30 @@ restarted, where the per-connection read had at least tried again. Keep only a f
 empty one after a backoff (five minutes), so a Mac where it always fails does not run it on every connection. Its
 output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands (`newModelLookup` takes
 the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
+
+## A resolved path is not one every terminal has (2026-11-18, #10365)
+
+A computer whose home is a link (`/home/me -> /data/home/me`) ran its herdr terminals in a container that mounts the
+home at `/home/me` and has no `/data`. The node took its own program from `os.Executable()` plus `EvalSymlinks` (on
+Linux `/proc/self/exe` is already resolved, so dropping `EvalSymlinks` alone changes nothing) and typed that path into
+every managed launcher's start, hook, MCP config and codex-start line: the container answered `No such file or
+directory`, and Persona recorded the launcher as missing in the terminal. Git did the same to task checkouts: `git
+worktree add` writes both links between a worktree and its repository as resolved paths, so inside the container the
+checkout was "not a git repository" and the main checkout listed it as prunable (a `git worktree prune` there deletes
+its record). A path a process on this computer may open has to be the one that process can see, and a link is not
+always visible where the processes run: keep the resolved file for what needs the file itself (an update replaces it,
+macOS attributes Full Disk Access to it, comparisons use `realPath`), and hand out the home's own spelling of the same
+file (`os.SameFile`, `node/selfprogram.go`), in the generated files the doctor compares too, or the node and
+`personad node doctor` rewrite each other's files. Do not reach for git's relative worktree links: they set
+`extensions.relativeWorktrees` in the repository's shared config, and git before 2.48, libgit2 and go-git then refuse
+the whole repository; rewriting the absolute links to the home's spelling works for every git on both sides.
+
+A spelling handed out is not an identity. Once the node answered a task's directory by the home's spelling, the hub's
+check of which to-do writes there compared it as text with Agents recorded under the resolved spelling before the
+upgrade, and found nobody: a second to-do could be started in a directory the first still wrote in. Where the hub
+compares a node's paths, fold the home's two spellings (`home_real`) on both sides, as remembered task kinds do
+(`trustDir`) and task directories now do (`taskDirKey`). And repair git's links wherever a checkout's path is handed to a
+terminal, not only where the node reuses it: a refusal that names a leftover for `{existing}` leads there too.
 
 ## A node binary's name does not prove its platform (2026-11-14, #7206)
 
@@ -462,10 +520,13 @@ cost is smaller than a broken image. When something has to be listed by hand in 
 
 ## Sharing frontiers and migration lanes (#3604)
 
-- Migration numbers are global across the hub and manager sets, even though their
-  files live in separate directories. Inventory both sets in every worktree;
-  distinct filenames with the same numeric prefix still collide. Renumber only
-  unpublished migrations, never an applied migration or the guard.
+- Hand-picked migration numbers were global across the hub and manager sets, even
+  though their files live in separate directories: distinct filenames with the same
+  prefix collided. New migrations are named by the UTC second they are written
+  (`docs/lessons/workflow.md`), so nobody picks a number, and two files of one second
+  may be one in each set since each records its own part (one file in both sets is
+  still refused); move only an unpublished migration to another second, never an
+  applied migration or the guard.
 - Future publication needs an immutable enable-window frontier **and** a moving
   verified scan checkpoint. Using the previous scan's EOF as the window boundary
   drops a new pending turn when it completes on a later scan. Preserve first-seen
@@ -1090,6 +1151,7 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
   - Go/cgo test executables need virtual-address headroom unrelated to physical memory. A too-small `RLIMIT_AS` can kill pthread startup even on harmless syntax. Native validators use explicit tagged policy, child CPU/FD/file/core limits, Go runtime memory/stack/thread settings and external sampled RSS/wall termination, not a V8 heap claim or independent `prlimit` parser bypass. Use a non-race trusted child for real bounded-process tests and race-instrument the parent separately; TSAN startup failure is not parser acceptance.
   - Never `dup3` onto a fixed FD in an already-running Go supervisor after filesystem reads: netpoll may own FD 3, causing intermittent fatal epoll failures. Keep the sealed policy at its allocated descriptor and use `exec.Cmd.ExtraFiles` to map FD 3 only during the new child exec. Rewind descriptors before bubblewrap's `--ro-bind-data` consumption. A disappeared `/proc/<pid>/status` can precede Wait's completed exit; bound that reaping race instead of misreporting a normal child exit as RSS termination.
   - Verify `pids.max` in both validator pre-parse gates too: requesting `TasksMax` is not proof that the task controller was delegated. Preserve the signed runtime artifact in a sealed memfd and pass it to the trusted launcher with explicit per-run disposal; `--ro-bind-data` consumes the descriptor before the guest starts. Reopening the checked package pathname permits replacement, and opening a parent's `/proc/.../fd` path fails after user-namespace entry. Test the descriptor through the scope and namespace separately from real resource acceptance.
+  - Candidate settings authority is request-bound, never a mutable process-global credential: the source SDK marks only its explicit per-check fetches, the trusted adapter puts that credential only on the outer broker request (redirects included), and the broker carries the exact immutable check through its internal request context. Guest JSON supplies no identity or targets; the credential never enters the upstream request. On a fixed runtime socket, a presented wrong, expired or other-extension credential must fail rather than fall back to ordinary saved-target authority (#1180).
   - Broker overload rejects before the admitted request's body deadline, so it must set `Connection: close` as well. Bind CONNECT-handshake socket closure to cancellation immediately after dialing, not after the proxy answers. A guest's stream-cancellation hook may never settle; start that cleanup without awaiting it when releasing fetch admission after size rejection.
   - Broker deadlines must interrupt socket writes as well as request-body reads: a raw guest can request an allowed multi-MiB response and never read it, retaining global admission after the request expires. Set both deadlines up front and interrupt both on cancellation, including registration changes. Test the stalled response writer independently of guest watchdog death. Fallback-only fixtures must skip when independent kernel enforcement is selected; production capability success is not a development-policy failure.
 
@@ -1861,6 +1923,74 @@ Two remaining limits aren't fixed by heartbeat settings:
   The root fix is smaller frames (`Writer` segmentation), or ping only when idle.
 - Hub Persona Link forwarding caps each write at 1 minute (`spliceWS`); below about 17 KB/s, 1 MiB blocks still time out. Use smaller blocks or speed-dependent limits.
 
+## Priority lanes on the node connection (2026-11-19, #10660)
+
+The heartbeat closed working connections because a pong queued behind whatever the node's one writer was writing, a
+1 MiB file chunk being 47 s at 30 KB/s. The miss rules were relaxed five times (#7520, #7861, #8846, #8900, #10442);
+framing the connection on lanes (protocol.md "Lanes") changes the queue instead. What the design learned:
+
+- **Priority at the writer is not enough.** The transports (ssh's channel window, TCP's buffers, a relay) take
+  megabytes the moment they are written, and a pong written after them waits behind them all the same. Only a credit
+  window bounds what is ahead of it in the pipe, and only a delay-based one fits both 30 KB/s (where 64 KiB in flight
+  is two seconds of queue) and a fast link (where it starves a transfer). Frames shrink with the window: on a slow
+  link the frame an interactive frame waits behind is a few KiB.
+- **Credit only where no read loop writes or waits.** A write made from inside a read loop (a synchronous event
+  handler), or one such a handler waits for (an answer, through `AfterReply`), that waits for credit waits for an
+  acknowledgement only that read loop's reading could release: a deadlock lines cannot have. So requests and bulk
+  lines wait for credit; events and interactive answers do not. Credit for bulk alone was the first version: a review
+  showed a large `model.http` body then filled ssh's buffer ahead of the ping, which with lines would have waited
+  unwritten (not counted) and framed was written and missed; credit for every interactive line was the second, and a
+  read loop waiting for its own answer then hung (`TestLanesReadLoopWaitingForItsOwnAnswer`). Large answers and
+  events still go to the transport at once, as with lines; the middle of a long line keeps excusing a late pong.
+- **A delay-based window compares like with like.** Once short interactive frames fed it round trips, the link's base
+  delay came from them, and a full frame's own 137 ms on the wire at 30 KB/s read as queueing: the window sat at its
+  least and a 1 MiB transfer took 109 s instead of 47 s. Only frames cut to the frame size are samples now.
+- **A round trip has two directions.** The window first judged round trips, and an acknowledgement waits behind
+  whatever the other side sends: with the node's events filling the way back, the manager's port bytes fell from
+  31.9 to 14.7 KB/s (64 KiB of queue) and from 36.9 to 5.5 KB/s (256 KiB). An acknowledgement now carries when its
+  frame was read, so the queueing judged is one way's. That alone still left the link idle: an acknowledgement waiting
+  behind the other side's 32 KiB frame covers everything read meanwhile but names only the newest frame, so the window
+  also keeps what the other side reads while its first byte waits to be acknowledged (a simulation that acknowledged
+  every frame on its own hid this: 100% there, 87% with one acknowledgement a frame of the other side's), and grows
+  little past it, since on a long round trip a queue shows only a round trip later. Pacing bulk at the measured rate
+  was tried and left out: a rate measured from the handshake's small frames is a few hundred bytes a second, and a
+  pace held to it stopped a port's bytes until the notes' stall check closed the connection.
+- **A floor needs a way down.** The window's floor (the longest wait of 10 s) outlived the wait it was set for: when
+  the other side's queue drained, its acknowledgements came quicker than the frames were read and the floor kept the
+  window large, so up to that queue's worth (8.7 s at 256 KiB) sat on the way ahead of pings. A queue on the way now
+  holds the window to the latest wait. And a budget shared by two queues must be paid back by both: dropping them
+  took only the new note off the count, which then stayed full and dropped every note after it.
+- **Two queues reorder.** Port bytes went to the bulk queue and the stream's close to the other one, so the close
+  overtook the last bytes and the tail of a download was lost. What must arrive in order shares one writer.
+- **A stall is no progress, not a long wait.** The notes' watchdog judged how long one write took; a write waiting for
+  credit while the connection carries other frames is not stuck. It now asks when the connection last wrote anything.
+- **The read-ahead must cost a read, not a line.** Decoding the pieces ahead again for every line made a framed
+  connection read 0.45 MB/s of small events where lines read 2.8: the reader scans what a read brought once.
+- **Taking turns among long lines finishes all of them last.** Ten 200 KiB answers sharing a link frame by frame all
+  end at the end, so every caller with a deadline gives up where one after another most would finish. Within a lane,
+  short lines take turns with the oldest long line; the other long lines wait, as on the one writer.
+- **A frame is not a line, nor a read.** The heartbeat's signals are defined per line and per read: the read-ahead must
+  never judge a later piece of a line on its own (a closing piece does not decode, and counted as activity), the
+  middle of a line counts per read that goes on with it (not per whole frame), and it stands while that same line
+  still arrives even when shorter lines finish beside it (any long line in progress would do for a first fix, and a
+  line held back by credit the other side never gets then kept every later event's middle alive: #8771 again). Each was a divergence from lines that a review found by feeding a
+  peer of lines and a framed one the same bytes (`server/internal/rpc/lanes_activity_test.go`).
+- **Switch each direction on its own line.** One side cannot know where the other's lines end except by a line that
+  says so: the answering side's last line is its answer, the asking side's a marker event. Both are written under the
+  writer's lock (a writer that waited for it finds the output framed and queues frames), and each read loop switches
+  right after reading the other's last line, handing the bytes it already read past it to the frame reader. An answer
+  must switch the asker whether or not its call still waits: a node already framing to a manager that gave up would
+  otherwise be read as lines.
+- **Writers wrapped around a connection assume a line a write.** The node's secret scrubbing and its update-response
+  observer were `io.Writer`s around the connection; with frames they would have scrubbed across frame headers (a value
+  split between two frames never found, a length changed under its header) and parsed frames as JSON. They are line
+  hooks on the peer now (`LineFilter` when a line's first frame is cut, `LineWritten` when its last is written).
+- **Not removed here:** the relaxed ping rules. Lanes take the large blocks out of a pong's way on the node connection,
+  but nodes and managers without lanes still need every allowance, and on a framed connection large answers and events
+  still fill the transport ahead of a pong: narrowing them needs evidence from framed connections first. On Persona
+  Link, frames also mean no WebSocket message over 32 KiB on the node stream, which takes away the 5 s `writeControl`
+  wait and `spliceWS`'s one-minute write cap described in "Heartbeat timeouts on slow links" for that stream.
+
 ## A new value for an existing RPC parameter may be silently ignored by an old node (2026-11-06, #4858)
 
 Uploads already had a `dest` parameter (`terminal`, `health`), but older nodes never read it: given `dest=dir&dir=~/proj`, they still put the file in the system temp directory and returned a successful path.
@@ -1955,6 +2085,9 @@ Error-valued message arguments and structured field errors also need the request
 
 - The session list asks `rolloutPath` once a second for every registered Codex thread; for a thread with no rollout (an app-server thread that never wrote one) that was a glob over every day directory of the whole history, each time. On a hub with 194 rollouts it was 61% of the node's CPU. Profile the live node before guessing: `perf record -p <pid>`, then map the addresses with an unstripped build of the same commit (`go tool addr2line`; the deployed binary is built with `-s -w`, but `.text` is laid out the same).
 - Caching a miss on directory mtimes needs care: a file created or moved into a directory changes its mtime, but the kernel stamps it with a coarse clock, so a second change within the same tick can leave it unchanged. Keep no miss whose directories changed in the last second (`TestRolloutPathMissRacy`).
+- A miss cache emptied on a timer pays the whole cost again each period (2026-11-18). The misses were cleared once a minute, so that a rollout put into an older day directory would still be found. Then Codex compressed most old rollouts to `.jsonl.zst`, which the `rollout-*.jsonl` globs never match: on one Mac, 528 listed threads had none, and each was globbed across 209 day directories once a minute (14 s of CPU in a row), and again whenever a new rollout changed today's directory. What the node already lists answers it: the minute listing of every day directory shows which ids appear in no file name, so only the misses whose id is in a name (and those nobody asked about for two minutes) are dropped, and a changed directory is listed once per list pass and checked by name (`TestRolloutPathMissesOutliveRelisting`). Finding a rollout still uses the per-id glob and the header check unchanged.
+- A per-row lookup that is cached can still pay for its cache check: `loadCodexAppState` globbed the Codex home for the state database before reading its cache, twice per App row per second (1,100 globs a second, about 16% of a core). Take such values once per list pass (`codexListPass.appState`, `TestCodexAppStateReadOncePerList`).
+- On macOS, `sample` cannot attribute a stripped Go binary's syscalls to Go callers (they go through libc on the system stack, and Go leaf functions keep no frame pointer); `go tool addr2line` still names the Go frames it does show. Calling the suspected functions from a throwaway test against the real Codex home, read-only, gave the per-call costs.
 
 ## Localized RPC summaries must not imply successful or absent delivery
 
@@ -2653,3 +2786,71 @@ nothing ran the old build after the new one.
 - Lesson: a 409 the client swallows hides a broken ownership model until something else (here a cleanup) depends on
   it. When a fence refuses a live, authenticated client, either let it prove the move or tell it plainly what to do;
   and check what a "looks unused" revocation still owns before treating it as cleanup.
+
+## A restore check must not start what it checks (2026-11-18, #10497)
+
+- Starting a restored hub or manager to see whether the restore worked changes the state under test: startup marks
+  pending client operations unknown, expires stale interactions, drains the manager's outbox and starts connectors,
+  extensions and nodes. Read the restored databases with `default_transaction_read_only=on` instead, and prove the
+  setting holds with one guarded write that must fail with SQLSTATE 25006 (psql prints the SQLSTATE only with
+  `VERBOSITY=verbose`; matching the message text would also accept unrelated failures).
+- Killing a `docker run` client on a timeout leaves its container running. Name every container, and remove it by name
+  (`docker rm --force`) after the client exits or is killed; then check with `docker container inspect` that it is gone.
+- `backup verify` passing says nothing about tasks, approvals or outboxes: the drill's `--checks verify-only` passes a
+  restore whose approval was resolved afterwards, which the read-only acceptance fails.
+
+## A new screenshot is not an old resolved exchange (#9124)
+
+Triage reads `[Image: ...]` as text, not the image's contents. Preserve the newest message separately from the
+conversation so an earlier answer or acknowledgement cannot silently close a later screenshot reporting a new
+failure. Stub-model tests prove that input contract and saving the result, not the real model's semantic accuracy;
+keep an original attachment and a live triage readback as separate acceptance evidence.
+
+Keep the newest-preview field in the triage input paths, including the no-write triage preview. The generic
+item builder also feeds drafts, task judging and handling conversations: adding triage labels there changes all
+those inputs. Compare those callers' rendered input bytes, not just triage's golden output.
+
+The tier criteria are shared with event grouping. Describe each event's assigned new activity and unresolved
+requests, not one "current new message" for an entire batch. A mixed-event regression should keep a new request
+and screenshot separate from another event's final acknowledgement, while retaining each event's overall tier.
+
+## Moving an element to the front with `slices.Delete` in the same expression (2026-11-19, #10659)
+
+`append([]T{s[i]}, slices.Delete(s, i, i+1)...)` sometimes reads `s[i]` after `Delete` ran. Go doesn't fix the order
+between an index expression and a call in the same expression, and `Delete` clears the slot it frees, so the moved
+element came out as a zero value (a nil func in `link.dialActive`'s route list, which panicked). Copy the element into a variable
+first, then delete and insert.
+
+`golang.org/x/net/http/httpproxy.FromEnvironment` reads `https_proxy` before `HTTPS_PROXY` (lower case first) in the
+version this repository uses. Older notes and reviews often say upper case first. Check the module's source before
+documenting an order.
+
+## Switching an ssh computer to Persona Link over ssh (#10662)
+
+- Every gate on the Persona Link path checks the entry's kind: making a code for an existing computer, redeeming it, the hub
+  taking `/api/v1/link`, and the manager taking the relayed link. A switch that pairs first and changes the kind later would
+  have to widen one of them. Change the kind first, in one hub step with the code (`devices.link_switch.begin`). The cost
+  is a few seconds offline, while the old ssh connection ends and the new link comes up.
+- `persona-link install` is meant for a person at the computer. It does not refuse an existing `link.json`. It always restarts
+  the connector, and exits 0 when the link connects even if its node step failed. `persona-link node uninstall` removes
+  any `personad-node.service`, whoever wrote it. A remote flow must find out what is there before it starts, record that, and
+  undo only what it added. It judges success by the node answering over the new link, not by the installer's exit code.
+- Without linger (`/var/lib/systemd/linger/<user>`), the user's systemd manager ends with the last session. Over ssh, that
+  session is the switch's own. The connector would start, connect, and stop again once the installer's ssh session closed.
+  Refuse instead.
+- ssh reads `~/.ssh/config` from the passwd entry's home directory, not from `$HOME`. To keep a test hub's ssh off the
+  user's config and keys, put a wrapper named `ssh` that runs `/usr/bin/ssh -F <own config>` first on its PATH
+  (`scripts/test/link_switch_e2e.py`).
+- systemd as PID 1 in a container needs a writable cgroup. Plain `docker run` (cgroup v2, private namespace) exits 255 with
+  "Failed to create /init.scope control group: Read-only file system". `--privileged --cgroupns=private` works, and
+  `loginctl enable-linger` then gives `testuser` a user manager reachable over ssh.
+- **A rollback must not take away the only way back.** The first version gave up asking the hub to end a failed switch after
+  2 minutes, then removed Persona Link from the computer anyway. The hub still said `kind: link`, and nothing asked again, so
+  the computer had neither a link nor SSH. Undo the side that decides how the computer is reached (the hub's entry) first,
+  and keep asking until it answers. Remove things from the computer only after that. `scripts/test/link_switch_e2e.py
+  --scenario hub_pause` stops the hub's slot process for 150 s to check this.
+- **Proof that something began must be written before it begins, under the same lock as anything that reads it.** An end
+  read "has it begun?" before taking the lock its begin held, a begin wrote its audit row after changing the kind, and the
+  guards against moving a switching computer were checked in memory and acted on without a lock. Each of these could leave
+  the computer at `kind: link` with nobody able to undo it. Write the intent row first and decide under the lock. Keep what
+  must survive a restart in the database.

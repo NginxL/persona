@@ -126,7 +126,7 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			if st.Path != "" {
 				mode = workspaceExisting
 				var source proto.Workspace
-				if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": t.Cwd}, &source); err != nil {
+				if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": t.Cwd, "terminal": true}, &source); err != nil {
 					return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.resolve", i18n.Args{"path": t.Cwd}), err)
 				}
 				if !source.Available || !proto.NodeAbs(source.Cwd) {
@@ -177,7 +177,9 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			}
 		}
 		var resolved proto.Workspace
-		if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": selected}, &resolved); err != nil {
+		// terminal: the directory as the Agent's terminal opens it (a home reached through a link keeps its own
+		// spelling, #10365); older nodes answer the physical path as before.
+		if err := s.call(ctx, t.Machine, "workspace.resolve", map[string]any{"path": selected, "terminal": true}, &resolved); err != nil {
 			return fmt.Errorf("%s: %w", i18n.T(s.lang(ctx), "assistant-tasks_workspace.resolve", i18n.Args{"path": selected}), err)
 		}
 		if !resolved.Available || !proto.NodeAbs(resolved.Cwd) {
@@ -240,12 +242,14 @@ func repositoryWithoutCommits(err error) bool {
 
 // taskWorkspaceOwner checks durable active task links, and the gap between
 // admission and linking. Callers that admit a writer hold workspaceMu as well.
-// Directories compare by proto.NodeKey: on a Windows machine, case aside.
-// Branch-checkout reuse also checks owners below the checkout root.
+// Directories compare by taskDirKey: on a Windows machine, case aside, and a
+// linked home's two spellings as one. Branch-checkout reuse also checks owners
+// below the checkout root.
 func (s *Service) taskWorkspaceOwner(ctx context.Context, machine, cwd, except string, descendants bool) *Todo {
-	machine, cwd = s.effectiveBoardMachine(machine), proto.NodeKey(cwd)
+	key := s.taskDirKey(ctx, machine)
+	machine, cwd = s.effectiveBoardMachine(machine), key(cwd)
 	matches := func(dir string) bool {
-		dir = proto.NodeKey(dir)
+		dir = key(dir)
 		return dir == cwd || descendants && strings.HasPrefix(strings.ReplaceAll(dir, `\`, "/"),
 			strings.TrimRight(strings.ReplaceAll(cwd, `\`, "/"), "/")+"/")
 	}
@@ -277,6 +281,44 @@ func (s *Service) taskWorkspaceOwner(ctx context.Context, machine, cwd, except s
 		}
 	}
 	return nil
+}
+
+// taskDirKey is how task folders on machine compare: proto.NodeKey's form, with a directory under the home as its
+// links resolve (the node's HomeReal) written under the home as its node names it. A node names the folder an Agent
+// starts in by the home's own spelling (workspace.resolve terminal, #10365), while a claim or an Agent's folder from
+// before, from an older node or from a terminal host that reports it physically has the resolved one: either must
+// find the same writer.
+func (s *Service) taskDirKey(ctx context.Context, machine string) func(string) string {
+	m, ok := s.machineByName(ctx, machine)
+	if effective := s.effectiveBoardMachine(machine); !ok && effective != machine {
+		m, _ = s.machineByName(ctx, effective)
+	}
+	return func(dir string) string { return homeDirKey(dir, m.Home, m.HomeReal) }
+}
+
+// homeDirKey is proto.NodeKey(dir), with dir under real (a home as its links resolve) written under home; the key
+// alone when either home is unknown, they are one path, or are of different systems.
+func homeDirKey(dir, home, real string) string {
+	dir = proto.NodeKey(dir)
+	if !proto.NodeAbs(home) || !proto.NodeAbs(real) || proto.WindowsPath(home) != proto.WindowsPath(real) {
+		return dir
+	}
+	home, real = proto.NodeKey(home), proto.NodeKey(real)
+	sep := "/"
+	if proto.WindowsPath(real) {
+		sep = `\`
+	}
+	under := strings.TrimSuffix(real, sep) + sep
+	if home == real || strings.HasPrefix(home, under) { // a home inside its own target is no spelling to fold
+		return dir
+	}
+	if dir == real {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(dir, under); ok {
+		return strings.TrimSuffix(home, sep) + sep + rest
+	}
+	return dir
 }
 
 func (s *Service) taskWorkspaceBusy(ctx context.Context, machine, cwd, except string) error {
@@ -332,11 +374,12 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 			return err
 		}
 		if t.TodoID != "" {
+			claim := s.effectiveBoardMachine(t.Machine) + "\x00" + s.taskDirKey(ctx, t.Machine)(t.Cwd)
 			s.tasks.mu.Lock()
 			if s.tasks.workspaceClaims == nil {
 				s.tasks.workspaceClaims = map[string]string{}
 			}
-			s.tasks.workspaceClaims[s.effectiveBoardMachine(t.Machine)+"\x00"+proto.NodeKey(t.Cwd)] = t.TodoID
+			s.tasks.workspaceClaims[claim] = t.TodoID
 			s.tasks.mu.Unlock()
 		}
 	}
@@ -353,16 +396,35 @@ func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 	return nil
 }
 
+// newTaskWorktree makes the task's new checkout, or reuses the checkout of its branch the node finds clean and idle:
+// an explicit {new: {branch}}'s (#8357), and this to-do's own task/<todo id>, which a failed start or an earlier Agent
+// of the same to-do left in the checkouts folder (#10365). The own branch reuses only a checkout in that folder (never
+// the main checkout or a folder of the user's own); a leftover it cannot reuse is refused with its path and the
+// workspace {existing} that continues there, and any other failure to look falls back to making the checkout, as an
+// older node that does not look gets.
 func (s *Service) newTaskWorktree(ctx context.Context, t *PlanTask) (proto.WorktreeCreateResult, bool, error) {
-	if t.Workspace.Branch != "" {
+	branch, own := t.Workspace.Branch, false
+	if branch == "" {
+		branch, own = t.WorkspaceResolved.Branch, true
+	}
+	if branch != "" {
 		var prep proto.WorktreePrepare
-		if err := s.call(ctx, t.Machine, DeviceWorktreePrepare,
-			map[string]any{"cwd": t.Cwd, "branch": t.Workspace.Branch}, &prep); err != nil {
+		err := s.call(ctx, t.Machine, DeviceWorktreePrepare, map[string]any{"cwd": t.Cwd, "branch": branch}, &prep)
+		switch at := prep.Existing; {
+		case err != nil && !own:
 			return proto.WorktreeCreateResult{}, false, err
-		}
-		if at := prep.Existing; at != nil {
-			if !proto.NodeAbs(at.Path) || at.Branch != t.Workspace.Branch {
+		case err != nil:
+			if refused := ownCheckoutRefusal(err); refused != nil {
+				return proto.WorktreeCreateResult{}, false, refused
+			}
+		case at != nil:
+			if !proto.NodeAbs(at.Path) || at.Branch != branch {
 				return proto.WorktreeCreateResult{}, false, i18n.ErrEnglish("assistant-tasks_workspace.engine_checkout")
+			}
+			// in_checkouts from the node; an older one leaves it out, and its path then says it as written.
+			if own && !at.InCheckouts && !nodePathWithin(at.Path, prep.Path) {
+				return proto.WorktreeCreateResult{}, false, i18n.ErrEnglish("assistant-tasks_workspace.own_checkout_elsewhere",
+					i18n.Args{"branch": branch, "path": at.Path})
 			}
 			if owner := s.taskWorkspaceOwner(ctx, t.Machine, at.Path, t.TodoID, true); owner != nil {
 				return proto.WorktreeCreateResult{}, false, i18n.ErrEnglish("assistant-tasks_workspace.busy",
@@ -372,7 +434,67 @@ func (s *Service) newTaskWorktree(ctx context.Context, t *PlanTask) (proto.Workt
 		}
 	}
 	wt, err := s.newWorktree(ctx, t.Machine, t.Cwd, t.WorkspaceResolved.Branch)
+	if own && err != nil {
+		if path, taken := pathTaken(err); taken {
+			return wt, false, taskCheckoutRefusal{i18n.ErrEnglish("assistant-tasks_workspace.own_path_taken",
+				i18n.Args{"path": path}).(*i18n.Message), err}
+		}
+	}
 	return wt, false, err
+}
+
+// ownCheckoutRefusal is the hub's sentence for the node's coded refusal of the to-do's own leftover checkout (dirty,
+// in use, changed or unverifiable), naming its path and what to do next; nil for any other failure.
+func ownCheckoutRefusal(err error) error {
+	var re *rpc.Error
+	if !errors.As(err, &re) {
+		return nil
+	}
+	var data struct{ Branch, Path, Owner string }
+	_ = json.Unmarshal(re.Data, &data)
+	args := i18n.Args{"branch": data.Branch, "path": data.Path, "owner": data.Owner}
+	var key string
+	switch re.Code {
+	case proto.CodeCheckoutDirty:
+		key = "own_checkout_dirty"
+	case proto.CodeCheckoutInUse:
+		key = "own_checkout_in_use"
+	case proto.CodeCheckoutChanged, proto.CodeCheckoutUnverified:
+		key = "own_checkout_unverified"
+	default:
+		return nil
+	}
+	return taskCheckoutRefusal{i18n.ErrEnglish("assistant-tasks_workspace."+key, args).(*i18n.Message), err}
+}
+
+// pathTaken: the node refused to make the checkout because its folder already holds something (code
+// worktree_path_taken), and where.
+func pathTaken(err error) (string, bool) {
+	var re *rpc.Error
+	if !errors.As(err, &re) || re.Code != proto.CodeWorktreePathTaken {
+		return "", false
+	}
+	var data struct{ Path string }
+	_ = json.Unmarshal(re.Data, &data)
+	return data.Path, data.Path != ""
+}
+
+// taskCheckoutRefusal reads as the hub's sentence and keeps the node's coded refusal under it, so the task's error
+// still carries that code (errors.As) for the clients that map codes first.
+type taskCheckoutRefusal struct {
+	*i18n.Message
+	node error
+}
+
+func (e taskCheckoutRefusal) Unwrap() []error { return []error{e.Message, e.node} }
+
+// nodePathWithin: the node's path p is dir or lies under it, compared as the node's paths are (proto.NodeKey).
+func nodePathWithin(p, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	p, dir = strings.ReplaceAll(proto.NodeKey(p), `\`, "/"), strings.TrimRight(strings.ReplaceAll(proto.NodeKey(dir), `\`, "/"), "/")
+	return p == dir || strings.HasPrefix(p, dir+"/")
 }
 
 func (s *Service) releaseTaskWorkspace(todoID string) {

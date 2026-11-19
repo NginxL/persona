@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -134,6 +135,9 @@ func profileIDs(ps []ModelProfile) string {
 // runs as a launcher, or one a computer lists (as last seen, and asked again before saying no: one just added to an
 // rc file is not refused).
 func (s *Service) tierLauncherCheck(ctx context.Context, name string) error {
+	if proto.IsExternalLauncher(name) {
+		return i18n.Err("external-adapter.purpose_unsupported")
+	}
 	if name == "" || name == "claude" {
 		return nil // "" is checkModelTiers' to refuse
 	}
@@ -204,7 +208,7 @@ func (s *Service) setModelTiers(ctx context.Context, v json.RawMessage) (*ownCha
 		return nil, errors.New("no database on this hub")
 	}
 	revision := ps.Revision
-	return &ownChange{cardText: func(l i18n.Lang) string {
+	return &ownChange{applyChecksProposal: true, cardText: func(l i18n.Lang) string {
 		lines := make([]string, 0, len(changes))
 		for _, c := range changes {
 			lines = append(lines, i18n.T(l, "assistant-settings_tool.change_model_tier", i18n.Args{"profile": c.Name, "tier": e.Tier,
@@ -245,7 +249,7 @@ func (s *Service) saveTierEditLocked(ctx context.Context, revision int64, e tier
 	if err != nil {
 		return "", "", err
 	}
-	stale := errors.New("the model profiles changed after the card was shown, so nothing was saved: set it again for a new card")
+	stale := fmt.Errorf("the model profiles changed after the card was shown, so nothing was saved: set it again for a new card (%w)", approvalops.ErrStale)
 	if ps.Revision != revision {
 		return "", "", stale
 	}

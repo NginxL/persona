@@ -20,9 +20,9 @@
 # (#2541). A release goes to one of two slots, <slot>/<name>, the one not served now; the deploy then switches dl/SLOT
 # (a static file, deployed with latest.json) to it. The slot left keeps the release before until the next one, so a
 # download that started before the deploy finishes. Only the newest version is served there. Every release also goes
-# to release/<version>/ (its node builds and its manifest as manifest.json), kept: a hub's manager fetches the node build
-# of the hub's own version from there (dl/<version>/…, docs/operations/node-update.md), a Docker image's version too (X.Y.Z, when
-# the release is the tag vX.Y.Z). release.sh runs this after uploading to TestFlight.
+# to release/<version>/ (its node and connector builds and its manifest as manifest.json), kept: a hub's manager
+# fetches those builds of the hub's own version from there (dl/<version>/…, docs/operations/node-update.md), a Docker
+# image's version too (X.Y.Z, when the release is the tag vX.Y.Z). release.sh runs this after uploading to TestFlight.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 _env=$(python3 scripts/persona_config.py env) || exit $?
@@ -65,12 +65,13 @@ settled() {
   "$@" || { echo "$what still differs about two minutes after the deploy" >&2; return 1; }
 }
 served_is() { [ "$(curl -fsSL "$PERSONA_PUBLISH_URL/dl/$1" 2>/dev/null)" = "$(cat "$2")" ]; }
-# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz) and
-# the iPhone helper's (persona-iphone-bridge-<os>-<arch>.gz), the only ones fetched from dl/<version>/.
+# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz), the
+# connector's (persona-link-<os>-<arch>.gz, which a switch of an ssh computer to Persona Link sends it) and the iPhone
+# helper's (persona-iphone-bridge-<os>-<arch>.gz), the only ones fetched from dl/<version>/.
 node_archives() {
   local gz
   for gz in "$1"/*.gz; do
-    [[ "${gz##*/}" =~ ^(personad|persona-node|persona-iphone-bridge)-(linux|darwin)-(amd64|arm64)\.gz$ ]] && printf '%s\n' "$gz"
+    [[ "${gz##*/}" =~ ^(personad|persona-node|persona-link|persona-iphone-bridge)-(linux|darwin)-(amd64|arm64)\.gz$ ]] && printf '%s\n' "$gz"
   done
   return 0
 }
@@ -340,9 +341,9 @@ for gz in "$PWD/$OUT/bin/"*.gz; do
   put_at "$SLOT/${gz##*/}" "$gz" application/gzip
 done
 # The versioned copies, kept: release/<version>/ (and release/X.Y.Z/ when the release is the tag vX.Y.Z, the version
-# of the Docker image built from that tag), the node builds and the manifest only: a manager fetches a node build from
-# there (docs/operations/node-update.md). The tag is looked up among all the commit's tags (release.sh tags it testflight/<build>
-# too).
+# of the Docker image built from that tag), the node_archives builds and the manifest only: a manager fetches a node
+# build or the connector from there (docs/operations/node-update.md). The tag is looked up among all the commit's tags
+# (release.sh tags it testflight/<build> too).
 VERSIONS=("$VERSION")
 # A build with changes not committed (-dirty) is not the tag's release, and gets no alias.
 if [[ "$VERSION" != *-dirty* ]] && tag="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)" && [ -n "$tag" ]; then

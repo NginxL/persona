@@ -110,12 +110,16 @@ internal object OperationText {
 
     fun instant(iso: String?): Instant = iso?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: Instant.EPOCH
 
-    /** 16.5 MB, 512 KB: one decimal under 10. */
-    fun size(bytes: Long): String = when {
-        bytes >= 1L shl 20 -> mb(bytes / (1024.0 * 1024.0), "MB")
-        bytes >= 1L shl 10 -> mb(bytes / 1024.0, "KB")
-        else -> "$bytes B"
+    /**
+     * 3.5 MB, 512 KB: one decimal under 10. The unit and the decimals come from the figure as it is shown, after rounding,
+     * as the machine pages' `MetricFormat.bytes`: 1023.5 KB and up is 1.0 MB, not 1024 KB; 9.95 KB is 10 KB, not 10.0 KB (#9903).
+     */
+    fun size(bytes: Long): String {
+        if (bytes < 1L shl 10) return "$bytes B"
+        val kb = bytes / 1024.0
+        return if (Math.round(kb) >= 1024) mb(kb / 1024.0, "MB") else mb(kb, "KB")
     }
 
-    private fun mb(v: Double, unit: String) = if (v < 10) String.format(Locale.ROOT, "%.1f %s", v, unit) else String.format(Locale.ROOT, "%.0f %s", v, unit)
+    private fun mb(v: Double, unit: String) =
+        if (Math.round(v * 10) < 100) String.format(Locale.ROOT, "%.1f %s", v, unit) else String.format(Locale.ROOT, "%.0f %s", v, unit)
 }

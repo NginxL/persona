@@ -32,13 +32,14 @@ import SwiftUI
         case workspace(String)
         case mainSupervises(Bool)
         case agentTasks(Bool)
+        case closeEndedTerminals(Bool)
         case idleHours(Int)
         case archiveDays(Int)
         case naming(Bool)
         case namingMax(Int)
         case namingInterval(Int)
 
-        enum Field: Hashable { case startRequested, workspace, mainSupervises, agentTasks, idleHours, archiveDays, naming, namingMax, namingInterval }
+        enum Field: Hashable { case startRequested, workspace, mainSupervises, agentTasks, closeEndedTerminals, idleHours, archiveDays, naming, namingMax, namingInterval }
 
         var field: Field {
             switch self {
@@ -46,6 +47,7 @@ import SwiftUI
             case .workspace: .workspace
             case .mainSupervises: .mainSupervises
             case .agentTasks: .agentTasks
+            case .closeEndedTerminals: .closeEndedTerminals
             case .idleHours: .idleHours
             case .archiveDays: .archiveDays
             case .naming: .naming
@@ -62,6 +64,7 @@ import SwiftUI
             case .workspace(let value): b.taskWorkspacePreference = value
             case .mainSupervises(let on): b.mainSupervisesOwnTasks = on
             case .agentTasks(let on): b.agentTasks = on
+            case .closeEndedTerminals(let on): b.closeEndedTerminals = on
             case .idleHours(let hours): b.idleCloseHours = hours
             case .archiveDays(let days): b.archiveClosedDays = days
             case .naming(let on): b.agentAutoNaming = on
@@ -77,6 +80,7 @@ import SwiftUI
             case .workspace(let value): s.taskWorkspacePreference = value
             case .mainSupervises(let on): s.mainSupervisesOwnTasks = on
             case .agentTasks(let on): s.agentTasks = on
+            case .closeEndedTerminals(let on): s.closeEndedTerminals = on
             case .idleHours(let hours): s.idleCloseHours = hours
             case .archiveDays(let days): s.archiveClosedDays = days
             case .naming(let on): s.agentAutoNaming = on
@@ -93,6 +97,7 @@ import SwiftUI
         case .workspace: if let v = source.taskWorkspacePreference { target.taskWorkspacePreference = v }
         case .mainSupervises: if let v = source.mainSupervisesOwnTasks { target.mainSupervisesOwnTasks = v }
         case .agentTasks: if let v = source.agentTasks { target.agentTasks = v }
+        case .closeEndedTerminals: if let v = source.closeEndedTerminals { target.closeEndedTerminals = v }
         case .idleHours: if let v = source.idleCloseHours { target.idleCloseHours = v }
         case .archiveDays: if let v = source.archiveClosedDays { target.archiveClosedDays = v }
         case .naming: if let v = source.agentAutoNaming { target.agentAutoNaming = v }
@@ -137,7 +142,7 @@ import SwiftUI
     static func offered(_ s: APIClient.AssistantState?) -> Bool {
         guard let s else { return false }
         return s.startRequestedTasks != nil || s.taskWorkspacePreference != nil || s.mainSupervisesOwnTasks != nil || s.agentTasks != nil
-            || s.idleCloseHours != nil || s.archiveClosedDays != nil || s.agentAutoNaming != nil
+            || s.idleCloseHours != nil || s.archiveClosedDays != nil || s.agentAutoNaming != nil || s.closeEndedTerminals != nil
     }
 
     func load() async {
@@ -274,6 +279,7 @@ struct AgentFollowUpView: View {
                 startingSection(s)
                 followUpSection(s)
                 tidyingSection(s)
+                terminalsSection(s)
                 if page.namesShown { namesSection(s) }
             } else if let error = page.error {
                 EmptyStateView(symbol: Theme.Icon.error, title: String(localized: "Couldn't load [Agent Follow-Up]"), message: error,
@@ -369,6 +375,21 @@ struct AgentFollowUpView: View {
                 Text("Tidying up [Agent Follow-Up]")
             } footer: {
                 Text("By default an idle Agent stops after 12 hours and keeps its terminal, and a closed session with no open task moves to Archived after 3 idle days.")
+            }
+        }
+    }
+
+    /// Closing an Agent's terminal when its session ends (#10355): off by default, only from a hub that has it.
+    @ViewBuilder private func terminalsSection(_ s: APIClient.AssistantState) -> some View {
+        if let on = s.closeEndedTerminals {
+            Section {
+                SettingsSwitchRow(title: String(localized: "Close an Agent's Terminal When It Ends"), symbol: Theme.Icon.closeTab, titleLines: 2,
+                                  accessibilityID: "followup-close-ended-terminals", isOn: binding(on) { .closeEndedTerminals($0) })
+                    .disabled(page.saving.contains(.closeEndedTerminals))
+            } header: {
+                Text("Terminals [Agent Follow-Up]")
+            } footer: {
+                Text("Off by default. When an Agent Persona started is done, cancelled or quits, its terminal tab closes too. Busy Agents and terminals you opened yourself are never closed; the conversation is kept and can be resumed.")
             }
         }
     }

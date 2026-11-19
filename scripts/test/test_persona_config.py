@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import os
@@ -241,6 +242,143 @@ class SigningProfileConfigTests(unittest.TestCase):
                 self.exported({'app': {'bundle_id': self.bid}, 'app_store': {'provisioning_profiles': overrides}})
 
 
+@unittest.skipUnless(sys.platform == 'darwin' and shutil.which('xcodegen') and shutil.which('plutil'),
+                     'needs macOS, xcodegen and plutil')
+class ReleaseProjectGenerationTests(unittest.TestCase):
+    """The Release project XcodeGen actually writes for the release-only opt-ins (#9526)."""
+    APPLE = ROOT / 'apple'
+    BID = 'com.example.persona'
+
+    def environment(self, cfg, home):
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(('PERSONA_', PersonaConfigTests.former_prefix))}
+        env.update(config.env(cfg))
+        env.update(HOME=str(home), DEVELOPMENT_TEAM='EXAMPLE')
+        # XcodeGen asks for a username while writing the project. Keep the CI environment hermetic if it has neither.
+        env.setdefault('USER', 'fixture')
+        env.setdefault('LOGNAME', 'fixture')
+        return env
+
+    def project(self, directory, app):
+        """A disposable checkout, configured through the production xcconfig path with placeholder identities."""
+        root = Path(directory)
+        shutil.copytree(self.APPLE, root / 'apple', ignore=shutil.ignore_patterns(
+            '*.xcodeproj', 'build', 'DerivedData', '.build', 'Config.xcconfig', 'PersonaOptIn.entitlements',
+            'PersonaSiriCalls.entitlements', 'PersonaCarPlay.entitlements'))
+        cfg = {'app': {'bundle_id': self.BID, 'team_id': 'EXAMPLE', **app}}
+        with patch.object(config, 'ROOT', str(root)):
+            config.xcconfig(cfg)
+        return root, root / 'apple', self.environment(cfg, root)
+
+    def generate(self, apple, env, *args):
+        result = subprocess.run(['xcodegen', 'generate', '-q', '--spec', str(apple / 'project.yml'), *args],
+                                env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def release_settings(self, apple):
+        project = apple / 'Persona.xcodeproj/project.pbxproj'
+        result = subprocess.run(['plutil', '-convert', 'json', '-o', '-', str(project)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        configurations = [c for c in json.loads(result.stdout)['objects'].values()
+                          if c.get('isa') == 'XCBuildConfiguration' and c.get('name') == 'Release'
+                          and c.get('buildSettings', {}).get('PRODUCT_NAME') == 'Persona'
+                          and c.get('buildSettings', {}).get('SDKROOT') == 'iphoneos']
+        self.assertEqual(len(configurations), 1, 'expected the one iPhone app Release configuration')
+        return configurations[0]['buildSettings']
+
+    def test_release_generation_with_opt_ins_off_preserves_base_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, apple, env = self.project(directory, {})
+            paths = [apple / config.APP_ENTITLEMENTS, apple / 'Persona/Resources/Info.plist']
+            before = [path.read_bytes() for path in paths]
+            self.generate(apple, env)
+            self.assertEqual(self.release_settings(apple).get('CODE_SIGN_ENTITLEMENTS'), config.APP_ENTITLEMENTS)
+            self.assertEqual([path.read_bytes() for path in paths], before,
+                             'with every opt-in off, generation must leave the base entitlements and Info.plist unchanged')
+
+    def test_release_entitlements_include_each_opt_in(self):
+        cases = {
+            'carplay_voice': 'com.apple.developer.carplay-voice-based-conversation',
+            'homekit': 'com.apple.developer.homekit',
+            'health_background_delivery': 'com.apple.developer.healthkit.background-delivery',
+        }
+        with open(self.APPLE / config.APP_ENTITLEMENTS, 'rb') as f:
+            base = plistlib.load(f)
+        for switch, key in cases.items():
+            with self.subTest(switch=switch), tempfile.TemporaryDirectory() as directory:
+                _, apple, env = self.project(directory, {switch: True})
+                self.generate(apple, env)
+                path = self.release_settings(apple).get('CODE_SIGN_ENTITLEMENTS')
+                self.assertTrue(path, 'the Release configuration must select an entitlements file')
+                with open(apple / path, 'rb') as f:
+                    selected = plistlib.load(f)
+                self.assertIs(selected.get(key), True,
+                              '%s selects %s, which lacks %s' % (switch, path, key))
+                for other in set(cases.values()) - {key}:
+                    self.assertNotIn(other, selected, 'each opt-in is independent')
+                for name, value in base.items():
+                    self.assertEqual(selected.get(name), value, 'the opt-in must preserve the base entitlements')
+
+    def test_meta_generation_leaves_every_tracked_source_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, apple, env = self.project(directory, {'meta_wearables': {
+                'enabled': True, 'app_id': '1234567890', 'client_token': 'AR|token|value'}})
+            tracked = subprocess.check_output(['git', '-C', str(ROOT), 'ls-files', '-z', '--', 'apple'],
+                                              text=True).split('\0')
+            tracked = [name for name in tracked if name]
+            before = {name: hashlib.sha256((ROOT / name).read_bytes()).digest() for name in tracked}
+            before_files = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()}
+            self.generate(apple, env)
+            changed = [name for name in tracked
+                       if not (root / name).is_file() or hashlib.sha256((root / name).read_bytes()).digest() != before[name]]
+            created = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()} - before_files
+            unignored = [name for name in sorted(created) if subprocess.run(
+                ['git', '-C', str(ROOT), 'check-ignore', '-q', '--', name]).returncode != 0]
+            self.assertEqual(changed, [], 'Meta project generation rewrote tracked sources: git status would not stay clean')
+            self.assertEqual(unignored, [], 'project generation created files that git status would report')
+
+    def test_meta_post_build_scripts_populate_the_built_info_plist(self):
+        cfg = {'app': {'bundle_id': self.BID, 'team_id': 'EXAMPLE', 'meta_wearables': {
+            'enabled': True, 'app_id': '1234567890', 'client_token': 'AR|token|value'}}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = self.environment(cfg, root)
+            result = subprocess.run(['xcodegen', 'dump', '--spec', str(self.APPLE / 'project.yml'), '--type', 'json'],
+                                    env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            target = json.loads(result.stdout)['targets']['Persona']
+            built = root / 'build/Persona.app/Info.plist'
+            built.parent.mkdir(parents=True)
+            built.write_bytes((self.APPLE / 'Persona/Resources/Info.plist').read_bytes())
+            (root / 'apple').mkdir()
+            env.update(SRCROOT=str(root / 'apple'), TARGET_BUILD_DIR=str(root / 'build'),
+                       INFOPLIST_PATH='Persona.app/Info.plist', PERSONA_META_APP_ID='1234567890',
+                       PERSONA_META_CLIENT_TOKEN='AR|token|value')
+            for _ in range(2):
+                for script in target.get('postBuildScripts', []):
+                    run = subprocess.run(['bash', '-e', '-c', script['script']], cwd=root / 'apple', env=env,
+                                         capture_output=True, text=True, timeout=30)
+                    self.assertEqual(run.returncode, 0, '%s: %s' % (script['name'], run.stdout + run.stderr))
+            with open(built, 'rb') as f:
+                info = plistlib.load(f)
+        self.assertEqual(info.get('MWDAT'), {
+            'AppLinkURLScheme': 'persona://', 'MetaAppID': '1234567890',
+            'ClientToken': 'AR|token|value', 'TeamID': 'EXAMPLE'})
+        self.assertEqual(info.get('UISupportedExternalAccessoryProtocols'), ['com.meta.ar.wearable'])
+        self.assertEqual(info.get('NSBonjourServices'), ['_bonjour._tcp'])
+        self.assertEqual(info.get('NSBluetoothAlwaysUsageDescription'),
+                         'Persona connects to your Meta glasses over Bluetooth when you ask it to take a photo with them, '
+                         'for example a whiteboard you want to attach to a message.')
+        self.assertEqual(info.get('NSLocalNetworkUsageDescription'),
+                         'Persona finds your Meta glasses on the local network when you ask it to take a photo with them, '
+                         'for example to attach a photo of a receipt to a message.')
+        for mode in ('bluetooth-central', 'bluetooth-peripheral', 'external-accessory',
+                     'remote-notification', 'audio', 'processing', 'voip'):
+            self.assertEqual(info.get('UIBackgroundModes', []).count(mode), 1)
+        self.assertEqual(info.get('CFBundleName'), 'Persona', 'the base Info.plist must survive Meta injection')
+
+
 class SiriCallsConfigTests(unittest.TestCase):
     """app.siri_calls (#9290, docs/operations/release.md "Siri calls"): "call Persona using Persona" through a SiriKit
     extension that needs account work first, so off by default, and off changes nothing a build or release reads."""
@@ -409,6 +547,19 @@ class MetaWearablesConfigTests(unittest.TestCase):
                 generated = config.env(cfg)
                 self.assertEqual(generated['PERSONA_META_WEARABLES'], expected)
                 self.assertEqual(generated[PersonaConfigTests.former_prefix + "META_WEARABLES"], expected)
+
+    def test_meta_release_uses_pinned_packages_without_rewriting_resolved_file(self):
+        with open(ROOT / 'apple/Packages/PersonaSSH/Package.resolved') as source:
+            resolved = json.load(source)
+        pins = [pin for pin in resolved['pins'] if pin['identity'] == 'meta-wearables-dat-ios']
+        self.assertEqual(len(pins), 1, 'the optional Meta package must already have a pinned resolution')
+        self.assertEqual(pins[0]['state']['version'], '1.0.1')
+        self.assertEqual(pins[0]['location'], 'https://github.com/facebook/meta-wearables-dat-ios')
+        release = (ROOT / 'scripts/release/release.sh').read_text()
+        entitlement_check = (ROOT / 'scripts/release/entitlements.py').read_text()
+        for source in (release, entitlement_check):
+            self.assertIn('-disableAutomaticPackageResolution', source,
+                          'release and its entitlement check must not rewrite the tracked resolved file')
 
     def test_xcconfig_writes_meta_app_id_and_client_token(self):
         cases = {

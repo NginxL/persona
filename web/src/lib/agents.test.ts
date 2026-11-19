@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { addSection, agentPath, arrangeSessions, assignSection, blockView, emptyPrefs, isDefaultView, mergeMessages, normalizePrefs, pendingOutgoing, removeSection, resetView, setView, setupHints, toggleProvider, togglePin, totalUnread, viewOf, type AgentMessage, type AgentSession, type Outgoing } from "./agents";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { addSection, agentPath, arrangeSessions, assignSection, blockView, dateBucket, emptyPrefs, isDefaultView, mergeMessages, normalizePrefs, pendingOutgoing, removeSection, resetView, setView, setupHints, toggleProvider, togglePin, totalUnread, viewOf, type AgentMessage, type AgentSession, type Outgoing } from "./agents";
 
 const s = (id: string, provider: string, rank: number, unread = 0, title = id): AgentSession => ({ id, source: "lark-bridge", sessionKey: id, provider, title, canSend: true, unreadCount: unread, rankTimeMs: rank });
 const m = (id: string, pos: number, role = "assistant", text = id, t = pos * 1000): AgentMessage => ({ externalId: id, role, blocks: [{ type: "text", text }], createTimeMs: t, position: pos });
@@ -116,5 +116,50 @@ describe("setupHints", () => {
     expect(h).toHaveLength(2);
     expect(h[0]).toContain("扩展");
     expect(h[1]).toContain("账号");
+  });
+});
+
+describe("date groups by calendar day (#9912)", () => {
+  // A calendar day is 23 or 25 hours on the days the clocks change; the groups count days, not 24-hour steps.
+  const savedTZ = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "America/New_York";
+  });
+  afterAll(() => {
+    if (savedTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ;
+  });
+  const at = (month: number, date: number, h = 0, m = 0) => new Date(2026, month, date, h, m).getTime();
+  const key = (ms: number, now: number) => dateBucket(ms, now).key;
+
+  it("after the clocks go forward, two days ago is not yesterday", () => {
+    const now = at(2, 9, 12); // Mon 2026-03-09; Sun 03-08 had 23 hours
+    expect(key(at(2, 9, 0, 10), now)).toBe("today");
+    expect(key(at(2, 8, 0, 30), now)).toBe("yesterday");
+    expect(key(at(2, 7, 23, 30), now)).toBe("week");
+  });
+
+  it("after the clocks go back, the first hour of yesterday is yesterday", () => {
+    const now = at(10, 2, 12); // Mon 2026-11-02; Sun 11-01 had 25 hours
+    expect(key(at(10, 1, 0, 30), now)).toBe("yesterday");
+    expect(key(at(10, 1, 23, 30), now)).toBe("yesterday");
+    expect(key(at(9, 31, 23, 30), now)).toBe("week");
+  });
+
+  it("the last 7 and 30 days start at a midnight across a change too", () => {
+    expect(key(at(2, 7, 0, 30), at(2, 14, 12))).toBe("week");
+    expect(key(at(2, 6, 23, 30), at(2, 14, 12))).toBe("month");
+    expect(key(at(1, 18, 0, 30), at(2, 20, 12))).toBe("month");
+    expect(key(at(1, 17, 23, 30), at(2, 20, 12))).toBe("older");
+  });
+
+  it("an ordinary week reads the same", () => {
+    const now = at(5, 10, 12); // Wed 2026-06-10
+    expect(key(at(5, 9, 0, 0), now)).toBe("yesterday");
+    expect(key(at(5, 8, 23, 59), now)).toBe("week");
+    expect(key(at(5, 3, 0, 0), now)).toBe("week");
+    expect(key(at(5, 2, 23, 59), now)).toBe("month");
+    expect(key(at(4, 11, 0, 0), now)).toBe("month");
+    expect(key(at(4, 10, 23, 59), now)).toBe("older");
   });
 });

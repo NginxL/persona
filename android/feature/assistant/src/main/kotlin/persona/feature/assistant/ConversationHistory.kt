@@ -26,14 +26,24 @@ import persona.core.domain.ConversationTitle
  */
 @Stable
 internal class ConversationHistory(private val management: AssistantManagement?, private val repository: AssistantRepository) {
+    val canEditTags: Boolean get() = management != null
     /** The archived conversations as the hub last listed them; null before the first read and where the hub can't list them. */
     var archived: List<Session>? by mutableStateOf(null)
         private set
     /** Titles renamed here, by conversation, until the hub's list has them. */
     var titles: Map<SessionKey, String> by mutableStateOf(emptyMap())
         private set
+    /** Whole-set tag writes made here, shown until the hub carries the same set. */
+    var tagEdits: Map<SessionKey, List<String>> by mutableStateOf(emptyMap())
+        private set
+    /** The selected exact tag; null leaves the list unfiltered. */
+    var activeTag: String? by mutableStateOf(null)
+        private set
+    /** The conversation whose whole-set editor is open. */
+    var editingTags: Session? by mutableStateOf(null)
     /** Brought back here and not confirmed yet: off the archived list at once. */
-    private var restoring: Set<SessionKey> by mutableStateOf(emptySet())
+    var restoring: Set<SessionKey> by mutableStateOf(emptySet())
+        private set
     /** The conversation the rename dialog is open on. */
     var renaming: Session? by mutableStateOf(null)
     var archivedOpen: Boolean by mutableStateOf(false)
@@ -46,11 +56,49 @@ internal class ConversationHistory(private val management: AssistantManagement?,
     fun titled(sessions: List<Session>): List<Session> =
         if (titles.isEmpty()) sessions else sessions.map { s -> titles[s.key]?.let { s.copy(title = it) } ?: s }
 
-    /** Forgets the titles the hub's [sessions] carry now, so a later rename (by Persona itself) shows. */
+    /** [sessions] with this client's temporary titles and optimistic whole-set tag writes. */
+    fun tagged(sessions: List<Session>): List<Session> {
+        val shown = titled(sessions)
+        return if (tagEdits.isEmpty()) shown else shown.map { session ->
+            tagEdits[session.key]?.let { session.copy(tags = it) } ?: session
+        }
+    }
+
+    fun selectTag(tag: String) {
+        activeTag = if (activeTag == tag) null else tag
+    }
+
+    /** Forgets edits the hub carries now, and clears a filter whose tag has disappeared everywhere. */
     fun settle(sessions: List<Session>) {
-        if (titles.isEmpty()) return
-        val now = sessions.associate { it.key to it.title }
-        titles.filter { (key, title) -> now[key] == title }.keys.takeIf { it.isNotEmpty() }?.let { titles = titles - it }
+        val now = sessions.associateBy { it.key }
+        if (titles.isNotEmpty()) {
+            titles.filter { (key, title) -> now[key]?.title == title }.keys.takeIf { it.isNotEmpty() }?.let { titles = titles - it }
+        }
+        if (tagEdits.isNotEmpty()) {
+            tagEdits.filter { (key, tags) -> now[key]?.tags.orEmpty() == tags }.keys
+                .takeIf { it.isNotEmpty() }?.let { tagEdits = tagEdits - it }
+        }
+        val selected = activeTag
+        if (selected != null && tagged(sessions).none { it.tags?.contains(selected) == true }) activeTag = null
+    }
+
+    /** Replaces one conversation's tags optimistically; a refusal restores the edit it superseded. */
+    suspend fun saveTags(key: SessionKey, tags: List<String>): Result<Unit> {
+        conversationTagsProblem(tags)?.let { problem ->
+            return Result.failure(IllegalArgumentException("Conversation tags are invalid: $problem"))
+        }
+        val api = management ?: return Result.failure(UnsupportedOperationException("Conversation tags unavailable"))
+        val normalized = normalizeConversationTags(tags)
+        val previous = tagEdits[key]
+        tagEdits = tagEdits + (key to normalized)
+        val result = assistantAttempt { api.setConversationTags(key, normalized) }
+        if (result.isSuccess) {
+            // A stale acknowledged read must not erase the optimistic row; settle removes it once the new set arrives.
+            assistantAttempt { repository.refresh() }
+        } else {
+            tagEdits = if (previous == null) tagEdits - key else tagEdits + (key to previous)
+        }
+        return result
     }
 
     /** Reads the archived conversations again; a failed read keeps the list shown, a hub that can't list them has none. */
@@ -109,9 +157,13 @@ internal fun ConversationHistoryDialogs(
 ) {
     val resources = androidx.compose.ui.platform.LocalResources.current
     val haptics = rememberHaptics()
+    val words = conversationWords()
     val open = remember(conversations) { openKeys(conversations) }
+    val known = remember(conversations, history.archived, history.restoring) {
+        (conversations + history.shownArchived(open)).distinctBy { it.key }
+    }
     LaunchedEffect(history, open) { history.loadArchived() }
-    LaunchedEffect(history, conversations) { history.settle(conversations) }
+    LaunchedEffect(history, known, history.tagEdits) { history.settle(known) }
     history.renaming?.let { session ->
         RenameConversationDialog(session, onDismiss = { history.renaming = null }) { title ->
             history.renaming = null
@@ -122,7 +174,23 @@ internal fun ConversationHistoryDialogs(
             }
         }
     }
-    if (history.archivedOpen) ArchivedConversationsSheet(history.shownArchived(open),
+    history.editingTags?.let { session ->
+        var busy by remember(session.key.path) { mutableStateOf(false) }
+        ConversationTagsDialog(session, busy, onDismiss = { history.editingTags = null }) { tags ->
+            busy = true
+            scope.launch {
+                history.saveTags(session.key, tags)
+                    .onSuccess {
+                        history.editingTags = null
+                        notice(resources.getString(R.string.assistant_tags_saved, session.conversationTitle(words)))
+                    }
+                    .onFailure { (it as? Exception)?.let(failure) }
+                busy = false
+            }
+        }
+    }
+    if (history.archivedOpen) ArchivedConversationsSheet(
+        history.tagged(history.shownArchived(open)).withConversationTag(history.activeTag),
         onDismiss = { history.archivedOpen = false },
         onOpen = { history.archivedOpen = false; onOpen(it.key) },
         onUnarchive = { session ->
@@ -133,7 +201,8 @@ internal fun ConversationHistoryDialogs(
                     .onSuccess { notice(resources.getString(R.string.assistant_unarchived)) }
                     .onFailure { (it as? Exception)?.let(failure) }
             }
-        })
+        },
+        onEditTags = if (history.canEditTags) ({ history.editingTags = it }) else null)
 }
 
 /**
@@ -162,6 +231,7 @@ internal fun RenameConversationDialog(session: Session, onDismiss: () -> Unit, o
 @Composable
 internal fun ArchivedConversationsSheet(
     sessions: List<Session>, onDismiss: () -> Unit, onOpen: (Session) -> Unit, onUnarchive: (Session) -> Unit,
+    onEditTags: ((Session) -> Unit)? = null,
 ) {
     val words = conversationWords()
     val resources = androidx.compose.ui.platform.LocalResources.current
@@ -177,17 +247,24 @@ internal fun ArchivedConversationsSheet(
                     // A hub title's day and kind in the quiet ink, the topic after it (iOS `ConversationTitle`); Glass.
                     val title = session.conversationTitle(words)
                     val dated = if (glass) ConversationTitle.parse(title) else null
-                    JRow(dated?.topic ?: title, titleLead = dated?.head, subtitle = historyTime(session.updated, resources),
-                        onClick = { onOpen(session) }, onLongClick = { menu = session }, trailing = {
-                            JButton(unarchive, { onUnarchive(session) }, kind = JButtonKind.Quiet, size = JButtonSize.Small)
-                        })
+                    Column {
+                        JRow(dated?.topic ?: title, titleLead = dated?.head, subtitle = historyTime(session.updated, resources),
+                            onClick = { onOpen(session) }, onLongClick = { menu = session }, trailing = {
+                                JButton(unarchive, { onUnarchive(session) }, kind = JButtonKind.Quiet, size = JButtonSize.Small)
+                            })
+                        ConversationTagLabels(session, Modifier.padding(horizontal = rowPadding).padding(bottom = Tokens.Space.xs))
+                    }
                 }
             }
         }
     }
     menu?.let { session ->
-        JActionSheet(listOf(JAction(unarchive, PersonaIcons.unarchive, onClick = { onUnarchive(session) })),
-            onDismiss = { menu = null }, title = session.conversationTitle(words))
+        JActionSheet(buildList {
+            onEditTags?.let { edit ->
+                add(JAction(stringResource(R.string.assistant_edit_tags_menu), PersonaIcons.edit, onClick = { menu = null; edit(session) }))
+            }
+            add(JAction(unarchive, PersonaIcons.unarchive, onClick = { onUnarchive(session) }))
+        }, onDismiss = { menu = null }, title = session.conversationTitle(words))
     }
 }
 

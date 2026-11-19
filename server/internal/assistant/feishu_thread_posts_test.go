@@ -157,7 +157,7 @@ func TestThreadPostsANewDecision(t *testing.T) {
 	}
 	e.clk.advance(threadPostSettle)
 	text := textOf(e.onlyPost(t))
-	mustContain(t, "line", text, "新决策", "先发安卓", testWeb+"/todos?id="+id)
+	mustContain(t, "line", text, "新决策", "先发安卓", testWeb+"/todos/"+id)
 	if strings.Contains(text, "\n") {
 		t.Fatalf("not one line: %q", text)
 	}
@@ -329,7 +329,7 @@ func TestThreadPostsAgentFinishedAndNeedsYou(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("%d lines for the finished turn: %v", len(got), got)
 	}
-	mustContain(t, "finished line", textOf(got[0]), "这一轮结束", "修登录", testWeb+"/todos?id=todo_f")
+	mustContain(t, "finished line", textOf(got[0]), "这一轮结束", "修登录", testWeb+"/todos/todo_f")
 	if g := got[0]; g["chat_id"] != testChat || g["in_thread"] != true || g["reply_to"] != "om_anchor" || g["no_detour"] != true {
 		t.Fatalf("where it went: %v", g)
 	}
@@ -343,7 +343,7 @@ func TestThreadPostsAgentFinishedAndNeedsYou(t *testing.T) {
 		t.Fatalf("%d lines after the card: %v", len(got), got)
 	}
 	// The card is in the DM (no run asked it in the topic): the topic is told so, not what the card asks.
-	mustContain(t, "needs line", textOf(got[1]), "Agent 修登录 需要你，已发到私聊", testWeb+"/todos?id=todo_f")
+	mustContain(t, "needs line", textOf(got[1]), "Agent 修登录 需要你，已发到私聊", testWeb+"/todos/todo_f")
 	if strings.Contains(textOf(got[1]), "要不要删除缓存") {
 		t.Fatalf("the card's question went to the group: %q", textOf(got[1]))
 	}
@@ -602,7 +602,7 @@ func TestThreadPostsTodoAcceptedOrClosed(t *testing.T) {
 	if !e.s.accepted(ctx, id, "") {
 		t.Fatal("not accepted")
 	}
-	mustContain(t, "accepted line", said(1), "已验收", testWeb+"/todos?id="+id)
+	mustContain(t, "accepted line", said(1), "已验收", testWeb+"/todos/"+id)
 
 	// Done by the user.
 	id = e.bound("手动", "omt_done")
@@ -771,5 +771,5 @@ func TestThreadPostsFirstProgressRepliesUnderTheRootMessage(t *testing.T) {
 	if p["reply_to"] != "om_root" || p["chat_id"] != testChat || p["in_thread"] != true {
 		t.Fatalf("the first line went as %v, want a reply to the root message in the topic", p)
 	}
-	mustContain(t, "line", textOf(p), "先发安卓", testWeb+"/todos?id="+todo.ID)
+	mustContain(t, "line", textOf(p), "先发安卓", testWeb+"/todos/"+todo.ID)
 }

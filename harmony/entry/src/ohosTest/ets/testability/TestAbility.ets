@@ -1,7 +1,7 @@
 import { UIAbility } from '@kit.AbilityKit';
 import { abilityDelegatorRegistry } from '@kit.TestKit';
 import { Hypium } from '@ohos/hypium';
-import nativeTransportTests, { fixtureArgument } from '../test/NativeTransport.test';
+import nativeTransportTests, { fixtureArgument, nativeIPv6TransportTests } from '../test/NativeTransport.test';
 import nativeStorageTests from '../test/NativeStorage.test';
 import nativeRFBTests from '../test/NativeRFB.test';
 import nativePreviewTests from '../test/NativePreview.test';
@@ -22,6 +22,7 @@ export default class TestAbility extends UIAbility {
     if (fixtureArgument('phoneCheck')) testArguments.parameters['-s timeout'] = '90000';
     Hypium.hypiumTest(abilityDelegatorRegistry.getAbilityDelegator(), testArguments, (): void => {
       if (fixtureArgument('coreReplay')) nativeCoreTests();
+      else if (fixtureArgument('ipv6FixturePort')) nativeIPv6TransportTests();
       else if (fixtureArgument('fontScale')) nativeFontTests();
       else if (fixtureArgument('sshFixtureFile')) nativeSshTests();
       else if (fixtureArgument('recordingFixtureId')) nativeRecordingTests();

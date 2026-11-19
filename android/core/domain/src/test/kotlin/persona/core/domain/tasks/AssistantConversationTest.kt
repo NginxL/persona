@@ -209,4 +209,80 @@ class AssistantConversationTest {
         assertTrue("$ids", "n2" in ids)
         assertTrue("$ids", "n3" !in ids)
     }
+
+    @Test fun standaloneScheduledAndFollowupConversationsKeepExchangesInForegroundAcrossStyles() {
+        val patrolAndFollowup = listOf(
+            user(1, "Scheduled prompt", source = MessageSource("patrol", title = "Daily check"),
+                injected = Injected("followup", "daily", "Daily check", line = "Scheduled task started")),
+            Item("use2", 2, role = "assistant", kind = "tool_use", toolUseId = "call2", toolName = "mcp_persona_0c671287_notify_user"),
+            Item("res3", 3, role = "user", kind = "tool_result", toolUseId = "call2", text = "Notification sent."),
+            reply(4, "Daily check finished and pushed to your phone."),
+            user(5, "Follow-up prompt", source = MessageSource("followup", "sched-chat", "Follow-up"),
+                injected = Injected("followup", "once", "Follow-up", line = "Follow-up is due")),
+            reply(6, "Quiet follow-up note in its own chat."),
+        )
+        val lines = chatLines(patrolAndFollowup.map(::LineItem)).lines
+        for (inline in listOf(false, true)) {
+            val projected = AssistantConversation.project(
+                lines, patrolAndFollowup,
+                folding = BackgroundFolding(rounds = false),
+                inline = inline,
+                supervisingConversation = false,
+            )
+            assertTrue("inline=$inline", projected.foreground.any { it.id == "a4" })
+            assertTrue("inline=$inline", projected.foreground.any { it.id == "a6" })
+            assertTrue("inline=$inline", projected.background.isEmpty())
+        }
+    }
+
+    @Test fun standaloneBackgroundSupervisorFoldsQuietRoundsInsteadOfBlankingForeground() {
+        val quietSupervision = listOf(
+            user(1, "Supervision: 1 task running", injected = Injected("system", "supervise", "Supervision")),
+            reply(2, "Nothing needs the owner."),
+        )
+        val lines = chatLines(quietSupervision.map(::LineItem)).lines
+        val closed = AssistantConversation.project(
+            lines, quietSupervision,
+            folding = BackgroundFolding(rounds = false),
+            inline = false,
+            supervisingConversation = false,
+        )
+        assertTrue(closed.foreground.isNotEmpty())
+        assertTrue(closed.background.isEmpty())
+        val opened = AssistantConversation.project(
+            lines, quietSupervision,
+            folding = BackgroundFolding(open = setOf("bg-u1"), rounds = false),
+            inline = false,
+            supervisingConversation = false,
+        )
+        assertTrue(opened.foreground.any { it.id == "a2" })
+    }
+
+    @Test fun supervisingConversationsKeepSupervisionVisibleRoundsInForegroundEvenOnBriefAndBoard() {
+        val items = listOf(
+            user(1, "Supervision check", MessageSource("supervision")),
+            Item("use2", 2, role = "assistant", kind = "tool_use", toolUseId = "call2", toolName = "mcp_persona_0c671287_notify_user"),
+            Item("res3", 3, role = "user", kind = "tool_result", toolUseId = "call2", text = "Notification sent."),
+            reply(4, "Notified the owner about completion."),
+            user(5, "Quiet supervision check", MessageSource("supervision")),
+            reply(6, "Still working quietly."),
+            user(7, "Accepted review round", MessageSource("supervision")),
+            Item("use8", 8, role = "assistant", kind = "tool_use", toolUseId = "call8",
+                toolName = "mcp_persona_55a1c59d_task_review", toolInput = buildJsonObject { put("verdict", "accepted") }),
+            Item("res9", 9, role = "user", kind = "tool_result", toolUseId = "call8", text = "Accepted."),
+            reply(10, "Task accepted."),
+        )
+        val projected = AssistantConversation.project(
+            chatLines(items.map(::LineItem)).lines,
+            items,
+            folding = BackgroundFolding(rounds = true),
+            inline = false,
+            supervisingConversation = true,
+        )
+        val foregroundIds = projected.foreground.map { it.id }
+        assertTrue("a4" in foregroundIds)
+        assertTrue("a10" in foregroundIds)
+        assertFalse("Quiet supervision still moves to background on Brief/Board", "a6" in foregroundIds)
+        assertTrue(projected.background.any { it.id == "a6" })
+    }
 }

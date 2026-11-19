@@ -141,7 +141,7 @@ struct AssistantTopBar: View {
                 .overlay(alignment: .topTrailing) { SidebarWaitingBadge() }
             Spacer(minLength: Theme.Space.s)
             Menu { menuItems(link) } label: {
-                HStack(spacing: Theme.Space.xs) {
+                Self.pill {
                     if link != .online {
                         ConnectionLabel(phase: link, compact: true)
                     } else {
@@ -149,13 +149,6 @@ struct AssistantTopBar: View {
                         ThemedIcon(Theme.Icon.expand).font(Theme.Font.label).foregroundStyle(.secondary)
                     }
                 }
-                .padding(.horizontal, Theme.Space.l)
-                .scaledFrame(height: Theme.Size.tapTarget)
-                .scaledFrame(maxWidth: Theme.Size.box240)
-                .fixedSize()
-                // Not the glass `surface`: inside a Menu's label it spreads over the whole label (the face's menu).
-                .background(.regularMaterial, in: .capsule)
-                .contentShape(.capsule)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -292,7 +285,7 @@ struct AssistantTopBar: View {
                 Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
             }
             if sidebarButtonShown {
-                GlassEffectContainer {
+                GlassGroup {
                     Self.circle(sidebarIsColumn ? Theme.Icon.sidebar : Theme.Icon.sidebarMenu, label: String(localized: "Chat History [Shell Components 60636b]"), id: "assistant-sidebar-button") {
                         Haptics.tap()
                         openSidebar()
@@ -302,13 +295,13 @@ struct AssistantTopBar: View {
                 .transition(.identity)
             }
             Spacer(minLength: 8)
-            face
+            if faceInColumn { namePill } else { face }
             Spacer(minLength: 8)
             if newChatInSidebar {
                 // Its room kept, empty, so the face stays in the middle.
                 Color.clear.scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget).accessibilityHidden(true)
             } else {
-                GlassEffectContainer {
+                GlassGroup {
                     Self.circle(Theme.Icon.compose, label: String(localized: "New Chat [Quick Actions ea4b29]"), id: "assistant-new") {
                         Haptics.tap()
                         newConversation()
@@ -346,6 +339,59 @@ struct AssistantTopBar: View {
         .surface(interactive: true, in: .circle)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
+    }
+
+    /// The sidebar column is out beside the page and its head draws the persona's face (the assistant switcher): the
+    /// bar's middle is then the name pill alone, so the screen shows the face once (#9973). With the column folded the
+    /// face comes back. Only where the column stands beside the page (the iPad, the open iPhone Duo).
+    private var faceInColumn: Bool {
+        #if os(iOS)
+        sidebarIsColumn && sidebarShown && model.showsAssistantSwitcher
+        #else
+        false
+        #endif
+    }
+
+    /// The name pill without the face (`faceInColumn`), as the phone's Sidebar layout bar draws it (`drawerRow`), with
+    /// the face's menu: the hub picker with several hubs, Knowledge, Details, the copies, the launcher, Interrupt. A
+    /// copy's confirmation shows in it for a moment, as on the Mac's bar.
+    private var namePill: some View {
+        let link = model.connection.shown
+        return HStack(spacing: Theme.Space.flush) {
+            Menu { menuItems(link) } label: {
+                Self.pill {
+                    if let hint {
+                        ThemedIcon(Theme.Icon.successFilled).foregroundStyle(Theme.positive)
+                        Text(hint).font(Theme.Font.bodyStrong).lineLimit(1)
+                    } else if link != .online {
+                        ConnectionLabel(phase: link, compact: true)
+                    } else {
+                        Text(name).font(Theme.Font.bodyStrong).lineLimit(1)
+                        ThemedIcon(Theme.Icon.expand).font(Theme.Font.label).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
+            .accessibilityHint("Knowledge, details, copy directory and chat info")
+            .accessibilityIdentifier("persona-avatar")
+            .connectionDetails($showLink)
+        }
+        .animation(Theme.Motion.standard, value: hint)
+        .task(id: hint) { await clearHint() }
+    }
+
+    /// The capsule of a name pill: one line, at most 240 pt, a finger's height.
+    static func pill<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: Theme.Space.xs) { content() }
+            .padding(.horizontal, Theme.Space.l)
+            .scaledFrame(height: Theme.Size.tapTarget)
+            .scaledFrame(maxWidth: Theme.Size.box240)
+            .fixedSize()
+            // Not the glass `surface`: inside a Menu's label it spreads over the whole label (the face's menu).
+            .background(.regularMaterial, in: .capsule)
+            .contentShape(.capsule)
     }
 
     /// The face over the name pill; both are the menu's button. A copy's confirmation covers the pill for a moment
@@ -424,11 +470,12 @@ struct AssistantTopBar: View {
         return t.isEmpty || t == "Claude Code" ? own : t
     }
 
-    /// Whose page it is: the current assistant's name on a hub with several (the face stays the persona's, picked in
-    /// Appearance), the persona's with one; another assistant's conversation opened from elsewhere names its own.
+    /// Whose page it is: the current assistant's name, as the sidebar's head says it (with one assistant too, #9973;
+    /// the face stays the persona's, picked in Appearance); another assistant's conversation opened from elsewhere
+    /// names its own.
     private var ownName: String {
         if let key, let other = model.otherAssistant(of: key) { return other.name }
-        return model.assistantShownName
+        return model.assistantManager?.name ?? AssistantSidebar.assistantName(model)
     }
 
     /// The conversation's launcher (the next message uses it) or, on the new-conversation page, the default one.
@@ -725,9 +772,10 @@ extension AppModel {
 /// below the safe area's top, then fading out over `fade`, and across the whole width. On iPhone Duo's outer screen
 /// the status bar stands at the side: a fog only as wide as the page stopped beside it, a hard edge (#283).
 private extension View {
-    /// What a screenshot shows of the bar (#9508): the assistant's avatar and name with "(Persona)" in its row of
-    /// buttons, down to where the fog starts to fade (the fog under both carries on below). Under the bar the page's
-    /// color with the fog's own over it, so at rest the bar looks as it did; under the banner the page's color alone.
+    /// What a screenshot shows of the bar (#9508): the assistant's avatar and name, and Persona's repository at the
+    /// right (#10172), in its row of buttons, down to where the fog starts to fade (the fog under both carries on
+    /// below). Under the bar the page's color with the fog's own over it, so at rest the bar looks as it did; under the
+    /// banner the page's color alone.
     func barScreenshotBanner() -> some View {
         screenshotBanner(solid: AssistantTopBar.fogSolid, fade: Theme.Space.m) {
             ZStack {

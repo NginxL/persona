@@ -22,6 +22,8 @@ import java.net.URLEncoder
  * reply's Markdown gets `[path](persona-path:…)` links ([markdown]), which [handler] opens instead of the page's
  * link host. A path with a line (`src/a.kt:12`, `a.kt#L12`) opens the file at that line (iOS `PathLinkURL`).
  */
+internal data class PathLinkEdit(val range: IntRange, val replacement: String)
+
 internal object PathLinks {
     const val SCHEME = "persona-path:"
 
@@ -48,24 +50,31 @@ internal object PathLinks {
     private val special = Regex("[\\\\`*_\\[\\]<>]")
 
     /** A reply's Markdown with the paths in [linkable] (as asked: [asked]) written as links. */
-    fun markdown(text: String, linkable: Set<String>): String {
-        if (linkable.isEmpty()) return text
+    fun markdown(text: String, linkable: Set<String>): String = apply(text, edits(text, linkable))
+
+    /** Source replacements made by [markdown], so incremental callers can retain settled edits. */
+    fun edits(text: String, linkable: Set<String>): List<PathLinkEdit> {
+        if (linkable.isEmpty()) return emptyList()
         val closed = blocked.findAll(text).map { it.range }.toMutableList()
         closed += ChatLinks.matches(text).map { it.start until it.end }
-        val edits = ArrayList<Pair<IntRange, String>>()
+        val edits = ArrayList<PathLinkEdit>()
         for (m in codeSpan.findAll(text)) {
             if (closed.any { m.range.first in it }) continue
             val ref = PathRefs.codePath(m.groupValues[1])
-            if (ref != null && ref.path in linkable) edits += m.range to "[${m.value}](${uri(ref.path, ref.line)})"
+            if (ref != null && ref.path in linkable) edits += PathLinkEdit(m.range, "[${m.value}](${uri(ref.path, ref.line)})")
             closed += m.range
         }
         for (ref in PathRefs.findAscii(text)) {
             val range = ref.start until ref.end
             if (ref.path !in linkable || closed.any { it.first <= range.last && range.first <= it.last }) continue
-            edits += range to "[${special.replace(text.substring(ref.start, ref.end)) { "\\" + it.value }}](${uri(ref.path, ref.line)})"
+            edits += PathLinkEdit(range, "[${special.replace(text.substring(ref.start, ref.end)) { "\\" + it.value }}](${uri(ref.path, ref.line)})")
         }
+        return edits.sortedBy { it.range.first }
+    }
+
+    /** Apply [edits] to the same source they were computed from. */
+    fun apply(text: String, edits: List<PathLinkEdit>): String {
         if (edits.isEmpty()) return text
-        edits.sortBy { it.first.first }
         return buildString {
             var at = 0
             for ((range, link) in edits) {

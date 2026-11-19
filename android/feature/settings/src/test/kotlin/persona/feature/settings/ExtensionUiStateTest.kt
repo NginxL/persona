@@ -404,6 +404,52 @@ class ExtensionUiStateTest {
         assertNull(ExtensionViewText.refreshAt(ExtensionViewState(ExtensionView(refreshAfter = 0), drawnAt = 1_000L)))
     }
 
+    // A redraw the user did not ask for (refresh_after, ui.invalidate, back from a page pushed on it) keeps what is being
+    // typed in the view's fields, as on the web and iOS: a field the new view no longer has goes, a new one comes with its value.
+    @Test fun refreshAfterKeepsWhatIsBeingTyped() = runTest {
+        val api = FakeUi()
+        api.view = api.view.copy(refreshAfter = 30)
+        val model = ExtensionViewModel(api, "example-gateway", "home", now = { testScheduler.currentTime })
+        model.load()
+        model.edit("note", "还没发出去的话")
+        model.edit("token", "s3cret")
+        val fresh = launch { model.keepFresh() }
+        advanceTimeBy(30_500); runCurrent()
+        assertEquals(2, api.renders.size)
+        assertEquals("还没发出去的话", model.state.value.values["note"])
+        assertEquals("s3cret", model.state.value.values["token"])
+        fresh.cancel()
+    }
+
+    @Test fun anInvalidateKeepsWhatIsBeingTyped() = runTest {
+        val api = FakeUi()
+        val model = ExtensionViewModel(api, "example-gateway", "home")
+        model.load()
+        model.shown(true)
+        model.edit("note", "还没发出去的话")
+        model.edit("plan", "solo")
+        api.view = api.view.copy(sections = listOf(ExtensionViewSection(items = listOf(
+            ExtensionViewItem("field", name = "note", kind = "text", value = "扩展的新值"),
+            ExtensionViewItem("field", name = "subject", kind = "text", value = "新字段"),
+        ))))
+        model.invalidate()
+        assertEquals(2, api.renders.size)
+        assertEquals(mapOf("note" to "还没发出去的话", "subject" to "新字段"), model.state.value.values)
+    }
+
+    @Test fun comingBackFromAPushedPageKeepsWhatIsBeingTyped() = runTest {
+        val api = FakeUi()
+        val model = ExtensionViewModel(api, "example-gateway", "home")
+        model.load()
+        model.shown(true)
+        model.edit("note", "还没发出去的话")
+        model.covered()
+        model.shown(false)
+        model.shown(true)
+        assertEquals(2, api.renders.size)
+        assertEquals("还没发出去的话", model.state.value.values["note"])
+    }
+
     // A machine's section for a machine the hub does not know (another hub's) is hidden, not an error.
     @Test fun aMachineTheHubDoesNotKnowHidesItsSection() = runBlocking {
         val api = FakeUi()

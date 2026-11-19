@@ -34,6 +34,21 @@ const noticeMarker = "这是 Persona 的任务通知"
 // superviseMarker is in every supervise (follow-up) message (assistant/supervise, #3124).
 const superviseMarker = "这是 Persona 的督办消息"
 
+// SuperviseRoundMarker is on its own line in a supervision message that is a round of the background supervisor starting
+// from a clean context (assistant/supervise, Fresh, #7315). The manager sends such a message as a round (IsSuperviseRound),
+// and the transcript reader keeps every round in view though they all hang from the conversation's first turn
+// (transcript/branch.go).
+const SuperviseRoundMarker = "<persona-supervision-round />"
+
+// IsSuperviseRound says whether text is a supervision message rendered as a round (SuperviseRoundMarker).
+func IsSuperviseRound(text string) bool {
+	if !strings.Contains(text, "\n"+SuperviseRoundMarker+"\n") {
+		return false
+	}
+	in := ParseInjected(text)
+	return in != nil && in.State == "supervise"
+}
+
 // inboxMarker is in every inbox note for a conversation an item was handed to (inbox/handoff_note, #1194).
 const inboxMarker = "这是 Persona 的收件箱通知"
 

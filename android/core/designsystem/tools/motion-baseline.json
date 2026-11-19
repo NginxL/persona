@@ -1,0 +1,33 @@
+{
+  "files": {
+    "android/app/src/main/java/persona/android/ui/PaneDividers.kt": 1,
+    "android/app/src/main/java/persona/android/ui/Root.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/AgentFilterCapsule.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/AgentRepoTree.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Agents.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/ChangingText.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Charts.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/ChatWaiting.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/ComposerHardware.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Controls.kt": 5,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Glass.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/HomeChrome.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/KeyCaps.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/ListTapMotion.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Page.kt": 4,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PageSizedSettingsSheet.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PageTransitions.kt": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/PersonaFace.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Voice.kt": 2,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Workflows.kt": 3,
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsScreen.kt": 1,
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/AssistantTasks.kt": 2,
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatLinkHost.kt": 6,
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatScreen.kt": 1,
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/StructuredContent.kt": 1,
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkDocumentReader.kt": 4,
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/EndpointDrag.kt": 4,
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewContent.kt": 3
+  },
+  "version": 1
+}

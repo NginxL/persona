@@ -15,9 +15,10 @@ import { sessionNode } from "../lib/node-actions";
 import { Button, copyText, Dialog, toast, type MenuItem } from "../ui/atoms";
 import type { MenuAt } from "../ui/menu-model";
 import { NodeMenu } from "./NodeMenu";
+import { preloadSessionDialogs } from "./chat/SessionDialogs";
 import { t } from "../i18n";
 import { markAllSeenLabel } from "../lib/state-labels";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import type { SpaceMenuProps } from "./SpaceMenu";
 
 /** What a row's ⋯ (and its right click) offers. `onLinkTodo`: the row can hang on a todo ("Link to to-do…"; "Move to another to-do…" and
@@ -82,11 +83,14 @@ export function AgentRowMenu({ s, anchor, at, onClose, ...o }: { s: Session; anc
   const muted = useStore((st) => isMuted(s, st.mutes));
   const features = useStore((st) => st.features);
   const online = useStore((st) => st.machines.find((m) => m.id === s.machine_id)?.online !== false);
+  // its Rename… and Delete… open dialogs from a chunk of their own: on its way while the pointer moves to them (#10382)
+  useEffect(preloadSessionDialogs, []);
   return <NodeMenu node={sessionNode(s, online)} at={at ?? { anchor }} onClose={onClose} before={agentRowMenuItems(s, { pinned, muted, features, ...o })} omit={["node-copy-path", "node-rename"]} />;
 }
 
 const LazySpaceMenu = lazy(() => import("./SpaceMenu").then((module) => ({ default: module.SpaceMenu })));
 export function SpaceMenu(props: SpaceMenuProps) {
+  useEffect(preloadSessionDialogs, []); // its Rename… opens a dialog from a chunk of its own (#10382)
   return <Suspense fallback={null}><LazySpaceMenu {...props} /></Suspense>;
 }
 

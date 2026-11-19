@@ -257,8 +257,218 @@ class InboxHandOffCrossGroupDiagnosticTest {
         assertEquals("the origin must recover target-committed acceptance after reopening", 1, transport.records)
     }
 
+    @Test fun crossGroupFailedRecordIsNotRepeatedByStartupJournalReplay() = runTest {
+        val directory = Files.createTempDirectory("inbox-handoff-cross-group-ordered-replay").toFile()
+        val scope = "hub/generation"
+        val target = SessionKey("laptop~g12345678", "agent")
+        val request = InboxHandOffRequest("item", "Handle this", target.machineId, target.sessionId,
+            "cross-group-ordered-replay", targetTitle = "Example agent")
+        val pending = InboxAgentHandOff(scope, request, "item", manager = null, delivered = false)
+        val journal = InboxReplyJournal(directory, scope)
+        journal.update(scope) {
+            it.enqueue(pending).enqueue(InboxPendingReply(
+                ReplyTarget.Lark("recovery-feed"), ReplyRequest("Recovery probe", "recovery-probe"), state = "unknown",
+            ))
+        }
+
+        AuthoritativeMessageDeliveries.publish(AuthoritativeMessageDelivery(
+            "agent-hub/generation", request.operationId, target, request.text,
+            pending.copy(delivered = true), originCommitted = false,
+        ))
+
+        // Hold the reopen's startup journal write, not the recording. Buffered evidence can finish its failed record;
+        // only then may the same opening's online journal replay inspect the still-unrecorded hand-off.
+        val journalLocked = CompletableDeferred<Unit>()
+        val releaseJournal = CompletableDeferred<Unit>()
+        val lock = backgroundScope.launch(Dispatchers.IO) {
+            journal.update(scope) {
+                journalLocked.complete(Unit)
+                runBlocking { releaseJournal.await() }
+                it
+            }
+        }
+        try {
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { journalLocked.await() }
+            }
+            val transport = RecordTransport(JsonArray(emptyList()))
+            val firstAttempt = CompletableDeferred<Unit>()
+            val recovered = CompletableDeferred<Unit>()
+            transport.onRecord = { item, session, title, client ->
+                assertEquals("item", item)
+                assertEquals(target, session)
+                assertEquals("Example agent", title)
+                assertEquals(request.operationId, client)
+                firstAttempt.complete(Unit)
+                throw UnsupportedOperationException("Inbox Agent hand-off route unavailable")
+            }
+            recordTestRepository(transport, directory, backgroundScope, RecordSender(), lookupReply = { target, id ->
+                assertEquals(ReplyTarget.Lark("recovery-feed"), target)
+                assertEquals("recovery-probe", id)
+                recovered.complete(Unit)
+                null
+            })
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { firstAttempt.await() }
+            }
+            runCurrent()
+            assertEquals("buffered evidence has made its one recording attempt", 1, transport.records)
+
+            releaseJournal.complete(Unit)
+            // Reply recovery follows hand-off replay. Its lookup proves that replay has scheduled all its work without
+            // requiring a duplicate attempt that a correct implementation will never make.
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { recovered.await() }
+            }
+            runCurrent()
+            assertEquals("startup journal replay must not repeat the same recording attempt", 1, transport.records)
+        } finally {
+            releaseJournal.complete(Unit)
+            lock.cancelAndJoin()
+            // Recording and journal completion use real IO; leave the temporary directory for any final write.
+        }
+    }
+
+    @Test fun failedJournalRecordRetriesOnLaterReconnect() = runTest {
+        val directory = Files.createTempDirectory("inbox-handoff-reconnect-retry").toFile()
+        val scope = "hub/generation"
+        val target = SessionKey("laptop~g12345678", "agent")
+        val request = InboxHandOffRequest("item", "Handle this", target.machineId, target.sessionId,
+            "cross-group-reconnect-retry", targetTitle = "Example agent")
+        val pending = InboxAgentHandOff(scope, request, "item", manager = null, delivered = true)
+        val journal = InboxReplyJournal(directory, scope)
+        journal.update(scope) { it.enqueue(pending) }
+        val states = MutableStateFlow(ConnectionState.Online)
+        val hub = object : HubConnection {
+            override val state = states
+            override val events = MutableSharedFlow<ServerEvent>()
+            override fun reconnect() = Unit
+            override fun send(message: JsonObject) = false
+        }
+        val transport = RecordTransport(JsonArray(emptyList()))
+        val firstAttempt = CompletableDeferred<Unit>()
+        val secondAttempt = CompletableDeferred<Unit>()
+        transport.onRecord = { _, _, _, _ ->
+            when (transport.records) {
+                1 -> {
+                    firstAttempt.complete(Unit)
+                    throw java.io.IOException("temporary recording failure")
+                }
+                2 -> {
+                    secondAttempt.complete(Unit)
+                    JsonObject(emptyMap())
+                }
+                else -> error("unexpected recording attempt")
+            }
+        }
+        recordTestRepository(transport, directory, backgroundScope, RecordSender(), hubConnection = hub)
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(5_000) { firstAttempt.await() }
+        }
+        runCurrent()
+        assertEquals("the first journal replay makes one attempt", 1, transport.records)
+
+        states.value = ConnectionState.Connecting
+        runCurrent()
+        states.value = ConnectionState.Online
+        runCurrent()
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(5_000) {
+                secondAttempt.await()
+                while (!journal.read(scope).agentHandOffs.single().recorded) yield()
+            }
+        }
+        assertEquals("a later reconnect retries the delivered but unrecorded hand-off", 2, transport.records)
+        // Recording and journal completion use real IO; leave the temporary directory for any final write.
+    }
+
+    @Test fun reconnectDuringStartupAllowsJournalRetry() = runTest {
+        val directory = Files.createTempDirectory("inbox-handoff-startup-reconnect").toFile()
+        val scope = "hub/generation"
+        val target = SessionKey("laptop~g12345678", "agent")
+        val request = InboxHandOffRequest("item", "Handle this", target.machineId, target.sessionId,
+            "cross-group-startup-reconnect", targetTitle = "Example agent")
+        val pending = InboxAgentHandOff(scope, request, "item", manager = null, delivered = false)
+        val journal = InboxReplyJournal(directory, scope)
+        journal.update(scope) {
+            it.enqueue(pending).enqueue(InboxPendingReply(
+                ReplyTarget.Lark("startup-reconnect-feed"), ReplyRequest("Recovery probe", "startup-reconnect-probe"),
+                state = "unknown",
+            ))
+        }
+        AuthoritativeMessageDeliveries.publish(AuthoritativeMessageDelivery(
+            "agent-hub/generation", request.operationId, target, request.text,
+            pending.copy(delivered = true), originCommitted = false,
+        ))
+        val states = MutableStateFlow(ConnectionState.Connecting)
+        val hub = object : HubConnection {
+            override val state = states
+            override val events = MutableSharedFlow<ServerEvent>()
+            override fun reconnect() = Unit
+            override fun send(message: JsonObject) = false
+        }
+        val journalLocked = CompletableDeferred<Unit>()
+        val releaseJournal = CompletableDeferred<Unit>()
+        val lock = backgroundScope.launch(Dispatchers.IO) {
+            journal.update(scope) {
+                journalLocked.complete(Unit)
+                runBlocking { releaseJournal.await() }
+                it
+            }
+        }
+        try {
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { journalLocked.await() }
+            }
+            val transport = RecordTransport(JsonArray(emptyList()))
+            val firstAttempt = CompletableDeferred<Unit>()
+            val recovered = CompletableDeferred<Unit>()
+            transport.onRecord = { _, _, _, _ ->
+                if (transport.records == 1) {
+                    firstAttempt.complete(Unit)
+                    throw java.io.IOException("temporary recording failure")
+                }
+                JsonObject(emptyMap())
+            }
+            recordTestRepository(transport, directory, backgroundScope, RecordSender(), hubConnection = hub,
+                lookupReply = { target, id ->
+                    assertEquals(ReplyTarget.Lark("startup-reconnect-feed"), target)
+                    assertEquals("startup-reconnect-probe", id)
+                    recovered.complete(Unit)
+                    null
+                })
+            runCurrent()
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { firstAttempt.await() }
+            }
+            runCurrent()
+            assertEquals("buffered evidence has made its one recording attempt", 1, transport.records)
+
+            // The startup write has not subscribed the recovery collector yet. The state watcher must nevertheless
+            // observe this Online → Connecting → Online cycle; subscribing only to its final value would conceal it.
+            states.value = ConnectionState.Online
+            runCurrent()
+            states.value = ConnectionState.Connecting
+            runCurrent()
+            states.value = ConnectionState.Online
+            runCurrent()
+            releaseJournal.complete(Unit)
+            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                withTimeout(5_000) { recovered.await() }
+            }
+            runCurrent()
+            assertEquals("a reconnect during startup must allow the journal retry", 2, transport.records)
+        } finally {
+            releaseJournal.complete(Unit)
+            lock.cancelAndJoin()
+            // Recording and journal completion use real IO; leave the temporary directory for any final write.
+        }
+    }
+
     private fun recordTestRepository(
         transport: RecordTransport, directory: java.io.File, owner: CoroutineScope, agents: MessageSender,
+        hubConnection: HubConnection? = null,
+        lookupReply: suspend (ReplyTarget, String) -> InboxReplyReceipt? = { _, _ -> null },
     ) = RealInboxRepository(
         object : InboxAssistantConnection { override val current = MutableStateFlow<InboxAssistantTransport?>(transport) },
         InboxReplyJournal(directory, "hub/generation"),
@@ -271,7 +481,7 @@ class InboxHandOffCrossGroupDiagnosticTest {
             override val pending = MutableStateFlow<List<Interaction>>(emptyList())
             override suspend fun refresh() = Unit
             override suspend fun resolve(id: String, resolution: Resolution) = Unit
-        }, owner, messageSender = agents,
+        }, owner, messageSender = agents, hubConnection = hubConnection, lookupReply = lookupReply,
     ) { _, _ -> error("unused") }
 
     private class RecordFailure(override val status: Int) : java.io.IOException("HTTP $status"), HubCodedFailure {

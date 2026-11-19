@@ -6,7 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
-import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
+import { getFeedState, loadFeed, setRoute, type FeedItem, type TaskPlan } from "../../lib/feed";
 import { clock } from "../../lib/format";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
@@ -108,6 +108,7 @@ async function mount() {
 }
 
 beforeEach(() => {
+  setRoute(conversation, null);
   ask = decision;
   posts = [];
   status = 200;
@@ -269,23 +270,34 @@ describe("a decision in the Needs you tray", () => {
     expect(row().querySelector("[data-decision-done]")).toBeNull();
   });
 
-  it("opens the task from Other…", async () => {
+  it("opens the originating conversation with this decision routed to its composer from Other…", async () => {
     await mount();
     const other = [...row().querySelectorAll("button")].find((b) => b.textContent === t("assistant-decisionrow.another"))!;
     act(() => other.click());
-    // in the side panel, the default (#5424)
-    expect(getPanel()).toMatchObject({ kind: "task", todo: "decision-task" });
-    expect(opened()).toBe("/");
+    expect(opened()).toBe("/persona/decision-demo");
+    expect(getFeedState().routes[conversation]).toEqual({ todoId: "decision-task", askedAt: at });
+    expect(getPanel()).toBeNull();
     expect(posts).toEqual([]);
   });
 
-  it("opens the task's Agent page from Other…, set to Full page (#5096)", async () => {
+  it("opens the free-text answer rather than the Agent page from Other…, set to Full page (#5096)", async () => {
     setAgentOpenMode("page");
     await mount();
     const other = [...row().querySelectorAll("button")].find((b) => b.textContent === t("assistant-decisionrow.another"))!;
     act(() => other.click());
     expect(getPanel()).toBeNull();
-    expect(opened()).toBe("/s/demo/worker");
+    expect(opened()).toBe("/persona/decision-demo");
+    expect(getFeedState().routes[conversation]).toEqual({ todoId: "decision-task", askedAt: at });
+  });
+
+  it("keeps the task-opening fallback when a decision has no originating conversation", async () => {
+    await mount();
+    await act(async () => putTodo({ ...todo, origin: undefined }));
+    const other = [...row().querySelectorAll("button")].find((b) => b.textContent === t("assistant-decisionrow.another"))!;
+    act(() => other.click());
+    expect(getPanel()).toMatchObject({ kind: "task", todo: "decision-task" });
+    expect(opened()).toBe("/");
+    expect(getFeedState().routes[conversation]).toBeUndefined();
   });
 
   it("says it went back to Persona while a decision answered with a fixed response still waits", async () => {

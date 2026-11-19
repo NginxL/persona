@@ -5,12 +5,19 @@ import SwiftUI
 /// The bar's start boundary, also allowing a unit test to fail or count a start without opening the microphone.
 @MainActor protocol DictationStarting {
     var heard: String { get }
+    /// Why a start now would be refused (a live call, #9290 follow-up), nil while it may.
+    var callRefusal: String? { get }
     func start(hints: [String], update: @escaping (String) -> Void, failed: @escaping (String) -> Void)
     func finish(settling: Bool) async -> String
     func stop(settling: Bool)
 }
 
 extension Dictation: DictationStarting {}
+
+extension DictationStarting {
+    /// A stand-in (tests' fakes) asks the gate itself; `Dictation` has its own, which tests can replace.
+    var callRefusal: String? { LiveCallGate.dictationRefusal }
+}
 
 /// The composer's mic tapped (not held): the composer's capsule turns into ChatGPT's dictation bar, [✕] the wave and
 /// ■ ↑. ✕ drops what was heard; ■ puts it into the draft and sends nothing; ↑ puts it into the draft and sends. ■ is
@@ -53,6 +60,12 @@ final class DictationBarModel {
     /// The mic's tap gives no haptic, as before the bar: the bar's own buttons do, and their generator gets ready once
     /// the bar is in (not on the tap's frame, which already carries the bar's spring).
     func start(_ dictation: any DictationStarting, hints: [String], reduceMotion: Bool, onFailure: (() -> Void)? = nil) {
+        // A live system call: a note, and the bar never opens (dictation would cut the call's microphone).
+        if let refusal = dictation.callRefusal {
+            AppModel.shared.toast = Toast(refusal)
+            onFailure?() // as any start that could not begin: the composer takes the keyboard back (#9619)
+            return
+        }
         run = UUID(); let mine = run
         Task {
             try? await Task.sleep(for: Theme.DictationBar.warmAfter)

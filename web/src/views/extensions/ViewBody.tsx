@@ -79,8 +79,9 @@ export interface ViewHandlers extends V6Handlers {
   chosen?: string;
   /** The fields cannot be changed (an answered card: what was sent shows). */
   locked?: boolean;
-  /** UI version 4: an action sent with values of the component's own (a file's path, a line, a comment typed). */
-  onAct?: (a: UIAction, values?: Record<string, string>) => void;
+  /** UI version 4: an action sent with values of the component's own (a file's path, a line, a comment typed); resolves
+   *  to whether it was done when the page can tell (CodeViews.tsx, CodeHandlers.act). */
+  onAct?: (a: UIAction, values?: Record<string, string>) => void | Promise<boolean>;
   onNativeAct?: (a: UIAction, values?: Record<string, string>) => Promise<boolean>;
   /** Opt-in native stream binding: callbacks and controlled drafts belong to the stable node, not an action ID. */
   nodeHandlers?: (key: string) => ViewHandlers;

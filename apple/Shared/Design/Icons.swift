@@ -111,6 +111,9 @@ extension Theme {
         static let permissions = "lock.shield"
         /// The two little arrows after a value that opens a menu of choices.
         static let choices = "chevron.up.chevron.down"
+        /// The small chevron after an action's words that opens a menu of how far it goes (a pull-down, as UIKit draws
+        /// one): a group title's Mark All Seen in the Inbox (#10422). A value's menu of choices is `choices`.
+        static let pullDown = expand
         static let effort = "gauge.with.dots.needle.50percent"
         /// The effort level left to the model (its own default, Thinking Effort › Auto).
         static let effortAuto = "gauge.with.dots.needle.bottom.50percent"
@@ -401,7 +404,7 @@ extension Theme {
         /// A Moments (Feishu Moments) post in the inbox: the company's public feed.
         static let moments = "newspaper"
         static let folder = "folder"
-        /// Home: Back to Main Chat (the main conversation), a repository's main checkout in the Agents list's By Repository (as Orca
+        /// Home: the main conversation (Back to Main Chat, its row in the sidebar and in search results, #9973), a repository's main checkout in the Agents list's By Repository (as Orca
         /// and the web mark it), and the computer's home folder in the file page's path bar.
         static let home = "house"
         /// Home accessories and scenes (HomeKit, #2285).

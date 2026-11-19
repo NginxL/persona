@@ -1,10 +1,12 @@
 import Foundation
+import ImageIO
 import Testing
+import UIKit
 @testable import Persona
 import PersonaWire
 
 /// Clipboard sharing with a computer (#3064): wire decoding, Send / Get / the switch against a FakeHub, the hub's
-/// refusals in words, and the once-only paste hint.
+/// refusals in words, the once-only paste hint, and the fetched picture kept at its preview's size (#7925).
 @MainActor struct ClipboardModelTests {
     /// A pasteboard in memory; `refuses`: the user tapped Don't Allow (the read comes back empty).
     @MainActor final class Board {
@@ -15,7 +17,15 @@ import PersonaWire
             PhonePasteboard(read: { [self] in
                 reads += 1
                 return refuses ? nil : content
-            }, write: { [self] in content = $0 }, hasContent: { [self] in content != nil })
+            }, write: { [self] in
+                // Match the live pasteboard: unknown, undecodable bytes do not replace what the phone already holds.
+                if case .image = $0.kind, let bytes = $0.image?.bytes {
+                    let png = bytes.starts(with: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+                    let jpeg = bytes.starts(with: [0xff, 0xd8, 0xff])
+                    if !png && !jpeg && UIImage(data: bytes) == nil { return }
+                }
+                content = $0
+            }, hasContent: { [self] in content != nil })
         }
     }
 
@@ -29,6 +39,23 @@ import PersonaWire
     private func model(_ hub: FakeHub, _ board: Board, hints: ClipboardHints = Hints().store(),
                        updated: @escaping (MachineClipboard) -> Void = { _ in }) -> ClipboardModel {
         ClipboardModel(deps: .init(api: { hub.client }, pasteboard: board.pasteboard, updated: updated, hints: hints))
+    }
+
+    /// A picture of one color, `width` × `height` pixels, as the computer's clipboard sends it (PNG, or JPEG carrying
+    /// an EXIF orientation).
+    private func picture(_ width: Int, _ height: Int, orientation: Int? = nil) throws -> ClipboardContent {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        guard let orientation else { return .image(ClipboardImage(mime: "image/png", bytes: try #require(image.pngData()))) }
+        let out = NSMutableData()
+        let dest = try #require(CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, try #require(image.cgImage), [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        #expect(CGImageDestinationFinalize(dest))
+        return .image(ClipboardImage(mime: "image/jpeg", bytes: out as Data))
     }
 
     @Test func decodesMachinesAndContent() throws {
@@ -96,16 +123,85 @@ import PersonaWire
         hub.on("GET", "/api/v1/machines/mac/clipboard", json: #"{"kind":"text","text":"from the Mac"}"#)
         let board = Board()
         let m = model(hub, board)
-        #expect(await m.fetch(machineID: "mac") == .fetched(.text))
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .fetched(.text))
         #expect(board.content == .text("from the Mac") && m.fetched == .text("from the Mac"))
         #expect(board.reads == 0, "getting never reads the phone's clipboard")
 
         hub.on("GET", "/api/v1/machines/mac/clipboard", json: #"{"kind":"concealed"}"#)
-        #expect(await m.fetch(machineID: "mac") == .remoteConcealed)
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .remoteConcealed)
         hub.on("GET", "/api/v1/machines/mac/clipboard", json: #"{"kind":"empty"}"#)
-        #expect(await m.fetch(machineID: "mac") == .remoteEmpty)
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .remoteEmpty)
         #expect(board.content == .text("from the Mac"), "nothing overwritten")
     }
+
+    /// The phone gets the computer's picture as it is; the preview keeps it at the size it draws, once (#7925).
+    @Test func aFetchedPictureIsKeptAtThePreviewsSize() async throws {
+        let hub = FakeHub()
+        let board = Board()
+        let m = model(hub, board)
+        let large = try picture(1600, 800)
+        hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in try JSON.encoder.encode(large) }
+        #expect(await m.fetch(machineID: "mac", scale: 1) == .fetched(.image))
+        #expect(board.content == large && m.fetched == large, "the original goes to the phone and stays with the preview")
+        let kept = try #require(m.fetchedPicture?.cgImage)
+        #expect(kept.width == 400 && kept.height == 200, "200 pt high at 1 pixel a point: 400 × 200")
+
+        let small = try picture(40, 20)
+        hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in try JSON.encoder.encode(small) }
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .fetched(.image))
+        #expect(m.fetched == small && m.fetchedPicture?.cgImage?.width == 40, "a smaller picture keeps its size")
+
+        hub.on("GET", "/api/v1/machines/mac/clipboard", json: #"{"kind":"text","text":"from the Mac"}"#)
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .fetched(.text))
+        #expect(m.fetchedPicture == nil, "text has no picture")
+    }
+
+    @Test func thePreviewsSizeFollowsTheHeightLimit() async throws {
+        #expect(ClipboardModel.previewPixels(CGSize(width: 4000, height: 2000), height: 600) == 1200, "a wide picture: the height × its aspect ratio")
+        #expect(ClipboardModel.previewPixels(CGSize(width: 1000, height: 3000), height: 600) == 600, "a tall one: the height")
+        #expect(ClipboardModel.previewPixels(CGSize(width: 40000, height: 1000), height: 600) == ClipboardModel.previewPixelLimit, "a panorama")
+
+        // Turned a quarter by its EXIF orientation, a 400 × 200 JPEG is drawn 200 wide and 400 high.
+        let turned = try #require(try picture(400, 200, orientation: 6).image?.bytes)
+        let kept = try #require(await ClipboardModel.previewPicture(turned, height: 200)?.cgImage)
+        #expect(kept.width == 100 && kept.height == 200)
+    }
+
+    @Test func clearingThePreviewDropsItsPicture() async throws {
+        let hub = FakeHub()
+        let m = model(hub, Board())
+        let content = try picture(40, 20)
+        hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in try JSON.encoder.encode(content) }
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .fetched(.image))
+        #expect(m.fetchedPicture != nil)
+        hub.on("PUT", "/api/v1/machines/mac/clipboard/settings", json: #"{"supported":true,"enabled":false}"#)
+        #expect(await m.setEnabled(false, machineID: "mac"))
+        #expect(m.fetched == nil && m.fetchedPicture == nil, "switched off: no preview, and its picture let go")
+    }
+
+    @Test func bytesThatAreNoPictureAreAVisibleFailure() async throws {
+        let hub = FakeHub()
+        let board = Board()
+        let m = model(hub, board)
+        let broken = ClipboardContent.image(ClipboardImage(mime: "image/png", bytes: Data("not a picture".utf8)))
+        hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in try JSON.encoder.encode(broken) }
+        let result = await m.fetch(machineID: "mac", scale: 3)
+        #expect(result == .failed(.badImage) && m.outcome == result)
+        #expect(m.outcome?.message(machine: "MacBook").isEmpty == false, "the failure says what went wrong")
+        #expect(board.content == nil, "the live pasteboard cannot store unreadable image bytes")
+        #expect(m.fetched == nil && m.fetchedPicture == nil, "no successful but empty image preview")
+    }
+
+    #if DEBUG
+    @Test func debugImagePreviewDecodesItsPicture() async throws {
+        let m = model(FakeHub(), Board())
+        let content = try picture(40, 20)
+        await m.preview(fetched: content, hint: false)
+        #expect(m.fetched == content && m.outcome == .fetched(.image))
+        let kept = try #require(m.fetchedPicture?.cgImage, "the screenshot's image preview is not blank")
+        #expect(kept.width == 40 && kept.height == 20)
+    }
+    #endif
 
     @Test func hubRefusalsInWords() async {
         let hub = FakeHub()
@@ -115,11 +211,11 @@ import PersonaWire
         hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in
             throw APIError(status: 403, message: "clipboard is off", fields: ["code": "clipboard_disabled"])
         }
-        #expect(await m.fetch(machineID: "mac") == .failed(.disabled))
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .failed(.disabled))
         hub.on("GET", "/api/v1/machines/mac/clipboard") { _ in
             throw APIError(status: 409, message: "no graphical session", fields: ["code": "clipboard_unsupported"])
         }
-        #expect(await m.fetch(machineID: "mac") == .failed(.unsupported("no graphical session")))
+        #expect(await m.fetch(machineID: "mac", scale: 3) == .failed(.unsupported("no graphical session")))
         hub.on("PUT", "/api/v1/machines/mac/clipboard") { _ in throw APIError(status: 503, message: "offline") }
         #expect(await m.sendPasteboard(machineID: "mac") == .failed(.offline))
         #expect(ClipboardOutcome.failed(.offline).message(machine: "MacBook").contains("MacBook"))

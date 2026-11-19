@@ -70,14 +70,16 @@ export function quotaTone(ratio: number, exhausted?: boolean): QuotaTone {
   return "accent";
 }
 
-/** 12K, 340M (Chinese counts in units of ten thousand and a hundred million). */
+/** 12K, 340M (Chinese counts in units of ten thousand and a hundred million). The unit follows the number as it is
+ *  shown, as formatTokens does: rounding that reaches the next unit moves up to it (99,999,500 → 1 亿, not 10000 万;
+ *  9,999.5 → 1 万, not 10000; #9913). */
 export function quotaCount(v: number): string {
   const short = (x: number) => x.toFixed(1).replace(/\.0$/, "");
-  const a = Math.abs(v);
+  const whole = Math.abs(Number(v.toFixed(0)));
   // English has no units of ten thousand / a hundred million: it reads 12K, 210.6M
-  if (a >= 1e4 && currentLanguage() === "en") return formatNumber(v, { notation: "compact", maximumFractionDigits: 1 });
-  if (a >= 1e8) return t("lib-quota.count_1e8", { n: short(v / 1e8) });
-  if (a >= 1e4) return t("lib-quota.count_1e4", { n: short(v / 1e4) });
+  if (whole >= 1e4 && currentLanguage() === "en") return formatNumber(v, { notation: "compact", maximumFractionDigits: 1 });
+  if (Math.abs(Number(short(v / 1e4))) >= 1e4) return t("lib-quota.count_1e8", { n: short(v / 1e8) });
+  if (whole >= 1e4) return t("lib-quota.count_1e4", { n: short(v / 1e4) });
   return v.toFixed(0);
 }
 
@@ -137,7 +139,7 @@ export function weeklyQuota(answer: LauncherQuotaAnswer | undefined): WeeklyQuot
   const windows = [...(q.budget ?? []), ...(q.pools ?? []).flatMap((p) => p.windows ?? [])];
   let found: { window: QuotaWindow; used: number } | undefined;
   for (const w of windows) {
-    if (!/week|周|週/i.test(w.label)) continue;
+    if (!/^(?:7d|1w)$|week|周|週/i.test(w.label.trim())) continue;
     let used = w.used_ratio !== undefined && Number.isFinite(w.used_ratio) ? w.used_ratio : undefined;
     if (used === undefined && w.used !== undefined && w.limit !== undefined && Number.isFinite(w.used) && w.used >= 0 && Number.isFinite(w.limit) && w.limit > 0) used = w.used / w.limit;
     if (used === undefined) {

@@ -355,7 +355,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
           column, so the usage popover that opens upward over it from the bottom is never drawn under them */}
       <div ref={nav} data-sidebar-rows data-row-scroller onMouseLeave={() => hover(null)} className="relative isolate min-h-0 flex-1 scroll-pt-16 overflow-y-auto overscroll-contain px-2.5 pb-3">
         {highlight}
-        {/* the main conversation is the column's first row, Persona with the app's mark, and only there (#2004, #5109); it
+        {/* the main conversation is the column's first row, Main chat with the home symbol, and only there (#2004, #5109); it
             stays at the top while the rest scrolls (#5581), with a solid divider above the sticky groups */}
         <div data-sidebar-sticky className="sticky top-0 z-30 flex flex-col gap-px bg-canvas pt-1">
           <PersonaRow reg={reg} hover={hover} active={activeKey === "persona"} go={go} main={mainConversation} chord={bindings.persona} onMenu={onConvMenu} />

@@ -101,6 +101,15 @@ func (d *DB) DeleteSubscription(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteSubscriptionAt removes it only while it is still at revision prev.
+func (d *DB) DeleteSubscriptionAt(ctx context.Context, id string, prev int64) (bool, error) {
+	tag, err := d.pool.Exec(ctx, `DELETE FROM subscriptions WHERE id = $1 AND revision = $2`, id, prev)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // LeaseSubscription holds id for a run until until, unless a run holds it past now; false when one does (or it is gone).
 func (d *DB) LeaseSubscription(ctx context.Context, id string, now, until time.Time) (bool, error) {
 	tag, err := d.pool.Exec(ctx, `UPDATE subscriptions SET lease_until = $2 WHERE id = $1 AND (lease_until IS NULL OR lease_until <= $3)`,

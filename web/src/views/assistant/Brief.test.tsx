@@ -5,7 +5,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
-import type { BriefRow, FeedItem } from "../../lib/feed";
+import { askRow, briefBody, type BriefRow, type FeedItem } from "../../lib/feed";
+import type { TodoAsk } from "../../lib/todos";
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/api", async (orig) => ({ ...(await orig<typeof import("../../lib/api")>()), api }));
@@ -302,5 +303,42 @@ describe("a brief item", () => {
   it("has no setup section on a briefing without the block", () => {
     draw(item(body()));
     expect(rows("setup")).toEqual([]);
+  });
+});
+
+// A row's meta line is "waited · nudged · from" and only text goes into it: a to-do's `ask.from` is an object (where the
+// task came from), and a hub row's fields are not checked by TypeScript, so a field of another type once read
+// "[object Object]" in the Needs you tray.
+describe("a row's meta line", () => {
+  const ASK: TodoAsk = {
+    outcome: "decide", verdict: "🤔 要你拍板：旧接口留不留", recommend: "先合入", asked_at: ASKED,
+    from: { conversation: "c1", title: "发版群", main: true, at: ASKED, message: "今天能发吗", by_assistant: false, started_by: "me" },
+  };
+
+  it("never carries a to-do's ask.from into its accept row", () => {
+    const row = askRow({ id: "todo_1", title: "检查 PR" }, ASK, Date.parse(ASKED) + 12.5 * 3_600_000);
+    expect(row.from).toBeUndefined();
+    drawDecision(row);
+    const meta = host.querySelector("[data-brief-meta]")!.textContent!;
+    expect(meta).toBe("已等 12 小时 30 分");
+    expect(host.textContent).not.toContain("[object Object]");
+    expect(host.querySelector("[data-brief-recommend]")!.textContent).toContain("先合入");
+  });
+
+  it("drops a wire field that is not text before any row draws it", () => {
+    const wire = body({
+      accept: [{ id: "todo_v1", title: "改设置页", from: { conversation: "c1" }, detail: ["x"], verdict: 3, recommend: {}, waited_s: 60, nudged: {}, asked_at: ASKED }, { title: "no id" }, "nope"],
+      waiting: [{ id: "ix1", title: "问题", from: 7, waited_s: "soon" }],
+    });
+    const got = briefBody(item(wire))!;
+    expect(got.accept).toEqual([{ id: "todo_v1", title: "改设置页", waited_s: 60, asked_at: ASKED }]);
+    expect(got.waiting).toEqual([{ id: "ix1", title: "问题", waited_s: 0 }]);
+    draw(item(wire));
+    expect(host.textContent).not.toContain("[object Object]");
+  });
+
+  it("keeps the fields a row is declared with", () => {
+    const got = briefBody(item(body()))!;
+    expect(got.waiting[0]).toEqual({ id: "ix1", title: "先发预发还是直接上线？", from: "来自 Agent「登录修复」", link: "https://hub.example/s/box/ag1", waited_s: 4800, nudged: true });
   });
 });

@@ -5,6 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { InteractionCard } from "./Interactions";
 import { getState } from "../../lib/store";
 import type { Interaction, Session } from "../../lib/types";
+import { loadPages } from "../../lib/lazy-page";
+
+await loadPages();
 
 const calls = vi.hoisted(() => [] as { path: string; body: Record<string, unknown> }[]);
 vi.mock("../../lib/ops", () => ({

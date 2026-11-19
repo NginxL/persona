@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,9 +180,105 @@ func TestBackgroundTasksStreamed(t *testing.T) {
 		if got := n.bgScans[path].meta.Background; !reflect.DeepEqual(got, want.Background) {
 			t.Errorf("%s: background tasks\n got %+v\nwant %+v", name, got, want.Background)
 		}
+		if got := n.bgScans[path].meta.BackgroundEnded; !reflect.DeepEqual(got, want.BackgroundEnded) {
+			t.Errorf("%s: ended background tasks\n got %+v\nwant %+v", name, got, want.BackgroundEnded)
+		}
 		if st, _ := os.Stat(path); n.bgScans[path].off != st.Size() {
 			t.Errorf("%s: scanned up to %d of %d bytes", name, n.bgScans[path].off, st.Size())
 		}
+	}
+}
+
+func TestBackgroundStopResultIncremental(t *testing.T) {
+	for _, tc := range []struct {
+		tool, input string
+	}{
+		{"TaskStop", `{"task_id":"shell"}`},
+		{"KillShell", `{"shell_id":"shell"}`},
+		{"KillBash", `{"shell_id":"shell"}`},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			ts := time.Now().UTC().Format(time.RFC3339Nano)
+			call := func(id, tool, input string) string {
+				return `{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","content":[{"type":"tool_use","id":"` + id + `","name":"` + tool + `","input":` + input + `}]}}` + "\n"
+			}
+			result := func(id, text string, isError bool) string {
+				return `{"type":"user","timestamp":"` + ts + `","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"` + text + `","is_error":` + strconv.FormatBool(isError) + `}]}}` + "\n"
+			}
+			appendRows := func(rows string) {
+				t.Helper()
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.WriteString(rows); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n := &Node{bgScans: map[string]*bgScan{}}
+			rows := call("launch", "Bash", `{"command":"sleep 60","run_in_background":true}`) +
+				result("launch", "Command running in background with ID: shell. Output is being written to: /tmp/shell.out", false)
+			if err := os.WriteFile(path, []byte(rows), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tasks, _, _, _ := n.backgroundTasks(path); len(tasks) != 1 {
+				t.Fatalf("launch: %+v", tasks)
+			}
+
+			// A result names only the pending call's id. Read the call and result in separate appends.
+			appendRows(call("denied", tc.tool, tc.input))
+			n.backgroundTasks(path)
+			appendRows(result("denied", "Permission denied", true))
+			if tasks, _, _, _ := n.backgroundTasks(path); len(tasks) != 1 || len(n.bgEnded(path)) != 0 {
+				t.Fatalf("denied stop: running %+v ended %+v", tasks, n.bgEnded(path))
+			}
+			appendRows(call("stopped", tc.tool, tc.input))
+			n.backgroundTasks(path)
+			appendRows(result("stopped", "Stopped background task shell", false))
+			tasks, _, _, _ := n.backgroundTasks(path)
+			ended := n.bgEnded(path)
+			if len(tasks) != 0 || len(ended) != 1 || ended[0].Status != "stopped" || ended[0].ExitCode != nil {
+				t.Fatalf("successful stop: running %+v ended %+v", tasks, ended)
+			}
+		})
+	}
+}
+
+func TestBackgroundEndedRetention(t *testing.T) {
+	now := time.Now()
+	recent, old := now.Add(-time.Hour), now.Add(-workflowKeep-time.Hour)
+	n := &Node{bgScans: map[string]*bgScan{"s": {meta: transcript.Meta{BackgroundEnded: []proto.BackgroundTask{
+		{ID: "old", Kind: "shell", EndedAt: &old},
+		{ID: "recent", Kind: "shell", Status: "completed", EndedAt: &recent},
+	}}}}}
+	ended := n.bgEnded("s")
+	if len(ended) != 1 || ended[0].ID != "recent" {
+		t.Fatalf("retained outcomes: %+v", ended)
+	}
+	path := filepath.Join(t.TempDir(), "cached.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.metas = map[string]quickMeta{path: {size: st.Size(), mtime: st.ModTime(), readAt: now, bgEnded: []proto.BackgroundTask{{ID: "old", EndedAt: &old}, {ID: "recent", EndedAt: &recent}}}}
+	if cached := n.meta(path, st).bgEnded; len(cached) != 1 || cached[0].ID != "recent" {
+		t.Fatalf("cached meta kept expired outcomes: %+v", cached)
+	}
+	var s proto.Session
+	n.setBackground(&s, quickMeta{bgEnded: ended})
+	if got := s.BackgroundEnded(); len(got) != 1 || got[0].ID != "recent" {
+		t.Fatalf("session outcomes: %+v", got)
+	}
+	n.bgScans["s"].pending = true
+	if got := n.bgEnded("s"); got != nil {
+		t.Fatalf("pending scan published outcomes: %+v", got)
 	}
 }
 

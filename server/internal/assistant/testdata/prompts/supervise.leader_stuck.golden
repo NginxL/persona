@@ -2,5 +2,5 @@
 （这是 Persona 的督办消息，不是用户发的。）
 <persona-supervision level="triage" />
 
-1. 任务「平板布局」（todo_1，signal=leader_stuck）：归一个主管督办，卡住超过一天了（基建 · 卡住超过一天，停着没做完：平板布局）
+1. 任务「平板布局」（todo_1，signal=leader_stuck）：归一个主管督办，卡住了（基建 · 卡住了，停着没做完：平板布局）
    验收标准：未记录

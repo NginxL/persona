@@ -1,5 +1,11 @@
 # HarmonyOS client lessons
 
+## Preserve the Hub name across socket family selection
+
+A DNS name can resolve exclusively to IPv6. On API 26, select the TCP family from the resolved numeric peer.
+Pass the logical name when upgrading that connected socket to TLS so SNI and certificate checks keep the Hub identity.
+Verify both the literal and the name against the same IPv6-only listener, including the Host header on child streams.
+
 ## Native controls need actual device evidence
 
 API 26 Select can retain a selected index without displaying its text when value is omitted. Bind both selection

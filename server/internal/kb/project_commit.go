@@ -48,7 +48,9 @@ func (e *Engine) commitProject(snapshot *Project, input prompts.KBProjectInput, 
 	if (d.Kind == "short" || d.Kind == "long") && !current.fieldLocked("project_kind") {
 		current.Kind = d.Kind
 	}
-	if (d.Status == "active" || d.Status == "paused" || d.Status == "done") && current.Status != "ignored" && !current.fieldLocked("status") {
+	// A finished project stays finished through a rewrite: only news revives it (evolveProject), and FinishProjects
+	// may have finished it on the sources' facts (#9427).
+	if (d.Status == "active" || d.Status == "paused" || d.Status == "done") && current.Status != "ignored" && current.Status != "done" && !current.fieldLocked("status") {
 		current.Status = d.Status
 	}
 	protected := current.Tagging

@@ -228,7 +228,7 @@ func TestElsewhereOpensATopicAndATodo(t *testing.T) {
 		}
 		// The topic is told the to-do is open (a reply under the first message, in the topic), and the main conversation
 		// gets the words; the run answers into the topic.
-		want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos?id=" + todo.ID
+		want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos/" + todo.ID
 		var told bool
 		for _, n := range roots[1:] {
 			if n["text"] == want && n["reply_to"] == "om_root1" && n["in_thread"] == true {
@@ -458,7 +458,7 @@ func TestElsewhereWithNoHomeGroupIsTakenInThePrivateChat(t *testing.T) {
 		}
 		// Told it is open, as a plain reply under the first message; the main conversation gets the words, and is told
 		// there is no topic; the run answers under the first message in the private chat.
-		want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos?id=" + todo.ID
+		want := e.said("thread_open_done", i18n.Args{"title": todo.Title}) + "\nhttps://hub.example.com/todos/" + todo.ID
 		if dm[1]["text"] != want || dm[1]["reply_to"] != "om_dm1" || dm[1]["in_thread"] != nil {
 			t.Fatalf("the second message %v, want %q under om_dm1", dm[1], want)
 		}

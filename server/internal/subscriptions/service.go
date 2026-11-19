@@ -1007,6 +1007,17 @@ func (s *Service) ConnectorChanged(ctx context.Context, id string) {
 // they took from it (#2039): its destinations are switched off first, so they take nothing more meanwhile; when the
 // removal fails the subscription stays (off), and deleting again finishes it. It is recorded either way.
 func (s *Service) Delete(ctx context.Context, id string, withData bool, by Actor) error {
+	return s.delete(ctx, id, withData, by, nil)
+}
+
+// DeleteAt is Delete with an optimistic-concurrency predicate. A clarified
+// approval uses it so an update between its final state check and the delete
+// cannot be removed under a stale proposal.
+func (s *Service) DeleteAt(ctx context.Context, id string, revision int64, withData bool, by Actor) error {
+	return s.delete(ctx, id, withData, by, &revision)
+}
+
+func (s *Service) delete(ctx context.Context, id string, withData bool, by Actor, expected *int64) error {
 	sub, err := s.o.Store.GetSubscription(ctx, id)
 	if err != nil {
 		return err
@@ -1014,16 +1025,41 @@ func (s *Service) Delete(ctx context.Context, id string, withData bool, by Actor
 	if sub == nil {
 		return notFound("subscription")
 	}
+	if expected != nil && sub.Revision != *expected {
+		return conflictWith(sub)
+	}
 	if withData && s.o.Forget != nil {
 		if sub, err = s.switchOff(ctx, *sub); err != nil {
 			return err
+		}
+		if expected != nil && sub.Revision != *expected {
+			// switchOff had to change the revision before the destinations could
+			// forget their data; the delete predicate follows that fresh revision.
+			expected = new(int64)
+			*expected = sub.Revision
 		}
 		if err := s.o.Forget(ctx, *sub); err != nil {
 			s.o.Logf("subscription %s: delete its data: %v", id, err)
 			return err
 		}
 	}
-	if err := s.o.Store.DeleteSubscription(ctx, id); err != nil {
+	if expected == nil {
+		err = s.o.Store.DeleteSubscription(ctx, id)
+	} else {
+		var ok bool
+		ok, err = s.o.Store.DeleteSubscriptionAt(ctx, id, *expected)
+		if err == nil && !ok {
+			cur, getErr := s.o.Store.GetSubscription(ctx, id)
+			if getErr != nil {
+				return getErr
+			}
+			if cur == nil {
+				return notFound("subscription")
+			}
+			return conflictWith(cur)
+		}
+	}
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()

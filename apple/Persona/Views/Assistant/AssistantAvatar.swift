@@ -14,6 +14,9 @@ struct AssistantAvatar: View {
     var state: PersonaState = .idle
     /// Hold still in Reduce Motion and Low Power Mode.
     var still = false
+    /// A call's own expressions (`PersonaFace.mouth`, `eyesShut`): the call screen's only; the defaults draw nothing more.
+    var mouth: Double? = nil
+    var eyesShut = false
 
     #if os(macOS)
     @Environment(\.tabIsActive) private var inFront
@@ -49,7 +52,7 @@ struct AssistantAvatar: View {
     private func face(at date: Date, eligible: Bool) -> some View {
         PersonaFace(size: size, design: PersonaFace.Design(rawValue: design.rawValue) ?? .mochi, state: state,
                     time: date.timeIntervalSinceReferenceDate, moving: moving(eligible: eligible),
-                    blink: held || !eligible ? nil : Theme.Motion.blink)
+                    blink: held || !eligible ? nil : Theme.Motion.blink, mouth: mouth, eyesShut: eyesShut)
     }
 }
 

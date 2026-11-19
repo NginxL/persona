@@ -140,6 +140,16 @@ describe("a new agent's own worktree (#6115)", () => {
     expect(agentBranch("a".repeat(30) + " " + "b".repeat(30))).toBe("persona/" + "a".repeat(30) + "-" + "b".repeat(9));
   });
 
+  it("names it after a Windows computer's folder by that folder's own separator (#9911)", () => {
+    expect(agentNameHint("修登录", "C:\\Users\\me\\code\\weather")).toBe("weather");
+    expect(agentBranch(agentNameHint("修登录", "C:\\Users\\me\\code\\weather\\"))).toBe("persona/weather");
+    expect(agentBranch(agentNameHint("修登录", "\\\\server\\share\\weather"))).toBe("persona/weather");
+    expect(agentBranch(agentNameHint("修登录", "d:/code/weather"))).toBe("persona/weather");
+    // elsewhere a backslash is part of a name; the root still has no name to give
+    expect(agentNameHint("修登录", "/home/me/a\\b")).toBe("a\\b");
+    expect(agentNameHint("修登录", " / ")).toBe("");
+  });
+
   it("counts what removing it loses: the branch's commits only with the branch", () => {
     const st = { worktree: true, ours: true, path: "/wt/x", branch: "persona/x", dirty: 2, unmerged: 3 };
     expect(worktreeLoss(st, false)).toEqual({ dirty: 2, unmerged: 0 });

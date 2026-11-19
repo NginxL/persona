@@ -136,7 +136,7 @@ func (n *Node) terminalOnlyCalls(ctx context.Context, method, id string, r termi
 	case "session.items":
 		return map[string]any{"items": []proto.Item{{ID: r.kind + "#0", Seq: 1, Role: "system", Kind: "notice", Text: r.notice,
 			TS: time.Now().UTC()}}, "has_more": false, "history": r.kind + "-pane:" + id, "to_seq": 1}, nil, true
-	case "session.item", "session.image":
+	case "session.item", "session.image", "session.visualization":
 		return nil, fmt.Errorf("no item"), true
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true

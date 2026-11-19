@@ -94,6 +94,7 @@
     <string name="assistant_full_search_no_results">「%1$s」の結果はありません</string>
     <string name="assistant_start_main">メインチャットを開始</string>
     <string name="assistant_main_chat">メインチャット</string>
+    <string name="assistant_main_conversation">メインチャット</string>
     <!-- The drawer's newest eligible chats, between 常驻 and All chats (#4922, #5196) -->
     <string name="assistant_recent">最近</string>
     <string name="assistant_directions">常駐</string>
@@ -183,6 +184,16 @@
     <string name="assistant_rename_field">セッション名</string>
     <string name="assistant_save">保存</string>
     <string name="assistant_renamed">名前を変更しました</string>
+    <string name="assistant_edit_tags_menu">タグを編集…</string>
+    <string name="assistant_tags_title">タグを編集</string>
+    <string name="assistant_tags_filter">タグで絞り込み</string>
+    <string name="assistant_tags_add">追加</string>
+    <string name="assistant_tags_placeholder">タグを追加</string>
+    <string name="assistant_tags_remove">%1$s を削除</string>
+    <string name="assistant_tags_hint">Enter で追加します。タグは %1$d 個まで、各 %2$d 文字以内です。</string>
+    <string name="assistant_tag_too_long">各タグは %1$d 文字以内で入力してください。</string>
+    <string name="assistant_tag_count_limit">1つのチャットに設定できるタグは %1$d 個までです。</string>
+    <string name="assistant_tags_saved">「%1$s」のタグを保存しました</string>
     <string name="assistant_copy_diagnostics">診断情報をコピー</string>
     <string name="assistant_diagnostics_copied">診断情報をコピーしました</string>
     <string name="assistant_end_menu">終了…</string>

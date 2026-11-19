@@ -59,6 +59,33 @@ const InteractionsOwnerAction = "interactions.owner_action"
 // {interaction} → proto.Resolution, when it is answered, expires or the call ends.
 const MethodFleetAsk = "fleet.ask"
 
+// MethodFleetAskPrepared is the hub's retained settings operation:
+// {interaction, replacement} → approval.Outcome. The executable handle stays in
+// the hub; only its random interaction ID crosses the bus.
+const MethodFleetAskPrepared = "fleet.ask_prepared"
+
+// MethodFleetApprovalApply consumes that hub handle once after a fresh owner
+// Allow. Resolution.Values travels only on this trusted manager/hub call.
+const MethodFleetApprovalApply = "fleet.approval_apply"
+
+// MethodFleetApprovalDiscard releases a handle without applying it.
+const MethodFleetApprovalDiscard = "fleet.approval_discard"
+
+type FleetApprovalApply struct {
+	InteractionID string           `json:"interaction_id"`
+	Resolution    proto.Resolution `json:"resolution"`
+}
+
+type FleetApprovalApplyResult struct {
+	Text  string `json:"text"`
+	Stale bool   `json:"stale,omitempty"`
+}
+
+type FleetApprovalDiscard struct {
+	InteractionID string `json:"interaction_id"`
+	Status        string `json:"status"`
+}
+
 // ElicitationHeader marks an app's request the hub relays to the manager as coming from an app that takes MCP
 // elicitations ("1"): the interaction history keeps them out otherwise.
 const ElicitationHeader = "X-Persona-Elicitation"

@@ -24,6 +24,8 @@ struct LarkThreadView: View {
     /// The replies loaded so far (never the root) and where paging stands (LarkPager).
     @State private var pager = LarkPager()
     @State private var loading = true
+    /// The first follower start relies on the initial load; later starts catch up once (#10337).
+    @State private var followed = false
     @State private var loadingOlder = false
     /// Why the replies did not load: the replies' placeholder while none are shown, a line over them otherwise
     /// (LarkLoadProblem, as on the chat page).
@@ -190,10 +192,19 @@ struct LarkThreadView: View {
                 if canAttach, attachments.isEmpty { attachments = await LarkAttachmentFixture.loadForThread(config: api?.config) }
                 #endif
             }
-            // A reply in the thread is a change in its chat: bring the newest replies in while the sheet is open.
-            .task(id: feedID) {
+            // A reply is a change in its chat: follow only in front, and catch up once after the first start (#10337).
+            .tabActiveTask(id: feedID) {
                 guard let feedID else { return }
-                for await _ in LarkSync.shared.changes(of: LarkConversation.key(feedID, account: account)) { await refreshLatest() }
+                let changes = LarkSync.shared.changes(of: LarkConversation.key(feedID, account: account))
+                if followed {
+                    await refreshLatest()
+                    guard !Task.isCancelled else { return }
+                }
+                followed = true
+                for await _ in changes {
+                    await refreshLatest()
+                    guard !Task.isCancelled else { return }
+                }
             }
         }
     }
@@ -390,7 +401,8 @@ struct LarkThreadView: View {
     }
 
     private func refreshLatest() async {
-        guard !loading, let api = api, let r = try? await api.larkThread(root.id) else { return }
+        guard !Task.isCancelled, !loading, let api = api,
+              let r = try? await api.larkThread(root.id), !Task.isCancelled else { return }
         problem = nil // it answers again (the Lark gateway signed in again, the network is back)
         let fresh = pager.refresh(with: r.replies(of: root.id))
         guard !fresh.isEmpty else { return }
@@ -404,7 +416,7 @@ private struct LarkThreadTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         if let chatName {
-            content.navigationTitle("Topic Details").navigationSubtitle(String(localized: "From \(chatName)"))
+            content.navigationTitle("Topic Details").navigationSubtitleWhenSupported(String(localized: "From \(chatName)"))
         } else {
             content.navigationTitle("Topic")
         }

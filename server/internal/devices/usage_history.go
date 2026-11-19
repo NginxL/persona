@@ -32,7 +32,7 @@ const (
 // sums spans of time (db.UsageSpans). A usageStore without it drops the rows past a week.
 type usageHistoryStore interface {
 	RollupUsageHours(ctx context.Context, before time.Time) (int64, error)
-	UsageSpans(ctx context.Context, bounds []time.Time, byMachine bool) ([]db.UsageSpan, error)
+	UsageSpans(ctx context.Context, bounds []time.Time, by db.UsageBy) ([]db.UsageSpan, error)
 }
 
 // UsageDay is one day of the calendar in the user's zone.
@@ -65,12 +65,21 @@ type UsageMachineShare struct {
 	UsageTokens
 }
 
+// UsageAgentShare is one agent's sums over the hours.
+type UsageAgentShare struct {
+	// Agent: proto.Session.Agent's names ("claude", "codex", …); "" for usage stored before agents were kept apart, or
+	// from an older node.
+	Agent string `json:"agent"`
+	UsageTokens
+}
+
 // UsageHours is GET /api/v1/usage/hours: the last days by the hour, oldest first (the last is the hour now), each
-// machine's share of them (largest first) and their total.
+// machine's and each agent's share of them (largest first) and their total.
 type UsageHours struct {
 	Zone     string              `json:"zone"`
 	Hours    []UsageHour         `json:"hours"`
 	Machines []UsageMachineShare `json:"machines"`
+	Agents   []UsageAgentShare   `json:"agents"`
 	Total    UsageTokens         `json:"total"`
 	Stored   bool                `json:"stored"`
 }
@@ -102,22 +111,22 @@ func usageHourBounds(now time.Time, loc *time.Location, n int) []time.Time {
 
 // usageSpans sums every machine's usage into the spans between bounds: from Postgres, or from memory (the last 26
 // hours) without it. stored: from Postgres.
-func (d *Devices) usageSpans(ctx context.Context, bounds []time.Time, byMachine bool) (spans []db.UsageSpan, stored bool, err error) {
+func (d *Devices) usageSpans(ctx context.Context, bounds []time.Time, by db.UsageBy) (spans []db.UsageSpan, stored bool, err error) {
 	if st, ok := d.opts.Store.(usageHistoryStore); ok {
-		spans, err = st.UsageSpans(ctx, bounds, byMachine)
+		spans, err = st.UsageSpans(ctx, bounds, by)
 		return spans, true, err
 	}
-	return d.usage.spans(bounds, byMachine), false, nil
+	return d.usage.spans(bounds, by), false, nil
 }
 
 // spans is UsageSpans over the buckets in memory.
-func (u *usageBook) spans(bounds []time.Time, byMachine bool) []db.UsageSpan {
+func (u *usageBook) spans(bounds []time.Time, by db.UsageBy) []db.UsageSpan {
 	if len(bounds) < 2 {
 		return nil
 	}
 	type key struct {
-		span    int
-		machine string
+		span           int
+		machine, agent string
 	}
 	sums := map[key]*db.UsageSpan{}
 	u.mu.Lock()
@@ -129,12 +138,15 @@ func (u *usageBook) spans(bounds []time.Time, byMachine bool) []db.UsageSpan {
 			}
 			i := sort.Search(len(bounds), func(i int) bool { return bounds[i].After(t) }) - 1
 			kk := key{span: i}
-			if byMachine {
+			switch by {
+			case db.UsageByMachine:
 				kk.machine = id
+			case db.UsageByAgent:
+				kk.agent = k.agent
 			}
 			s := sums[kk]
 			if s == nil {
-				s = &db.UsageSpan{Span: i, Machine: kk.machine}
+				s = &db.UsageSpan{Span: i, Machine: kk.machine, Agent: kk.agent}
 				sums[kk] = s
 			}
 			s.Input += b.Input
@@ -150,7 +162,7 @@ func (u *usageBook) spans(bounds []time.Time, byMachine bool) []db.UsageSpan {
 		out = append(out, *s)
 	}
 	slices.SortFunc(out, func(a, b db.UsageSpan) int {
-		return cmp.Or(cmp.Compare(a.Span, b.Span), cmp.Compare(a.Machine, b.Machine))
+		return cmp.Or(cmp.Compare(a.Span, b.Span), cmp.Compare(a.Machine, b.Machine), cmp.Compare(a.Agent, b.Agent))
 	})
 	return out
 }
@@ -171,7 +183,7 @@ func (t *UsageTokens) plus(o UsageTokens) {
 func (d *Devices) usageDays(ctx context.Context, n int, now time.Time) (UsageDays, error) {
 	loc := d.location()
 	bounds := usageDayBounds(now, loc, n)
-	spans, stored, err := d.usageSpans(ctx, bounds, false)
+	spans, stored, err := d.usageSpans(ctx, bounds, db.UsageSum)
 	if err != nil {
 		return UsageDays{}, err
 	}
@@ -187,15 +199,20 @@ func (d *Devices) usageDays(ctx context.Context, n int, now time.Time) (UsageDay
 	return out, nil
 }
 
-// usageHours sums the last n days in the user's zone by the hour, and each machine's share of them.
+// usageHours sums the last n days in the user's zone by the hour, and each machine's and each agent's share of them.
 func (d *Devices) usageHours(ctx context.Context, n int, now time.Time) (UsageHours, error) {
 	loc := d.location()
 	bounds := usageHourBounds(now, loc, n)
-	spans, stored, err := d.usageSpans(ctx, bounds, true)
+	spans, stored, err := d.usageSpans(ctx, bounds, db.UsageByMachine)
 	if err != nil {
 		return UsageHours{}, err
 	}
-	out := UsageHours{Zone: loc.String(), Hours: make([]UsageHour, len(bounds)-1), Machines: []UsageMachineShare{}, Stored: stored}
+	byAgent, _, err := d.usageSpans(ctx, bounds, db.UsageByAgent)
+	if err != nil {
+		return UsageHours{}, err
+	}
+	out := UsageHours{Zone: loc.String(), Hours: make([]UsageHour, len(bounds)-1), Machines: []UsageMachineShare{},
+		Agents: []UsageAgentShare{}, Stored: stored}
 	for i := range out.Hours {
 		t := bounds[i].In(loc)
 		out.Hours[i] = UsageHour{T: t.Unix(), Date: t.Format(time.DateOnly), Hour: t.Hour()}
@@ -223,6 +240,24 @@ func (d *Devices) usageHours(ctx context.Context, n int, now time.Time) (UsageHo
 	}
 	slices.SortFunc(out.Machines, func(a, b UsageMachineShare) int {
 		return cmp.Or(cmp.Compare(b.Total(), a.Total()), cmp.Compare(a.ID, b.ID))
+	})
+	agents := map[string]*UsageAgentShare{}
+	for _, s := range byAgent {
+		if s.Span < 0 || s.Span >= len(out.Hours) {
+			continue
+		}
+		sh := agents[s.Agent]
+		if sh == nil {
+			sh = &UsageAgentShare{Agent: s.Agent}
+			agents[s.Agent] = sh
+		}
+		sh.plus(spanTokens(s))
+	}
+	for _, sh := range agents {
+		out.Agents = append(out.Agents, *sh)
+	}
+	slices.SortFunc(out.Agents, func(a, b UsageAgentShare) int {
+		return cmp.Or(cmp.Compare(b.Total(), a.Total()), cmp.Compare(a.Agent, b.Agent))
 	})
 	return out, nil
 }

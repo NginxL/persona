@@ -35,6 +35,8 @@
   "claude_plugin_unavailable": "This computer’s Persona node has no plugin to install. Update the node first.",
   "claude_plugin_error": "The last check failed. Persona Link tries again soon.",
   "claude_plugin_unknown": "Not checked yet.",
+  "app_menu_about": "About Persona",
+  "app_menu_hide": "Hide Persona",
   "tray_open": "Open Persona",
   "tray_quit": "Quit Persona",
   "update_check": "Check for updates",

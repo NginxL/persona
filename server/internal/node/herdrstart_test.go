@@ -315,7 +315,7 @@ func TestHerdrServerEnvIsClean(t *testing.T) {
 		"CLAUDE_CONFIG_DIR=/Users/me/.claude-work", "HTTPS_PROXY=http://proxy.example.com:8080", "http_proxy=http://p",
 		"ALL_PROXY=socks5://p", "NO_PROXY=localhost", "PATH=/Users/me/.persona/bin:/usr/bin", "HERDR_PANE_ID=w1:p1",
 		"HERDR_ENV=1", "TERM_PROGRAM=herdr", "SHELL=/bin/bash", "NODE_OPTIONS=--x"}
-	got := herdrServerEnv(environ, "/bin/zsh")
+	got := herdrServerEnv(environ, "/bin/zsh", nil)
 	want := []string{"HOME=/Users/me", "USER=me", "LOGNAME=me", "TMPDIR=/tmp/me/", "LANG=zh_CN.UTF-8",
 		"XDG_CONFIG_HOME=/Users/me/.config", "HERDR_SOCKET_PATH=/Users/me/.config/herdr/herdr.sock",
 		"HERDR_CONFIG_PATH=/Users/me/herdr.toml", "SHELL=/bin/zsh", "TERM=xterm-256color", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
@@ -340,7 +340,7 @@ func TestHerdrServerEnvKeepsTheDataDirectory(t *testing.T) {
 	for _, name := range []string{"PERSONA_HOME", "JARVIS_HOME"} { // the second is the older name the node still reads
 		t.Run(name, func(t *testing.T) {
 			environ := []string{"HOME=/Users/me", name + "=" + custom, "ANTHROPIC_API_KEY=sk-test"}
-			got := herdrServerEnv(environ, "/bin/sh")
+			got := herdrServerEnv(environ, "/bin/sh", nil)
 			if !slices.Contains(got, name+"="+custom) {
 				t.Fatalf("%s is not in the server's environment: %q", name, got)
 			}
@@ -404,7 +404,7 @@ func TestHerdrServerOfACustomDataDirIsItsOwn(t *testing.T) {
 		t.Fatalf("default alive %v, custom alive %v", herdrAlive(context.Background(), def.Socket), herdrAlive(context.Background(), a.Socket))
 	}
 	// What the server of the custom directory starts with.
-	env := withHerdrSession(herdrServerEnv(append(os.Environ(), "ANTHROPIC_API_KEY=sk-test"), "/bin/sh"), a.Session)
+	env := withHerdrSession(herdrServerEnv(append(os.Environ(), "ANTHROPIC_API_KEY=sk-test"), "/bin/sh", nil), a.Session)
 	if !slices.Contains(env, "HERDR_SESSION="+a.Session) || slices.Contains(env, "ANTHROPIC_API_KEY=sk-test") {
 		t.Fatalf("server env %q", env)
 	}

@@ -49,6 +49,9 @@ func drainingNow(s *Service, id string) bool {
 // has its own id.
 func TestRelayTriesShareOneMessageID(t *testing.T) {
 	s, f := newQuietService(t)
+	gap := relayRetryGap
+	relayRetryGap = 0 // the second try right away; the gap has its own test
+	t.Cleanup(func() { relayRetryGap = gap })
 	idle := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
 	at := time.Now().UTC()
 	s.queueRelay("conv1", relayMsg{From: "conv2", FromTitle: "Planning", Tool: "conversation_send", Text: "first", At: at})

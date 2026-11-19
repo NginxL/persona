@@ -197,3 +197,34 @@ test('AGY watch cursors follow the complete export while its compact export is a
   await until('the complete export catches up', () => node.last('session.items')?.to_seq === 4)
   assert.deepEqual(node.last('session.items').items.map((item) => item.seq), [3, 4])
 })
+
+test('owned ACP turns publish the user prompt, working state and live tool steps before native transcript export', { timeout: 20_000 }, async (t) => {
+  const { node, directory, update, promptCount } = await fixture(t)
+  const started = await node.peer.call('session.start', { cwd: directory, assistant: true })
+  assert.equal(started.session.status, 'idle')
+
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Inspect the repository.', client_msg_id: 'msg-1', assistant: true })
+  await promptCount(1)
+  await until('working session published', () => node.last('runtime.sessions')?.sessions.find((s) => s.session_id === SESSION)?.status === 'working')
+
+  const liveInitial = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(liveInitial.items.length, 1)
+  assert.equal(liveInitial.items[0].role, 'user')
+  assert.equal(liveInitial.items[0].text, 'Inspect the repository.')
+  assert.equal(liveInitial.items[0].client_msg_id, 'msg-1')
+
+  update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking files first.' } })
+  update({ sessionUpdate: 'tool_call', toolCallId: 'tool-live-1', name: 'run_command', rawInput: { CommandLine: 'ls', toolSummary: 'List files' } })
+  await until('live thought and tool call pushed', () => {
+    const latest = node.last('session.items')
+    return latest?.items?.some((it) => it.kind === 'thinking') && latest?.items?.some((it) => it.kind === 'tool_use' && it.tool_name === 'Bash')
+  })
+
+  const exported = [userStep(0, 'Inspect the repository.'), replyStep(1, 'Inspection complete.')]
+  transcripts(directory, exported, exported)
+  update({ end: true })
+  await until('native export replaces live steps', () => node.last('session.items')?.items?.some((it) => it.role === 'assistant' && it.text === 'Inspection complete.'))
+  const finalPage = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(finalPage.items[0].client_msg_id, 'msg-1')
+  assert.equal(finalPage.items.at(-1).text, 'Inspection complete.')
+})

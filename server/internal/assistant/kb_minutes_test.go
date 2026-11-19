@@ -256,3 +256,40 @@ func TestMinutesPastMeetingTools(t *testing.T) {
 		t.Fatalf("kb_get recording, the action items:\n%s\nwant\n%s", out, want)
 	}
 }
+
+// kb_get on a meeting imported from a connected app lists the recording whose calendar match is an overlapping event
+// but whose imported meeting it is (#8872).
+func TestKBGetImportedMeetingListsItsRecording(t *testing.T) {
+	f := newFakeHub()
+	s := kbServiceOn(t, f, newKBStore(), t.TempDir(), func(string, ...any) {})
+	setSettings(t, s, func(v *Settings) { v.Timezone = "Asia/Shanghai" })
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	e := kbEng(t, s)
+	e.Model, e.ModelFor = nil, nil // the round matches, writes no minutes
+	start := time.Now().In(loc).Truncate(time.Hour).AddDate(0, 0, -3)
+	for _, it := range []*kb.Item{
+		{Kind: kb.KindEvent, ID: "e1", Title: "Design review", At: start.Add(-5 * time.Minute)},
+		{Kind: kb.KindMeeting, ID: "m1", Title: "Design review (video)", At: start.Add(time.Minute), URL: "https://meet.example.com/m1"},
+	} {
+		if err := e.Store.PutItem(it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const id = "55555555-5555-4555-8555-555555555555"
+	up := kb.RecordingUpload{Revision: 1, StartedAt: start, Duration: 120, Device: "phone", Complete: true, Kind: kb.RecordingMeeting,
+		Segments: []kb.RecordingSegment{{Start: 0, End: 9, Text: "we keep the cap"}}}
+	if st, err := e.PutRecording(id, up, start.Add(3*time.Minute)); err != nil || st.Status != kb.RecordingStored {
+		t.Fatalf("put: %v %v", st, err)
+	}
+	e.WriteMinutes(context.Background(), 2)
+	if r, _ := e.Store.Recording(id); r.Meeting == nil || r.Meeting.ID != "e1" || r.ImportedMeeting == nil || r.ImportedMeeting.ID != "m1" {
+		t.Fatalf("matched %+v, imported %+v", r.Meeting, r.ImportedMeeting)
+	}
+	for _, kind := range []string{"meetings", "events"} {
+		id1 := map[string]string{"meetings": "m1", "events": "e1"}[kind]
+		out, err := runTool(s, "c1", "kb_get", map[string]any{"kind": kind, "id": id1})
+		if err != nil || !strings.Contains(out, "\nRecorded at it (kb_get kind=recordings for the minutes and the transcript):\n- "+id+" · ") {
+			t.Fatalf("kb_get %s:\n%s (%v)", kind, out, err)
+		}
+	}
+}

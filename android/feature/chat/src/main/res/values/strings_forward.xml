@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Forwarding a message (#3901, iOS Forward.swift, web forward.ts): the action, the card and Forward to. -->
+    <string name="chat_menu_forward">Forward</string>
+    <string name="chat_forward_me">Me</string>
+    <string name="chat_forward_messages">Messages</string>
+    <string name="chat_forward_heading">Forwarded from %1$s</string>
+    <string name="chat_forward_heading_chat">Forwarded from %1$s · %2$s</string>
+    <string name="chat_forward_meta">%1$s · %2$s</string>
+    <string name="chat_forward_no_content">No content</string>
+    <string name="chat_forward_remove">Remove forward</string>
+    <string name="chat_forward_open_original">Open the original message</string>
+    <string name="chat_forward_show_all">Show all</string>
+    <string name="chat_forward_no_note">Please look at the forwarded message above.</string>
+    <string name="chat_forward_file_on">(File on %1$s: %2$s)</string>
+    <string name="chat_forward_file">(File: %1$s)</string>
+    <string name="chat_forward_cut">(The original is longer and was cut here.)</string>
+    <string name="chat_forward_route_from_to_persona">From %1$s · to Persona</string>
+    <string name="chat_forward_route_to_persona">To Persona</string>
+    <string name="chat_forward_route_to_agent">To %1$s</string>
+    <string name="chat_forward_route_from_to_agent_on">From %1$s · to %2$s on %3$s</string>
+    <string name="chat_forward_route_to_agent_on">To %1$s on %2$s</string>
+    <string name="chat_forward_title">Forward to</string>
+    <string name="chat_forward_search">Search chats, computers or projects</string>
+    <string name="chat_forward_preview">Message to forward</string>
+    <string name="chat_forward_main_chat">Main chat</string>
+    <string name="chat_forward_new_agent">New agent…</string>
+    <string name="chat_forward_new_agent_detail">Pick a computer, folder and model</string>
+    <string name="chat_forward_recent">Recent</string>
+    <string name="chat_forward_no_match">No matching chats</string>
+    <string name="chat_forward_failed">Couldn\'t forward it: %1$s</string>
+</resources>

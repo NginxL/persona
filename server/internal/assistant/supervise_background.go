@@ -26,6 +26,9 @@ import (
 // always had, a switch of the setting moves every open task at once, and a background supervisor that is gone leaves
 // no task naming a conversation that does not exist. Who gets a task's signals is decided when they are sent
 // (ownSupervisor), and what the background supervisor may do to a task follows the same rule (backgroundSupervises).
+//
+// Each of its rounds starts from its first turn, with only that round's facts and tools (#7315, supervise_round.go),
+// unless assistant.background_supervisor_keeps_context is on.
 
 // purposeSupervise is the model purpose the background supervisor runs under; it inherits the main chat's.
 const purposeSupervise = "assistant.supervise"
@@ -36,9 +39,11 @@ const purposeSupervise = "assistant.supervise"
 var backgroundGrace, backgroundRetry = 2 * time.Minute, 10 * time.Minute
 
 // backgroundBook holds the background supervisor's start still: one at a time, and not again right after a failure.
+// rounds is what its rounds' answers said (supervise_round.go), under its own lock.
 type backgroundBook struct {
 	mu       sync.Mutex
 	failedAt time.Time
+	rounds   superviseRounds
 }
 
 // backgroundOn: the background supervisor is on with settings cfg (assistant.main_supervises_own_tasks is not on).
@@ -97,8 +102,9 @@ func (s *Service) followUpWords(ctx context.Context, self string) string {
 // ensureBackground is the background supervisor to send to now, made if there is none yet or the one there was is
 // gone; "" while it is off, there is no main conversation or machine, or it cannot start (its tasks' signals then go
 // to the main conversation, and the start is tried again after backgroundRetry). gone is the one it found gone (on
-// another machine than the assistant's now, or no longer listed), whose queued message the caller takes back
-// (backgroundLost).
+// another machine than the assistant's now, or no longer listed), or the one it replaced because its rounds can no
+// longer start from its first turn (backgroundOutgrown, supervise_round.go), whose queued message the caller takes
+// back (backgroundLost).
 func (s *Service) ensureBackground(ctx context.Context) (id, gone string) {
 	b := &s.background
 	b.mu.Lock()
@@ -109,6 +115,11 @@ func (s *Service) ensureBackground(ctx context.Context) (id, gone string) {
 	}
 	if id := s.ownSupervisor(cfg); id != cfg.Main {
 		if s.backgroundThere(ctx, cfg, id) {
+			if why := s.backgroundOutgrown(ctx, cfg, id); why != "" {
+				if next := s.replaceBackground(ctx, cfg, id, why); next != id {
+					return next, id
+				}
+			}
 			return id, ""
 		}
 		s.logf("supervise: the background supervisor %s is gone from %s", short(id), cfg.MachineID)
@@ -134,7 +145,9 @@ func (s *Service) ensureBackground(ctx context.Context) (id, gone string) {
 // again where they go now, and that message is dropped. When the signals are not known (the manager restarted since it
 // was queued: supervise.queued is memory only, the deduplication history is not) the message itself moves to
 // conversation to, the new background supervisor or the main conversation, as do the other messages that waited
-// there: nothing queued is dropped unread. dedupMu is held.
+// there: nothing queued is dropped unread. A background supervisor reserved for its replacement (backgroundOutgrown)
+// takes messages again from here: it is no longer the background supervisor, and nothing waits for it. dedupMu is
+// held.
 func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []superviseSignal {
 	if old == "" || old == to {
 		return nil
@@ -160,6 +173,7 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 		delete(r.st.Queue, old)
 		s.saveRelayLocked()
 	}
+	delete(r.replacing, old)
 	r.mu.Unlock()
 	if moved > 0 {
 		s.logf("supervise: %d message(s) queued for the background supervisor %s, which is gone, wait for %s now", moved, short(old), short(to))

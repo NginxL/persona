@@ -322,7 +322,7 @@ func TestReadinessNotLoggedIn(t *testing.T) {
 	m, first := readinessStep(t, r, StepModel), readinessStep(t, r, StepFirstMessage)
 	if r.Mode != ReadinessSetup || nextOf(r) != StepModel || m.State != StepProblem || m.Code != proto.TurnErrorNotLoggedIn ||
 		m.Action.ID != "connect_model" || len(m.AltActions) != 1 || m.AltActions[0].ID != "login_claude" ||
-		m.Title != "Claude Code 命令行还没登录" || m.Detail != notLoggedInZh || m.Launcher != "claude" ||
+		m.Title != "模型没接好：claude 没登录" || m.Detail != notLoggedInZh || m.Launcher != "claude" ||
 		first.State != StepProblem || first.Code != proto.TurnErrorNotLoggedIn || first.Detail != notLoggedInZh {
 		t.Fatalf("readiness = %+v", r)
 	}
@@ -348,11 +348,11 @@ func TestReadinessNotLoggedInDesktopLauncher(t *testing.T) {
 	f.mu.Unlock()
 	m := readinessStep(t, getReadiness(t, s, "", ""), StepModel)
 	if m.Code != proto.TurnErrorNotLoggedIn || len(m.AltActions) != 1 || m.AltActions[0].ID != "login_claude" ||
-		m.Title != "Claude Code 命令行还没登录" || m.Detail != notLoggedInZh+desktopAgentZh {
+		m.Title != "模型没接好：claude 没登录" || m.Detail != notLoggedInZh+desktopAgentZh {
 		t.Fatalf("desktop app only: %+v", m)
 	}
 	en := readinessStep(t, getReadiness(t, s, "", "en"), StepModel)
-	if en.Title != "Claude Code CLI isn't signed in" || !strings.Contains(en.Detail, "the Claude desktop app's sign-in doesn't count") ||
+	if en.Title != "Model not connected: claude isn't signed in" || !strings.Contains(en.Detail, "the Claude desktop app's sign-in doesn't count") ||
 		!strings.Contains(en.Detail, "Run claude auth login in a terminal on server") || !strings.Contains(en.Detail, "start an agent with claude-desktop") {
 		t.Fatalf("en: %+v", en)
 	}
@@ -369,6 +369,27 @@ func TestReadinessNotLoggedInDesktopLauncher(t *testing.T) {
 	f.mu.Unlock()
 	if m = readinessStep(t, getReadiness(t, s, "", ""), StepModel); len(m.AltActions) != 2 || m.Detail != notLoggedInSwitchZh {
 		t.Fatalf("no desktop app: %+v", m)
+	}
+}
+
+// The model step names the launcher that needs repair; first_message keeps its launcher-free wording because that
+// step deliberately carries no launcher identity.
+func TestReadinessModelErrorNamesLauncher(t *testing.T) {
+	for _, tc := range []struct {
+		code, text, title, firstTitle string
+	}{
+		{proto.TurnErrorNotLoggedIn, "Not logged in · Please run /login", "Model not connected: claude isn't signed in", "Claude Code CLI isn't signed in"},
+		{proto.TurnErrorAuthFailed, "Invalid API key · Please run /login", "Model not connected: the key for claude is wrong", "The model's key doesn't work"},
+		{proto.TurnErrorModelRoute, "There's an issue with the selected model (example-model). It may not exist or you may not have access to it.", "Model not connected: this model isn't available on claude", "This model isn't available"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			_, s, _ := readyMachine(t, proto.Session{SessionID: "m1", State: proto.StateIdle, LastText: tc.text, UpdatedAt: time.Now()})
+			r := getReadiness(t, s, "", "en")
+			m, first := readinessStep(t, r, StepModel), readinessStep(t, r, StepFirstMessage)
+			if m.Code != tc.code || m.Launcher != "claude" || m.Title != tc.title || first.Title != tc.firstTitle || first.Launcher != "" {
+				t.Fatalf("model = %+v; first message = %+v", m, first)
+			}
+		})
 	}
 }
 
@@ -659,7 +680,7 @@ func TestReadinessSignedOutStatus(t *testing.T) {
 	r := getReadiness(t, s, "", "")
 	m := readinessStep(t, r, StepModel)
 	if r.Mode != ReadinessSetup || nextOf(r) != StepModel || m.State != StepProblem || m.Code != proto.TurnErrorNotLoggedIn ||
-		m.Action.ID != "connect_model" || len(m.AltActions) != 1 || m.AltActions[0].ID != "login_claude" || m.Title != "Claude Code 命令行还没登录" {
+		m.Action.ID != "connect_model" || len(m.AltActions) != 1 || m.AltActions[0].ID != "login_claude" || m.Title != "模型没接好：claude 没登录" {
 		t.Fatalf("readiness = %+v", r)
 	}
 	getReadiness(t, s, "", "")

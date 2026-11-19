@@ -47,6 +47,10 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
+	if decideAsk(&ask) && (!ask.RecheckAt.IsZero() || ok && ownerDecisionReturned(t.Supervision)) {
+		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		return true
+	}
 	// "OK" to a decision with nothing recommended takes nothing: it is their answer, and goes on as one.
 	if passWords.MatchString(text) && !(decideAsk(&ask) && ask.Recommend == "") {
 		// Approval on a pre-reopen card is answered but neither accepts nor reopens; a gone todo keeps old behavior.
@@ -207,7 +211,7 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 	}
 	a, ok := b.asks[id]
 	if !ok || a.AskedAt.IsZero() || !a.AcceptedAt.IsZero() || (todoOK && acceptAskStale(a, t)) || (card != "" && card != a.MessageID && !slices.Contains(a.Messages, card)) ||
-		decideAsk(a) && (a.Recommend == "" || todoOK && acceptAskEnded(a, t)) ||
+		decideAsk(a) && (a.Recommend == "" || todoOK && acceptAskEnded(a, t) || !a.RecheckAt.IsZero() || todoOK && ownerDecisionReturned(t.Supervision)) ||
 		byDefault && !(decideAsk(a) && a.Reversible && !a.Deadline.IsZero() && a.DueAt.IsZero() && !time.Now().Before(a.Deadline)) {
 		b.mu.Unlock()
 		return acceptResult{}, nil

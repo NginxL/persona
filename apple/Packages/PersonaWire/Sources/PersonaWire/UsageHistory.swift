@@ -85,18 +85,53 @@ public nonisolated struct UsageMachineShare: Decodable, Hashable, Sendable, Iden
     }
 }
 
-/// GET /api/v1/usage/hours: the last days by the hour, oldest first, each computer's share (largest first) and the total.
+/// One agent's share of the hours (#9984): `agent` is `Session.agent`'s name ("claude", "codex", "pi", …); "" for usage
+/// the hub stored before it kept agents apart.
+public nonisolated struct UsageAgentShare: Decodable, Hashable, Sendable, Identifiable {
+    public var agent: String
+    public var tokens: UsageTokens
+
+    public enum CodingKeys: String, CodingKey { case agent }
+
+    public init(agent: String, tokens: UsageTokens) {
+        self.agent = agent
+        self.tokens = tokens
+    }
+
+    public init(from decoder: Decoder) throws {
+        agent = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(String.self, forKey: .agent) ?? ""
+        tokens = try UsageTokens(from: decoder)
+    }
+
+    public var id: String { agent }
+}
+
+/// GET /api/v1/usage/hours: the last days by the hour, oldest first, each computer's and each agent's share (largest
+/// first) and the total. An older hub sends no agents (empty).
 public nonisolated struct UsageHours: Decodable, Hashable, Sendable {
     public var zone: String
     public var hours: [UsageHour]
     public var machines: [UsageMachineShare]
+    public var agents: [UsageAgentShare]
     public var total: UsageTokens
 
-    public init(zone: String, hours: [UsageHour], machines: [UsageMachineShare], total: UsageTokens) {
+    public enum CodingKeys: String, CodingKey { case zone, hours, machines, agents, total }
+
+    public init(zone: String, hours: [UsageHour], machines: [UsageMachineShare], agents: [UsageAgentShare] = [], total: UsageTokens) {
         self.zone = zone
         self.hours = hours
         self.machines = machines
+        self.agents = agents
         self.total = total
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        zone = try c.decode(String.self, forKey: .zone)
+        hours = try c.decode([UsageHour].self, forKey: .hours)
+        machines = try c.decode([UsageMachineShare].self, forKey: .machines)
+        agents = try c.decodeIfPresent([UsageAgentShare].self, forKey: .agents) ?? []
+        total = try c.decode(UsageTokens.self, forKey: .total)
     }
 }
 

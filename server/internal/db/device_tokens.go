@@ -78,6 +78,11 @@ func dropDeviceRows(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE pair_tokens SET expires_at = `+endedNow+` WHERE device_id = $1`, id, time.Now()); err != nil {
 		return err
 	}
+	return dropDeviceRegistrations(ctx, tx, id)
+}
+
+// dropDeviceRegistrations removes registrations owned by a revoked credential.
+func dropDeviceRegistrations(ctx context.Context, tx pgx.Tx, id string) error {
 	if err := lockPushRegistrations(ctx, tx); err != nil {
 		return err
 	}

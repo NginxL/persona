@@ -1,6 +1,11 @@
 package persona.feature.inbox
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -19,8 +24,11 @@ class ConnectorThreadModelTest {
         ConnectorsManagement {
         val calls = mutableListOf<String>()
         val replies = mutableListOf<Pair<String, String?>>()
+        /** Reads of these cursors wait until the test lets them through. */
+        val held = mutableMapOf<String, CompletableDeferred<Unit>>()
         override suspend fun connectorThread(id: String, thread: String, before: String?, limit: Int): ConnectorThreadPage {
             calls += before.orEmpty()
+            held[before.orEmpty()]?.await()
             return pages[before.orEmpty()] ?: throw java.io.IOException("no page")
         }
         override suspend fun connectorThreadReply(id: String, thread: String, action: String, text: String, replyTo: String?): ConnectorReplyOutcome {
@@ -70,6 +78,25 @@ class ConnectorThreadModelTest {
         assertFalse(far)
         // At the thread's start there is nothing more to read.
         assertFalse(reachMessage(page("m5"), "m1") { error("no older page") }.second)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun aMessageThatCameDuringAQuoteJumpStays() = runTest {
+        val pages = mutableMapOf("" to page("m3", "m4", before = "c1"), "c1" to page("m1", "m2", before = "c0"))
+        val hub = FakeHub(pages)
+        val model = ConnectorThreadModel(hub, "example", "g1")
+        model.load()
+        val older = CompletableDeferred<Unit>()
+        hub.held["c1"] = older
+        val jump = async { model.reach("m1") }
+        runCurrent()
+        // A new message comes in while the jump reads back: the page is read again.
+        pages[""] = page("m3", "m4", "m5", before = "c1")
+        model.load()
+        older.complete(Unit)
+        assertTrue(jump.await())
+        assertEquals(listOf("m1", "m2", "m3", "m4", "m5"), model.state.value.page?.messages?.map { it.id })
+        assertEquals("c0", model.state.value.page?.before)
     }
 
     @Test fun replyOutcomesAreShownAsTheHubSaidThem() = runBlocking {

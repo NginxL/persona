@@ -30,5 +30,19 @@
   "undo": "元に戻す",
   "load_failed": "リポジトリを読み込めません。応答がないか、別のアシスタントの応答です。",
   "save_unconfirmed": "変更結果を確認できません。再試行する前にリポジトリを再読み込みしてください。",
-  "invalid_url": "認証情報を含まないGitHubまたはGitLabのHTTP(S)かgit SSHリンクを入力してください。リポジトリ内のページも使えます。セルフホストの場合はサービスを選択してください。"
+  "invalid_url": "認証情報を含まないGitHubまたはGitLabのHTTP(S)かgit SSHリンクを入力してください。リポジトリ内のページも使えます。セルフホストの場合はサービスを選択してください。",
+  "sources": "ソース",
+  "sources_hint": "保存するリポジトリの取得元です。拡張機能で他のコードホスティングのソースを追加できます。",
+  "builtin": "組み込み",
+  "unavailable": "利用不可",
+  "unavailable_hint": "{provider}は利用できません。リポジトリは保存されたままで、名前・別名・用途は編集できますが、確認やアドレスの変更には{provider}が必要です。",
+  "another_source": "別のソース",
+  "previewing": "{provider}でアドレスを読み取り中…",
+  "unchecked_extension": "{provider}で読み取り済み・リモートの存在は未確認",
+  "check_hint_extension": "{provider}が独自のサインインでリポジトリの存在を確認します。空のリポジトリも有効です。確認できない場合は保存できません。",
+  "option_unavailable": "{provider}（利用不可）",
+  "host_mismatch": "{hosts}上の{provider}のアドレスを、認証情報を含めずに入力してください。",
+  "source_unavailable": "{provider}は現在利用できないため、このアドレスを読み取れません。",
+  "invalid_url_sources": "認証情報を含まないGitHubまたはGitLabのHTTP(S)かgit SSHリンク、またはソースが示すホスト上のアドレスを入力してください。セルフホストの場合はサービスを選択してください。",
+  "retry": "再試行"
 }

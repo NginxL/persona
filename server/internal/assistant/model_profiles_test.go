@@ -703,6 +703,7 @@ func storeManyProfiles(tb testing.TB, st *downStore, n int) [][]string {
 		"kb":             {Model: "test-kb"},
 		"inbox.triage":   {Effort: "high"},
 		"agent.delegate": {Model: "test-delegate"},
+		"translate":      {Model: "test-translation"},
 	}
 	for id, b := range records {
 		if err := st.PutSetting(ctx, modelRecordKey(id), modelRecord{Revision: 2, Binding: b}); err != nil {
@@ -762,11 +763,11 @@ func TestModelProfilesViewReadsEachRecordOnce(t *testing.T) {
 		t.Fatalf("changes = %v, %v", v.Profiles[0].Changes, v.Profiles[1].Changes)
 	}
 
-	// Seeding captures every record once for the templates (inbox.triage once more: agent.delegate's default is resolved
-	// from its connection), then the view reads each once to compare the two templates with it.
+	// Seeding captures every record once for the templates (inbox.triage twice more: the delegation and translation
+	// defaults use its connection), then the view reads each once to compare the two templates with it.
 	s, _, st = modelService(t)
 	counter = countRecordReads(s, st)
-	capture := map[string]int{"assistant": 1, "agent.new": 1, "kb": 1, "inbox.triage": 2, "agent.delegate": 1}
+	capture := map[string]int{"assistant": 1, "agent.new": 1, "kb": 1, "inbox.triage": 3, "agent.delegate": 1, "translate": 1}
 	if _, _, _, err := s.captureModels(context.Background()); err != nil {
 		t.Fatal(err)
 	}

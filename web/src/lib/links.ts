@@ -41,6 +41,8 @@ export type LinkRoute =
   | { kind: "agent"; mid: string; sid: string } // this hub's /s/<machine>/<session>: that agent's page
   | { kind: "task"; id: string } // this hub's /todos?id=<todo>: that task's Agent's page, or its to-do's while it has none
   | { kind: "conversation"; sid: string; mid?: string; manager?: string } // this hub's /persona/<id>: that assistant conversation, in place (with the computer and manager its address names)
+  | { kind: "page"; path: string } // any other page of this hub's app (the Inbox, settings…, or one message: ?at=): in place (docs/protocol/deep-links.md)
+  | { kind: "app"; url: string } // an app link to a page (persona://open<path>, persona://task|kb|settings|extension/…): read when opened (lib/deep-links.ts)
   | { kind: "web" } // any other http(s) page: a new tab
   | { kind: "system" } // mailto: / tel:: the browser hands it to the system
   | { kind: "none" }; // anything else (javascript:, other apps' schemes, not a URL): not followed
@@ -62,36 +64,12 @@ function isFeishuHost(host: string) {
   return FEISHU_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
 }
 
+// First path segments whose kind is another word; any other kind is its own segment (DOC_LABEL's keys).
+const DOC_SEGMENT: Partial<Record<string, DocKind>> = { docx: "doc", docs: "doc", sheets: "sheet", base: "bitable", mindnotes: "mindnote", board: "whiteboard" };
+
 export function docKind(url: string): DocKind {
-  const parts = (parse(url)?.pathname ?? "").split("/").filter(Boolean);
-  switch (parts[0] ?? "") {
-    case "docx":
-    case "docs":
-    case "doc":
-      return "doc";
-    case "sheets":
-    case "sheet":
-      return "sheet";
-    case "base":
-    case "bitable":
-      return "bitable";
-    case "mindnotes":
-    case "mindnote":
-      return "mindnote";
-    case "file":
-      return "file";
-    case "slides":
-      return "slides";
-    case "wiki":
-      return "wiki";
-    case "page":
-      return "page";
-    case "board":
-    case "whiteboard":
-      return "whiteboard";
-    default:
-      return "other";
-  }
+  const first = (parse(url)?.pathname ?? "").split("/").filter(Boolean)[0] ?? "";
+  return Object.hasOwn(DOC_SEGMENT, first) ? DOC_SEGMENT[first]! : Object.hasOwn(DOC_LABEL, first) ? (first as DocKind) : "other";
 }
 
 export const DOC_LABEL: Record<DocKind, string> = {
@@ -141,11 +119,13 @@ export function isOwnImageURL(src: string): boolean {
   return pageOrigin().includes(u.origin);
 }
 
-/** An agent, task or conversation page of the hub this page is served by (router.ts's /s/…, /todos, /persona/…, under the
- * sub-path the page is served at), or null. */
+/** A page of the hub this page is served by (router.ts's paths, under the sub-path the page is served at; the route table,
+ * docs/protocol/deep-links.md), or null. An agent (/s/…), a task (/todos…) and a conversation (/persona/…) open as they
+ * always did; one message of them (?at=) and any other page of this app (the Inbox, settings, knowledge…) in place. An
+ * address that is no page of it (/admin, /share/…), and a link with a user name or password, stays a web page. */
 function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | null {
   const origins = (Array.isArray(origin) ? origin : [origin]).filter(Boolean);
-  if (!origins.includes(u.origin)) return null;
+  if (!origins.includes(u.origin) || u.username || u.password) return null;
   if (base && u.pathname !== base && !u.pathname.startsWith(base + "/")) return null;
   let p: string[];
   try {
@@ -153,6 +133,8 @@ function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | n
   } catch {
     return null;
   }
+  const path = stripBase(u.pathname, base);
+  if (u.searchParams.has("at")) p = []; // one message: its page, which lands there
   if (p[0] === "s" && p[1] && p[2] && p.length === 3) return { kind: "agent", mid: p[1], sid: p[2] };
   if (assistantPath(p[0]) && p[1] && p[1] !== "new" && p.length === 2) {
     const mid = u.searchParams.get("machine");
@@ -163,7 +145,7 @@ function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | n
     const id = p[1] || u.searchParams.get("id");
     if (id) return { kind: "task", id };
   }
-  return null;
+  return parseRoute(path, u.search).name === "not-found" ? null : { kind: "page", path: path + u.search };
 }
 
 /**
@@ -178,12 +160,13 @@ export function linkRoute(url: string, lark = larkOn(), origin: string | string[
     // persona://session/<mid>/<sid>: the host is "session"
     try {
       const parts = `${u.host}${u.pathname}`.split("/").filter(Boolean).map(decodeURIComponent);
-      if (parts[0] === "session" && parts[1] && parts[2]) return { kind: "session", mid: parts[1], sid: parts[2] };
+      if (parts[0] === "session" && parts[1] && parts[2] && !u.search) return { kind: "session", mid: parts[1], sid: parts[2] };
     } catch {
       // A malformed percent escape in model output must not crash the transcript render.
       return { kind: "none" };
     }
-    return { kind: "none" };
+    // the route table's other forms (docs/protocol/deep-links.md): read when opened, off the first screen
+    return /^(open|session|task|kb|settings|extension)$/.test(u.host) ? { kind: "app", url: url.trim() } : { kind: "none" };
   }
   if (scheme === "mailto:" || scheme === "tel:") return { kind: "system" };
   if (scheme !== "http:" && scheme !== "https:") return { kind: "none" };
@@ -205,7 +188,7 @@ export function linkRoute(url: string, lark = larkOn(), origin: string | string[
 export function opensInApp(url: string): boolean {
   if (previewTarget(url)) return true;
   const r = linkRoute(url);
-  return (r.kind === "doc" && r.doc !== "bitable") || r.kind === "moments" || r.kind === "session" || r.kind === "agent" || r.kind === "task" || r.kind === "conversation";
+  return (r.kind === "doc" && r.doc !== "bitable") || r.kind === "moments" || r.kind === "session" || r.kind === "agent" || r.kind === "task" || r.kind === "conversation" || r.kind === "page" || r.kind === "app";
 }
 
 /**
@@ -276,6 +259,15 @@ export function openLink(url: string, title?: string, manager?: string) {
       return;
     case "conversation":
       navigate({ name: "persona", sid: r.sid, ...(r.mid ? { mid: r.mid } : {}), ...(r.manager ? { manager: r.manager } : {}) });
+      return;
+    case "page":
+      navigate(r.path);
+      return;
+    case "app":
+      void import("./deep-links").then(({ appPath }) => {
+        const to = appPath(r.url);
+        if (to) openLink(location.origin + BASE + to, title, manager); // as the link to that page of this hub opens
+      });
       return;
     case "doc":
     case "moments":

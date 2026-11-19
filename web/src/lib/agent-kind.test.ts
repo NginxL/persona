@@ -21,7 +21,7 @@ describe("agentId", () => {
 
 describe("agentName", () => {
   it("names the known agents by their product", () => {
-    expect(MARKED_AGENTS.map((a) => agentName(a))).toEqual(["Claude Code", "Codex", "OpenCode", "Pi", "Gemini CLI", "Cursor", "TRAE"]);
+    expect(MARKED_AGENTS.map((a) => agentName(a))).toEqual(["Claude Code", "Codex", "opencode", "pi", "Gemini CLI", "Cursor", "TRAE"]);
     expect(agentName("traex")).toBe("TRAEX");
     expect(agentName("")).toBe("Claude Code");
   });
@@ -90,5 +90,14 @@ describe("agentLetter", () => {
   it("is the first letter or digit, upper case", () => {
     expect(["dsh", "  amp", "-x", "3d", "小车"].map(agentLetter)).toEqual(["D", "A", "X", "3", "小"]);
     expect(agentLetter("")).toBe("?");
+  });
+});
+
+// What every client calls each agent (spec/fixtures/agent-names, #10042): the iPhone checks the same file.
+describe("agent names", () => {
+  it("are the shared fixture's, the product's own spelling", async () => {
+    const { readFileSync } = await import("node:fs");
+    const fixture = JSON.parse(readFileSync(new URL("../../../spec/fixtures/agent-names/names.json", import.meta.url), "utf8")) as { names: Record<string, string> };
+    for (const [id, name] of Object.entries(fixture.names)) expect([id, agentName(id)]).toEqual([id, name]);
   });
 });

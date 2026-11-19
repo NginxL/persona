@@ -417,7 +417,8 @@ export function stackFrames(stack: string | undefined): ErrorFrame[] {
 
 /** Starts recording (at launch with the switch on, or as it is turned on). Everything it watches it hooks itself and
  *  puts back on `setDevMode(false)`: the hub socket (lib/dev-probe.ts, wrapped before the app opens it), fetch, the
- *  history for pages, uncaught errors and rejections, freezes and console.error / warn. */
+ *  history for pages, uncaught errors and rejections, freezes and console.error / warn; it also starts the To-dos view's
+ *  shadow, and stops it. */
 export function startDevMode(): DevRecorder {
   if (running) return running.recorder;
   watchSockets(); // a socket already open is counted from its next connection
@@ -485,6 +486,14 @@ export function startDevMode(): DevRecorder {
   console.error = wrap("error");
   console.warn = wrap("warn");
   const freezes = startFreezeWatch({ enabled: () => true, report: (hit) => (recorder.report(freezeReport(hit)), true) });
+  // the To-dos view's shadow (#10226, features/todos/model/view-shadow.ts): a chunk of its own, comparing while the hub
+  // sends `view`; its lines go to whichever recorder runs
+  let shadow: (() => void) | null | undefined;
+  void import("../features/todos/model/view-shadow")
+    .then((m) => {
+      if (shadow === undefined) shadow = m.startViewShadow({ note: (kind, fields) => devRecorder()?.note(kind, fields) });
+    })
+    .catch(() => {});
 
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("online", onOnline);
@@ -498,6 +507,8 @@ export function startDevMode(): DevRecorder {
     recorder,
     stop: () => {
       if (timer) clearInterval(timer);
+      shadow?.();
+      shadow = null; // stopped before its chunk loaded: it never starts
       window.fetch = nativeFetch;
       history.pushState = pushState;
       history.replaceState = replaceState;

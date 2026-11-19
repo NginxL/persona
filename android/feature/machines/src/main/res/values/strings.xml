@@ -60,6 +60,9 @@
     <string name="machines_metric_load">Load</string>
     <string name="machines_metric_disk">Disk</string>
     <string name="machines_metric_swap">Swap</string>
+    <string name="machines_metric_battery">Battery</string>
+    <string name="machines_metric_charging">Charging</string>
+    <string name="machines_metric_temperature">Temperature</string>
     <string name="machines_swap_off">Off</string>
     <string name="machines_no_sample">No new samples yet</string>
     <string name="machines_offline_history">The machine is offline; the charts below keep past samples.</string>

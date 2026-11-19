@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_menu_forward">转发</string>
+    <string name="chat_forward_me">我</string>
+    <string name="chat_forward_messages">消息</string>
+    <string name="chat_forward_heading">转发自 %1$s</string>
+    <string name="chat_forward_heading_chat">转发自 %1$s · %2$s</string>
+    <string name="chat_forward_meta">%1$s · %2$s</string>
+    <string name="chat_forward_no_content">没有内容</string>
+    <string name="chat_forward_remove">取消转发</string>
+    <string name="chat_forward_open_original">打开原消息</string>
+    <string name="chat_forward_show_all">展开全文</string>
+    <string name="chat_forward_no_note">请看上面转发的消息。</string>
+    <string name="chat_forward_file_on">（在 %1$s 上的文件：%2$s）</string>
+    <string name="chat_forward_file">（文件：%1$s）</string>
+    <string name="chat_forward_cut">（原文更长，到这里截断了。）</string>
+    <string name="chat_forward_route_from_to_persona">从 %1$s 转发 · 发给 Persona</string>
+    <string name="chat_forward_route_to_persona">发给 Persona</string>
+    <string name="chat_forward_route_to_agent">发给 %1$s</string>
+    <string name="chat_forward_route_from_to_agent_on">从 %1$s 转发 · 发到 %3$s 上的 %2$s</string>
+    <string name="chat_forward_route_to_agent_on">发到 %2$s 上的 %1$s</string>
+    <string name="chat_forward_title">转发到</string>
+    <string name="chat_forward_search">搜索对话、电脑或项目</string>
+    <string name="chat_forward_preview">要转发的消息</string>
+    <string name="chat_forward_main_chat">主对话</string>
+    <string name="chat_forward_new_agent">开 Agent…</string>
+    <string name="chat_forward_new_agent_detail">选电脑、文件夹和模型</string>
+    <string name="chat_forward_recent">最近</string>
+    <string name="chat_forward_no_match">没有匹配的对话</string>
+    <string name="chat_forward_failed">没能转发：%1$s</string>
+</resources>

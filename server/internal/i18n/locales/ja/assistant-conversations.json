@@ -1,5 +1,6 @@
 {
   "archive_main": "メインチャットはアーカイブできません",
   "archive_background_supervisor": "バックグラウンド監督のチャットはアーカイブできません",
-  "background_supervisor": "バックグラウンド監督"
+  "background_supervisor": "バックグラウンド監督",
+  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで"
 }

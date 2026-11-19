@@ -200,7 +200,23 @@ nonisolated struct TurnErrorFix: Hashable, Sendable {
     var detail: String
     var action: String
 
-    init?(code: String?) {
+    init?(code: String?, launcher: String? = nil) {
+        let owner = launcher?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let owner, !owner.isEmpty {
+            switch code {
+            case "not_logged_in":
+                self.init(title: String(localized: "Model not connected: \(owner) isn't signed in"), detail: String(localized: "The Claude desktop app's sign-in doesn't count for it. Run claude auth login in a terminal on that computer, or use an API key instead."), action: "connect_model")
+                return
+            case "auth_failed":
+                self.init(title: String(localized: "Model not connected: the key for \(owner) is wrong"), detail: String(localized: "The key is wrong or has expired; use one that works."), action: "edit_provider")
+                return
+            case "model_route":
+                self.init(title: String(localized: "Model not connected: this model isn't available on \(owner)"), detail: String(localized: "The model name is wrong, or the model isn't available right now; try another one."), action: "connect_model")
+                return
+            default:
+                return nil
+            }
+        }
         switch code {
         case "not_logged_in":
             // The CLI the conversation runs, not the Claude desktop app, whose sign-in it does not share (#9366).
