@@ -189,8 +189,8 @@ func (s *Service) askLadder(ctx context.Context, ix proto.Interaction) (ladder [
 		if s.ixInHealth(ctx, ix) || s.todoInHealth(ctx, t) {
 			return nil, "", "", false
 		}
-		if lead == "" || lead == cfg.Main {
-			lead = s.ownSupervisor(cfg)
+		if lead == "" || lead == cfg.Main || s.handedBack(cfg, lead, t) {
+			lead = s.ownSupervisor(cfg) // an ended direction's open tasks went back to this route (#11394)
 		}
 		// Side conversations supervise their own work too. Resolve the same
 		// destination as a supervision message when a runtime cannot receive it.

@@ -390,7 +390,8 @@ func (s *Service) makeDirection(ctx context.Context, id, project, newProject, ti
 }
 
 // endDirection takes leader id out of assistant.leaders as the owner chose: its record is ended (directionsSync), its
-// tasks' signals go back to the main conversation, nothing is deleted. One that is no leader is a no-op.
+// open tasks keep it as their supervisor on the ledger while their signals and terminal questions go back to the main
+// conversation's supervision route (handedBack), nothing is deleted. One that is no leader is a no-op.
 func (s *Service) endDirection(ctx context.Context, id string) (bool, error) {
 	cfg := s.settings(ctx)
 	if !slices.Contains(cfg.Leaders, id) {

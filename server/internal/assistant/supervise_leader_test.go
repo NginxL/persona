@@ -146,6 +146,62 @@ func TestMainReviewKeepsLeaderSupervisor(t *testing.T) {
 	}
 }
 
+// #11394: Unpin (End direction) tells the owner that the direction's open tasks go back to the main chat's supervision.
+// They do: the next supervision message of its task comes to the main conversation, not to the conversation that led,
+// and the ledger keeps its supervisor; Pin it again and the task's messages are its own again.
+func TestEndingADirectionHandsItsTasksBack(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	noDirectionsTimers(s)
+	ctx := context.Background()
+	f.known["lead1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "lead1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	if _, err := s.makeDirection(ctx, "lead1", "", "", ""); err != nil { // the owner's Pin
+		t.Fatal(err)
+	}
+	todo, err := s.createTodo(ctx, "修登录崩溃", "iPad 横屏时登录页崩溃", "lead1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "lead1", []string{"PR 合并到 main"}, 30)
+	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool { v.State = reviewPending; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if ended, err := s.endDirection(ctx, "lead1"); err != nil || !ended { // the owner's Unpin
+		t.Fatalf("end: %v %v", ended, err)
+	}
+
+	s.signal(superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "1", Detail: "做完了，PR https://github.com/o/r/pull/7 已合并"})
+	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
+	n := f.noticesTo("conv1")[0]
+	for _, want := range []string{"📋 督办", "signal=review", "pull/7"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("the main conversation's message lacks %q:\n%s", want, n)
+		}
+	}
+	if strings.Contains(n, "你是这些任务的 leader 对话") {
+		t.Fatalf("the main conversation is told it is the leader:\n%s", n)
+	}
+	s.supervise.dedupMu.Lock()
+	s.supervise.dedupMu.Unlock() // the digest send has finished before checking the conversation that led
+	if got := f.noticesTo("lead1"); len(got) != 0 {
+		t.Fatalf("the unpinned conversation was still told its old task: %q", got)
+	}
+	if v := todoNow(s, todo.ID).Supervision; v.Supervisor != "lead1" {
+		t.Fatalf("the ledger lost its supervisor: %+v", v)
+	}
+
+	// Pinned again: it leads its task again.
+	if _, err := s.makeDirection(ctx, "lead1", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	s.signal(superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "again", Detail: "又改了一版"})
+	waitFor(t, "the leader's message", func() bool { return len(f.noticesTo("lead1")) == 1 })
+	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "你是这些任务的 leader 对话") {
+		t.Fatalf("the leader's message:\n%s", n)
+	}
+}
+
 // Without leaders a task supervised by a side conversation is told in that conversation: the supervisor is the
 // conversation that handed the task out, leader or not, and a task_plan task gets its ledger from it.
 func TestDigestGoesToItsSupervisorWithoutLeader(t *testing.T) {
@@ -219,6 +275,32 @@ func TestDigestTo(t *testing.T) {
 	leaders := Settings{Main: "conv1", Leaders: []string{"lead1"}}
 	none := Settings{Main: "conv1"}
 	mains, leads, waits := mk("conv1", ""), mk("lead1", ""), mk("lead1", reviewNeedsUser)
+	// lead2 led a direction the owner ended (#11394): ended and endedWaits were handed out before the end, after once
+	// it was a side conversation again.
+	endedAt := time.Now().UTC().Add(-time.Minute)
+	ended, endedWaits, after := mk("lead2", ""), mk("lead2", reviewNeedsUser), mk("lead2", "")
+	// A task leader lead2 handed out before the end, and its worker made after it: what counts is the leader's task.
+	taskLead, worker := mk("lead2", ""), mk("lead2", "")
+	s.todos.mu.Lock()
+	s.todos.todos[ended].CreatedAt = endedAt.Add(-time.Hour)
+	s.todos.todos[endedWaits].CreatedAt = endedAt.Add(-time.Hour)
+	s.todos.todos[after].CreatedAt = endedAt.Add(time.Second)
+	s.todos.todos[taskLead].CreatedAt = endedAt.Add(-time.Hour)
+	s.todos.todos[taskLead].Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-lead", Source: sourceLeader, Agent: "claude"}}
+	s.todos.todos[worker].CreatedAt = endedAt.Add(time.Second)
+	s.todos.todos[worker].Supervision.Supervisor = leaderRef("mac", "s-lead")
+	s.todos.todos[worker].Agents = []TodoAgent{{MachineID: "mac", SessionID: "s-w1", Source: sourceWorker, Via: taskLead}}
+	s.todos.mu.Unlock()
+	record := func(end *time.Time) {
+		s.directions.mu.Lock()
+		defer s.directions.mu.Unlock()
+		if !s.directionsLocked(ctx) {
+			t.Fatal("the directions could not be read")
+		}
+		s.directions.m["lead2"] = &direction{By: directionByUser, At: endedAt.Add(-2 * time.Hour), EndedAt: end}
+	}
+	record(&endedAt)
+	again := Settings{Main: "conv1", Leaders: []string{"lead1", "lead2"}}
 	for _, c := range []struct {
 		name string
 		cfg  Settings
@@ -228,14 +310,30 @@ func TestDigestTo(t *testing.T) {
 		{"main's task", leaders, superviseSignal{Todo: mains, Kind: sigReview}, "conv1"},
 		{"leader's task", leaders, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
 		{"leader's report", leaders, superviseSignal{Todo: leads, Kind: sigReport, Report: upReportQuestion}, "lead1"},
-		{"no leaders: the supervisor conversation itself", none, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
+		{"no leaders: a side conversation that never led supervises its own", none, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
 		{"leader's task waits for the user", leaders, superviseSignal{Todo: waits, Kind: sigIdle}, "conv1"},
 		{"leader's escalation", leaders, superviseSignal{Todo: waits, Kind: sigEscalated}, "conv1"},
 		{"leader's failed start", leaders, superviseSignal{Todo: leads, Kind: sigFailed}, "conv1"},
 		{"gone", leaders, superviseSignal{Todo: "nope", Kind: sigReview}, "conv1"},
+		{"an ended direction's task: back to the main conversation", leaders, superviseSignal{Todo: ended, Kind: sigReview}, "conv1"},
+		{"an ended direction's report", none, superviseSignal{Todo: ended, Kind: sigReport, Report: upReportQuestion}, "conv1"},
+		{"an ended direction's task waits for the user", leaders, superviseSignal{Todo: endedWaits, Kind: sigIdle}, "conv1"},
+		{"a task leader's decision for an ended direction", leaders, superviseSignal{Todo: ended, Kind: sigDecide, To: "lead2"}, "conv1"},
+		{"handed out after its direction ended: its own", leaders, superviseSignal{Todo: after, Kind: sigReview}, "lead2"},
+		{"a task leader's decision, handed out after the end", leaders, superviseSignal{Todo: after, Kind: sigDecide, To: "lead2"}, "lead2"},
+		{"a decision of a newer worker of a task leader handed out before the end", leaders, superviseSignal{Todo: worker, Kind: sigDecide, To: "lead2"}, "conv1"},
+		{"a direction again takes its tasks back", again, superviseSignal{Todo: ended, Kind: sigReview}, "lead2"},
+		{"a task leader's decision for a direction again", again, superviseSignal{Todo: ended, Kind: sigDecide, To: "lead2"}, "lead2"},
 	} {
 		if got := s.digestTo(c.cfg, c.g); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// Taken out of assistant.leaders moments ago, before directionsSync marked its record: every task it has is back.
+	record(nil)
+	for _, id := range []string{ended, after} {
+		if got := s.digestTo(leaders, superviseSignal{Todo: id, Kind: sigReview}); got != "conv1" {
+			t.Errorf("a direction ended a moment ago: %q, want conv1", got)
 		}
 	}
 }

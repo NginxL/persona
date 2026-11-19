@@ -17,7 +17,7 @@
   "make_leader": "常駐にする",
   "end_leader": "常駐をやめる",
   "leader_made": "「{title}」を常駐にしました",
-  "leader_ended": "「{title}」の常駐をやめました。任せた仕事はそのままです",
+  "leader_ended": "「{title}」の常駐をやめました。進行中のタスクはメインチャットの監督に戻ります",
   "leader_failed": "変更できませんでした：{error}",
   "delete": "削除…",
   "make_leader_confirm": "常駐にする（確認）",

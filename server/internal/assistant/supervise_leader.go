@@ -99,14 +99,17 @@ func (s *Service) planTaskSupervisor(ctx context.Context, conversation string, t
 
 // digestTo is the conversation signal g goes to, with cfg the settings in effect: the one it names (To), else its task's
 // supervisor when that is a leader or another side conversation, unless the main conversation handles it (its needs_user,
-// a start to remedy, a task waiting for the user); else, for a task whose ledger names the main conversation, the
-// background supervisor, or the main conversation while there is none (ownSupervisor, supervise_background.go).
+// a start to remedy, a task waiting for the user); else, for a task whose ledger names the main conversation or a
+// direction that has ended since (handedBack), the background supervisor, or the main conversation while there is none
+// (ownSupervisor, supervise_background.go).
 func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 	own := s.ownSupervisor(cfg)
 	if g.To != "" {
 		switch {
 		case g.Kind == sigDecide && g.To == cfg.Main:
 			return own // a task leader's decision for the conversation above it, whose task is one no leader conversation supervises
+		case g.Kind == sigDecide && s.handedBackTo(cfg, g.To, g.Todo):
+			return own // the same, from a task leader handed out by a direction that has ended since
 		case g.To == cfg.BackgroundSupervisor && g.To != own:
 			return cfg.Main // named the background supervisor, which was switched off or moved meanwhile
 		}
@@ -131,7 +134,41 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 	if t.Supervision.state(t) == reviewNeedsUser && g.Kind != sigAllStopped {
 		return cfg.Main
 	}
+	if s.handedBack(cfg, lead, t) {
+		return own
+	}
 	return lead
+}
+
+// handedBack: conversation id, which task t's ledger names as its supervisor (for a worker, the conversation above its
+// task leader), led a direction that has ended since t was handed out (End direction, or its id taken out of
+// assistant.leaders, #11394). The owner was told that such a direction's open tasks go back to the main conversation's
+// supervision, so their signals and terminal questions go to that route (ownSupervisor), as their tree group, cards and
+// reviews already do; the ledger keeps the supervisor. Made a direction again, it is a current leader and takes them
+// back. A side conversation that never led keeps what it hands out (#5002), and so does an ended direction for a task
+// handed out after it ended (defaultPlanSupervisor). Unreadable records change nothing.
+func (s *Service) handedBack(cfg Settings, id string, t Todo) bool {
+	if id == "" || id == cfg.Main || id == cfg.BackgroundSupervisor || slices.Contains(cfg.Leaders, id) || s.isLeaderRef(id) {
+		return false
+	}
+	d := s.directionOf(id)
+	if d == nil {
+		return false
+	}
+	if lead, _, ok := s.leaderAbove(t); ok && lead.ID != "" {
+		t = lead // a worker: what id handed out is its task leader's task
+	}
+	// No end yet: it left assistant.leaders moments ago, and directionsSync has not marked its record.
+	return d.EndedAt == nil || !t.CreatedAt.After(*d.EndedAt)
+}
+
+// handedBackTo is handedBack for the task with id todo; false when it is gone.
+func (s *Service) handedBackTo(cfg Settings, id, todo string) bool {
+	if id == "" || id == cfg.Main || slices.Contains(cfg.Leaders, id) {
+		return false // the common case, without reading the task
+	}
+	t, ok := s.todoNow(todo)
+	return ok && s.handedBack(cfg, id, t)
 }
 
 // digestTarget is digestTo, except that a conversation hosted by a runtime without supervision_policy is never the

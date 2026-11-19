@@ -9,6 +9,7 @@ import (
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/screen"
 )
 
 // assistantHome is where the node's sessions are the assistant's conversations.
@@ -214,6 +215,41 @@ func TestAskGoesToTheLeaderFirst(t *testing.T) {
 	}
 	if got := e.f.noticesTo("conv1"); len(got) != 0 {
 		t.Fatalf("the main conversation was told: %q", got)
+	}
+}
+
+// #11394: a terminal question of a task an ended direction handed out goes where its supervision messages now go, the
+// main conversation's route, and no longer to the conversation that led; while it leads, the question is its own.
+func TestEndedDirectionsTerminalQuestionGoesToTheMainChat(t *testing.T) {
+	e := newRouteEnv(t, &memStore{}, true)
+	ctx := context.Background()
+	if _, err := e.s.makeDirection(ctx, "lead1", "", "", ""); err != nil { // its record, as the owner's Pin keeps it
+		t.Fatal(err)
+	}
+	screenAsk := func(id, session string) proto.Interaction {
+		ix := askQuestion(id, session)
+		ix.Kind, ix.Questions = proto.IxScreen, nil
+		ix.Dialog = &screen.Dialog{Question: "Which edition?", Options: []screen.Option{{Key: "1", Label: "Pocket"}, {Key: "2", Label: "Standard"}}}
+		return ix
+	}
+	led := screenAsk("led", "worker-1")
+	e.raise(led)
+	e.noticeWith("lead1", "interaction_id="+led.ID)
+
+	if ended, err := e.s.endDirection(ctx, "lead1"); err != nil || !ended { // the owner's Unpin
+		t.Fatalf("end: %v %v", ended, err)
+	}
+	back := screenAsk("back", "worker-2")
+	e.raise(back)
+	e.noticeWith("conv1", "interaction_id="+back.ID)
+	if !e.lastShown(back.ID).Delegating || e.pushesOf(back.ID) != 0 {
+		t.Fatal("the question did not wait for the main conversation")
+	}
+	e.settle()
+	for _, n := range e.f.noticesTo("lead1") {
+		if strings.Contains(n, "interaction_id="+back.ID) {
+			t.Fatalf("the unpinned conversation was told the question:\n%s", n)
+		}
 	}
 }
 
