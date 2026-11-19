@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -66,6 +67,41 @@ func TestTaskModelRecoveryFailsOnlyAfterTheFinalTurn(t *testing.T) {
 		}
 		if f.sent() != 0 || again {
 			t.Fatal("a recovered run was sent again as a scheduled retry")
+		}
+	})
+}
+
+func TestTaskWithoutPendingModelRetryDoesNotHoldRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFakeHub().withMachine()
+		s := New(Options{Hub: f, Logf: testLogf(t)})
+		s.turnPoll, s.runRetry = time.Second, 5*time.Second
+		task := Task{ID: "p", Title: "Example check", Prompt: "Check the example", Repeat: repeatInterval, EveryMinutes: 30,
+			At: time.Now(), Enabled: true, MachineID: "server"}
+		setTasks(s, task)
+		f.items = []proto.Item{{ID: "failure", Role: "assistant", Kind: proto.KindText, Text: "API Error: 503 no eligible upstream"}}
+		working := proto.Session{SessionID: "s1", Status: proto.StatusWorking, State: proto.StateWorking, Assistant: true,
+			TurnError: "API Error: 503 no eligible upstream", TurnErrorKind: proto.TurnErrorTransient, UpdatedAt: time.Now()}
+		f.setSessions("server", working)
+		turnAt := time.Now().UTC()
+		s.putWork(context.Background(), db.SessionWork{MachineID: "server", SessionID: "s1", TurnAt: turnAt,
+			Work: proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitTransient, TurnAt: turnAt, At: turnAt}})
+		run := ScheduleRun{RefID: task.ID, Status: runOK, SessionID: "s1", Retried: true}
+		run.ID = s.recordRun(run)
+		done := make(chan struct{})
+		go func() {
+			s.watchScheduledRun(run, task, Device{ID: "server", Name: "Example computer"})
+			close(done)
+		}()
+		synctest.Wait()
+		<-time.After(2 * s.turnPoll)
+		working.Status, working.State = proto.StatusDone, proto.StateUnread
+		f.setSessions("server", working)
+		synctest.Wait()
+		select {
+		case <-done:
+		case <-time.After(10 * s.turnPoll):
+			t.Fatal("a transient work entry with no pending wake held the scheduled run")
 		}
 	})
 }

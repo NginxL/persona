@@ -308,10 +308,10 @@ func (n *Node) recoverAssistantResult(p *assistantProc, failed bool, result stri
 // That identity check prevents a result delayed by process replacement from restarting a turn the user has cancelled.
 func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTurnRecovery, failed bool, result string, kinds ...string) bool {
 	if failed && (modelretry.Temporary(result) || modelretry.Permanent(result) || slices.Contains(kinds, assistantModelServiceFailure) || len(kinds) > 0 && kinds[0] == proto.TurnErrorTransient) &&
-		!assistantSafeguardsRefusal(result) && !assistantModelUnavailable(result) && !assistantwire.ToolSearchRefused(result) {
+		!assistantSafeguardsRefusal(result) && !assistantModelUnavailable(result) && !assistantwire.ToolSearchRefused(result) && ModelRecoveryReason(result) != proto.ModelRecoveryReasonQuota {
 		// Publish the stopped turn to the manager's durable due-wake scheduler.
-		// Keep the existing unavailable-model, safeguards and tool-search recovery
-		// paths out of this new scheduler; they have their own bounded recovery contracts.
+		// Keep the existing unavailable-model, safeguards, tool-search and gateway-
+		// quota recovery paths out of this scheduler; they have their own contracts.
 		return false
 	}
 	if proto.IsExternalLauncher(p.launcher) {

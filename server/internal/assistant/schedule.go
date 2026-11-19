@@ -2490,7 +2490,7 @@ func (s *Service) waitTurnEnd(ctx context.Context, machine, sid string) (ended, 
 			continue // not read: no sight of idle (and the debounce does not count it)
 		}
 		if c.Assistant && turnErrorTransient(c) && s.triageSwitches(ctx).transientOn() {
-			if e, exists := s.workEntry([2]string{machine, sid}); !exists || e.Work.RetiredAt == nil {
+			if e, exists := s.workEntry([2]string{machine, sid}); !exists || e.WakeAt != nil && e.Work.On == proto.WaitTransient && e.Work.RetiredAt == nil {
 				// Recovery continues this conversation. Never let the schedule
 				// watcher replay the task prompt while a model retry is pending.
 				ran, idle = true, 0

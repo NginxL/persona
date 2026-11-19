@@ -62,6 +62,17 @@ a pre-existing draft merely because it equals earlier assistant text: equality p
 Use an isolated fixture that acknowledges Enter without consuming the paste, and prove it fails without the production
 check. This demonstrates the confirmation gap, not the cause of any particular live incident.
 
+## herdr's "idle" is not "ready for the first message", and `agent.prompt` only types (#11345)
+
+herdr reports a work agent as soon as it sees its process, and calls agy idle as soon as its input box shows, but agy
+keeps signing in after that (model list, slash commands, skills and hooks reloaded) and can drop a message typed then.
+herdr's `agent.prompt` without `wait` answers `ok` once it has typed the text and Enter, so a start that sends once and
+returns reports a dropped task as started. On one Windows node two of three agy starts lost their task this way, with
+the Enter landing at the same time after agy's "ready" line in the lost and the delivered starts alike, so a fixed
+delay is no fix. Confirm instead: the agent turns working, blocked or done, or its integration reports a session.
+Retype only what is provably gone (the agent still idle, nothing of the message or a `[Pasted text …]` chip on screen),
+and otherwise list the session as needing the user.
+
 # A continuation must stay on its original to-do (#6820)
 
 When replacing an Agent to fix or retry work, keep the original to-do and immutable brief. Stop/release prior Agents at Start and reopen a closed to-do in place; failed starts must not create successor tasks. For Codex edits, a plan/read-only sandbox needs a fresh process with explicit writable permission. Keep takeover and legacy-successor duplicate refusals intact.

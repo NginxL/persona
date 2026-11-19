@@ -87,8 +87,8 @@ func workAgentResume(kind, cmd, id string) string {
 
 // startWorkAgent opens a tab in ws and runs the work agent there, then delivers the first message: to pi through the
 // extension that lists the session (finishPiStart), to cursor-agent and agy through herdr's agent.prompt once herdr
-// reports the agent. A pi whose extension never lists the session is quit; its tab stays at the shell, and typing the
-// message into pi is refused.
+// reports the agent, checked until the agent takes it (workAgentFirst). A pi whose extension never lists the session is
+// quit; its tab stays at the shell, and typing the message into pi is refused.
 func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, model, effort, prompt, ws, tabName string) (*proto.Session, error) {
 	herdrName, program, ok := workAgent(kind)
 	if !ok {
@@ -150,7 +150,8 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 	}
 	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model, effort)
 	if prompt != "" {
-		if err := n.hostPrompt(ctx, pane, prompt); err != nil {
+		// Typed once, then checked in the background until the agent is seen taking it (workagent_first.go, #11345).
+		if err := n.workAgentFirst(ctx, pane, id, herdrName, prompt); err != nil {
 			return nil, fmt.Errorf("send first message: %w", err)
 		}
 	}
@@ -386,9 +387,14 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err, true
 		}
+		// After the check of a start's first message (workAgentFirst): a message typed meanwhile could meet the first
+		// one typed again.
+		unlock := n.typing.lock(id)
+		defer unlock()
 		if err := n.hostPrompt(ctx, a.PaneID, p.Text); err != nil {
 			return nil, fmt.Errorf("send: %w", err), true
 		}
+		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
 		return okResult(nil), nil, true
 	case "session.interrupt":
 		return okResult(n.sendKeys(ctx, a.PaneID, "escape")), nil, true
