@@ -92,7 +92,7 @@ def install():
     hub.ITEMS[hub.ASK1] += [hub.it("assistant", "text", 4.5, text="已派出任务，进度会在面板里更新。"),
                             hub.it("user", "text", 3, text="Routine supervision check", source={"kind": "supervision"},
                                    injected={"kind": "system", "state": "supervise", "level": "triage", "line": "例行督办", "title": "例行督办"}),
-                            hub.it("assistant", "text", 2.5, text="后台巡检完成，没有新问题。"),
+                            hub.it("assistant", "text", 2.5, text="后台巡检完成，没有新问题。", narration=True),
                             hub.it("system", "text", 2, text="Context compacted", injected={"kind": "compact", "state": "done", "line": "上下文已压缩"})]
     hub.TODOS_INIT[:] = copy.deepcopy(hub.TODOS)
     for sid, title, _, text, _, _ in rows:

@@ -136,6 +136,38 @@ compile the old contracts and later tasks read newly merged tests, producing mis
 errors. Finish or stop that invocation first, update the branch, then verify the fixed revision. A failure is not an
 inherited main defect until a clean, independent main worktree reproduces it.
 
+## A cache key that differs in every worktree (#10712)
+
+Gradle hashes an input as written, so an absolute path in one gives every checkout its own cache key and a second
+worktree at the same commit rebuilds and retests everything. Nothing warns about it. The ones this build had:
+
+- `Test.systemProperty("persona.repo.root", <path>)` and the native library's path. Pass a path through
+  `jvmArgumentProviders` (`android/build-logic/convention/src/main/kotlin/persona/buildlogic/TestArguments.kt`):
+  `@Internal` for a location, or `@InputFiles` with `PathSensitivity.NONE` when the file's contents are the input.
+- `-Xfriend-paths=<build dir>` in `freeCompilerArgs`. Use the Kotlin compile task's `friendPaths` instead: Kotlin keys
+  it by each friend's path relative to the module's build directory (the classpath tracks the contents). Keep the friends
+  to project outputs with a non-transitive configuration; a jar from the Gradle cache sits at a different relative path
+  in every checkout, so a transitive friend list still splits the key.
+- An `Exec` task's `commandLine` / `args` set at configuration time, and KSP's `arg(key, "$projectDir/…")`. Set the
+  command line inside `exec()`, and give KSP a `CommandLineArgumentProvider` with a relative fingerprint.
+- `inputs.files(…)` without `withPathSensitivity(…)`: its default is `ABSOLUTE`.
+
+To check, run one task in two worktrees at one commit with `--info` and look for `FROM-CACHE`; with
+`-Dorg.gradle.caching.debug=true` Gradle prints each input property's hash, and the one that differs is the culprit.
+
+Two more traps from the same change. Reading a source file at configuration time (to find which fixtures a module's
+tests read, say) makes it a configuration-cache input, so editing a test discards the configuration; do such a scan
+in a task whose output feeds the test task's inputs, as `fixtureReferences` does. And a Kotlin package named
+`persona.build` lives in `persona/build/`, which `android/.gitignore`'s `build/` rule hides: the build compiles it
+locally and the commit leaves it out.
+
+Shared keys also change what a cache hit leaves behind. Robolectric screenshot tests write PNGs to `build/<name>-shots/`,
+which no task declares; while each checkout had its own keys, a new worktree's first test run always drew them. Once
+keys match, a new worktree's test task can come `FROM-CACHE` with no pictures, and a reused one keeps an older run's. An
+undeclared output is only safe where the task cannot be restored, so `--tests` runs (how screenshots are captured)
+skip the build cache (`android/build-logic/convention/src/main/kotlin/persona/buildlogic/TestRuns.kt`), and a
+whole-suite capture adds `--rerun`.
+
 ## Reusing an onboarding checklist for ordinary settings (#5233)
 
 Reusing the full phone-check list is not enough: an ordinary Notifications and background page must also suppress

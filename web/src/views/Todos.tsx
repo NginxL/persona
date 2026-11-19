@@ -25,6 +25,7 @@ import { composing } from "../lib/send-history";
 import { useScrollMemory } from "../lib/scroll-memory";
 import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { useScoped } from "../lib/current-assistant";
+import { lazyPage } from "../lib/lazy-page";
 import { dropTodo, refresh, refreshTodos, useStore, withTaskRows } from "../lib/store";
 import {
   addTodoDecision,
@@ -119,6 +120,7 @@ import { setTodoSeen, todoSeenOn } from "../lib/todo-seen";
 import { retryKey, retryTask, useFeed } from "../lib/feed";
 import { planTaskOf, retryLauncher, retryOnLauncher } from "../lib/start-retry";
 import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
+import { PageBoundary } from "./PageBoundary";
 
 /** What this browser was last on (#2029): the list or the calendar, the calendar's mode, and whether it shows done ones. */
 const VIEW_KEY = "persona.todos.view";
@@ -1935,6 +1937,7 @@ function askText(ix: Interaction | undefined): string {
 // A task's brief (#3822) comes with the first to-do that has one, not with the page.
 const TodoRequestGraph = lazy(() => import("./TodoRequestGraph"));
 const TaskBriefPanel = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.TaskBriefPanel })));
+const WorkspaceNaming = lazyPage(() => import("../ui/WorkspaceNaming").then((m) => m.WorkspaceNaming));
 const TaskBriefHistory = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.TaskBriefHistory })));
 const BriefResultExtras = lazy(() => import("./assistant/TaskBrief").then((m) => ({ default: m.BriefResultExtras })));
 // the question a failed start's tab stopped on, answered on its page (#10365): only for such a failure
@@ -2258,6 +2261,11 @@ function TodoDetail({
 
       <TodoRepositoryBindings key={`${owner}:${todo.manager ?? defaultManager()}:${todo.id}`} manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id}
         legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} />
+      <PageBoundary page="workspace-naming">
+        <Suspense fallback={<Loading />}>
+          <WorkspaceNaming manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id} />
+        </Suspense>
+      </PageBoundary>
 
       <ThreadSection todo={todo} />
 

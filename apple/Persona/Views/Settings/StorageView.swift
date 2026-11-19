@@ -278,10 +278,10 @@ struct StorageView: View {
             #endif
         }
         .refreshable { await measure() }
-        .confirmationDialog("Clear all \(clearableTotal.storageText) of caches? Settings and pairing info are kept.", isPresented: $confirmAll, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Clear all \(clearableTotal.storageText) of caches? Settings and pairing info are kept.", isPresented: $confirmAll, titleVisibility: .visible) {
             Button("Clear [Image Editor bce237]", role: .destructive) { Task { await clear(StorageKind.allCases.filter(\.clearable)) } }
         }
-        .confirmationDialog(confirmOne.map { String(localized: "Clear “\($0.title)” (\((usage?[$0] ?? 0).storageText))?") } ?? "",
+        .accessibleConfirmationDialog(confirmOne.map { String(localized: "Clear “\($0.title)” (\((usage?[$0] ?? 0).storageText))?") } ?? "",
                             isPresented: Binding(get: { confirmOne != nil }, set: { if !$0 { confirmOne = nil } }), titleVisibility: .visible,
                             presenting: confirmOne) { k in
             Button("Clear [Image Editor bce237]", role: .destructive) { Task { await clear([k]) } }

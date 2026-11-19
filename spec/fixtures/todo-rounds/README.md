@@ -10,7 +10,10 @@ value to the schema, and the generated types read each one back unchanged (Apple
 `android/core/contracts/src/test/kotlin/persona/core/contracts/TodoViewWireTest.kt`).
 
 Stage 2 reads the timeline from the stores the hub already keeps, and keeps nothing new; stage 3 stores the entries
-themselves (`todo_activity`, proposal 7.6), and these cases still hold for what both can say, ids aside.
+themselves (`todo_activity`, proposal 7.6), and these cases still hold for what both can say, ids aside. The manager
+serves them through `GET /api/v1/todos/{id}/timeline` (the rounds, paged) and `GET /api/v1/todos/{id}`, whose
+`TodoItemDetail` is a case's `latest` rounds, how many rounds it has, its `recap` and its `results`; the wire tests build
+that from each case too.
 
 | File | What it pins | Cases |
 | --- | --- | --- |

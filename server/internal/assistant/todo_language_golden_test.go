@@ -40,7 +40,7 @@ func TestGoldenTodoLanguageCallers(t *testing.T) {
 			if err := store.AppendLog("天气-app", time.Date(2026, time.November, 1, 12, 0, 0, 0, store.Zone()), kb.TodoLogSource+kb.TodoLogTitle(todo.Title), "结论：修好了"); err != nil {
 				t.Fatal(err)
 			}
-			project := s.withProjectContext(ctx, "box", "/code/weather", "下一步")
+			project := s.withProjectContext(ctx, "box", "/code/weather", "", "下一步")
 			if got := transcript.StripInjected(project); got != "下一步" {
 				t.Fatalf("transcript body = %q", got)
 			}

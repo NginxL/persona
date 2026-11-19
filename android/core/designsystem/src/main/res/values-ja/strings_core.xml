@@ -400,6 +400,7 @@
     <string name="designsystem_core_knowledge_meetings">会議</string>
     <string name="designsystem_core_knowledge_events">予定</string>
     <string name="designsystem_core_knowledge_recordings">録音</string>
+    <string name="designsystem_core_knowledge_topics">トピック</string>
     <string name="designsystem_core_mail_error">エラー</string>
     <string name="designsystem_core_mail_outlook">Outlook · Microsoftアカウントでログイン</string>
     <string name="designsystem_core_mail_gmail">Gmail · Googleアカウントでログイン</string>

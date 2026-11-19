@@ -85,6 +85,8 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.TodoID, t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", "", nil, nil
 		t.WorkspaceResolved, t.ReservedTodoID, t.WorkspaceInferred = nil, "", false
 		t.OwnerStarted = false // the hub's: only the owner's Start on the card sets it (startPlan)
+		t.CloseTabOnAccept, t.TerminalTarget, t.TerminalCleanup = false, taskTerminalTarget{}, ""
+		t.TerminalAuthorized = false
 		// The hub's too: the scheduled round this plan comes from is the hub's to tell (scheduledRoundOf, #8045).
 		t.Schedule, t.ScheduleTitle, t.ScheduleBasis = "", "", ""
 		// Reroute is hub-owned: drop any reroute a model passes in task_plan args, so healthyPlace seeds it only from a
@@ -308,6 +310,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		return "", err
 	}
 	var b strings.Builder
+	supervisor := ""
 	fmt.Fprintf(&b, "Queued %d task(s) for dispatch without asking (read-only, asked for by the user, a kind the user trusts, or one "+
 		"the user lets this scheduled task start):\n", len(started.Tasks))
 	for _, t := range started.Tasks {
@@ -315,33 +318,32 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			fmt.Fprintf(&b, "- %s on %s: dispatch failed: %s\n", t.Title, t.Machine, t.Error)
 		} else {
 			fmt.Fprintf(&b, "- %s → todo %s on %s (dispatching)\n", t.Title, t.TodoID, t.Machine)
+			if todo, ok := s.todoNow(t.TodoID); ok && todo.Supervision != nil {
+				supervisor = todo.Supervision.Supervisor
+			}
 		}
 	}
 	b.WriteString("This is not confirmation that any agent started. Startup can still fail; the task cards and context snapshot show the outcome.")
-	background := s.backgroundOn(s.settings(ctx)) // who follows up a task no leader supervises (supervise_background.go)
+	cfg := s.settings(ctx)
+	background := s.backgroundOn(cfg)
 	switch {
-	case lead != "":
-		fmt.Fprintf(&b, " Leader conversation %s supervises them: their supervision messages go there, and it reviews them with task_review.", lead)
+	case supervisor == "":
+	case supervisor != sessionID && supervisor != cfg.Main:
+		fmt.Fprintf(&b, " Leader conversation %s supervises them: their supervision messages go there, and it reviews them with task_review.", supervisor)
 	case background && s.isBackground(ctx, sessionID):
 		b.WriteString(" You follow them up as the background supervisor: a supervision message comes when one needs you (review it with task_review).")
 	case background && s.isMain(ctx, sessionID):
 		b.WriteString(" The background supervisor follows them up: their supervision messages go to it and it reviews them with " +
 			"task_review, so none comes to you for them. You still hear of a start that failed and of what it hands to the user, " +
 			"and may review any of them yourself (task_review).")
-	case s.supervises(ctx, sessionID):
+	case supervisor == sessionID:
 		b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
+	case background:
+		b.WriteString(" The background supervisor follows them up (their supervision messages and task_review); this conversation " +
+			"gets a one-line notice with the task's link when each one ends.")
 	default:
-		// A live side conversation supervises what it hands out; one that cannot be told anything leaves its task to
-		// the main conversation's follow-up (defaultPlanSupervisor), which is the background supervisor's while it is on.
-		if sup, ok := s.defaultPlanSupervisor(ctx, sessionID, ""); ok && sup == sessionID {
-			b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
-		} else if ok && background {
-			b.WriteString(" The background supervisor follows them up (their supervision messages and task_review); this conversation " +
-				"gets a one-line notice with the task's link when each one ends.")
-		} else if ok {
-			b.WriteString(" The main conversation supervises them (its supervision messages and task_review); this conversation " +
-				"gets a one-line notice with the task's link when each one ends.")
-		}
+		b.WriteString(" The main conversation supervises them (its supervision messages and task_review); this conversation " +
+			"gets a one-line notice with the task's link when each one ends.")
 	}
 	b.WriteString(dups)
 	return b.String(), nil

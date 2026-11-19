@@ -14,6 +14,7 @@ Prints one line per check and a verdict; exits 1 on the first failure. --shots s
 """
 import argparse
 import os
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
@@ -22,15 +23,20 @@ from playwright.sync_api import expect, sync_playwright
 AGENTS = {
     "整理发布说明": ("claude", "Claude Code（命令行版）"),
     "修复订单列表的 N+1 查询": ("codex", "Codex（桌面版）"),
-    "重构解析器的错误处理": ("opencode", "OpenCode"),
-    "给导出脚本加上进度条": ("pi", "Pi"),
+    "重构解析器的错误处理": ("opencode", "opencode"),
+    "给导出脚本加上进度条": ("pi", "pi"),
     "Gemini CLI": ("gemini", "Gemini CLI"),
     "补全设置页的单元测试": ("cursor", "Cursor"),
     "TRAEX 的一个会话": ("letter", "TRAEX"),
     "amp 的一个会话": ("letter", "amp"),
     "TRAE CLI 的一个会话": ("trae", "TRAE（命令行版）"),
+    "Grok": ("grok", "Grok"),
+    "Antigravity CLI": ("agy", "Antigravity CLI"),
+    "DeepSeek Harness": ("dsh", "DSH"),
+    "Kimi CLI": ("kimi", "Kimi"),
+    "GitHub Copilot": ("copilot", "GitHub Copilot"),
 }
-TEMPLATES = ("codex", "opencode", "pi", "gemini", "cursor", "trae")
+TEMPLATES = ("codex", "opencode", "pi", "gemini", "cursor", "trae", "grok", "agy", "dsh", "kimi", "copilot")
 CLI = ("整理发布说明", "TRAE CLI 的一个会话")  # the ones the mock runs from the command line (#6390)
 
 
@@ -82,7 +88,7 @@ def settle(page):
     page.wait_for_timeout(500)
 
 
-def run(browser, base, token, shots, channel_note):
+def run(browser, base, token, shots, session_marks_only):
     for width, height, touch in ((1280, 900, False), (390, 844, True)):
         where = "wide" if width > 600 else "390"
         for theme in ("light", "dark"):
@@ -106,17 +112,23 @@ def run(browser, base, token, shots, channel_note):
             # the session header
             page.goto(base + "/s/server/marks-codex")
             header = page.locator("header").first
-            expect(header.locator("[data-agent-mark=codex]")).to_have_attribute("aria-label", "Codex（桌面版）")
-            expect(header.locator('[role="img"][aria-label="Codex（桌面版）"]')).to_have_count(1)
+            expect(header.locator("[data-agent-mark=codex]")).to_have_attribute("data-agent-surface", "desktop")
+            expect(header.locator('[data-agent-device]')).to_have_attribute("aria-label", re.compile("Codex.*桌面版"))
             expect(header.locator("[data-agent-badge]")).to_have_count(0)
             page.wait_for_timeout(600)
             box = header.locator("[data-agent-mark]").bounding_box()
-            assert round(box["width"]) == 16, box
+            assert round(box["width"]) == 14, box
             ok(f"{where} {theme}: the session header names Codex, its desktop app, without a badge")
             if shots:
                 page.screenshot(path=os.path.join(shots, f"header-{where}-{theme}.png"), clip={"x": 0, "y": 0, "width": width, "height": 70})
 
-            if width > 600:
+            page.goto(base + "/s/server/marks-grok")
+            expect(header.locator("[data-agent-mark=grok]")).to_be_visible()
+            expect(header.locator("[data-agent-device]")).to_have_attribute("aria-label", re.compile("Grok"))
+            if shots:
+                page.screenshot(path=os.path.join(shots, f"grok-{where}-{theme}.png"))
+
+            if width > 600 and not session_marks_only:
                 # the /terminal tree: an agent's pane has its mark, a plain shell none
                 page.goto(base + "/terminal")
                 tree = page.locator("main")
@@ -174,13 +186,14 @@ def main():
     ap.add_argument("--shots")
     ap.add_argument("--token", default="mock")
     ap.add_argument("--channel")
+    ap.add_argument("--session-marks-only", action="store_true", help="check the sidebar and chat headers")
     a = ap.parse_args()
     if a.shots:
         os.makedirs(a.shots, exist_ok=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=a.channel) if a.channel else p.chromium.launch()
         try:
-            run(browser, a.base.rstrip("/"), a.token, a.shots, a.channel)
+            run(browser, a.base.rstrip("/"), a.token, a.shots, a.session_marks_only)
         finally:
             browser.close()
     print("PASS web agent marks e2e")

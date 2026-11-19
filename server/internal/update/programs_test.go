@@ -69,15 +69,18 @@ func TestBuildManifestNodes(t *testing.T) {
 	writeGz(t, filepath.Join(dir, "personad-linux-amd64.gz"), []byte("personad"))
 	writeGz(t, filepath.Join(dir, "personad-darwin-arm64.gz"), []byte("personad for a Mac"))
 	writeGz(t, filepath.Join(dir, "persona-node-linux-amd64.gz"), []byte("persona-node"))
+	writeGz(t, filepath.Join(dir, "persona-node-windows-amd64.exe.gz"), []byte("Windows persona-node"))
+	writeGz(t, filepath.Join(dir, "personad-windows-amd64.exe.gz"), []byte("Windows personad"))
 	m, err := BuildManifest(dir, Manifest{Version: "v1", Build: 202611030000, NodeProtocol: 2, NodeProtocolMin: 1,
 		NodeCapabilities: []string{"sessions"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Files) != 2 || m.Files["linux-amd64"].Name != "personad-linux-amd64.gz" {
+	if len(m.Files) != 3 || m.Files["linux-amd64"].Name != "personad-linux-amd64.gz" || m.Files["windows-amd64"].Name != "personad-windows-amd64.exe.gz" {
 		t.Fatalf("files %+v", m.Files)
 	}
-	if n := m.Nodes["persona-node"]; len(n) != 1 || n["linux-amd64"].Name != "persona-node-linux-amd64.gz" || n["linux-amd64"].BinarySHA256 == "" {
+	if n := m.Nodes["persona-node"]; len(n) != 2 || n["linux-amd64"].Name != "persona-node-linux-amd64.gz" ||
+		n["windows-amd64"].Name != "persona-node-windows-amd64.exe.gz" || n["linux-amd64"].BinarySHA256 == "" {
 		t.Fatalf("nodes %+v", m.Nodes)
 	}
 	for _, c := range []struct{ program, plat, want string }{
@@ -89,8 +92,14 @@ func TestBuildManifestNodes(t *testing.T) {
 			t.Errorf("%s on %s: %+v %v, want %s", c.program, c.plat, f, ok, c.want)
 		}
 	}
-	if _, ok := m.NodeFile("persona-node", "windows-amd64"); ok {
-		t.Error("a platform the release has no build for")
+	if f, ok := m.NodeFile("persona-node", "windows-amd64"); !ok || f.Name != "persona-node-windows-amd64.exe.gz" {
+		t.Errorf("a Windows node download must retain its executable suffix: %+v %v", f, ok)
+	}
+	if f, ok := m.NodeFile("personad", "windows-amd64"); !ok || f.Name != "personad-windows-amd64.exe.gz" {
+		t.Errorf("a Windows personad download must not be mistaken for a POSIX program: %+v %v", f, ok)
+	}
+	if _, ok := m.NodeFile("persona-node", "windows-arm64"); ok {
+		t.Error("a missing architecture must not reuse another one's bytes")
 	}
 	b, _ := json.Marshal(m)
 	back, err := ParseManifest(b)

@@ -966,3 +966,38 @@ IPv4-only networks can't reach a home IPv6 address, just as with the phone.
 Logs:
 - Helper / Linux service: `~/.persona/link.log` (`persona-link logs -f`); passive mode uses `passive: …` (listener start, pairing, stream start / end, rejected requests);
 - Hub: `[<machine>] link up …` / `link down …`.
+
+
+### Redacted connection diagnostics
+
+The existing Link logger emits one `link: dial` record per attempted WebSocket handshake,
+including active control candidates, SSH tunnel handshakes, direct recovery probes and node
+streams. `attempt` is a process-local sequence, not a persistent identifier. `role` distinguishes
+`control` from `stream`; `candidate` is the one-based position in the ranked, deduplicated
+control candidates, the tunnel bind attempt, or 1 for the selected stream route. `kind` is
+`lan`, `ipv6`, `ipv4`, `name`, `ssh` or `other`; unrecognized input is never echoed.
+
+`phase` is the last observed boundary (`dial`, `dns`, `tcp`, `tls`, `upgrade`). `outcome` is
+`success`, `error`, `timeout`, `canceled` or `http_refused`. The phase distinguishes a TLS
+stall from an Upgrade stall; an RPC pong fix does not explain either automatically.
+`dns_us`, `tcp_us`, `tls_us`, `upgrade_us` and `total_us` are monotonic elapsed microseconds.
+Zero means no observed work, reuse, or less than a microsecond; a literal IP needs no DNS.
+For SSH, TCP time measures connecting to the local forwarding listener, not a public TCP
+connection or the SSH authentication duration. TCP time sums observed address attempts,
+including overlapping address-family attempts,
+so phase totals need not equal wall-clock total. Upgrade time starts when the checked
+connection is handed to HTTP and includes writing the request and validating the response.
+Canceled phases include their observed elapsed time. A losing raced candidate can emit its
+cancellation after the winning candidate succeeds; attempt numbers need not appear in order.
+
+Each existing retry wait emits `link: retry_wait` with `planned_us`, `actual_us`, and `wake`:
+`timer`, `canceled`, `network_check`, `redial` or `config_changed`. The actual duration includes
+scheduling delay; a configuration change is observed by the existing poll interval. These
+records do not change candidate racing, TLS verification, timeouts, backoff, heartbeat,
+queues or offline detection, and introduce no new setting.
+
+These new records contain no endpoint addresses, stream IDs, credentials, certificates,
+HTTP headers, response bodies or raw errors. Existing status and legacy error logs keep
+their established behavior; this does not make an entire historical log safe to share.
+The diagnostics cover outbound Link WebSocket handshakes; pairing, passive listener
+acceptance and SSH process startup failures retain their existing diagnostics.

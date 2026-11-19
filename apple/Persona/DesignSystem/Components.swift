@@ -247,8 +247,12 @@ struct Chip: View {
     /// Truncates instead of keeping its full width when offered less (in a FlowLayoutRow, a chip longer than the line).
     var shrinks = false
     /// A step quieter, for a tag that sits under a row's time (the Agents row's source, #3043): the label's size in
-    /// regular weight, on a tighter capsule, in every style.
+    /// regular weight, on a tighter capsule, in every style. Its symbol, when it has one, goes before the words (#6578).
     var compact = false
+
+    /// How far a compact chip's capsule reaches above and below its words: a line that must stay as tall as its words
+    /// lets the capsule hang over it by this much (a to-do row's Got It, #6578).
+    static let compactInset = Theme.Space.xxs / 2
 
     var body: some View {
         chipBody.accessibilityShowsLargeContentViewer()
@@ -256,13 +260,22 @@ struct Chip: View {
 
     @ViewBuilder private var chipBody: some View {
         if compact {
-            Text(text).lineLimit(1)
-                .font(Theme.Font.label)
-                .foregroundStyle(words)
-                .padding(.horizontal, Theme.Space.sm)
-                .padding(.vertical, Theme.Space.xxs / 2)
-                .background(Capsule().fill(fill))
-                .fixedSize()
+            Group {
+                if let symbol {
+                    HStack(spacing: Theme.Space.xs) {
+                        ThemedIcon(symbol)
+                        Text(text).lineLimit(1)
+                    }
+                } else {
+                    Text(text).lineLimit(1)
+                }
+            }
+            .font(Theme.Font.label)
+            .foregroundStyle(words)
+            .padding(.horizontal, Theme.Space.sm)
+            .padding(.vertical, Self.compactInset)
+            .background(Capsule().fill(fill))
+            .fixedSize()
         } else if AppStyle.current.usesBeautifulUI {
             BUIPill(text, tone: pillTone, icon: symbol.map { .symbol(Theme.Icon.styled($0)) }, truncates: shrinks)
         } else {

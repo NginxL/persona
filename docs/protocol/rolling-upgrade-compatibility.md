@@ -159,6 +159,24 @@ does not take part:
 Nothing is stored: every new connection negotiates again, so a node or manager rolled back mid-session simply connects
 with lines next time.
 
+### Resuming node connections (#10663)
+
+A framed connection between a manager and a resident node built since #10663 survives its transport ending for a
+while (protocol.md "Resuming"); anything older drops it as before. Resuming is asked for with `rpc.lanes` and happens
+on a new transport, through the same relays:
+
+| Pair | What happens |
+| --- | --- |
+| New manager, new resident node | `node.info` announces `node_resume_v1`; the manager adds `"resume":1` to `rpc.lanes` and the node's answer grants it with a token. Logged as `lanes=on resume=on`. A dropped transport is taken back with `rpc.resume` on a new one. |
+| New manager, a node without a resident node (`node --stdio` serving the connection itself) | It ends with its transport, so it does not announce `node_resume_v1`: the manager does not ask, and a drop reconnects as before. |
+| New manager, older node | No `node_resume_v1`: lanes as in #10660, a drop reconnects. |
+| Older manager, new resident node | The manager's `rpc.lanes` does not ask for resuming, so the node grants none and keeps nothing; a new transport's first line is the manager's handshake, which replaces the connection as before. The node reads that first line before serving, which an older manager writes at once too. |
+| A token the node does not have | A node restarted (a new process), or a token already used: `rpc.resume` is answered `resume_refused`, the transport closed, and the manager connects anew. A token asked with again because the answer was lost is still taken until the new transport carries a byte. |
+| A drop past the window, or while the node restarts | The manager closes its peer and connects anew after its 30 s; the node's kept connection ends at its own window's end (60 s), or when a new connection replaces it. |
+| An older relay in between | Relays copy bytes; the resume goes over a new transport through them like any connection. |
+
+Nothing is stored: tokens live in each process's memory, so a restarted manager or node connects anew.
+
 ### Launcher default models (#4663)
 
 A launcher with no explicit model has an empty `model` on the wire; display text is never a model ID. Older nodes and

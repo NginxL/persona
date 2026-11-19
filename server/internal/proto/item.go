@@ -193,9 +193,8 @@ type Item struct {
 	// Wake marks a background task's notice that started new work after the agent had finished its turn
 	// (not one absorbed mid-turn): the exchange before it is over and its last words are an answer.
 	Wake bool `json:"wake,omitempty"`
-	// Narration is assistant text that belongs to the work summary (Codex commentary). It is internal to the
-	// transcript and FoldWork: on the wire it is ordinary text, so clients need no new item kind or cache migration.
-	Narration bool `json:"-"`
+	// Narration marks assistant text belonging to the work summary (Codex commentary), even if sent unfolded.
+	Narration bool `json:"narration,omitempty"`
 	// From names the Claude session that sent this message (cross-session messaging), not the user.
 	From string `json:"from,omitempty"`
 	// Injected: this user line is a message Persona put into the conversation for the model (a task's notice, a

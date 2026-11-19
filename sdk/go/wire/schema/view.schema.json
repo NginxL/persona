@@ -116,7 +116,8 @@
         {"$ref": "#/$defs/ComposerComponent"},
         {"$ref": "#/$defs/ImageComponent"},
         {"$ref": "#/$defs/GridComponent"},
-        {"$ref": "#/$defs/CarouselComponent"}
+        {"$ref": "#/$defs/CarouselComponent"},
+        {"$ref": "#/$defs/GraphComponent"}
       ]
     },
     "TextComponent": {
@@ -501,6 +502,49 @@
       },
       "required": ["type", "tiles"]
     },
+    "GraphComponent": {
+      "description": "Nodes joined by edges, drawn as a canvas the person can pan, zoom, fit and open full screen (UI version 10): work split into parts, a plan's steps, a family of things. The app lays it out (layout, direction) and draws each node with its own design system; tapping a node does its action, as a row's; a node with children folds them. Each node counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or itself, a repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a card it is a still preview that opens full screen. An older app gets a row per node in reading order, indented.",
+      "type": "object", "x-since": 10,
+      "properties": {
+        "type": {"const": "graph"},
+        "key": {"type": "string", "maxLength": 128, "description": "Keeps the person's pan, zoom and folding across redraws of the page."},
+        "nodes": {"type": "array", "minItems": 1, "maxItems": 300, "items": {"$ref": "#/$defs/GraphNode"}},
+        "edges": {"type": "array", "maxItems": 600, "items": {"$ref": "#/$defs/GraphEdge"}},
+        "layout": {"$ref": "#/$defs/GraphLayout"},
+        "direction": {"$ref": "#/$defs/GraphDirection"},
+        "selected": {"type": "string", "maxLength": 128, "description": "A node's id: drawn as selected, and the canvas opens centred on it."},
+        "folded": {"type": "array", "maxItems": 300, "items": {"type": "string", "minLength": 1, "maxLength": 128}, "description": "Ids of nodes whose children start folded. Once the person folds or unfolds one, the app keeps their choice for this key."}
+      },
+      "required": ["type", "nodes"]
+    },
+    "GraphNode": {
+      "description": "One node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress bar, in tone's role color or color's named color (never both).",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "subtitle": {"type": "string", "maxLength": 200},
+        "badge": {"$ref": "#/$defs/Badge"},
+        "tone": {"$ref": "#/$defs/Tone"},
+        "color": {"$ref": "#/$defs/Color"},
+        "icon": {"$ref": "#/$defs/NavIcon"},
+        "progress": {"type": "number", "minimum": 0, "maximum": 1, "x-go-pointer": true, "description": "A thin bar along the node's foot, 0 to 1."},
+        "group": {"type": "string", "minLength": 1, "maxLength": 60, "description": "Nodes with the same parents and the same group sit next to each other inside one frame titled with it (the same task tried several ways)."},
+        "action": {"$ref": "#/$defs/Action"}
+      },
+      "required": ["id", "title"]
+    },
+    "GraphEdge": {
+      "description": "An edge from one node to another (UI version 10): from is the parent, to the child.",
+      "type": "object",
+      "properties": {
+        "from": {"type": "string", "minLength": 1, "maxLength": 128},
+        "to": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["from", "to"]
+    },
+    "GraphLayout": {"description": "tree (the default): every node has at most one parent, children under it, a parent centred over its children. layered: a node may have several parents; each node sits one layer past its furthest parent (a plan whose steps wait for several others).", "type": "string", "enum": ["tree", "layered"]},
+    "GraphDirection": {"description": "right (the default): roots at the start, children after them, so a wide fan-out reads down the screen like an outline. down: roots at the top, children below.", "type": "string", "enum": ["right", "down"]},
     "ImageSource": {
       "description": "Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own address, which the app loads with its device credentials. An extension that writes path is refused.",
       "type": "object",

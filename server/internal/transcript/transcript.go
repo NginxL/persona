@@ -203,6 +203,10 @@ type Meta struct {
 	// turn_duration / an interrupt), no turn started after it. Unlike !TurnOpen it is false when the lines say nothing
 	// (a tail read from mid-turn).
 	TurnClosed bool
+	// The closing record, even when it produces no visible item (e.g. Codex without a duration).
+	turnEndedAt time.Time
+	turnEndSeq  int
+	turnEndLine string
 	// TurnError / TurnErrorKind: the latest turn failed on the model service, as the agent's own record says it
 	// (Codex: task_complete's error, #2185; Claude Code: the reply it writes itself for a failed request,
 	// isApiErrorMessage, #1710); empty when it ended well or the model answered since. Kind is
@@ -497,6 +501,14 @@ func ParseLine(seq int, line []byte, meta *Meta) []proto.Item {
 	return items
 }
 
+func (m *Meta) endTurn(seq int, at time.Time) {
+	m.TurnOpen, m.TurnClosed = false, true
+	m.turnEndedAt, m.turnEndSeq, m.turnEndLine = at, seq, m.tree.uuid
+	if m.tree.sidechain || m.Sidechain {
+		m.turnEndedAt = time.Time{}
+	}
+}
+
 // lineJSON is encoding/json's way of decoding without its check of the whole input before it decodes (its legacy
 // error semantics): the decoder checks each byte as it reads it anyway, so input that is not JSON fails all the same,
 // read once instead of twice. A transcript line is mostly its message, and a message's content was read up to four
@@ -634,7 +646,10 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 			return nil
 		}
 		var text string
-		var images []proto.Item // a message with pictures, sent while the agent worked: its prompt is blocks
+		// A message with pictures, sent while the agent worked: its prompt is blocks. Newer Claude Code puts the
+		// pictures first: the text's items count from its first block, after them, so no two items share an id.
+		var before, images []proto.Item
+		at := 0
 		if json.Unmarshal(a.Prompt, &text) != nil {
 			var blocks []block
 			if json.Unmarshal(a.Prompt, &blocks) == nil {
@@ -642,12 +657,19 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 				for i, b := range blocks {
 					switch b.Type {
 					case "text":
+						if len(parts) == 0 {
+							at = i
+						}
 						parts = append(parts, b.Text)
 					case "image":
 						if img := imageOf(b); img != nil {
 							it := mk(i, "user", proto.KindImage)
 							it.Image, it.Queued = img, true
-							images = append(images, it)
+							if len(parts) == 0 {
+								before = append(before, it)
+							} else {
+								images = append(images, it)
+							}
 						}
 					}
 				}
@@ -661,9 +683,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if notification {
 			return nil // other harness notifications are not user input
 		}
-		items, paseo := paseoInput(mk, 0, text)
+		items, paseo := paseoInput(mk, at, text)
 		if !paseo {
-			items = userText(mk, text, meta)
+			items = userText(func(k int, role, kind string) proto.Item { return mk(at+k, role, kind) }, text, meta)
 		}
 		for i := range items {
 			if !paseo || items[i].Role == "user" { // a Paseo child's notice is a notice, as a background task's
@@ -673,7 +695,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if meta.FirstUser == "" && len(items) > 0 && items[0].Kind == proto.KindText {
 			meta.FirstUser = items[0].Text
 		}
-		return append(items, images...) // the pictures dropped here once: the phone showed the message without them
+		return append(append(before, items...), images...) // the pictures dropped here once: the phone showed the message without them
 	case "system":
 		if strings.HasPrefix(e.Subtype, "model_refusal_") {
 			return meta.claudeModelRefusal(e.Subtype, line, mk(0, "system", proto.KindNotice))
@@ -681,7 +703,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		var text string
 		switch e.Subtype {
 		case "turn_duration":
-			meta.TurnOpen, meta.TurnClosed = false, true
+			meta.endTurn(seq, e.Timestamp)
 			meta.turnSucceeded = meta.turnWorked && meta.TurnError == ""
 			meta.turnWorked = false // the turn's work is done: Claude Code's own continuation after a limit opens with no prompt
 			ms, ok := recordedMilliseconds(e.DurationMS)

@@ -110,5 +110,16 @@
   "feature_answer_new_card_title": "Answer as a new card",
   "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card",
   "source_report_full_title": "Reply with the complete final answer",
-  "source_report_full_detail": "Everyone in the original group can see the final answer. When off, the bot sends a short result."
+  "source_report_full_detail": "Everyone in the original group can see the final answer. When off, the bot sends a short result.",
+  "topic_groups": "Topic groups",
+  "topic_home": "Home topic group",
+  "topic_home_hint": "Requests from other groups open here. Choosing a home is a separate action.",
+  "topic_home_none": "None — use the private chat",
+  "topic_owner_mention": "Only respond when I mention the bot",
+  "topic_mention_for": "Only respond when I mention the bot — {name}",
+  "topic_group_id": "Group ID",
+  "topic_group_name": "Group name (optional)",
+  "topic_add": "Add group",
+  "topic_policy_footer": "Applies only to your messages in this group, including settings commands. Other messages are ignored. A group added with this switch on does not become home automatically. Turn it off to restore the usual topic behavior.",
+  "topic_home_default": "Use default home"
 }

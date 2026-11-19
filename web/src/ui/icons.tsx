@@ -78,6 +78,8 @@ const P: Record<string, React.ReactNode> = {
   arrowUp: <path d="M12 19V5M5 12l7-7 7 7" />,
   image: <g><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" /></g>,
   external: <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />,
+  // the graph canvas's Fit (UI version 10): four corner brackets, everything inside them
+  fit: <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" />,
   download: <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />,
   retry: <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />,
   undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,

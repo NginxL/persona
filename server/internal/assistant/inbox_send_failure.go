@@ -35,14 +35,20 @@ var inboxSendFailures = map[string]inboxSendFailure{
 // writeInboxSendError writes err, the failure of a reply's send for item id (what: "reply", "suggestion"), when it
 // is one this code words: in doubt (delivered unknown, never retryable), or a coded reason nothing went out. The
 // log gets the item, the code and the request's id, never the error's words. False: err is none of them.
-func (s *Service) writeInboxSendError(w http.ResponseWriter, r *http.Request, what, id string, err error) bool {
+func (s *Service) writeInboxSendError(w http.ResponseWriter, r *http.Request, what, id string, err error, items ...InboxItem) bool {
 	l := i18n.OfWriter(w)
+	withItem := func(body map[string]any) map[string]any {
+		if len(items) > 0 && items[0].ID != "" {
+			body["item"] = items[0]
+		}
+		return body
+	}
 	if replyInDoubt(err) {
 		// It may have gone out: the apps say so (delivered unknown); the same reply again is not sent twice. The
 		// sentence is ours: an older manager's in-doubt message carried the source's own error.
 		s.logf("inbox: %s of %s may have gone out: %s (request %s)", what, id, assistantwire.CodeAssistantInDoubt, inboxRequestID(w, r))
-		apierr.WriteBody(w, http.StatusBadGateway, map[string]any{"code": assistantwire.CodeAssistantInDoubt,
-			"error": i18n.T(l, "rpc-errors.in_doubt"), "delivered": "unknown", "retryable": false})
+		apierr.WriteBody(w, http.StatusBadGateway, withItem(map[string]any{"code": assistantwire.CodeAssistantInDoubt,
+			"error": i18n.T(l, "rpc-errors.in_doubt"), "delivered": "unknown", "retryable": false}))
 		return true
 	}
 	code := ""
@@ -71,7 +77,7 @@ func (s *Service) writeInboxSendError(w http.ResponseWriter, r *http.Request, wh
 			w.Header().Set("Retry-After", strconv.Itoa(data.RetryAfter))
 		}
 	}
-	apierr.WriteBody(w, f.status, body)
+	apierr.WriteBody(w, f.status, withItem(body))
 	return true
 }
 

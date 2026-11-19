@@ -173,6 +173,12 @@ type Peer struct {
 	lanesAsked bool
 	lanesUp    chan struct{}
 
+	// resume (resume.go): nil unless EnableResume. OnLost, when set, is told (in a goroutine of its own) that the
+	// transport was lost and the peer waits to be resumed: the caller closes it, which ends a write or read still stuck
+	// on it, and finds a new one. Set it before Serve.
+	resume *resumeState
+	OnLost func(err error)
+
 	running map[string]context.CancelFunc // requests being handled, by id: what a cancelEvent ends
 	// Only bounded peers couple accepted work to closure; legacy peers retain their cancellation semantics.
 	runtimeCancel context.CancelFunc
@@ -406,6 +412,7 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 			// The answer to this side's rpc.lanes is the other side's last line, whether or not its caller still
 			// waits: frames follow it, and this side's own output follows suit.
 			if lanesAnswer && !framed && lanesAccepted(m) {
+				p.resumeGranted(resumeTokenOf(m))
 				sc, framed = p.framedInput(lr, act, maximum), true
 				go p.switchOutput(message{Event: lanesMethod, Params: lanesMarker})
 			}

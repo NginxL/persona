@@ -19,7 +19,7 @@ func larkDecision(cfg proto.AssistantLark, c larkCall) string {
 		if action, ok := matchLark(cfg.Rules, c); ok {
 			return action
 		}
-		if c.Risk == "read" {
+		if larkCLIReads(c.Risk) {
 			return "allow"
 		}
 		return "confirm"
@@ -39,10 +39,10 @@ func larkDecision(cfg proto.AssistantLark, c larkCall) string {
 	return decideLark(cfg.Gates[c.Gate].Rules, c)
 }
 
-// larkRead: a call that only reads (lark-cli's own read risk, a GET / HEAD).
+// larkRead: a call that only reads (lark-cli's own read risk or a command it does not have, a GET / HEAD).
 func larkRead(c larkCall) bool {
 	if c.CLI && c.Method == "CLI" {
-		return c.Risk == "read"
+		return larkCLIReads(c.Risk)
 	}
 	return c.Method == "GET" || c.Method == "HEAD"
 }

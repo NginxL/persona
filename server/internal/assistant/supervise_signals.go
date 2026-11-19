@@ -43,8 +43,9 @@ var (
 	// superviseEvery is the least time between two supervision messages; superviseUrgentEvery when one waits on a decision.
 	superviseEvery       = 10 * time.Minute
 	superviseUrgentEvery = 2 * time.Minute
-	// superviseNoMainLogEvery is how often a digest that still finds no main conversation says so in the log: the
-	// watch's every pass (superviseTick) tries again, and each said it once before.
+	// superviseNoMainLogEvery is how often a digest that still leaves signals waiting for a main conversation (none is
+	// set and no conversation that dispatched them can be told, or no machine) says so in the log: the watch's every
+	// pass (superviseTick) tries again, and each said it once before.
 	superviseNoMainLogEvery = time.Hour
 	// superviseNeedsAfter is how long an agent waits for an answer before the supervisor hears of it (the user was
 	// pushed; a quiet task's at once: the user was not).
@@ -122,6 +123,9 @@ func (g superviseSignal) id() string {
 	if g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "sent" {
 		return g.Todo + "|" + g.Kind + ":agent_copy" // delivered copies never absorb an earlier failed delivery
 	}
+	if g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" {
+		return g.Todo + "|" + g.Kind + ":unhandled@" + g.Key
+	}
 	return g.Todo + "|" + g.Kind
 }
 
@@ -158,8 +162,8 @@ type superviseBook struct {
 
 	resuming map[[2]string]struct{} // fingerprints of offline leader sends in flight, under dedupMu
 
-	// noMainSince is when digests started finding no main conversation (zero: the last one found it), noMainLogged
-	// when that was last logged (sendDigest).
+	// noMainSince is when digests started leaving signals waiting for a main conversation (zero: the last one left none
+	// waiting), noMainLogged when that was last logged (sendDigest).
 	noMainSince, noMainLogged time.Time
 	hold                      map[string]time.Time // conversation → when a supervision message went in: its turn's finish is not pushed
 	visible                   map[string]bool      // an explicit user action makes the current triage turn visible
@@ -247,7 +251,10 @@ func (s *Service) signal(g superviseSignal) {
 	}
 	b.mu.Lock()
 	b.init()
-	if b.sent[g.id()] == g.Key {
+	// This early cache is not an unhandled source's delivery receipt: an owner wait
+	// can discard the entry before dispatch. Its durable fingerprint deduplicates delivery.
+	unhandled := g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled"
+	if b.sent[g.id()] == g.Key && !unhandled {
 		b.mu.Unlock()
 		return
 	}
@@ -421,6 +428,7 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.handOverUnreviewed(ctx, now) // a review a side conversation left waiting goes to the main one's follow-up (side_handover.go)
 	routed := s.routedSessions()
 	s.pruneTurns(ctx) // the turns' ledger: read before the first signal (what was told before a restart is not told again), closed tasks off it
+	s.recoverTaskInboxEvents(ctx)
 	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
 	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
 	s.pruneAllStoppedDedup(ctx)

@@ -308,6 +308,17 @@ describe("compact rows", () => {
     expect(html).toContain(">Report ready.<");
   });
 
+  it("shows the latest words without their Markdown, a tab's row too (#10939)", () => {
+    const words = "Done. **Result** is in `src/app.ts`:\n- see [the notes](https://example.com/notes)";
+    const plain = "Done. Result is in src/app.ts: see the notes";
+    const one = render([agent(1, 0, "unread", { last_text: words })]);
+    expect(one).toContain(`>${plain}<`);
+    expect(one).not.toContain("**Result**");
+    const tab = render([agent(2, 0, "working", { last_text: words, state_since: "2026-01-01T00:00:00Z" }), agent(2, 1, "idle")]);
+    expect(tab).toContain(`>${plain}<`);
+    expect(tab).not.toContain("`src/app.ts`");
+  });
+
   it("puts the rows of every agent section in columns on a wide page, cards with buttons later", () => {
     const a = agent(1, 0, "needs_you");
     const html = render([a, agent(2, 0, "unread"), agent(3, 0, "working")], [{ id: "p", kind: "permission", machine_id: "mac", session_id: a.session_id, tool_name: "Bash", tool_input: { command: "ls" } } as Interaction]);

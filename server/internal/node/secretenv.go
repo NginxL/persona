@@ -667,5 +667,8 @@ func (n *Node) capabilities() []string {
 	if n.external != nil {
 		capabilities = append(capabilities, nodeproto.ExternalLauncherInventory)
 	}
+	if n.resumeWindow > 0 { // a resident node's only (attach_resume.go)
+		capabilities = append(capabilities, nodeproto.NodeResume)
+	}
 	return capabilities
 }

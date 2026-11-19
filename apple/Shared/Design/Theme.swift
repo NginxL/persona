@@ -667,6 +667,22 @@ nonisolated enum Theme {
         static let tileRegular: CGFloat = 200
         /// A wide carousel tile's share of the width it scrolls in (the next one's edge shows).
         static let tileWideShare: CGFloat = 0.8
+        // An extension's gauge tile (UI version 9, #9337).
+        static let gaugeRing: CGFloat = 96
+        static let gaugeRingCompact: CGFloat = 80
+        static let gaugeStroke: CGFloat = 9
+        // An extension's graph canvas (UI version 10, #9727): one fixed node box and its gaps.
+        static let graphNodeWidth: CGFloat = 224
+        static let graphNodeHeight: CGFloat = 64
+        static let graphNodeGap: CGFloat = 32
+        static let graphPageShare: CGFloat = 0.7
+        static let graphPageMinHeight: CGFloat = 320
+        static let graphPageMaxHeight: CGFloat = 900
+        static let graphPreviewHeight: CGFloat = 200
+        static let graphFoldChip: CGFloat = 24
+        static let graphPreviewMinScale: CGFloat = 0.01
+        static let graphZoomStep: CGFloat = 1.25
+        static let graphWheelZoomSensitivity: Double = 0.0025
     }
 
     /// The system's sidebar column on iPad (iOS 26, the glass styles), measured from its pixels: the split fills the

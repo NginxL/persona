@@ -139,33 +139,50 @@ func (h *Manager) connectorThreadRoutes(api *http.ServeMux) {
 	})
 	// One media's bytes: ?ref=<a page's avatar or media ref>. Kept on disk, and by the app for good.
 	api.HandleFunc("GET /api/v1/connectors/{id}/media", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 		ref := r.URL.Query().Get("ref")
 		if ref == "" {
 			writeErr(w, http.StatusBadRequest, errors.New("ref is required"))
 			return
 		}
 		id := r.PathValue("id")
-		if m, ok := h.media.get(h.mediaDir(), id, ref); ok {
-			writeMedia(w, m)
-			return
-		}
-		c, th, ok := h.threadConnector(w, r)
-		if !ok {
-			return
-		}
-		m, err := h.media.fetch(r.Context(), id+"\x00"+ref, func(ctx context.Context) (connector.Media, error) { return th.Media(ctx, ref) })
-		if err != nil {
-			h.threadFailed(w, r.Context(), c, err)
-			return
+		m, cached := h.media.get(h.mediaDir(), id, ref)
+		if !cached {
+			c, th, ok := h.threadConnector(w, r)
+			if !ok {
+				return
+			}
+			var err error
+			m, err = h.media.fetch(r.Context(), id+"\x00"+ref, func(ctx context.Context) (connector.Media, error) { return th.Media(ctx, ref) })
+			if err != nil {
+				h.threadFailed(w, r.Context(), c, err)
+				return
+			}
 		}
 		if len(m.Data) == 0 || len(m.Data) > connector.MediaMost {
 			writeErr(w, http.StatusBadGateway, fmt.Errorf("media of %d bytes", len(m.Data)))
 			return
 		}
-		if err := h.media.put(h.mediaDir(), id, ref, m); err != nil {
-			h.logf("connector %s: keep media: %v", id, err)
+		// Connector MIME claims and old cache headers are untrusted. Only passive media whose type can be
+		// recognized from the bytes may be served on the hub origin; this is not a full codec validation.
+		m.Mime = http.DetectContentType(m.Data)
+		switch m.Mime {
+		case "image/jpeg", "image/png", "image/gif", "image/webp",
+			"audio/aiff", "audio/mpeg", "audio/midi", "audio/wave",
+			"video/avi", "video/mp4", "video/webm", "application/ogg":
+		default:
+			writeErr(w, http.StatusUnsupportedMediaType, errors.New("unsupported media type"))
+			return
 		}
-		writeMedia(w, m)
+		if !cached {
+			if err := h.media.put(h.mediaDir(), id, ref, m); err != nil {
+				h.logf("connector %s: keep media: %v", id, err)
+			}
+		}
+		w.Header().Set("Content-Type", m.Mime)
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+		_, _ = w.Write(m.Data)
 	})
 	// A reply in the thread through the action its page named (ThreadChat.Reply). Sent from the user's own app it runs
 	// as they sent it; anything else (the pairing token: a script, maybe the AI's) goes through the gate like the
@@ -228,16 +245,6 @@ func (h *Manager) connectorThreadRoutes(api *http.ServeMux) {
 		}
 		writeJSON(w, map[string]any{"ok": true, "result": out})
 	})
-}
-
-func writeMedia(w http.ResponseWriter, m connector.Media) {
-	mime := m.Mime
-	if mime == "" {
-		mime = http.DetectContentType(m.Data)
-	}
-	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	_, _ = w.Write(m.Data)
 }
 
 // mediaDir is where connectors' media are kept: <hub dir>/cache/connector-media/<connector>/<hash of the ref>.

@@ -50,6 +50,8 @@ func releaseDir(t *testing.T, version string, build func(name string) int64) str
 	write("personad-"+other+".gz", foreign("personad-"+other+".gz"))
 	write("persona-node-"+other+".gz", foreign("persona-node-"+other+".gz"))
 	write("persona-link-windows-amd64.exe.gz", foreign("persona-link-windows-amd64.exe.gz"))
+	write("persona-node-windows-amd64.exe.gz", foreign("persona-node-windows-amd64.exe.gz"))
+	write("personad-windows-amd64.exe.gz", foreign("personad-windows-amd64.exe.gz"))
 	return dir
 }
 
@@ -62,8 +64,9 @@ func TestVerifyReleaseAcceptsItsOwnBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Files) != 2 || len(m.Programs["persona-hub"]) != 1 || len(m.Nodes["persona-node"]) != 1 ||
-		m.Links["windows-amd64"].Name != "persona-link-windows-amd64.exe.gz" {
+	if len(m.Files) != 3 || len(m.Programs["persona-hub"]) != 1 || len(m.Nodes["persona-node"]) != 2 ||
+		m.Links["windows-amd64"].Name != "persona-link-windows-amd64.exe.gz" || m.Files["windows-amd64"].Name != "personad-windows-amd64.exe.gz" ||
+		m.Nodes["persona-node"]["windows-amd64"].Name != "persona-node-windows-amd64.exe.gz" {
 		t.Fatalf("the release is not all there: %+v", m)
 	}
 	if err := VerifyRelease(context.Background(), dir, m); err != nil {
@@ -84,6 +87,8 @@ func TestVerifyReleaseRefusesAnotherRunsBinaries(t *testing.T) {
 		{"personad-" + other + ".gz", "is not build 202611110749"},
 		{"persona-node-" + other + ".gz", "is not build 202611110749"},
 		{"persona-link-windows-amd64.exe.gz", "is not build 202611110749"},
+		{"persona-node-windows-amd64.exe.gz", "is not build 202611110749"},
+		{"personad-windows-amd64.exe.gz", "is not build 202611110749"},
 	} {
 		t.Run(tc.stale, func(t *testing.T) {
 			dir := releaseDir(t, "0.2.1", func(name string) int64 {
@@ -203,7 +208,7 @@ func TestVerifyReleaseChecksHelpers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(m.Helpers["persona-iphone-bridge"]) != 2 || len(m.Nodes["persona-node"]) != 1 {
+			if len(m.Helpers["persona-iphone-bridge"]) != 2 || len(m.Nodes["persona-node"]) != 2 {
 				t.Fatalf("helpers: %+v", m.Helpers)
 			}
 			if f, ok := m.HelperFile("persona-iphone-bridge", other); !ok || f.Name != "persona-iphone-bridge-"+other+".gz" || f.BinarySHA256 == "" {

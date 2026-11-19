@@ -527,7 +527,7 @@ function BoundedPersonalAgents({ reg, hover, activeKey, go }: { reg: RegFn; hove
   const page = useSyncExternalStore(personalSessions.subscribe, personalSessions.getSnapshot, personalSessions.getSnapshot);
   const going = useGoingIds();
   if (!page.loaded || !page.rows.some((s) => !going.has(s.id))) return null;
-  return <Section title={t("sidebar.personal_agents")} folded={folded} onToggle={toggle} right={<GroupCount n={page.total} label={t("sidebar.agent_count", { count: page.total })} />}>
+  return <Section top title={t("sidebar.personal_agents")} folded={folded} onToggle={toggle} right={<GroupCount n={page.total} label={t("sidebar.agent_count", { count: page.total })} />}>
     {!folded && <PagedSessionList root={personalSessions} path="/agents/sessions" identity={personalIdentity} compare={personalOrder} event="agents" personal
       renderRow={(s) => (going.has(s.id) ? null : <AgentRow s={s} reg={reg} hover={hover} active={activeKey === `a:${s.id}`} go={go} pinned={prefs.pins.includes(s.id)} onMenu={onMenu} />)} />}
     {rowMenu && <Menu anchor={rowMenu.el} onClose={() => setRowMenu(null)} align="right" width={200} items={agentRowItems(rowMenu.s, prefs)} />}
@@ -567,6 +567,7 @@ const LegacyPersonalAgents = memo(function LegacyPersonalAgents({ reg, hover, ac
   const sectionOf = (key: string) => (key.startsWith("sec:") ? key.slice(4) : "");
   return (
     <Section
+      top
       title={t("sidebar.personal_agents")}
       folded={folded}
       onToggle={toggle}

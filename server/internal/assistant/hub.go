@@ -24,6 +24,8 @@ type Hub interface {
 	Hello(ctx context.Context) (Hello, error)
 	// DeviceCall is device.call {device, method, params}: a call to one of the user's machines (assistantwire.Device*).
 	DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error)
+	// CredentialRevoked checks the original sender before a kept message is delivered.
+	CredentialRevoked(ctx context.Context, id string) (bool, error)
 	// AppCall is app.call {app_id, method, params}: a call to an app the hub runs (App*).
 	AppCall(ctx context.Context, p AppCall) (json.RawMessage, error)
 	// NotifyRequest is notify.request {notification} → {ok, held?, reason?}: a push for the user. Held/reason say ln

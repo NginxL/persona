@@ -19,3 +19,7 @@ App 已依赖 `:feature:knowledge`，Persona 入口跳转 `KnowledgeRoute`，`Ro
 构建时需显式给 Gradle 指定已安装的 JDK 21 路径：`-Porg.gradle.java.installations.paths=<JDK 路径>`。当前沙箱不允许 Kotlin daemon 写默认目录，使用 `-Pkotlin.compiler.execution.strategy=in-process` 编译即可，无需修改公共构建配置。单测清理 ViewModel 后需先排空测试调度器，再恢复 `Dispatchers.Main`，避免残留的取消任务访问 Android 主线程。
 
 页面使用 MaterialTheme 和现有设计系统的颜色、按钮与间距。App 已接入，深浅色、链接浮层与完整发送链路仍待真机验收。性能未实测。
+
+## Topics and the knowledge map (#7678)
+
+Topics is a seventh kind (`KnowledgeKind.Topics`): a topic's page lists its knowledge points by subtopic, a point opens in a sheet (`KnowledgePoints.kt`), and the toolbar's map button opens `KnowledgeMapScreen`, an outline of topics or projects like the iPhone's. The tree and its rules are pure code in `KnowledgeMap.kt` (`KnowledgeMapTest`, `KnowledgeMapFlowTest`); `KnowledgeMapShotsTest` writes screenshots of the map and a topic page in all three styles, light and dark, to `build/i18n-shots/`. Behavior and the differences from the web: `docs/android/android.md`, "Inbox AI drafting and handoff; knowledge base categories, entries and tagging".

@@ -1,3 +1,5 @@
+import persona.buildlogic.FileContentProperty
+
 plugins {
     id("persona.jvm.library")
     id("org.jetbrains.kotlin.plugin.serialization")
@@ -47,12 +49,19 @@ dependencies {
 }
 
 // The test compilation is a friend of the separately compiled observer, not a public API relaxation in production.
+// friendPaths, not an -Xfriend-paths= argument: the argument's absolute path would be part of the cache key (#10712).
 tasks.named("compileShadowTestKotlin", org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile::class.java).configure {
-    compilerOptions.freeCompilerArgs.add(provider {
-        "-Xfriend-paths=" + layout.buildDirectory.dir("classes/kotlin/shadow").get().asFile.absolutePath
-    })
+    friendPaths.from(shadowSource.output.classesDirs)
 }
 
+// The host build of the Rust core that both shadow suites load (:core:rustcore's buildHostCore, for this OS).
+val hostCore = configurations.create("hostCore") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+dependencies { add(hostCore.name, project(path = ":core:rustcore", configuration = "hostCoreElements")) }
+
+// The repository root and the fixture domains the shadow sources read come from persona.jvm.library, as for test.
 val shadowTest = tasks.register<Test>("shadowTest") {
     description = "Runs the DEBUG-only answer observer and both Kotlin/JNI fixture replays on the host JVM."
     testClassesDirs = shadowTestSource.output.classesDirs
@@ -60,19 +69,7 @@ val shadowTest = tasks.register<Test>("shadowTest") {
     useJUnit()
     maxParallelForks = 1
     forkEvery = 1
-    val repositoryRoot = providers.gradleProperty("personaRepoRoot")        .getOrElse(rootProject.layout.projectDirectory.dir("..").asFile.absolutePath)
-    systemProperty("persona.repo.root", repositoryRoot)
-    val hostLibrary = rootProject.layout.projectDirectory.dir("../native/app-core").file(
-        "target/debug/" + when {
-            org.gradle.internal.os.OperatingSystem.current().isMacOsX -> "libpersona_core.dylib"
-            org.gradle.internal.os.OperatingSystem.current().isWindows -> "persona_core.dll"
-            else -> "libpersona_core.so"
-        },
-    )
-    systemProperty("persona.core.library", hostLibrary.asFile.absolutePath)
-    dependsOn(":core:rustcore:buildHostCore")
-    inputs.files(fileTree(File(repositoryRoot, "spec/fixtures/answer")) { include("*.json") })
-        .withPropertyName("answerFixtures").withPathSensitivity(PathSensitivity.RELATIVE)
+    jvmArgumentProviders.add(FileContentProperty("persona.core.library", hostCore))
     testLogging {
         events("failed", "skipped", "passed")
         showStandardStreams = true
@@ -86,11 +83,7 @@ val shadowCounterTest = tasks.register<Test>("shadowCounterTest") {
     useJUnit()
     maxParallelForks = 1
     forkEvery = 1
-    dependsOn(":core:rustcore:buildHostCore")
-    systemProperty("persona.repo.root", providers.gradleProperty("personaRepoRoot")
-        .getOrElse(rootProject.layout.projectDirectory.dir("..").asFile.absolutePath))
-    systemProperty("persona.core.library", rootProject.layout.projectDirectory.dir("../native/app-core")
-        .file("target/debug/libpersona_core.so").asFile.absolutePath)
+    jvmArgumentProviders.add(FileContentProperty("persona.core.library", hostCore))
     filter { includeTestsMatching("persona.core.domain.answer.ShadowAnswerGlobalCounterTest") }
     testLogging { events("failed", "skipped", "passed") }
 }

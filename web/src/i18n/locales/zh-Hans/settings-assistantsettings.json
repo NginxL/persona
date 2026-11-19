@@ -149,5 +149,7 @@
   "idle_close_unit": "小时",
   "main_supervises": "主对话自己督办它派出的任务",
   "main_supervises_hint": "默认关闭：Persona 派出的任务由内置的后台督办对话跟进和验收，主对话随时能回你；开启后改回由主对话自己跟进和验收",
-  "background_supervisor_model": "后台督办的模型"
+  "background_supervisor_model": "后台督办的模型",
+  "claude_interactive": "交互式 Claude Code",
+  "claude_interactive_footer": "默认关闭。打开后，Claude 对话在它所在的电脑上用真正的交互式 Claude Code 运行，代替打印模式（claude -p），说明、工具和设置都不变。有人反映用 Claude 订阅时打印模式消耗 5 小时额度更快；Anthropic 没有公开说明。风险：这样做是由 Persona 操作一个为人设计的程序，Anthropic 可能把它当成另一种用法，账号有被限制的可能。回复会一段一段出现，而不是逐字出现。需要那台电脑装有 tmux；交互式启动失败时，对话改用打印模式运行，上面的「运行在」会写明原因。"
 }

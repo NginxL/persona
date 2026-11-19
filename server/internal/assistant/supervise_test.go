@@ -233,7 +233,7 @@ func TestSupervisedTaskRound(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "按 A 做完了，PR https://github.com/o/r/pull/901 已合并", 0)
 	waitFor(t, "the review message", func() bool { return len(f.notices()) == 2 })
-	if n := f.notices()[1]; !strings.Contains(n, "hub 判断做完了，等你验收（PR 已合并）") || !strings.Contains(n, "pull/901") {
+	if n := f.notices()[1]; !strings.Contains(n, "待逐项复核，不代表完成（PR 已合并）") || !strings.Contains(n, "pull/901") {
 		t.Fatalf("message:\n%s", n)
 	}
 	if now := todoNow(s, todo.ID); now.DoneAt != nil || now.Supervision.State != reviewPending {

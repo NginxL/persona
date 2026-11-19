@@ -20,7 +20,7 @@ usage() {
     'No arguments runs the original complete verification. lint-build-test-0 owns checker tests,' \
     'translation/token checks, all-module lint, the debug APK and feature test shard 0; test-1' \
     'runs core, feature shard 1, platform and app tests. Together the two lanes run every' \
-    'included module once using its all-variant test lifecycle task.' \
+    'included module once using its all-variant test lifecycle task (release unit tests included).' \
     '--profile writes Gradle timing reports to android/build/reports/profile/.' \
     'No instrumentation/device tests or release signing.' \
     'ANDROID_CI_TIMEOUT_SECONDS: timeout per check (default 3600; kill grace 30s).' \
@@ -161,6 +161,8 @@ BUILD_COMMIT=${PERSONA_BUILD_COMMIT:-${GITHUB_SHA:-unknown}}
 
 cd "$ROOT/android"
 # Unqualified lint still covers every module; full preserves the original selectors.
+# persona.releaseUnitTests adds the release unit tests (app, core:data) that a local test leaves out, so each
+# module's test still runs every variant here.
 # --continue collects independent failures, never turns them into success.
 # Do not stop shared daemons, update baselines, exclude tests or depend on local.properties.
 if [[ ${#TASKS[@]} -gt 0 ]]; then
@@ -172,6 +174,7 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     -PpersonaGoogleOAuthScheme=persona.oauth.unset \
     -PpersonaRepoRoot="$ROOT" \
     -PpersonaBuildCommit="$BUILD_COMMIT" \
+    -Ppersona.releaseUnitTests=true \
     ${PROFILE[@]+"${PROFILE[@]}"} "${TASKS[@]}"
 else
   printf 'Android CI: no modules in lane %s; no Gradle default tasks invoked\n' "$LANE"

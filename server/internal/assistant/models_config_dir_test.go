@@ -116,6 +116,11 @@ func TestNewConversationStartsInTheMainChatsProfile(t *testing.T) {
 		{"guest", StartParams{Text: "hello", Untitled: true, GuestTools: []string{}}, false, nil},
 		{"codex", StartParams{Text: "hello", Untitled: true, Launcher: "codex"}, false, nil},
 		{"older node", StartParams{Text: "hello", Untitled: true}, true, nil},
+		// A purpose that inherits from Agents, not the main chat, starts there too: an extension's /agent (#10859).
+		{"lark.agent", StartParams{Text: "hello", Untitled: true, Purpose: "lark.agent"}, false, assistantConfigDirLegacy},
+		{"lark.agent guest", StartParams{Text: "hello", Untitled: true, Purpose: "lark.agent", GuestTools: []string{}}, false, nil},
+		// The Inbox AI twin acts on what strangers sent: it stays in Persona's own profile, away from the user's setup.
+		{"inbox.agent", StartParams{Text: "hello", Untitled: true, Purpose: purposeAgent, Origin: OriginInbox}, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeHub().withMachine()

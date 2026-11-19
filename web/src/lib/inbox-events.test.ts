@@ -8,7 +8,7 @@ vi.mock("./store", () => ({ onHubEvent: () => () => {} }));
 vi.mock("../ui/atoms", () => ({ toast: vi.fn() }));
 
 import { toast } from "../ui/atoms";
-import { badgeCount, getInbox, reloadInbox, resetInboxForTests, sections, suggestionAct, TIERS, type InboxItem } from "./inbox";
+import { badgeCount, getInbox, handOffToMain, reloadInbox, replaceItem, resetInboxForTests, sections, suggestionAct, uncertainReplyKey, TIERS, type InboxItem } from "./inbox";
 import {
   actOnSuggestion, canExpand, chainRows, chainTap, chainTime, firstLine, handlingWord, hasEvent, itemAtUid, preparing, statusOf, suggestionButtons, suggestionTitle,
 } from "./inbox-events";
@@ -174,6 +174,245 @@ describe("收件箱事件：确认 / 驳回 / 说一句话", () => {
     expect(await suggestionAct(agentSuggestion, "reject")).toBe(false);
     expect(getInbox().items.find((x) => x.id === agentSuggestion.id)?.suggestion?.version).toBe(1);
     expect(vi.mocked(toast).mock.calls.at(-1)?.[1]).toBe("error");
+  });
+  const receipt = (status: "failed" | "sending" | "unknown" | "sent", extra = {}) => ({ version: 2, status, retryable: status === "failed", text: "实际确认的修改稿", at: "2026-11-18T13:00:00Z", conversation: reply.suggestion!.conversation, ...extra });
+  it("preserves delivery metadata and authoritative failure readback", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed", { retry_after: 3 })] };
+    fetcher.mockResolvedValueOnce(res(502, { code: "rate_limited", error: "wait", delivered: "none", retryable: true, retry_after: 3, item }));
+    const r = await actOnSuggestion("/inbox/x", 2, "confirm");
+    expect(r).toMatchObject({ ok: false, stale: false, delivered: "none", retryable: true, retry_after: 3, item: JSON.parse(JSON.stringify(item)) });
+  });
+  it("reads a retained failed attempt and retries only its frozen version, without an edited replacement", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    fetcher.mockResolvedValueOnce(res(502, { code: "temporarily_unavailable", error: "offline", delivered: "none", retryable: true, item }));
+    expect(await suggestionAct(reply, "confirm", "实际确认的修改稿")).toBe(false);
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion_attempts).toEqual(item.suggestion_attempts);
+    expect(await suggestionAct(item, "confirm", "不同的新修改")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockResolvedValueOnce(res(200, { ...reply, suggestion: undefined, suggestion_attempts: [receipt("sent")] }));
+    expect(await suggestionAct(item, "confirm")).toBe(true);
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toMatchObject({ version: 2, action: "confirm" });
+    expect(JSON.parse(fetcher.mock.calls[2][1].body).text).toBeUndefined();
+  });
+  it.each(["unknown", "sending"] as const)("never retries a durable %s attempt", async status => {
+    const item = { ...reply, suggestion_attempts: [receipt(status)] };
+    replaceItem(item);
+    expect(await suggestionAct(item, "confirm")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("uses GET after a lost response, and its durable receipt supersedes the local uncertainty", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    fetcher.mockRejectedValueOnce(new TypeError("lost response")).mockResolvedValueOnce(res(200, item));
+    expect(await suggestionAct(reply, "confirm", "实际确认的修改稿")).toBe(false);
+    expect(fetcher.mock.calls[2][0]).toBe("/api/v1/inbox/lark:oc_demo1:100");
+    expect(getInbox().uncertainReplies[uncertainReplyKey(reply, 2)]).toBeUndefined();
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion_attempts?.[0].status).toBe("failed");
+  });
+  it("keeps a conservative no-resend hint when both POST and readback are lost, without blocking a different version", async () => {
+    fetcher.mockRejectedValueOnce(new TypeError("lost response")).mockRejectedValueOnce(new TypeError("GET offline"));
+    expect(await suggestionAct(reply, "confirm", "实际确认的修改稿")).toBe(false);
+    expect(getInbox().uncertainReplies[uncertainReplyKey(reply, 2)]).toMatchObject({ status: "unknown", text: "实际确认的修改稿", retryable: false });
+    expect(await suggestionAct(reply, "confirm")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    const fresh = { ...reply, suggestion: { ...reply.suggestion!, version: 3, text: "合法新回复" } };
+    replaceItem(fresh);
+    fetcher.mockResolvedValueOnce(res(200, { ...fresh, suggestion: undefined }));
+    expect(await suggestionAct(fresh, "confirm")).toBe(true);
+    expect(JSON.parse(fetcher.mock.calls[3][1].body).version).toBe(3);
+  });
+  it("does not let an older failed receipt authorize another send after a Retry's POST and GET are lost", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    replaceItem(item);
+    fetcher.mockRejectedValueOnce(new TypeError("retry response lost")).mockRejectedValueOnce(new TypeError("GET offline"));
+    expect(await suggestionAct(item, "confirm")).toBe(false);
+    expect(getInbox().uncertainReplies[uncertainReplyKey(item, 2)]?.status).toBe("unknown");
+    expect(await suggestionAct(item, "confirm")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it("accepts a later fresh list's durable sent receipt after a lost retry", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    replaceItem(item);
+    fetcher.mockRejectedValueOnce(new TypeError("retry response lost")).mockRejectedValueOnce(new TypeError("GET offline"));
+    await suggestionAct(item, "confirm");
+    fetcher.mockResolvedValueOnce(res(200, { items: [{ ...reply, suggestion: undefined, suggestion_attempts: [receipt("sent")] }] }));
+    await reloadInbox();
+    expect(getInbox().uncertainReplies[uncertainReplyKey(item, 2)]).toBeUndefined();
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion_attempts?.[0].status).toBe("sent");
+  });
+  it("does not let a list begun before the lost retry clear its new uncertainty", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    replaceItem(item);
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }))
+      .mockRejectedValueOnce(new TypeError("retry response lost")).mockRejectedValueOnce(new TypeError("GET offline"));
+    const listing = reloadInbox();
+    await suggestionAct(item, "confirm");
+    respond(res(200, { items: [item] }));
+    await listing;
+    expect(getInbox().uncertainReplies[uncertainReplyKey(item, 2)]?.status).toBe("unknown");
+    expect(await suggestionAct(item, "confirm")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("does not treat a held delta row as a newly returned receipt", async () => {
+    const item = { ...reply, suggestion_attempts: [receipt("failed")] };
+    fetcher.mockResolvedValueOnce(res(200, { items: [item], cursor: "c1" }));
+    await reloadInbox();
+    fetcher.mockRejectedValueOnce(new TypeError("retry response lost")).mockRejectedValueOnce(new TypeError("GET offline"));
+    await suggestionAct(item, "confirm");
+    fetcher.mockResolvedValueOnce(res(200, { items: [], cursor: "c2", delta: true }));
+    await reloadInbox();
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion_attempts?.[0].status).toBe("failed");
+    expect(getInbox().uncertainReplies[uncertainReplyKey(item, 2)]?.status).toBe("unknown");
+    expect(await suggestionAct(item, "confirm")).toBe(false);
+  });
+  it("merges a late outcome without overwriting a newer pushed suggestion", async () => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const pending = suggestionAct(reply, "confirm", "实际确认的修改稿");
+    const fresh = { ...reply, suggestion: { ...reply.suggestion!, version: 3, text: "新建议" } };
+    replaceItem(fresh);
+    respond(res(502, { code: "offline", error: "offline", item: { ...reply, suggestion_attempts: [receipt("failed")] } }));
+    await pending;
+    const now = getInbox().items.find(x => x.id === reply.id)!;
+    expect(now.suggestion?.version).toBe(3);
+    expect(now.suggestion_attempts?.[0].text).toBe("实际确认的修改稿");
+    expect(await suggestionAct(reply, "confirm")).toBe(false);
+  });
+  it.each(["source", "filed"] as const)("keeps an arrived same-version %s push when an old failed response finishes", async change => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const pending = suggestionAct(reply, "confirm", "实际确认的修改稿");
+    const newer: InboxItem = { ...reply, suggestion: undefined, ...(change === "source"
+      ? { version: "new-source", updated_at: "2026-11-18T14:00:00Z", count: 2 }
+      : { done_at: "2026-11-18T14:00:00Z", done_by: "user" }) };
+    replaceItem(newer);
+    respond(res(502, { code: "offline", error: "offline", item: { ...reply, suggestion_attempts: [receipt("failed")] } }));
+    await pending;
+    const now = getInbox().items.find(x => x.id === reply.id)!;
+    expect(now.suggestion).toBeUndefined();
+    expect(now.version).toBe(newer.version);
+    expect(now.done_at).toBe(newer.done_at);
+    expect(now.suggestion_attempts?.[0].status).toBe("failed");
+    expect(await suggestionAct(now, "confirm")).toBe(false);
+  });
+  it.each(["source", "filed"] as const)("keeps an arrived same-version %s push while retaining a late successful receipt", async change => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const pending = suggestionAct(reply, "confirm", "实际确认的修改稿");
+    const newer: InboxItem = { ...reply, suggestion: undefined, ...(change === "source"
+      ? { version: "new-source", updated_at: "2026-11-18T14:00:00Z", count: 2 }
+      : { done_at: "2026-11-18T14:00:00Z", done_by: "user" }) };
+    replaceItem(newer);
+    respond(res(200, { ...reply, suggestion: undefined, done_at: "2026-11-18T13:00:00Z", done_by: "replied", suggestion_attempts: [receipt("sent")] }));
+    await pending;
+    const now = getInbox().items.find(x => x.id === reply.id)!;
+    expect(now.version).toBe(newer.version);
+    expect(now.done_at).toBe(newer.done_at);
+    expect(now.done_by).toBe(newer.done_by);
+    expect(now.suggestion_attempts?.[0].status).toBe("sent");
+  });
+  it("coalesces quick clicks before the first reply response", async () => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const one = suggestionAct(reply, "confirm");
+    expect(await suggestionAct(reply, "confirm")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    respond(res(200, { ...reply, suggestion: undefined }));
+    await one;
+  });
+  it("coalesces concurrent Wrap up entries, uses authoritative readback, and releases the local request on completion", async () => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const item = { ...reply, suggestion: undefined };
+    const one = handOffToMain(item, "收尾", "first", true);
+    const two = handOffToMain(item, "收尾", "second", true);
+    expect(one).toBe(two);
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ text: "收尾", client_id: "first", reuse_pending: true });
+    respond(res(200, { item: reply, session: { machine_id: "server", session_id: "main" }, reused: true }));
+    await one;
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion?.version).toBe(2);
+    fetcher.mockResolvedValueOnce(res(200, { session: { machine_id: "server", session_id: "main" } }));
+    await handOffToMain(item, "收尾", "third", true);
+    expect(fetcher).toHaveBeenCalledTimes(3); // the server, rather than a permanent client cache, owns the pending gap
+  });
+  it("captures a handoff's current store item rather than a stale component copy", async () => {
+    const current = { ...reply, suggestion: undefined, title: "current before request" };
+    replaceItem(current);
+    const fresh = { ...current, suggestion: { ...reply.suggestion!, version: 3, text: "handoff result" } };
+    fetcher.mockResolvedValueOnce(res(200, { item: fresh, session: { machine_id: "server", session_id: "main" } }));
+    await handOffToMain({ ...reply }, "收尾", "one", true);
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion?.version).toBe(3);
+  });
+  it("preserves a source push that arrives during handoff instead of reopening the old suggestion", async () => {
+    let respond!: (r: unknown) => void;
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+    const pending = handOffToMain(reply, "收尾", "one", true);
+    replaceItem({ ...reply, suggestion: undefined, version: "new-source", count: 2 });
+    respond(res(200, { item: reply, session: { machine_id: "server", session_id: "main" } }));
+    await pending;
+    const now = getInbox().items.find(x => x.id === reply.id)!;
+    expect(now.suggestion).toBeUndefined();
+    expect(now.version).toBe("new-source");
+  });
+  it("captures a fresh GET snapshot after a POST-era push, then accepts its uncontested readback", async () => {
+    let post!: (r: unknown) => void;
+    let read!: (r: unknown) => void;
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>(resolve => { markReadStarted = resolve; });
+    fetcher.mockImplementationOnce(() => new Promise(resolve => { post = resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { read = resolve; markReadStarted(); }));
+    const pending = suggestionAct(reply, "confirm");
+    replaceItem({ ...reply, suggestion: undefined, version: "new-source" });
+    post(res(502, { code: "offline", error: "response lost" }));
+    await readStarted;
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    const fresh = { ...reply, version: "new-source", suggestion: { ...reply.suggestion!, version: 3, text: "authoritative current" }, suggestion_attempts: [receipt("unknown")] };
+    read(res(200, fresh));
+    await pending;
+    expect(getInbox().items.find(x => x.id === reply.id)?.suggestion?.version).toBe(3);
+  });
+  it("keeps a same-version filing that arrives during fallback GET, and merges only its receipt", async () => {
+    let read!: (r: unknown) => void;
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>(resolve => { markReadStarted = resolve; });
+    fetcher.mockResolvedValueOnce(res(502, { code: "offline", error: "response lost" }))
+      .mockImplementationOnce(() => new Promise(resolve => { read = resolve; markReadStarted(); }));
+    const pending = suggestionAct(reply, "confirm");
+    await readStarted;
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    replaceItem({ ...reply, suggestion: undefined, done_at: "2026-11-18T14:00:00Z", done_by: "user" });
+    read(res(200, { ...reply, suggestion_attempts: [receipt("unknown")] }));
+    await pending;
+    const now = getInbox().items.find(x => x.id === reply.id)!;
+    expect(now.suggestion).toBeUndefined();
+    expect(now.done_by).toBe("user");
+    expect(now.suggestion_attempts?.[0].status).toBe("unknown");
+  });
+  it("keeps explicit typed handoffs independent, including equal words with distinct identities", async () => {
+    fetcher.mockResolvedValue(res(200, { session: { machine_id: "server", session_id: "main" } }));
+    await Promise.all([handOffToMain(reply, "新要求", "one"), handOffToMain(reply, "新要求", "two"), handOffToMain(reply, "另一要求", "three")]);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    for (const [, init] of fetcher.mock.calls.slice(1)) expect(JSON.parse(init.body).reuse_pending).toBeUndefined();
+  });
+  it("does not reconcile an error item from a different manager, and routes readback to the original manager", async () => {
+    const target = { ...reply, manager: "other" };
+    fetcher.mockResolvedValueOnce(res(200, { items: [target, reply] }));
+    await reloadInbox();
+    fetcher.mockResolvedValueOnce(res(502, { code: "offline", error: "offline", item: { ...reply, manager: "foreign", suggestion_attempts: [receipt("failed")] } }))
+      .mockResolvedValueOnce(res(200, { ...target, suggestion_attempts: [receipt("unknown")] }));
+    expect(await suggestionAct(target, "confirm")).toBe(false);
+    expect(new Headers(fetcher.mock.calls[3][1].headers).get("X-Persona-Manager")).toBe("other");
+    expect(getInbox().items.find(x => x.manager === "other")?.suggestion_attempts?.[0].status).toBe("unknown");
+    expect(getInbox().items.find(x => !x.manager)?.suggestion_attempts).toBeUndefined();
+  });
+  it("keeps a handback reply's instruction behavior outside actual reply delivery tracking", async () => {
+    const item = { ...reply, suggestion: { ...reply.suggestion!, handback: true } };
+    replaceItem(item);
+    fetcher.mockResolvedValueOnce(res(502, { code: "offline", error: "offline" }));
+    expect(await suggestionAct(item, "confirm", "需要判断的修改稿")).toBe(false);
+    expect(getInbox().uncertainReplies).toEqual({});
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetcher.mock.calls[1][1].body).text).toBe("需要判断的修改稿");
   });
   it("instruct carries the words; no suggestion: nothing is sent", async () => {
     fetcher.mockResolvedValueOnce(res(200, reply));

@@ -41,6 +41,15 @@ enum class AgentMarkKind(@DrawableRes internal val drawable: Int, internal val t
     Claude(R.drawable.brand_claude, tinted = false, fit = 1f),
     Codex(R.drawable.brand_openai, tinted = true, fit = 1f),
     Trae(R.drawable.brand_trae, tinted = true, fit = 0.92f),
+    OpenCode(R.drawable.brand_opencode, tinted = true, fit = 0.88f),
+    Pi(R.drawable.brand_pi, tinted = true, fit = 0.88f),
+    Gemini(R.drawable.brand_gemini, tinted = true, fit = 1f),
+    Cursor(R.drawable.brand_cursor, tinted = true, fit = 0.92f),
+    Grok(R.drawable.brand_grok, tinted = true, fit = 1f),
+    Antigravity(R.drawable.brand_agy, tinted = true, fit = 1f),
+    Dsh(R.drawable.brand_dsh, tinted = true, fit = 1f),
+    Kimi(R.drawable.brand_kimi, tinted = true, fit = 0.88f),
+    Copilot(R.drawable.brand_copilot, tinted = true, fit = 1f),
 }
 
 /** The client an agent runs in: its desktop app, or its command line (the mark carries </>). */

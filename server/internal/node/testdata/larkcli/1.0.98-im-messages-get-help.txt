@@ -1,0 +1,24 @@
+delete, forward, merge_forward, patch, read_status, read_users, urgent_app, urgent_phone, urgent_sms
+
+Usage:
+  lark-cli im messages [flags]
+  lark-cli im messages [command]
+
+Available Commands:
+  delete        Recall message. Identity: supports `user` and `bot`; for `bot` calls, the bot must be in the chat to revoke group messages; to revoke another user's group message, the bot must be the owner, an admin, or the creator; for user P2P recalls, the target user must be within the bot's availability
+  forward       Forward a message. Identity: supports `user` and `bot`
+  merge_forward Merge and forward messages. Identity: `bot` only (`tenant_access_token`)
+  patch         Update sent message card. Update an interactive message card sent by the app. Identity: supports `user` and `bot`; the message must have been sent within the last 14 days, and `content` must be a JSON-serialized string no larger than 30 KB
+  read_status   批量查询当前用户对消息的已读状态。Identity: `user` only (`user_access_token`); accepts up to 50 message IDs and returns `items[].is_read` plus `invalid_message_ids` for messages that cannot be determined.Must-read
+  read_users    Query the read status of a message as the sender. Identity: supports `user` and `bot`. With `user_access_token`, the user must still be in the chat and can query read users only for messages they sent within the last 7 days. With `tenant_access_token`, the bot must be in the chat and can only query its own messages within the last 7 days.Must-read
+  urgent_app    Send buzz messages in apps. Identity: `bot` only (`tenant_access_token`); the bot must be the message sender and must be in the conversation that contains the message
+  urgent_phone  Send buzz messages via phone call. Identity: `bot` only (`tenant_access_token`); the bot must be the message sender and must be in the conversation that contains the message
+  urgent_sms    Send buzz messages via SMS. Identity: `bot` only (`tenant_access_token`); the bot must be the message sender and must be in the conversation that contains the message
+
+Flags:
+  -h, --help   help for messages
+
+Global Flags:
+      --profile string   use a specific profile
+
+Use "lark-cli im messages [command] --help" for more information about a command.

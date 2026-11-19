@@ -77,6 +77,15 @@ func Main(ctx context.Context, build update.Build, args []string, out io.Writer)
 	if *path == "" || fs.NArg() != 0 {
 		return errors.New("--plan is required; positional arguments are not accepted")
 	}
+	if action == "inventory" {
+		supplied := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { supplied[f.Name] = true })
+		for _, name := range []string{"main", "machine", "machine-uid"} {
+			if !supplied[name] {
+				return errors.New("inventory requires explicit --main, --machine and --machine-uid, including deliberately empty values")
+			}
+		}
+	}
 	p, e := readActionPlan(action, *path, os.Stdin)
 	if e != nil {
 		return e

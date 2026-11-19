@@ -85,6 +85,7 @@ Record requested/agreed work or reminders immediately, without confirmation; exe
                 "type": "object",
                 "properties": {
                   "kind": {
+                    "type": "string",
                     "enum": [
                       "default",
                       "branch",
@@ -104,8 +105,10 @@ Record requested/agreed work or reminders immediately, without confirmation; exe
                 ],
                 "oneOf": [
                   {
+                    "type": "object",
                     "properties": {
                       "kind": {
+                        "type": "string",
                         "const": "default"
                       }
                     }
@@ -127,6 +130,7 @@ Record requested/agreed work or reminders immediately, without confirmation; exe
                       "minLength": 1
                     },
                     "kind": {
+                      "type": "string",
                       "enum": [
                         "issue",
                         "pull_request"

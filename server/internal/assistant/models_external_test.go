@@ -1175,7 +1175,7 @@ func TestExternalFailureDoesNotTriggerHealthChecks(t *testing.T) {
 	if _, asked := s.probeLauncherHealth(t.Context(), "server", l.Name); asked {
 		t.Fatal("external source was automatically probed")
 	}
-	list, err := s.healthLaunchers(t.Context(), "server")
+	list, _, err := s.healthLaunchers(t.Context(), "server")
 	if err != nil || slices.Contains(list, l.Name) || len(f.checked) != 0 {
 		t.Fatalf("external source entered automatic health polling: %v %v %v", list, err, f.checked)
 	}

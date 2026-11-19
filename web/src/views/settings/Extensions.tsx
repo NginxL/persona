@@ -23,6 +23,7 @@ import {
 } from "../../lib/extensions";
 import { loadLaunchers } from "../../lib/launcher-list";
 import { hubHasExt } from "../../lib/extension-api";
+import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { TriageRuleField } from "../../ui/TriageRuleField";
 import { ExtensionLogo } from "../../ui/ExtensionLogo";
@@ -142,7 +143,10 @@ function ExtensionPage({ id, ui, manager, onBack }: { id: string; ui: string; ma
         <span className="flex-1" />
         <IconButton icon="retry" label={t("settings-extensions.redraw")} onClick={() => setN((x) => x + 1)} />
       </div>
-      <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} />
+      {/* its extension id scopes what a graph's `key` keeps (lib/extension-owner.tsx) */}
+      <ExtensionOwnerScope owner={id}>
+        <ExtensionUI key={n} extension={id} ui={ui} title={title} manager={manager} />
+      </ExtensionOwnerScope>
     </>
   );
 }

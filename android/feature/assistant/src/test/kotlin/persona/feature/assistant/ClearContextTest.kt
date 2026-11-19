@@ -15,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.Session
+import persona.core.contracts.SessionCompaction
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppFeedback
@@ -94,6 +95,38 @@ class ClearContextTest {
         rule.onAllNodesWithText("composer-clear").assertCountEquals(0)
     }
 
+    @Test fun anotherConversationCanCompactButCannotClearOrReplaceMain() {
+        val hub = Hub()
+        show(hub, features = setOf(CompactFeature, NewMainFeature, ClearMainFeature), open = side)
+        menu()
+        rule.onNodeWithText("Compact context").performClick()
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(listOf(side.key), hub.compacted) }
+        rule.onNodeWithText("Compacting context…").assertExists()
+        menu()
+        rule.onAllNodesWithText("Clear context").assertCountEquals(0)
+        rule.onAllNodesWithText("New main chat").assertCountEquals(0)
+        rule.onNodeWithText("Compact context").assertIsNotEnabled()
+    }
+
+    @Test fun sideConversationObservesItsOwnCompactionRatherThanTheMains() {
+        val hub = Hub()
+        val running = SessionCompaction("running", startedAt = "2026-11-01T10:00:00Z")
+        hub.assistant.value = AssistantSnapshot(main.key, listOf(main, side.copy(compaction = running)))
+        show(hub, features = setOf(CompactFeature), open = side)
+        rule.onNodeWithText("Compacting context…").assertExists()
+        rule.runOnIdle {
+            hub.assistant.value = AssistantSnapshot(main.key, listOf(main,
+                side.copy(compaction = running.copy(state = "failed", error = "Example failure"))))
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("Compaction failed: Example failure").assertExists()
+        menu()
+        rule.onNodeWithText("Back to main chat").performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithText("Compaction failed: Example failure").assertCountEquals(0)
+    }
+
     @Test fun theDemoHasNone() {
         show(Hub(), demo = true)
         menu()
@@ -167,11 +200,13 @@ class ClearContextTest {
         override val assistant = MutableStateFlow(AssistantSnapshot(main.key, listOf(main, side)))
         override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
         val cleared = mutableListOf<String?>()
+        val compacted = mutableListOf<SessionKey>()
         val replaced = mutableListOf<SessionKey>()
         var failure: Exception? = null
         var afterRefresh: AssistantSnapshot? = null
         var afterRefusal: AssistantSnapshot? = null
         var composerClear: persona.feature.chat.MainChatClear? = null
+        override suspend fun compactConversation(session: SessionKey) { compacted += session }
         override suspend fun clearMainConversation(expect: String?): String {
             failure?.let { afterRefusal?.let { afterRefresh = it }; throw it }
             cleared += expect

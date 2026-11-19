@@ -249,6 +249,7 @@ struct ShareCardViewCard: View {
                 Text(title).font(Theme.Font.heading).fixedSize(horizontal: false, vertical: true)
             }
             ExtensionViewStack(view: view, model: nil, cards: false, titles: true, link: .constant(nil))
+                .environment(\.pluginUICompact, true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: Theme.Space.m)

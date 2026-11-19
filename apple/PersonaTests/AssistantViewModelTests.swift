@@ -107,6 +107,20 @@ struct AssistantViewModelTests {
         _ = await model.perform(AssistantViewModel.actions(card)[0])
         #expect(model.selected("submit") && model.attempt == nil && model.values["task"] == "已选结果")
     }
+    @Test func graphNodeActionsNavigateInsideTheAssistantCard() async {
+        let push = ExtensionAction(id: "node-details", push: ExtensionPush(page: "details"))
+        let graph = ExtensionGraphComponent(key: "work", nodes: [
+            ExtensionGraphNode(id: "node", title: "Node", action: push)
+        ])
+        let details = ExtensionView(sections: [ExtensionSection(items: [.text(ExtensionTextComponent(text: "Details"))])])
+        let card = ExtensionView(sections: [ExtensionSection(items: [.graph(graph)])], pages: ["details": details])
+        #expect(AssistantViewModel.actions(card).contains(push))
+        let model = AssistantViewModel(key: "view_example", scope: scope, view: card, store: AssistantViewsStore(),
+            deps: .init(send: { _ in Issue.record("a graph push sent a reply"); throw CancellationError() }))
+        _ = await model.perform(push)
+        #expect(model.page == "details")
+    }
+
     @Test func navigationStaysInsideTheCardAndDropsRemovedPages() async {
         let push = ExtensionAction(id: "details", push: ExtensionPush(page: "details"))
         let pop = ExtensionAction(id: "back", pop: true)
@@ -193,7 +207,7 @@ struct AssistantViewModelTests {
     @Test func unsupportedGeneratedComponentsUseFallbackRatherThanBlankCards() {
         let future = #"{"fallback":"文字说明","sections":[{"items":[{"type":"hologram","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(future) == nil)
-        // A card is drawn at `ExtensionUIContext.cardVersion` (8, #827, #9158): UI version 4's header is drawn, not left out.
+        // A card is drawn at `ExtensionUIContext.cardVersion` (10, #9727): UI version 4's header is drawn, not left out.
         let header = #"{"fallback":"文字说明","sections":[{"items":[{"type":"header","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(header) != nil)
         var card = view()

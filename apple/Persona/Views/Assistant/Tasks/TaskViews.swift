@@ -54,9 +54,9 @@ struct TaskRemoval: ViewModifier {
     @Binding var pending: TodoItem?
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(pending.map { String(localized: "Remove “\($0.title)”?") } ?? "",
+        content.accessibleConfirmationDialog(pending.map { String(localized: "Remove “\($0.title)”?") } ?? "",
                                    isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
-                                   titleVisibility: .visible, presenting: pending) { todo in
+                                   titleVisibility: .visible, hasCancel: true, presenting: pending) { todo in
             Button("Remove [Task Sheets 6135d4]", role: .destructive) { Task { await TasksStore.shared.remove(todo) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in

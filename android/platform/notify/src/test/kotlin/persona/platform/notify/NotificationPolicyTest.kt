@@ -70,6 +70,18 @@ class NotificationPolicyTest {
         assertNull(NotificationPolicy.resolution(screen, "option.unknown", null))
     }
 
+    @Test fun explicitIrreversibilityOnlyBlocksNotificationResponses() {
+        val card = interaction("question")
+        val irreversible = card.copy(reversible = false)
+        val draft = AnswerDraft(optionIndex = 0)
+        assertTrue(NotificationPolicy.actions(irreversible).isEmpty())
+        assertNull(AnswerBuilder.build(irreversible, AnswerAction.PickOption, draft,
+            AnswerContext(entry = AnswerEntry.Notification)).resolution)
+        assertNotNull(AnswerBuilder.build(irreversible, AnswerAction.PickOption, draft,
+            AnswerContext(entry = AnswerEntry.Conversation)).resolution)
+        assertEquals(NotificationPolicy.actions(card), NotificationPolicy.actions(card.copy(reversible = true)))
+    }
+
     @Test fun sayingNoComesBeforeSayingYes() {
         // The same order as the ongoing notification and Android's dialogs: the negative button on the left.
         assertEquals(listOf(R.string.notify_action_deny, R.string.notify_action_allow),

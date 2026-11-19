@@ -351,6 +351,28 @@ type NodeCall struct {
 	// Actor says who asked for a session.modes call the manager keeps a record of (#10297): display only, never
 	// trusted for access (the hub checked the request already). Nil from an older hub and on every other call.
 	Actor *Actor `json:"actor,omitempty"`
+	// Hold (session.send only, #10661): the owner's message to an Agent may be held when it cannot go now. When the
+	// node is not connected, so nothing was written, or older held messages of the same session wait, the manager keeps
+	// this call as it came (caller and submission with it) and sends it once the node is back, answering CodeHeld
+	// instead of machine_offline. Nil from an older hub and on every other call; an older manager ignores it.
+	Hold *Hold `json:"hold,omitempty"`
+	// Ordered (session.send only, #10661): the owner's message to an Agent from a person's device, which must not go
+	// ahead of messages held for that Agent. Set whether or not Hold is: a message from an app that does not draw held
+	// messages (no Hold) is refused, nothing written, while older ones of its session are held, instead of overtaking
+	// them (codeHeldAhead, delivered none). Nil from an older hub; an older manager ignores it.
+	Ordered bool `json:"ordered,omitempty"`
+}
+
+// Hold is NodeCall.Hold.
+type Hold struct {
+	// Lang is the language of the words in CodeHeld's answer (the request's).
+	Lang string `json:"lang,omitempty"`
+}
+
+// HeldAnswer is CodeHeld's data: the held message as the session's row shows it.
+type HeldAnswer struct {
+	Delivered   string                    `json:"delivered"` // "later"
+	Undelivered *proto.UndeliveredMessage `json:"undelivered,omitempty"`
 }
 
 // Actor is who asked the hub for a call (NodeCall.Actor): the kind of token ("device", "hub" for the hub's own
@@ -405,6 +427,10 @@ var Routes = []string{
 	"GET /api/v1/sessions/{mid}/{sid}/mode-changes",
 	// The answer to a start's startup question, from a full device (#10365, internal/devices start_continue.go).
 	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
+	// Retry and Delete on a message held for an Agent while its computer was away (#10661, internal/devices held.go),
+	// from a full device.
+	"POST /api/v1/sessions/{mid}/{sid}/held/{msg}/retry",
+	"DELETE /api/v1/sessions/{mid}/{sid}/held/{msg}",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",
@@ -486,4 +512,7 @@ const (
 	// CodeHandoffRefused: secret.stage, or a session.start with a secret_ticket, asked by the hub or another manager:
 	// only the manager that connects the computer makes a hand-off, after its own card (docs/extensions/secret-providers.md).
 	CodeHandoffRefused = "handoff_refused"
+	// CodeHeld: a session.send with Hold was not sent now but held to be sent when the node is back (#10661); its data
+	// is a HeldAnswer. Nothing was written to the node.
+	CodeHeld = "held"
 )

@@ -47,7 +47,7 @@ struct SavedPlacesView: View {
         .sheet(item: $creating) { p in
             NavigationStack { SavedPlaceEditor(place: p, save: page.save, delete: page.delete) }
         }
-        .confirmationDialog(Text("Delete “\(deleting?.name ?? "")”?"), isPresented: deletingShown, titleVisibility: .visible,
+        .accessibleConfirmationDialog(Text("Delete “\(deleting?.name ?? "")”?"), isPresented: deletingShown, titleVisibility: .visible,
                             presenting: deleting) { p in
             Button("Delete", role: .destructive) { Task { await page.delete(p) } }
         } message: { _ in
@@ -237,7 +237,7 @@ struct SavedPlaceEditor: View {
             suggestions.update(q, near: visible)
         }
         .onChange(of: draft.radiusMeters) { if located { recenter() } }
-        .confirmationDialog("Delete “\(opened.name)”?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete “\(opened.name)”?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task { await delete(opened) }
                 dismiss()

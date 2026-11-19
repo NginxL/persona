@@ -728,7 +728,8 @@ func (h *Hub) kindLive(mid, kind string) {
 func (h *Hub) adminLinkSwitchRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/admin/machines/{mid}/link-switch", func(w http.ResponseWriter, r *http.Request) {
 		mid := r.PathValue("mid")
-		_ = h.waitDevices(r.Context()) // the hub just started: the manager is on its way (bounded), and its machines
+		owner := h.machineOwner(mid)
+		_ = h.waitDevicesFor(r.Context(), owner) // wait for the machine's manager to report during hub startup
 		if h.localMachine(mid) == nil {
 			writeErr(w, http.StatusNotFound, i18n.Err("devices-api.unknown_machine"))
 			return
@@ -737,6 +738,6 @@ func (h *Hub) adminLinkSwitchRoutes(mux *http.ServeMux) {
 		r.URL.Path = "/api/v1/machines/" + mid + "/link-switch"
 		r.URL.RawPath = "/api/v1/machines/" + url.PathEscape(mid) + "/link-switch"
 		r.Header.Del("X-Persona-CSRF") // the admin session's own, not the manager's business
-		h.forwardAdminHTTP(w, r, h.machineOwner(mid))
+		h.forwardAdminHTTP(w, r, owner)
 	})
 }

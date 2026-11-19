@@ -429,6 +429,7 @@
     <string name="designsystem_core_knowledge_meetings">Meetings</string>
     <string name="designsystem_core_knowledge_events">Events</string>
     <string name="designsystem_core_knowledge_recordings">Recordings</string>
+    <string name="designsystem_core_knowledge_topics">Topics</string>
     <string name="designsystem_core_mail_error">Error</string>
     <string name="designsystem_core_mail_outlook">Outlook · Microsoft account</string>
     <string name="designsystem_core_mail_gmail">Gmail · Google account</string>

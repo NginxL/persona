@@ -2871,16 +2871,20 @@ struct ChatView: View {
     private var pendingCards: [PendingCards.Card] {
         let parentPage = style == .dev && host == nil
         var cards = model.interactions(for: key).compactMap { ix -> PendingCards.Card? in
-            // Answerable exactly when nothing blocks it (`canAnswer`); what does is said under the card (#6868).
-            let blocked = model.answerBlock(ix)
+            // A stopped Agent's work card stays open for putting it off or dismissing it, which send the Agent nothing (#6839).
+            let answerable = model.canAnswer(ix)
+            let localOnly = !answerable && ix.isManagerWork
+            let blocked = answerable ? nil : model.answerBlock(ix)
+            let enabled = answerable || localOnly || blocked == nil
             // A side session's card (#7944), here by its `folded_under` as every folded child's: "From Side Session ·
             // <title>", and not while that side's own page is the one shown, which has it.
             if parentPage, ix.sessionKey != key, let side = model.sideChat(of: ix) {
                 guard side != sideUI.shown else { return nil }
                 return PendingCards.Card(
-                    interaction: ix, enabled: blocked == nil, blocked: blocked, from: Self.sideCardSource(side, ix, model))
+                    interaction: ix, enabled: enabled, localOnly: localOnly, blocked: blocked,
+                    from: Self.sideCardSource(side, ix, model))
             }
-            return PendingCards.Card(interaction: ix, enabled: blocked == nil, blocked: blocked)
+            return PendingCards.Card(interaction: ix, enabled: enabled, localOnly: localOnly, blocked: blocked)
         }
         // A card answered in a terminal dialog of several questions stays, greyed, until the next one comes (#2970).
         if let move = model.screenMoves[key], !cards.contains(where: { $0.interaction.kind == .screen }) {
@@ -2894,6 +2898,10 @@ struct ChatView: View {
         ]
         for (flag, sample) in samples where UserDefaults.standard.bool(forKey: flag) {
             if let ix = sample(key) { cards.append(PendingCards.Card(interaction: ix, enabled: true)) }
+        }
+        // `-showSampleStoppedWork YES`: a manager work card on an Agent that has stopped (#6839).
+        if UserDefaults.standard.bool(forKey: "showSampleStoppedWork"), let ix = Interaction.sampleStoppedWork(key) {
+            cards.append(PendingCards.Card(interaction: ix, enabled: true, localOnly: true))
         }
         // `-showVoiceSample asking|approval|plan_feedback`: the card the voice asks about or points to.
         cards += VoiceSample.cards(key).map { PendingCards.Card(interaction: $0, enabled: true) }
@@ -3446,7 +3454,7 @@ struct ChatView: View {
             }
         }
         #endif
-        .confirmationDialog("This Reply", isPresented: Binding(get: { menu.more != nil }, set: { if !$0 { menu.more = nil } })) {
+        .accessibleConfirmationDialog("This Reply", isPresented: Binding(get: { menu.more != nil }, set: { if !$0 { menu.more = nil } })) {
             if let id = menu.more {
                 // A new conversation with what was said up to here (#2137). Opened once the dialog is gone: a navigation
                 // made while it is still going away is dropped, and the chat stayed on the original.
@@ -6382,7 +6390,7 @@ struct Composer: View, Equatable {
         }
         #endif
         return AnyView(top)
-        .confirmationDialog("Clear Context?", isPresented: $confirmClear, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Clear Context?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear [Chat View 1ef3de]", role: .destructive) {
                 clearing = true
                 Task {
@@ -7838,14 +7846,13 @@ struct WorkStepView: View, Equatable {
 
     func set(_ h: Handlers) { handlers = h }
 
-    private(set) lazy var openFile: (String) -> Void = { [weak self] in self?.handlers.openFile($0) }
+    private(set) lazy var openFile = FileOpener { [weak self] in self?.handlers.openFile($0) }
     private(set) lazy var openLink: (URL) -> Void = { [weak self] in self?.handlers.openLink($0) }
     private(set) lazy var openPort: (PortLink) -> Void = { [weak self] in self?.handlers.openPort($0) }
     private(set) lazy var viewImages: (ImageViewing) -> Void = { [weak self] in self?.handlers.viewImages($0) }
     private(set) lazy var attachImage: (UIImage) -> Void = { [weak self] in self?.handlers.attachImage($0) }
     // The async ones run on the main actor, where the handlers are.
-    private(set) lazy var loadImage: @Sendable (String) async -> ImagePayload? = {
-        @MainActor [weak self] path in
+    private(set) lazy var loadImage = ImageLoader { @MainActor [weak self] path in
         guard let load = self?.handlers.loadImage else { return nil }
         return await load(path)
     }

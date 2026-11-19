@@ -525,6 +525,16 @@ of a kind is code there (as #7319 is for gateways whose model list lacks a fallb
 provider's `env` field, where a value, an empty one too, overrides a Persona default. Check such a setting in the
 profile the process really uses, not in `~/.claude`.
 
+## A profile hook installed on the next scan is too late for the first start (#7636)
+
+Claude Code reads settings hooks only at process startup. An extension that discovers a new assistant profile on its next
+heartbeat can therefore leave the conversation's first process without its `PermissionRequest` policy even when periodic
+reconciliation is otherwise correct. Seed a brand-new directory only with the extension's stable tagged entry, never copy
+arbitrary hooks or rewrite an existing profile; the extension still owns the policy and later profile-local reconciliation.
+A synthetic real-Claude check on 2.1.322 also rejected a plausible but wrong event attribution: storing an `ssh` command in
+a variable and expanding it as the command did not emit `PermissionRequest` in bypass mode and the command ran. Do not infer
+the prompt's command from elapsed time; capture the hook event or use a known bypass-immune call.
+
 ## `--setting-sources project` still reads `~/.claude` as the home's project files (2026-11-12, #5786)
 
 A guest conversation's `--tools ""` and `--strict-mcp-config` take away tools, not context: an extension's guest on the
@@ -1373,6 +1383,19 @@ rather than counting on the model to follow the prompt, and check a real transcr
 parsing it. Once the card worked, the prompt went back to asking with AskUserQuestion as usual (#8558): a prompt's
 workaround that outlives the fix it stood in for is wrong advice to the model.
 
+## Peer attestation needs the receiver's live permission mode (#9672)
+
+Claude Code 2.1.326's `sessions/<pid>.json` names the live process, session and tmux pane, but not its permission mode or
+bypass availability. A transcript's standalone `permission-mode` row is not rewritten on shift+tab; the next prompt records
+the mode instead. Reading even the newest transcript at send time therefore states the old class immediately after a switch:
+none after default became bypass is held, and stale bypass after the return to default is a mismatch. For an external tmux
+session, read the footer through the pane named by the PID file before using transcript evidence. A visible composer
+without a bypass or plan indicator is prompting even when a draft or dialog hides default's idle hint; do not fall back
+to a stale bypass transcript just because `tuiMode` has no exact idle-text match. Question and permission dialogs draw
+rules too; they are not composers and must not override transcript bypass. Plan has no single class:
+Claude counts it as bypass only when bypass is available, so use the live process's argv for the enabling flag rather than
+treating every plan session as prompting. Without those live sources, keep the old fail-closed outcome instead of guessing.
+
 ## A plugin's asUser prompt is the only way in that counts as the person's (Persona's Claude Code plugin)
 
 The peer inbox frames every message as another session's, and no wording in it makes the model take a go-ahead from
@@ -1422,3 +1445,7 @@ can contain multiple workspaces sharing a directory; importing a pin into `pins.
 the timestamp on the workspace catalog and match machine, source and source ID. An unpin must also release retained
 old sessions even if pin and unpin happen before the coalesced catalog push: a session push can observe the temporary
 pin while the final catalog bytes equal the earlier unpinned snapshot.
+
+## A transcript directory is not the selected launcher's sign-in
+
+When restoring an assistant conversation, finding its newest transcript does not establish that a newly selected launcher can authenticate in that profile. Check private-profile ownership before stopping the old process or writing input; a later CLI sign-in error has already accepted the wrong launch and may forward a provider-only model. A refusal should preserve the original process and session state and explain how to continue. Regression coverage needs cold resumes and live idle processes, with both an omitted model and the old provider's explicit model (#10453).

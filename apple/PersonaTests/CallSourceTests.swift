@@ -113,6 +113,7 @@ struct CallSourceTests {
             "Persona/Voice/PhoneVoiceAudio.swift": ("an in-app voice chat, started only through VoiceCalls (refused or asked first)", "systemCallName"),
             "Persona/Views/Chat/PromptComposer.swift": ("dictation: refused", "callGate"),
             "Shared/Recording/RecordingCapture.swift": ("a recording: refused, a paused one stays paused", "callGate"),
+            "Persona/Recording/MeetingReplay.swift": ("meeting replay: refused, audio-session changes skipped", "LiveCallGate.liveNow"),
             "Persona/Screen/VNCPiP.swift": ("picture in picture: the session left alone", "LiveCallGate.callIsLive"),
             "Persona/Recording/MeetingSpeaker.swift": ("a meeting recording's answers: a recording a call paused leaves the call's route alone", "LiveCallGate.callIsLive"),
         ]
@@ -140,6 +141,21 @@ struct CallSourceTests {
         }
         let pip = try #require(Self.body(try Self.lines("Persona/Screen/VNCPiP.swift"), "if !LiveCallGate.callIsLive {"))
         #expect(pip.contains("setCategory(") && pip.contains("setActive("), "picture in picture sets the session only with no call")
+        // A replay asks on the main actor before its tape opens, then again on the session queue before every session
+        // change: a call that went live while its audio file opened or ended keeps its own session (#10693).
+        let replay = try Self.lines("Persona/Recording/MeetingReplay.swift")
+        let canStart = try #require(Self.body(replay, "static var canStart"))
+        #expect(canStart.contains("callGate() == nil"), "a replay starts during a live call")
+        let prepare = try #require(Self.body(replay, "private func prepareAudio("))
+        let queue = try #require(prepare.range(of: "LiveCallGate.sessionQueue.sync"))
+        let live = try #require(prepare.range(of: "!LiveCallGate.liveNow", range: queue.upperBound..<prepare.endIndex))
+        for call in ["setCategory(", "setActive(true)"] {
+            #expect(live.lowerBound < (prepare.range(of: call)?.lowerBound ?? prepare.startIndex), "\(call) runs before the replay's call gate")
+        }
+        let deactivate = try #require(Self.body(replay, "private static func deactivateSession()"))
+        let offQueue = try #require(deactivate.range(of: "LiveCallGate.sessionQueue.sync"))
+        let offLive = try #require(deactivate.range(of: "!LiveCallGate.liveNow", range: offQueue.upperBound..<deactivate.endIndex))
+        #expect(offLive.lowerBound < (deactivate.range(of: "setActive(false")?.lowerBound ?? deactivate.startIndex))
     }
 
     /// Nothing in the app ends a live call to Persona by itself (#9290 follow-up): every way into a voice chat asks the call

@@ -19,10 +19,10 @@ import { SUBSCRIPTIONS_UI } from "./subscriptions-ui";
 export { isHttps };
 
 /**
- * The UI version the web draws (context.ui_version): all of 9, the columns layout's (views/extensions/ViewBody8.tsx) and a
- * tile's gauge (views/extensions/ViewBody9.tsx) too.
+ * The UI version the web draws (context.ui_version): all of 10, the graph canvas (views/extensions/ViewBody10.tsx),
+ * the columns layout's (views/extensions/ViewBody8.tsx) and a tile's gauge (views/extensions/ViewBody9.tsx) too.
  */
-export const UI_VERSION = 9;
+export const UI_VERSION = 10;
 
 export type UITone = "neutral" | "positive" | "caution" | "danger";
 
@@ -53,7 +53,7 @@ export interface UIChoice {
 
 /** One item of a section; which fields it has depends on `type`. */
 export interface UIItem {
-  type: "text" | "metric" | "progress" | "row" | "button" | "link" | "field" | "divider" | "chart" | "stat_grid" | "segmented" | string;
+  type: "text" | "metric" | "progress" | "row" | "button" | "link" | "field" | "divider" | "chart" | "stat_grid" | "segmented" | "graph" | string;
   text?: string;
   /** text: body | secondary | caption | code */
   style?: string;
@@ -159,6 +159,12 @@ export interface UIItem {
   /** field: date, time, datetime limits */
   earliest?: string;
   latest?: string;
+  /** UI version 10 (#9727), graph: its nodes, edges, folds, layout, direction and the node drawn as selected (its id) */
+  nodes?: UIGraphNode[];
+  edges?: { from: string; to: string }[];
+  folded?: string[];
+  layout?: UIGraph["layout"];
+  direction?: UIGraph["direction"];
 }
 
 /** A view's tabs on top (UI version 4): choosing one sends {name: value} (with the search's q) at once. */
@@ -221,6 +227,39 @@ export interface UIStat {
   tone?: UITone;
   /** UI version 6 */
   spark?: UISpark;
+}
+
+// ── UI version 10: a graph ───────────────────────────────
+
+/** One node of a graph (UI version 10, #9727): a box with a title, a state line, a badge, an icon and a progress bar. */
+export interface UIGraphNode {
+  id: string;
+  title: string;
+  subtitle?: string;
+  badge?: { text: string; tone?: UITone; color?: UIColor };
+  /** A role color (never with color): colors the node's edge bar and state dot, never its text. */
+  tone?: UITone;
+  /** A named color (never with tone). */
+  color?: UIColor;
+  icon?: string;
+  /** A thin bar along the node's foot, 0 to 1. */
+  progress?: number;
+  group?: string;
+  action?: UIAction;
+}
+
+/** A graph component (UI version 10): nodes joined by edges, laid out by the app (lib/graph-layout.ts). */
+export interface UIGraph {
+  /** Keeps the person's pan, zoom and folding across redraws of the page. */
+  key?: string;
+  nodes: UIGraphNode[];
+  edges: { from: string; to: string }[];
+  layout?: "tree" | "layered" | string;
+  direction?: "right" | "down" | string;
+  /** A node's id: drawn as selected, and the canvas opens centred on it. */
+  selected?: string;
+  /** The ids of nodes whose children start folded; the person's own folds for this key take over. */
+  folded?: string[];
 }
 
 export interface UISection {
@@ -600,6 +639,7 @@ export const KNOWN_ITEMS: readonly string[] = [
   "markdown", "table", "empty", "loading", // UI version 3
   "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", // UI version 4
   "image", "grid", "carousel", // UI version 6
+  "graph", // UI version 10
 ];
 
 /** An item the web can draw: a known type with what it needs to be drawn at all (a chart with points, a grid with stats). */
@@ -639,6 +679,9 @@ function drawable(it: unknown): it is UIItem {
     case "grid":
     case "carousel":
       return Array.isArray(it.tiles) && it.tiles.some((t) => isObject(t) && typeof t.title === "string" && !!t.title);
+    // UI version 10: a graph with nodes that read at all; the rest of the reading is readGraph's
+    case "graph":
+      return Array.isArray(it.nodes) && it.nodes.some((n: Record<string, unknown>) => isObject(n) && typeof n.id === "string" && typeof n.title === "string" && !!n.title);
     default:
       return true;
   }
@@ -731,6 +774,47 @@ function readSection8(s: Record<string, unknown>): Partial<UISection> {
   return out;
 }
 
+/**
+ * A graph as the web draws it (UI version 10, #9727): the hub has already checked the ids, edges and folds; what does
+ * not read here is left out node by node, never drawn half. An edge whose ends are both kept stays; a `selected` or a
+ * `folded` id that is gone is dropped. The tone and the color are kept as sent (never both; the drawing holds a
+ * progress to 0–1 and leaves an unknown color or icon out).
+ */
+export function readGraph(raw: unknown): UIGraph | undefined {
+  if (!isObject(raw) || !Array.isArray(raw.nodes)) return undefined;
+  const byId = new Map<string, UIGraphNode>();
+  for (const n of raw.nodes) {
+    if (!isObject(n) || typeof n.id !== "string" || !n.id || typeof n.title !== "string" || !n.title) continue;
+    const node: UIGraphNode = { id: n.id, title: n.title };
+    if (typeof n.subtitle === "string") node.subtitle = n.subtitle;
+    if (isObject(n.badge) && typeof n.badge.text === "string" && n.badge.text)
+      node.badge = { text: n.badge.text, ...(typeof n.badge.tone === "string" ? { tone: toneOf(n.badge.tone as string) } : {}), ...(colorOf(n.badge.color as string) ? { color: colorOf(n.badge.color as string)! } : {}) };
+    if (TONES.includes(n.tone as string)) node.tone = n.tone as UITone;
+    if (colorOf(n.color as string)) node.color = colorOf(n.color as string)!;
+    if (typeof n.icon === "string") node.icon = n.icon;
+    if (typeof n.progress === "number" && Number.isFinite(n.progress)) node.progress = n.progress;
+    if (typeof n.group === "string" && n.group) node.group = n.group;
+    const action = readAction(n.action);
+    if (action) node.action = action;
+    byId.set(node.id, node);
+  }
+  if (!byId.size) return undefined;
+  const edges: { from: string; to: string }[] = [];
+  for (const e of Array.isArray(raw.edges) ? raw.edges : []) {
+    if (!isObject(e) || typeof e.from !== "string" || typeof e.to !== "string") continue;
+    if (e.from === e.to || !byId.has(e.from) || !byId.has(e.to)) continue;
+    if (edges.some((x) => x.from === e.from && x.to === e.to)) continue;
+    edges.push({ from: e.from, to: e.to });
+  }
+  const out: UIGraph = { nodes: [...byId.values()], edges };
+  if (typeof raw.key === "string" && raw.key) out.key = raw.key;
+  if (raw.layout === "tree" || raw.layout === "layered") out.layout = raw.layout;
+  if (raw.direction === "right" || raw.direction === "down") out.direction = raw.direction;
+  if (typeof raw.selected === "string" && byId.has(raw.selected)) out.selected = raw.selected;
+  if (Array.isArray(raw.folded)) out.folded = raw.folded.filter((f) => typeof f === "string" && byId.has(f));
+  return out;
+}
+
 /** An item with its actions read; an empty's button (`action: {title, action}`) under `button`. */
 function readItem(it: UIItem): UIItem {
   const raw = it as unknown as Record<string, unknown>;
@@ -742,6 +826,20 @@ function readItem(it: UIItem): UIItem {
   }
   const out: UIItem = { ...it };
   if (isObject(raw.action)) out.action = readAction(raw.action);
+  // UI version 10: a graph's nodes, edges and folds, read as a view's actions are
+  if (it.type === "graph") {
+    const graph = readGraph(raw);
+    if (graph) out.nodes = graph.nodes as unknown as UIItem["nodes"];
+    else delete out.nodes;
+    out.edges = graph?.edges as unknown as UIItem["edges"];
+    out.folded = graph?.folded as unknown as UIItem["folded"];
+    if (graph?.layout) out.layout = graph.layout as UIItem["layout"];
+    else delete out.layout;
+    if (graph?.direction) out.direction = graph.direction as unknown as UIItem["direction"];
+    else delete out.direction;
+    if (graph?.selected) out.selected = graph.selected;
+    else delete out.selected;
+  }
   // UI version 4: the other places an action sits, each read the same way
   for (const k of ["expand", "load", "comment", "reply", "context", "mark_viewed", "draft"] as const) if (k in raw) out[k] = readAction(raw[k]);
   // UI version 6: a row's control and extra actions, a grid's or a carousel's tiles

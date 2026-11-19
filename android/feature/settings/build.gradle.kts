@@ -1,5 +1,7 @@
 plugins {
     id("persona.android.library")
+    // Its tests expect CoreText in Simplified Chinese (CoreTextFallback).
+    id("persona.coretext.zh")
     id("persona.compose")
     id("persona.hilt")
 }

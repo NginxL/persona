@@ -24,7 +24,7 @@ const T0 = Date.parse("2026-11-12T09:00:00Z");
 const at = (m: number) => new Date(T0 + m * 60_000).toISOString();
 const item = (seq: number, m: number): Item => ({ id: `i${seq}#0`, seq, role: "assistant", kind: "text", text: `at ${m}`, ts: at(m) });
 const noop = async () => {};
-const live = (items: Item[]): LiveTranscript => ({ items, hasMore: false, loading: false, loadingEarlier: false, loadEarlier: noop, expandFold: noop });
+const live = (items: Item[]): LiveTranscript => ({ items, hasMore: false, loading: false, loadingEarlier: false, loadEarlier: async () => undefined, expandFold: noop });
 const report = () => {};
 
 let host: HTMLDivElement;
@@ -56,6 +56,34 @@ describe("EarlierStretches", () => {
     const before = split.calls.filter((s) => s === "a").length;
     draw("a", history, [item(1, 1), item(2, 21), item(3, 22)]);
     expect(split.calls.filter((s) => s === "a").length).toBe(before + 1);
+  });
+
+  it("waits for an earlier engine's backoff and shares its next page", async () => {
+    vi.useFakeTimers();
+    const get = vi.fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ items: [item(1, 1)], has_more: false }));
+    vi.stubGlobal("fetch", get);
+    try {
+      let latest!: StretchesReport;
+      const history = [{ session_id: "a", agent: "claude", until: at(10) }];
+      await act(() => root.render(
+        <EarlierStretches mid="m" sid="b" scope="m/b" history={history} live={live([item(2, 11)])}
+          report={(_scope, report) => { latest = report; }} />,
+      ));
+      await act(async () => { await latest.loadEarlier(); });
+      const first = latest.loadEarlier({ waitForRetry: true });
+      const second = latest.loadEarlier({ waitForRetry: true });
+      expect(get).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      const page = await first;
+      expect(typeof page).toBe("symbol");
+      expect(await second).toBe(page);
+      expect(get).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
   // #8160: an earlier stretch gets a divider over the first line of each day it covers, day-only keys, and a day split

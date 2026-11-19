@@ -207,6 +207,19 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.interjectBackground(ctx)), nil },
 			set: s.setInterjectBackground},
+		{Setting: Setting{Key: "assistant.claude_interactive", Title: "Run Claude chats in interactive Claude Code", Actions: getSet,
+			About: "off (the default): Claude assistant conversations run Claude Code in print mode (claude -p), as always. on: they run " +
+				"the real interactive Claude Code in a private terminal on their computer instead, with the same instructions, tools, " +
+				"permission mode and settings. Why: people report that on a Claude subscription print mode uses the 5-hour limit faster " +
+				"than interactive use (Anthropic does not document this). Risk: Persona then drives a program made for a person, which " +
+				"Anthropic may treat as a different kind of use than it is; an account restriction is possible. Changes: replies show " +
+				"a block at a time instead of word by word; images reach Claude as files it reads; cancelling a queued message or Send " +
+				"now is not available. Needs tmux on that computer; when the interactive start fails the conversation runs in print mode " +
+				"and says why (Settings › Assistant › Runs on), trying again 10 minutes later. Applies to each conversation's next " +
+				"start; a running idle one restarts with its next message",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.claudeInteractive(ctx)), nil },
+			set: s.setClaudeInteractive},
 		{Setting: Setting{Key: "assistant.load_all_tools", Title: "Load every Persona tool up front", Actions: getSet,
 			About: "off (the default): only the Persona tools conversations use often are sent in full with every request; the " +
 				"others are listed by name and loaded with ToolSearch when needed, which keeps every request smaller. on: every " +
@@ -443,7 +456,7 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
-	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
@@ -764,6 +777,13 @@ func (s *Service) setInterjectBackground(ctx context.Context, v json.RawMessage)
 		return i18n.T(l, "assistant-settings_tool.change_interject_background", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.InterjectBackground },
 		"assistant.interject_background is %v from the next message on.")
+}
+
+func (s *Service) setClaudeInteractive(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.claudeInteractive, "assistant.claude_interactive is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_claude_interactive", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.ClaudeInteractive },
+		"assistant.claude_interactive is %v from each conversation's next start on.")
 }
 
 func (s *Service) setAgentTasks(ctx context.Context, v json.RawMessage) (*ownChange, error) {

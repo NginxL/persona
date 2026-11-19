@@ -9,5 +9,7 @@
   "reopen_card": "タスク「{title}」を再開",
   "supervision_needs_deployment": "マージ済み。デプロイと実環境での検証がまだ必要です",
   "someday_closed": "未完了のToDoだけを「いつか」に回せます",
-  "someday_until": "これより先の日時を選んでください（9999年まで）"
+  "someday_until": "これより先の日時を選んでください（9999年まで）",
+  "not_found": "このToDoはもうありません",
+  "round_not_found": "ToDoの会話のこの部分はもうありません"
 }

@@ -1,6 +1,7 @@
 package extmgr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,7 +80,7 @@ func (c *threadsConnector) Media(_ context.Context, ref string) (connector.Media
 	if ref == "photo:missing" {
 		return connector.Media{}, errors.New("没有这张图")
 	}
-	return connector.Media{Mime: "image/png", Data: []byte("made-up png " + ref)}, nil
+	return connector.Media{Mime: "image/png", Data: connectorTestPNG()}, nil
 }
 
 func (*threadsConnector) Actions() []proto.Tool { return []proto.Tool{{Name: "example_send"}} }
@@ -217,7 +218,7 @@ func TestConnectorMedia(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if w := get("avatar:u1:1"); w.Code != 200 || w.Body.String() != "made-up png avatar:u1:1" || w.Header().Get("Content-Type") != "image/png" ||
+			if w := get("avatar:u1:1"); w.Code != 200 || !bytes.Equal(w.Body.Bytes(), connectorTestPNG()) || w.Header().Get("Content-Type") != "image/png" ||
 				!strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
 				t.Errorf("%d %q %v", w.Code, w.Body.String(), w.Header())
 			}

@@ -49,11 +49,15 @@ func (s *Service) applyModel(ctx context.Context, id string, params map[string]a
 // conversation's params (assistant.send, assistant.warm): only when the start names none of its own, and only for
 // Claude Code, the one agent with profiles. True when it did, so a node too old for config_dir can be asked again
 // without it. Nothing else is told it: an existing conversation keeps the profile it was started in.
-func (s *Service) withNewConversationProfile(ctx context.Context, machine, purpose string, params map[string]any) bool {
+//
+// The setting is read from the main chat whatever purpose the conversation starts under: only `assistant` stores it,
+// and a purpose that inherits from Agents (an extension's lark.agent) would otherwise resolve without it and start in
+// Persona's own, possibly signed-out profile (#10859). startOn leaves out guests and the Inbox AI twin.
+func (s *Service) withNewConversationProfile(ctx context.Context, machine string, params map[string]any) bool {
 	if _, asked := params["config_dir"]; asked {
 		return false
 	}
-	b, err := s.resolveModel(ctx, purpose)
+	b, err := s.resolveModel(ctx, "assistant")
 	if err != nil || b.ConfigDir == "" {
 		return false
 	}

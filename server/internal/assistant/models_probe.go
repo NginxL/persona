@@ -77,6 +77,8 @@ type probeTarget struct {
 	models                                                                       []proto.ProviderModel
 	// agent is the agent the request names, else a stored provider's (AgentType); "" for neither.
 	agent string
+	// chatAlias resolves a stored Chat provider's legacy tier aliases for a connection test, not model discovery.
+	chatAlias *storedLauncher
 	// through sends the requests through via's node (models_via.go).
 	through http.RoundTripper
 	// auth is the credential header(s) the requests send (probeAuth*); send settles auto on the first request.
@@ -165,6 +167,9 @@ func (s *Service) probeTarget(ctx context.Context, in probeInput) (probeTarget, 
 		}
 		t = probeTarget{base: l.BaseURL, key: key, headers: headers, model: l.Model, effort: l.Effort, proxy: l.Proxy, noProxy: l.NoProxy, api: l.API, kind: l.Kind, via: l.ViaMachine,
 			models: l.Models, agent: l.AgentType()}
+		if l.Kind == "api" && l.API == "chat" {
+			t.chatAlias = &l
+		}
 		if t.kind == "" {
 			t.kind = "launcher" // Stored entries without kind are legacy launchers.
 		}
@@ -264,9 +269,6 @@ func (s *Service) probeTarget(ctx context.Context, in probeInput) (probeTarget, 
 	t.sessionID = modelhttp.OpenCodeSessionID("")
 	if t.via != "" {
 		t.through = viaNode{s: s, machine: t.via}
-	}
-	if t.api == "chat" {
-		t.effort = chatEffortForModel(t.models, t.model, t.effort)
 	}
 	return t, nil
 }
@@ -566,6 +568,17 @@ func (s *Service) providerTest(ctx context.Context, in probeInput) map[string]an
 	if err != nil {
 		out["error"] = i18n.Localize(err, i18n.From(ctx))
 		return out
+	}
+	if t.chatAlias != nil && t.api == "chat" {
+		model, err := resolveAPITierAlias(*t.chatAlias, t.model)
+		if err != nil {
+			out["error"] = i18n.Localize(err, i18n.From(ctx))
+			return out
+		}
+		t.model = model
+	}
+	if t.api == "chat" {
+		t.effort = chatEffortForModel(t.models, t.model, t.effort)
 	}
 	if out["model"] = t.model; t.model == "" {
 		out["error"] = i18n.T(i18n.From(ctx), "assistant-models_launchers.err_model_required")

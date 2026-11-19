@@ -375,6 +375,7 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         KnowledgeMeetings("Meetings"),
         KnowledgeEvents("Events"),
         KnowledgeRecordings("Recordings"),
+        KnowledgeTopics("Topics"),
         MailError("Error"),
         MailOutlook("Outlook · Microsoft account"),
         MailGmail("Gmail · Google account"),

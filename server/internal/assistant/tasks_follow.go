@@ -422,7 +422,24 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	}
 	agents, reached := s.taskAgentsReached(ctx, t)
 	agents = s.rowsProven(agents) // an unknown status whose transcript showed the turn closed is a stopped agent (task_turns.go)
+	var inboxRecipient proto.Session
+	if s.taskInboxRecipient(ctx, t.ID, machine, sid) {
+		for _, c := range agents {
+			if c.MachineID == machine && c.SessionID == sid {
+				inboxRecipient = c
+				break
+			}
+		}
+	}
 	if !reached || !taskAgentsSettled(t, agents) {
+		// An event belongs to one Agent's turn, not the aggregate task's completion.
+		if taskAgentSettled(inboxRecipient) && !limitTakenUp(inboxRecipient, time.Now()) {
+			items, read := s.lastTurnItems(ctx, machine, sid)
+			if _, closed := turnEndOf(items); read && closed &&
+				s.taskInboxTurnEnded(ctx, t, inboxRecipient, items, silentTurn(items)) {
+				return settleTaken
+			}
+		}
 		return settleLater
 	}
 	agents = currentTaskAgents(agents, supersededAgents(t, agents)) // not an agent it was handed over from (#6483)
@@ -458,6 +475,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 			cut = c
 			cut.TurnError, cut.TurnErrorKind = text, kind
 		}
+	}
+	if inboxRecipient.SessionID != "" {
+		last = inboxRecipient // another Agent's newer timestamp cannot choose this event's transcript
 	}
 	var items []proto.Item
 	read := false
@@ -538,6 +558,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 	if cut.SessionID != "" {
 		s.forgetStop(last.MachineID, last.SessionID, stop)
 		if _, again := s.takeTurn(cctx, t, last, items, end, named, since, turnInterrupted); again {
+			if read && silentTurn(items) {
+				s.taskInboxTurnEnded(cctx, t, last, items, true)
+			}
 			return settleTaken // this very turn was taken up before: no second receipt
 		}
 		// A turn cut off by the model service is no end of the work: an interrupted receipt (with "Continue" on the card),
@@ -548,6 +571,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 			Error: clip(strings.TrimSpace(cut.TurnError), 300)}
 		s.appendInterrupted(cctx, t, SessionRef{MachineID: cut.MachineID, SessionID: cut.SessionID}, body, false)
 		if s.closedWhileRead(t.ID) {
+			return settleTaken
+		}
+		if read && silentTurn(items) && s.taskInboxTurnEnded(cctx, t, last, items, true) {
 			return settleTaken
 		}
 		s.taskNotice(cctx, t, name, "interrupted", "", body.Error)
@@ -579,6 +605,10 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		// taken before the read). Moved, it is looked at again, the row and the transcript read together.
 		if now, ok := s.session(cctx, last.MachineID, last.SessionID); !ok || !sameTurnRow(now, last) {
 			s.releaseReceipt(ctx, t.ID, machine, sid, reserved)
+			if !ok && quiet == proto.TurnErrorNoOutput {
+				// A vanished recipient still owes its recorded source a failure notice.
+				s.taskInboxTurnEnded(cctx, t, last, items, true)
+			}
 			return settleLater
 		}
 		s.forgetStop(last.MachineID, last.SessionID, stop)
@@ -588,6 +618,9 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 			// ledger has it (just put there for a turn taken without it) and the row does not show it yet.
 			if m, ok := s.quietMarks(last.MachineID)[last.SessionID]; e.Silent != "" && (!ok || !m.holds(last)) {
 				s.markQuietTurn(last, e.Silent)
+			}
+			if e.Silent == proto.TurnErrorNoOutput {
+				s.taskInboxTurnEnded(cctx, t, last, items, true)
 			}
 			return settleTaken
 		}
@@ -614,9 +647,15 @@ func (s *Service) settleTurn(ctx context.Context, machine, sid, unheard string) 
 		if s.closedWhileRead(t.ID) {
 			return settleTaken
 		}
+		if s.taskInboxTurnEnded(cctx, t, last, items, true) {
+			return settleTaken
+		}
 		s.taskNotice(cctx, t, name, "interrupted", "", body.Error)
 		s.taskReport(t, reportInterrupted, name, where, body.Error, nil)
 		return settleTaken
+	}
+	if read {
+		s.taskInboxTurnEnded(cctx, t, last, items, false)
 	}
 	// The whole last reply, as Markdown: the session list's last_text is one line cut at 200 characters.
 	text := strings.TrimSpace(last.LastText)

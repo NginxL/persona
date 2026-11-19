@@ -20,10 +20,11 @@ object FixtureReader {
         val root = System.getProperty("persona.repo.root")?.let(::File) ?: generateSequence(File(".").canonicalFile) { it.parentFile }
             .firstOrNull { File(it, ".git").exists() && File(it, "android").isDirectory }
             ?: error("Cannot locate the repository root; set persona.repo.root")
-        val directory = File(root, "spec/fixtures/$domain")
-        check(directory.isDirectory) { "Missing fixture directory spec/fixtures/$domain (under ${root.path})" }
+        val path = "spec/fixtures/$domain" // fixture-inputs: callers write FixtureReader.read("<domain>")
+        val directory = File(root, path)
+        check(directory.isDirectory) { "Missing fixture directory $path (under ${root.path})" }
         val files = directory.listFiles { file -> file.isFile && file.extension == "json" }!!.sortedBy { it.name }
-        check(files.isNotEmpty()) { "No JSON fixtures in spec/fixtures/$domain" }
+        check(files.isNotEmpty()) { "No JSON fixtures in $path" }
         return files.flatMap { file ->
             val fixture = JsonCodec.parseToJsonElement(file.readText()).jsonObject
             check(fixture.getValue("version").jsonPrimitive.int == 1) { "Unsupported fixture version: ${file.name}" }

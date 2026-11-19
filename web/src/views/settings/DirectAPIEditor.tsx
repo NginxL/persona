@@ -4,13 +4,90 @@ import { api, ApiError, errorText, HubTimeoutError } from "../../lib/api";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import type { ModelDraft, ModelProvider, ModelPurpose } from "../../lib/model-config";
 import { supportsField } from "../../lib/model-config-execution";
-import type { ProviderModel, TestResult } from "../../lib/providers";
+import { EFFORT_LEVELS, type ProviderModel, type TestResult } from "../../lib/providers";
 import { effortTitle } from "../../lib/session-actions";
 import { Button } from "../../ui/atoms";
 
 const inputClass = "h-9 w-full rounded-control bg-field px-3 text-meta text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
 type ProbeResult = TestResult & { effort?: string };
 type Failure = { kind: "auth" | "model" | "timeout" | "other" | "effort"; detail?: string };
+
+function directCapabilityModel(provider: ModelProvider, model: string) {
+  const alias = model.trim().toLowerCase().replace(/\[1m\]$/, "");
+  const mapped = provider.api === "chat" && provider.model_aliases && Object.prototype.hasOwnProperty.call(provider.model_aliases, alias)
+    ? provider.model_aliases[alias] : undefined;
+  return mapped ?? model;
+}
+
+export function directEffortState(provider: ModelProvider, discovered: ProviderModel[], model: string) {
+  const chat = provider.api === "chat";
+  const capabilityModel = directCapabilityModel(provider, model);
+  const selected = discovered.find((item) => item.id === capabilityModel);
+  const stored = provider.models?.find((item) => item.id === capabilityModel);
+  // Chat requests and named probes apply stored capabilities. Discovery is the fallback when no entry is stored.
+  const capability = chat ? stored ?? selected : selected;
+  const exact = chat && !!capability?.all_efforts?.length;
+  const reported = exact ? capability?.all_efforts : capability?.efforts;
+  // Purpose Save accepts proto.EffortLevels plus off/none. Chat's all_efforts is its exact runtime capability list.
+  const reportedEfforts = chat && reported ? [...new Set(reported.flatMap((value) =>
+    value === "none" || value === "off" ? ["off"] : EFFORT_LEVELS.includes(value) ? [value] : []))] : reported;
+  // Chat reports an empty list as unknown; only no_effort explicitly rules the control out.
+  const unsupported = chat ? capability?.no_effort === true : selected?.efforts?.length === 0;
+  const unavailable = chat && !unsupported && !!reported?.length && !reportedEfforts?.length;
+  // Efforts-only Chat metadata keeps Off as a separate runtime control.
+  const reportedOptions = chat && reported?.length && !exact && !reportedEfforts?.includes("off")
+    ? ["off", ...(reportedEfforts ?? [])] : reportedEfforts;
+  const fallback = provider.api === "responses"
+    ? ["off", "minimal", ...EFFORT_LEVELS, "ultra"] : ["off", ...EFFORT_LEVELS];
+  return {
+    efforts: unsupported || unavailable ? [] : reported?.length ? reportedOptions ?? [] : fallback,
+    unsupported, unavailable, reported: !!reported?.length,
+    noEffort: chat && capability?.no_effort === true,
+  };
+}
+
+/** The echo that proves the requested effort reached the model. Undefined means no effort was requested; an empty
+ * string means stored capabilities deliberately suppress it. Discovery cannot prove suppression on an older hub. */
+export function expectedDirectProbeEffort(provider: ModelProvider, model: string, requested: string): string | undefined {
+  const effort = requested || (provider.api === "chat" ? provider.effort?.trim() ?? "" : "");
+  if (!effort) return undefined;
+  if (provider.api !== "chat") return effort;
+  const capabilityModel = directCapabilityModel(provider, model);
+  const stored = provider.models?.find((item) => item.id === capabilityModel);
+  if (!stored) return effort;
+  if (stored.no_effort) return "";
+  const exact = !!stored.all_efforts?.length;
+  const levels = exact ? stored.all_efforts : stored.efforts;
+  if (!levels?.length) return effort;
+  let wanted = effort;
+  if (["off", "none", "disabled"].includes(effort.trim().toLowerCase())) {
+    if (!exact) return effort;
+    wanted = "none";
+  }
+  // Keep in sync with chatEffortForModel in server/internal/assistant/models_resolve.go.
+  return levels.includes(wanted) ? effort : "";
+}
+
+export function DirectEffortSelect({ state, value, inherited, disabled, onChange }: {
+  state: ReturnType<typeof directEffortState>;
+  value: string;
+  inherited?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const effortLabel = (effort: string) => effort === "off" || effort === "none" ? t("settings-modelconfiguration.api_effort_off") : effortTitle(effort);
+  return <label className="block">
+    <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
+    <select className={inputClass} value={value} disabled={disabled || (state.unsupported || state.unavailable) && !value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">{inherited ? t("settings-modelconfiguration.api_effort_inherit", { effort: effortLabel(inherited) }) : t("settings-modelconfiguration.follow_default")}</option>
+      {value && !state.efforts.includes(value) && <option value={value}>{t("settings-modelconfiguration.model_current", { id: effortLabel(value) })}</option>}
+      {state.efforts.filter((effort) => value !== "none" || effort !== "off").map((effort) => <option key={effort} value={effort}>{effortLabel(effort)}</option>)}
+    </select>
+    <span className="mt-1 block text-submeta text-ink-3">{state.unsupported ? t("settings-modelconfiguration.api_effort_unsupported")
+      : state.unavailable ? t("settings-modelconfiguration.api_effort_unavailable")
+      : state.reported ? t("settings-modelconfiguration.api_effort_hint") : t("settings-modelconfiguration.api_effort_unknown")}</span>
+  </label>;
+}
 
 function probeFailure(detail: string, code?: string, status?: number): Failure {
   if (code === "auth" || code === "authentication" || code === "invalid_api_key") return { kind: "auth", detail };
@@ -53,13 +130,9 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
   const model = draft.model.trim() || inheritedModel || provider.model || "";
   const inheritedEffort = sameProvider && !purpose.override.effort ? purpose.effective.effort : undefined;
   const effort = draft.effort.trim() || inheritedEffort || (purpose.id === "inbox.triage" ? "off" : "");
-  const selected = models.find((item) => item.id === model);
-  const reportedEfforts = selected?.efforts;
-  const efforts = provider.api === "chat" ? [] : reportedEfforts ?? (provider.api === "responses"
-    ? ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-    : ["off", "low", "medium", "high", "xhigh", "max"]);
-  const unsupported = provider.api === "chat" || efforts?.length === 0;
-  const effortLabel = (value: string) => value === "off" || value === "none" ? t("settings-modelconfiguration.api_effort_off") : effortTitle(value);
+  const chat = provider.api === "chat";
+  const capabilities = directEffortState(provider, models, model);
+  const expectedEffort = expectedDirectProbeEffort(provider, model, effort);
 
   const retire = () => {
     probe.current?.abort();
@@ -72,7 +145,7 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
     setVerified(null);
     setFailure(null);
     return retire;
-  }, [manager, purpose.id, purpose.revision, provider.id, provider.api, draft.provider, draft.model, draft.effort, model, effort, unresolvedInheritance]);
+  }, [manager, purpose.id, purpose.revision, provider.id, provider.api, provider.effort, draft.provider, draft.model, draft.effort, model, effort, expectedEffort, capabilities.noEffort, unresolvedInheritance]);
   useLayoutEffect(() => () => discovery.current?.abort(), [manager, provider.id, provider.api, draft.provider]);
 
   useEffect(() => {
@@ -105,7 +178,7 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
     onChange(patch);
   };
   const test = async () => {
-    if (disabled || !name || unresolvedInheritance || probe.current) return;
+    if (disabled || (chat && listing) || !name || unresolvedInheritance || probe.current) return;
     const controller = new AbortController();
     probe.current = controller;
     const current = () => probe.current === controller && !controller.signal.aborted;
@@ -113,14 +186,14 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
     setVerified(null);
     setFailure(null);
     try {
+      const requestedEffort = effort;
       const result = await api<ProbeResult>("/launchers/test", {
-        method: "POST", json: { name, model, effort: effort || undefined }, signal: controller.signal, timeout: 35_000,
+        method: "POST", json: { name, model, effort: requestedEffort || undefined }, signal: controller.signal, timeout: 35_000,
         headers: { [MANAGER_HEADER]: manager }, isAuthContextCurrent: current,
       });
       if (!current()) return;
       if (!result.ok) setFailure(probeFailure(result.error ?? "", result.code));
-      // An older hub ignores effort. Its successful model-only check must not verify this combination.
-      else if (effort && result.effort !== effort) setFailure({ kind: "effort" });
+      else if (expectedEffort !== undefined && result.effort !== expectedEffort) setFailure({ kind: "effort" });
       else setVerified(result);
     } catch (error) {
       if (!current()) return;
@@ -153,19 +226,10 @@ export function DirectAPIEditor({ manager, purpose, provider, draft, disabled, e
         <button type="button" disabled={disabled || listing} onClick={() => setReload((value) => value + 1)} className="shrink-0 whitespace-nowrap font-medium text-accent-ink hover:underline">{t("settings-modelconfiguration.retry")}</button>
       </div>}
     </div>}
-    {(supportsField(purpose, "effort") || effortAllowed) && <label className="block">
-      <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
-      <select className={inputClass} value={draft.effort} disabled={disabled || (unsupported && !draft.effort)} onChange={(event) => change({ effort: event.target.value })}>
-        <option value="">{inheritedEffort ? t("settings-modelconfiguration.api_effort_inherit", { effort: effortLabel(inheritedEffort) }) : t("settings-modelconfiguration.follow_default")}</option>
-        {draft.effort && !efforts?.includes(draft.effort) && <option value={draft.effort}>{t("settings-modelconfiguration.model_current", { id: draft.effort })}</option>}
-        {efforts.map((value) => <option key={value} value={value}>{effortLabel(value)}</option>)}
-      </select>
-      <span className="mt-1 block text-submeta text-ink-3">{unsupported ? t("settings-modelconfiguration.api_effort_unsupported")
-        : reportedEfforts === undefined ? t("settings-modelconfiguration.api_effort_unknown") : t("settings-modelconfiguration.api_effort_hint")}</span>
-    </label>}
+    {effortAllowed && <DirectEffortSelect state={capabilities} value={draft.effort} inherited={inheritedEffort} disabled={disabled} onChange={(value) => change({ effort: value })} />}
     <div className="flex flex-col items-start gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button tone="secondary" busy={testing} disabled={disabled || !name || unresolvedInheritance} onClick={() => void test()}>{t("settings-modelconfiguration.api_test")}</Button>
+        <Button tone="secondary" busy={testing} disabled={disabled || (chat && listing) || !name || unresolvedInheritance} onClick={() => void test()}>{t("settings-modelconfiguration.api_test")}</Button>
         {testing && <p role="status" className="text-label text-ink-3">{t("settings-modelconfiguration.api_test_running")}</p>}
       {!testing && !verified && !failure && <p role="status" className="text-label text-ink-3">{t("settings-modelconfiguration.api_test_unverified")}</p>}
         {verified && <p role="status" className="text-label text-accent-ink">{t("settings-modelconfiguration.api_test_ok", { ms: verified.ms })}</p>}

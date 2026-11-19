@@ -286,7 +286,7 @@ function WorkCard({ item, machine }: { item: WorkItem; machine?: Machine }) {
     <div className="mt-2">
       <Button tone="quiet" icon="chevronRight" className="!px-2 !py-1 text-xs" onClick={() => {
         if (s) openAgent(s.machine_id, s.session_id);
-        else navigate("/todos");
+        else navigate(item.todo ? `/todos?id=${encodeURIComponent(item.todo.id)}` : "/todos");
       }}>{item.kind === "todo" ? t("workspaceboard.work_open_todo") : t("workspaceboard.auto_open_session")}</Button>
     </div>
   </article>;

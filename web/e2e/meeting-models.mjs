@@ -8,9 +8,9 @@
 //
 // Needs the web page against the fake hub with the two meeting uses, and Chrome (or any Chromium through --executable):
 //
-//   MOCK_MEETING_MODELS=1 MOCK_SUPERVISE_LISTED=1 PORT=18797 python3 scripts/mock/mock_hub.py &
+//   MOCK_MEETING_MODELS=1 MOCK_SUPERVISE_LISTED=1 MOCK_CHAT_EFFORT=1 PORT=18797 python3 scripts/mock/mock_hub.py &
 //   (cd web && PERSONA_HUB_URL=http://127.0.0.1:18797 npx vite --port 5797 --strictPort &)
-//   node web/e2e/meeting-models.mjs http://127.0.0.1:5797 [--shots <dir>] [--executable <chromium>]
+//   node web/e2e/meeting-models.mjs http://127.0.0.1:5797 [--shots <dir>] [--executable <chromium>] [--chat-effort]
 //
 // --shots saves the sheet at each narrow size (light and dark in English, light in the other two) and the wide editor.
 // Prints one line per check and a verdict; exits 1 on a failure and after three minutes.
@@ -30,8 +30,9 @@ const flag = (name) => {
 const base = (args[0] ?? "").replace(/\/$/, "");
 const shots = flag("--shots");
 const executable = flag("--executable");
+const chatEffort = args.includes("--chat-effort");
 if (!base || base.startsWith("--")) {
-  console.error("usage: node web/e2e/meeting-models.mjs <web URL> [--shots <dir>] [--executable <chromium>]");
+  console.error("usage: node web/e2e/meeting-models.mjs <web URL> [--shots <dir>] [--executable <chromium>] [--chat-effort]");
   process.exit(2);
 }
 if (shots) mkdirSync(shots, { recursive: true });
@@ -146,6 +147,43 @@ try {
         await dialog.waitFor({ state: "detached" });
       }
       await ctx.close();
+    }
+  }
+  if (chatEffort) {
+    for (const theme of ["light", "dark"]) {
+      for (const text of ["standard", "large"]) {
+        const where = `${theme} ${text === "large" ? "Large text" : "default text"}`;
+        const ctx = await browser.newContext({ viewport: { width: 480, height: 900 }, deviceScaleFactor: 2, colorScheme: theme, reducedMotion: "reduce" });
+        await localizeCatalog(ctx, "en");
+        const page = await ctx.newPage();
+        await page.goto(`${base}/?token=mock`);
+        await page.waitForFunction(() => localStorage.getItem("persona.token"), null, { timeout: 15000 });
+        await page.evaluate(([th, size]) => {
+          localStorage.setItem("persona.theme", th);
+          localStorage.setItem("persona.language", "en");
+          if (size === "standard") localStorage.removeItem("persona.text-size");
+          else localStorage.setItem("persona.text-size", size);
+        }, [theme, text]);
+        await page.goto(`${base}/settings?tab=models#settings-model-config`);
+        await page.locator('[data-model-purpose="meeting.minutes"] button').first().click();
+        const dialog = page.locator('[role="dialog"]');
+        await dialog.locator("select").first().selectOption("api.chat");
+        const effort = dialog.getByText("Reasoning effort", { exact: true }).locator("..").locator("select");
+        await effort.waitFor({ timeout: 10000 });
+        const options = await effort.locator("option").evaluateAll((nodes) => nodes.map((node) => node.value));
+        check(JSON.stringify(options) === JSON.stringify(["", "off", "low", "medium", "high"]), `${where} Chat effort: reported options ${options.join(" | ")}`);
+        await effort.selectOption("high");
+        const [control, panel] = await Promise.all([effort.boundingBox(), dialog.boundingBox()]);
+        check(!!control && !!panel && control.x >= panel.x && control.x + control.width <= panel.x + panel.width + 0.5,
+          `${where} Chat effort: the selector stays inside the sheet`);
+        check(await dialog.getByText("These reasoning options are reported for this model. A current value not in the list is kept.", { exact: true }).isVisible(),
+          `${where} Chat effort: reported-capability hint is visible`);
+        if (shots) {
+          await page.waitForTimeout(400);
+          await page.screenshot({ path: join(shots, `chat-effort-${theme}${text === "large" ? "-large" : ""}.png`) });
+        }
+        await ctx.close();
+      }
     }
   }
 } finally {

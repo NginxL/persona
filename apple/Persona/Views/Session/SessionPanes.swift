@@ -269,7 +269,7 @@ struct TerminalPanel: View {
             Task { await takePhotos(items) }
         }
         .fileUploadPicker(isPresented: $pickingFiles) { takeFiles($0.map { .file($0) }) }
-        .confirmationDialog(pasting.map { String(localized: "Paste \($0.split(separator: "\n", omittingEmptySubsequences: false).count) lines into the terminal?") } ?? "",
+        .accessibleConfirmationDialog(pasting.map { String(localized: "Paste \($0.split(separator: "\n", omittingEmptySubsequences: false).count) lines into the terminal?") } ?? "",
                             isPresented: Binding(get: { pasting != nil }, set: { if !$0 { pasting = nil } }),
                             titleVisibility: .visible) {
             Button("Paste") { if let t = pasting { paste(t) } }
@@ -1346,7 +1346,7 @@ struct LoopStrip: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.vertical, Theme.Space.m)
         .surface(in: .rect(cornerRadius: Theme.Radius.panel, style: .continuous))
-        .confirmationDialog("Stop this loop?", isPresented: $confirming, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Stop this loop?", isPresented: $confirming, titleVisibility: .visible) {
             Button("Stop Loop", role: .destructive, action: stop)
         } message: {
             Text("This sends the agent a message asking it not to schedule another wake-up. The current round finishes first.")

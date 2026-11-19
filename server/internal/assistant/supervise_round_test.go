@@ -340,7 +340,18 @@ func TestBackgroundSwitchOnAfterARoundAsksForEveryTool(t *testing.T) {
 // A round queued before the manager restarted goes in as a round after it, from its persisted text, with the pushes of
 // its turn held as any supervision message's.
 func TestBackgroundQueuedWakeAfterManagerRestart(t *testing.T) {
-	s, f, todo, st := newRoundService(t)
+	// The queue now rechecks the task ledger after restart, so persist both in a real database.
+	database, err := db.Open(context.Background(), newDatabase(t), db.AllSets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var st Store = database
+	s, f, todo := newSupervisedServiceOn(t, st)
+	s.noBackground = false
+	f.mu.Lock()
+	f.made = 100
+	f.mu.Unlock()
 	bg := withBackgroundBG1(t, s, f)
 	listRound(f, bg, proto.StatusWorking, false)
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigStalled, Key: "k1", Minutes: 45})

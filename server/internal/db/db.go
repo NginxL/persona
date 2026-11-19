@@ -253,10 +253,13 @@ func (d *DB) migrate(ctx context.Context) error {
 // number now, and run the renumbered one again; so it is moved to the new number first, or dropped when the new number
 // is recorded too. The renumbered migrations are idempotent; the ones that took over the old numbers never ran there.
 var renumbered = []struct{ from, to string }{
-	{"0071_pair_tokens.sql", "0111_pair_tokens.sql"},             // 0071 is sent_messages
-	{"0081_device_push_relay.sql", "0141_device_push_relay.sql"}, // 0081 is device_sessions
-	{"0428_todo_source.sql", "0429_todo_source.sql"},             // 0428 is manager_moved
-	{"0492_client_password.sql", "0505_client_password.sql"},     // 0492 is the manager's agent_shares
+	{"0515_workspace_naming.sql", "20261118234802_workspace_naming.sql"}, // naming branch before timestamped migrations
+	{"0513_todo_repositories.sql", "0516_todo_repositories.sql"},         // 0513 is assistant_search_plain
+	{"0514_todo_repositories.sql", "0516_todo_repositories.sql"},         // 0514 is assistant_search_strong
+	{"0071_pair_tokens.sql", "0111_pair_tokens.sql"},                     // 0071 is sent_messages
+	{"0081_device_push_relay.sql", "0141_device_push_relay.sql"},         // 0081 is device_sessions
+	{"0428_todo_source.sql", "0429_todo_source.sql"},                     // 0428 is manager_moved
+	{"0492_client_password.sql", "0505_client_password.sql"},             // 0492 is the manager's agent_shares
 }
 
 // lastUnified is the last migration from before the split: a NULL-part row up to it stands for both sets.

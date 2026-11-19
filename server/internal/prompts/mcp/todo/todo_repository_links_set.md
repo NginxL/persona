@@ -31,6 +31,7 @@ Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. M
             "minLength": 1
           },
           "kind": {
+            "type": "string",
             "enum": [
               "issue",
               "pull_request"

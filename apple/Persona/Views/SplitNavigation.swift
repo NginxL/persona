@@ -14,6 +14,9 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
     @Environment(\.horizontalSizeClass) private var widthClass
     /// Whether the list column shows (its button in the toolbar closes it).
     @State private var columns = SplitColumns.shown
+    /// What the split hands the pages under it, the same objects for its life (#10303): `SplitShowList`.
+    @State private var showList = SplitShowList()
+    @State private var pusher = SplitPush()
     @Binding var path: NavigationPath
     /// iOS: whether the list column is shown, remembered under this key (`SplitListMemory`), and slid by a finger
     /// (`SplitColumnControl`); nil: nothing kept, no slide.
@@ -79,7 +82,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
     private var firstPage: Bool { rootsSwap ? path.isEmpty : path.count <= 1 }
 
     var body: some View {
-        layout.environment(\.splitPush, SplitPush { [path = $path] value in path.wrappedValue.append(value) })
+        layout.environment(\.splitPush, pusher.set { [path = $path] value in path.wrappedValue.append(value) })
         #if os(iOS)
             .environment(\.splitDrawer, nil)
             .environment(\.splitSideBars, false)
@@ -169,7 +172,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
             // registered, in the sidebar's environment.
             .environment(\.splitDetail, SplitDetail(isFirstPage: firstPage, listHidden: columns == .detailOnly,
                                                      sideBars: sideBars, roots: rootsSwap))
-            .environment(\.splitShowList, SplitShowList(show: { [columns = $columns] in
+            .environment(\.splitShowList, showList.set(show: { [columns = $columns] in
                 withAnimation(Theme.Motion.layout) { columns.wrappedValue = SplitColumns.shown }
             }, hide: { [columns = $columns] in
                 withAnimation(Theme.Motion.layout) { columns.wrappedValue = .detailOnly }
@@ -252,7 +255,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
         AssistantDrawerLayout(drawer: drawer, enabled: firstPage, backdrop: columnColor ?? Theme.groupedPage, firstPages: !rootsSwap, sidebar: { sidebar }, page:
             NavigationStack(path: $path) { empty.modifier(destinations) })
             .environment(\.splitDetail, SplitDetail(isFirstPage: firstPage, listHidden: true, drawer: true))
-            .environment(\.splitShowList, SplitShowList(show: { drawer.open() }))
+            .environment(\.splitShowList, showList.set(show: { drawer.open() }))
     }
     #endif
 }
@@ -378,17 +381,46 @@ extension EnvironmentValues {
 
 /// Brings a `SplitNavigation`'s list column back, or (the Sidebar layout's Persona page, its sidebar button, #6332)
 /// folds it away.
-struct SplitShowList {
-    var show: () -> Void
-    var hide: (() -> Void)? = nil
+///
+/// One for the split's life, its actions set again each time the split's body runs (`SplitNavigation`): made in the body,
+/// a value of closures never compared equal to the last, and every page under the split that reads it ran again with the
+/// split's body, and with each of them everything it hands closures down to (each message of the conversation). The
+/// split's body runs as a tab's page leaves the window and comes back: three or four times on each switch between the
+/// open iPhone Duo's tabs (#10303).
+@MainActor final class SplitShowList {
+    private(set) var show: () -> Void
+    private(set) var hide: (() -> Void)?
     /// Slides the list away if it lies over the page (#4852), for a pick that leaves the page as it was (the conversation
     /// picked while it is already there); beside the page it stays.
-    var hideOverlay: (() -> Void)? = nil
+    private(set) var hideOverlay: (() -> Void)?
+
+    init(show: @escaping () -> Void = {}, hide: (() -> Void)? = nil, hideOverlay: (() -> Void)? = nil) {
+        self.show = show
+        self.hide = hide
+        self.hideOverlay = hideOverlay
+    }
+
+    /// The split's current actions; the object handed down stays the same.
+    func set(show: @escaping () -> Void, hide: (() -> Void)? = nil, hideOverlay: (() -> Void)? = nil) -> SplitShowList {
+        self.show = show
+        self.hide = hide
+        self.hideOverlay = hideOverlay
+        return self
+    }
 }
 
-/// Appends a value to a `SplitNavigation`'s path.
-struct SplitPush {
-    var push: (any Hashable) -> Void
+/// Appends a value to a `SplitNavigation`'s path. One for the split's life, as `SplitShowList`.
+@MainActor final class SplitPush {
+    private(set) var push: (any Hashable) -> Void
+
+    init(push: @escaping (any Hashable) -> Void = { _ in }) {
+        self.push = push
+    }
+
+    func set(_ push: @escaping (any Hashable) -> Void) -> SplitPush {
+        self.push = push
+        return self
+    }
 }
 
 extension View {

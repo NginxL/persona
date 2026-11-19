@@ -1,6 +1,7 @@
 // An agent's row in a list of a machine's or a space's agents: its state, title, tab and latest line; opens its chat.
 import { sessionPreview, sessionTitle, stateOf } from "../../lib/format";
 import { agentMeta, loudState } from "../../lib/machine-detail";
+import { plainMarkdown } from "../../lib/plain-markdown";
 import { href, onLinkClick } from "../../lib/router";
 import type { Session } from "../../lib/types";
 import { StatePill } from "../../ui/atoms";
@@ -11,7 +12,8 @@ export function AgentRow({ s }: { s: Session }) {
   const st = stateOf(s);
   const to = { name: "session" as const, mid: s.machine_id, sid: s.session_id };
   const meta = agentMeta(s);
-  const preview = sessionPreview(s);
+  // Markdown on one line, without its marks (#10939)
+  const preview = plainMarkdown(sessionPreview(s));
   return (
     <a href={href(to)} onClick={(e) => onLinkClick(e, to)} className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover">
       <span className="flex size-4 shrink-0 items-center justify-center">

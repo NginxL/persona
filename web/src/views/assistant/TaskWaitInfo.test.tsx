@@ -146,6 +146,95 @@ describe("task wait information", () => {
     expect(host.querySelector("[data-pr-waiting-url]")?.textContent).toContain(t("assistant-tasks.pr_blocker_review_required"));
   });
 
+  it.each([
+    ["https://github.com/example/demo/pull/73", "PR #73"],
+    ["https://github.com/example/demo/issues/912", "issue #912"],
+    ["https://github.com/example/demo/issues/912#issuecomment-42", "Comment on #912"],
+    ["https://github.com/example/demo/pull/73#discussion_r42", "Comment on #73"],
+    ["https://github.com/example/demo/pull/73#pullrequestreview-42", "Comment on #73"],
+    ["https://github.com/example/demo/pull/73/files#r42", "Comment on #73"],
+    ["https://github.com.example.test/example/demo/pull/73", "github.com.example.test/example/demo/pull/73"],
+    ["https://example.test/evidence/7", "example.test/evidence/7"],
+  ])("names the GitHub source %s rather than numbering it", async (url, label) => {
+    await render(makeTodo({ kind: "external_event", target: "A review", wake: "A response arrives", url }));
+    const source = host.querySelector<HTMLAnchorElement>("[data-wait-source]")!;
+    expect(source.textContent).toBe(label);
+    expect(source.href).toBe(url);
+    expect(source.title).toBe(url);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["en", "Comment on #912"],
+    ["zh-Hans", "#912 \u4e0b\u7684\u7559\u8a00"],
+    ["ja", "#912 \u306e\u30b3\u30e1\u30f3\u30c8"],
+  ])("localizes a GitHub comment source in %s", async (locale, label) => {
+    await initI18n(locale);
+    await render(makeTodo({ kind: "external_event", target: "A reply", wake: "A response arrives",
+      url: "https://github.com/example/demo/issues/912#issuecomment-42" }));
+    expect(text("[data-wait-source]")).toBe(label);
+  });
+
+  it("shows the bound PR, not an older associated PR, in the actual parked row", async () => {
+    const url = "https://github.com/example/demo/pull/73";
+    const old = "https://github.com/example/demo/pull/7";
+    const todo = makeTodo({ kind: "external_event", target: "Review of the new PR", wake: "Review arrives", url }, {
+      origin: "conversation-1", pr_url: old,
+      pr_status: { url: old, state: "open", draft: false, review: "required", checks: "success", conflicts: false, checked_at: new Date(NOW).toISOString() },
+    });
+    const items = assistantEntries({ conversation: "conversation-1", main: "conversation-1", todos: [todo],
+      sessions: [], interactions: [], plans: {}, feed: [], now: NOW }).parked;
+    await act(async () => root.render(<ParkedTaskRows items={items} />));
+    expect([...host.querySelectorAll<HTMLAnchorElement>("[data-wait-source]")].map(a => [a.href, a.textContent]))
+      .toEqual([[url, "PR #73"]]);
+    expect(host.querySelector(`a[href="${old}"]`)).toBeNull();
+  });
+
+  it.each(["applink.feishu.cn", "applink.larksuite.com"])("names the matching recorded Lark topic on %s, never an unrelated topic", async (host) => {
+    const url = `https://${host}/client/thread/open?open_chat_id=oc_example_group&open_thread_id=omt_example_topic`;
+    const todo = makeTodo({ kind: "external_event", target: "Support team", wake: "The topic changes", url }, {
+      thread: { channel: "feishu", chat_id: "oc_example_group", thread_id: "omt_example_topic", title: "Release questions" },
+    });
+    await render(todo);
+    expect(text("[data-wait-source]")).toBe("Release questions");
+    todo.thread = { ...todo.thread!, thread_id: "omt_another_topic", title: "Unrelated topic" };
+    await render(todo);
+    expect(text("[data-wait-source]")).toBe("Lark conversation");
+    expect(text("[data-wait-source]")).not.toContain("Unrelated");
+    todo.thread = { ...todo.thread!, thread_id: "omt_example_topic", chat_id: "oc_another_group" };
+    await render(todo);
+    expect(text("[data-wait-source]")).toBe("Lark conversation");
+  });
+
+  it("keeps a recorded Lark group name in the contact link without duplicating the receipt", async () => {
+    const url = "https://applink.feishu.cn/client/chat/open?open_chat_id=oc_example_group";
+    const todo = makeTodo({ kind: "person_reply", target: "Support team", wake: "They reply", url,
+      contact: { ...contact, url, channel: "Release support group" } });
+    await render(todo);
+    expect(text("[data-wait-contact]")).toContain("Release support group");
+    expect(host.querySelectorAll(`a[href="${url}"]`)).toHaveLength(1);
+    expect(host.textContent).not.toContain("Source 1");
+  });
+
+  it("keeps PR blockers on the recorded object when its URL has a fragment or query", async () => {
+    const url = "https://github.com/example/demo/pull/73";
+    const receipt = `${url}?from=review#issuecomment-42`;
+    const todo = makeTodo({ kind: "merge_review", target: "Review team", wake: "Approval and merge", ready: true, url: receipt,
+      contact: { ...contact, url: receipt } });
+    await act(async () => root.render(<TaskWaitInfo todo={todo} merges={[
+      { url, state: "open", draft: false, review: "required", checks: "failure", conflicts: false, checked_at: new Date(NOW).toISOString() },
+    ]} />));
+    expect(host.querySelectorAll(`a[href="${receipt}"]`)).toHaveLength(1);
+    expect(host.querySelector(`a[href="${url}"]`)).toBeNull();
+    expect(host.querySelector("[data-pr-waiting-url]")?.textContent).toContain(t("assistant-tasks.pr_blocker_checks_failed"));
+  });
+
+  it.each([undefined, "", "not a URL", "javascript:alert(1)"])("omits an absent or unsafe source without an ordinal placeholder: %s", async (url) => {
+    await render(makeTodo({ kind: "external_event", target: "A version", wake: "Version changes", url }));
+    expect(host.querySelectorAll("[data-wait-source]")).toHaveLength(0);
+    expect(host.textContent).not.toContain("Source 1");
+  });
+
   it("refreshes elapsed wait age from the current clock, not the task update time", async () => {
     let tick: (() => void) | undefined;
     vi.spyOn(globalThis, "setInterval").mockImplementation((callback) => { tick = callback as () => void; return {} as ReturnType<typeof setInterval>; });

@@ -153,7 +153,7 @@ internal fun engineMark(engine: String, name: String? = null): AgentMarkSpec = w
     AgentMarkKind.Claude -> AgentMarkSpec(kind, "Claude Code", null)
     AgentMarkKind.Codex -> AgentMarkSpec(kind, "Codex", null)
     AgentMarkKind.Trae -> AgentMarkSpec(kind, "TRAE", null)
-    null -> AgentMarkSpec(null, name?.takeIf(String::isNotBlank) ?: engine, null)
+    else -> AgentMarkSpec(kind, name?.takeIf(String::isNotBlank) ?: engine, null)
 }
 
 /** An effort as the pill says it: Very high is "Extra" there (the web's pill-only word), the rest their names. */

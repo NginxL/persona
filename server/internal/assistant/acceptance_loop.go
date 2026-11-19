@@ -113,6 +113,12 @@ func (s *Service) retryAcceptance(now time.Time) {
 			b.mu.Unlock()
 			continue
 		}
+		if err := s.saveAcceptErrLocked(ctx); err != nil {
+			// An initial conclusion save may have failed: never send its key from memory alone.
+			b.mu.Unlock()
+			s.logf("task %s: acceptance: save before retry: %v", id, err)
+			continue
+		}
 		cp := *a
 		b.mu.Unlock()
 		mid, err := s.botPostKeyed(ctx, "", s.acceptCard(ctx, t, cp, false), askSummary(s.botLang(ctx), &cp), acceptCardKey(id, cp.AskedAt))

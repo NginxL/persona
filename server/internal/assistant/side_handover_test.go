@@ -87,7 +87,7 @@ func TestReviewLeftWaitingByASideConversationGoesToTheMainConversation(t *testin
 			told = text
 		}
 	}
-	if !strings.Contains(told, "等你验收") || !strings.Contains(told, "转给你验收") {
+	if !strings.Contains(told, "待逐项复核，不代表完成") || !strings.Contains(told, "转给你验收") {
 		t.Fatalf("the main conversation is not told that the review is handed to it, and why:\n%s", told)
 	}
 

@@ -98,6 +98,9 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		if current.SupervisionResolved {
 			execution.SupervisionInstructions = current.SupervisionInstructions
 		}
+		// It starts as a send would: in interactive Claude Code while the setting is on (#10058; tuiWanted leaves guests
+		// and plan mode in print mode), so neither the compaction nor the next message runs a process of the other kind.
+		execution.Interactive = current.Interactive
 		if proto.IsExternalLauncher(launcher) {
 			execution.StartupContext = ctx
 		}

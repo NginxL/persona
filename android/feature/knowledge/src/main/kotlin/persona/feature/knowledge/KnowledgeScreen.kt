@@ -31,6 +31,7 @@ import androidx.compose.ui.text.withStyle
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.icons.PersonaIcons
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -79,6 +80,7 @@ internal fun KnowledgeScreen(model: KnowledgeViewModel, navigator: Navigator) {
     JListPage(stringResource(R.string.knowledge_title), onBack = if (LocalIsSidebarRoot.current) null else navigator::back, largeTitle = true,
         refreshing = page.loading && shown, onRefresh = model::refresh,
         actions = {
+            JIconButton(PersonaIcons.knowledgeMap, stringResource(R.string.knowledge_map_open), { navigator.navigate(KnowledgeMapRoute(owner)) })
             if (!search) JIconButton(PhIcons.FunnelSimple, page.filter.tag?.let { stringResource(R.string.knowledge_filter_tag_current, it) }
                 ?: stringResource(R.string.knowledge_filter_tag), { tagMenu = true },
                 badge = page.filter.tag != null)
@@ -271,6 +273,7 @@ internal fun KnowledgeDetailScreen(
     var recent by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     var openLinks by rememberSaveable(page.scope?.path) { mutableStateOf(listOf<String>()) }
     var editing by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
+    var openPoint by remember(page.scope) { mutableStateOf<Pair<TopicPoint, List<String>>?>(null) }
     val defaultQuestion = stringResource(R.string.knowledge_question_default)
     var question by rememberSaveable(page.scope?.path) { mutableStateOf(defaultQuestion) }
     var linkMessage by remember(page.scope) { mutableStateOf<String?>(null) }
@@ -355,6 +358,7 @@ internal fun KnowledgeDetailScreen(
                         }
                     }
                     agents(page.agents, navigator)
+                    if (detail.kind == KnowledgeKind.Topics.wire) topicPoints(detail, entry.name) { point, crumbs -> openPoint = point to crumbs }
                     val recording = entry.isRecording
                     val facts = if (recording) RecordingFacts.of(detail.meta) else null
                     facts?.let { recordingFacts(it) }
@@ -420,6 +424,9 @@ internal fun KnowledgeDetailScreen(
                 }
             }
         }
+    }
+    openPoint?.let { (point, crumbs) ->
+        PointSheet(point, crumbs, detail?.links.orEmpty(), { source -> openPoint = null; navigator.open(source, model.owner) }, { openPoint = null })
     }
     if (editing && entry != null) KnowledgeTagEditor(entry, tagging, onSave = model::saveTags, onDismiss = { editing = false })
 }
@@ -611,7 +618,7 @@ private fun LazyListScope.dirs(dirs: List<String>) {
 }
 
 @Composable
-private fun Note(text: String) {
+internal fun Note(text: String) {
     Text(text, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3,
         modifier = Modifier.padding(horizontal = rowPadding).padding(top = Tokens.Space.s, bottom = Tokens.Space.xs))
 }
@@ -655,18 +662,18 @@ private fun KnowledgeMarkdown(text: String) {
 }
 
 /** [entry]'s page, kept [manager]'s (the assistant whose knowledge base listed it, or the entry's page it was linked from). */
-private fun Navigator.open(entry: KnowledgeEntry, manager: String?) {
+internal fun Navigator.open(entry: KnowledgeEntry, manager: String?) {
     KnowledgeKind.fromWire(entry.kind)?.let { navigate(KnowledgeDetailRoute(it, entry.id, manager)) }
 }
 
 @Composable
-private fun KnowledgeFailure(title: Int, message: Int, retry: (() -> Unit)?) {
+internal fun KnowledgeFailure(title: Int, message: Int, retry: (() -> Unit)?) {
     val disabled = message == R.string.knowledge_disabled_text
     RetryState(stringResource(if (disabled) R.string.knowledge_disabled_title else title),
         stringResource(message), retry.takeUnless { disabled })
 }
 
-@Composable private fun RetryState(title: String, message: String, retry: (() -> Unit)?) {
+@Composable internal fun RetryState(title: String, message: String, retry: (() -> Unit)?) {
     JEmptyState(title, message, action = retry?.let { { JButton(stringResource(R.string.knowledge_retry), it, kind = JButtonKind.Secondary) } })
 }
 
@@ -678,6 +685,8 @@ private val KnowledgeKind.words: KindWords
     get() = when (this) {
         KnowledgeKind.Projects -> KindWords(R.string.knowledge_kind_projects, R.string.knowledge_empty_projects,
             R.string.knowledge_empty_tag_projects, R.string.knowledge_linked_projects)
+        KnowledgeKind.Topics -> KindWords(R.string.knowledge_kind_topics, R.string.knowledge_empty_topics,
+            R.string.knowledge_empty_tag_topics, R.string.knowledge_linked_topics, icon = PersonaIcons.topic)
         KnowledgeKind.Chats -> KindWords(R.string.knowledge_kind_chats, R.string.knowledge_empty_chats,
             R.string.knowledge_empty_tag_chats, R.string.knowledge_linked_chats)
         KnowledgeKind.People -> KindWords(R.string.knowledge_kind_people, R.string.knowledge_empty_people,

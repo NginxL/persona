@@ -3,6 +3,8 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -328,4 +330,137 @@ func TestAgentTaskWorkerCannotHandOutTasks(t *testing.T) {
 			t.Fatalf("%s refused: %v", self, err)
 		}
 	}
+}
+
+// An assistant conversation is never made a task, also when the row the turn end reads says `assistant: false` (it
+// is listed outside this manager's assistant directory, #10801): one this manager's assistant opened, by its own
+// records (the apps' and a channel's or an extension's POST /api/v1/assistant/conversations, the main conversation,
+// the background supervisor), and a headless one in any manager's assistant directory (another manager's, left on a
+// computer that moved here). agent_supervise refuses them too. An app's New Agent still becomes a task, both ways.
+func TestAssistantConversationsListedAsAgentsAreNoTasks(t *testing.T) {
+	ctx := context.Background()
+	const drifted = "/home/me/.persona/assistant/reports" // an older node's row at rest, where a `cd` left it
+	// listed lists id on server (beside the main conversation, or as it) with a turn that ran a command.
+	listed := func(f *fakeHub, id, cwd string) {
+		main := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
+		row := proto.Session{SessionID: id, MachineID: "server", Cwd: cwd, Agent: "claude", Title: "Persona", Status: proto.StatusDone,
+			State: proto.StateUnread, StartedByPersona: true, LastText: "done", UpdatedAt: time.Now()}
+		if id == "conv1" {
+			main = row
+		}
+		f.setSessions("server", main, row)
+		f.setItems(proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: "check the build"},
+			proto.Item{Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolName: "Bash"},
+			proto.Item{Seq: 3, Role: "assistant", Kind: proto.KindText, Text: "done"})
+	}
+	// itemReads counts the transcript reads of the turn end's check (lastTurnItems).
+	itemReads := func(f *fakeHub) int {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		n := 0
+		for _, c := range f.calls {
+			if c.Method == DeviceSessionItems {
+				n++
+			}
+		}
+		return n
+	}
+	// noTask: id's turn end made no todo and did not even read its turn, and agent_supervise refuses it as an
+	// assistant conversation.
+	noTask := func(t *testing.T, s *Service, f *fakeHub, id, cwd string) {
+		t.Helper()
+		listed(f, id, cwd)
+		reads := itemReads(f)
+		s.taskTurnSettled(ctx, "server", id)
+		if n := todoCount(s); n != 0 || itemReads(f) != reads {
+			t.Fatalf("turn end: %d todos, %d reads of its turn", n, itemReads(f)-reads)
+		}
+		if len(id) < 8 { // agent_supervise needs 8 characters of an id
+			return
+		}
+		_, err := runJSON(t, s, "conv1", "agent_supervise", map[string]any{"machine": "server", "session_id": id})
+		if err == nil || !strings.Contains(err.Error(), "assistant conversation") || todoCount(s) != 0 {
+			t.Fatalf("agent_supervise: %v, %d todos", err, todoCount(s))
+		}
+	}
+	// opened is the conversation a POST /api/v1/assistant/conversations opens with headers (role, extension) and body.
+	opened := func(t *testing.T, s *Service, f *fakeHub, role, ext, body string) string {
+		t.Helper()
+		f.mu.Lock()
+		f.made = 1000000 // ids of 8 characters (s1000001)
+		f.mu.Unlock()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations", strings.NewReader(body))
+		if role != "" {
+			r.Header.Set(RoleHeader, role)
+			r.Header.Set(ExtensionHeader, ext)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var out struct {
+			Session proto.Session `json:"session"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusOK || err != nil || len(out.Session.SessionID) < 8 {
+			t.Fatalf("open: %d %s", w.Code, w.Body)
+		}
+		return out.Session.SessionID
+	}
+	for _, c := range []struct{ name, role, ext, body string }{
+		{"an app's new chat", "", "", `{"prompt":"check the build"}`},
+		{"a channel's /agent", roleExtension, "larkext", `{"prompt":"check the build","purpose":"lark.agent"}`},
+		{"an extension's", roleExtension, "github", `{"prompt":"check the build"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			agentTasksOn(t, s)
+			noTask(t, s, f, opened(t, s, f, c.role, c.ext, c.body), drifted)
+		})
+	}
+	t.Run("the background supervisor", func(t *testing.T) {
+		s, f := newQuietService(t)
+		agentTasksOn(t, s)
+		setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg000001", "server" })
+		noTask(t, s, f, "bg000001", drifted)
+	})
+	t.Run("the main conversation", func(t *testing.T) {
+		s, f := newQuietService(t)
+		agentTasksOn(t, s)
+		noTask(t, s, f, "conv1", drifted)
+	})
+	t.Run("another manager's assistant directory", func(t *testing.T) {
+		s, f := newQuietService(t)
+		agentTasksOn(t, s)
+		noTask(t, s, f, "old00001", "/home/me/.persona/assistant-m-0a1b2c")
+	})
+	// A session ID is only unique on its own computer: an Agent on box that shares the main conversation's or the
+	// background supervisor's ID (recorded on server) is an Agent like any other.
+	t.Run("the same ID on another computer", func(t *testing.T) {
+		for _, id := range []string{"conv1", "bg000001"} {
+			s, f := newQuietService(t)
+			agentTasksOn(t, s)
+			setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg000001", "server" })
+			f.setSessions("box", proto.Session{SessionID: id, MachineID: "box", Cwd: "/code/app", Agent: "claude", Title: "agent-1",
+				Status: proto.StatusDone, State: proto.StateUnread, StartedByPersona: true, LastText: "done", UpdatedAt: time.Now()})
+			f.setItems(proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: "check the build"},
+				proto.Item{Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolName: "Bash"},
+				proto.Item{Seq: 3, Role: "assistant", Kind: proto.KindText, Text: "done"})
+			s.taskTurnSettled(ctx, "box", id)
+			if todo := onlyTodo(s); len(todo.Agents) != 1 || todo.Agents[0].MachineID != "box" || todo.Agents[0].SessionID != id {
+				t.Fatalf("%s on box: todo = %+v", id, todo)
+			}
+		}
+	})
+	t.Run("an agent in a folder of the user's", func(t *testing.T) {
+		s, f := newQuietService(t)
+		agentTasksOn(t, s)
+		listed(f, "a1000001", "/home/me/code/app")
+		s.taskTurnSettled(ctx, "server", "a1000001")
+		if todo := onlyTodo(s); len(todo.Agents) != 1 || todo.Agents[0].SessionID != "a1000001" {
+			t.Fatalf("turn end: todo = %+v", todo)
+		}
+		listed(f, "a2000001", "/home/me/code/app")
+		if _, err := runJSON(t, s, "conv1", "agent_supervise", map[string]any{"machine": "server", "session_id": "a2000001"}); err != nil ||
+			todoCount(s) != 2 {
+			t.Fatalf("agent_supervise: %v, %d todos", err, todoCount(s))
+		}
+	})
 }

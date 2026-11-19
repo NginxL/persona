@@ -26,11 +26,13 @@ import (
 const handoffsMax = 5
 
 type handoffReq struct {
-	Text     string      `json:"text"`
-	ClientID string      `json:"client_id"`
-	Session  *SessionRef `json:"session"`
-	Kind     string      `json:"kind"`
-	Title    string      `json:"title"`
+	Text         string      `json:"text"`
+	ClientID     string      `json:"client_id"`
+	Session      *SessionRef `json:"session"`
+	Kind         string      `json:"kind"`
+	Title        string      `json:"title"`
+	ReusePending bool        `json:"reuse_pending,omitempty"`
+	reused       *bool
 }
 
 func (s *Service) inboxHandoffRoutes() {
@@ -43,6 +45,8 @@ func (s *Service) inboxHandoffRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		reused := false
+		in.reused = &reused
 		if in.Session != nil {
 			switch {
 			case strings.TrimSpace(in.Session.MachineID) == "" || strings.TrimSpace(in.Session.SessionID) == "":
@@ -77,7 +81,7 @@ func (s *Service) inboxHandoffRoutes() {
 		case err != nil:
 			apierr.Call(w, err)
 		default:
-			apierr.WriteJSON(w, map[string]any{"item": it, "session": to})
+			apierr.WriteJSON(w, map[string]any{"item": it, "session": to, "reused": reused})
 		}
 	})
 }
@@ -104,12 +108,42 @@ func (s *Service) handOff(ctx context.Context, id string, in handoffReq) (InboxI
 		b.mu.Unlock()
 		return InboxItem{}, SessionRef{}, errNoInboxItem
 	}
+	if in.ReusePending {
+		var to *SessionRef
+		if g := currentSuggestion(it); g != nil && g.SourceOf == suggestionReplyTarget(it) {
+			to = g.Conversation
+			if to == nil && it.Agent != nil {
+				to = &SessionRef{MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}
+			}
+			if to == nil {
+				to = &SessionRef{}
+			}
+		} else {
+			source := suggestionReplyTarget(it)
+			for i := len(it.Handoffs) - 1; i >= 0; i-- {
+				h := it.Handoffs[i]
+				if h.PendingSuggestion && h.SourceOf == source {
+					to = &SessionRef{MachineID: h.MachineID, SessionID: h.SessionID}
+					break
+				}
+			}
+		}
+		if to != nil {
+			out, target := it.listed(), *to
+			if in.reused != nil {
+				*in.reused = true
+			}
+			b.mu.Unlock()
+			return out, target, nil
+		}
+	}
 	if h := handoffOp(it, op); h != nil {
 		out, to := it.listed(), SessionRef{MachineID: h.MachineID, SessionID: h.SessionID}
 		b.mu.Unlock()
 		return out, to, nil
 	}
 	title := clip(oneLine(it.Title), 80)
+	source := suggestionReplyTarget(it) // captured before I/O: a newer incoming message was not part of this request
 	b.mu.Unlock()
 	to, err := s.sendHandoff(ctx, prompts.RenderInboxHandoff(prompts.InboxHandoff{ID: id, Title: title, Text: text}), op)
 	if err != nil {
@@ -117,6 +151,12 @@ func (s *Service) handOff(ctx context.Context, id string, in handoffReq) (InboxI
 	}
 	b.mu.Lock()
 	b.noteHandoff(it, to, op, time.Now())
+	if in.ReusePending {
+		if h := handoffOp(it, op); h != nil {
+			g := currentSuggestion(it)
+			h.PendingSuggestion, h.SourceOf = g == nil || g.SourceOf != source, source
+		}
+	}
 	out := it.listed()
 	b.mu.Unlock()
 	// No rollback: the message is in the conversation. The record stays in memory and the item's next save writes it.
@@ -258,6 +298,7 @@ func listedHandoffs(hs []InboxHandoff) []InboxHandoff {
 	out := slices.Clone(hs)
 	for i := range out {
 		out[i].Op = ""
+		out[i].PendingSuggestion, out[i].SourceOf = false, ""
 	}
 	return out
 }

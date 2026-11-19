@@ -29,6 +29,7 @@ export function GroupTitle({ group, compact = false }: { group: NavGroup; compac
   const me = useSettingsAssistant();
   if (group === "device") return <>{t("settings-nav.group_device")}</>;
   if (group === "hub") return <>{t("settings-nav.group_hub")}</>;
+  if (group === "labs") return null;
   return (
     <span className="flex min-w-0 items-center gap-1.5" data-settings-assistant={me.id ?? ""}>
       {me.id && <AssistantAvatar id={me.id} name={me.name} isDefault={me.isDefault} size={compact ? 16 : 18} status={me.tone} ring={compact ? "ring-(--color-inset)" : "ring-page"} />}
@@ -53,4 +54,4 @@ export function GroupFooter({ group }: { group: NavGroup }) {
 }
 
 /** Whether a group has a line under it. */
-export const hasFooter = (group: NavGroup) => group !== "device";
+export const hasFooter = (group: NavGroup) => group === "assistant" || group === "hub";

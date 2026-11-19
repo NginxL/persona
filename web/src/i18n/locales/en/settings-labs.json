@@ -1,0 +1,20 @@
+{
+  "intro": "Try features that are still being finished, or switch between the stable way of doing something and a new one. If something doesn't work well, come back here and choose the default.",
+  "scope_note": "Each item here explains where it applies and when it takes effect.",
+  "area_agents": "Agents",
+  "trial": "Trial",
+  "scope": "Applies to",
+  "scope_browser": "This browser only",
+  "activation": "Takes effect",
+  "rollback": "Going back",
+  "save_failed": "Couldn't confirm this was saved in this browser. Check that the browser lets sites store data, then try again.",
+  "invalid": "A saved choice from another version of Persona isn't recognized, so the default is used. Choosing an option replaces it.",
+  "unreadable": "This browser isn't letting Persona read its saved settings, so the default is used and a change may not be saved.",
+  "terminal_group": "Terminal",
+  "terminal_renderer": "Terminal renderer",
+  "terminal_renderer_hint": "How terminals in Single pane view are drawn. WebGL uses the graphics card, which can be smoother with lots of output or small text, but doesn't work in every browser. Full view isn't affected.",
+  "terminal_renderer_standard": "Standard",
+  "terminal_renderer_webgl": "WebGL",
+  "terminal_renderer_activation": "Terminals you open after changing it. A terminal that's already open keeps its renderer, and what you typed in it, until you open it again or reload the page.",
+  "terminal_renderer_rollback": "Choose Standard. If WebGL stops working in a terminal, that terminal switches back to Standard by itself, and so does this setting."
+}

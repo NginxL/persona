@@ -16,7 +16,9 @@
   "switched_during_upload": "The terminal changed during the upload, so nothing was pasted",
   "released_during_upload": "Control of the terminal ended during the upload, so nothing was pasted",
   "watch_only_chosen": "Watching only: another program on the computer is using this terminal",
-  "webgl_lost": "GPU rendering was interrupted. Switched back to the default renderer.",
-  "webgl_unavailable": "WebGL isn't available in this browser. Using the default renderer.",
+  "webgl_lost": "GPU rendering stopped, so this terminal switched back to the standard renderer. New terminals use Standard too; you can try WebGL again in Settings › Labs.",
+  "webgl_lost_unsaved": "GPU rendering stopped, so this terminal switched back to the standard renderer. Standard couldn't be saved in this browser, so new terminals may try WebGL again.",
+  "webgl_unavailable": "WebGL isn't available in this browser, so this terminal uses the standard renderer. Settings › Labs is set back to Standard.",
+  "webgl_unavailable_unsaved": "WebGL isn't available in this browser, so this terminal uses the standard renderer. Standard couldn't be saved in this browser.",
   "older_failed": "Couldn't load earlier output: {error}"
 }

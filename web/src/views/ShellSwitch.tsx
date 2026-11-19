@@ -3,11 +3,7 @@
 // are told about in the main conversation, not counted here), the current assistant's with several. Narrow screens only;
 // wide ones have the sidebar.
 //
-// The switch never runs under the bar's buttons (#5036): it takes the room between the side slots and no more. On a
-// phone (under 640 px, where "Sessions and Terminal" doesn't fit beside the main conversation's three buttons) the
-// Sessions side says its short name, on both pages alike, with less padding and its count on the segment's corner;
-// on the narrowest screens a label truncates rather than wrap or go under a button. The full name stays the link's
-// accessible name and its tooltip.
+// The switch stays within its header slots; History is a destination under Agents (#10240).
 import { href, onLinkClick, type Route } from "../lib/router";
 import { useScopedCounts } from "../lib/current-assistant";
 import { othersWaiting } from "../lib/sessions";
@@ -20,7 +16,7 @@ type ShellPage = "assistant" | "agents";
 
 const SHELL_PAGES: { page: ShellPage; label: string; short?: string; to: Route }[] = [
   { page: "assistant", label: t("shellswitch.assistant"), to: { name: "persona" } },
-  { page: "agents", label: t("work-entry.title"), short: t("work-entry.short"), to: { name: "terminal" } },
+  { page: "agents", label: t("agentspage.title"), to: { name: "agent-list" } },
 ];
 
 export function ShellSwitch({ page }: { page: ShellPage }) {

@@ -30,6 +30,9 @@ var terminalClosers = map[string][]string{
 	},
 	"panes.close": {},
 	"tabs.close":  {},
+	"session.close_task_terminal": {
+		"finishTaskTerminal", // the owner opted in at dispatch and task_review accepted durable completion (#10201)
+	},
 }
 
 func TestOnlyUserActionsCloseAgentTerminals(t *testing.T) {
@@ -37,7 +40,8 @@ func TestOnlyUserActionsCloseAgentTerminals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	consts := map[string]string{"deviceSessionRetire": "session.retire", "deviceSessionStop": "session.stop"}
+	consts := map[string]string{"deviceSessionRetire": "session.retire", "deviceSessionStop": "session.stop",
+		"MethodCloseTaskTerminal": "session.close_task_terminal"}
 	fset := token.NewFileSet()
 	found := map[string][]string{}
 	for _, name := range files {

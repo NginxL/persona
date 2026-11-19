@@ -1735,7 +1735,7 @@ iOS, Mac, visionOS, watch and extensions support Simplified Chinese, English and
   Affirmative buttons require unlocking (`.authenticationRequired`); Deny does not. Plan approval from a notification uses `acceptEdits` (the whole plan has not been viewed, so commands still need individual approval),
   and "Approve and run automatically" is App-only. Buttons call resolve directly in the background without opening the App; failure (already handled, cannot reach hub) produces a local notification explaining why. Questions and terminal interactions have no buttons; tap to handle them.
   MCP forms and links are pushed too (#2433, `docs/protocol/protocol.md` "MCP elicitation"): the iOS app alone registers `features: ["withdraw", "elicitation"]` (`PushRegistrar.features`, the rule of `LiveConnection.helloFeatures`), so the hub pushes it these cards and waits for it while no app that shows them is open. Category `INTERACTION_ELICITATION` has no buttons: a tap opens the conversation, where the card arrives over the socket; the hub's withdrawal push takes it back like any card's. The alert names the MCP server and never carries the link or a form's values.
-  What the hub gives for taking a to-do's recommendation with one tap (#2056, `docs/assistant/todos.md` "Waiting for the owner"; the App's side is not built yet): each to-do waiting for the owner has `ask: {outcome?, verdict, recommend?, asked_at}` in `GET /api/v1/todos` (a `{"type":"todos"}` event when it comes up, is taken or ends), and a decision with a recommended option is pushed with category `TODO_DECIDE` and a top-level `todo: {id, asked_at, recommend}`; both are taken with `POST /api/v1/todos/{id}/accept {"asked_at"}` (409: already handled, refresh; 423 with a `code` such as `dialog_open`: the Agent's node refused it and nothing was taken, #7343; 502: the recommendation did not reach the Agent, nothing taken). The watch's answer-only credential cannot call either route yet.
+  What the hub gives for taking a to-do's recommendation with one tap (#2056, `docs/assistant/todos.md` "Waiting for the owner"; the App's rows are in "Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)"): each to-do waiting for the owner has `ask: {outcome?, verdict, recommend?, asked_at}` in `GET /api/v1/todos` (a `{"type":"todos"}` event when it comes up, is taken or ends), and a decision with a recommended option is pushed with category `TODO_DECIDE`, whose Take Recommendation action takes it, and a top-level `todo: {id, asked_at, recommend, manager}`; from a manager that says how the push may answer it, `todo` also has `ask` and `lockscreen`, with `options` and `aps.mutable-content: 1` when `lockscreen` is `answer`, while `open_only` sends category `TODO_DECIDE_OPEN`, with no action (#10465); both are taken with `POST /api/v1/todos/{id}/accept {"asked_at"}` (409: already handled, refresh; 423 with a `code` such as `dialog_open`: the Agent's node refused it and nothing was taken, #7343; 502: the recommendation did not reach the Agent, nothing taken). The watch's answer-only credential cannot call either route yet.
   Settings › Notifications (`NotificationSettingsView`): "When you are needed" toggle, "When an Agent finishes" never / long tasks only / every time, Live Activities (Lock Screen and Dynamic Island / show details on Lock Screen / what each side of Dynamic Island shows, `IslandSettingsView`, `docs/apple/live-activity.md`), stored per device on the hub (`PushRegistrar.deviceID`). Changes save one at a time in the order they were made, each PUT the hub's last answer plus that one change, so a failed one reverts alone and no later PUT carries it (`NotificationSettingsModel.change`, #1913; the web's queue, #1285); quiet hours keep their own endpoint.
   Tapping a notification opens its session: use the completion-handler version of `UNUserNotificationCenterDelegate`, switch to the main queue to handle it, then call back (the async version returns on a background executor,
   UIKit receives completion off the main thread and a notification-triggered cold launch crashes).
@@ -1982,8 +1982,8 @@ Mac app is frozen: it decodes the same models and draws none of this (`#if os(ma
   `BriefAcceptRow` has them there (`TodoAskRow`'s `deferrable`). A decision held for the briefing says so, and a
   suggested rule's line (`RuleSuggestionLine`) sits under it, as on `BriefAcceptRow`. An ask without options, and every
   ask on the Mac, keeps `BriefAcceptRow`.
-- **Not built**: the `TODO_DECIDE` notification's option and response actions (the push payload carries `options` and
-  `responses`); the watch.
+- **Not built**: the `TODO_DECIDE` notification's option actions (the push payload carries `options` when its
+  `lockscreen` is `answer`, and `TODO_DECIDE_OPEN`, no actions, when it is `open_only`, #10465); the watch.
 - **Tests**: `CloseoutTests` (decoding, claims, the rows' line, the stripped block, nothing new without a closeout),
   `DecisionRowTests` (the ask's fields, the default line and its memo, every answer with `FakeHub`, the row staying
   answerable after a fixed answer, the row held during Complete Directly, the armed option keeping its button,
@@ -2006,6 +2006,61 @@ built in stages behind the hub's `todo_view`; this section grows with it.
   the path that reads the hub's counts and places as sent; the default roster lists several.
   `docs/operations/testing.md` has the details, including `GET /mock/churn?todos=1` for measuring a push on the list
   and where the mock is not a hub.
+- **The data** (`TodoStore`, `apple/Persona/Features/Todos/`): `GET /api/v1/todos` is decoded into its rows and, beside
+  them, each row's `view` (by to-do id) and the list's `counts` (`TodosPage`); a view that does not decode is none.
+  `TodoItem` gains only facts (`part_of`, `after`, `restored_at`, `someday_until`); the store keeps `views`, `counts` and
+  `places` apart from `todos`, so a change to a view alone (a run's latest line) redraws nothing that reads the rows and
+  does not refresh the watch or the widgets. A 304 applies the views and counts read with that tag again. Views and
+  counts are read whether V1 is on or not (V1 coming on in a run has them); everything else is done only while it is on:
+  - the `todo-view` StateCache entry beside `todo-items`: the views, counts and places, with the numbers the pages
+    showed, so the first frame draws them. It is written at most every 15 s while a run's line moves (`Throttle`) and
+    at once when the scene leaves the front; forgetting the hub removes it whether V1 is on or not, and an entry none
+    of whose views is for the kept rows is not used at all;
+  - the first V1 launch without it: `viewsRead` stays false until the first read ends, so the list does not file its
+    rows twice, but no longer than a second (no connection yet, or a hub that does not answer);
+  - the places, read with the list while the hub lists `todo_places`, again only when the list changed; a hub without
+    the route, or whose hello stopped listing it, has none (All only);
+  - one timer, to the earliest `next_change_at` of any row, reads the list again (coalesced) through the app's hub, only
+    while the scene is in front. A read that still shows that moment (the hub's clock behind) is tried again after 5 s
+    and 30 s, then left to the next push, and the timer never reads sooner than 5 s after its last read. The timer is
+    the store's, not the page's: the drawer's and sidebar's counts change by time too.
+
+  Tests inject all of this through `TodoStore.V1` (whether V1 is on, the features, the cache, the client the store's
+  own reads go through, and `Timing`); only `TodoStore.shared` follows the scene (`followsScene`). When the gate
+  changes, `TodosV1` tells the store (`v1Changed`), which counts, writes the cache, arms the timer and reads the places
+  from what the last read had, or lets the numbers go. `TodosAPI.swift` has the item, places, Someday, restore and
+  origin-route calls (the last with its op id and a timeout above the hub's five-minute relay).
+- **Filing and counts.** `TodoFiling` files a row by its `view` when its section is one this build knows, else by the
+  app's own rules (`TodoTriageLogic`, frozen) mapped onto the V1 sections (Needs you → Needs you, Working → Working,
+  PR to merge → Waiting, Other open → To do, Just finished → Just finished, Shelved → To do with the Inactive mark,
+  Done → Done); a section's rows go by `rank`, then `manager`, then `id`. Every To-dos number comes from
+  `TodoStore.countsSource` (`TodoCountsSource`): the hub's `counts` and places with one manager; with several, counted
+  from the current assistant's filed rows (`TodoCountsFallback`, the hub's rules, replayed against
+  `spec/fixtures/todo-counts`) with only its own project places; less the answers given on the device that the hub's
+  view does not show yet. The rows are filed there once (`countsSource.filed`, the current assistant's in the list's
+  order), for the V1 list to take its sections from, so the list and the numbers cannot disagree. A row filed
+  by the app's own rules (a manager older than the hub's features say, or a section this build does not know) is
+  filed again when one of its Agents' sessions changes (each read through its own cell, so only those are watched)
+  and each minute while the scene is in front, since those rules read the clock and no `next_change_at` says when.
+- **The gate and its memory.** `TodoFeatures` reads `todo_view`, `todo_places`, `todo_timeline` and `todo_asks` from each
+  group's hello and remembers them per group (`hubTodoFeatures.<group>`, written only when they change); before a
+  group's hello in this run the remembered value is used. `TodosV1` is on while the hub-level group's hello listed
+  `todo_view` in this run, or, before that hello, its last one did; once on for a group it stays on for that group
+  until the app quits, so a hello without it while a manager reconnects never swaps the page back, and such a hello is
+  not remembered as a downgrade (the first hello of a run is). It follows the owner's pick of the hub-level group:
+  picking an older group's hub turns it off, picking back a group it was on for turns it on without another hello.
+  Signing out of every hub forgets the remembered values, and a group that goes while others stay (signed out of, or
+  merged into another: `TodosV1.forget`) loses its own, since the app's stored pick, written only when the owner picks
+  a hub, can still name that group at the next launch. The gate turns on at the first hello that lists `todo_view`, also in the
+  middle of a run: holding that change while To-dos is on screen, so a visible page never swaps, is the page's job and
+  arrives with the V1 list; the gate stays a plain value. It is off in every build until the switch-on
+  (`TodosV1.released`), and on the iPhone and iPad only (`TodosV1.platform`): visionOS keeps today's To-dos. The data
+  and model files under `apple/Persona/Features/Todos/` compile on every platform, since `TodoStore` (shared with
+  visionOS) names them; the V1 views will be iOS only. The hub's `todo_send_state` marker is not read yet.
+- **404 and 405.** An older hub answers 405 for `GET /api/v1/todos/{id}` and `GET /api/v1/todos/places` (the `PATCH` and
+  `DELETE` routes of `/api/v1/todos/{id}` match the path) and 404 for the other new routes: `TodoNotThere` takes both
+  as "not there". A 404 with `todo_not_found` is the to-do itself gone. `GET /api/v1/todos` answering 404 still hides
+  the To-dos entrance, as before.
 
 ## Quiet supervision rounds (#2092)
 
@@ -2047,6 +2102,8 @@ a follow-up's prompt (`injected.detail`, or the raw input) is never shown while 
 visible one; its block shows only the one-line `injected.line` (`ChatLine.hidesPrompt`). A round stays shown by exactly
 the supervision rule (`Supervision.visible`): a successful `ask_user` / `notify_user`, a pending live `ask_user`, an
 accepted / needs-user `task_review`, a `supervision_finish` receipt with user visibility, or `fold.supervision_user`.
+A completed round with a nonblank final reply also stays visible unless it successfully finished silent. The reply
+uses the usual bubble and the work stays collapsed. See `docs/assistant/assistant.md` "Background rounds".
 
 While folding is on, the main chat's Needs You tray groups task rows by the conversation that supervises them (the
 to-do's `origin`) when they come from more than one: the conversation's own group first without a header, then each

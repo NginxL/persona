@@ -1,6 +1,10 @@
 {
   "decision_review_changed": "这条决定已更新或已处理，请刷新后再试。",
   "decision_review_fields": "请求缺少有效的审核时间或撤销凭据。",
+  "ask_stale": "这个问题已经答过或已更新，请刷新后再回答。",
+  "answer_in_session": "这是 Agent 自己的提问，请在它的会话里回答。",
+  "not_declinable": "这一项不能选择不处理。",
+  "ask_not_found": "这个待办没有这个问题，请刷新后查看它现在的提问。",
   "draft_changed": "这份草稿已更新或不再待处理，请刷新后再试。",
   "draft_dismissed": "你已选择不处理这份草稿。要发送，请先撤销这个决定。",
   "draft_decision_question": "按任务进度起草的回复",

@@ -156,6 +156,26 @@ describe("NavRail", () => {
     short();
   });
 
+  it("highlights the pending jump while preserving the current scroll position marker", async () => {
+    const sc = scrollerWith(700, 600);
+    const row = document.createElement("div");
+    row.dataset.line = "seg:1";
+    row.append(document.createElement("div"));
+    sc.append(row);
+    let finish!: () => void;
+    const jump = new Promise<void>((resolve) => { finish = resolve; });
+    act(() => root.render(<NavRail ticks={[tick(1), tick(2)]} scroller={sc} onJump={() => jump} reset="example/pending" />));
+    await settle();
+
+    const target = host.querySelector<HTMLElement>('[data-tick="1"]')!;
+    const mark = target.querySelector<HTMLElement>("[data-nav-mark]")!;
+    act(() => target.click());
+    expect(mark.style.width).toBe(`${M.currentHoverWidth}px`);
+    expect(host.querySelector('[aria-current="true"]')?.getAttribute("data-tick")).toBe("0");
+    await act(async () => finish());
+    expect(mark.style.width).toBe(`${M.tickWidth}px`);
+  });
+
   it("measures nothing for a chat below the tick minimum", async () => {
     const sc = scrollerWith(1200, 600);
     act(() => root.render(

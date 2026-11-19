@@ -2,12 +2,24 @@ package hub
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
+
+func TestAgyPaneNoticeLocalization(t *testing.T) {
+	const key = "node-engine.agy_pane_integration"
+	notice := proto.Item{ID: "agy#0", Seq: 1, Role: "system", Kind: proto.KindNotice, Text: i18n.T(i18n.Default, key)}
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		got := localizedItems(lang, []proto.Item{notice})[0].Text
+		if got != i18n.T(lang, key) || !strings.Contains(got, "herdr integration install antigravity-cli") {
+			t.Errorf("%s: unexpected pane notice %q", lang, got)
+		}
+	}
+}
 
 // userLine is a transcript line with a user message saying s, as Claude Code writes it.
 func userLine(t *testing.T, s string) []proto.Item {

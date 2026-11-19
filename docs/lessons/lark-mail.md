@@ -39,6 +39,25 @@ Don't give the whole `LarkMessageRow` one accessibilityIdentifier on sending row
 
 When mainline hides the send button for an empty composer, attachment drafts still count as sendable content: photos / files alone should still show the button, it hides after the last attachment is removed, and it's disabled while attachments are being prepared. Existing text, quote, thread composer and read markers stay.
 
+## Versioned Inbox reply recovery (#9126)
+
+- No current suggestion or no receipt means unknown history, not proof of non-delivery. Preserve the existing coded
+  `delivered` / `retryable` distinction; only confirmed retryable non-delivery may send again. Enforce that in the
+  manager, not only by hiding a Web button.
+- Freeze the first confirmation's actual edited payload, client ID and source/target before I/O. Retry the same version
+  with that identity after reload. Never reuse its ID with changed text, and never let an equivalent proposal of the
+  edited text escape an unknown reservation through a new version.
+  Check both re-proposed and actually confirmed edits against historical unresolved operations, including after
+  intervening proposals. A display-history cap must not delete the last proof used by this guard; settle the result
+  of equivalent current aliases without clearing a different proposal or source.
+- Saving an empty mutation set is not proof of a durable reservation. A failed or missing store prevents outward work;
+  an interrupted reservation stays conservative after restart. Keep the send-success helper's local side effects under
+  the same version/attempt/source fence as completion; an outer restore check is too late if the helper already filed
+  the item or marked a newer card sent.
+- Deduplicate default Wrap up by explicit intent and incoming identity, not an arbitrary time window, component-local
+  busy state or changed metadata timestamps. User-authored different instructions remain a fresh handoff. Compare the
+  full action, conversation and target when reusing a waiting suggestion, not just its visible words.
+
 ## Messages and documents
 
 - An all-account mail search must fail when any account fails, even if another supplies results; otherwise older HTTP, tool and subscription clients accept an incomplete page as complete. Keep cancellation distinct, and do not put upstream error details or credentials into the aggregate error (#4462). Verify the actual callers with two independent loopback IMAP servers, including retry after repair and a healthy empty result.
@@ -181,3 +200,7 @@ Pinned chats on the home page and normal paging both need to be bound to the act
   not feed alone. That's also why the hub doesn't guess the account from the feed (when an old client opens another account's chat, the default account is used: better to fail to read than to send under the wrong identity).
 - Resource URLs (avatars, images, files) for added accounts come from the Lark gateway with `ol_account` already in them; the hub rewrites them to `/api/v1/lark/media/…?ol_account=N`, and passing that back unchanged is correct;
   when the App adds an account to such URLs, it must not overwrite the `ol_account` already there.
+
+## Group delivery is not permission to trigger (#10238)
+
+A platform's mention scope may coexist with broader message scopes. Enforce per-group mention-only policy before the bot's own settings commands as well as assistant handoff; a command reply is already an observable side effect. Match structured open IDs, fail closed while the bot identity is unknown, and read the policy after a queued message gets its turn. Keep omitted boolean edits distinct from false so older clients cannot silently loosen a saved policy. A strict first enrollment must not become the fallback home for unrelated requests.

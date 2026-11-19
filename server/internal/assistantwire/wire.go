@@ -319,6 +319,12 @@ type NotifyTodo struct {
 	// `response`. Left out by a hub from before them.
 	Options   []string `json:"options,omitempty"`
 	Responses []string `json:"responses,omitempty"`
+	// Ask is the decision's ask in the to-do's view (OwnerAsk.ID), which an answer from the notification names, and
+	// Lockscreen what its push may offer on the lock screen (OwnerAskLockscreen: answer, its options as actions;
+	// open_only, none, a tap opens it), from how risky answering it is (#10465). The hub forwards the options only
+	// with answer, and sends an older manager's push, which has neither, as before.
+	Ask        string `json:"ask,omitempty"`
+	Lockscreen string `json:"lockscreen,omitempty"`
 }
 
 // NotifyPush is the kind of the assistant's pushes.

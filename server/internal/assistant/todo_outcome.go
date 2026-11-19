@@ -396,7 +396,7 @@ func (s *Service) projectContextSlugs(ctx context.Context, machine, dir string) 
 	}
 	projects := e.ProjectsForWork(machine, dir)
 	if len(projects) == 0 {
-		return ""
+		return "", nil
 	}
 	// What extensions wrote for these projects (extension_context.go): asked once for all of them.
 	var slugs []string

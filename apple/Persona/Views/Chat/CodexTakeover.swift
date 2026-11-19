@@ -146,15 +146,15 @@ struct CodexTakeoverDialogs: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
         content
-            .confirmationDialog("Take over this Codex session?", isPresented: Binding(
+            .accessibleConfirmationDialog("Take over this Codex session?", isPresented: Binding(
                 get: { coordinator.needsTakeoverConfirmation }, set: { if !$0 { coordinator.pending = nil } }
-            ), titleVisibility: .visible) {
+            ), titleVisibility: .visible, hasCancel: true) {
                 Button("Take over", role: .destructive) { confirm() }
                 Button("Cancel", role: .cancel) { coordinator.pending = nil }
             } message: { Text("This will end the turn currently running in the terminal.") }
-            .confirmationDialog("Continue in a new session?", isPresented: Binding(
+            .accessibleConfirmationDialog("Continue in a new session?", isPresented: Binding(
                 get: { coordinator.needsContinuationConfirmation }, set: { if !$0 { coordinator.pending = nil } }
-            ), titleVisibility: .visible) {
+            ), titleVisibility: .visible, hasCancel: true) {
                 Button("Continue in a new session") { confirm() }
                 Button("Cancel", role: .cancel) { coordinator.pending = nil }
             } message: { Text(continuationMessage) }

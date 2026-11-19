@@ -2,5 +2,8 @@
   "archive_main": "メインチャットはアーカイブできません",
   "archive_background_supervisor": "バックグラウンド監督のチャットはアーカイブできません",
   "background_supervisor": "バックグラウンド監督",
-  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで"
+  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで",
+  "relay_delivery_failed": "メッセージを届けられませんでした",
+  "supervision_delivery_failed": "このチャットではタスクのフォローアップ指示を受け取れません。タスクを開いて最新の状態と報告を確認し、Claude Code または Codex の監督チャットでフォローアップしてください。",
+  "supervision_reviewer_required": "このタスクを始める前に、Claude Code または Codex の監督チャットを選んでください。"
 }

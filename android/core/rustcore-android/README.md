@@ -18,7 +18,11 @@ cd android && ./gradlew :core:rustcore:test :app:assembleDebug :core:rustcore-an
 ```
 
 `buildAndroidCore` declares Cargo.lock, the pinned toolchain, Rust sources/manifests/headers and target rlibs, the
-build script, and the NDK's clang/lld/ar/strip/readelf and sysroot as inputs. Standalone JVM tests do not require the NDK.
+build script, the cargo profile, the ABIs, and the NDK's clang/lld/ar/strip/readelf and sysroot as inputs; cargo's target
+directory is not one, so another checkout can take the result from the build cache. Standalone JVM tests do not require the NDK.
+Debug packages build with the `android-dev` cargo profile (cargo's unoptimised dev profile with line tables;
+`native/app-core/Cargo.toml`), and `-Ppersona.abis=arm64-v8a` (or `x86_64`) limits a debug build to one ABI.
+`buildAndroidReleaseCore` always builds both ABIs with the release profile.
 A second invocation with unchanged inputs must report it `UP-TO-DATE` (or `FROM-CACHE`), with no Cargo compilation.
 Both the symbol-retaining `build/native/symbols/<abi>/libpersona_core.so` and the stripped packaged `.so` under
 `build/native/jni/<abi>/` are build outputs; no compiled library is committed. The unstripped symbols and ELF reports
@@ -26,7 +30,9 @@ are separate output roots, so neither is packaged as another ABI.
 
 Every `LOAD` segment must report alignment `0x4000`. The App packages both libraries uncompressed and `zipalign -P 16`
 checks their 16 KB APK alignment. Kernel page size is a separate device property: ELF/APK alignment does not establish
-that a test ran on a 16 KB kernel. Produce a size report (raw, stripped, gzip and actual APK bytes per ABI) with:
+that a test ran on a 16 KB kernel. Produce a size report (raw, stripped, gzip and actual APK bytes per ABI) with the
+command below; it measures the debug package, whose unoptimised core is larger than the one release ships, so for
+shipped sizes point it at `build/native/releaseJni`, `build/native/releaseSymbols` and the release APK instead:
 
 ```sh
 python3 -I native/app-core/scripts/android-package-report.py \

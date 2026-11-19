@@ -141,9 +141,12 @@ describe("a session's start", () => {
     const launch: AgentLaunch = { id: "l1", machineId: "mac", cwd: "/code/app", launcher: "", text: "fix it", attachments: [], phase: "failed",
       error: "stopped on a question", uploaded: {}, startOpId: "o1", startPromptOpId: "o2", messageId: "m1",
       session: { machine_id: "mac", session_id: SID } as AgentLaunch["session"], shellWaiting: { code: "shell_waiting", ...args() } };
-    act(() => root.render(<StartingAgent launch={launch} />));
-    await flush();
-    expect(card()).not.toBeNull();
+    await act(async () => {
+      root.render(<StartingAgent launch={launch} />);
+      // The launch page resolves this already-imported card through React.lazy.
+      await import("./ShellQuestionCard");
+    });
+    await vi.waitFor(() => expect(card()).not.toBeNull());
     expect(buttons()).toHaveLength(3);
     // the row's own question wins: renewed after a retry in the kept tab
     state.sessions = { mac: [{ machine_id: "mac", session_id: SID, start_error_code: "shell_waiting",

@@ -115,6 +115,7 @@ var Features = []string{
 	"launcher_scope",           // a Persona-managed provider's share, scope_machines, delivery, own_service and machine_keys (docs/integrations/launchers.md "Device scope and on-demand delivery")
 	"file_inbox",               // POST /api/v1/machines/{mid}/files?dest=inbox: into the machine's receive folder, kept for good (docs/protocol/file-transfer.md)
 	"upload_attachment",        // POST /api/v1/machines/{mid}/files?dest=attachment: a chat attachment kept for good in the node's uploads/<date>/ (docs/protocol/protocol.md "Sending files", #8361)
+	"agent_message_hold",       // a message to an Agent whose computer is away is held and sent when it is back: 202 {"delivered":"later"}, undelivered on its row with computer, …/held/{msg} Retry / DELETE (#10661)
 	"file_transfer",            // POST/GET/DELETE /api/v1/files/transfer: computer to computer, run by the manager, file_transfer events (docs/protocol/file-transfer.md)
 	"task_push",                // Task.push on /api/v1/assistant/tasks: "Push when done", every run or only what a run sends (docs/assistant/assistant.md "Push when done")
 	"task_inbox",               // Task.inbox on /api/v1/assistant/tasks: "When done, put it in the Inbox", off / only if worth a look / every time (docs/assistant/assistant.md "Put it in the Inbox when done")

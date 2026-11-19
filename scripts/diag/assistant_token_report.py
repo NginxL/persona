@@ -84,11 +84,19 @@ def default_codex_files():
 
 
 def transcript_files(paths):
+    seen = set()
     for p in paths:
         if os.path.isdir(p):
-            yield from sorted(glob.glob(os.path.join(p, "**", "*.jsonl"), recursive=True))
+            candidates = sorted(glob.glob(os.path.join(p, "**", "*.jsonl"), recursive=True))
         elif os.path.isfile(p):
-            yield p
+            candidates = (p,)
+        else:
+            continue
+        for candidate in candidates:
+            resolved = os.path.realpath(candidate)
+            if resolved not in seen:
+                seen.add(resolved)
+                yield candidate
 
 
 def message_text(entry):

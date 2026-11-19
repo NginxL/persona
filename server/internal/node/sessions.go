@@ -214,7 +214,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			s.Title = opencodeTitle(a.Title)
 			n.mergeOpencodeRow(&s) // its conversation is the plugin's (opencode.go)
 		case a.Agent == cursorAgent || a.Agent == agyAgent:
-			// herdr drives the pane (agent.prompt, the keys); Persona does not read the conversation (workagent.go).
+			// Herdr drives the pane (agent.prompt, the keys). Agy can also read its verified conversation (workagent.go).
 		case otherAgent(a):
 			s.ReadOnlyReason = otherNoReader(a.Agent)
 		}

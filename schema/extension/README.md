@@ -390,6 +390,11 @@ stream's source may draw them. Its examples are `examples/View.v8-*.json`.
 UI version 9 (#9337) adds one field: a tile's `gauge` (`Gauge`: `ratio`, `unit`, `color`), `x-since: 9`, a ring with the tile's
 value in its centre. The hub's `downgrade9` (`server/internal/extension/ui_v9.go`) leaves it out for an older app and puts the unit,
 the percentage and the color on the tile instead. Its examples are `examples/View.v9-*.json`.
+UI version 10 (#9727) adds one component, `graph` (`GraphComponent`: `nodes`, `edges`, `layout`, `direction`, `selected`,
+`folded`): a canvas of nodes joined by edges, each node `GraphNode` with `id`, `title` and optional state, color, progress,
+group and action. The hub's `downgrade10` (`server/internal/extension/ui_v10.go`) draws an older app one indented row per
+visible node in reading order; a native stream's source may draw a graph too (`UIStreamItem` lists it), but its client
+never gets one, at 10 included: the hub draws it as those rows. Its examples are `examples/View.v10-*.json`.
 
 ## Adding a call
 

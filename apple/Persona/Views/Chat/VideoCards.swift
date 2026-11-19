@@ -26,7 +26,7 @@ struct AttachedFileCards: View {
                 if f.playable {
                     AttachedVideoCard(file: f, machine: scope?.machine)
                 } else {
-                    AttachedDocumentCard(file: f, open: openFile)
+                    AttachedDocumentCard(file: f, open: openFile?.open)
                 }
             }
             if files.count > Self.foldAt {

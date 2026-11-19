@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-Hans">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title>
+<!-- web/e2e/configuration-showcase.html: a fixture-only page that shows module settings exactly as the real
+     ConfigurationForm draws them (#9877, docs/web/web.md "Configuration forms"), opened on the Vite dev server and never
+     part of a build. The default view is three genuine-looking module documents over in-memory sources
+     (configuration-showcase-data.mjs); nothing is read from or written to real settings or storage, and the mock framing
+     stays out of the rendered settings view. ?scenario= selects a coverage case
+     (overview/default, slow, load-fail, reject, conflict, unconfirmed, contract, invalid, empty, unsupported); the
+     navigation is not drawn. The page checks its fixture documents with the real parser.
+     web/e2e/configuration-showcase.mjs drives and captures it. -->
+<style>
+  /* src/styles.css keeps e2e out of Tailwind's scan ("@source not \"../e2e\""), so a fixture-only utility would not
+     exist in the built CSS. The content width is fixture-scoped here, matching the settings column (Settings.tsx uses
+     max-w-[760px]); the page's other classes are app utilities the scan already generates. */
+  #app { max-width: 760px; margin-inline: auto; }
+</style>
+<body class="bg-page">
+<div id="app" class="px-5 py-6 sm:px-8"></div>
+<script type="module">
+  import "/src/styles.css";
+  import { initI18n } from "/src/i18n/index.ts";
+  import { applyLook } from "/src/ui/look.ts";
+  import { buildShowcase, shell } from "/e2e/configuration-showcase-data.mjs";
+
+  applyLook();
+  // The app's theme (index.html does this for the real app): the saved choice, else the system's scheme.
+  const savedTheme = (() => {
+    try {
+      return localStorage.getItem("persona.theme");
+    } catch {
+      return null;
+    }
+  })();
+  document.documentElement.classList.toggle("dark", savedTheme === "dark" || (savedTheme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches));
+  // The app's own language (catalog, buttons and messages), loaded before any module that says t().
+  const lang = await initI18n();
+  const [{ createElement }, { createRoot }, { ConfigurationForm }, { fieldValue, parseDocument }] = await Promise.all([
+    import("react"),
+    import("react-dom/client"),
+    import("/src/views/settings/configuration/ConfigurationForm.tsx"),
+    import("/src/lib/configuration/contract.ts"),
+  ]);
+
+  const s = shell(lang);
+  document.title = s.title;
+  const query = new URLSearchParams(location.search);
+  const { scenario, modules } = buildShowcase(query.get("scenario") ?? "default", lang);
+  const app = document.getElementById("app");
+  const mk = (tag, className, text) => {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+
+  app.append(mk("h1", "mb-4 px-1 text-[20px] font-semibold leading-tight text-ink", s.title));
+
+  // The real parser checks every document and effective value: a fixture this build can't read is a bug in the page,
+  // not something to discover while clicking. It draws only on that bug. The `invalid` coverage scenario deliberately
+  // holds unreadable saved values, so only its definitions are checked.
+  const allowInvalidValues = scenario === "invalid";
+  const problems = [];
+  for (const module of modules) {
+    try {
+      const { doc, writable } = parseDocument(module.document);
+      const expected = module.key !== "showcase-newer-version";
+      if (writable !== expected) problems.push(`${module.key}: writable=${writable}`);
+      for (const group of doc.groups) {
+        for (const field of group.fields) {
+          if (!allowInvalidValues && field.kind !== "unsupported" && fieldValue(doc, field) === undefined) problems.push(`${module.key}:${field.id}`);
+        }
+      }
+    } catch (error) {
+      problems.push(`${module.key}: ${error?.code ?? error}`);
+    }
+  }
+  if (problems.length) {
+    const problem = mk("p", "mb-5 rounded-card bg-surface px-4 py-2.5 text-[12.5px] leading-snug text-red shadow-card", `${s.fixtureProblem} (${problems.join(", ")})`);
+    problem.setAttribute("role", "alert");
+    problem.setAttribute("data-showcase-invalid", "");
+    app.append(problem);
+  }
+
+  const main = mk("main", "");
+  main.setAttribute("data-showcase-scenario", scenario);
+  for (const module of modules) {
+    const section = mk("section", "mb-6");
+    section.setAttribute("data-showcase-module", module.key);
+    const mount = mk("div", "");
+    mount.setAttribute("data-showcase-form", module.key);
+    section.append(mount);
+    main.append(section);
+    createRoot(mount).render(createElement(ConfigurationForm, { source: module.source }));
+  }
+  app.append(main);
+</script>

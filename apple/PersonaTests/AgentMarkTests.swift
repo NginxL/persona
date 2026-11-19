@@ -31,24 +31,24 @@ struct AgentMarkTests {
         let traex = AgentKind(Self.session(#","agent":"traex""#))
         #expect(traex.brand == nil && traex.letter == "T" && traex.name == "TRAEX")
         let dsh = AgentKind(Self.session(#","agent":"dsh","agent_label":"DSH""#))
-        #expect(dsh.brand == nil && dsh.letter == "D")
+        #expect(dsh.brand == Theme.Brand.dsh)
     }
 
     /// A Paseo provider that is neither Claude Code nor Codex (`agent` "paseo", #8144): named by its label, else its
     /// launcher, never the engine; a known provider (TRAE) draws its mark, any other its letter, never Claude's.
     @Test func aPaseoProviderIsNamedAndMarkedByItsProvider() {
         let grok = AgentKind(Self.session(#","agent":"paseo","agent_label":"Grok","launcher":"grok""#))
-        #expect(grok.brand == nil && grok.name == "Grok" && grok.letter == "G")
+        #expect(grok.brand == Theme.Brand.grok && grok.name == "Grok")
         // The node's fallback ("Paseo", the engine's name) and a row with no label: the launcher, Paseo's provider id.
         let engine = AgentKind(Self.session(#","agent":"paseo","agent_label":"Paseo","launcher":"grok""#))
-        #expect(engine.brand == nil && engine.name == "grok")
+        #expect(engine.brand == Theme.Brand.grok && engine.name == "grok")
         #expect(AgentKind(Self.session(#","agent":"paseo","launcher":"kimi""#)).name == "kimi")
         // TRAE by its label, or by its launcher when the row names only the engine.
         #expect(AgentKind(Self.session(#","agent":"paseo","agent_label":"Trae CLI","launcher":"traecli""#)).brand == Theme.Brand.trae)
         #expect(AgentKind(Self.session(#","agent":"paseo","agent_label":"Paseo","launcher":"traecli""#)).brand == Theme.Brand.trae)
-        // Another runtime's agent keeps its own label and letter; its launcher names no mark.
+        // A runtime's reported agent keeps its own mark even when its launcher names a different product.
         let dsh = AgentKind(Self.session(#","agent":"dsh","agent_label":"DSH","launcher":"trae""#))
-        #expect(dsh.brand == nil && dsh.name == "DSH")
+        #expect(dsh.brand == Theme.Brand.dsh && dsh.name == "DSH")
     }
 
     @Test func knownNamesMapToTheirMarks() {
@@ -58,7 +58,15 @@ struct AgentMarkTests {
         #expect(AgentKind.brand(named: "Codex") == Theme.Brand.openAI)
         // TRAEX is an in-house Codex fork, not TRAE; an unknown provider has no mark.
         #expect(AgentKind.brand(named: "TRAEX") == nil)
-        #expect(AgentKind.brand(named: "Grok") == nil)
+        #expect(AgentKind.brand(named: "Grok · Official") == Theme.Brand.grok)
+        #expect(AgentKind.brand(named: "Grok Build") == Theme.Brand.grok)
+        #expect(AgentKind.brand(named: "Google Antigravity") == Theme.Brand.agy)
+        #expect(AgentKind.brand(named: "Kimi CLI") == Theme.Brand.kimi)
+        #expect(AgentKind.brand(named: "GitHub Copilot CLI") == Theme.Brand.copilot)
+        #expect(AgentKind(Self.session(#","agent":"opencode""#)).brand == Theme.Brand.opencode)
+        #expect(AgentKind(Self.session(#","agent":"pi","agent_label":"My pi profile""#)).brand == Theme.Brand.pi)
+        #expect(AgentKind(Self.session(#","agent":"agy","launcher":"my-remote-launcher""#)).brand == Theme.Brand.agy)
+        #expect(AgentKind.brand(named: "Unknown Harness") == nil)
         #expect(AgentKind.brand(named: nil) == nil)
     }
 

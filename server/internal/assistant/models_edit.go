@@ -214,7 +214,7 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 			if provider.Status != "" {
 				return errors.New(provider.Status)
 			}
-			if !slices.ContainsFunc(provider.Models, func(m ModelChoice) bool { return m.ID == b.Model }) {
+			if !slices.ContainsFunc(provider.Models, func(m proto.ProviderModel) bool { return m.ID == b.Model }) {
 				return i18n.Err("assistant-models.err_extension_model")
 			}
 		}

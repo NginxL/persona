@@ -1,4 +1,5 @@
 {
+  "agy_pane_integration": "You can send messages and use the terminal. The conversation appears in Persona once herdr can identify it for this pane. If the integration isn’t installed yet, run herdr integration install antigravity-cli.",
   "paseo_unreachable": "Paseo is running, but Persona can’t connect to it: {reason}",
   "paseo_not_connected": "Paseo is running, but Persona still hasn’t connected to it",
   "paseo_not_connected_why": "Paseo is running, but Persona still hasn’t connected to it: {reason}",

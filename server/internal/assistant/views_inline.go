@@ -105,6 +105,13 @@ func (s *Service) registerInlineTurn(parent context.Context, r SessionRef) {
 	s.registerInlineViews(ctx, SessionItems{MachineID: r.MachineID, SessionID: r.SessionID, Items: result.Items})
 }
 
+// registerInlineTurnSettled re-runs registerInlineTurn after the turn settles so runtimes that flush their native
+// transcript after TurnEnded (replacing temporary live/unexported item ids with final persisted ids) still register
+// their final persona-view blocks idempotently.
+func (s *Service) registerInlineTurnSettled(ctx context.Context, machine, sid string) {
+	s.registerInlineTurn(ctx, SessionRef{MachineID: machine, SessionID: sid})
+}
+
 func (s *Service) conversationViewBlockKeys(ctx context.Context, conversation string) ([]string, error) {
 	st, ok := s.store().(inlineViewStore)
 	if !ok {

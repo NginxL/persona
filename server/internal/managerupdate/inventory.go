@@ -31,6 +31,13 @@ type IdleEvidence struct {
 type inventoryRead func(context.Context, nodeclient.UpdateInventoryTarget) (nodeclient.UpdateInventory, error)
 
 func (c *Controller) ReadIdleEvidence(ctx context.Context, p Plan, main, machine, uid string) (IdleEvidence, error) {
+	unassigned := main == "" && machine == "" && uid == ""
+	if p.Unassigned != unassigned {
+		return IdleEvidence{}, errors.New("inventory plan and explicit main/machine/UID empty state differ")
+	}
+	if (p.Main != "" || p.MachineID != "" || p.MachineUID != "") && (p.Main != main || p.MachineID != machine || p.MachineUID != uid) {
+		return IdleEvidence{}, errors.New("inventory plan and explicit main/machine/UID differ")
+	}
 	read := func(ctx context.Context, target nodeclient.UpdateInventoryTarget) (nodeclient.UpdateInventory, error) {
 		input, err := json.Marshal(target)
 		if err != nil {
@@ -59,8 +66,9 @@ func readIdleEvidence(ctx context.Context, manager, main, machine, uid string, a
 	out := IdleEvidence{Schema: 1, StartedAt: now().UTC()}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if manager == "" || main == "" || machine == "" || uid == "" {
-		return out, errors.New("explicit original main, machine and UID required")
+	unassigned := main == "" && machine == "" && uid == ""
+	if manager == "" || (!unassigned && (main == "" || machine == "" || uid == "")) {
+		return out, errors.New("explicit original main, machine and UID required, or all three deliberately empty")
 	}
 	var originalAuthority, originalInventory string
 	for i := 0; i < 2; i++ {
@@ -68,14 +76,19 @@ func readIdleEvidence(ctx context.Context, manager, main, machine, uid string, a
 		if err != nil {
 			return out, err
 		}
-		if a.ManagerID != manager || a.Main != main || a.MachineID != machine || !shaPattern.MatchString(a.Revision) {
+		if a.ManagerID != manager || a.Main != main || a.MachineID != machine || a.Unassigned != unassigned || !shaPattern.MatchString(a.Revision) {
 			return out, errors.New("persisted manager/main/machine identity conflicts")
 		}
 		if age := now().Sub(a.ObservedAt); age < -5*time.Second || age >= 30*time.Second {
 			return out, errors.New("authority read is stale or its clock conflicts")
 		}
 		target := nodeclient.UpdateInventoryTarget{Manager: manager, Main: main, Machine: machine, MachineUID: uid, AuthorityRevision: a.Revision}
-		inventory, err := read(ctx, target)
+		var inventory nodeclient.UpdateInventory
+		if unassigned {
+			inventory, err = emptyIdleInventory(target, now())
+		} else {
+			inventory, err = read(ctx, target)
+		}
 		if err != nil {
 			return out, err
 		}
@@ -95,7 +108,7 @@ func readIdleEvidence(ctx context.Context, manager, main, machine, uid string, a
 	if err != nil {
 		return out, err
 	}
-	if after.ManagerID != manager || after.Main != main || after.MachineID != machine || after.Revision != originalAuthority {
+	if after.ManagerID != manager || after.Main != main || after.MachineID != machine || after.Unassigned != unassigned || after.Revision != originalAuthority {
 		return out, errors.New("manager authority changed after final runtime read")
 	}
 	out.CompletedAt = now().UTC()
@@ -118,7 +131,39 @@ func readIdleEvidence(ctx context.Context, manager, main, machine, uid string, a
 	return out, nil
 }
 
+func emptyIdleInventory(target nodeclient.UpdateInventoryTarget, observed time.Time) (nodeclient.UpdateInventory, error) {
+	in := nodeclient.UpdateInventory{Schema: 1, Capability: nodeproto.ManagerUpdateInventory, Complete: true,
+		Target: target, Sources: map[string]string{"manager-authority": target.AuthorityRevision},
+		Rows: []nodeclient.UpdateActivity{}, CompletedAt: observed.UTC()}
+	revision, err := nodeclient.InventoryRevision(in)
+	if err != nil {
+		return nodeclient.UpdateInventory{}, err
+	}
+	in.Revision = revision
+	return in, nil
+}
+
+func validateEmptyIdleInventory(in nodeclient.UpdateInventory, target nodeclient.UpdateInventoryTarget, now time.Time) error {
+	source := in.Sources["manager-authority"]
+	if in.Schema != 1 || in.Capability != nodeproto.ManagerUpdateInventory || !in.Complete || in.Target != target ||
+		in.Instance != "" || in.Version != "" || !shaPattern.MatchString(in.Revision) || in.Rows == nil || len(in.Rows) != 0 ||
+		len(in.Sources) != 1 || !shaPattern.MatchString(source) || source != target.AuthorityRevision {
+		return errors.New("explicit empty manager authority or complete empty-runtime coverage unavailable")
+	}
+	if age := now.Sub(in.CompletedAt); age < -5*time.Second || age >= 30*time.Second {
+		return errors.New("empty-runtime evidence is stale or its clock conflicts")
+	}
+	computed, err := nodeclient.InventoryRevision(in)
+	if err != nil || computed != in.Revision {
+		return errors.New("empty-runtime payload conflicts with its revision")
+	}
+	return nil
+}
+
 func validateIdleInventory(in nodeclient.UpdateInventory, target nodeclient.UpdateInventoryTarget, now time.Time) error {
+	if target.Main == "" && target.Machine == "" && target.MachineUID == "" {
+		return validateEmptyIdleInventory(in, target, now)
+	}
 	if in.Schema != 1 || in.Capability != nodeproto.ManagerUpdateInventory || !in.Complete || in.Target != target || in.Instance == "" || !shaPattern.MatchString(in.Revision) || len(in.Sources) < 3 {
 		return errors.New("authoritative node inventory capability or complete coverage unavailable")
 	}

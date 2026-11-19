@@ -96,6 +96,17 @@ Observable differences from before:
 - With `assistant.external` (manager on another computer), that computer makes connections: its SSH config, tailcat key, `node --stdio` binary and node update packages are used;
   hub restart doesn't restart it (computers stay connected), but for the second or two before it reconnects to the bus, hub shows machines from hub.json as offline.
 
+### A dropped connection that resumes (#10663)
+
+A computer whose resident node announces `node_resume_v1` is not offline when its connection's transport ends (a relay
+ended, a link dropped, the address changed and pings went unanswered): for up to `nodeproto.ResumeWindowSeconds` (30 s)
+the manager keeps the connection and shows the computer as it was, its calls waiting rather than failing, and takes
+the connection back over a new transport on the same path (`devices/resume.go`; protocol.md "Resuming"). The node
+keeps it longer, `nodeproto.ResumeKeepSeconds` (60 s), since it may notice the drop first. Nothing is watched again
+and the apps see no change. Not resumed in that time, or refused (the node restarted), the connection
+ends as any does: the reconnect grace and offline below follow. The lines about the computer's connections log its
+drops, resumes, fall backs and the time to resume (`drops=… resumed=… fell_back=… recover=latest/longest`).
+
 ## Who handles computer events
 
 Computers belong to the manager, and so does everything they send: the hub's existing code moved unchanged into the manager (`server/internal/assistant/fleet*.go`, monitoring in `server/internal/devices/metrics.go`); the hub only forwards and delivers.

@@ -159,6 +159,22 @@ func (s *Service) originMadeMain(ctx context.Context, id string) error {
 	return err
 }
 
+// originNoted: the book has where conversation id on machine comes from, so this manager's assistant started it (the
+// start, or the backfill of one of its assistant rows). false while the book cannot be read.
+func (s *Service) originNoted(ctx context.Context, machine, id string) bool {
+	if id == "" {
+		return false
+	}
+	b := &s.origins
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.originsLocked(ctx) {
+		return false
+	}
+	o := b.m[id]
+	return o != nil && (o.MachineID == "" || o.MachineID == machine)
+}
+
 type shownOrigin struct{ origin, ref, machine, ext string }
 
 // conversationOrigins are the origins to show, by session id; false while they could not be read.

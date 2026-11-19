@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -47,7 +49,7 @@ func TestParseDeployedCommits(t *testing.T) {
 }
 
 // GitHub unreachable (the hub's machine has no way out): the deployed-commits file decides. The PR named in the running
-// hub's file: deployed. Not named: merged, not deployed, and GitHub is not asked again for a while; once a deploy
+// hub's file: deployed. Not named: held, and GitHub is not asked again for a while; once a deploy
 // brings a file that names it, deployed.
 func TestDeployedCommitsWithoutGitHub(t *testing.T) {
 	s, f, posts, _, forge := deployService(t)
@@ -60,7 +62,7 @@ func TestDeployedCommitsWithoutGitHub(t *testing.T) {
 		a := askOf(s, todo.ID)
 		return a != nil && !a.AcceptedAt.IsZero() && todoNow(s, todo.ID).Stage == "verify"
 	})
-	if forge.calls != 0 || verifyCards(posts()) != 0 {
+	if forge.calls != 1 || verifyCards(posts()) != 0 {
 		t.Fatalf("%d GitHub calls, %d cards", forge.calls, verifyCards(posts()))
 	}
 
@@ -72,7 +74,7 @@ func TestDeployedCommitsWithoutGitHub(t *testing.T) {
 	agentTurn(s2, f2, proto.StatusDone, deployedReply, 0)
 	waitFor(t, "held", func() bool { return todoNow(s2, todo2.ID).Delivery != nil })
 	got := todoNow(s2, todo2.ID)
-	if got.Delivery.State != deliveryMerged || got.Stage != "merge" || !strings.Contains(got.Delivery.Gate, "还没有这个 PR") {
+	if got.Delivery.State != deliveryPR || got.Stage != "review" || !strings.Contains(got.Delivery.Gate, "还没有这个 PR") {
 		t.Fatalf("%q %+v", got.Stage, got.Delivery)
 	}
 	if askOf(s2, todo2.ID) != nil {
@@ -101,7 +103,7 @@ func TestStaleDeployedCommitsIgnored(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 	waitFor(t, "held", func() bool { return todoNow(s, todo.ID).Delivery != nil })
-	if got := todoNow(s, todo.ID); got.Delivery.State != deliveryMerged || !strings.Contains(got.Delivery.Gate, "等确认部署") {
+	if got := todoNow(s, todo.ID); got.Delivery.State != deliveryPR || !strings.Contains(got.Delivery.Gate, "等确认部署") {
 		t.Fatalf("%+v", got.Delivery)
 	}
 }
@@ -146,7 +148,7 @@ func TestDeployedCommitsPRHeads(t *testing.T) {
 }
 
 // GitHub would say the PR is still open; the running hub's file names it by its head: deployed here, asked to verify
-// and verified by the supervising assistant, with GitHub never asked. A file that does not list the head is no evidence:
+// and verified by the supervising assistant. A file that does not list the head is no evidence:
 // held at the PR.
 func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
 	s, f, _, _, forge := deployService(t)
@@ -160,7 +162,7 @@ func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
 		a := askOf(s, todo.ID)
 		return a != nil && !a.AcceptedAt.IsZero() && todoNow(s, todo.ID).Stage == "verify"
 	})
-	if got := todoNow(s, todo.ID); got.Delivery != nil && got.Delivery.State != deliveryLive || forge.calls != 0 {
+	if got := todoNow(s, todo.ID); got.Delivery != nil && got.Delivery.State != deliveryLive || forge.calls != 1 {
 		t.Fatalf("%+v, %d GitHub calls", got.Delivery, forge.calls)
 	}
 
@@ -173,5 +175,34 @@ func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
 	waitFor(t, "held", func() bool { return todoNow(s2, todo2.ID).Delivery != nil })
 	if got := todoNow(s2, todo2.ID); got.Delivery.State != deliveryPR || got.Stage != "review" || askOf(s2, todo2.ID) != nil {
 		t.Fatalf("%q %+v", got.Stage, got.Delivery)
+	}
+}
+
+func TestCloseoutReportsLocalDeploymentAndUpstreamMergeIndependently(t *testing.T) {
+	for _, tc := range []struct {
+		name, merged, text string
+		forgeErr           error
+	}{
+		{"open", proto.CloseoutNo, "没合并，本机部署包含该 PR", nil},
+		{"unavailable", "", "合没合查不出，本机部署包含该 PR", errors.New("timeout")},
+		{"merged", proto.CloseoutYes, "已合并，本机部署包含该 PR", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _, _, forge := deployService(t)
+			forge.merged, forge.err = tc.merged == proto.CloseoutYes, tc.forgeErr
+			head := strings.Repeat("d", 40)
+			writeDeployed(t, s, oldHub, head+" local change", "# pr: 9 "+head)
+			var c proto.Closeout
+			s.checkCloseout(context.Background(), &c, []proto.WorkArtifact{{Kind: "pr", Ref: "https://github.com/o/r/pull/9"}})
+			if c.Checked == nil || c.Checked.Merged != tc.merged || c.Checked.Deployed != proto.CloseoutYes {
+				t.Fatalf("merge and deploy facts: %+v", c.Checked)
+			}
+			line := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{{Closeout: &prompts.SuperviseCloseout{
+				CheckedMerged: c.Checked.Merged, CheckedDeployed: c.Checked.Deployed, LocalDeployment: c.Checked.LocalDeployment,
+			}}}})
+			if !strings.Contains(line, tc.text) {
+				t.Errorf("want %q in supervision message: %s", tc.text, line)
+			}
+		})
 	}
 }

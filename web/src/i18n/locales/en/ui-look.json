@@ -23,5 +23,17 @@
   "small": "Small",
   "standard": "Standard",
   "large": "Large",
-  "swatch_label": "{name}, {origin}"
+  "swatch_label": "{name}, {origin}",
+  "font": "Font",
+  "font_sans": "Interface font",
+  "font_mono": "Code font",
+  "font_hint": "Saved in this browser. Terminals use the code font when reopened.",
+  "font_system_sans": "System UI",
+  "font_system_mono": "System Mono",
+  "font_custom": "Custom",
+  "font_family": "Installed family name",
+  "font_custom_label": "{kind}: custom family",
+  "font_invalid": "Enter one family name, without commas or CSS punctuation.",
+  "font_unavailable": "This font may be unavailable. Your choice is kept; fallback fonts still apply.",
+  "font_local": "Use one font installed on this computer. No fonts are downloaded."
 }

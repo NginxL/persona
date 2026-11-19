@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"net/http"
 	"slices"
 	"sort"
@@ -38,6 +39,15 @@ type fleetDevs struct {
 	confirmed   map[string]bool
 	// watched: the sessions an app has open (Watched), by machine and session.
 	watched map[[2]string]bool
+	// held: the owner's messages held for machines' Agents while their computer is away (HeldMessages), by machine and
+	// session; heldAsked and heldLang: how many times HeldMessages was called for a machine and in what language last
+	// (counted, not listed: the allocation tests decorate through it); heldActs: every HeldRetry / HeldDelete
+	// ("retry <session>/<message>"); heldErr: what those answer for a message they find.
+	held      map[string]map[string][]proto.UndeliveredMessage
+	heldAsked map[string]int
+	heldLang  map[string]i18n.Lang
+	heldActs  []string
+	heldErr   error
 }
 
 type fleetNode struct {
@@ -571,4 +581,49 @@ func (d *fleetDevs) watch(id, session string, on bool) {
 		d.watched = map[[2]string]bool{}
 	}
 	d.watched[[2]string{id, session}] = on
+}
+
+// HeldMessages are the messages the test holds for machine's Agents (held), as the devices' index answers them; the
+// calls are counted (heldAsked, heldLang).
+func (d *fleetDevs) HeldMessages(machine string, lang i18n.Lang) map[string][]proto.UndeliveredMessage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.heldAsked == nil {
+		d.heldAsked, d.heldLang = map[string]int{}, map[string]i18n.Lang{}
+	}
+	d.heldAsked[machine]++
+	d.heldLang[machine] = lang
+	var out map[string][]proto.UndeliveredMessage
+	for sid, list := range d.held[machine] {
+		if out == nil {
+			out = map[string][]proto.UndeliveredMessage{}
+		}
+		out[sid] = slices.Clone(list)
+	}
+	return out
+}
+
+func (d *fleetDevs) HeldRetry(_ context.Context, sid, msg string) (bool, error) {
+	return d.heldAct("retry", sid, msg)
+}
+
+func (d *fleetDevs) HeldDelete(_ context.Context, sid, msg string) (bool, error) {
+	return d.heldAct("delete", sid, msg)
+}
+
+// heldAct notes Retry or Delete (what) on held message msg of session sid, found on any machine or not; one found is
+// answered heldErr, and a Delete that succeeds takes it away.
+func (d *fleetDevs) heldAct(what, sid, msg string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.heldActs = append(d.heldActs, what+" "+sid+"/"+msg)
+	for _, bySession := range d.held {
+		if i := slices.IndexFunc(bySession[sid], func(m proto.UndeliveredMessage) bool { return m.ID == msg }); i >= 0 {
+			if what == "delete" && d.heldErr == nil {
+				bySession[sid] = slices.Delete(slices.Clone(bySession[sid]), i, i+1)
+			}
+			return true, d.heldErr
+		}
+	}
+	return false, nil
 }

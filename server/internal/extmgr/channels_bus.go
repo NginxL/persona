@@ -178,9 +178,19 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		}
 		msgType, content := feishubot.TypeText, feishubot.TextContent(a.Text)
 		if a.FullAnswer {
-			msgType, content, err = api.AnswerContent(ctx, a.Text)
+			msgType, content, err = h.feishuAnswerContent(ctx, api, a.ReplyTo, replyUUID, a.Text)
 			if err != nil {
 				return nil, err
+			}
+			current, settings := h.botAPI()
+			if !settings.SourceReportFullReply {
+				return nil, errBotSourceReply
+			}
+			if current != api {
+				// The bot restarted during the upload (new credentials, turned off and on, the group's
+				// center moved): a file key of the old client may not be usable. Failing for now lets
+				// the report try again with the current client.
+				return nil, errBotRestarted
 			}
 		}
 		if found && !h.useAISourceReply(a.ReplyTo, a.FullAnswer) {

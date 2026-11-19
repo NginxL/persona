@@ -43,7 +43,7 @@ func TestTaskTurnEndWithoutOutputIsInterrupted(t *testing.T) {
 		{name: "a reply", items: []proto.Item{prompt, {Kind: proto.KindToolUse, Role: "assistant", ToolName: "Edit"},
 			{Kind: proto.KindText, Role: "assistant", Text: "修好了，提了 https://github.com/o/r/pull/901"}},
 			state: "done", summary: "修好了，提了 https://github.com/o/r/pull/901",
-			notice: []string{"做完了，等你验收", "修好了"}, judged: true},
+			notice: []string{"待逐项复核，不代表完成", "修好了"}, judged: true},
 		{name: "a model API error", items: []proto.Item{prompt}, turnError: "API Error: 529 overloaded",
 			state: "interrupted", summary: interruptedSummary, errText: "API Error: 529 overloaded",
 			notice: []string{"被模型服务出错打断了", "529 overloaded"}},

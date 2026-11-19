@@ -27,6 +27,12 @@ type Input struct {
 	Loc *time.Location `json:"-"`
 }
 
+// FeedKinds are the kinds of feed items the timeline reads (Derive skips the others), for a reader of the stores to
+// ask for: never message, a card about an inbox item.
+func FeedKinds() []string {
+	return []string{feedRouted, feedReceipt, feedAnswered, feedTask, feedReport, feedReview}
+}
+
 // Todo is the part of a listed to-do the timeline reads.
 type Todo struct {
 	ID          string     `json:"id"`

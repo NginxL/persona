@@ -69693,6 +69693,29 @@
       },
       "extractionState" : "manual"
     },
+    "Fit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全体を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示全部"
+          }
+        }
+      }
+    },
     "Fix Unhelpful Session Names" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69898,6 +69921,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Fold" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "折りたたむ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "折叠"
+          }
+        }
+      }
     },
     "Fold background rounds" : {
       "extractionState" : "manual",
@@ -73775,6 +73821,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "授予时间"
+          }
+        }
+      }
+    },
+    "Graph" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Graph"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グラフ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关系图"
           }
         }
       }
@@ -115620,6 +115689,29 @@
         }
       }
     },
+    "Open Graph Full Screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Graph Full Screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グラフをフルスクリーンで開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全屏打开关系图"
+          }
+        }
+      }
+    },
     "Open Knowledge Selection" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -148373,6 +148465,29 @@
         }
       }
     },
+    "Show %lld hidden" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show %1$lld hidden"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 件の非表示項目を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示隐藏的 %1$lld 项"
+          }
+        }
+      }
+    },
     "Show %lld idle agents" : {
       "localizations" : {
         "en" : {
@@ -173495,6 +173610,29 @@
         }
       }
     },
+    "This Agent has stopped. You can put this off or dismiss it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Agent has stopped. You can put this off or dismiss it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このエージェントは停止しています。あとで対応するか、このまま閉じることができます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Agent 已停止。你可以稍后再说，或者不用管它。"
+          }
+        }
+      }
+    },
     "This Agent stopped before it left any messages." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -186079,6 +186217,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "会覆盖未提交的改动：先提交或收起这些文件"
+          }
+        }
+      }
+    },
+    "Under %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Under %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上位：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上级：%1$@"
           }
         }
       }
@@ -201401,6 +201562,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Zoom Out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom Out"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "縮小"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缩小"
+          }
+        }
+      }
     },
     "Zoom in" : {
       "localizations" : {

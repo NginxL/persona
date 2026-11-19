@@ -19,6 +19,20 @@ func fakeClaudeHome(t *testing.T, script string) {
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("no zsh")
 	}
+	fakeClaudeHomeFiles(t, script)
+}
+
+// fakeClaudeHomeBash uses the assistant's production bash fallback for a regression that must execute without zsh.
+func fakeClaudeHomeBash(t *testing.T, script string) {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Fatalf("no bash: %v", err)
+	}
+	fakeClaudeHomeFiles(t, script)
+}
+
+func fakeClaudeHomeFiles(t *testing.T, script string) {
+	t.Helper()
 	home := t.TempDir()
 	bin := filepath.Join(home, "bin")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
@@ -28,6 +42,7 @@ func fakeClaudeHome(t *testing.T, script string) {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(filepath.Join(home, ".zshrc"), nil, 0o600)
+	_ = os.WriteFile(filepath.Join(home, ".bashrc"), nil, 0o600)
 	// The fake claude is meant to work, so mark its first-run setup finished: the launcher check's onboarding gate
 	// (claudeonboarding.go) otherwise stops before it ever runs.
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600); err != nil {

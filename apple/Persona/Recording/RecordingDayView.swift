@@ -62,14 +62,14 @@ struct RecordingDayView: View {
         .navigationDestination(item: $transcriptAt) { focus in
             RecordingDayTranscriptView(id: id, timeZone: focus.timeZone, focus: focus.at)
         }
-        .confirmationDialog("Delete This Recording?", isPresented: $deleting, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete This Recording?", isPresented: $deleting, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { delete() }
         } message: {
             Text(watchRecordsThisDay
                  ? String(localized: "All-day recording stops on your Apple Watch, and today's audio and text are deleted from it and this iPhone now. Its text in Knowledge is removed after sync succeeds.")
                  : String(localized: "The day's audio and text are deleted from this iPhone and your Apple Watch now. Its text in Knowledge is removed after sync succeeds."))
         }
-        .confirmationDialog("Erase the last 10 minutes?", isPresented: $erasing, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Erase the last 10 minutes?", isPresented: $erasing, titleVisibility: .visible) {
             Button("Erase", role: .destructive) { Task { await eraseRecent() } }
         } message: {
             Text("What was said in the last 10 minutes is deleted from this iPhone and your Apple Watch now, and from Knowledge after sync succeeds.")

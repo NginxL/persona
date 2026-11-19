@@ -246,6 +246,8 @@ internal object ExtensionViewText {
         // UI version 6 (#5464)
         "image" -> item.src != null && !item.alt.isNullOrBlank()
         "grid", "carousel" -> item.tiles.orEmpty().any { it.title.isNotBlank() }
+        // UI version 10 (#9727): the shared layout needs at least one node.
+        "graph" -> !item.nodes.isNullOrEmpty()
         else -> false
     }
 

@@ -38,16 +38,20 @@ type BotChat struct {
 	ChatID string `json:"chat_id"`
 	Name   string `json:"name,omitempty"` // a label the app may set; the command in the chat leaves it empty
 	// Home marks the home topic group (#6146): where a request from a group that is not opted in opens its topic. At
-	// most one chat has it; with none marked, the first one opted in is the home (homeChat).
-	Home bool      `json:"home,omitempty"`
-	At   time.Time `json:"at"`
+	// most one chat has it; with none marked, the first legacy enrollment is the home (homeChat).
+	Home                bool `json:"home,omitempty"`
+	RequireOwnerMention bool `json:"require_owner_mention,omitempty"`
+	// Strict enrollments never acquire an implicit home, even after their policy is reversed.
+	ExplicitHomeOnly bool      `json:"explicit_home_only,omitempty"`
+	At               time.Time `json:"at"`
 }
 
 type botChatView struct {
-	ChatID  string `json:"chat_id"`
-	Name    string `json:"name,omitempty"`
-	AddedAt int64  `json:"added_at"`
-	Home    bool   `json:"home,omitempty"` // the home topic group, marked or by being the first
+	ChatID              string `json:"chat_id"`
+	Name                string `json:"name,omitempty"`
+	AddedAt             int64  `json:"added_at"`
+	Home                bool   `json:"home,omitempty"` // the effective home topic group
+	RequireOwnerMention bool   `json:"require_owner_mention"`
 }
 
 // BotAISource is a message the hub took as the owner's "@bot /ai …" in a group chat that is not opted in (#6146).
@@ -78,15 +82,17 @@ func (s FeishuBotSettings) topicChat(chatID string) bool {
 	return chatID != "" && slices.ContainsFunc(s.TopicChats, func(c BotChat) bool { return c.ChatID == chatID })
 }
 
-// homeChat is the home topic group: the one marked home, else the first one opted in; "" while none is opted in.
+// homeChat uses an explicit home, else the first legacy enrollment. A strict enrollment alone never redirects other groups.
 func (s FeishuBotSettings) homeChat() string {
 	for _, c := range s.TopicChats {
 		if c.Home {
 			return c.ChatID
 		}
 	}
-	if len(s.TopicChats) > 0 {
-		return s.TopicChats[0].ChatID
+	for _, c := range s.TopicChats {
+		if !c.ExplicitHomeOnly {
+			return c.ChatID
+		}
 	}
 	return ""
 }
@@ -150,7 +156,7 @@ func (h *Manager) topicChatsPossible(ctx context.Context, appID *string) error {
 // setTopicChats replaces the owner's list (PUT /api/v1/bots/feishu): the chats that stay keep the time they were
 // added, new ones get now. keepHome: the request said nothing about the home group, so the one the list had stays
 // (when it is still in the list). A bot with no owner has no list to keep.
-func (h *Manager) setTopicChats(ctx context.Context, want []BotChat, keepHome bool) error {
+func (h *Manager) setTopicChats(ctx context.Context, want []BotChat, keepHome bool, mentionEdits map[string]bool) error {
 	b := &h.bots
 	b.mu.Lock()
 	h.loadBotsLocked(ctx)
@@ -167,11 +173,20 @@ func (h *Manager) setTopicChats(ctx context.Context, want []BotChat, keepHome bo
 	for _, c := range want {
 		c.ChatID, c.Name = strings.TrimSpace(c.ChatID), strings.TrimSpace(c.Name)
 		c.At = b.clock().UTC()
-		if i := slices.IndexFunc(before, func(o BotChat) bool { return o.ChatID == c.ChatID }); i >= 0 {
+		existing := slices.IndexFunc(before, func(o BotChat) bool { return o.ChatID == c.ChatID })
+		if i := existing; i >= 0 {
 			c.At = before[i].At
+			c.RequireOwnerMention = before[i].RequireOwnerMention
+			c.ExplicitHomeOnly = before[i].ExplicitHomeOnly
 			if keepHome {
 				c.Home = before[i].Home
 			}
+		}
+		if required, ok := mentionEdits[c.ChatID]; ok {
+			c.RequireOwnerMention = required
+		}
+		if existing < 0 {
+			c.ExplicitHomeOnly = c.RequireOwnerMention
 		}
 		next = append(next, c)
 	}
@@ -181,7 +196,11 @@ func (h *Manager) setTopicChats(ctx context.Context, want []BotChat, keepHome bo
 	}
 	b.set.TopicChats = next
 	if len(records) > 0 || !slices.EqualFunc(before, next, func(a, b BotChat) bool { return a == b }) {
-		h.saveBotSettingsLocked()
+		if err := h.saveBotSettingsLocked(); err != nil {
+			b.set.TopicChats = before
+			b.mu.Unlock()
+			return err
+		}
 	}
 	b.mu.Unlock()
 	h.auditBot(ctx, records...)
@@ -270,6 +289,13 @@ func (h *Manager) botGroupMessage(api *feishubot.Client, set FeishuBotSettings, 
 	msg := ev.Message
 	if set.Owner == nil || ev.Sender.SenderID.OpenID != set.Owner.OpenID || msg.ChatID == "" {
 		return // not paired, or not the owner: in a group anyone could write to the owner's Persona
+	}
+	// Apply the group's current policy before settings commands or any topic side effect.
+	if i := slices.IndexFunc(set.TopicChats, func(c BotChat) bool { return c.ChatID == msg.ChatID }); i >= 0 && set.TopicChats[i].RequireOwnerMention {
+		botID := h.botOpenID(api)
+		if botID == "" || !slices.ContainsFunc(msg.Mentions, func(m feishubot.Mention) bool { return m.ID.OpenID == botID }) {
+			return
+		}
 	}
 	if msg.MessageType == "text" || msg.MessageType == "post" {
 		content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)

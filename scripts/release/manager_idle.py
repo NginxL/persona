@@ -85,6 +85,9 @@ def collect(root, target, api, require_idle=True, clock=time.monotonic, identity
     read never receives a fresh timestamp or digest.
     """
     started = clock()
+    target_empty = target['main'] == '' and target['machine_id'] == ''
+    if not target_empty and (not target['main'] or not target['machine_id']):
+        raise ValueError('Manager main and machine must be populated together or explicitly empty together')
 
     def read(path):
         if clock() - started >= MAX_ACQUISITION_SECONDS:
@@ -109,12 +112,24 @@ def collect(root, target, api, require_idle=True, clock=time.monotonic, identity
             raise SnapshotPending('Exact independent manager is reconnecting')
         profile = read('assistant?' + urlencode({'manager': mid, 'archived': 'true'}))
         for field, expected in (('manager', mid), ('main', target['main']), ('machine_id', target['machine_id'])):
+            if target_empty and field != 'manager':
+                if profile.get(field) not in (None, ''):
+                    raise ValueError('Empty manager acquired a main or machine assignment')
+                continue
             if not profile.get(field):
                 raise SnapshotPending('Scoped assistant identity has not resynced')
             if profile[field] != expected:
                 raise ValueError('Scoped assistant identity conflicts with the original target')
+        if target_empty and _rows(profile, 'conversations'):
+            raise ValueError('Empty manager has conversation or activity state')
         machines = _rows(read('machines'), 'machines')
         owned = [m for m in machines if m.get('manager') == mid]
+        if target_empty:
+            if owned:
+                raise ValueError('Empty manager acquired an owned machine')
+            identity = dict(manager=mid, main='', machine_id='', machines=[])
+            revisions = {'assistant': _coverage(profile), 'machines': {}}
+            return manager, identity, [], revisions
         ids = [m.get('id') for m in owned]
         if not owned or any(not i for i in ids) or len(set(ids)) != len(ids):
             raise ValueError('Owned machine inventory is absent or ambiguous')

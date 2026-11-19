@@ -65,7 +65,10 @@ class AgentMarkShotsTest {
             slotName = "3", lastText = "要跑测试吗？", updatedAt = ago(6), paneId = "w1:p3", agent = "trae", agentSurface = "cli"),
         Session("mac", "s4", title = "amp 的一个会话", cwd = "/code/app", state = "unread", spaceId = "w1", spaceName = "app",
             slotName = "4", lastText = "好的", updatedAt = ago(30), paneId = "w1:p4", agent = "amp"),
-    )
+    ) + listOf("Grok" to "grok", "Antigravity CLI" to "agy", "OpenCode" to "opencode").mapIndexed { index, (name, agent) ->
+        Session("mac", "mark-$agent", title = name, cwd = "/code/app", state = "unread", spaceId = "w1", spaceName = "app",
+            agent = agent, agentLabelHint = name, updatedAt = ago(8L + index))
+    }
 
     private class Connection : HubConnection {
         override val state = MutableStateFlow(ConnectionState.Online)
@@ -116,7 +119,7 @@ class AgentMarkShotsTest {
         var dark by mutableStateOf(false)
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
-                Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
+                Box(Modifier.testTag("shot").width(400.dp).height(1100.dp).background(PersonaTheme.palette.background)) {
                     AgentsScreen(model, Nowhere, AgentsMetadata())
                 }
             }
@@ -130,7 +133,7 @@ class AgentMarkShotsTest {
                 val list = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
                 val name = "marks-${if (compact) "compact" else "list"}-${s.name.lowercase()}-${if (d) "dark" else "light"}.png"
                 File(out(), name).outputStream().use { assertTrue(list.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-                for (said in listOf("Claude Code（命令行版）", "Codex（桌面版）", "TRAE（命令行版）", "amp")) {
+                for (said in listOf("Claude Code（命令行版）", "Codex（桌面版）", "TRAE（命令行版）", "amp", "Grok", "Antigravity CLI", "OpenCode")) {
                     assertEquals("$said in $s ${if (d) "dark" else "light"} ${if (compact) "compact" else "list"}", 1,
                         rule.onAllNodesWithContentDescription(said, useUnmergedTree = true).fetchSemanticsNodes().size)
                 }

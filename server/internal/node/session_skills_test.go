@@ -15,6 +15,7 @@ import (
 )
 
 func TestOrdinaryClaudeSkillsCatalogAndSend(t *testing.T) {
+	fakeClaudeManagedSettings(t)
 	probedLaunchers(t, map[string]string{"claude": "claude"})
 	withSubmitGrace(t, 50*time.Millisecond)
 	n, o, _ := orcaSession(t)

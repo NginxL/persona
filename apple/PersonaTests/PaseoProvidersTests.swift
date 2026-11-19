@@ -99,9 +99,9 @@ import Testing
         #expect(!dsh.namesOnlyEngine && dsh.agentName(session: row) == "DSH")
     }
 
-    @Test func theShareCardDrawsAProvidersLetterNotClaudesMark() {
-        #expect(AgentKind.brand(named: "Grok") == nil)
-        #expect(AgentKind(brand: nil, name: "Grok", surface: nil).letter == "G")
+    @Test func theShareCardUsesAProvidersMarkOrLetter() {
+        #expect(AgentKind.brand(named: "Grok") == Theme.Brand.grok)
+        #expect(AgentKind(brand: nil, name: "Example", surface: nil).letter == "E")
         #expect(AgentKind.brand(named: "Claude") == Theme.Brand.claude)
         #expect(AgentKind.brand(named: "Codex") == Theme.Brand.openAI)
     }

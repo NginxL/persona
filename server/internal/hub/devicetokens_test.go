@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
@@ -54,9 +55,12 @@ func (s *tokenStore) DeviceTokens(context.Context) ([]db.DeviceToken, error) {
 func (s *tokenStore) RevokeDeviceToken(_ context.Context, id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, t := range s.rows {
+	for hash, t := range s.rows {
 		if t.ID == id && !s.rev[id] {
 			s.rev[id] = true
+			now := time.Now()
+			t.RevokedAt = &now
+			s.rows[hash] = t
 			return true, nil
 		}
 	}
@@ -64,6 +68,66 @@ func (s *tokenStore) RevokeDeviceToken(_ context.Context, id string) (bool, erro
 }
 
 func (s *tokenStore) TouchDeviceToken(context.Context, string) error { return nil }
+
+func TestDeviceRevocationReachesEveryManager(t *testing.T) {
+	h := newTestHub(t)
+	h.store = &tokenStore{rows: map[string]db.DeviceToken{
+		"first": {ID: "dev_first"},
+		"other": {ID: "dev_other"},
+	}, rev: map[string]bool{}}
+	h.bus.idents = &memIdents{}
+	mux := http.NewServeMux()
+	h.busRoutes(mux)
+	h.tokenRoutes(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	events := make(chan bus.DeviceCredential, 2)
+	for _, id := range []string{"assistant", "another-manager"} {
+		m := connectGuardManager(t, h, srv.URL, id, func(string, json.RawMessage) (any, error) { return map[string]any{}, nil })
+		m.mu.Lock()
+		m.onEvent = func(event string, raw json.RawMessage) {
+			if event == bus.EventCredentialRevoked {
+				var p bus.DeviceCredential
+				if err := json.Unmarshal(raw, &p); err != nil {
+					t.Error(err)
+				}
+				events <- p
+			}
+		}
+		m.mu.Unlock()
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/auth/tokens/dev_first", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("sign out: %d %s", w.Code, w.Body)
+	}
+	for range 2 {
+		select {
+		case p := <-events:
+			if p.ID != "dev_first" {
+				t.Fatalf("revoked credential: %+v", p)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a manager missed the revocation event")
+		}
+	}
+
+	// A fresh hub has no in-memory revocation and can still answer a manager that missed the event.
+	fresh := newTestHub(t)
+	fresh.store = h.store
+	fresh.bus.idents = &memIdents{}
+	freshMux := http.NewServeMux()
+	fresh.busRoutes(freshMux)
+	freshSrv := httptest.NewServer(freshMux)
+	t.Cleanup(freshSrv.Close)
+	m := connectGuardManager(t, fresh, freshSrv.URL, "assistant", func(string, json.RawMessage) (any, error) { return map[string]any{}, nil })
+	for credential, want := range map[string]bool{"dev_first": true, "dev_other": false} {
+		var status bus.CredentialStatus
+		if err := m.call(t, bus.MethodCredentialRevoked, bus.DeviceCredential{ID: credential}, &status); err != nil || status.Revoked != want {
+			t.Fatalf("status for %s: %+v, %v", credential, status, err)
+		}
+	}
+}
 
 // pausedTokenStore returns the snapshot read before revocation only after the test releases it.
 type pausedTokenStore struct {

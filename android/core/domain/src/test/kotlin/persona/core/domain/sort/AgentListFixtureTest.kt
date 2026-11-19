@@ -14,7 +14,7 @@ import org.junit.runners.Parameterized
 class AgentListFixtureTest internal constructor(private val fixture: ListFixture) {
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun cases(): List<Array<Any>> = listFixtures("sort")
+        fun cases(): List<Array<Any>> = listFixtures("spec/fixtures/sort")
     }
 
     @Test fun matchesExpected() {

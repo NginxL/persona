@@ -68,8 +68,8 @@ func TestFoldWorkFoldsNarrationWithoutCallingItThinking(t *testing.T) {
 		t.Fatalf("assistant narration is not Reasoning: %+v", fo)
 	}
 	wire, err := json.Marshal(run[0])
-	if err != nil || strings.Contains(string(wire), "narration") || !strings.Contains(string(wire), `"kind":"text"`) {
-		t.Fatalf("narration is internal only; the wire is ordinary text: %s (%v)", wire, err)
+	if err != nil || !strings.Contains(string(wire), `"narration":true`) || !strings.Contains(string(wire), `"kind":"text"`) {
+		t.Fatalf("unfolded commentary keeps its text kind and narration marker: %s (%v)", wire, err)
 	}
 }
 

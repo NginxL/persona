@@ -251,6 +251,93 @@ func TestMCPToolSchemasHaveNoEmptyEnum(t *testing.T) {
 	}
 }
 
+// Strict JSON Schema model providers reject properties whose type is only implied by enum, const, nested structure
+// or a composition. A reference is the explicit exception: its target is checked in $defs. Check every embedded tool,
+// including tools offered only in specialized conversations.
+func TestMCPToolSchemasDeclarePropertyTypes(t *testing.T) {
+	for _, name := range ToolNames() {
+		var schema any
+		if err := json.Unmarshal(Tool(name).InputSchema, &schema); err != nil {
+			t.Fatalf("%s: bad JSON schema: %v", name, err)
+		}
+		for _, bad := range missingSchemaTypes(schema, name, false) {
+			t.Errorf("%s", bad)
+		}
+	}
+	var sample any
+	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"bad":{"enum":["x"]},"nested":{"oneOf":[{"properties":{"kind":{"const":"x"}}}]}}}`), &sample)
+	if got := missingSchemaTypes(sample, "sample", false); !slices.Equal(got, []string{
+		"sample.properties.bad: type is not defined",
+		"sample.properties.nested: type is not defined",
+		"sample.properties.nested.oneOf[0]: type is not defined",
+		"sample.properties.nested.oneOf[0].properties.kind: type is not defined",
+	}) {
+		t.Fatalf("missingSchemaTypes(sample) = %v", got)
+	}
+}
+
+func missingSchemaTypes(node any, path string, requireType bool) []string {
+	obj, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	_, hasType := obj["type"]
+	_, hasProperties := obj["properties"]
+	_, hasItems := obj["items"]
+	_, hasEnum := obj["enum"]
+	_, hasConst := obj["const"]
+	_, hasRef := obj["$ref"]
+	if !hasType && (requireType || hasProperties || hasItems || hasEnum || hasConst) &&
+		(!hasRef || hasProperties || hasItems || hasEnum || hasConst) {
+		out = append(out, path+": type is not defined")
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v := obj[k]
+		switch k {
+		case "enum", "const":
+			continue
+		case "properties", "$defs", "definitions", "patternProperties", "dependentSchemas":
+			children, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			childKeys := make([]string, 0, len(children))
+			for ck := range children {
+				childKeys = append(childKeys, ck)
+			}
+			slices.Sort(childKeys)
+			for _, ck := range childKeys {
+				out = append(out, missingSchemaTypes(children[ck], path+"."+k+"."+ck, k == "properties")...)
+			}
+		case "items":
+			switch items := v.(type) {
+			case []any:
+				for i, item := range items {
+					out = append(out, missingSchemaTypes(item, fmt.Sprintf("%s.items[%d]", path, i), true)...)
+				}
+			default:
+				out = append(out, missingSchemaTypes(items, path+".items", true)...)
+			}
+		default:
+			switch v := v.(type) {
+			case map[string]any:
+				out = append(out, missingSchemaTypes(v, path+"."+k, false)...)
+			case []any:
+				for i, item := range v {
+					out = append(out, missingSchemaTypes(item, fmt.Sprintf("%s.%s[%d]", path, k, i), false)...)
+				}
+			}
+		}
+	}
+	return out
+}
+
 func emptySchemaEnums(node any, path string) []string {
 	obj, ok := node.(map[string]any)
 	if !ok {

@@ -252,6 +252,7 @@ internal fun KnowledgeDetail.entry(): KnowledgeEntry {
     val extra = when (kind) {
         KnowledgeKind.Projects.wire -> "${meta.string("kind").ifBlank { "short" }} · ${meta.string("status").ifBlank { "active" }}"
         KnowledgeKind.Recordings.wire -> meta.string("device")
+        KnowledgeKind.Topics.wire -> points?.size?.toString().orEmpty()
         else -> meta.string("kind")
     }
     // A recording lists as when it was made, as the hub's list does.

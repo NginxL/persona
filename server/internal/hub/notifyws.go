@@ -128,10 +128,11 @@ func replyKey(sessionID, text, given string) string {
 }
 
 // notifyDecide pushes a to-do whose conclusion waits for the owner's decision and recommends an option (#2056) to the
-// devices that take "needs you" pushes: category TODO_DECIDE, whose OK takes the recommendation (decidePayloadIn). On
-// the WebSocket it is an "assistant" notify carrying the same `todo`: a client that does not know it shows a plain
-// notification. Nothing finished: the extensions hear no agent.finished. One collapse id a to-do: a later round's push
-// takes the place of the earlier one, whose OK could only answer "already handled".
+// devices that take "needs you" pushes: category TODO_DECIDE, whose OK takes the recommendation, or TODO_DECIDE_OPEN,
+// with no action, when the manager says open_only (decidePayloadIn). On the WebSocket it is an "assistant" notify
+// carrying the same `todo`: a client that does not know it shows a plain notification. Nothing finished: the
+// extensions hear no agent.finished. One collapse id a to-do: a later round's push takes the place of the earlier one,
+// whose OK could only answer "already handled".
 func (h *Hub) notifyDecide(owner, machineID, machine, sessionID, title, text string, todo assistantwire.NotifyTodo) {
 	build := func(i18n.Lang) map[string]any {
 		return decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
@@ -194,8 +195,9 @@ func (h *Hub) notifyInteractionAt(owner string, ix proto.Interaction, machine st
 // one that asked for it: a device that turned that manager's pushes off (NotifyPrefs.MutedManagers) gets none, as with
 // its push (Pusher.sendFrom); "" is the hub's own, for every device wants takes. Returns the selected count and the
 // count of capable connections before preferences are applied, each with the browsers its Web Push went to (or could
-// go to); neither is a client delivery receipt. A device without a push route and without a ws_notify socket now keeps
-// what its settings take for its next connection (notifyring.go): kept counts those, apart from selected.
+// go to); neither is a client delivery receipt. A device without a push route keeps what its settings take for its
+// next connection when no ws_notify socket accepts it (notifyring.go). kept counts those devices; a rejected socket
+// still counts as selected.
 func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(NotifyPrefs) bool, rule quietRule, required ...string) wsReach {
 	msgs := map[i18n.Lang]map[string]any{}
 	msgIn := func(l i18n.Lang) map[string]any {
@@ -250,12 +252,11 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 	var reach wsReach
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	live := map[string]bool{} // the devices with a ws_notify socket now
+	live := map[string]bool{} // devices whose ws_notify socket accepted this event
 	for c := range h.clients {
 		if !c.has("ws_notify") {
 			continue
 		}
-		live[c.device] = true
 		if len(required) > 0 && !c.has(required[0]) {
 			continue
 		}
@@ -264,8 +265,8 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 		if !ok {
 			continue
 		}
-		if b := msgFor(c.lang(), quiet); b != nil {
-			c.queue(b)
+		if b := msgFor(c.lang(), quiet); b != nil && c.queue(b) {
+			live[c.device] = true
 		}
 		reach.selected++
 	}
@@ -276,8 +277,8 @@ func (h *Hub) notifyWSFrom(manager, kind string, build localized, wants func(Not
 	return reach
 }
 
-// wsReach is where notifyWSFrom put one notify event: selected and reachable as it says, and kept, the offline
-// devices that keep it for their next connection.
+// wsReach is where notifyWSFrom put one notify event: selected and reachable as it says, and kept, the devices
+// that keep it for their next connection (offline or rejected by every eligible socket).
 type wsReach struct {
 	selected, reachable, kept int
 }

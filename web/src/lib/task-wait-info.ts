@@ -47,6 +47,7 @@ export function taskWait(todo: Todo, now: number, merges: readonly PRFacts[] = [
     until,
     overdue: until !== undefined && until <= now || contactDue !== undefined && contactDue <= now,
     canRemind: contactDue !== undefined && contactDue <= now,
-    sources: [...new Set([e?.url, ...merges.map((pr) => pr.url)].map(waitSource).filter((url): url is string => !!url))],
+    // A task's other PRs are not evidence for this recorded wait.
+    sources: [...new Set((e ? [e.url] : merges.map((pr) => pr.url)).map(waitSource).filter((url): url is string => !!url))],
   };
 }

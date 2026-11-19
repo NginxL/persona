@@ -5,6 +5,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable @SerialName("persona.core.navigation.AssistantRoute") data object AssistantRoute : NavKey
+@Serializable @SerialName("persona.core.navigation.UsageCalendarRoute") data object UsageCalendarRoute : NavKey
 @Serializable @SerialName("persona.core.navigation.AgentsRoute") data object AgentsRoute : NavKey
 @Serializable @SerialName("persona.core.navigation.InboxRoute") data object InboxRoute : NavKey
 @Serializable @SerialName("persona.core.navigation.SettingsRoute") data object SettingsRoute : NavKey

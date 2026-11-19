@@ -367,12 +367,12 @@ struct AssistantView: View {
             .transformEnvironment(\.macTitleRowLeading) { if columns != .detailOnly { $0 = 0 } }
             #endif
             #if os(iOS)
-            .liftBlur(liftHost.menu)
+            .liftBlur(host: liftHost)
             #endif
         }
         #if os(iOS)
         // A message pressed in the conversation, over the bar too: the whole page dims (#3188).
-        .overlay { if let menu = liftHost.menu { MessageLiftLayer(menu: menu) } }
+        .overlay { MessageLiftHostLayer(host: liftHost) }
         #endif
         #if os(macOS)
         // The bar is the title bar's row, as the list beside it (#830); pushed pages keep their own.

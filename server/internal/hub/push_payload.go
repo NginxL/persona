@@ -234,29 +234,74 @@ func donePayloadIn(l i18n.Lang, machineID, machine, sessionID, title, text strin
 
 // decideCategory is the category of a decision's push (#2056): the app registers it with one action, OK, which takes the
 // recommendation (POST /api/v1/todos/{id}/accept with the push's todo.asked_at; apple/Persona/App/NotificationActions.swift).
-const decideCategory = "TODO_DECIDE"
+// decideOpenCategory is the one of a decision that is answered only after a look (lockscreen open_only, #10465): no app
+// gives it actions, so every app shows the notification with none and a tap opens the app, older apps included.
+const (
+	decideCategory     = "TODO_DECIDE"
+	decideOpenCategory = "TODO_DECIDE_OPEN"
+)
+
+// decideOptionsMost is how many option labels a decision's push carries: as many as a decision has (decision.go).
+const decideOptionsMost = 4
 
 // decidePayloadIn is the alert of a to-do whose conclusion waits for the owner's decision and recommends an option: the
 // texts are the assistant's (the card's words), and `todo` carries what its OK needs: the to-do, the round (asked_at, as
 // the accept route takes it) and the recommendation, and the manager whose to-do it is (owner), as the hub's merged
 // lists stamp every item (ownership_lists.go): OK names it in ManagerHeader, so it reaches that manager whichever one
 // is the default.
+//
+// From a manager that says what the push may offer on the lock screen (todo.Lockscreen, #10465; an older manager's
+// push stays byte for byte as it was), `todo` also names the ask and that rule (schema/wire/todo-view.schema.json
+// TodoDecidePush). open_only, or a value this hub does not know (written open_only), takes the category no app gives
+// actions; answer keeps TODO_DECIDE and carries the options, whole and the recommended first, with mutable-content, so
+// a newer app's notification service extension can offer them as actions. fitAlert drops those two, and nothing else
+// of `todo`, rather than cut the alert under decideAlertShortest when the push is too big.
 func decidePayloadIn(owner, machineID, machine, sessionID, title, text string, todo assistantwire.NotifyTodo) map[string]any {
 	td := map[string]any{"id": todo.ID, "asked_at": todo.AskedAt.UTC().Format(time.RFC3339Nano), "recommend": todo.Recommend}
 	if owner != "" {
 		td["manager"] = owner
 	}
+	aps := map[string]any{
+		"alert":              map[string]any{"title": title, "subtitle": machine, "body": text},
+		"sound":              "default",
+		"thread-id":          sessionID,
+		"category":           decideCategory,
+		"interruption-level": "time-sensitive",
+	}
+	if todo.Lockscreen != "" {
+		if todo.Ask != "" {
+			td["ask"] = todo.Ask
+		}
+		if todo.Lockscreen == assistantwire.OwnerAskLockscreenAnswer {
+			td["lockscreen"] = assistantwire.OwnerAskLockscreenAnswer
+			if labels := decideOptions(todo); len(labels) > 0 {
+				td["options"] = labels
+				aps["mutable-content"] = 1
+			}
+		} else {
+			td["lockscreen"], aps["category"] = assistantwire.OwnerAskLockscreenOpenOnly, decideOpenCategory
+		}
+	}
 	return map[string]any{
-		"aps": map[string]any{
-			"alert":              map[string]any{"title": title, "subtitle": machine, "body": text},
-			"sound":              "default",
-			"thread-id":          sessionID,
-			"category":           decideCategory,
-			"interruption-level": "time-sensitive",
-		},
+		"aps":        aps,
 		"machine_id": machineID, "session_id": sessionID,
 		"todo": td,
 	}
+}
+
+// decideOptions are the option labels a decision's push carries: whole (the extension offers a label it can show, or
+// none), without empty ones or repeats, the recommended first, at most decideOptionsMost.
+func decideOptions(todo assistantwire.NotifyTodo) []string {
+	var labels []string
+	for _, label := range todo.Options {
+		if strings.TrimSpace(label) != "" && !slices.Contains(labels, label) {
+			labels = append(labels, label)
+		}
+	}
+	if i := slices.Index(labels, todo.Recommend); i > 0 {
+		labels = slices.Insert(slices.Delete(labels, i, i+1), 0, todo.Recommend)
+	}
+	return labels[:min(len(labels), decideOptionsMost)]
 }
 
 // joinPlace is "Chat · Machine" without the parts that are empty.

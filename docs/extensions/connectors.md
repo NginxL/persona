@@ -61,6 +61,18 @@ unknown capabilities, or kinds without an Inbox capability all fail registration
 | `login` | `Login` | Stepwise login | Telegram, larkcli |
 | `threads` | `Threads` | Opens an Inbox conversation as a chat page in the App: `Thread(thread, before, limit)` returns a page of messages (sender, avatar, media, references, cursor); `Media(ref)` supplies avatar/media bytes. Read-only; replies use the action named in `ThreadChat.Reply` (gated). The App selects a page by `ThreadChat.Kind`: bubbles for dm / group / channel, GitHub layout for pr / issue. A message whose `format` is `markdown` is drawn from its Markdown, and lark-cli's envelope for one interactive message (`<card title="…">…</card>`) as a card under its title. lark-cli's page takes its kind from the chat's own record (`docs/protocol/protocol.md`); a Lark page with an empty kind (a hub before that) is a chat too | Telegram (#1054), GitHub (#1055, `docs/plans/plan-connectors.md` ("Conversation page")), Lark via lark-cli |
 
+**Thread media** (#10974). `GET /api/v1/connectors/{id}/media?ref=` checks the bytes before serving them, including
+previously cached bodies; the connector's `Media.Mime` does not select the response type. Images are limited to JPEG,
+PNG, GIF and WebP (`image/jpeg`, `image/png`, `image/gif`, `image/webp`). The route also accepts recognized passive
+audio/video containers: `audio/aiff`, `audio/mpeg`, `audio/midi`, `audio/wave`, `video/avi`, `video/mp4`, `video/webm`
+and `application/ogg`. Conversation pages use media for pictures, stickers, avatars and video thumbnails; voice
+messages and files remain descriptions. HTML, SVG and other unsupported bytes receive 415 in the usual JSON error
+body, whatever MIME the connector declared. An empty connector answer or one over 4 MiB still receives 502.
+Invalid fresh bodies are not cached; a cached body that fails the check is refused. Responses written by the media
+handler, including its errors, carry `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'; sandbox`. Accepted bodies keep the byte-derived `Content-Type` and
+existing private immutable caching; a ref must still name the same bytes.
+
 `Runner` (its own loop) and `Machines` (a computer connected) describe how it runs, not capabilities, and still use type assertions. Inbox tiers are `connector.Tier` (`TierAction`, `TierFYI`, `TierNoise`);
 the hub drops unknown tiers and leaves classification to the model.
 

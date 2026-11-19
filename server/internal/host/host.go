@@ -321,11 +321,14 @@ type ReadOpts struct {
 	ANSI bool
 }
 
-// AgentSession is what an agent integration in the host reported about the pane's session (Kind "id": Value is the
-// session id; Kind "path": Value is the session's file, as herdr's pi integration reports it).
+// AgentSession is what an agent integration in the host reported about the pane's session. Source identifies the
+// reporting integration and Agent names the agent. Kind "id" carries the session ID in Value. Kind "path" carries
+// the session's file, as herdr's pi integration reports it.
 type AgentSession struct {
-	Kind  string
-	Value string
+	Source string
+	Agent  string
+	Kind   string
+	Value  string
 }
 
 // Agent is one pane as the node sees it: where it is, and the agent running in it with its state and session when the

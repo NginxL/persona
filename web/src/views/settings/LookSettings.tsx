@@ -1,6 +1,6 @@
 // Settings › General › Appearance's "Theme color" and "Text size" (ui/look.ts; the app's ThemeColorPicker and StyleSettingsPage's "Text size"),
 // and the web's own "Recent chats in the sidebar" (lib/sidebar-recent.ts).
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { cx } from "../../ui/atoms";
 import { pageToken } from "../../ui/extension-theme";
@@ -14,6 +14,7 @@ import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar
 import { usePersona } from "../assistant/Persona";
 import { Segmented } from "../assistant/parts";
 import { Row } from "./SettingsParts";
+import { FONT_PRESETS, quoteFont, setFontChoice, useFontPreference, validFontFamily, type FontChoice, type FontKind } from "../../ui/font-preference";
 
 function subscribeScheme(l: () => void) {
   const o = new MutationObserver(l);
@@ -98,4 +99,48 @@ export function RecentChatsRow() {
       <Segmented label={t("ui-look.recent_chats")} value={String(count)} options={RECENT_COUNTS.map((n) => ({ v: String(n), label: String(n) }))} onChange={(v) => setRecentCount(Number(v))} />
     </Row>
   );
+}
+
+/** Local fonts are opt-in; a missing face keeps its choice and uses the normal fallback stack. */
+export function FontRows() {
+  const saved = useFontPreference();
+  return <div data-settings-row="font">
+    <div className="px-4 pt-3 text-meta font-medium text-ink">{t("ui-look.font")}</div>
+    {(["sans", "mono"] as const).map((kind) => <FontRow key={kind} kind={kind} choice={saved[kind]} />)}
+  </div>;
+}
+function FontRow({ kind, choice }: { kind: FontKind; choice: FontChoice }) {
+  const [custom, setCustom] = useState(choice.preset === "custom");
+  const [draft, setDraft] = useState(choice.family ?? "");
+  useEffect(() => { setCustom(choice.preset === "custom"); setDraft(choice.family ?? ""); }, [choice.preset, choice.family]);
+  const valid = validFontFamily(draft);
+  let unavailable = false;
+  if (custom && valid) {
+    try { unavailable = document.fonts?.check(`1em ${quoteFont(draft.trim())}`) === false; }
+    catch { /* Font availability checks are only advisory, never a reason to discard a choice. */ }
+  }
+  const label = t(`ui-look.font_${kind}`);
+  return <div>
+    <Row label={label} hint={t("ui-look.font_hint")} wrapHint stackOnNarrow>
+      <select aria-label={label} className="h-11 max-w-full rounded-control bg-field px-2.5 text-label text-ink shadow-inset-field outline-none" value={custom ? "custom" : choice.preset} onChange={(event) => {
+        const preset = event.target.value;
+        setCustom(preset === "custom");
+        if (preset !== "custom") setFontChoice(kind, { preset });
+      }}>
+        <option value="default">{t("ui-look.default")}</option>
+        {Object.entries(FONT_PRESETS[kind]).map(([preset, family]) => <option key={preset} value={preset}>{preset === "system" ? t(`ui-look.font_system_${kind}`) : family}</option>)}
+        <option value="custom">{t("ui-look.font_custom")}</option>
+      </select>
+    </Row>
+    {custom && <div className="space-y-1 px-4 pb-3">
+      <label className="block text-label text-ink-2">{t("ui-look.font_family")}
+        <input aria-label={t("ui-look.font_custom_label", { kind: label })} aria-invalid={draft.length > 0 && !valid} value={draft} maxLength={100} spellCheck={false} autoComplete="off" className="mt-1 h-11 w-full rounded-control bg-field px-2.5 text-label text-ink shadow-inset-field outline-none" onChange={(event) => {
+          const family = event.target.value;
+          setDraft(family);
+          if (validFontFamily(family)) setFontChoice(kind, { preset: "custom", family });
+        }} />
+      </label>
+      <p className="text-submeta text-ink-3" role={draft.length > 0 && !valid ? "alert" : undefined}>{draft.length > 0 && !valid ? t("ui-look.font_invalid") : unavailable ? t("ui-look.font_unavailable") : t("ui-look.font_local")}</p>
+    </div>}
+  </div>;
 }

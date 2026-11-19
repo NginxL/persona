@@ -107,7 +107,12 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return "", err
 	}
-	t, ok := s.todoNow(strings.TrimSpace(a.TodoID))
+	a.TodoID = strings.TrimSpace(a.TodoID)
+	if a.Verdict == reviewAccepted || a.Verdict == reviewCancelled {
+		s.tasks.reviews.acquire(a.TodoID)
+		defer s.tasks.reviews.release(a.TodoID)
+	}
+	t, ok := s.todoNow(a.TodoID)
 	if !ok {
 		return "", fmt.Errorf("no task %q", a.TodoID)
 	}
@@ -124,6 +129,13 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if t.DoneAt != nil && (a.Verdict == reviewRework || a.Verdict == reviewNeedsUser || a.Verdict == reviewParked) {
 		return "", fmt.Errorf("task %s is done already (%s): hand out a new task for what is left", t.ID, cmp.Or(t.DoneReason, "closed"))
+	}
+	if t.DoneAt != nil && t.DoneBy == db.DoneByReview && a.Verdict == reviewAccepted {
+		plan, _, _ := s.taskTerminalPlan(ctx, t)
+		if plan.CloseTabOnAccept || plan.TerminalCleanup != "" {
+			s.sendsAccepted(ctx, t.ID, time.Now())
+			return fmt.Sprintf("Task %s is already accepted and closed. Terminal cleanup: %s.", t.ID, terminalCleanupStatus(plan)), nil
+		}
 	}
 	if err := restated(t, a.Verdict, decision); err != nil {
 		return "", err
@@ -290,12 +302,14 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			reason = "取消：" + cmp.Or(clip(oneLine(note), 80), "不做了")
 		}
 		carded := false
+		acceptedHere := false
 		if t.DoneAt == nil || t.StartError != "" {
 			closed, err := s.reviewDoneTodo(ctx, t.ID, reason, verdict == reviewAccepted)
 			if err != nil {
 				return "", err
 			}
 			if t.DoneAt == nil {
+				acceptedHere = closed && verdict == reviewAccepted
 				if closed && verdict == reviewAccepted { // accepted and closed (availability_supervision.go)
 					s.taskReviewed(ctx, self, t.ID, verdict, v)
 				}
@@ -329,12 +343,15 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			return fmt.Sprintf("Task %s is cancelled and closed; its agents are being stopped and archived (their terminals stay; archived, not deleted: "+
 				"agent_unarchive brings one back), and the cards they had waiting end. Tell the user only if they need to know.", t.ID), nil
 		}
-		against := result.words()
+		authorized := isMain || background || t.Supervision != nil && t.Supervision.Supervisor == self ||
+			t.Supervision == nil && t.Origin == self
+		cleanup := s.finishTaskTerminal(ctx, t, acceptedHere && authorized && a.Outcome != outcomeCannot && !a.UserCheck)
+		against := fmt.Sprintf(" Terminal cleanup: %s.", cleanup) + result.words()
 		if gaps := result.unsettled(); len(gaps) > 0 {
 			against += " You accepted it with criteria of its brief not shown met: if one no longer applies, say so with task_scope before accepting next time."
 		}
 		if ledger && verdict == reviewAccepted && a.UserCheck {
-			return fmt.Sprintf("Task %s is accepted and closed; its agent is closed once it stays still. A \"Please verify\" card asks the "+
+			return fmt.Sprintf("Task %s is accepted and closed. A \"Please verify\" card asks the "+
 				"user to look at it themselves (user_check), and it waits for their \"Pass\": don't ask them again.", t.ID) + against, nil
 		}
 		if ledger && verdict == reviewAccepted {
@@ -343,16 +360,16 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				s.logf("task %s: supervisor verify: %v", t.ID, err)
 			} else if ok {
 				return fmt.Sprintf("Task %s is accepted and closed, and marked verified by you: its \"Please verify\" card now says so and the "+
-					"user is not asked to pass it. Its agent is closed once it stays still. Tell the user the result in a line only if "+
+					"user is not asked to pass it. Tell the user the result in a line only if "+
 					"they are waiting for it, and hand out or schedule anything that follows (TestFlight, closing an issue).", t.ID) + against, nil
 			}
 		}
 		if carded {
-			return fmt.Sprintf("Task %s is accepted and closed; its agent is closed once it stays still. Its conclusion card (the verdict, "+
+			return fmt.Sprintf("Task %s is accepted and closed. Its conclusion card (the verdict, "+
 				"why in a sentence, the link) went to the user in Lark, marked checked by you (nothing waits for them): don't push the result again. Hand out or schedule anything that "+
 				"follows (deploy, TestFlight, closing an issue).", t.ID) + against, nil
 		}
-		return fmt.Sprintf("Task %s is accepted and closed; its agent is closed once it stays still. Tell the user the result in a line or two "+
+		return fmt.Sprintf("Task %s is accepted and closed. Tell the user the result in a line or two "+
 			"if they are waiting for it, and hand out or schedule anything that follows (deploy, TestFlight, closing an issue).", t.ID) + against, nil
 	case reviewNeedsUser:
 		conclusion.Outcome, conclusion.Reason, conclusion.Recommend, conclusion.Decision = outcomeDecide, decision.Reason, decision.Recommend, decision
@@ -599,12 +616,27 @@ func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, 
 // sendToTaskAs is sendToTask; with wait, a closed agent's resume and send is waited for too (up to 5 minutes), so the
 // caller learns whether the text reached it (inboxToAgent, #7346).
 func (s *Service) sendToTaskAs(ctx context.Context, t Todo, text string, wait bool) (string, error) {
+	return s.sendTaskInput(ctx, t, text, wait, nil)
+}
+
+func (s *Service) sendTaskInput(ctx context.Context, t Todo, text string, wait bool, event *taskInboxEvent) (string, error) {
 	agents := s.taskAgents(ctx, t)
 	if len(agents) == 0 {
 		return "", errors.New("the task has no agent")
 	}
+	if event != nil && event.Retried {
+		agents = slices.DeleteFunc(agents, func(c proto.Session) bool {
+			return c.MachineID != event.Machine || c.SessionID != event.Session
+		})
+		if len(agents) == 0 {
+			return "", errors.New("the event's agent is no longer available")
+		}
+	}
 	live, _ := liveTaskAgents(agents)
 	if len(live) == 0 { // stopped agents are read-only (#4754): Persona's follow-ups start nothing (tasks_successor.go)
+		if event != nil && event.Retried {
+			return "", errors.New("the event's agent is stopped and read-only")
+		}
 		return "", errTaskAgentsStopped
 	}
 	c := pickTaskAgent(live)
@@ -620,11 +652,28 @@ func (s *Service) sendToTaskAs(ctx context.Context, t Todo, text string, wait bo
 		if cur.DoneAt != nil || cur.ReopenedAt != nil && (t.ReopenedAt == nil || !cur.ReopenedAt.Equal(*t.ReopenedAt)) {
 			return db.ErrTodoCompleted
 		}
+		if event != nil {
+			if !event.Retried {
+				event.Machine, event.Session = c.MachineID, c.SessionID
+			}
+			duplicate, err := s.recordTaskInboxEvent(ctx, *event)
+			if err != nil {
+				return err
+			}
+			if duplicate {
+				return nil
+			}
+		}
 		if err := s.call(ctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil); err != nil {
 			return err
 		}
 		_, err := s.appendFeed(ctx, t.Origin, feedRouted, t.ID, map[string]string{"text": text, "from": routedFromAssistant,
 			"machine_id": c.MachineID, "session_id": c.SessionID}) // the run it told (#10465)
+		if err != nil && event != nil {
+			// The node already accepted this event; a feed failure cannot revoke delivery.
+			s.logf("task %s: external-event delivery feed: %v", t.ID, err)
+			return nil
+		}
 		return err
 	}
 	if c.Status == proto.StatusOffline && wait {

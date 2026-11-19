@@ -10,6 +10,7 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import persona.core.navigation.SettingsPage
 import persona.core.navigation.SettingsPageRoute
+import persona.core.navigation.UsageCalendarRoute
 import persona.feature.assistant.settings.AssistantSettingsScreen
 
 fun EntryProviderScope<NavKey>.assistantEntries(
@@ -17,6 +18,7 @@ fun EntryProviderScope<NavKey>.assistantEntries(
     content: @Composable () -> Unit = { ConnectedAssistant(navigator) },
 ) {
     entry<AssistantRoute> { AssistantAppHost(navigator) { content() } }
+    entry<UsageCalendarRoute> { AssistantAppHost(navigator) { UsageCalendarDestination(navigator) } }
     // Settings › AI › Assistant: the same page the Persona tab opens in place, as a page of its own.
     entry<AssistantSettingsRoute> { AssistantAppHost(navigator) { AssistantSettingsPage(navigator) } }
 }

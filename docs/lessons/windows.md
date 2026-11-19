@@ -2,6 +2,11 @@
 
 Read this before changing the Windows node (#1090), or developing or testing `personad` on a Windows computer. See [windows.md](../operations/windows.md) for the design and current status.
 
+## Release packages and native verification
+
+- **Keep `.exe` through the entire node-package path**: a Windows release is `personad-windows-amd64.exe.gz` or `persona-node-windows-amd64.exe.gz`, not its POSIX spelling. Manifest parsing removes both suffixes to get `windows-amd64`; manager selection accepts only that exact Windows name; download and cache removal strips only `.gz`. A connector's Link report does not verify personad or persona-node. A native report binds its program, version, build, feed, compressed bytes and decompressed PE bytes; node programs must also match the `latest.json` carried in that same receipt.
+- **Cross-compilation is not native execution**: Go can compile Windows programs on a Mac, and their PE architecture and build stamp can be checked there, but `windows_release.py` must run the real `version`, `version -v` and node self-check on the matching Windows architecture before a receipt is publishable. SHA-256 alone does not establish what the program reports. The CLI's native verification is distinct from the Electron installer's required Authenticode signature.
+
 ## Development environment
 
 - **Check out the repository with LF endings**: Git for Windows defaults to `core.autocrlf=true`, so every checked-out `.go` file has CRLF endings. `gofmt -l` reports many files, and scripts and golden files can also fail to match.

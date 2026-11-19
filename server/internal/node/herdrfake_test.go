@@ -76,7 +76,7 @@ type herdrFail struct{ Code, Message string }
 // connDeadline bounds one connection: a client that never writes its line cannot hold up the calls behind it.
 const connDeadline = 5 * time.Second
 
-func newFakeHerdr(t *testing.T) *fakeHerdr {
+func newFakeHerdr(t *testing.T, concurrent ...bool) *fakeHerdr {
 	t.Helper()
 	// Under /tmp, not $TMPDIR: macOS limits unix socket paths to 104 bytes.
 	dir, err := os.MkdirTemp("/tmp", "hf")
@@ -97,7 +97,11 @@ func newFakeHerdr(t *testing.T) *fakeHerdr {
 			if err != nil {
 				return
 			}
-			f.serveConn(c) // one at a time: the recorded order is the order the node made the calls
+			if len(concurrent) > 0 && concurrent[0] {
+				go f.serveConn(c) // a guarded close keeps an idle connection open during its last reads
+			} else {
+				f.serveConn(c) // preserve request order in tests that assert a serial trace
+			}
 		}
 	}()
 	return f
@@ -331,13 +335,13 @@ func agentOf(kind, session, status, pane, tab, ws, cwd, title string) map[string
 // herdrNode is a Node wired to a fresh fake herdr, with a temp home (~/.claude/projects exists, empty) and every map
 // the herdr paths touch. The two package-level caches that outlive a test (the offline list and the compatible CLI's panes and
 // statuses) are cleared before and after it; the other caches are keyed by the test's own temp paths.
-func herdrNode(t *testing.T) (*Node, *fakeHerdr, string) {
+func herdrNode(t *testing.T, concurrent ...bool) (*Node, *fakeHerdr, string) {
 	t.Helper()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	// herdr's config is the temp home's, not one the environment points at (herdr.WorktreesDir)
 	t.Setenv("HERDR_CONFIG_PATH", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
-	f := newFakeHerdr(t)
+	f := newFakeHerdr(t, concurrent...)
 	n, home := testNode(t)
 	n.hosts, n.dir, n.bin = herdrHosts(&herdr.Client{Socket: f.sock}), filepath.Join(home, ".persona"), "/tmp/persona-test/personad"
 	n.panes, n.panePIDs, n.modes, n.driving = map[string]string{}, map[string]panePID{}, map[string]sessionModes{}, map[string]bool{}

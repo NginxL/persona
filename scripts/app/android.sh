@@ -8,6 +8,7 @@
 #   ./scripts/app/android.sh apk        # debug APK only (android/app/build/outputs/apk/debug/app-debug.apk)
 #   ./scripts/app/android.sh release    # R8 release APK, checked, aligned and signed for your own phone
 #                                       # (android/app/build/outputs/apk/release/app-release.apk); add -s <phone> to install it
+# Gradle runs with at most ANDROID_MAX_WORKERS workers (default 4), unless org.gradle.workers.max is already set.
 # shots takes optional environment variables for repeatable, pixel-comparable captures (docs/android/android.md):
 #   SHOTS_STYLE=glass|brief|board  pass debug.style on every launch
 #   SHOTS_PLUGINS=1                the mock hub serves MOCK_EXTENSIONS (Settings › Plugins) and the plugin pages are captured too
@@ -113,8 +114,18 @@ else
 fi
 [ -f local.properties ] || echo "sdk.dir=$SDK" > local.properties
 # Gradle runs in a machine-wide gradle slot, so parallel worktrees queue instead of thrashing
-# (docs/operations/testing.md "Heavy build slots").
-gradlew() { python3 ../scripts/heavy_slot.py run --kind gradle -- ./gradlew "$@"; }
+# (docs/operations/testing.md "Heavy build slots"). Inside the slot it takes at most ANDROID_MAX_WORKERS workers
+# (default 4; org.gradle.parallel is on) unless the caller already set org.gradle.workers.max in GRADLE_OPTS or the
+# Gradle user home's properties.
+gradlew() {
+  local workers=()
+  if ! { [[ " ${GRADLE_OPTS:-} " == *" -Dorg.gradle.workers.max="* ]] ||
+         grep -qs '^[[:space:]]*org\.gradle\.workers\.max[[:space:]]*=' "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties"; }; then
+    workers=(--max-workers="${ANDROID_MAX_WORKERS:-4}")
+  fi
+  python3 ../scripts/heavy_slot.py run --kind gradle -- ./gradlew ${workers[@]+"${workers[@]}"} "$@"
+}
+case "${ANDROID_MAX_WORKERS:-4}" in ''|*[!0-9]*|0*) echo "ANDROID_MAX_WORKERS must be a positive whole number." >&2; exit 2 ;; esac
 case "$COMMAND" in
   test) gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" test ;;
   lint) gradlew -q -PpersonaApplicationId="$APP_ID" -PpersonaGettingStartedUrl="$GETTING_STARTED" lint ;;

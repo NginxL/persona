@@ -104,13 +104,23 @@ def observation_time(value):
 def idle_evidence(argv, target, identity, reader):
     """Read the node's full runtime inventory through the pinned local CLI."""
     owned = identity['machines']
-    if len(owned) != 1 or owned[0][0] != target['machine_id']:
-        raise ValueError('Local manager inventory requires one exact owned machine')
+    empty = target['main'] == '' and target['machine_id'] == ''
+    if not empty and (not target['main'] or not target['machine_id']):
+        raise ValueError('Manager main and machine must be populated together or explicitly empty together')
     fields = ('manager_id', 'dir', 'binary', 'unit', 'plist_path', 'uid',
               'previous_sha256', 'config_sha256', 'plist_sha256')
     identity_plan = dict(schema=1, **{key: target[key] for key in fields})
+    if empty:
+        if owned:
+            raise ValueError('Explicitly empty manager inventory has an owned machine')
+        identity_plan.update(unassigned=True, main='', machine_id='', machine_uid='')
+        machine_uid = ''
+    else:
+        if len(owned) != 1 or owned[0][0] != target['machine_id']:
+            raise ValueError('Local manager inventory requires one exact owned machine')
+        machine_uid = owned[0][1]
     expected = dict(manager=target['manager_id'], main=target['main'],
-                    machine_id=target['machine_id'], machine_uid=owned[0][1])
+                    machine_id=target['machine_id'], machine_uid=machine_uid)
     started = time.monotonic()
     evidence = remote(argv, [reader, 'manager', 'update', 'inventory', '--plan', '-',
                             '--main', expected['main'], '--machine', expected['machine_id'],
@@ -128,6 +138,8 @@ def idle_evidence(argv, target, identity, reader):
             any(authority.get(key) != expected[value] for key, value in
                 (('manager', 'manager'), ('main', 'main'), ('machine_id', 'machine_id')))):
         raise ValueError('Authoritative manager identity differs')
+    if empty != (authority.get('unassigned') is True):
+        raise ValueError('Authoritative manager empty/unassigned contract differs')
     runtime_target = inventory.get('target')
     if (not isinstance(runtime_target, dict) or
             any(runtime_target.get(key) != value for key, value in expected.items()) or

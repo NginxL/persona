@@ -48,7 +48,7 @@
   "zshrc_title": "来自 {file} {count}",
   "zshrc_footer": "各台电脑登录 shell 的配置文件（~/.zshrc、~/.bashrc）里调用 claude / codex 的函数和别名，每次打开这页时同步；新加的会自动出现。",
   "path_title": "来自 PATH {count}",
-  "path_footer": "各台电脑 PATH 上启动 claude 的包装脚本，以及运行时自带的启动器，每次打开这页时同步。",
+  "path_footer": "各台电脑 PATH 上的 Agent 包装脚本和运行时提供的启动器，每次打开这页时同步。",
   "hidden_title": "已隐藏 {count}",
   "hidden_footer": "只是在 Persona 里不显示，配置文件没有改。点进去可以恢复。",
   "deleted": "已删除 {name}",

@@ -63,6 +63,40 @@ func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, paren
 	return main, main != "" && main != conversation
 }
 
+// planTaskSupervisor resolves the reviewer before a plan starts. A runtime-backed conversation can dispatch work,
+// but the main conversation's supervision route must take over when the intended reviewer cannot receive policy.
+func (s *Service) planTaskSupervisor(ctx context.Context, conversation string, task PlanTask) (string, error) {
+	if task.Parent != "" {
+		return conversation, nil
+	}
+	supervisor := conversation
+	if s.supervises(ctx, conversation) {
+		if s.isLeader(ctx, task.Supervisor) {
+			supervisor = task.Supervisor
+		}
+	} else {
+		supervisor, _ = s.defaultPlanSupervisor(ctx, conversation, "")
+	}
+	cfg := s.settings(ctx)
+	machine := cfg.MachineID
+	if supervisor == cfg.Main {
+		machine = cfg.mainRouteMachine()
+	}
+	if !s.runtimeConversation(ctx, machine, supervisor) {
+		return supervisor, nil
+	}
+	if cfg.Main == "" {
+		return "", planInvalid{i18n.Err("assistant-conversations.supervision_reviewer_required")}
+	}
+	if supervisor != cfg.Main && !s.runtimeConversation(ctx, cfg.mainRouteMachine(), cfg.Main) {
+		return cfg.Main, nil
+	}
+	if background := s.ownSupervisor(cfg); background != cfg.Main && !s.runtimeConversation(ctx, cfg.MachineID, background) {
+		return cfg.Main, nil
+	}
+	return "", planInvalid{i18n.Err("assistant-conversations.supervision_reviewer_required")}
+}
+
 // digestTo is the conversation signal g goes to, with cfg the settings in effect: the one it names (To), else its task's
 // supervisor when that is a leader or another side conversation, unless the main conversation handles it (its needs_user,
 // a start to remedy, a task waiting for the user); else, for a task whose ledger names the main conversation, the

@@ -44,7 +44,7 @@ type larkCall struct {
 	Body   string // JSON text, a file's content (@file, cut), or "upload file X" (in Chinese)
 
 	CLI  bool     // lark-cli
-	Risk string   // lark-cli's own risk level for a "CLI" call: read | write | high-risk-write ("" unknown)
+	Risk string   // lark-cli's own risk level for a "CLI" call: read | write | high-risk-write ("" unknown, larkCLIMissing)
 	Args []string // lark-cli's arguments, for the phone card
 
 	relFile      bool // a relative @file body or query input, read from the conversation's directory (classifyLark, #8404)

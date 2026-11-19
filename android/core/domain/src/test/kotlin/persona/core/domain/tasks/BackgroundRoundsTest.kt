@@ -14,6 +14,7 @@ class BackgroundRoundsTest {
         Item("u$n", n, ts = "2026-11-10T10:00:${n.toString().padStart(2, '0')}Z", role = "user", kind = "text",
             text = text, source = source, injected = injected, queued = queued)
     private fun reply(n: Int, text: String) = Item("a$n", n, role = "assistant", kind = "text", text = text)
+    private fun narration(n: Int, text: String) = reply(n, text).copy(narration = true)
     private fun use(n: Int, tool: String, input: kotlinx.serialization.json.JsonObject? = null) =
         Item("use$n", n, role = "assistant", kind = "tool_use", toolUseId = "call$n", toolName = tool, toolInput = input)
     private fun result(n: Int, call: Int, text: String = "ok", error: Boolean? = null) =
@@ -27,7 +28,7 @@ class BackgroundRoundsTest {
     @Test fun aSupervisorMessageRoundFoldsIntoOneLineThatOpensToItsWholeTranscript() {
         val supervisor = MessageSource("conversation", "c2", "Release plan")
         val items = listOf(user(1, "My question"), reply(2, "My answer"),
-            user(3, "Please check the build", supervisor), use(4, "Bash"), result(5, 4), reply(6, "Build is green"),
+            user(3, "Please check the build", supervisor), use(4, "Bash"), result(5, 4), narration(6, "Checking the build"),
             user(7, "Next question"), reply(8, "Next answer"))
         val closed = project(items).foreground
         val round = folds(closed).single()
@@ -49,13 +50,26 @@ class BackgroundRoundsTest {
     @Test fun scheduledAndFollowUpRoundsFoldAndAreNotMovedToTheBackgroundRecord() {
         val items = listOf(user(1, "My question"), reply(2, "My answer"),
             user(3, "Daily: summarize the inbox", injected = Injected("followup", "daily", "Inbox digest", line = "⏰ Inbox digest", detail = "Summarize the inbox")),
-            reply(4, "Digest done"),
-            user(5, "Remind about the PR", source = MessageSource("followup", "main", "PR reminder")), reply(6, "Reminded"))
+            narration(4, "Checking the inbox"),
+            user(5, "Remind about the PR", source = MessageSource("followup", "main", "PR reminder")), narration(6, "Looking up the PR"))
         val projection = project(items)
         assertEquals(listOf("patrol", "followup"), folds(projection.foreground).map { it.source.kind })
         assertEquals("Inbox digest", folds(projection.foreground).first().source.title)
         assertTrue(projection.foreground.none { it.id in setOf("u3", "a4", "u5", "a6") })
         assertTrue("Folded, not moved into the background record", projection.background.none { it.id in setOf("u3", "a4", "u5", "a6") })
+    }
+
+    @Test fun completedRepliesStayVisibleWithBackgroundFoldingOn() {
+        for (source in listOf(MessageSource("conversation", "c2", "Release plan"),
+            MessageSource("patrol", title = "Daily check"), MessageSource("followup", title = "Reminder"))) {
+            val items = listOf(user(1, "Check", source), use(2, "mcp__persona__notify_user"), result(3, 2, "Unavailable", error = true),
+                reply(4, "The example release is ready"))
+            assertTrue(folds(project(items, live = true).foreground).single().live)
+            val shown = project(items).foreground
+            assertTrue(folds(shown).isEmpty())
+            assertTrue(shown.any { it.id == "a4" })
+            assertFalse(shown.filterIsInstance<ChatLine.Work>().single().open)
+        }
     }
 
     @Test fun usageContinuationsWakeUpsAndUntitledFollowUpsAreNotFolded() {
@@ -71,7 +85,7 @@ class BackgroundRoundsTest {
         for (id in listOf("a4", "a6", "a8", "a10")) assertTrue(id, foreground.any { it.id == id })
         // a titled scheduled follow-up still folds
         val scheduled = listOf(user(1, "Remind me", MessageSource("followup", "main", "PR reminder"),
-            Injected("followup", "once", "PR reminder", line = "PR reminder")), reply(2, "Reminded"))
+            Injected("followup", "once", "PR reminder", line = "PR reminder")), narration(2, "Preparing the reminder"))
         assertEquals(1, folds(project(scheduled).foreground).size)
     }
 
@@ -91,17 +105,17 @@ class BackgroundRoundsTest {
         // failed notify, another server's ask_user, a rejected review and a quiet finish: folded
         val quiet = listOf(user(1, "Check", source), use(2, "mcp__persona__notify_user"), result(3, 2, "failed", error = true),
             use(4, "mcp__other__ask_user"), result(5, 4), use(6, "task_review", buildJsonObject { put("verdict", "rejected") }), result(7, 6),
-            use(8, "supervision_finish"), result(9, 8, """{"visibility":"quiet"}"""), reply(10, "Done"))
+            use(8, "supervision_finish"), result(9, 8, """{"visibility":"quiet"}"""))
         assertEquals(1, folds(project(quiet).foreground).size)
-        val accepted = listOf(user(1, "Check", source), use(2, "task_review", buildJsonObject { put("verdict", "accepted") }), result(3, 2), reply(4, "Done"))
+        val accepted = listOf(user(1, "Check", source), use(2, "task_review", buildJsonObject { put("verdict", "accepted") }), result(3, 2))
         assertTrue(folds(project(accepted).foreground).isEmpty())
-        val finish = listOf(user(1, "Check", source), use(2, "mcp__persona__supervision_finish"), result(3, 2, """{"visibility":"user"}"""), reply(4, "Done"))
+        val finish = listOf(user(1, "Check", source), use(2, "mcp__persona__supervision_finish"), result(3, 2, """{"visibility":"user"}"""))
         assertTrue(folds(project(finish).foreground).isEmpty())
         // ask_user waiting for the user while the round runs: never buried
         val asking = listOf(user(1, "Check", source), use(2, "mcp__persona__ask_user"))
         assertTrue(folds(project(asking, live = true).foreground).isEmpty())
         val promoted = listOf(user(1, "Check", source), Item("f", 2, role = "assistant", kind = "fold",
-            fold = persona.core.contracts.Fold(items = 3, throughSeq = 4, throughId = "x", supervisionUser = true)), reply(5, "Done"))
+            fold = persona.core.contracts.Fold(items = 3, throughSeq = 4, throughId = "x", supervisionUser = true)))
         assertTrue(folds(project(promoted).foreground).isEmpty())
     }
 
@@ -110,7 +124,7 @@ class BackgroundRoundsTest {
         // the same rule on iOS. A failed notify alone would fold it; the user-level mark wins.
         val source = MessageSource("conversation", "c2", "Release plan")
         val quietTools = listOf(
-            use(2, "mcp__persona__notify_user"), result(3, 2, "failed", error = true), reply(4, "Done"))
+            use(2, "mcp__persona__notify_user"), result(3, 2, "failed", error = true))
         val userLevel = listOf(
             user(1, "Check", source, injected = Injected("system", "supervise", line = "督办：2 个派出去的任务要处理", level = "user")),
         ) + quietTools
@@ -133,7 +147,7 @@ class BackgroundRoundsTest {
     }
 
     @Test fun aQueuedUserMessageEndsTheRound() {
-        val items = listOf(user(1, "Check", MessageSource("conversation", "c2", "Release plan")), reply(2, "Checked"),
+        val items = listOf(user(1, "Check", MessageSource("conversation", "c2", "Release plan")), narration(2, "Checking"),
             user(3, "My own queued question", queued = true), reply(4, "My answer"))
         val foreground = project(items).foreground
         assertEquals(listOf("u1", "a2"), folds(foreground).single().lines.filterNot { it is ChatLine.Work }.map { it.id })
@@ -142,7 +156,7 @@ class BackgroundRoundsTest {
 
     @Test fun aSystemHintInsideARoundDoesNotEndIt() {
         val items = listOf(user(1, "Check", MessageSource("conversation", "c2", "Release plan")), reply(2, "Checking"),
-            user(3, "Internal restart notification", injected = Injected("system", "lost_tasks")), reply(4, "Checked"),
+            user(3, "Internal restart notification", injected = Injected("system", "lost_tasks")), narration(4, "Checking after restart"),
             user(5, "My question"), reply(6, "My answer"))
         val foreground = project(items).foreground
         val round = folds(foreground).single()
@@ -153,7 +167,7 @@ class BackgroundRoundsTest {
 
     @Test fun aFoldedRoundKeepsItsPlaceAmongTheFeedAndDays() {
         val items = listOf(user(1, "My question"), reply(2, "My answer"),
-            user(3, "Check", MessageSource("conversation", "c2", "Release plan")), reply(4, "Checked"))
+            user(3, "Check", MessageSource("conversation", "c2", "Release plan")), narration(4, "Checking"))
         val before = FeedItem("before", "main", "2026-11-10T10:00:02Z", "routed", body = buildJsonObject { put("text", "Earlier") })
         for (open in listOf(emptySet(), setOf("bg-u3"))) {
             val lines = AssistantLines.lines(project(items, BackgroundFolding(open)).foreground, listOf(before), java.time.ZoneOffset.UTC)
@@ -179,7 +193,7 @@ class BackgroundRoundsTest {
     }
 
     @Test fun aSearchHitOpensItsRound() {
-        val items = listOf(user(1, "Check", MessageSource("conversation", "c2", "Release plan")), reply(2, "Checked"))
+        val items = listOf(user(1, "Check", MessageSource("conversation", "c2", "Release plan")), narration(2, "Checking"))
         val foreground = project(items, BackgroundFolding(reveal = "a2")).foreground
         assertTrue(folds(foreground).single().open)
         assertTrue(foreground.any { it.id == "a2" })
@@ -231,10 +245,10 @@ class BackgroundRoundsTest {
         // the gate on for a leader id drives the same folding: relayed and patrol rounds fold, the owner's stays open
         val items = listOf(
             user(1, "Check the build", MessageSource("conversation", "w1", "Release desk")),
-            use(2, "Read"), result(3, 2), reply(4, "Build is green"),
+            use(2, "Read"), result(3, 2), narration(4, "Checking the build"),
             user(5, "Scheduled prompt", MessageSource("patrol", title = "Half-hour patrol"),
                 Injected(kind = "followup", state = "daily", title = "Half-hour patrol", line = "Scheduled task started")),
-            reply(6, "Nothing new"),
+            narration(6, "Checking the inbox"),
             user(7, "A real request", queued = null).copy(clientMsgId = "owner-1"), reply(8, "On it"),
         )
         val folded = project(items, BackgroundFolding(rounds = true)).foreground

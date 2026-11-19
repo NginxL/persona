@@ -12,6 +12,12 @@ Cards can be renamed, pinned, archived, and restored. Dragging moves a card acro
 
 Click a card to see its folder and linked Agents, open that machine's Files or Git, or use **New agent** to open the existing creation flow prefilled with the machine and folder. Binding, moving to Done, pinning, and archiving only update board metadata: they do not start or stop Agents, and do not run Git, PRs, releases, or delete folders. Starting an Agent requires an explicit submit in the creation flow.
 
+## Automatic lanes (#2648)
+
+**Auto** leaves the manual columns untouched and groups bound workspaces, unbound Agent sessions and to-dos by their live state. **Needs you** and **Working** keep their canonical Agent-state meanings. **To review** contains only work that still deserves a look: an unread or just-finished session, a workspace with one, or a to-do with an outstanding owner review or an unread finished result that has not been accepted. **Planned** holds the other open to-dos. **Idle** keeps history accessible: workspaces and sessions with nothing active or unread, including seen and offline sessions, and accepted or closed to-dos.
+
+Each lane's number is exactly the number of cards in that lane. Opening a to-do goes to that to-do's detail; opening a session goes to that session. Accepted, closed and seen items therefore remain reachable without being presented as pending acceptance. Workspace archiving remains the existing manual metadata action; automatic lane placement itself persists nothing.
+
 ## Organizing several workspaces (#7583)
 
 For people managing several Agent workspaces, the manual view offers **Select** when the manager advertises bulk

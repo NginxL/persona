@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,7 @@ var (
 	errDeleteRunning   = i18n.Err("hub-deleted_sessions.running")
 	errDeleteAssistant = i18n.Err("hub-deleted_sessions.assistant")
 	errDeleteUnknown   = i18n.Err("hub-deleted_sessions.unknown")
+	errDeleteHeld      = i18n.Err("hub-deleted_sessions.held")
 )
 
 // deleteSession is DELETE /api/v1/sessions/{mid}/{sid}: take an offline session out of the apps' lists.
@@ -156,6 +158,11 @@ func (h *Hub) deleteSession(w http.ResponseWriter, r *http.Request, m *Machine) 
 	case s.Starting || s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked:
 		writeErr(w, http.StatusConflict, errDeleteRunning)
 		return
+	case holdsMessages(s):
+		// Its computer's manager would send them once the computer is back, and the first would start it again: the
+		// owner deletes those first (#10661).
+		writeErr(w, http.StatusConflict, errDeleteHeld)
+		return
 	}
 	if err := h.noteDeleted(r.Context(), m.cfg.ID, id, time.Now().UTC()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -163,6 +170,11 @@ func (h *Hub) deleteSession(w http.ResponseWriter, r *http.Request, m *Machine) 
 	}
 	h.sessionsChanged(m) // the apps get the list without it now
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// holdsMessages: s's row shows messages held for it while its computer is away (proto.UndeliveredMessage.Computer).
+func holdsMessages(s proto.Session) bool {
+	return s.Undelivered != nil && slices.ContainsFunc(*s.Undelivered, func(u proto.UndeliveredMessage) bool { return u.Computer != "" })
 }
 
 // noteDeleted keeps deletion timestamps without expiry. A manager may retain

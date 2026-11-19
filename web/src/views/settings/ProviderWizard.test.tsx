@@ -380,7 +380,7 @@ describe("ProviderWizard from presets", () => {
     await act(async () => button("测试连接")!.click());
     expect(keyTests()[0]!.body).not.toHaveProperty("headers");
     act(() => button("下一步")!.click());
-    expect(text()).toContain("上下文限制、默认思考档位");
+    expect(text()).toContain("上下文限制、分档模型");
     expect(text()).toContain("模型列表中仍可记录各模型的上下文窗口");
     expect(document.body.querySelector('textarea[placeholder^="X-Name"]')).toBeNull();
     expect(document.body.querySelector('input[placeholder="http://127.0.0.1:7890"]')).toBeNull();
@@ -401,14 +401,14 @@ describe("ProviderWizard from presets", () => {
     for (const key of ["headers", "proxy", "no_proxy", "env", "timeout_ms", "compact_window", "max_context", "effort"]) expect(body).not.toHaveProperty(key);
   });
 
-  it("keeps model metadata while hiding unused chat thinking controls", async () => {
+  it("keeps Chat effort metadata while hiding the wizard's thinking controls", async () => {
     act(() => root.render(<ProviderWizard existing={{ name: "chat", kind: "api", api: "chat", base_url: "https://api.example.com", model: "example-chat", has_key: true, models: [{ id: "example-chat", context_window: 16000, efforts: ["high"], default_effort: "high" }] }} onClose={() => {}} onSaved={() => {}} />));
     await flush();
     act(() => button("下一步")!.click());
     expect(document.body.querySelector<HTMLInputElement>('input[aria-label="example-chat 的上下文窗口"]')?.value).toBe("16000");
     expect(document.body.querySelector('[aria-label="example-chat 支持的思考档位"]')).toBeNull();
     expect(document.body.querySelector('[aria-label="example-chat 的默认思考档位"]')).toBeNull();
-    expect(text()).toContain("Chat Completions 不使用模型的思考档位设置");
+    expect(text()).toContain("用途编辑器可以覆盖默认档位；此向导会保留这些设置");
     await act(async () => button("保存")!.click());
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("models");
   });
@@ -426,7 +426,7 @@ describe("ProviderWizard from presets", () => {
   });
 
   it("requires an explicit choice before clearing unsupported stored Chat settings", async () => {
-    const existing = { name: "chat", kind: "api" as const, api: "chat" as const, base_url: "https://api.example.com", model: "example-chat", has_key: true, has_headers: true, has_env: true, proxy: "http://proxy.example.com", no_proxy: "example.com", timeout_ms: 1200, compact_window: 100, max_context: 200, effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true };
+    const existing = { name: "chat", kind: "api" as const, api: "chat" as const, base_url: "https://api.example.com", model: "sonnet", has_key: true, has_headers: true, has_env: true, proxy: "http://proxy.example.com", no_proxy: "example.com", timeout_ms: 1200, compact_window: 100, max_context: 200, effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true };
     act(() => root.render(<ProviderWizard existing={existing} onClose={() => {}} onSaved={() => {}} />));
     await flush();
     expect(text()).toContain("保存时清除这些设置");
@@ -451,7 +451,7 @@ describe("ProviderWizard from presets", () => {
     await act(async () => button("保存")!.click());
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).toMatchObject({
       headers: "", env: "", proxy: "", no_proxy: "", timeout_ms: 0, compact_window: 0, max_context: 0,
-      opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
+      model: "sonnet", opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
     });
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("effort");
   });

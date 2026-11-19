@@ -103,7 +103,7 @@ describe("the pill's states", () => {
   it("one of Paseo's providers: its mark and its label, never the engine's id (#8142)", () => {
     const grok = markup(<ModelPill current={{ engine: "grok", engineLabel: "Grok", provider: "grok", model: "Grok 4" }} onOpen={() => {}} />);
     expect(grok).toContain('title="Grok · Grok 4 · grok"');
-    expect(grok).toMatch(/data-pill-engine="grok"[^>]*>.*data-agent-mark="letter"/);
+    expect(grok).toMatch(/data-pill-engine="grok"[^>]*>.*data-agent-mark="grok"/);
     expect(grok).not.toMatch(/paseo/i);
     const cursor = markup(<ModelPill current={{ engine: "cursor", engineLabel: "Cursor", provider: "cursor", model: "Auto" }} onOpen={() => {}} />);
     expect(cursor).toContain('data-agent-mark="cursor"');

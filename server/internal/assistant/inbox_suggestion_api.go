@@ -71,8 +71,8 @@ func (s *Service) inboxSuggestionRoutes() {
 		case errors.Is(err, errAnswerOnly):
 			apierr.Write(w, http.StatusForbidden, err)
 		case errors.Is(err, errMailReplyTargetChanged):
-			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "mail_reply_target_changed", "error": i18n.T(l, "assistant-inbox.mail_target_changed"), "retryable": false, "delivered": "none"})
-		case err != nil && s.writeInboxSendError(w, r, "suggestion", r.PathValue("id"), err):
+			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "mail_reply_target_changed", "error": i18n.T(l, "assistant-inbox.mail_target_changed"), "retryable": false, "delivered": "none", "item": it})
+		case err != nil && s.writeInboxSendError(w, r, "suggestion", r.PathValue("id"), err, it):
 			// in doubt (delivered unknown), or why nothing was sent (#9125)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
@@ -118,6 +118,9 @@ func (s *Service) actOnSuggestion(ctx context.Context, id string, in suggestionR
 	if !full && (g == nil || in.Action != suggestConfirm || g.Kind == SuggestAgent || g.Kind == SuggestTodo || g.Handback || len(g.Changes) > 0 || assistantwire.AsksAgent(text)) {
 		b.mu.Unlock()
 		return InboxItem{}, errAnswerOnly
+	}
+	if g != nil && g.Kind == SuggestReply && in.Action == suggestConfirm && !g.Handback {
+		return s.confirmSuggestionReplyLocked(ctx, it, g, in)
 	}
 	if g != nil && g.Conversation != nil {
 		resetInboxFollowChecks(it)

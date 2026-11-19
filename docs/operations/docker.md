@@ -253,6 +253,7 @@ Upgrading from 0.1.1 or earlier, the App won't prompt; switch manually: back the
 To set where node builds are fetched from with `PERSONA_NODE_PACKAGES` in `.env` (see "Node builds"), take the new `compose.yaml` as well: an older one does not pass it to the hub (`node_packages` in hub.json works either way).
 The image looks for no releases, so the hub offers the phones no Android update until `hub.json`'s `update.url` names a release source (`https://github.com/<owner>/<repo>/releases/latest/download`); with one, it keeps the newest release's Android app for them (`docs/operations/hub-update.md` ("The Android app")), and that source also serves the rest of "Update source" there.
 A new image doesn't change how the built-in manager runs on an existing install. Its `hub.json` keeps the hub's child until you switch (see "The hub and the built-in manager in one container"). An older `compose.yaml` works unchanged with either mode.
+`personad backup` does not support this deployment yet (`docs/server/server.md`, "Whole-install backup"), and its restore drill ("Restore drill" there) does not cover it either.
 
 ## Network
 

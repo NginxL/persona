@@ -13,9 +13,9 @@ import (
 // an item, and the judge links the item to one of the user's tasks (linkTaskFor). When that task is supervised, its
 // supervisor gets the signal inbox through the usual digest: routed to the task's leader conversation or the main one,
 // gathered, deduplicated and spaced like any other signal, and several messages about one task before the message goes
-// out are one entry, the newest item's, with how many came. A GitHub thread's new messages also go straight to the
-// task's agent (inboxToAgent, #7346), the supervisor's entry then being the copy. Off unless assistant.inbox_signals is
-// on: each one is a supervisor turn the user pays for.
+// out are one entry, the newest item's, with how many came. A GitHub thread's new messages go straight to the task's
+// agent (inboxToAgent, #7346); confirmed delivery to active work needs no supervisor copy (#9916). Off unless
+// assistant.inbox_signals is on: each signal is a supervisor turn the user pays for.
 //
 // Nothing Persona says itself raises one, so a supervisor's turn cannot feed the next: not the reply Persona sent for a
 // confirmed suggestion (SentOf), not a bot chat (where Persona's own bot posts its pushes and cards), and not the twin's
@@ -85,22 +85,40 @@ func (s *Service) superviseInbox(ctx context.Context, items []*InboxItem, linked
 }
 
 // inboxToAgent sends what someone else wrote on a task's GitHub thread straight to the task's agent (#7346): a line of
-// it and the thread's URL, as someone else's words for the agent to read there itself (sendToTaskAs, waiting for an
-// agent closed after a stretch of work to resume, up to 5 minutes; its turn ends the task's parking). The supervisor
-// still gets signal g, marked as the copy only once the note reached the agent; when no agent could take it (none, all
-// stopped, its machine offline, the resume or send failed) g goes as before. In the background: the twin's pass does
-// not wait on a node.
+// it and the thread's URL, as someone else's words for the agent to read there itself (sendTaskInput, waiting for an
+// agent closed after a stretch of work to resume, up to 5 minutes; its turn ends the task's parking). Confirmed
+// delivery to active work stays in the task's routed feed and log, without another supervisor turn. Parked/review/
+// owner waits still need the supervisor, as does a failed delivery. The Agent reports scope or authority questions
+// through report_to_supervisor; a clipped Inbox preview is not a semantic classifier. In the background: the twin's
+// pass does not wait on a node.
 func (s *Service) inboxToAgent(ctx context.Context, g superviseSignal) {
 	in := *g.Inbox
 	g.Inbox = &in
 	if t, ok := s.todoNow(g.Todo); ok && taskOpen(t) {
-		_, err := s.sendToTaskAs(ctx, t, prompts.RenderInboxToAgent(prompts.InboxToAgent{Sender: in.Sender,
-			Preview: in.Preview, URL: in.URL, Count: in.Count}), true)
+		v := t.Supervision
+		active := v != nil && (v.state(t) == "" || v.state(t) == reviewRework) && v.Waits == nil
+		e := taskInboxEvent{ID: namedClientID("task inbox\n" + t.ID + "\n" + g.Key), Key: g.Key, Todo: t.ID, Inbox: in}
+		e.Prompt = prompts.RenderInboxToAgent(prompts.InboxToAgent{Sender: in.Sender,
+			Preview: in.Preview, URL: in.URL, Count: in.Count, Event: e.ID})
+		_, err := s.sendTaskInput(ctx, t, e.Prompt, true, &e)
 		if err != nil {
+			_ = s.updateTaskInboxEvents(ctx, func(events map[string]taskInboxEvent) bool {
+				if cur, ok := events[e.ID]; ok && !cur.Retried {
+					delete(events, e.ID) // the unchanged supervisor fallback owns failed initial delivery
+					return true
+				}
+				return false
+			})
 			s.logf("task %s: inbox %s not sent to its agent: %v", t.ID, in.Item, err)
 		} else {
 			in.ToAgent = "sent"
 			s.logf("task %s: inbox %s sent to its agent", t.ID, in.Item)
+			// Delivery already recorded the routed feed. A wait before or during the send still needs supervision.
+			if cur, ok := s.todoNow(t.ID); active && ok && taskOpen(cur) {
+				if v := cur.Supervision; v != nil && (v.state(cur) == "" || v.state(cur) == reviewRework) && v.Waits == nil {
+					return
+				}
+			}
 		}
 	}
 	s.signal(g)

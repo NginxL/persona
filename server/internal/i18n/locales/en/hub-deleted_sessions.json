@@ -1,5 +1,6 @@
 {
   "running": "This agent is still running. Close it before deleting",
   "assistant": "Archive the assistant’s chats instead",
-  "unknown": "No such session"
+  "unknown": "No such session",
+  "held": "Delete the messages waiting to be sent first"
 }

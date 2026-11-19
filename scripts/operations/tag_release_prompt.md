@@ -71,13 +71,8 @@ The coordinator refuses a receipt whose `latest.json` does not describe its
 binaries (sizes, sha256s, build number, and this machine's `personad version
 -v`), and uploads `latest.json` after the files it lists.
 
-For a Windows CLI ZIP, run `scripts/operations/windows_release.py` on Windows
-of the matching architecture before writing the artifact receipt. Include its
-`<archive-stem>.verification.json` report with the ZIP and release metadata.
-The coordinator verifies the native command results and their binding to the
-exact ZIP and executable hashes. Without native verification, report the
-Windows bundle as blocked; do not infer its version from a filename, a build
-number, or a string found in its bytes.
+For a Windows CLI ZIP or a current `persona-link` / `personad` / `persona-node-windows-<arch>.exe.gz`,
+run `scripts/operations/windows_release.py` on Windows of the matching architecture before writing the artifact receipt. Include each `<artifact-stem>.verification.json` report with the exact artifact and release metadata. Node programs also require their exact `latest.json` entry. The coordinator verifies native command results, the selected beta/stable receipt identity, PE architecture and the binding to exact archive and executable hashes. A Link report never verifies personad or persona-node. Without native verification, report the Windows artifact as blocked; do not infer its version from a filename, a build number, or a string found in its bytes. These command-line programs are not Authenticode-signed; native execution and publisher signing are separate requirements.
 
 For `web`, use the existing hub/web publication receipt. A successful artifact
 upload does not by itself establish that a separate production deployment is

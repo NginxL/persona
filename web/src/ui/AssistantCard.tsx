@@ -16,6 +16,7 @@ import { conversationCards, draftKey, submitAction, updateDraft, useCards, type 
 import type { AssistantView, ViewAction } from "../lib/extension-wire";
 import { fieldValues, numberProblem, readView, type UIAction, type UIItem, type UIView } from "../lib/extension-ui";
 import { openLink } from "../lib/links";
+import { ExtensionOwnerScope } from "../lib/extension-owner";
 import { useLinkManager } from "../lib/manager-choice";
 import { openPanel } from "../lib/panel";
 import { openTask } from "../lib/handoff";
@@ -264,8 +265,11 @@ function CardBody({ raw, conversation, cardKey, version, source, htmlRuns }: { r
   const title = view.title ?? rootTitle;
   const replies = [...actions.values()].some((a) => a.reply);
   const hint = !keyed || !replies || answered ? undefined : !registered ? "waiting" : !takesAnswers ? "unsupported" : undefined;
+  // Whose card this is scopes what a graph's `key` keeps (lib/extension-owner.tsx): the conversation and the card's
+  // key, so two cards' graphs never share one entry even when the same extension drew them.
   return (
-    <div className="card-ui my-3 flex flex-col gap-3 text-[13px] leading-normal" data-assistant-card="persona-view" data-card-key={keyed ? cardKey : undefined} data-card-version={version}>
+    <ExtensionOwnerScope owner={`${conversation}/${cardKey}`}>
+      <div className="card-ui my-3 flex flex-col gap-3 text-[13px] leading-normal" data-assistant-card="persona-view" data-card-key={keyed ? cardKey : undefined} data-card-version={version}>
       {(title || stack.length > 0) && (
         <div className="flex min-w-0 items-center gap-1 px-1">
           {stack.length > 0 && (
@@ -329,6 +333,7 @@ function CardBody({ raw, conversation, cardKey, version, source, htmlRuns }: { r
         </Dialog>
       )}
     </div>
+    </ExtensionOwnerScope>
   );
 }
 

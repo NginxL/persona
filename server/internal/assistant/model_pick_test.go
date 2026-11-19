@@ -718,15 +718,22 @@ func TestRelayedMessagesAndTheSupervisorRunOnTheirModel(t *testing.T) {
 	if p := relay("bg"); p["launcher"] != "cx" {
 		t.Fatalf("a relayed message to the supervisor: %v", p)
 	}
-	// with a pick, both run on it
+	// with a pick, both run on it after a manager restart too; the main conversation still follows its own default
 	if r := putPick(t, s, "bg", `{"launcher":"claude","model":"haiku"}`); r.Code != 200 {
 		t.Fatalf("PUT bg: %d %s", r.Code, r.Body.String())
 	}
+	s = newServiceOn(t, f, s.store())
+	if p, err := send(t, s, "main", map[string]any{}); err != nil || p["launcher"] != "gw" {
+		t.Fatalf("the main conversation after the restart: %v %v", p, err)
+	}
+	if p, err := send(t, s, "lead", map[string]any{}); err != nil || p["launcher"] != "claude" || p["model"] != "opus" {
+		t.Fatalf("the leader after the restart: %v %v", p, err)
+	}
 	if p, err := send(t, s, "bg", map[string]any{}); err != nil || p["launcher"] != "claude" || p["model"] != "haiku" {
-		t.Fatalf("typed to the supervisor on its pick: %v %v", p, err)
+		t.Fatalf("typed to the supervisor on its pick after the restart: %v %v", p, err)
 	}
 	if p := relay("bg"); p["launcher"] != "claude" || p["model"] != "haiku" {
-		t.Fatalf("relayed to the supervisor on its pick: %v", p)
+		t.Fatalf("relayed to the supervisor on its pick after the restart: %v", p)
 	}
 }
 

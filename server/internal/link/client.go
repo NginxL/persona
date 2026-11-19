@@ -223,6 +223,7 @@ func Run(ctx context.Context, o Options) error {
 	if o.Logf == nil {
 		o.Logf = func(string, ...any) {}
 	}
+	ctx = context.WithValue(ctx, diagnosticLogKey{}, o.Logf)
 	if o.PingEvery <= 0 || o.PingTimeout <= 0 {
 		o.PingEvery, o.PingTimeout = PingEvery, PingTimeout
 	}
@@ -451,6 +452,12 @@ func tryRoutes[T any](order []string, try func(kind string) (T, error), stop fun
 // an address added) since was: the stamp (stampOf) from when the attempt read it, so a change that landed during the
 // attempt (a new credential written while the hub refused the old one) ends the wait at its first poll.
 func (o Options) wait(ctx context.Context, d time.Duration, was time.Time) {
+	start, reason := time.Now(), "timer"
+	defer func() {
+		if o.Logf != nil {
+			o.Logf("link: retry_wait planned_us=%d actual_us=%d wake=%s", max(d, 0).Microseconds(), time.Since(start).Microseconds(), reason)
+		}
+	}()
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	poll := time.NewTicker(cmp.Or(o.PairCheck, 2*time.Second))
@@ -458,15 +465,19 @@ func (o Options) wait(ctx context.Context, d time.Duration, was time.Time) {
 	for {
 		select {
 		case <-ctx.Done():
+			reason = "canceled"
 			return
 		case <-timer.C:
 			return
 		case <-o.Check:
+			reason = "network_check"
 			return
 		case <-o.Redial:
+			reason = "redial"
 			return
 		case <-poll.C:
 			if !stampOf(o.Path).Equal(was) {
+				reason = "config_changed"
 				return
 			}
 		}

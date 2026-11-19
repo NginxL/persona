@@ -805,6 +805,11 @@ internal fun QuickResultCard(result: QuickResult, undoState: QuickResultUndo = Q
     val locale = currentLocale
     val time = AssistantLines.time(result.time)?.let { LocalizedFormats.format(it, LocalizedFormats.MONTH_DAY_TIME, locale) }
     val undone = undoState == QuickResultUndo.Undone
+    val source = result.sourceDeviceName?.trim()?.takeIf { it.isNotEmpty() } ?: when (result.sourceDevicePlatform?.trim()?.lowercase()) {
+        "android" -> "Android"
+        "ios", "ios-app", "iphone" -> "iPhone"
+        else -> null
+    }
     // Undone gives way, as the same card does on iOS.
     val alpha by animateFloatAsState(if (undone) QuickResultUndoneAlpha else 1f,
         if (PersonaTheme.reduceMotion) snap() else tween(PersonaTheme.motion.standard), label = "quick-result-undone")
@@ -821,6 +826,10 @@ internal fun QuickResultCard(result: QuickResult, undoState: QuickResultUndo = Q
             }), style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink)
             Text(listOfNotNull(time, result.title, result.place).joinToString(" · "), style = PersonaTheme.type.caption,
                 color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (source != null) {
+                Text(stringResource(R.string.chat_content_from, source), style = PersonaTheme.type.caption,
+                    color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         if (!undone && onUndo != null) JButton(stringResource(R.string.chat_tasks_quick_undo), onUndo,
             kind = JButtonKind.Secondary, size = JButtonSize.Small, enabled = undoState != QuickResultUndo.Undoing)

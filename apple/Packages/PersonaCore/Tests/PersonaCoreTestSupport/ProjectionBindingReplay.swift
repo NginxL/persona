@@ -179,6 +179,20 @@ public enum ProjectionBindingReplay {
     }
 
     private static let sortCases: Set<String> = [
+        "composable_qualifiers_match_with_plain_term", "composable_qualifiers_reject_one_wrong_dimension",
+        "dimension_settings_compose_with_plain_term", "dimension_settings_reject_wrong_model",
+        "machine_qualifier_matches_registry_title", "machine_qualifier_rejects_session_title_match",
+        "search_as_code_day_keyword_uses_ios_window", "search_as_code_disabled_keeps_plain_text_matches",
+        "search_as_code_error_keyword_filters_plain_text", "search_as_code_pinned_keyword_composes_with_terms",
+        "search_as_code_preserves_explicit_longer_window", "search_as_code_week_keyword_uses_ios_window",
+        "search_scope_assistant_matches_prose_and_work", "search_scope_assistant_rejects_user_and_tool_fields",
+        "search_scope_conversation_matches_prose_and_summaries", "search_scope_conversation_rejects_tool_noise",
+        "search_scope_errors_matches_reason_fields", "search_scope_errors_rejects_non_error_evidence",
+        "search_scope_errors_without_terms_lists_only_error_rows", "search_scope_title_matches_display_names",
+        "search_scope_title_rejects_other_fields", "search_scope_user_matches_request_summaries",
+        "search_scope_user_rejects_assistant_fields", "session_summary_fields_do_not_leak_into_all_scope",
+        "subtask_summary_evidence_retains_parent_in_user_scope", "subtask_summary_evidence_does_not_leak_into_all_scope",
+        "subtask_title_evidence_retains_parent_in_all_scope",
         "active_space_uses_rank_not_slots", "compact_expands_idle_without_reordering",
         "cross_machine_same_session_id", "cross_machine_same_session_id_reversed",
         "empty_list", "filter_all", "filter_needsyou", "filter_unread", "filter_working",

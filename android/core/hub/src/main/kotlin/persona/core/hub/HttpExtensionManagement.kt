@@ -465,9 +465,10 @@ class HttpExtensionManagement internal constructor(
          * pictures, controls in rows, candlesticks / areas / donuts / pies and sparks, a row's actions, grids and carousels,
          * date / time / multichoice / multiline fields, title styles, named colours and more icons (#5464); 7 a section's
          * key, which only the native stream reads; 8 the columns layout of a dashboard page and a section's span, icon,
-         * link and rows side by side (#9158). The native stream sends the same version.
+         * link and rows side by side (#9158); 9 gauge rings on grid and carousel tiles (#9337); 10 native graph canvases
+         * (#9727). The native stream sends the same version, but its components still exclude graphs and receive rows.
          */
-        const val UI_VERSION = 8
+        const val UI_VERSION = 10
 
         /** The hub's own picture route (UI version 6), the one path a view's picture is fetched from with credentials. */
         private val ImagePath = Regex("/api/v1/extensions/[A-Za-z0-9_-]{1,64}/-/image/[A-Za-z0-9_.-]{1,1900}")

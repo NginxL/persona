@@ -156,9 +156,7 @@ func messagesAPI(api string) bool { return api == "" || api == "messages" }
 // fallbackAPIProvider names the managed connection an unconfigured API use runs on: the first direct API provider,
 // else the first keyed launcher speaking Messages. Other launcher protocols cannot serve these uses. Hidden ones and
 // ones without an address, a default model or a key are skipped. "" when there is none.
-func (s *Service) fallbackAPIProvider(ctx context.Context) string {
-	stored := s.storedLaunchers(ctx)
-	hidden := s.hiddenLaunchers(ctx)
+func fallbackAPIProviderFrom(stored []storedLauncher, hidden []string) string {
 	usable := func(l storedLauncher) bool {
 		return !proto.IsExternalLauncher(l.Name) && !slices.Contains(hidden, l.Name) && l.BaseURL != "" && l.Model != "" && l.KeySealed != ""
 	}
@@ -173,6 +171,10 @@ func (s *Service) fallbackAPIProvider(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func (s *Service) fallbackAPIProvider(ctx context.Context) string {
+	return fallbackAPIProviderFrom(s.storedLaunchers(ctx), s.hiddenLaunchers(ctx))
 }
 
 // mergeModel puts over's choices on base: another provider starts from nothing (its model and effort are its own).

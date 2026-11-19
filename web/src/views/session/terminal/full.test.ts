@@ -28,7 +28,7 @@ vi.mock("./cjk", () => ({
 }));
 
 // A stand-in for xterm: only what FullFeed touches on the way to a live view and while typing.
-const terms = vi.hoisted(() => [] as { typed: (d: string) => void; resets: number }[]);
+const terms = vi.hoisted(() => [] as { typed: (d: string) => void; resets: number; options: Record<string, unknown> }[]);
 
 vi.mock("./xterm", () => {
   const disposable = () => ({ dispose: () => {} });
@@ -173,4 +173,21 @@ describe("FullFeed and the hub link", () => {
     feed.dispose();
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+it("uses the current mono family on mount and when a retained feed attaches to a new surface, without changing size", async () => {
+  const feed = new FullFeed("m1", "s1");
+  const first = document.body.appendChild(document.createElement("div"));
+  first.style.fontFamily = '"Menlo", monospace';
+  await feed.mount(first);
+  const term = terms[0];
+  expect(term.options.fontFamily).toBe('"Menlo", monospace');
+  const size = term.options.fontSize;
+  const second = document.body.appendChild(document.createElement("div"));
+  second.style.fontFamily = '"Consolas", monospace';
+  feed.claim({}, second, second, "s1");
+  await Promise.resolve(); await Promise.resolve();
+  expect(term.options.fontFamily).toBe('"Consolas", monospace');
+  expect(term.options.fontSize).toBe(size);
+  feed.dispose();
 });

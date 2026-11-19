@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Authority is a fresh read of the selected manager's own persisted identity.
@@ -21,6 +22,7 @@ type Authority struct {
 	ManagerID  string    `json:"manager"`
 	Main       string    `json:"main"`
 	MachineID  string    `json:"machine_id"`
+	Unassigned bool      `json:"unassigned,omitempty"`
 	Revision   string    `json:"revision"`
 	ObservedAt time.Time `json:"observed_at"`
 }
@@ -81,10 +83,13 @@ func (c *Controller) ReadAuthority(ctx context.Context, p Plan) (Authority, erro
 	if err != nil {
 		return out, errors.New("authority database connection unavailable")
 	}
-	var main, machine, rowVersion string
-	var changed, observed time.Time
-	err = connection.QueryRow(ctx, `SELECT value->>'main', value->>'machine_id', xmin::text, updated_at, clock_timestamp()
-		FROM public.settings WHERE key = 'assistant'`).Scan(&main, &machine, &rowVersion, &changed, &observed)
+	var main, machine, rowVersion, rowShape, mainShape, machineShape pgtype.Text
+	var changed pgtype.Timestamptz
+	var observed time.Time
+	err = connection.QueryRow(ctx, `SELECT s.value->>'main', s.value->>'machine_id', s.xmin::text, s.updated_at, clock_timestamp(),
+		jsonb_typeof(s.value), jsonb_typeof(s.value->'main'), jsonb_typeof(s.value->'machine_id')
+		FROM (VALUES (1)) AS present(placeholder)
+		LEFT JOIN public.settings AS s ON s.key = 'assistant'`).Scan(&main, &machine, &rowVersion, &changed, &observed, &rowShape, &mainShape, &machineShape)
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	closeErr := connection.Close(closeCtx)
 	closeCancel()
@@ -98,7 +103,14 @@ func (c *Controller) ReadAuthority(ctx context.Context, p Plan) (Authority, erro
 	if current != p.ConfigSHA256 {
 		return out, errors.New("authority manager config changed during read")
 	}
-	return authorityRecord(p.ManagerID, main, machine, rowVersion, changed, observed)
+	stringOrNull := func(shape pgtype.Text) bool {
+		return !shape.Valid || shape.String == "null" || shape.String == "string"
+	}
+	if rowVersion.Valid != rowShape.Valid || (rowShape.Valid && rowShape.String != "object") ||
+		!stringOrNull(mainShape) || !stringOrNull(machineShape) {
+		return out, errors.New("invalid authority assistant settings shape")
+	}
+	return authorityRecord(p.ManagerID, main.String, machine.String, rowVersion.String, changed.Time, observed)
 }
 
 func authorityRecord(manager, main, machine, version string, changed, observed time.Time) (Authority, error) {
@@ -106,7 +118,11 @@ func authorityRecord(manager, main, machine, version string, changed, observed t
 		return value != "" && len(value) <= 256 && strings.TrimSpace(value) == value &&
 			strings.IndexFunc(value, unicode.IsControl) < 0
 	}
-	if !idPattern.MatchString(manager) || !valid(main) || !valid(machine) || !valid(version) || changed.IsZero() || observed.IsZero() {
+	unassigned := main == "" && machine == ""
+	partial := (main == "") != (machine == "")
+	validPersistedRevision := valid(version) && !changed.IsZero()
+	if !idPattern.MatchString(manager) || partial || observed.IsZero() || !validPersistedRevision ||
+		(!unassigned && (!valid(main) || !valid(machine))) {
 		return Authority{}, errors.New("persisted main, machine or authority revision unavailable")
 	}
 	data, err := json.Marshal([]any{manager, main, machine, version, changed.UTC()})
@@ -114,6 +130,6 @@ func authorityRecord(manager, main, machine, version string, changed, observed t
 		return Authority{}, err
 	}
 	digest := sha256.Sum256(data)
-	return Authority{ManagerID: manager, Main: main, MachineID: machine,
+	return Authority{ManagerID: manager, Main: main, MachineID: machine, Unassigned: unassigned,
 		Revision: hex.EncodeToString(digest[:]), ObservedAt: observed.UTC()}, nil
 }

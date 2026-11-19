@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -129,6 +130,18 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, aske
 	selected, err := normalize(selected)
 	if err != nil {
 		return "", err
+	}
+	if resume {
+		profile := n.assistantConfigPath(selected)
+		owner := filepath.Base(profile)
+		// A managed connection's private profile is not the new launcher's
+		// sign-in. Refuse before stopping the old process or delivering input,
+		// including a provider-only model. Inspect the actual profile even if
+		// an older node saved the wrong launcher (or no launcher) in state.
+		if _, managed := n.managedCatalog(owner); managed && owner != launcher &&
+			n.privateProfile(profile) && sameScopePath(profile, filepath.Join(n.assistantProfilesRoot(), owner)) {
+			return "", refusal("assistant_launcher_profile_switch", i18n.T(i18n.From(ctx), "rpc-errors.assistant_launcher_profile_switch"), nil)
+		}
 	}
 	if resume && asked != "" {
 		explicit, err := normalize(asked)

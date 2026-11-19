@@ -139,6 +139,11 @@ func (d *mirrorDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot
 func (d *mirrorDevices) SetAttention(link.Attention) {}
 
 func (d *mirrorDevices) LinkRang(context.Context, string, time.Duration) bool { return false }
+func (d *mirrorDevices) HeldMessages(string, i18n.Lang) map[string][]proto.UndeliveredMessage {
+	return nil
+}
+func (d *mirrorDevices) HeldRetry(context.Context, string, string) (bool, error)  { return false, nil }
+func (d *mirrorDevices) HeldDelete(context.Context, string, string) (bool, error) { return false, nil }
 
 // mirrors are the tests' hubs' mirror devices.
 var mirrors sync.Map // *Hub → *mirrorDevices

@@ -172,6 +172,8 @@ class ShellLaneTests(unittest.TestCase):
                 expected = shards.tasks(SETTINGS, lane)
                 self.assertEqual(arguments[-len(expected):], expected)
                 self.assertIn("--max-workers=2", arguments)
+                # Each module's test runs its release unit tests too, which a local build leaves out (#10712).
+                self.assertIn("-Ppersona.releaseUnitTests=true", arguments)
                 self.assertNotIn("--profile", arguments)
                 self.assertEqual("translation checker tests" in result.stdout, lane in ("full", "lint-build-test-0"))
                 # Motion ratchet + its unit tests run in the same lint/build lane as the token checks (#9897).

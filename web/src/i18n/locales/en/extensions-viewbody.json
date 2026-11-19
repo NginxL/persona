@@ -16,5 +16,15 @@
   "chosen_count_other": "{count} chosen",
   "done": "Done",
   "search_choices": "Search",
-  "no_match": "Nothing matches"
+  "no_match": "Nothing matches",
+  "graph": "Graph",
+  "graph_zoom_in": "Zoom in",
+  "graph_zoom_out": "Zoom out",
+  "graph_fit": "Fit",
+  "graph_full_screen": "Full screen",
+  "graph_close": "Close",
+  "graph_fold": "Fold",
+  "graph_show_hidden_one": "Show {count} hidden",
+  "graph_show_hidden_other": "Show {count} hidden",
+  "graph_under": "under {title}"
 }

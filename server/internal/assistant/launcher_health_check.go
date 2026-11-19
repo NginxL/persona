@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -39,23 +40,50 @@ func (s *Service) probeLauncherHealth(ctx context.Context, machine, launcher str
 
 // healthLaunchers are the launchers to check on machine: those it can start (its ~/.zshrc's, the managed ones) and
 // the default one when every machine has it (plain claude: a default only some have never starts where it isn't,
-// launcher_fit.go); not a runtime's (they are not run with a prompt) nor an API provider's.
-func (s *Service) healthLaunchers(ctx context.Context, machine string) ([]string, error) {
+// launcher_fit.go); not an API provider's. A runtime's launcher only when the main chat or Agents run on it (#10369):
+// those are in whileFailing, checked only while their record on machine says they do not work, through the runtime's
+// own launchers.check as the on-demand probe does. So a failure is rechecked and a pass clears it, but no runtime is
+// asked to spend a request each interval, and the record a pass leaves stays while the machine lists the launcher.
+func (s *Service) healthLaunchers(ctx context.Context, machine string) (names []string, whileFailing map[string]bool, err error) {
 	list, err := s.machineLaunchers(ctx, machine)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []string
+	var runtimes []string
 	for _, l := range list {
-		if startableLauncher(l) {
-			out = append(out, l.Name)
+		switch {
+		case startableLauncher(l):
+			names = append(names, l.Name)
+		case runtimeLauncher(l):
+			runtimes = append(runtimes, l.Name)
 		}
 	}
-	if d := s.startLauncher(ctx, ""); !slices.Contains(out, d) && s.launcherEverywhere(ctx, d) {
-		out = append(out, d)
+	d := s.startLauncher(ctx, "")
+	if !slices.Contains(names, d) && s.launcherEverywhere(ctx, d) {
+		names = append(names, d)
 	}
-	return out, nil
+	for _, name := range []string{s.launcherNow(ctx), d} {
+		if slices.Contains(runtimes, name) && !slices.Contains(names, name) {
+			names = append(names, name)
+			if whileFailing == nil {
+				whileFailing = map[string]bool{}
+			}
+			whileFailing[name] = true
+		}
+	}
+	return names, whileFailing, nil
 }
+
+// runtimeLauncher: l is a runtime's launcher (DSH, Paseo, agy…: its source is the runtime's id), which the node checks
+// through the runtime. Not the desktop apps' (their check runs no prompt and always fails) nor an external source's.
+func runtimeLauncher(l proto.Launcher) bool {
+	source := compat.Source(l.Source)
+	return runtimeSource(l.Source) && source != proto.SourceClaudeDesktop && source != codexAppSource &&
+		source != proto.ExternalLauncherSource && !proto.IsExternalLauncher(l.Name)
+}
+
+// codexAppSource is the source of codex-app, a new chat in the Codex App (node/codexapp_new.go).
+const codexAppSource = "codex_app"
 
 // startLauncher is the launcher a start with launcher runs: itself, else model settings › Agents', else claude.
 func (s *Service) startLauncher(ctx context.Context, launcher string) string {
@@ -123,7 +151,7 @@ func (s *Service) healthRound(ctx context.Context, wait bool) {
 // checkMachine checks machine d's launchers that are due (only: one by that name, at once); the records of launchers
 // it no longer has go.
 func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, cameOnline bool, only string) []LauncherHealth {
-	names, err := s.healthLaunchers(ctx, d.ID)
+	names, whileFailing, err := s.healthLaunchers(ctx, d.ID)
 	if err != nil {
 		s.logf("launcher health: %s: launchers: %v", d.ID, err)
 		return nil
@@ -145,8 +173,11 @@ func (s *Service) checkMachine(ctx context.Context, d Device, cfg healthConfig, 
 		if only != "" && name != only {
 			continue
 		}
+		r, ok := s.launcherHealth(ctx, d.ID, name)
+		if whileFailing[name] && !(ok && r.unusable()) {
+			continue // a runtime's launcher that works, or was never seen failing here: nothing to recheck (#10369)
+		}
 		if only == "" {
-			r, ok := s.launcherHealth(ctx, d.ID, name)
 			since := time.Since(r.CheckedAt)
 			if reset, limited := r.limitReset(); limited {
 				// A check before the reset is refused too, and spends a request for it; the first round after it

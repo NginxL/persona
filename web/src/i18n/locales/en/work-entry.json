@@ -1,14 +1,13 @@
 {
-  "title": "Sessions and Terminal",
-  "short": "Sessions",
-  "sessions": "Sessions",
+  "title": "History",
+  "sessions": "History",
   "content": "Session or terminal",
-  "back": "Back to sessions",
+  "back": "Back to History",
   "terminal_unavailable": "Terminal unavailable",
   "pick_session": "Open a session",
   "pick_session_detail": "Choose a session from the list to see its conversation.",
   "pending": "Needs your attention",
   "pending_empty": "Nothing needs your attention.",
   "pending_request": "Pending request",
-  "all": "Browse all"
+  "all": "History"
 }

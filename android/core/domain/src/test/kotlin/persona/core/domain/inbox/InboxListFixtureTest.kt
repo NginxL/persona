@@ -10,7 +10,7 @@ import org.junit.runners.Parameterized
 class InboxListFixtureTest internal constructor(private val fixture: ListFixture) {
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun cases(): List<Array<Any>> = listFixtures("inbox").filter { fixture ->
+        fun cases(): List<Array<Any>> = listFixtures("spec/fixtures/inbox").filter { fixture ->
             // The display package's feature:inbox tests own the other operations; this test covers only list projections.
             (fixture[0] as ListFixture).operation in setOf("inbox_item_state", "hub_inbox_order", "inbox_list")
         }

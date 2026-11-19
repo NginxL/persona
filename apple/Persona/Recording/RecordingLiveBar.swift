@@ -41,7 +41,7 @@ struct RecordingLiveBar: View {
         .padding(.vertical, Theme.Space.s)
         .frame(maxWidth: .infinity)
         .background { Theme.groupedPage.ignoresSafeArea(edges: .bottom) }
-        .confirmationDialog("Stop Recording?", isPresented: $confirmingStop, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Stop Recording?", isPresented: $confirmingStop, titleVisibility: .visible) {
             Button("Stop Recording", role: .destructive) { MeetingRecorder.shared.stop(recordingID: nil) }
         } message: {
             Text("The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.")

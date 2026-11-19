@@ -132,7 +132,8 @@ describe("model change divider placement", () => {
 
   it("skips folded rounds: they are no visible reply", () => {
     const supervise = { injected: { kind: "system", state: "supervise", line: "Review a task" } } as Partial<Item>;
-    const lines = chatLines([user(1, "first"), said(2, OPUS), user(3, "check", supervise), said(4, "claude-haiku-4-5"), user(5, "second"), said(6, OPUS)]);
+    const lines = chatLines([user(1, "first"), said(2, OPUS), user(3, "check", supervise),
+      { ...said(4, "claude-haiku-4-5"), narration: true }, user(5, "second"), said(6, OPUS)]);
     expect(marks(lines)).toEqual(["first", "supervision", "second"]);
   });
 

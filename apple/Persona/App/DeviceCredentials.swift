@@ -228,7 +228,7 @@ struct DevicesView: View {
             scanningBrowser = true
         }
         #endif
-        .confirmationDialog(revoking.map { String(localized: "Revoke “\($0.name)”?") } ?? "", isPresented: Binding(
+        .accessibleConfirmationDialog(revoking.map { String(localized: "Revoke “\($0.name)”?") } ?? "", isPresented: Binding(
             get: { revoking != nil }, set: { if !$0 { revoking = nil } }
         ), titleVisibility: .visible, presenting: revoking) { t in
             Button(t.id == current ? String(localized: "Revoke and Unpair") : String(localized: "action.revoke", defaultValue: "Revoke"), role: .destructive) { Task { await revoke(t) } }

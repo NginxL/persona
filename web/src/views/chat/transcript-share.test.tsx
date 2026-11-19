@@ -23,7 +23,7 @@ const page = (seq: number): Transcript => ({
   error: "",
   hasMore: false,
   loadingEarlier: false,
-  loadEarlier: async () => {},
+  loadEarlier: async () => undefined,
   expandFold: async () => true,
   streaming: "",
   notLive: false,

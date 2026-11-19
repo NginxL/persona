@@ -82,16 +82,16 @@ struct TerminalsView: View {
         #endif
         .renameTerminalAlert($renaming) { t, name in Task { await rename(t, to: name) } }
         .renameSessionAlert($renamingSession)
-        .confirmationDialog(closing.map { String(localized: "Close \"\($0.title)\"?") } ?? "", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
-                            titleVisibility: .visible, presenting: closing) { c in
+        .accessibleConfirmationDialog(closing.map { String(localized: "Close \"\($0.title)\"?") } ?? "", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
+                            titleVisibility: .visible, hasCancel: true, presenting: closing) { c in
             Button(String(localized: "Close Terminal"), role: .destructive) { close(c) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("Whatever runs in it stops. This can't be undone.")
         }
-        .confirmationDialog(finished.map { String(localized: "Close \($0.panes.count) finished terminals on \($0.name)?") } ?? "",
+        .accessibleConfirmationDialog(finished.map { String(localized: "Close \($0.panes.count) finished terminals on \($0.name)?") } ?? "",
                             isPresented: Binding(get: { finished != nil }, set: { if !$0 { finished = nil } }),
-                            titleVisibility: .visible, presenting: finished) { f in
+                            titleVisibility: .visible, hasCancel: true, presenting: finished) { f in
             Button(String(localized: "Close Terminals"), role: .destructive) { closeFinished(f) }
             Button("Cancel", role: .cancel) {}
         } message: { f in

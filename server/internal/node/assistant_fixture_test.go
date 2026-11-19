@@ -63,8 +63,17 @@ type cliFixture struct {
 
 // cliTest is a node whose assistant conversations run fakeCLI as the machine's claude, with a fake hub.
 func cliTest(t *testing.T) *cliFixture {
+	return cliTestHome(t, fakeClaudeHome)
+}
+
+// cliTestBash runs a regression through the production bash fallback instead of skipping on a host without zsh.
+func cliTestBash(t *testing.T) *cliFixture {
+	return cliTestHome(t, fakeClaudeHomeBash)
+}
+
+func cliTestHome(t *testing.T, home func(*testing.T, string)) *cliFixture {
 	t.Helper()
-	fakeClaudeHome(t, fakeCLI)
+	home(t, fakeCLI)
 	dir := t.TempDir()
 	t.Setenv("CLI_FAKE_DIR", dir)
 	n := codexTestNode(t)

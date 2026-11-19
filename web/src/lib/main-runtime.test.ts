@@ -44,6 +44,14 @@ describe("main conversation runtime", () => {
     expect(mainRuntimeDetails("main", undefined)).toEqual({});
   });
 
+  it("says how a Claude main chat runs while interactive Claude Code is asked for, and why it fell back (#10058)", () => {
+    const claude = { ...report, harness: "claude" };
+    expect(mainRuntimeDetails("main", { ...claude, mode: "interactive" }).runtime).toBe("Claude Code（交互式）");
+    expect(mainRuntimeDetails("main", { ...claude, mode: "print", mode_note: "tmux is not installed on this computer" }))
+      .toEqual({ place: "execution-host", runtime: "Claude Code（打印模式）", note: "交互式 Claude Code 没有启动起来：tmux is not installed on this computer" });
+    expect(mainRuntimeDetails("main", claude).runtime).toBe("Claude Code"); // the switch off: as before
+  });
+
   it("preserves the main route when the configured device changes", () => {
     expect(mainConversationMachine({ main: "main", main_machine_id: "old", machine_id: "new", conversations: [] })).toBe("old");
     expect(mainConversationMachine({ main: "main", machine_id: "legacy", conversations: [] })).toBe("legacy");

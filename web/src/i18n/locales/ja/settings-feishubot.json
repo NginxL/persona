@@ -110,5 +110,16 @@
   "feature_answer_new_card_title": "回答を新しいカードで送る",
   "feature_answer_new_card_detail": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます",
   "source_report_full_title": "最終回答の全文を返信",
-  "source_report_full_detail": "元のグループの全員が最終回答を読めます。オフにすると短い結果を返信します。"
+  "source_report_full_detail": "元のグループの全員が最終回答を読めます。オフにすると短い結果を返信します。",
+  "topic_groups": "トピックグループ",
+  "topic_home": "メインのトピックグループ",
+  "topic_home_hint": "他のグループからの依頼をここで開きます。メイングループは別に選びます。",
+  "topic_home_none": "なし — 個別チャットを使用",
+  "topic_owner_mention": "私がボットにメンションしたときだけ応答",
+  "topic_mention_for": "私がボットにメンションしたときだけ応答 — {name}",
+  "topic_group_id": "グループ ID",
+  "topic_group_name": "グループ名（任意）",
+  "topic_add": "グループを追加",
+  "topic_policy_footer": "このグループでのあなたのメッセージと設定コマンドにのみ適用されます。他のメッセージは無視します。このスイッチをオンにして追加したグループは自動でメインになりません。オフにすると通常のトピックの動作に戻ります。",
+  "topic_home_default": "既定のメイングループに戻す"
 }

@@ -171,7 +171,7 @@ struct InboxPage: View {
                 .sheet(isPresented: $showingSubscriptions) { SubscriptionsSheet() }
                 .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
                 .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
-                .confirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
+                .accessibleConfirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible, hasCancel: true) {
                     Button(InboxBulk.confirmButton(count: cleanScope.count)) { clean(confirmed: true) }
                         .accessibilityIdentifier("inbox.cleanConfirm")
                     Button("Cancel", role: .cancel) {}

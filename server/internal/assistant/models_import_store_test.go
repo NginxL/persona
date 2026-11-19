@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -13,15 +14,19 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// settingsFaultStore is a memStore that counts reads by key, fails reads of failRead, fails a batch write that holds
-// failBatch, and runs onRead before a read is answered.
+// settingsFaultStore is a memStore that counts reads by key, fails reads of failRead, fails selected batch writes,
+// can fail the second individual write, and runs onRead before a read is answered.
 type settingsFaultStore struct {
 	*memStore
-	mu        sync.Mutex
-	reads     map[string]int
-	failRead  string
-	failBatch string
-	onRead    func(st *settingsFaultStore, key string, n int)
+	mu            sync.Mutex
+	reads         map[string]int
+	prefixReads   int
+	failRead      string
+	failPrefix    error
+	failBatch     string
+	failSecondPut bool
+	putCalls      int
+	onRead        func(st *settingsFaultStore, key string, n int)
 }
 
 func newSettingsFaultStore() *settingsFaultStore {
@@ -42,8 +47,32 @@ func (st *settingsFaultStore) Setting(ctx context.Context, key string, out any) 
 	return st.memStore.Setting(ctx, key, out)
 }
 
+func (st *settingsFaultStore) SettingsPrefix(ctx context.Context, prefix string) (map[string]json.RawMessage, error) {
+	st.mu.Lock()
+	st.prefixReads++
+	fail := st.failPrefix
+	st.mu.Unlock()
+	if fail != nil {
+		return nil, fail
+	}
+	return st.memStore.SettingsPrefix(ctx, prefix)
+}
+
+func (st *settingsFaultStore) PutSetting(ctx context.Context, key string, value any) error {
+	if st.failSecondPut {
+		st.putCalls++
+		if st.putCalls == 2 {
+			return errors.New("database unavailable")
+		}
+	}
+	return st.memStore.PutSetting(ctx, key, value)
+}
+
 func (st *settingsFaultStore) PutSettings(ctx context.Context, values map[string]any) error {
 	if _, ok := values[st.failBatch]; ok && st.failBatch != "" {
+		return errors.New("database unavailable")
+	}
+	if st.failSecondPut {
 		return errors.New("database unavailable")
 	}
 	return st.memStore.PutSettings(ctx, values)
@@ -59,6 +88,10 @@ func (st *settingsFaultStore) readCount(key string) int {
 type oneAtATimeStore struct {
 	Store
 	failPut string
+}
+
+func (st *oneAtATimeStore) SettingsPrefix(ctx context.Context, prefix string) (map[string]json.RawMessage, error) {
+	return st.Store.(settingsPrefixStore).SettingsPrefix(ctx, prefix)
 }
 
 func (st *oneAtATimeStore) PutSetting(ctx context.Context, key string, v any) error {

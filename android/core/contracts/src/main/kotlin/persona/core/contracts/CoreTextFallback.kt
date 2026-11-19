@@ -3,10 +3,10 @@ package persona.core.contracts
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * [CoreText.words] before the app sets it: unit tests run in Simplified Chinese (docs/android/android.md "Internationalization"), and the
- * build puts core/designsystem's `values-zh/strings_core.xml` on every Android module's test classpath, so their
- * expected text keeps reading as the app shows it. Without that file (the app, before it sets the words) it is
- * English.
+ * [CoreText.words] before the app sets it: unit tests run in Simplified Chinese (docs/android/android.md "Internationalization"), and
+ * modules that apply the `persona.coretext.zh` build plugin get core/designsystem's `values-zh/strings_core.xml` on their
+ * test classpath, so their expected text keeps reading as the app shows it. Without that file (the app before it sets the
+ * words, and the tests of every other module) it is English.
  */
 internal object CoreTextFallback {
     private val table: Map<String, String>? by lazy {

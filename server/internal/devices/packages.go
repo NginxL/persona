@@ -325,12 +325,12 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		if k.program == nodeproto.ProgramPersonaNode {
 			// Only deploy.sh puts persona-node there, with the version it is in <name>.version: the hub's own updates
 			// replace personad-* alone, so one left from an earlier deploy is another build than the hub's.
-			node := filepath.Join(dir, nodeproto.ProgramPersonaNode+"-"+plat)
+			node := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonaNode, plat))
 			if b, err := os.ReadFile(node + ".version"); err == nil && k.hub != "" && strings.TrimSpace(string(b)) == k.hub && fileExists(node) && localBuildOK(node, nodeproto.ProgramPersonaNode) {
 				return local(node, nodeproto.ProgramPersonaNode), nil
 			}
 		}
-		if p := filepath.Join(dir, "personad-"+plat); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
+		if p := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonad, plat)); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
 			personad = p
 		}
 	}
@@ -424,10 +424,23 @@ func releaseNodeIncompatible(m *update.Manifest) string {
 	}
 }
 
-// fileFor: f is named as a release names a node build for plat (personad-<plat>.gz, persona-node-<plat>.gz): its name
-// goes into a URL and the cache's paths, so nothing else is taken.
+// nodeBinaryName is a cached or bundled personad for plat. A Windows executable keeps .exe; it must be looked up
+// with the same suffix that the release download and hub update retain.
+func nodeBinaryName(program, plat string) string {
+	if strings.HasPrefix(plat, "windows-") {
+		return program + "-" + plat + ".exe"
+	}
+	return program + "-" + plat
+}
+
+// fileFor: f is named as a release names a node build for plat (personad-<plat>[.exe].gz,
+// persona-node-<plat>[.exe].gz). Its name goes into a URL and the cache's paths, so nothing else is taken.
 func fileFor(f update.File, plat string) bool {
-	return f.Name == "personad-"+plat+".gz" || f.Name == nodeproto.ProgramPersonaNode+"-"+plat+".gz"
+	suffix := ""
+	if strings.HasPrefix(plat, "windows-") {
+		suffix = ".exe"
+	}
+	return f.Name == "personad-"+plat+suffix+".gz" || f.Name == nodeproto.ProgramPersonaNode+"-"+plat+suffix+".gz"
 }
 
 // fileProgram is the kind of program a release download is, by its name.

@@ -217,6 +217,27 @@ describe("main conversation first-screen cache", () => {
     expect(shown.items).toEqual([]);
   });
 
+  it("drops an older page that resolves after a rewrite push but before effect cleanup", async () => {
+    render();
+    await answer({ items: saved().items, history: "v1", has_more: true });
+    let read!: Promise<symbol | undefined>;
+    act(() => { read = shown.loadEarlier(); });
+    const older = calls.shift()!;
+    expect(older.path).toContain("before_seq=10");
+
+    await act(async () => {
+      listener!.items!({ machine_id: "m", session_id: "main", items: [], history: "v2" });
+      expect(calls).toHaveLength(0); // the replacement effect has not run
+      older.resolve({ items: [item("stale-older", 5)], history: "v1", has_more: true });
+      expect(await read).toBeUndefined();
+    });
+
+    expect(renders.some(({ ids }) => ids.includes("stale-older"))).toBe(false);
+    await answer({ items: [item("replacement", 1)], history: "v2" });
+    expect(ids()).toEqual(["replacement"]);
+    expect(shown.loadingEarlier).toBe(false);
+  });
+
   it("discards a rewrite reported by an older page before the replacement read fails", async () => {
     writeFeedCache(scope, saved());
     render();

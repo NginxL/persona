@@ -487,6 +487,34 @@
               "done": 1
             }
           }
+        },
+        "order": {
+          "needs_you": [
+            "todo_a1",
+            "todo_b1"
+          ],
+          "can_wait": [
+            "todo_e1"
+          ],
+          "working": [
+            "todo_g1"
+          ],
+          "waiting": [
+            "todo_h1"
+          ],
+          "todo": [
+            "todo_p1"
+          ],
+          "just_finished": [
+            "todo_i1",
+            "todo_l1"
+          ],
+          "someday": [
+            "todo_n1"
+          ],
+          "done": [
+            "todo_m1"
+          ]
         }
       }
     },
@@ -610,6 +638,15 @@
               "done": 1
             }
           }
+        },
+        "order": {
+          "todo": [
+            "todo_r1",
+            "todo_a2"
+          ],
+          "done": [
+            "todo_q1"
+          ]
         }
       }
     },
@@ -711,6 +748,14 @@
               "done": 1
             }
           }
+        },
+        "order": {
+          "just_finished": [
+            "todo_y3"
+          ],
+          "done": [
+            "todo_y2"
+          ]
         }
       }
     },
@@ -913,6 +958,15 @@
               "done": 0
             }
           }
+        },
+        "order": {
+          "needs_you": [
+            "todo_ad1",
+            "todo_ad2"
+          ],
+          "todo": [
+            "todo_ad3"
+          ]
         }
       }
     },

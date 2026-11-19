@@ -23,6 +23,7 @@ var paneClosers = map[string]string{
 	"closeWithCause":    "n.close with the stop cause it records: the user's, or close-on-end's automatic one (#10355)",
 	"closeExited":       "session.retire with after_exit: the owner's close-on-end setting, once the Agent quit (#10355)",
 	"closeAfterExit":    "session.close after its Agent exits: the user's Close of its marked Herdr shell (#9648)",
+	"closeTaskTerminal": "session.close_task_terminal: the owner's opted-in task tab after durable acceptance (#10201)",
 	"closeCodexStart":   "a Codex start abandoned before Codex ran",
 	"closeNewTab":       "a start whose command never ran",
 	"failedTerminal":    "a Herdr App terminal whose launch failed",
@@ -71,7 +72,7 @@ func TestOnlyUserActionsClosePanes(t *testing.T) {
 				recv, _ := sel.X.(*ast.Ident)
 				closes := (sel.Sel.Name == "close" || sel.Sel.Name == "closeAfterExit" || sel.Sel.Name == "closeWithCause" ||
 					sel.Sel.Name == "closeExited") && recv != nil && recv.Name == "n" ||
-					sel.Sel.Name == "PaneClose" && nodeMethod ||
+					(sel.Sel.Name == "PaneClose" || sel.Sel.Name == "PaneCloseIf") && nodeMethod ||
 					sel.Sel.Name == "guardedClose" && (nodeMethod || keptClaimMethod) ||
 					sel.Sel.Name == "Close" && len(c.Args) == 4 // host.Organizer.Close(ctx, pane, workspace, tab)
 				if closes && !slices.Contains(found, fn.Name.Name) {

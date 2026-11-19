@@ -96,6 +96,38 @@ describe("loading an older page that fails", () => {
     expect(older()).toBe(3);
   });
 
+  it("joins a retry requested by the rail during backoff", async () => {
+    await loadEarlier();
+    api.mockImplementation(async (path: string) => path.includes("before_seq=")
+      ? { items: [{ id: "older", seq: 5, role: "user", kind: "text", text: "older" }], has_more: false }
+      : newest);
+    let first!: Promise<symbol | undefined>;
+    let second!: Promise<symbol | undefined>;
+    act(() => {
+      first = tr.current.loadEarlier({ waitForRetry: true });
+      second = tr.current.loadEarlier({ waitForRetry: true });
+    });
+    expect(second).toBe(first);
+    vi.advanceTimersByTime(2999);
+    expect(older()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(await first).toBe(tr.current.earlierPage);
+    expect(older()).toBe(2);
+    expect(tr.current.items[0].seq).toBe(5);
+    expect(tr.current.hasMore).toBe(false);
+  });
+
+  it("cancels a rail retry when its conversation changes", async () => {
+    await loadEarlier();
+    let pending!: Promise<symbol | undefined>;
+    act(() => { pending = tr.current.loadEarlier({ waitForRetry: true }); });
+    await act(async () => root.render(<Probe sid="s2" />));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(await pending).toBeUndefined();
+    expect(older()).toBe(1);
+    expect(tr.current.error).toBe("");
+  });
+
   it("asks at once in another session", async () => {
     await loadEarlier();
     await act(async () => root.render(<Probe sid="s2" />));

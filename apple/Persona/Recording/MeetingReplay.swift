@@ -47,7 +47,7 @@ import OSLog
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The run playing now: a run that ended late (its last tick after the next began) touches nothing of the next.
     @ObservationIgnored private var generation = UUID()
-    @ObservationIgnored private var audio: AVAudioPlayer?
+    @ObservationIgnored private(set) var audio: AVAudioPlayer?
     @ObservationIgnored private var sessionActive = false
     nonisolated private static let log = Logger(subsystem: "persona", category: "recording")
 
@@ -69,14 +69,15 @@ import OSLog
         return minutes
     }
 
-    /// Whether a replay can start now: nothing records (a meeting, a note or all day).
+    /// Whether a replay can start now: nothing records (a meeting, a note or all day), and no system call is live.
     static var canStart: Bool {
         let capture = RecordingCapture.shared
-        return capture.state == .idle && capture.recordingID == nil
+        return capture.state == .idle && capture.recordingID == nil && capture.callGate() == nil
     }
 
     /// Starts `tape` in the meeting room, its audio from `audioFile` where there is one; false, and nothing changes,
-    /// while something records. `ends`: the meeting ends by itself after the tape's last event (DEBUG screenshots).
+    /// while something records or a system call is live. `ends`: the meeting ends by itself after the tape's last event
+    /// (DEBUG screenshots).
     @discardableResult
     func play(_ tape: MeetingTape, audioFile: URL? = nil, speed: Double = 1, sound: Bool = true, ends: Bool = false) -> Bool {
         guard Self.canStart else { return false }
@@ -180,7 +181,11 @@ import OSLog
 
     private static func deactivateSession() {
         Task.detached(priority: .utility) {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            LiveCallGate.sessionQueue.sync {
+                // A call that went live owns the session now: deactivating it here would stop the call's audio.
+                guard !LiveCallGate.liveNow else { return }
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
         }
     }
 
@@ -199,8 +204,14 @@ import OSLog
                 player.enableRate = true
                 player.prepareToPlay()
                 let session = AVAudioSession.sharedInstance()
-                try session.setCategory(.playback, mode: .spokenAudio)
-                try session.setActive(true)
+                // Ordered with the call's own category: a call that went live while the file opened keeps its session.
+                let activated = try LiveCallGate.sessionQueue.sync { () -> Bool in
+                    guard !LiveCallGate.liveNow else { return false }
+                    try session.setCategory(.playback, mode: .spokenAudio)
+                    try session.setActive(true)
+                    return true
+                }
+                guard activated else { return nil }
                 return AudioBox(player: player)
             } catch {
                 Self.log.error("replay: no audio: \(error.localizedDescription, privacy: .public)")

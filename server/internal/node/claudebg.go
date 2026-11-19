@@ -406,40 +406,61 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 // only where that evidence is reliable (#9607):
 //   - the owner's own message (ownerInputExact), card answer or Stop (the Devices manager's owner-control RPC): it goes in as the session's own user's words, the one authorization the node acts on. The
 //     person who owns the session is the one its permission prompts and held messages wait on, and what they type at its
-//     terminal goes in whatever its mode. bypass when the session's own transcript says bypassPermissions now
-//     (peerSessionClass); nothing otherwise (a session that prompts takes a message that states none; plan may be
-//     either class). A stale record can only make the session hold the message, never take more than its owner could.
+//     terminal goes in whatever its mode. bypass when live receiver evidence puts the session in that class
+//     (peerSessionClassAt); nothing otherwise (a session that prompts takes a message that states none). Uncertain
+//     evidence can only make the session hold the message, never take more than its owner could.
 //   - anything else (supervision, another Agent's message, non-owner answers and stops): nothing. The node cannot bind such
 //     words to the permission mode they were written in, so a bypass session holds them for approval at the computer.
 func (n *Node) peerAttest(ctx context.Context, c claudeProc, id string) string {
-	if ownerDeliveryOf(ctx) != nil && peerSessionClass(n, c, id) == peerModeBypass {
+	if ownerDeliveryOf(ctx) != nil && peerSessionClassAt(ctx, n, c, id) == peerModeBypass {
 		return peerModeBypass
 	}
 	return ""
 }
 
-// peerSessionClass is the from-mode class session id runs in, from the transcript in claude c's own config directory
-// (not another profile's copy of the session): bypass when its latest mode is bypassPermissions, prompting for a mode
-// that prompts, "" when it cannot be told (plan, which Claude Code counts as bypass when bypass is available to the
-// session; no transcript or no mode yet). A mode changed since the transcript last said is not seen: such a message
-// is held there, which the send reports as such.
+// peerSessionClass is the classifier without a send context. Keep its signature for callers that only inspect a class.
 func peerSessionClass(n *Node, c claudeProc, id string) string {
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(c.dir), "projects", "*", id+".jsonl"))
-	var path string
-	var newest os.FileInfo
-	for _, m := range matches {
-		if st, err := os.Stat(m); err == nil && (newest == nil || st.ModTime().After(newest.ModTime())) {
-			path, newest = m, st
+	return peerSessionClassAt(context.Background(), n, c, id)
+}
+
+// peerSessionClassAt is the from-mode class session id runs in. A readable external tmux footer is the freshest mode:
+// shift+tab changes it before Claude writes the transcript. A visible composer without a recognized mode is prompting:
+// bypass and plan keep their indicators when a draft or dialog hides default's hint. Without live evidence, read the newest
+// transcript copy in claude c's own config directory (not another profile's copy), bypassing the ordinary metadata cache.
+// Plan needs one more fact: process arguments say whether bypass is available to that session. No mode, or plan without
+// that evidence, is "".
+func peerSessionClassAt(ctx context.Context, n *Node, c claudeProc, id string) string {
+	mode := ""
+	if pane := outsidePane(c); pane != "" {
+		if text, err := n.readPane(ctx, pane, "visible", 60); err == nil {
+			mode = tuiMode(text)
+			if mode == "" && tuiPromptingScreen(text) {
+				return peerModePrompting
+			}
 		}
 	}
-	if newest == nil {
-		return ""
+	if mode == "" {
+		matches, _ := filepath.Glob(filepath.Join(filepath.Dir(c.dir), "projects", "*", id+".jsonl"))
+		var path string
+		var newest os.FileInfo
+		for _, m := range matches {
+			if st, err := os.Stat(m); err == nil && (newest == nil || st.ModTime().After(newest.ModTime())) {
+				path, newest = m, st
+			}
+		}
+		if newest != nil {
+			mode = n.metaNow(path, newest).mode
+		}
 	}
-	switch n.metaNow(path, newest).mode {
+	switch mode {
 	case "bypassPermissions":
 		return peerModeBypass
 	case "default", "acceptEdits", "auto", "dontAsk":
 		return peerModePrompting
+	case "plan":
+		if claudeCanBypass(c.pid) {
+			return peerModeBypass
+		}
 	}
 	return ""
 }

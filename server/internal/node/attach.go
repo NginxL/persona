@@ -1,11 +1,14 @@
 package node
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/nwverse/persona/server/internal/acceptloop"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"io"
 	"net"
 	"os"
@@ -138,15 +141,36 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 	sb := newStandby(sp, logf)
 	sb.want()
 	defer sb.unwant()
-	var mu sync.Mutex        // served, and standby's want / unwant with it
+	var mu sync.Mutex        // served, cur, and standby's want / unwant with them
 	var served chan struct{} // closed when the connection being served has ended
+	var cur *attached        // the connection being served (attach_resume.go)
 	var current context.CancelFunc
 	var wg sync.WaitGroup
 	defer keeper.stopAll() // after the last connection handed them over: this resident node is ending
 	defer wg.Wait()
+	// A new transport is served once its first line says what it is (attach_resume.go): read beside the loop, so one
+	// that says nothing holds up no other. Connections still replace each other in the order they came: one that came
+	// before the connection served, and spoke after it, is let go (an attempt the manager gave up on).
+	peeked := make(chan peekedConn)
+	stopped := make(chan struct{}) // this loop returned: a peek still going lets its transport go
+	defer close(stopped)
+	var came, servedCame uint64 // transports in the order they came; the one of the connection served
+	peek := func(c net.Conn, at uint64) {
+		first, rest, err := readFirstLine(c)
+		select {
+		case peeked <- peekedConn{c: c, came: at, first: first, rest: rest, err: err}:
+		case <-ctx.Done():
+			c.Close()
+		case <-stopped:
+			c.Close()
+		}
+	}
 	for {
 		var c net.Conn
 		var ok bool
+		var first []byte
+		var rest io.Reader
+		var at uint64 // when c came (came)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -154,12 +178,55 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 			if !ok {
 				return nil
 			}
+			came++
+			go peek(c, came)
+			continue
 		case c, ok = <-extra:
 			if !ok {
 				extra = nil // that way is gone; relays go on
 				continue
 			}
+			came++
+			go peek(c, came)
+			continue
+		case f := <-peeked:
+			c, first, rest, at = f.c, f.first, f.rest, f.came
+			if f.err != nil && !errors.Is(f.err, bufio.ErrTooLong) {
+				// It ended, or said nothing in time, before a whole first line: not a manager's connection (one cut
+				// while asking to resume included), and it must not replace the connection kept.
+				_ = c.Close()
+				continue
+			}
 		}
+		if req, ok := rpc.ParseResume(first); ok { // the manager takes its connection back (attach_resume.go)
+			mu.Lock()
+			a := cur
+			mu.Unlock()
+			var err error = rpc.ErrResumeRefused
+			if a != nil {
+				err = a.resume(req, c, rest)
+			}
+			switch {
+			case err == nil:
+				logf("connection resumed on a new transport")
+			case errors.Is(err, rpc.ErrResumeRefused):
+				_ = rpc.RefuseResume(c, req)
+				_ = c.Close()
+				logf("refused to resume a connection this node does not have")
+			default: // the new transport failed while answering: the connection waits for the next
+				_ = c.Close()
+				logf("resuming on a new transport: %v", err)
+			}
+			continue
+		}
+		if at < servedCame {
+			_ = c.Close()
+			logf("let go a connection that came before the one served")
+			continue
+		}
+		servedCame = at
+		a := &attached{conn: c}
+		reader := connReader{Reader: io.MultiReader(bytes.NewReader(first), rest), a: a}
 		if current != nil {
 			current() // the previous connection's node shuts down; its hooks retry on the new one (hooks.go)
 		}
@@ -168,7 +235,7 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 		wg.Add(1)
 		mu.Lock()
 		prev, done := served, make(chan struct{})
-		served = done
+		served, cur = done, a
 		sb.unwant() // the new connection's Node takes node.sock; under mu, so an ending one cannot want it back
 		mu.Unlock()
 		began := time.Now()
@@ -186,7 +253,7 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 				sb.want()
 			}()
 			defer close(done)
-			defer c.Close()
+			defer a.end(errReplaced)
 			defer cancel()
 			if prev != nil { // the last connection's Node hands its conversations over as it ends (assistant_keep.go)
 				select {
@@ -204,10 +271,13 @@ func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), ext
 			}
 			n.adoptBgScans(scans)
 			n.share.Store(switches)
-			n.keeper = keeper                        // conversations go on from one connection to the next (assistant_keep.go)
-			n.spool = sp                             // what standby took goes to this connection first (spool.go)
-			go func() { <-cctx.Done(); c.Close() }() // a replaced connection stops reading at once
-			if err := n.Serve(cctx, c, c); err != nil && !errors.Is(err, io.EOF) && cctx.Err() == nil {
+			n.keeper = keeper // conversations go on from one connection to the next (assistant_keep.go)
+			n.spool = sp      // what standby took goes to this connection first (spool.go)
+			// The connection outlives a transport that ends, for the manager to resume (attach_resume.go). It writes on c
+			// until a resume gives its frame writer the new transport (rpc.Peer.AcceptResume).
+			n.resumeWindow, n.onPeer = resumeWindow, a.setPeer
+			go func() { <-cctx.Done(); a.end(errReplaced) }() // a replaced connection stops at once, a waiting one too
+			if err := n.Serve(cctx, reader, c); err != nil && !errors.Is(err, io.EOF) && cctx.Err() == nil {
 				n.logger.Printf("connection ended: %v", err)
 			}
 			n.handOverBgScans(scans)

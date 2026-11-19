@@ -3,7 +3,22 @@ import SwiftUI
 
 extension EnvironmentValues {
     /// Opens a space's page (its agents) from a chat; set on the dev tab's NavigationStack.
-    @Entry var openSpace: ((String) -> Void)? = nil
+    @Entry var openSpace: SpaceOpener? = nil
+}
+
+/// `\.openSpace`: one object for the life of the page that hands it down, given that page's current closure each time its
+/// body runs (`set`). A closure read from the environment is reported changed each time SwiftUI looks, so the chat that
+/// read it ran its body again, every message in it with it, whenever SwiftUI looked at its inputs again: three or four
+/// times on each switch between the open iPhone Duo's tabs (#10303).
+@MainActor final class SpaceOpener {
+    private var open: (String) -> Void = { _ in }
+
+    func set(_ open: @escaping (String) -> Void) -> SpaceOpener {
+        self.open = open
+        return self
+    }
+
+    func callAsFunction(_ space: String) { open(space) }
 }
 
 /// The space's tabs (its agents) in the chat's header, one capsule each in its state's color (no dots: the pulsing ones

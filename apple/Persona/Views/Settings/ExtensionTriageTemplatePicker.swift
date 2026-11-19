@@ -17,8 +17,8 @@ struct ExtensionTriageTemplatePicker: View {
             } label: {
                 Label { Text("Fill from Template").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.insert) }
             }
-            .confirmationDialog("Replace the Current Rule Draft?", isPresented: Binding(
-                get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
+            .accessibleConfirmationDialog("Replace the Current Rule Draft?", isPresented: Binding(
+                get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible, hasCancel: true) {
                 if let template = selected {
                     Button {
                         text = ExtensionTextContributions.filling(template)

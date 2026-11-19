@@ -1,0 +1,8391 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "name": "one node",
+   "graph": {
+    "nodes": [
+     {
+      "id": "a"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ]
+    },
+    "edges": [],
+    "size": [
+     1,
+     1.0
+    ],
+    "order": [
+     "a"
+    ],
+    "depth": {
+     "a": 0
+    },
+    "folds": {},
+    "frames": []
+   }
+  },
+  {
+   "name": "a root and three children, the middle one with two",
+   "graph": {
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "b1"
+     },
+     {
+      "id": "b2"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "a"
+     },
+     {
+      "from": "r",
+      "to": "b"
+     },
+     {
+      "from": "r",
+      "to": "c"
+     },
+     {
+      "from": "b",
+      "to": "b1"
+     },
+     {
+      "from": "b",
+      "to": "b2"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      1.5
+     ],
+     "a": [
+      1,
+      0.0
+     ],
+     "b": [
+      1,
+      1.5
+     ],
+     "c": [
+      1,
+      3.0
+     ],
+     "b1": [
+      2,
+      1.0
+     ],
+     "b2": [
+      2,
+      2.0
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "a"
+     ],
+     [
+      "r",
+      "b"
+     ],
+     [
+      "r",
+      "c"
+     ],
+     [
+      "b",
+      "b1"
+     ],
+     [
+      "b",
+      "b2"
+     ]
+    ],
+    "size": [
+     3,
+     4.0
+    ],
+    "order": [
+     "r",
+     "a",
+     "b",
+     "b1",
+     "b2",
+     "c"
+    ],
+    "depth": {
+     "r": 0,
+     "a": 1,
+     "b": 1,
+     "b1": 2,
+     "b2": 2,
+     "c": 1
+    },
+    "folds": {
+     "r": 0,
+     "b": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "the same, downwards",
+   "graph": {
+    "direction": "down",
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "b1"
+     },
+     {
+      "id": "b2"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "a"
+     },
+     {
+      "from": "r",
+      "to": "b"
+     },
+     {
+      "from": "r",
+      "to": "c"
+     },
+     {
+      "from": "b",
+      "to": "b1"
+     },
+     {
+      "from": "b",
+      "to": "b2"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      1.5,
+      0
+     ],
+     "a": [
+      0.0,
+      1
+     ],
+     "b": [
+      1.5,
+      1
+     ],
+     "c": [
+      3.0,
+      1
+     ],
+     "b1": [
+      1.0,
+      2
+     ],
+     "b2": [
+      2.0,
+      2
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "a"
+     ],
+     [
+      "r",
+      "b"
+     ],
+     [
+      "r",
+      "c"
+     ],
+     [
+      "b",
+      "b1"
+     ],
+     [
+      "b",
+      "b2"
+     ]
+    ],
+    "size": [
+     4.0,
+     3
+    ],
+    "order": [
+     "r",
+     "a",
+     "b",
+     "b1",
+     "b2",
+     "c"
+    ],
+    "depth": {
+     "r": 0,
+     "a": 1,
+     "b": 1,
+     "b1": 2,
+     "b2": 2,
+     "c": 1
+    },
+    "folds": {
+     "r": 0,
+     "b": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "children follow the edges' order, not the nodes'",
+   "graph": {
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "c"
+     },
+     {
+      "from": "r",
+      "to": "a"
+     },
+     {
+      "from": "r",
+      "to": "b"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      1.0
+     ],
+     "a": [
+      1,
+      1.0
+     ],
+     "b": [
+      1,
+      2.0
+     ],
+     "c": [
+      1,
+      0.0
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "c"
+     ],
+     [
+      "r",
+      "a"
+     ],
+     [
+      "r",
+      "b"
+     ]
+    ],
+    "size": [
+     2,
+     3.0
+    ],
+    "order": [
+     "r",
+     "c",
+     "a",
+     "b"
+    ],
+    "depth": {
+     "r": 0,
+     "c": 1,
+     "a": 1,
+     "b": 1
+    },
+    "folds": {
+     "r": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "three roots, half a slot apart",
+   "graph": {
+    "nodes": [
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "b1"
+     },
+     {
+      "id": "c"
+     }
+    ],
+    "edges": [
+     {
+      "from": "b",
+      "to": "b1"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ],
+     "b": [
+      0,
+      1.5
+     ],
+     "b1": [
+      1,
+      1.5
+     ],
+     "c": [
+      0,
+      3.0
+     ]
+    },
+    "edges": [
+     [
+      "b",
+      "b1"
+     ]
+    ],
+    "size": [
+     2,
+     4.0
+    ],
+    "order": [
+     "a",
+     "b",
+     "b1",
+     "c"
+    ],
+    "depth": {
+     "a": 0,
+     "b": 0,
+     "b1": 1,
+     "c": 0
+    },
+    "folds": {
+     "b": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "a folded node hides everything under it and counts it",
+   "graph": {
+    "folded": [
+     "b"
+    ],
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "b1"
+     },
+     {
+      "id": "b2"
+     },
+     {
+      "id": "b21"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "a"
+     },
+     {
+      "from": "r",
+      "to": "b"
+     },
+     {
+      "from": "b",
+      "to": "b1"
+     },
+     {
+      "from": "b",
+      "to": "b2"
+     },
+     {
+      "from": "b2",
+      "to": "b21"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      0.5
+     ],
+     "a": [
+      1,
+      0.0
+     ],
+     "b": [
+      1,
+      1.0
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "a"
+     ],
+     [
+      "r",
+      "b"
+     ]
+    ],
+    "size": [
+     2,
+     2.0
+    ],
+    "order": [
+     "r",
+     "a",
+     "b"
+    ],
+    "depth": {
+     "r": 0,
+     "a": 1,
+     "b": 1
+    },
+    "folds": {
+     "r": 0,
+     "b": 3
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "a folded leaf has nothing to hide",
+   "graph": {
+    "folded": [
+     "a"
+    ],
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "a"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      0.0
+     ],
+     "a": [
+      1,
+      0.0
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "a"
+     ]
+    ],
+    "size": [
+     2,
+     1.0
+    ],
+    "order": [
+     "r",
+     "a"
+    ],
+    "depth": {
+     "r": 0,
+     "a": 1
+    },
+    "folds": {
+     "r": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "a group's members are pulled together, framed, and set apart from their neighbours",
+   "graph": {
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "x",
+      "group": "Two ways"
+     },
+     {
+      "id": "plain"
+     },
+     {
+      "id": "y",
+      "group": "Two ways"
+     },
+     {
+      "id": "z",
+      "group": "Other"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "x"
+     },
+     {
+      "from": "r",
+      "to": "plain"
+     },
+     {
+      "from": "r",
+      "to": "y"
+     },
+     {
+      "from": "r",
+      "to": "z"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      1.75
+     ],
+     "x": [
+      1,
+      0.0
+     ],
+     "plain": [
+      1,
+      2.25
+     ],
+     "y": [
+      1,
+      1.0
+     ],
+     "z": [
+      1,
+      3.5
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "x"
+     ],
+     [
+      "r",
+      "plain"
+     ],
+     [
+      "r",
+      "y"
+     ],
+     [
+      "r",
+      "z"
+     ]
+    ],
+    "size": [
+     2,
+     4.5
+    ],
+    "order": [
+     "r",
+     "x",
+     "y",
+     "plain",
+     "z"
+    ],
+    "depth": {
+     "r": 0,
+     "x": 1,
+     "y": 1,
+     "plain": 1,
+     "z": 1
+    },
+    "folds": {
+     "r": 0
+    },
+    "frames": [
+     {
+      "group": "Two ways",
+      "members": [
+       "x",
+       "y"
+      ]
+     },
+     {
+      "group": "Other",
+      "members": [
+       "z"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "the same group under two parents is two frames",
+   "graph": {
+    "nodes": [
+     {
+      "id": "r"
+     },
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "a1",
+      "group": "ways"
+     },
+     {
+      "id": "a2",
+      "group": "ways"
+     },
+     {
+      "id": "b1",
+      "group": "ways"
+     },
+     {
+      "id": "b2",
+      "group": "ways"
+     }
+    ],
+    "edges": [
+     {
+      "from": "r",
+      "to": "a"
+     },
+     {
+      "from": "r",
+      "to": "b"
+     },
+     {
+      "from": "a",
+      "to": "a1"
+     },
+     {
+      "from": "a",
+      "to": "a2"
+     },
+     {
+      "from": "b",
+      "to": "b1"
+     },
+     {
+      "from": "b",
+      "to": "b2"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "r": [
+      0,
+      1.5
+     ],
+     "a": [
+      1,
+      0.5
+     ],
+     "b": [
+      1,
+      2.5
+     ],
+     "a1": [
+      2,
+      0.0
+     ],
+     "a2": [
+      2,
+      1.0
+     ],
+     "b1": [
+      2,
+      2.0
+     ],
+     "b2": [
+      2,
+      3.0
+     ]
+    },
+    "edges": [
+     [
+      "r",
+      "a"
+     ],
+     [
+      "r",
+      "b"
+     ],
+     [
+      "a",
+      "a1"
+     ],
+     [
+      "a",
+      "a2"
+     ],
+     [
+      "b",
+      "b1"
+     ],
+     [
+      "b",
+      "b2"
+     ]
+    ],
+    "size": [
+     3,
+     4.0
+    ],
+    "order": [
+     "r",
+     "a",
+     "a1",
+     "a2",
+     "b",
+     "b1",
+     "b2"
+    ],
+    "depth": {
+     "r": 0,
+     "a": 1,
+     "a1": 2,
+     "a2": 2,
+     "b": 1,
+     "b1": 2,
+     "b2": 2
+    },
+    "folds": {
+     "r": 0,
+     "a": 0,
+     "b": 0
+    },
+    "frames": [
+     {
+      "group": "ways",
+      "members": [
+       "a1",
+       "a2"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "b1",
+       "b2"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "grouped roots",
+   "graph": {
+    "nodes": [
+     {
+      "id": "a",
+      "group": "g"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c",
+      "group": "g"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ],
+     "b": [
+      0,
+      3.0
+     ],
+     "c": [
+      0,
+      1.5
+     ]
+    },
+    "edges": [],
+    "size": [
+     1,
+     4.0
+    ],
+    "order": [
+     "a",
+     "c",
+     "b"
+    ],
+    "depth": {
+     "a": 0,
+     "c": 0,
+     "b": 0
+    },
+    "folds": {},
+    "frames": [
+     {
+      "group": "g",
+      "members": [
+       "a",
+       "c"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "layered: a diamond",
+   "graph": {
+    "layout": "layered",
+    "nodes": [
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "d"
+     }
+    ],
+    "edges": [
+     {
+      "from": "a",
+      "to": "b"
+     },
+     {
+      "from": "a",
+      "to": "c"
+     },
+     {
+      "from": "b",
+      "to": "d"
+     },
+     {
+      "from": "c",
+      "to": "d"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.5
+     ],
+     "b": [
+      1,
+      0.0
+     ],
+     "c": [
+      1,
+      1.0
+     ],
+     "d": [
+      2,
+      0.5
+     ]
+    },
+    "edges": [
+     [
+      "a",
+      "b"
+     ],
+     [
+      "a",
+      "c"
+     ],
+     [
+      "b",
+      "d"
+     ],
+     [
+      "c",
+      "d"
+     ]
+    ],
+    "size": [
+     3,
+     2.0
+    ],
+    "order": [
+     "a",
+     "b",
+     "d",
+     "c"
+    ],
+    "depth": {
+     "a": 0,
+     "b": 1,
+     "d": 2,
+     "c": 1
+    },
+    "folds": {
+     "a": 0,
+     "b": 0,
+     "c": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "layered: a node sits one past its furthest parent",
+   "graph": {
+    "layout": "layered",
+    "nodes": [
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "d"
+     }
+    ],
+    "edges": [
+     {
+      "from": "a",
+      "to": "b"
+     },
+     {
+      "from": "b",
+      "to": "c"
+     },
+     {
+      "from": "a",
+      "to": "d"
+     },
+     {
+      "from": "c",
+      "to": "d"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ],
+     "b": [
+      1,
+      0.0
+     ],
+     "c": [
+      2,
+      0.0
+     ],
+     "d": [
+      3,
+      0.0
+     ]
+    },
+    "edges": [
+     [
+      "a",
+      "b"
+     ],
+     [
+      "b",
+      "c"
+     ],
+     [
+      "a",
+      "d"
+     ],
+     [
+      "c",
+      "d"
+     ]
+    ],
+    "size": [
+     4,
+     1.0
+    ],
+    "order": [
+     "a",
+     "b",
+     "c",
+     "d"
+    ],
+    "depth": {
+     "a": 0,
+     "b": 1,
+     "c": 2,
+     "d": 3
+    },
+    "folds": {
+     "a": 0,
+     "b": 0,
+     "c": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "layered: the sweeps uncross edges",
+   "graph": {
+    "layout": "layered",
+    "nodes": [
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "x"
+     },
+     {
+      "id": "y"
+     },
+     {
+      "id": "z"
+     }
+    ],
+    "edges": [
+     {
+      "from": "a",
+      "to": "z"
+     },
+     {
+      "from": "b",
+      "to": "y"
+     },
+     {
+      "from": "c",
+      "to": "x"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ],
+     "b": [
+      0,
+      1.0
+     ],
+     "c": [
+      0,
+      2.0
+     ],
+     "x": [
+      1,
+      2.0
+     ],
+     "y": [
+      1,
+      1.0
+     ],
+     "z": [
+      1,
+      0.0
+     ]
+    },
+    "edges": [
+     [
+      "a",
+      "z"
+     ],
+     [
+      "b",
+      "y"
+     ],
+     [
+      "c",
+      "x"
+     ]
+    ],
+    "size": [
+     2,
+     3.0
+    ],
+    "order": [
+     "a",
+     "z",
+     "b",
+     "y",
+     "c",
+     "x"
+    ],
+    "depth": {
+     "a": 0,
+     "z": 1,
+     "b": 0,
+     "y": 1,
+     "c": 0,
+     "x": 1
+    },
+    "folds": {
+     "a": 0,
+     "b": 0,
+     "c": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "layered: a node with a folded parent stays while another parent shows it",
+   "graph": {
+    "layout": "layered",
+    "folded": [
+     "a"
+    ],
+    "nodes": [
+     {
+      "id": "a"
+     },
+     {
+      "id": "b"
+     },
+     {
+      "id": "c"
+     },
+     {
+      "id": "d"
+     }
+    ],
+    "edges": [
+     {
+      "from": "a",
+      "to": "c"
+     },
+     {
+      "from": "b",
+      "to": "c"
+     },
+     {
+      "from": "a",
+      "to": "d"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "a": [
+      0,
+      0.0
+     ],
+     "b": [
+      0,
+      1.0
+     ],
+     "c": [
+      1,
+      0.5
+     ]
+    },
+    "edges": [
+     [
+      "b",
+      "c"
+     ]
+    ],
+    "size": [
+     2,
+     2.0
+    ],
+    "order": [
+     "a",
+     "b",
+     "c"
+    ],
+    "depth": {
+     "a": 0,
+     "b": 0,
+     "c": 1
+    },
+    "folds": {
+     "a": 1,
+     "b": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "layered downwards with a group and an unequal layer",
+   "graph": {
+    "layout": "layered",
+    "direction": "down",
+    "nodes": [
+     {
+      "id": "s"
+     },
+     {
+      "id": "p1",
+      "group": "ways"
+     },
+     {
+      "id": "q"
+     },
+     {
+      "id": "p2",
+      "group": "ways"
+     },
+     {
+      "id": "j"
+     }
+    ],
+    "edges": [
+     {
+      "from": "s",
+      "to": "p1"
+     },
+     {
+      "from": "s",
+      "to": "q"
+     },
+     {
+      "from": "s",
+      "to": "p2"
+     },
+     {
+      "from": "p1",
+      "to": "j"
+     },
+     {
+      "from": "p2",
+      "to": "j"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "s": [
+      1.125,
+      0
+     ],
+     "p1": [
+      0.0,
+      1
+     ],
+     "q": [
+      2.25,
+      1
+     ],
+     "p2": [
+      1.0,
+      1
+     ],
+     "j": [
+      1.125,
+      2
+     ]
+    },
+    "edges": [
+     [
+      "s",
+      "p1"
+     ],
+     [
+      "s",
+      "q"
+     ],
+     [
+      "s",
+      "p2"
+     ],
+     [
+      "p1",
+      "j"
+     ],
+     [
+      "p2",
+      "j"
+     ]
+    ],
+    "size": [
+     3.25,
+     3
+    ],
+    "order": [
+     "s",
+     "p1",
+     "j",
+     "p2",
+     "q"
+    ],
+    "depth": {
+     "s": 0,
+     "p1": 1,
+     "j": 2,
+     "p2": 1,
+     "q": 1
+    },
+    "folds": {
+     "s": 0,
+     "p1": 0,
+     "p2": 0
+    },
+    "frames": [
+     {
+      "group": "ways",
+      "members": [
+       "p1",
+       "p2"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "the view's example: a release checklist",
+   "graph": {
+    "folded": [
+     "docs"
+    ],
+    "nodes": [
+     {
+      "id": "root"
+     },
+     {
+      "id": "plan"
+     },
+     {
+      "id": "build"
+     },
+     {
+      "id": "build.small",
+      "group": "Two ways"
+     },
+     {
+      "id": "build.cause",
+      "group": "Two ways"
+     },
+     {
+      "id": "tests"
+     },
+     {
+      "id": "tests.unit"
+     },
+     {
+      "id": "tests.ui"
+     },
+     {
+      "id": "tests.review"
+     },
+     {
+      "id": "docs"
+     },
+     {
+      "id": "docs.en"
+     },
+     {
+      "id": "docs.ja"
+     }
+    ],
+    "edges": [
+     {
+      "from": "root",
+      "to": "plan"
+     },
+     {
+      "from": "root",
+      "to": "build"
+     },
+     {
+      "from": "root",
+      "to": "tests"
+     },
+     {
+      "from": "root",
+      "to": "docs"
+     },
+     {
+      "from": "build",
+      "to": "build.small"
+     },
+     {
+      "from": "build",
+      "to": "build.cause"
+     },
+     {
+      "from": "tests",
+      "to": "tests.unit"
+     },
+     {
+      "from": "tests",
+      "to": "tests.ui"
+     },
+     {
+      "from": "tests",
+      "to": "tests.review"
+     },
+     {
+      "from": "docs",
+      "to": "docs.en"
+     },
+     {
+      "from": "docs",
+      "to": "docs.ja"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "root": [
+      0,
+      3.0
+     ],
+     "plan": [
+      1,
+      0.0
+     ],
+     "build": [
+      1,
+      1.5
+     ],
+     "build.small": [
+      2,
+      1.0
+     ],
+     "build.cause": [
+      2,
+      2.0
+     ],
+     "tests": [
+      1,
+      4.0
+     ],
+     "tests.unit": [
+      2,
+      3.0
+     ],
+     "tests.ui": [
+      2,
+      4.0
+     ],
+     "tests.review": [
+      2,
+      5.0
+     ],
+     "docs": [
+      1,
+      6.0
+     ]
+    },
+    "edges": [
+     [
+      "root",
+      "plan"
+     ],
+     [
+      "root",
+      "build"
+     ],
+     [
+      "root",
+      "tests"
+     ],
+     [
+      "root",
+      "docs"
+     ],
+     [
+      "build",
+      "build.small"
+     ],
+     [
+      "build",
+      "build.cause"
+     ],
+     [
+      "tests",
+      "tests.unit"
+     ],
+     [
+      "tests",
+      "tests.ui"
+     ],
+     [
+      "tests",
+      "tests.review"
+     ]
+    ],
+    "size": [
+     3,
+     7.0
+    ],
+    "order": [
+     "root",
+     "plan",
+     "build",
+     "build.small",
+     "build.cause",
+     "tests",
+     "tests.unit",
+     "tests.ui",
+     "tests.review",
+     "docs"
+    ],
+    "depth": {
+     "root": 0,
+     "plan": 1,
+     "build": 1,
+     "build.small": 2,
+     "build.cause": 2,
+     "tests": 1,
+     "tests.unit": 2,
+     "tests.ui": 2,
+     "tests.review": 2,
+     "docs": 1
+    },
+    "folds": {
+     "root": 0,
+     "build": 0,
+     "tests": 0,
+     "docs": 2
+    },
+    "frames": [
+     {
+      "group": "Two ways",
+      "members": [
+       "build.small",
+       "build.cause"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "the view's example: a layered plan",
+   "graph": {
+    "layout": "layered",
+    "direction": "down",
+    "nodes": [
+     {
+      "id": "date"
+     },
+     {
+      "id": "movers"
+     },
+     {
+      "id": "boxes"
+     },
+     {
+      "id": "pack"
+     },
+     {
+      "id": "address"
+     },
+     {
+      "id": "move"
+     }
+    ],
+    "edges": [
+     {
+      "from": "date",
+      "to": "movers"
+     },
+     {
+      "from": "date",
+      "to": "address"
+     },
+     {
+      "from": "boxes",
+      "to": "pack"
+     },
+     {
+      "from": "movers",
+      "to": "move"
+     },
+     {
+      "from": "pack",
+      "to": "move"
+     },
+     {
+      "from": "address",
+      "to": "move"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "date": [
+      0.5,
+      0
+     ],
+     "movers": [
+      0.0,
+      1
+     ],
+     "boxes": [
+      1.5,
+      0
+     ],
+     "pack": [
+      2.0,
+      1
+     ],
+     "address": [
+      1.0,
+      1
+     ],
+     "move": [
+      1.0,
+      2
+     ]
+    },
+    "edges": [
+     [
+      "date",
+      "movers"
+     ],
+     [
+      "date",
+      "address"
+     ],
+     [
+      "boxes",
+      "pack"
+     ],
+     [
+      "movers",
+      "move"
+     ],
+     [
+      "pack",
+      "move"
+     ],
+     [
+      "address",
+      "move"
+     ]
+    ],
+    "size": [
+     3.0,
+     3
+    ],
+    "order": [
+     "date",
+     "movers",
+     "move",
+     "address",
+     "boxes",
+     "pack"
+    ],
+    "depth": {
+     "date": 0,
+     "movers": 1,
+     "move": 2,
+     "address": 1,
+     "boxes": 0,
+     "pack": 1
+    },
+    "folds": {
+     "date": 0,
+     "movers": 0,
+     "boxes": 0,
+     "pack": 0,
+     "address": 0
+    },
+    "frames": []
+   }
+  },
+  {
+   "name": "200 nodes",
+   "graph": {
+    "nodes": [
+     {
+      "id": "root"
+     },
+     {
+      "id": "p0"
+     },
+     {
+      "id": "p0.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p0.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p0.s1.c0"
+     },
+     {
+      "id": "p0.s2"
+     },
+     {
+      "id": "p0.s2.c0"
+     },
+     {
+      "id": "p0.s2.c1"
+     },
+     {
+      "id": "p0.s3"
+     },
+     {
+      "id": "p0.s3.c0"
+     },
+     {
+      "id": "p0.s3.c1"
+     },
+     {
+      "id": "p0.s3.c2"
+     },
+     {
+      "id": "p0.s4"
+     },
+     {
+      "id": "p0.s4.c0"
+     },
+     {
+      "id": "p0.s4.c1"
+     },
+     {
+      "id": "p0.s4.c2"
+     },
+     {
+      "id": "p0.s4.c3"
+     },
+     {
+      "id": "p0.s5"
+     },
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p1.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p1.s0.c0"
+     },
+     {
+      "id": "p1.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p1.s1.c0"
+     },
+     {
+      "id": "p1.s1.c1"
+     },
+     {
+      "id": "p1.s2"
+     },
+     {
+      "id": "p1.s2.c0"
+     },
+     {
+      "id": "p1.s2.c1"
+     },
+     {
+      "id": "p1.s2.c2"
+     },
+     {
+      "id": "p1.s3"
+     },
+     {
+      "id": "p1.s3.c0"
+     },
+     {
+      "id": "p1.s3.c1"
+     },
+     {
+      "id": "p1.s3.c2"
+     },
+     {
+      "id": "p1.s3.c3"
+     },
+     {
+      "id": "p1.s4"
+     },
+     {
+      "id": "p1.s5"
+     },
+     {
+      "id": "p1.s5.c0"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p2.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p2.s0.c0"
+     },
+     {
+      "id": "p2.s0.c1"
+     },
+     {
+      "id": "p2.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p2.s1.c0"
+     },
+     {
+      "id": "p2.s1.c1"
+     },
+     {
+      "id": "p2.s1.c2"
+     },
+     {
+      "id": "p2.s2"
+     },
+     {
+      "id": "p2.s2.c0"
+     },
+     {
+      "id": "p2.s2.c1"
+     },
+     {
+      "id": "p2.s2.c2"
+     },
+     {
+      "id": "p2.s2.c3"
+     },
+     {
+      "id": "p2.s3"
+     },
+     {
+      "id": "p2.s4"
+     },
+     {
+      "id": "p2.s4.c0"
+     },
+     {
+      "id": "p2.s5"
+     },
+     {
+      "id": "p2.s5.c0"
+     },
+     {
+      "id": "p2.s5.c1"
+     },
+     {
+      "id": "p3"
+     },
+     {
+      "id": "p3.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p3.s0.c0"
+     },
+     {
+      "id": "p3.s0.c1"
+     },
+     {
+      "id": "p3.s0.c2"
+     },
+     {
+      "id": "p3.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p3.s1.c0"
+     },
+     {
+      "id": "p3.s1.c1"
+     },
+     {
+      "id": "p3.s1.c2"
+     },
+     {
+      "id": "p3.s1.c3"
+     },
+     {
+      "id": "p3.s2"
+     },
+     {
+      "id": "p3.s3"
+     },
+     {
+      "id": "p3.s3.c0"
+     },
+     {
+      "id": "p3.s4"
+     },
+     {
+      "id": "p3.s4.c0"
+     },
+     {
+      "id": "p3.s4.c1"
+     },
+     {
+      "id": "p3.s5"
+     },
+     {
+      "id": "p3.s5.c0"
+     },
+     {
+      "id": "p3.s5.c1"
+     },
+     {
+      "id": "p3.s5.c2"
+     },
+     {
+      "id": "p4"
+     },
+     {
+      "id": "p4.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p4.s0.c0"
+     },
+     {
+      "id": "p4.s0.c1"
+     },
+     {
+      "id": "p4.s0.c2"
+     },
+     {
+      "id": "p4.s0.c3"
+     },
+     {
+      "id": "p4.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p4.s2"
+     },
+     {
+      "id": "p4.s2.c0"
+     },
+     {
+      "id": "p4.s3"
+     },
+     {
+      "id": "p4.s3.c0"
+     },
+     {
+      "id": "p4.s3.c1"
+     },
+     {
+      "id": "p4.s4"
+     },
+     {
+      "id": "p4.s4.c0"
+     },
+     {
+      "id": "p4.s4.c1"
+     },
+     {
+      "id": "p4.s4.c2"
+     },
+     {
+      "id": "p4.s5"
+     },
+     {
+      "id": "p4.s5.c0"
+     },
+     {
+      "id": "p4.s5.c1"
+     },
+     {
+      "id": "p4.s5.c2"
+     },
+     {
+      "id": "p4.s5.c3"
+     },
+     {
+      "id": "p5"
+     },
+     {
+      "id": "p5.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p5.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p5.s1.c0"
+     },
+     {
+      "id": "p5.s2"
+     },
+     {
+      "id": "p5.s2.c0"
+     },
+     {
+      "id": "p5.s2.c1"
+     },
+     {
+      "id": "p5.s3"
+     },
+     {
+      "id": "p5.s3.c0"
+     },
+     {
+      "id": "p5.s3.c1"
+     },
+     {
+      "id": "p5.s3.c2"
+     },
+     {
+      "id": "p5.s4"
+     },
+     {
+      "id": "p5.s4.c0"
+     },
+     {
+      "id": "p5.s4.c1"
+     },
+     {
+      "id": "p5.s4.c2"
+     },
+     {
+      "id": "p5.s4.c3"
+     },
+     {
+      "id": "p5.s5"
+     },
+     {
+      "id": "p6"
+     },
+     {
+      "id": "p6.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p6.s0.c0"
+     },
+     {
+      "id": "p6.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p6.s1.c0"
+     },
+     {
+      "id": "p6.s1.c1"
+     },
+     {
+      "id": "p6.s2"
+     },
+     {
+      "id": "p6.s2.c0"
+     },
+     {
+      "id": "p6.s2.c1"
+     },
+     {
+      "id": "p6.s2.c2"
+     },
+     {
+      "id": "p6.s3"
+     },
+     {
+      "id": "p6.s3.c0"
+     },
+     {
+      "id": "p6.s3.c1"
+     },
+     {
+      "id": "p6.s3.c2"
+     },
+     {
+      "id": "p6.s3.c3"
+     },
+     {
+      "id": "p6.s4"
+     },
+     {
+      "id": "p6.s5"
+     },
+     {
+      "id": "p6.s5.c0"
+     },
+     {
+      "id": "p7"
+     },
+     {
+      "id": "p7.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p7.s0.c0"
+     },
+     {
+      "id": "p7.s0.c1"
+     },
+     {
+      "id": "p7.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p7.s1.c0"
+     },
+     {
+      "id": "p7.s1.c1"
+     },
+     {
+      "id": "p7.s1.c2"
+     },
+     {
+      "id": "p7.s2"
+     },
+     {
+      "id": "p7.s2.c0"
+     },
+     {
+      "id": "p7.s2.c1"
+     },
+     {
+      "id": "p7.s2.c2"
+     },
+     {
+      "id": "p7.s2.c3"
+     },
+     {
+      "id": "p7.s3"
+     },
+     {
+      "id": "p7.s4"
+     },
+     {
+      "id": "p7.s4.c0"
+     },
+     {
+      "id": "p7.s5"
+     },
+     {
+      "id": "p7.s5.c0"
+     },
+     {
+      "id": "p7.s5.c1"
+     },
+     {
+      "id": "p0.s5.x0"
+     },
+     {
+      "id": "p1.s5.x0"
+     },
+     {
+      "id": "p2.s5.x0"
+     },
+     {
+      "id": "p3.s5.x0"
+     },
+     {
+      "id": "p4.s5.x0"
+     },
+     {
+      "id": "p5.s5.x0"
+     },
+     {
+      "id": "p6.s5.x0"
+     },
+     {
+      "id": "p7.s5.x0"
+     },
+     {
+      "id": "p0.s5.x1"
+     },
+     {
+      "id": "p1.s5.x1"
+     },
+     {
+      "id": "p2.s5.x1"
+     },
+     {
+      "id": "p3.s5.x1"
+     },
+     {
+      "id": "p4.s5.x1"
+     },
+     {
+      "id": "p5.s5.x1"
+     },
+     {
+      "id": "p6.s5.x1"
+     },
+     {
+      "id": "p7.s5.x1"
+     },
+     {
+      "id": "p0.s5.x2"
+     },
+     {
+      "id": "p1.s5.x2"
+     },
+     {
+      "id": "p2.s5.x2"
+     },
+     {
+      "id": "p3.s5.x2"
+     },
+     {
+      "id": "p4.s5.x2"
+     },
+     {
+      "id": "p5.s5.x2"
+     },
+     {
+      "id": "p6.s5.x2"
+     },
+     {
+      "id": "p7.s5.x2"
+     },
+     {
+      "id": "p0.s5.x3"
+     },
+     {
+      "id": "p1.s5.x3"
+     },
+     {
+      "id": "p2.s5.x3"
+     },
+     {
+      "id": "p3.s5.x3"
+     },
+     {
+      "id": "p4.s5.x3"
+     },
+     {
+      "id": "p5.s5.x3"
+     },
+     {
+      "id": "p6.s5.x3"
+     },
+     {
+      "id": "p7.s5.x3"
+     },
+     {
+      "id": "p0.s5.x4"
+     },
+     {
+      "id": "p1.s5.x4"
+     },
+     {
+      "id": "p2.s5.x4"
+     },
+     {
+      "id": "p3.s5.x4"
+     },
+     {
+      "id": "p4.s5.x4"
+     },
+     {
+      "id": "p5.s5.x4"
+     },
+     {
+      "id": "p6.s5.x4"
+     },
+     {
+      "id": "p7.s5.x4"
+     },
+     {
+      "id": "p0.s5.x5"
+     },
+     {
+      "id": "p1.s5.x5"
+     },
+     {
+      "id": "p2.s5.x5"
+     },
+     {
+      "id": "p3.s5.x5"
+     },
+     {
+      "id": "p4.s5.x5"
+     },
+     {
+      "id": "p5.s5.x5"
+     },
+     {
+      "id": "p6.s5.x5"
+     },
+     {
+      "id": "p7.s5.x5"
+     },
+     {
+      "id": "p0.s5.x6"
+     },
+     {
+      "id": "p1.s5.x6"
+     }
+    ],
+    "edges": [
+     {
+      "from": "root",
+      "to": "p0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s1"
+     },
+     {
+      "from": "p0.s1",
+      "to": "p0.s1.c0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s2"
+     },
+     {
+      "from": "p0.s2",
+      "to": "p0.s2.c0"
+     },
+     {
+      "from": "p0.s2",
+      "to": "p0.s2.c1"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s3"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c0"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c1"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c2"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s4"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c0"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c1"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c2"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c3"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s5"
+     },
+     {
+      "from": "root",
+      "to": "p1"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s0"
+     },
+     {
+      "from": "p1.s0",
+      "to": "p1.s0.c0"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s1"
+     },
+     {
+      "from": "p1.s1",
+      "to": "p1.s1.c0"
+     },
+     {
+      "from": "p1.s1",
+      "to": "p1.s1.c1"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s2"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c0"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c1"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c2"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s3"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c0"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c1"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c2"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c3"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s4"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s5"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.c0"
+     },
+     {
+      "from": "root",
+      "to": "p2"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s0"
+     },
+     {
+      "from": "p2.s0",
+      "to": "p2.s0.c0"
+     },
+     {
+      "from": "p2.s0",
+      "to": "p2.s0.c1"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s1"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c0"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c1"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c2"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s2"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c0"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c1"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c2"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c3"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s3"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s4"
+     },
+     {
+      "from": "p2.s4",
+      "to": "p2.s4.c0"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s5"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.c0"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.c1"
+     },
+     {
+      "from": "root",
+      "to": "p3"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s0"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c0"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c1"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c2"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s1"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c0"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c1"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c2"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c3"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s2"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s3"
+     },
+     {
+      "from": "p3.s3",
+      "to": "p3.s3.c0"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s4"
+     },
+     {
+      "from": "p3.s4",
+      "to": "p3.s4.c0"
+     },
+     {
+      "from": "p3.s4",
+      "to": "p3.s4.c1"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s5"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c0"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c1"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c2"
+     },
+     {
+      "from": "root",
+      "to": "p4"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s0"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c0"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c1"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c2"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c3"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s1"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s2"
+     },
+     {
+      "from": "p4.s2",
+      "to": "p4.s2.c0"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s3"
+     },
+     {
+      "from": "p4.s3",
+      "to": "p4.s3.c0"
+     },
+     {
+      "from": "p4.s3",
+      "to": "p4.s3.c1"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s4"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c0"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c1"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c2"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s5"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c0"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c1"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c2"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c3"
+     },
+     {
+      "from": "root",
+      "to": "p5"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s0"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s1"
+     },
+     {
+      "from": "p5.s1",
+      "to": "p5.s1.c0"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s2"
+     },
+     {
+      "from": "p5.s2",
+      "to": "p5.s2.c0"
+     },
+     {
+      "from": "p5.s2",
+      "to": "p5.s2.c1"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s3"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c0"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c1"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c2"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s4"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c0"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c1"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c2"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c3"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s5"
+     },
+     {
+      "from": "root",
+      "to": "p6"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s0"
+     },
+     {
+      "from": "p6.s0",
+      "to": "p6.s0.c0"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s1"
+     },
+     {
+      "from": "p6.s1",
+      "to": "p6.s1.c0"
+     },
+     {
+      "from": "p6.s1",
+      "to": "p6.s1.c1"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s2"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c0"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c1"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c2"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s3"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c0"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c1"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c2"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c3"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s4"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s5"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.c0"
+     },
+     {
+      "from": "root",
+      "to": "p7"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s0"
+     },
+     {
+      "from": "p7.s0",
+      "to": "p7.s0.c0"
+     },
+     {
+      "from": "p7.s0",
+      "to": "p7.s0.c1"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s1"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c0"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c1"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c2"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s2"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c0"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c1"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c2"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c3"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s3"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s4"
+     },
+     {
+      "from": "p7.s4",
+      "to": "p7.s4.c0"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s5"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.c0"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.c1"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x0"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x0"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x0"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x0"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x0"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x0"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x0"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x0"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x1"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x1"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x1"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x1"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x1"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x1"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x1"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x1"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x2"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x2"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x2"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x2"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x2"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x2"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x2"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x2"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x3"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x3"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x3"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x3"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x3"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x3"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x3"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x3"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x4"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x4"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x4"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x4"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x4"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x4"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x4"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x4"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x5"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x5"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x5"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x5"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x5"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x5"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x5"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x5"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x6"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x6"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "root": [
+      0,
+      74.25
+     ],
+     "p0": [
+      1,
+      7.125
+     ],
+     "p0.s0": [
+      2,
+      0.0
+     ],
+     "p0.s1": [
+      2,
+      1.0
+     ],
+     "p0.s1.c0": [
+      3,
+      1.0
+     ],
+     "p0.s2": [
+      2,
+      2.75
+     ],
+     "p0.s2.c0": [
+      3,
+      2.25
+     ],
+     "p0.s2.c1": [
+      3,
+      3.25
+     ],
+     "p0.s3": [
+      2,
+      5.25
+     ],
+     "p0.s3.c0": [
+      3,
+      4.25
+     ],
+     "p0.s3.c1": [
+      3,
+      5.25
+     ],
+     "p0.s3.c2": [
+      3,
+      6.25
+     ],
+     "p0.s4": [
+      2,
+      8.75
+     ],
+     "p0.s4.c0": [
+      3,
+      7.25
+     ],
+     "p0.s4.c1": [
+      3,
+      8.25
+     ],
+     "p0.s4.c2": [
+      3,
+      9.25
+     ],
+     "p0.s4.c3": [
+      3,
+      10.25
+     ],
+     "p0.s5": [
+      2,
+      14.25
+     ],
+     "p1": [
+      1,
+      25.625
+     ],
+     "p1.s0": [
+      2,
+      18.25
+     ],
+     "p1.s0.c0": [
+      3,
+      18.25
+     ],
+     "p1.s1": [
+      2,
+      19.75
+     ],
+     "p1.s1.c0": [
+      3,
+      19.25
+     ],
+     "p1.s1.c1": [
+      3,
+      20.25
+     ],
+     "p1.s2": [
+      2,
+      22.5
+     ],
+     "p1.s2.c0": [
+      3,
+      21.5
+     ],
+     "p1.s2.c1": [
+      3,
+      22.5
+     ],
+     "p1.s2.c2": [
+      3,
+      23.5
+     ],
+     "p1.s3": [
+      2,
+      26.0
+     ],
+     "p1.s3.c0": [
+      3,
+      24.5
+     ],
+     "p1.s3.c1": [
+      3,
+      25.5
+     ],
+     "p1.s3.c2": [
+      3,
+      26.5
+     ],
+     "p1.s3.c3": [
+      3,
+      27.5
+     ],
+     "p1.s4": [
+      2,
+      28.5
+     ],
+     "p1.s5": [
+      2,
+      33.0
+     ],
+     "p1.s5.c0": [
+      3,
+      29.5
+     ],
+     "p2": [
+      1,
+      45.125
+     ],
+     "p2.s0": [
+      2,
+      38.0
+     ],
+     "p2.s0.c0": [
+      3,
+      37.5
+     ],
+     "p2.s0.c1": [
+      3,
+      38.5
+     ],
+     "p2.s1": [
+      2,
+      40.5
+     ],
+     "p2.s1.c0": [
+      3,
+      39.5
+     ],
+     "p2.s1.c1": [
+      3,
+      40.5
+     ],
+     "p2.s1.c2": [
+      3,
+      41.5
+     ],
+     "p2.s2": [
+      2,
+      44.25
+     ],
+     "p2.s2.c0": [
+      3,
+      42.75
+     ],
+     "p2.s2.c1": [
+      3,
+      43.75
+     ],
+     "p2.s2.c2": [
+      3,
+      44.75
+     ],
+     "p2.s2.c3": [
+      3,
+      45.75
+     ],
+     "p2.s3": [
+      2,
+      46.75
+     ],
+     "p2.s4": [
+      2,
+      47.75
+     ],
+     "p2.s4.c0": [
+      3,
+      47.75
+     ],
+     "p2.s5": [
+      2,
+      52.25
+     ],
+     "p2.s5.c0": [
+      3,
+      48.75
+     ],
+     "p2.s5.c1": [
+      3,
+      49.75
+     ],
+     "p3": [
+      1,
+      64.875
+     ],
+     "p3.s0": [
+      2,
+      57.75
+     ],
+     "p3.s0.c0": [
+      3,
+      56.75
+     ],
+     "p3.s0.c1": [
+      3,
+      57.75
+     ],
+     "p3.s0.c2": [
+      3,
+      58.75
+     ],
+     "p3.s1": [
+      2,
+      61.25
+     ],
+     "p3.s1.c0": [
+      3,
+      59.75
+     ],
+     "p3.s1.c1": [
+      3,
+      60.75
+     ],
+     "p3.s1.c2": [
+      3,
+      61.75
+     ],
+     "p3.s1.c3": [
+      3,
+      62.75
+     ],
+     "p3.s2": [
+      2,
+      64.0
+     ],
+     "p3.s3": [
+      2,
+      65.0
+     ],
+     "p3.s3.c0": [
+      3,
+      65.0
+     ],
+     "p3.s4": [
+      2,
+      66.5
+     ],
+     "p3.s4.c0": [
+      3,
+      66.0
+     ],
+     "p3.s4.c1": [
+      3,
+      67.0
+     ],
+     "p3.s5": [
+      2,
+      72.0
+     ],
+     "p3.s5.c0": [
+      3,
+      68.0
+     ],
+     "p3.s5.c1": [
+      3,
+      69.0
+     ],
+     "p3.s5.c2": [
+      3,
+      70.0
+     ],
+     "p4": [
+      1,
+      85.625
+     ],
+     "p4.s0": [
+      2,
+      78.5
+     ],
+     "p4.s0.c0": [
+      3,
+      77.0
+     ],
+     "p4.s0.c1": [
+      3,
+      78.0
+     ],
+     "p4.s0.c2": [
+      3,
+      79.0
+     ],
+     "p4.s0.c3": [
+      3,
+      80.0
+     ],
+     "p4.s1": [
+      2,
+      81.0
+     ],
+     "p4.s2": [
+      2,
+      82.25
+     ],
+     "p4.s2.c0": [
+      3,
+      82.25
+     ],
+     "p4.s3": [
+      2,
+      83.75
+     ],
+     "p4.s3.c0": [
+      3,
+      83.25
+     ],
+     "p4.s3.c1": [
+      3,
+      84.25
+     ],
+     "p4.s4": [
+      2,
+      86.25
+     ],
+     "p4.s4.c0": [
+      3,
+      85.25
+     ],
+     "p4.s4.c1": [
+      3,
+      86.25
+     ],
+     "p4.s4.c2": [
+      3,
+      87.25
+     ],
+     "p4.s5": [
+      2,
+      92.75
+     ],
+     "p4.s5.c0": [
+      3,
+      88.25
+     ],
+     "p4.s5.c1": [
+      3,
+      89.25
+     ],
+     "p4.s5.c2": [
+      3,
+      90.25
+     ],
+     "p4.s5.c3": [
+      3,
+      91.25
+     ],
+     "p5": [
+      1,
+      105.125
+     ],
+     "p5.s0": [
+      2,
+      98.25
+     ],
+     "p5.s1": [
+      2,
+      99.25
+     ],
+     "p5.s1.c0": [
+      3,
+      99.25
+     ],
+     "p5.s2": [
+      2,
+      101.0
+     ],
+     "p5.s2.c0": [
+      3,
+      100.5
+     ],
+     "p5.s2.c1": [
+      3,
+      101.5
+     ],
+     "p5.s3": [
+      2,
+      103.5
+     ],
+     "p5.s3.c0": [
+      3,
+      102.5
+     ],
+     "p5.s3.c1": [
+      3,
+      103.5
+     ],
+     "p5.s3.c2": [
+      3,
+      104.5
+     ],
+     "p5.s4": [
+      2,
+      107.0
+     ],
+     "p5.s4.c0": [
+      3,
+      105.5
+     ],
+     "p5.s4.c1": [
+      3,
+      106.5
+     ],
+     "p5.s4.c2": [
+      3,
+      107.5
+     ],
+     "p5.s4.c3": [
+      3,
+      108.5
+     ],
+     "p5.s5": [
+      2,
+      112.0
+     ],
+     "p6": [
+      1,
+      122.625
+     ],
+     "p6.s0": [
+      2,
+      115.5
+     ],
+     "p6.s0.c0": [
+      3,
+      115.5
+     ],
+     "p6.s1": [
+      2,
+      117.0
+     ],
+     "p6.s1.c0": [
+      3,
+      116.5
+     ],
+     "p6.s1.c1": [
+      3,
+      117.5
+     ],
+     "p6.s2": [
+      2,
+      119.75
+     ],
+     "p6.s2.c0": [
+      3,
+      118.75
+     ],
+     "p6.s2.c1": [
+      3,
+      119.75
+     ],
+     "p6.s2.c2": [
+      3,
+      120.75
+     ],
+     "p6.s3": [
+      2,
+      123.25
+     ],
+     "p6.s3.c0": [
+      3,
+      121.75
+     ],
+     "p6.s3.c1": [
+      3,
+      122.75
+     ],
+     "p6.s3.c2": [
+      3,
+      123.75
+     ],
+     "p6.s3.c3": [
+      3,
+      124.75
+     ],
+     "p6.s4": [
+      2,
+      125.75
+     ],
+     "p6.s5": [
+      2,
+      129.75
+     ],
+     "p6.s5.c0": [
+      3,
+      126.75
+     ],
+     "p7": [
+      1,
+      141.375
+     ],
+     "p7.s0": [
+      2,
+      134.25
+     ],
+     "p7.s0.c0": [
+      3,
+      133.75
+     ],
+     "p7.s0.c1": [
+      3,
+      134.75
+     ],
+     "p7.s1": [
+      2,
+      136.75
+     ],
+     "p7.s1.c0": [
+      3,
+      135.75
+     ],
+     "p7.s1.c1": [
+      3,
+      136.75
+     ],
+     "p7.s1.c2": [
+      3,
+      137.75
+     ],
+     "p7.s2": [
+      2,
+      140.5
+     ],
+     "p7.s2.c0": [
+      3,
+      139.0
+     ],
+     "p7.s2.c1": [
+      3,
+      140.0
+     ],
+     "p7.s2.c2": [
+      3,
+      141.0
+     ],
+     "p7.s2.c3": [
+      3,
+      142.0
+     ],
+     "p7.s3": [
+      2,
+      143.0
+     ],
+     "p7.s4": [
+      2,
+      144.0
+     ],
+     "p7.s4.c0": [
+      3,
+      144.0
+     ],
+     "p7.s5": [
+      2,
+      148.5
+     ],
+     "p7.s5.c0": [
+      3,
+      145.0
+     ],
+     "p7.s5.c1": [
+      3,
+      146.0
+     ],
+     "p0.s5.x0": [
+      3,
+      11.25
+     ],
+     "p1.s5.x0": [
+      3,
+      30.5
+     ],
+     "p2.s5.x0": [
+      3,
+      50.75
+     ],
+     "p3.s5.x0": [
+      3,
+      71.0
+     ],
+     "p4.s5.x0": [
+      3,
+      92.25
+     ],
+     "p5.s5.x0": [
+      3,
+      109.5
+     ],
+     "p6.s5.x0": [
+      3,
+      127.75
+     ],
+     "p7.s5.x0": [
+      3,
+      147.0
+     ],
+     "p0.s5.x1": [
+      3,
+      12.25
+     ],
+     "p1.s5.x1": [
+      3,
+      31.5
+     ],
+     "p2.s5.x1": [
+      3,
+      51.75
+     ],
+     "p3.s5.x1": [
+      3,
+      72.0
+     ],
+     "p4.s5.x1": [
+      3,
+      93.25
+     ],
+     "p5.s5.x1": [
+      3,
+      110.5
+     ],
+     "p6.s5.x1": [
+      3,
+      128.75
+     ],
+     "p7.s5.x1": [
+      3,
+      148.0
+     ],
+     "p0.s5.x2": [
+      3,
+      13.25
+     ],
+     "p1.s5.x2": [
+      3,
+      32.5
+     ],
+     "p2.s5.x2": [
+      3,
+      52.75
+     ],
+     "p3.s5.x2": [
+      3,
+      73.0
+     ],
+     "p4.s5.x2": [
+      3,
+      94.25
+     ],
+     "p5.s5.x2": [
+      3,
+      111.5
+     ],
+     "p6.s5.x2": [
+      3,
+      129.75
+     ],
+     "p7.s5.x2": [
+      3,
+      149.0
+     ],
+     "p0.s5.x3": [
+      3,
+      14.25
+     ],
+     "p1.s5.x3": [
+      3,
+      33.5
+     ],
+     "p2.s5.x3": [
+      3,
+      53.75
+     ],
+     "p3.s5.x3": [
+      3,
+      74.0
+     ],
+     "p4.s5.x3": [
+      3,
+      95.25
+     ],
+     "p5.s5.x3": [
+      3,
+      112.5
+     ],
+     "p6.s5.x3": [
+      3,
+      130.75
+     ],
+     "p7.s5.x3": [
+      3,
+      150.0
+     ],
+     "p0.s5.x4": [
+      3,
+      15.25
+     ],
+     "p1.s5.x4": [
+      3,
+      34.5
+     ],
+     "p2.s5.x4": [
+      3,
+      54.75
+     ],
+     "p3.s5.x4": [
+      3,
+      75.0
+     ],
+     "p4.s5.x4": [
+      3,
+      96.25
+     ],
+     "p5.s5.x4": [
+      3,
+      113.5
+     ],
+     "p6.s5.x4": [
+      3,
+      131.75
+     ],
+     "p7.s5.x4": [
+      3,
+      151.0
+     ],
+     "p0.s5.x5": [
+      3,
+      16.25
+     ],
+     "p1.s5.x5": [
+      3,
+      35.5
+     ],
+     "p2.s5.x5": [
+      3,
+      55.75
+     ],
+     "p3.s5.x5": [
+      3,
+      76.0
+     ],
+     "p4.s5.x5": [
+      3,
+      97.25
+     ],
+     "p5.s5.x5": [
+      3,
+      114.5
+     ],
+     "p6.s5.x5": [
+      3,
+      132.75
+     ],
+     "p7.s5.x5": [
+      3,
+      152.0
+     ],
+     "p0.s5.x6": [
+      3,
+      17.25
+     ],
+     "p1.s5.x6": [
+      3,
+      36.5
+     ]
+    },
+    "edges": [
+     [
+      "root",
+      "p0"
+     ],
+     [
+      "p0",
+      "p0.s0"
+     ],
+     [
+      "p0",
+      "p0.s1"
+     ],
+     [
+      "p0.s1",
+      "p0.s1.c0"
+     ],
+     [
+      "p0",
+      "p0.s2"
+     ],
+     [
+      "p0.s2",
+      "p0.s2.c0"
+     ],
+     [
+      "p0.s2",
+      "p0.s2.c1"
+     ],
+     [
+      "p0",
+      "p0.s3"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c0"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c1"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c2"
+     ],
+     [
+      "p0",
+      "p0.s4"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c0"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c1"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c2"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c3"
+     ],
+     [
+      "p0",
+      "p0.s5"
+     ],
+     [
+      "root",
+      "p1"
+     ],
+     [
+      "p1",
+      "p1.s0"
+     ],
+     [
+      "p1.s0",
+      "p1.s0.c0"
+     ],
+     [
+      "p1",
+      "p1.s1"
+     ],
+     [
+      "p1.s1",
+      "p1.s1.c0"
+     ],
+     [
+      "p1.s1",
+      "p1.s1.c1"
+     ],
+     [
+      "p1",
+      "p1.s2"
+     ],
+     [
+      "p1.s2",
+      "p1.s2.c0"
+     ],
+     [
+      "p1.s2",
+      "p1.s2.c1"
+     ],
+     [
+      "p1.s2",
+      "p1.s2.c2"
+     ],
+     [
+      "p1",
+      "p1.s3"
+     ],
+     [
+      "p1.s3",
+      "p1.s3.c0"
+     ],
+     [
+      "p1.s3",
+      "p1.s3.c1"
+     ],
+     [
+      "p1.s3",
+      "p1.s3.c2"
+     ],
+     [
+      "p1.s3",
+      "p1.s3.c3"
+     ],
+     [
+      "p1",
+      "p1.s4"
+     ],
+     [
+      "p1",
+      "p1.s5"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.c0"
+     ],
+     [
+      "root",
+      "p2"
+     ],
+     [
+      "p2",
+      "p2.s0"
+     ],
+     [
+      "p2.s0",
+      "p2.s0.c0"
+     ],
+     [
+      "p2.s0",
+      "p2.s0.c1"
+     ],
+     [
+      "p2",
+      "p2.s1"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c0"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c1"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c2"
+     ],
+     [
+      "p2",
+      "p2.s2"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c0"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c1"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c2"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c3"
+     ],
+     [
+      "p2",
+      "p2.s3"
+     ],
+     [
+      "p2",
+      "p2.s4"
+     ],
+     [
+      "p2.s4",
+      "p2.s4.c0"
+     ],
+     [
+      "p2",
+      "p2.s5"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.c0"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.c1"
+     ],
+     [
+      "root",
+      "p3"
+     ],
+     [
+      "p3",
+      "p3.s0"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c0"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c1"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c2"
+     ],
+     [
+      "p3",
+      "p3.s1"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c0"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c1"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c2"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c3"
+     ],
+     [
+      "p3",
+      "p3.s2"
+     ],
+     [
+      "p3",
+      "p3.s3"
+     ],
+     [
+      "p3.s3",
+      "p3.s3.c0"
+     ],
+     [
+      "p3",
+      "p3.s4"
+     ],
+     [
+      "p3.s4",
+      "p3.s4.c0"
+     ],
+     [
+      "p3.s4",
+      "p3.s4.c1"
+     ],
+     [
+      "p3",
+      "p3.s5"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c0"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c1"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c2"
+     ],
+     [
+      "root",
+      "p4"
+     ],
+     [
+      "p4",
+      "p4.s0"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c0"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c1"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c2"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c3"
+     ],
+     [
+      "p4",
+      "p4.s1"
+     ],
+     [
+      "p4",
+      "p4.s2"
+     ],
+     [
+      "p4.s2",
+      "p4.s2.c0"
+     ],
+     [
+      "p4",
+      "p4.s3"
+     ],
+     [
+      "p4.s3",
+      "p4.s3.c0"
+     ],
+     [
+      "p4.s3",
+      "p4.s3.c1"
+     ],
+     [
+      "p4",
+      "p4.s4"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c0"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c1"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c2"
+     ],
+     [
+      "p4",
+      "p4.s5"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c0"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c1"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c2"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c3"
+     ],
+     [
+      "root",
+      "p5"
+     ],
+     [
+      "p5",
+      "p5.s0"
+     ],
+     [
+      "p5",
+      "p5.s1"
+     ],
+     [
+      "p5.s1",
+      "p5.s1.c0"
+     ],
+     [
+      "p5",
+      "p5.s2"
+     ],
+     [
+      "p5.s2",
+      "p5.s2.c0"
+     ],
+     [
+      "p5.s2",
+      "p5.s2.c1"
+     ],
+     [
+      "p5",
+      "p5.s3"
+     ],
+     [
+      "p5.s3",
+      "p5.s3.c0"
+     ],
+     [
+      "p5.s3",
+      "p5.s3.c1"
+     ],
+     [
+      "p5.s3",
+      "p5.s3.c2"
+     ],
+     [
+      "p5",
+      "p5.s4"
+     ],
+     [
+      "p5.s4",
+      "p5.s4.c0"
+     ],
+     [
+      "p5.s4",
+      "p5.s4.c1"
+     ],
+     [
+      "p5.s4",
+      "p5.s4.c2"
+     ],
+     [
+      "p5.s4",
+      "p5.s4.c3"
+     ],
+     [
+      "p5",
+      "p5.s5"
+     ],
+     [
+      "root",
+      "p6"
+     ],
+     [
+      "p6",
+      "p6.s0"
+     ],
+     [
+      "p6.s0",
+      "p6.s0.c0"
+     ],
+     [
+      "p6",
+      "p6.s1"
+     ],
+     [
+      "p6.s1",
+      "p6.s1.c0"
+     ],
+     [
+      "p6.s1",
+      "p6.s1.c1"
+     ],
+     [
+      "p6",
+      "p6.s2"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c0"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c1"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c2"
+     ],
+     [
+      "p6",
+      "p6.s3"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c0"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c1"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c2"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c3"
+     ],
+     [
+      "p6",
+      "p6.s4"
+     ],
+     [
+      "p6",
+      "p6.s5"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.c0"
+     ],
+     [
+      "root",
+      "p7"
+     ],
+     [
+      "p7",
+      "p7.s0"
+     ],
+     [
+      "p7.s0",
+      "p7.s0.c0"
+     ],
+     [
+      "p7.s0",
+      "p7.s0.c1"
+     ],
+     [
+      "p7",
+      "p7.s1"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c0"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c1"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c2"
+     ],
+     [
+      "p7",
+      "p7.s2"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c0"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c1"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c2"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c3"
+     ],
+     [
+      "p7",
+      "p7.s3"
+     ],
+     [
+      "p7",
+      "p7.s4"
+     ],
+     [
+      "p7.s4",
+      "p7.s4.c0"
+     ],
+     [
+      "p7",
+      "p7.s5"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.c0"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.c1"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x0"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x0"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x0"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x0"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x0"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x0"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x0"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x0"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x1"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x1"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x1"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x1"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x1"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x1"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x1"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x1"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x2"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x2"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x2"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x2"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x2"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x2"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x2"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x2"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x3"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x3"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x3"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x3"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x3"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x3"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x3"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x3"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x4"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x4"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x4"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x4"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x4"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x4"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x4"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x4"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x5"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x5"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x5"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x5"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x5"
+     ],
+     [
+      "p5.s5",
+      "p5.s5.x5"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x5"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x5"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x6"
+     ],
+     [
+      "p1.s5",
+      "p1.s5.x6"
+     ]
+    ],
+    "size": [
+     4,
+     153.0
+    ],
+    "order": [
+     "root",
+     "p0",
+     "p0.s0",
+     "p0.s1",
+     "p0.s1.c0",
+     "p0.s2",
+     "p0.s2.c0",
+     "p0.s2.c1",
+     "p0.s3",
+     "p0.s3.c0",
+     "p0.s3.c1",
+     "p0.s3.c2",
+     "p0.s4",
+     "p0.s4.c0",
+     "p0.s4.c1",
+     "p0.s4.c2",
+     "p0.s4.c3",
+     "p0.s5",
+     "p0.s5.x0",
+     "p0.s5.x1",
+     "p0.s5.x2",
+     "p0.s5.x3",
+     "p0.s5.x4",
+     "p0.s5.x5",
+     "p0.s5.x6",
+     "p1",
+     "p1.s0",
+     "p1.s0.c0",
+     "p1.s1",
+     "p1.s1.c0",
+     "p1.s1.c1",
+     "p1.s2",
+     "p1.s2.c0",
+     "p1.s2.c1",
+     "p1.s2.c2",
+     "p1.s3",
+     "p1.s3.c0",
+     "p1.s3.c1",
+     "p1.s3.c2",
+     "p1.s3.c3",
+     "p1.s4",
+     "p1.s5",
+     "p1.s5.c0",
+     "p1.s5.x0",
+     "p1.s5.x1",
+     "p1.s5.x2",
+     "p1.s5.x3",
+     "p1.s5.x4",
+     "p1.s5.x5",
+     "p1.s5.x6",
+     "p2",
+     "p2.s0",
+     "p2.s0.c0",
+     "p2.s0.c1",
+     "p2.s1",
+     "p2.s1.c0",
+     "p2.s1.c1",
+     "p2.s1.c2",
+     "p2.s2",
+     "p2.s2.c0",
+     "p2.s2.c1",
+     "p2.s2.c2",
+     "p2.s2.c3",
+     "p2.s3",
+     "p2.s4",
+     "p2.s4.c0",
+     "p2.s5",
+     "p2.s5.c0",
+     "p2.s5.c1",
+     "p2.s5.x0",
+     "p2.s5.x1",
+     "p2.s5.x2",
+     "p2.s5.x3",
+     "p2.s5.x4",
+     "p2.s5.x5",
+     "p3",
+     "p3.s0",
+     "p3.s0.c0",
+     "p3.s0.c1",
+     "p3.s0.c2",
+     "p3.s1",
+     "p3.s1.c0",
+     "p3.s1.c1",
+     "p3.s1.c2",
+     "p3.s1.c3",
+     "p3.s2",
+     "p3.s3",
+     "p3.s3.c0",
+     "p3.s4",
+     "p3.s4.c0",
+     "p3.s4.c1",
+     "p3.s5",
+     "p3.s5.c0",
+     "p3.s5.c1",
+     "p3.s5.c2",
+     "p3.s5.x0",
+     "p3.s5.x1",
+     "p3.s5.x2",
+     "p3.s5.x3",
+     "p3.s5.x4",
+     "p3.s5.x5",
+     "p4",
+     "p4.s0",
+     "p4.s0.c0",
+     "p4.s0.c1",
+     "p4.s0.c2",
+     "p4.s0.c3",
+     "p4.s1",
+     "p4.s2",
+     "p4.s2.c0",
+     "p4.s3",
+     "p4.s3.c0",
+     "p4.s3.c1",
+     "p4.s4",
+     "p4.s4.c0",
+     "p4.s4.c1",
+     "p4.s4.c2",
+     "p4.s5",
+     "p4.s5.c0",
+     "p4.s5.c1",
+     "p4.s5.c2",
+     "p4.s5.c3",
+     "p4.s5.x0",
+     "p4.s5.x1",
+     "p4.s5.x2",
+     "p4.s5.x3",
+     "p4.s5.x4",
+     "p4.s5.x5",
+     "p5",
+     "p5.s0",
+     "p5.s1",
+     "p5.s1.c0",
+     "p5.s2",
+     "p5.s2.c0",
+     "p5.s2.c1",
+     "p5.s3",
+     "p5.s3.c0",
+     "p5.s3.c1",
+     "p5.s3.c2",
+     "p5.s4",
+     "p5.s4.c0",
+     "p5.s4.c1",
+     "p5.s4.c2",
+     "p5.s4.c3",
+     "p5.s5",
+     "p5.s5.x0",
+     "p5.s5.x1",
+     "p5.s5.x2",
+     "p5.s5.x3",
+     "p5.s5.x4",
+     "p5.s5.x5",
+     "p6",
+     "p6.s0",
+     "p6.s0.c0",
+     "p6.s1",
+     "p6.s1.c0",
+     "p6.s1.c1",
+     "p6.s2",
+     "p6.s2.c0",
+     "p6.s2.c1",
+     "p6.s2.c2",
+     "p6.s3",
+     "p6.s3.c0",
+     "p6.s3.c1",
+     "p6.s3.c2",
+     "p6.s3.c3",
+     "p6.s4",
+     "p6.s5",
+     "p6.s5.c0",
+     "p6.s5.x0",
+     "p6.s5.x1",
+     "p6.s5.x2",
+     "p6.s5.x3",
+     "p6.s5.x4",
+     "p6.s5.x5",
+     "p7",
+     "p7.s0",
+     "p7.s0.c0",
+     "p7.s0.c1",
+     "p7.s1",
+     "p7.s1.c0",
+     "p7.s1.c1",
+     "p7.s1.c2",
+     "p7.s2",
+     "p7.s2.c0",
+     "p7.s2.c1",
+     "p7.s2.c2",
+     "p7.s2.c3",
+     "p7.s3",
+     "p7.s4",
+     "p7.s4.c0",
+     "p7.s5",
+     "p7.s5.c0",
+     "p7.s5.c1",
+     "p7.s5.x0",
+     "p7.s5.x1",
+     "p7.s5.x2",
+     "p7.s5.x3",
+     "p7.s5.x4",
+     "p7.s5.x5"
+    ],
+    "depth": {
+     "root": 0,
+     "p0": 1,
+     "p0.s0": 2,
+     "p0.s1": 2,
+     "p0.s1.c0": 3,
+     "p0.s2": 2,
+     "p0.s2.c0": 3,
+     "p0.s2.c1": 3,
+     "p0.s3": 2,
+     "p0.s3.c0": 3,
+     "p0.s3.c1": 3,
+     "p0.s3.c2": 3,
+     "p0.s4": 2,
+     "p0.s4.c0": 3,
+     "p0.s4.c1": 3,
+     "p0.s4.c2": 3,
+     "p0.s4.c3": 3,
+     "p0.s5": 2,
+     "p0.s5.x0": 3,
+     "p0.s5.x1": 3,
+     "p0.s5.x2": 3,
+     "p0.s5.x3": 3,
+     "p0.s5.x4": 3,
+     "p0.s5.x5": 3,
+     "p0.s5.x6": 3,
+     "p1": 1,
+     "p1.s0": 2,
+     "p1.s0.c0": 3,
+     "p1.s1": 2,
+     "p1.s1.c0": 3,
+     "p1.s1.c1": 3,
+     "p1.s2": 2,
+     "p1.s2.c0": 3,
+     "p1.s2.c1": 3,
+     "p1.s2.c2": 3,
+     "p1.s3": 2,
+     "p1.s3.c0": 3,
+     "p1.s3.c1": 3,
+     "p1.s3.c2": 3,
+     "p1.s3.c3": 3,
+     "p1.s4": 2,
+     "p1.s5": 2,
+     "p1.s5.c0": 3,
+     "p1.s5.x0": 3,
+     "p1.s5.x1": 3,
+     "p1.s5.x2": 3,
+     "p1.s5.x3": 3,
+     "p1.s5.x4": 3,
+     "p1.s5.x5": 3,
+     "p1.s5.x6": 3,
+     "p2": 1,
+     "p2.s0": 2,
+     "p2.s0.c0": 3,
+     "p2.s0.c1": 3,
+     "p2.s1": 2,
+     "p2.s1.c0": 3,
+     "p2.s1.c1": 3,
+     "p2.s1.c2": 3,
+     "p2.s2": 2,
+     "p2.s2.c0": 3,
+     "p2.s2.c1": 3,
+     "p2.s2.c2": 3,
+     "p2.s2.c3": 3,
+     "p2.s3": 2,
+     "p2.s4": 2,
+     "p2.s4.c0": 3,
+     "p2.s5": 2,
+     "p2.s5.c0": 3,
+     "p2.s5.c1": 3,
+     "p2.s5.x0": 3,
+     "p2.s5.x1": 3,
+     "p2.s5.x2": 3,
+     "p2.s5.x3": 3,
+     "p2.s5.x4": 3,
+     "p2.s5.x5": 3,
+     "p3": 1,
+     "p3.s0": 2,
+     "p3.s0.c0": 3,
+     "p3.s0.c1": 3,
+     "p3.s0.c2": 3,
+     "p3.s1": 2,
+     "p3.s1.c0": 3,
+     "p3.s1.c1": 3,
+     "p3.s1.c2": 3,
+     "p3.s1.c3": 3,
+     "p3.s2": 2,
+     "p3.s3": 2,
+     "p3.s3.c0": 3,
+     "p3.s4": 2,
+     "p3.s4.c0": 3,
+     "p3.s4.c1": 3,
+     "p3.s5": 2,
+     "p3.s5.c0": 3,
+     "p3.s5.c1": 3,
+     "p3.s5.c2": 3,
+     "p3.s5.x0": 3,
+     "p3.s5.x1": 3,
+     "p3.s5.x2": 3,
+     "p3.s5.x3": 3,
+     "p3.s5.x4": 3,
+     "p3.s5.x5": 3,
+     "p4": 1,
+     "p4.s0": 2,
+     "p4.s0.c0": 3,
+     "p4.s0.c1": 3,
+     "p4.s0.c2": 3,
+     "p4.s0.c3": 3,
+     "p4.s1": 2,
+     "p4.s2": 2,
+     "p4.s2.c0": 3,
+     "p4.s3": 2,
+     "p4.s3.c0": 3,
+     "p4.s3.c1": 3,
+     "p4.s4": 2,
+     "p4.s4.c0": 3,
+     "p4.s4.c1": 3,
+     "p4.s4.c2": 3,
+     "p4.s5": 2,
+     "p4.s5.c0": 3,
+     "p4.s5.c1": 3,
+     "p4.s5.c2": 3,
+     "p4.s5.c3": 3,
+     "p4.s5.x0": 3,
+     "p4.s5.x1": 3,
+     "p4.s5.x2": 3,
+     "p4.s5.x3": 3,
+     "p4.s5.x4": 3,
+     "p4.s5.x5": 3,
+     "p5": 1,
+     "p5.s0": 2,
+     "p5.s1": 2,
+     "p5.s1.c0": 3,
+     "p5.s2": 2,
+     "p5.s2.c0": 3,
+     "p5.s2.c1": 3,
+     "p5.s3": 2,
+     "p5.s3.c0": 3,
+     "p5.s3.c1": 3,
+     "p5.s3.c2": 3,
+     "p5.s4": 2,
+     "p5.s4.c0": 3,
+     "p5.s4.c1": 3,
+     "p5.s4.c2": 3,
+     "p5.s4.c3": 3,
+     "p5.s5": 2,
+     "p5.s5.x0": 3,
+     "p5.s5.x1": 3,
+     "p5.s5.x2": 3,
+     "p5.s5.x3": 3,
+     "p5.s5.x4": 3,
+     "p5.s5.x5": 3,
+     "p6": 1,
+     "p6.s0": 2,
+     "p6.s0.c0": 3,
+     "p6.s1": 2,
+     "p6.s1.c0": 3,
+     "p6.s1.c1": 3,
+     "p6.s2": 2,
+     "p6.s2.c0": 3,
+     "p6.s2.c1": 3,
+     "p6.s2.c2": 3,
+     "p6.s3": 2,
+     "p6.s3.c0": 3,
+     "p6.s3.c1": 3,
+     "p6.s3.c2": 3,
+     "p6.s3.c3": 3,
+     "p6.s4": 2,
+     "p6.s5": 2,
+     "p6.s5.c0": 3,
+     "p6.s5.x0": 3,
+     "p6.s5.x1": 3,
+     "p6.s5.x2": 3,
+     "p6.s5.x3": 3,
+     "p6.s5.x4": 3,
+     "p6.s5.x5": 3,
+     "p7": 1,
+     "p7.s0": 2,
+     "p7.s0.c0": 3,
+     "p7.s0.c1": 3,
+     "p7.s1": 2,
+     "p7.s1.c0": 3,
+     "p7.s1.c1": 3,
+     "p7.s1.c2": 3,
+     "p7.s2": 2,
+     "p7.s2.c0": 3,
+     "p7.s2.c1": 3,
+     "p7.s2.c2": 3,
+     "p7.s2.c3": 3,
+     "p7.s3": 2,
+     "p7.s4": 2,
+     "p7.s4.c0": 3,
+     "p7.s5": 2,
+     "p7.s5.c0": 3,
+     "p7.s5.c1": 3,
+     "p7.s5.x0": 3,
+     "p7.s5.x1": 3,
+     "p7.s5.x2": 3,
+     "p7.s5.x3": 3,
+     "p7.s5.x4": 3,
+     "p7.s5.x5": 3
+    },
+    "folds": {
+     "root": 0,
+     "p0": 0,
+     "p0.s1": 0,
+     "p0.s2": 0,
+     "p0.s3": 0,
+     "p0.s4": 0,
+     "p0.s5": 0,
+     "p1": 0,
+     "p1.s0": 0,
+     "p1.s1": 0,
+     "p1.s2": 0,
+     "p1.s3": 0,
+     "p1.s5": 0,
+     "p2": 0,
+     "p2.s0": 0,
+     "p2.s1": 0,
+     "p2.s2": 0,
+     "p2.s4": 0,
+     "p2.s5": 0,
+     "p3": 0,
+     "p3.s0": 0,
+     "p3.s1": 0,
+     "p3.s3": 0,
+     "p3.s4": 0,
+     "p3.s5": 0,
+     "p4": 0,
+     "p4.s0": 0,
+     "p4.s2": 0,
+     "p4.s3": 0,
+     "p4.s4": 0,
+     "p4.s5": 0,
+     "p5": 0,
+     "p5.s1": 0,
+     "p5.s2": 0,
+     "p5.s3": 0,
+     "p5.s4": 0,
+     "p5.s5": 0,
+     "p6": 0,
+     "p6.s0": 0,
+     "p6.s1": 0,
+     "p6.s2": 0,
+     "p6.s3": 0,
+     "p6.s5": 0,
+     "p7": 0,
+     "p7.s0": 0,
+     "p7.s1": 0,
+     "p7.s2": 0,
+     "p7.s4": 0,
+     "p7.s5": 0
+    },
+    "frames": [
+     {
+      "group": "ways",
+      "members": [
+       "p0.s0",
+       "p0.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p1.s0",
+       "p1.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p2.s0",
+       "p2.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p3.s0",
+       "p3.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p4.s0",
+       "p4.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p5.s0",
+       "p5.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p6.s0",
+       "p6.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p7.s0",
+       "p7.s1"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "200 nodes with two parts folded",
+   "graph": {
+    "folded": [
+     "p1",
+     "p5"
+    ],
+    "nodes": [
+     {
+      "id": "root"
+     },
+     {
+      "id": "p0"
+     },
+     {
+      "id": "p0.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p0.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p0.s1.c0"
+     },
+     {
+      "id": "p0.s2"
+     },
+     {
+      "id": "p0.s2.c0"
+     },
+     {
+      "id": "p0.s2.c1"
+     },
+     {
+      "id": "p0.s3"
+     },
+     {
+      "id": "p0.s3.c0"
+     },
+     {
+      "id": "p0.s3.c1"
+     },
+     {
+      "id": "p0.s3.c2"
+     },
+     {
+      "id": "p0.s4"
+     },
+     {
+      "id": "p0.s4.c0"
+     },
+     {
+      "id": "p0.s4.c1"
+     },
+     {
+      "id": "p0.s4.c2"
+     },
+     {
+      "id": "p0.s4.c3"
+     },
+     {
+      "id": "p0.s5"
+     },
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p1.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p1.s0.c0"
+     },
+     {
+      "id": "p1.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p1.s1.c0"
+     },
+     {
+      "id": "p1.s1.c1"
+     },
+     {
+      "id": "p1.s2"
+     },
+     {
+      "id": "p1.s2.c0"
+     },
+     {
+      "id": "p1.s2.c1"
+     },
+     {
+      "id": "p1.s2.c2"
+     },
+     {
+      "id": "p1.s3"
+     },
+     {
+      "id": "p1.s3.c0"
+     },
+     {
+      "id": "p1.s3.c1"
+     },
+     {
+      "id": "p1.s3.c2"
+     },
+     {
+      "id": "p1.s3.c3"
+     },
+     {
+      "id": "p1.s4"
+     },
+     {
+      "id": "p1.s5"
+     },
+     {
+      "id": "p1.s5.c0"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p2.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p2.s0.c0"
+     },
+     {
+      "id": "p2.s0.c1"
+     },
+     {
+      "id": "p2.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p2.s1.c0"
+     },
+     {
+      "id": "p2.s1.c1"
+     },
+     {
+      "id": "p2.s1.c2"
+     },
+     {
+      "id": "p2.s2"
+     },
+     {
+      "id": "p2.s2.c0"
+     },
+     {
+      "id": "p2.s2.c1"
+     },
+     {
+      "id": "p2.s2.c2"
+     },
+     {
+      "id": "p2.s2.c3"
+     },
+     {
+      "id": "p2.s3"
+     },
+     {
+      "id": "p2.s4"
+     },
+     {
+      "id": "p2.s4.c0"
+     },
+     {
+      "id": "p2.s5"
+     },
+     {
+      "id": "p2.s5.c0"
+     },
+     {
+      "id": "p2.s5.c1"
+     },
+     {
+      "id": "p3"
+     },
+     {
+      "id": "p3.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p3.s0.c0"
+     },
+     {
+      "id": "p3.s0.c1"
+     },
+     {
+      "id": "p3.s0.c2"
+     },
+     {
+      "id": "p3.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p3.s1.c0"
+     },
+     {
+      "id": "p3.s1.c1"
+     },
+     {
+      "id": "p3.s1.c2"
+     },
+     {
+      "id": "p3.s1.c3"
+     },
+     {
+      "id": "p3.s2"
+     },
+     {
+      "id": "p3.s3"
+     },
+     {
+      "id": "p3.s3.c0"
+     },
+     {
+      "id": "p3.s4"
+     },
+     {
+      "id": "p3.s4.c0"
+     },
+     {
+      "id": "p3.s4.c1"
+     },
+     {
+      "id": "p3.s5"
+     },
+     {
+      "id": "p3.s5.c0"
+     },
+     {
+      "id": "p3.s5.c1"
+     },
+     {
+      "id": "p3.s5.c2"
+     },
+     {
+      "id": "p4"
+     },
+     {
+      "id": "p4.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p4.s0.c0"
+     },
+     {
+      "id": "p4.s0.c1"
+     },
+     {
+      "id": "p4.s0.c2"
+     },
+     {
+      "id": "p4.s0.c3"
+     },
+     {
+      "id": "p4.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p4.s2"
+     },
+     {
+      "id": "p4.s2.c0"
+     },
+     {
+      "id": "p4.s3"
+     },
+     {
+      "id": "p4.s3.c0"
+     },
+     {
+      "id": "p4.s3.c1"
+     },
+     {
+      "id": "p4.s4"
+     },
+     {
+      "id": "p4.s4.c0"
+     },
+     {
+      "id": "p4.s4.c1"
+     },
+     {
+      "id": "p4.s4.c2"
+     },
+     {
+      "id": "p4.s5"
+     },
+     {
+      "id": "p4.s5.c0"
+     },
+     {
+      "id": "p4.s5.c1"
+     },
+     {
+      "id": "p4.s5.c2"
+     },
+     {
+      "id": "p4.s5.c3"
+     },
+     {
+      "id": "p5"
+     },
+     {
+      "id": "p5.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p5.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p5.s1.c0"
+     },
+     {
+      "id": "p5.s2"
+     },
+     {
+      "id": "p5.s2.c0"
+     },
+     {
+      "id": "p5.s2.c1"
+     },
+     {
+      "id": "p5.s3"
+     },
+     {
+      "id": "p5.s3.c0"
+     },
+     {
+      "id": "p5.s3.c1"
+     },
+     {
+      "id": "p5.s3.c2"
+     },
+     {
+      "id": "p5.s4"
+     },
+     {
+      "id": "p5.s4.c0"
+     },
+     {
+      "id": "p5.s4.c1"
+     },
+     {
+      "id": "p5.s4.c2"
+     },
+     {
+      "id": "p5.s4.c3"
+     },
+     {
+      "id": "p5.s5"
+     },
+     {
+      "id": "p6"
+     },
+     {
+      "id": "p6.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p6.s0.c0"
+     },
+     {
+      "id": "p6.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p6.s1.c0"
+     },
+     {
+      "id": "p6.s1.c1"
+     },
+     {
+      "id": "p6.s2"
+     },
+     {
+      "id": "p6.s2.c0"
+     },
+     {
+      "id": "p6.s2.c1"
+     },
+     {
+      "id": "p6.s2.c2"
+     },
+     {
+      "id": "p6.s3"
+     },
+     {
+      "id": "p6.s3.c0"
+     },
+     {
+      "id": "p6.s3.c1"
+     },
+     {
+      "id": "p6.s3.c2"
+     },
+     {
+      "id": "p6.s3.c3"
+     },
+     {
+      "id": "p6.s4"
+     },
+     {
+      "id": "p6.s5"
+     },
+     {
+      "id": "p6.s5.c0"
+     },
+     {
+      "id": "p7"
+     },
+     {
+      "id": "p7.s0",
+      "group": "ways"
+     },
+     {
+      "id": "p7.s0.c0"
+     },
+     {
+      "id": "p7.s0.c1"
+     },
+     {
+      "id": "p7.s1",
+      "group": "ways"
+     },
+     {
+      "id": "p7.s1.c0"
+     },
+     {
+      "id": "p7.s1.c1"
+     },
+     {
+      "id": "p7.s1.c2"
+     },
+     {
+      "id": "p7.s2"
+     },
+     {
+      "id": "p7.s2.c0"
+     },
+     {
+      "id": "p7.s2.c1"
+     },
+     {
+      "id": "p7.s2.c2"
+     },
+     {
+      "id": "p7.s2.c3"
+     },
+     {
+      "id": "p7.s3"
+     },
+     {
+      "id": "p7.s4"
+     },
+     {
+      "id": "p7.s4.c0"
+     },
+     {
+      "id": "p7.s5"
+     },
+     {
+      "id": "p7.s5.c0"
+     },
+     {
+      "id": "p7.s5.c1"
+     },
+     {
+      "id": "p0.s5.x0"
+     },
+     {
+      "id": "p1.s5.x0"
+     },
+     {
+      "id": "p2.s5.x0"
+     },
+     {
+      "id": "p3.s5.x0"
+     },
+     {
+      "id": "p4.s5.x0"
+     },
+     {
+      "id": "p5.s5.x0"
+     },
+     {
+      "id": "p6.s5.x0"
+     },
+     {
+      "id": "p7.s5.x0"
+     },
+     {
+      "id": "p0.s5.x1"
+     },
+     {
+      "id": "p1.s5.x1"
+     },
+     {
+      "id": "p2.s5.x1"
+     },
+     {
+      "id": "p3.s5.x1"
+     },
+     {
+      "id": "p4.s5.x1"
+     },
+     {
+      "id": "p5.s5.x1"
+     },
+     {
+      "id": "p6.s5.x1"
+     },
+     {
+      "id": "p7.s5.x1"
+     },
+     {
+      "id": "p0.s5.x2"
+     },
+     {
+      "id": "p1.s5.x2"
+     },
+     {
+      "id": "p2.s5.x2"
+     },
+     {
+      "id": "p3.s5.x2"
+     },
+     {
+      "id": "p4.s5.x2"
+     },
+     {
+      "id": "p5.s5.x2"
+     },
+     {
+      "id": "p6.s5.x2"
+     },
+     {
+      "id": "p7.s5.x2"
+     },
+     {
+      "id": "p0.s5.x3"
+     },
+     {
+      "id": "p1.s5.x3"
+     },
+     {
+      "id": "p2.s5.x3"
+     },
+     {
+      "id": "p3.s5.x3"
+     },
+     {
+      "id": "p4.s5.x3"
+     },
+     {
+      "id": "p5.s5.x3"
+     },
+     {
+      "id": "p6.s5.x3"
+     },
+     {
+      "id": "p7.s5.x3"
+     },
+     {
+      "id": "p0.s5.x4"
+     },
+     {
+      "id": "p1.s5.x4"
+     },
+     {
+      "id": "p2.s5.x4"
+     },
+     {
+      "id": "p3.s5.x4"
+     },
+     {
+      "id": "p4.s5.x4"
+     },
+     {
+      "id": "p5.s5.x4"
+     },
+     {
+      "id": "p6.s5.x4"
+     },
+     {
+      "id": "p7.s5.x4"
+     },
+     {
+      "id": "p0.s5.x5"
+     },
+     {
+      "id": "p1.s5.x5"
+     },
+     {
+      "id": "p2.s5.x5"
+     },
+     {
+      "id": "p3.s5.x5"
+     },
+     {
+      "id": "p4.s5.x5"
+     },
+     {
+      "id": "p5.s5.x5"
+     },
+     {
+      "id": "p6.s5.x5"
+     },
+     {
+      "id": "p7.s5.x5"
+     },
+     {
+      "id": "p0.s5.x6"
+     },
+     {
+      "id": "p1.s5.x6"
+     }
+    ],
+    "edges": [
+     {
+      "from": "root",
+      "to": "p0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s1"
+     },
+     {
+      "from": "p0.s1",
+      "to": "p0.s1.c0"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s2"
+     },
+     {
+      "from": "p0.s2",
+      "to": "p0.s2.c0"
+     },
+     {
+      "from": "p0.s2",
+      "to": "p0.s2.c1"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s3"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c0"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c1"
+     },
+     {
+      "from": "p0.s3",
+      "to": "p0.s3.c2"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s4"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c0"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c1"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c2"
+     },
+     {
+      "from": "p0.s4",
+      "to": "p0.s4.c3"
+     },
+     {
+      "from": "p0",
+      "to": "p0.s5"
+     },
+     {
+      "from": "root",
+      "to": "p1"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s0"
+     },
+     {
+      "from": "p1.s0",
+      "to": "p1.s0.c0"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s1"
+     },
+     {
+      "from": "p1.s1",
+      "to": "p1.s1.c0"
+     },
+     {
+      "from": "p1.s1",
+      "to": "p1.s1.c1"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s2"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c0"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c1"
+     },
+     {
+      "from": "p1.s2",
+      "to": "p1.s2.c2"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s3"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c0"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c1"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c2"
+     },
+     {
+      "from": "p1.s3",
+      "to": "p1.s3.c3"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s4"
+     },
+     {
+      "from": "p1",
+      "to": "p1.s5"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.c0"
+     },
+     {
+      "from": "root",
+      "to": "p2"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s0"
+     },
+     {
+      "from": "p2.s0",
+      "to": "p2.s0.c0"
+     },
+     {
+      "from": "p2.s0",
+      "to": "p2.s0.c1"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s1"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c0"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c1"
+     },
+     {
+      "from": "p2.s1",
+      "to": "p2.s1.c2"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s2"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c0"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c1"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c2"
+     },
+     {
+      "from": "p2.s2",
+      "to": "p2.s2.c3"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s3"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s4"
+     },
+     {
+      "from": "p2.s4",
+      "to": "p2.s4.c0"
+     },
+     {
+      "from": "p2",
+      "to": "p2.s5"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.c0"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.c1"
+     },
+     {
+      "from": "root",
+      "to": "p3"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s0"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c0"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c1"
+     },
+     {
+      "from": "p3.s0",
+      "to": "p3.s0.c2"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s1"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c0"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c1"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c2"
+     },
+     {
+      "from": "p3.s1",
+      "to": "p3.s1.c3"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s2"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s3"
+     },
+     {
+      "from": "p3.s3",
+      "to": "p3.s3.c0"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s4"
+     },
+     {
+      "from": "p3.s4",
+      "to": "p3.s4.c0"
+     },
+     {
+      "from": "p3.s4",
+      "to": "p3.s4.c1"
+     },
+     {
+      "from": "p3",
+      "to": "p3.s5"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c0"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c1"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.c2"
+     },
+     {
+      "from": "root",
+      "to": "p4"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s0"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c0"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c1"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c2"
+     },
+     {
+      "from": "p4.s0",
+      "to": "p4.s0.c3"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s1"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s2"
+     },
+     {
+      "from": "p4.s2",
+      "to": "p4.s2.c0"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s3"
+     },
+     {
+      "from": "p4.s3",
+      "to": "p4.s3.c0"
+     },
+     {
+      "from": "p4.s3",
+      "to": "p4.s3.c1"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s4"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c0"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c1"
+     },
+     {
+      "from": "p4.s4",
+      "to": "p4.s4.c2"
+     },
+     {
+      "from": "p4",
+      "to": "p4.s5"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c0"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c1"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c2"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.c3"
+     },
+     {
+      "from": "root",
+      "to": "p5"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s0"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s1"
+     },
+     {
+      "from": "p5.s1",
+      "to": "p5.s1.c0"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s2"
+     },
+     {
+      "from": "p5.s2",
+      "to": "p5.s2.c0"
+     },
+     {
+      "from": "p5.s2",
+      "to": "p5.s2.c1"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s3"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c0"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c1"
+     },
+     {
+      "from": "p5.s3",
+      "to": "p5.s3.c2"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s4"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c0"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c1"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c2"
+     },
+     {
+      "from": "p5.s4",
+      "to": "p5.s4.c3"
+     },
+     {
+      "from": "p5",
+      "to": "p5.s5"
+     },
+     {
+      "from": "root",
+      "to": "p6"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s0"
+     },
+     {
+      "from": "p6.s0",
+      "to": "p6.s0.c0"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s1"
+     },
+     {
+      "from": "p6.s1",
+      "to": "p6.s1.c0"
+     },
+     {
+      "from": "p6.s1",
+      "to": "p6.s1.c1"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s2"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c0"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c1"
+     },
+     {
+      "from": "p6.s2",
+      "to": "p6.s2.c2"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s3"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c0"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c1"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c2"
+     },
+     {
+      "from": "p6.s3",
+      "to": "p6.s3.c3"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s4"
+     },
+     {
+      "from": "p6",
+      "to": "p6.s5"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.c0"
+     },
+     {
+      "from": "root",
+      "to": "p7"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s0"
+     },
+     {
+      "from": "p7.s0",
+      "to": "p7.s0.c0"
+     },
+     {
+      "from": "p7.s0",
+      "to": "p7.s0.c1"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s1"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c0"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c1"
+     },
+     {
+      "from": "p7.s1",
+      "to": "p7.s1.c2"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s2"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c0"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c1"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c2"
+     },
+     {
+      "from": "p7.s2",
+      "to": "p7.s2.c3"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s3"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s4"
+     },
+     {
+      "from": "p7.s4",
+      "to": "p7.s4.c0"
+     },
+     {
+      "from": "p7",
+      "to": "p7.s5"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.c0"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.c1"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x0"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x0"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x0"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x0"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x0"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x0"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x0"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x0"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x1"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x1"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x1"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x1"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x1"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x1"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x1"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x1"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x2"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x2"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x2"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x2"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x2"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x2"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x2"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x2"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x3"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x3"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x3"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x3"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x3"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x3"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x3"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x3"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x4"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x4"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x4"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x4"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x4"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x4"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x4"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x4"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x5"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x5"
+     },
+     {
+      "from": "p2.s5",
+      "to": "p2.s5.x5"
+     },
+     {
+      "from": "p3.s5",
+      "to": "p3.s5.x5"
+     },
+     {
+      "from": "p4.s5",
+      "to": "p4.s5.x5"
+     },
+     {
+      "from": "p5.s5",
+      "to": "p5.s5.x5"
+     },
+     {
+      "from": "p6.s5",
+      "to": "p6.s5.x5"
+     },
+     {
+      "from": "p7.s5",
+      "to": "p7.s5.x5"
+     },
+     {
+      "from": "p0.s5",
+      "to": "p0.s5.x6"
+     },
+     {
+      "from": "p1.s5",
+      "to": "p1.s5.x6"
+     }
+    ]
+   },
+   "expected": {
+    "at": {
+     "root": [
+      0,
+      57.0
+     ],
+     "p0": [
+      1,
+      7.125
+     ],
+     "p0.s0": [
+      2,
+      0.0
+     ],
+     "p0.s1": [
+      2,
+      1.0
+     ],
+     "p0.s1.c0": [
+      3,
+      1.0
+     ],
+     "p0.s2": [
+      2,
+      2.75
+     ],
+     "p0.s2.c0": [
+      3,
+      2.25
+     ],
+     "p0.s2.c1": [
+      3,
+      3.25
+     ],
+     "p0.s3": [
+      2,
+      5.25
+     ],
+     "p0.s3.c0": [
+      3,
+      4.25
+     ],
+     "p0.s3.c1": [
+      3,
+      5.25
+     ],
+     "p0.s3.c2": [
+      3,
+      6.25
+     ],
+     "p0.s4": [
+      2,
+      8.75
+     ],
+     "p0.s4.c0": [
+      3,
+      7.25
+     ],
+     "p0.s4.c1": [
+      3,
+      8.25
+     ],
+     "p0.s4.c2": [
+      3,
+      9.25
+     ],
+     "p0.s4.c3": [
+      3,
+      10.25
+     ],
+     "p0.s5": [
+      2,
+      14.25
+     ],
+     "p1": [
+      1,
+      18.25
+     ],
+     "p2": [
+      1,
+      26.875
+     ],
+     "p2.s0": [
+      2,
+      19.75
+     ],
+     "p2.s0.c0": [
+      3,
+      19.25
+     ],
+     "p2.s0.c1": [
+      3,
+      20.25
+     ],
+     "p2.s1": [
+      2,
+      22.25
+     ],
+     "p2.s1.c0": [
+      3,
+      21.25
+     ],
+     "p2.s1.c1": [
+      3,
+      22.25
+     ],
+     "p2.s1.c2": [
+      3,
+      23.25
+     ],
+     "p2.s2": [
+      2,
+      26.0
+     ],
+     "p2.s2.c0": [
+      3,
+      24.5
+     ],
+     "p2.s2.c1": [
+      3,
+      25.5
+     ],
+     "p2.s2.c2": [
+      3,
+      26.5
+     ],
+     "p2.s2.c3": [
+      3,
+      27.5
+     ],
+     "p2.s3": [
+      2,
+      28.5
+     ],
+     "p2.s4": [
+      2,
+      29.5
+     ],
+     "p2.s4.c0": [
+      3,
+      29.5
+     ],
+     "p2.s5": [
+      2,
+      34.0
+     ],
+     "p2.s5.c0": [
+      3,
+      30.5
+     ],
+     "p2.s5.c1": [
+      3,
+      31.5
+     ],
+     "p3": [
+      1,
+      46.625
+     ],
+     "p3.s0": [
+      2,
+      39.5
+     ],
+     "p3.s0.c0": [
+      3,
+      38.5
+     ],
+     "p3.s0.c1": [
+      3,
+      39.5
+     ],
+     "p3.s0.c2": [
+      3,
+      40.5
+     ],
+     "p3.s1": [
+      2,
+      43.0
+     ],
+     "p3.s1.c0": [
+      3,
+      41.5
+     ],
+     "p3.s1.c1": [
+      3,
+      42.5
+     ],
+     "p3.s1.c2": [
+      3,
+      43.5
+     ],
+     "p3.s1.c3": [
+      3,
+      44.5
+     ],
+     "p3.s2": [
+      2,
+      45.75
+     ],
+     "p3.s3": [
+      2,
+      46.75
+     ],
+     "p3.s3.c0": [
+      3,
+      46.75
+     ],
+     "p3.s4": [
+      2,
+      48.25
+     ],
+     "p3.s4.c0": [
+      3,
+      47.75
+     ],
+     "p3.s4.c1": [
+      3,
+      48.75
+     ],
+     "p3.s5": [
+      2,
+      53.75
+     ],
+     "p3.s5.c0": [
+      3,
+      49.75
+     ],
+     "p3.s5.c1": [
+      3,
+      50.75
+     ],
+     "p3.s5.c2": [
+      3,
+      51.75
+     ],
+     "p4": [
+      1,
+      67.375
+     ],
+     "p4.s0": [
+      2,
+      60.25
+     ],
+     "p4.s0.c0": [
+      3,
+      58.75
+     ],
+     "p4.s0.c1": [
+      3,
+      59.75
+     ],
+     "p4.s0.c2": [
+      3,
+      60.75
+     ],
+     "p4.s0.c3": [
+      3,
+      61.75
+     ],
+     "p4.s1": [
+      2,
+      62.75
+     ],
+     "p4.s2": [
+      2,
+      64.0
+     ],
+     "p4.s2.c0": [
+      3,
+      64.0
+     ],
+     "p4.s3": [
+      2,
+      65.5
+     ],
+     "p4.s3.c0": [
+      3,
+      65.0
+     ],
+     "p4.s3.c1": [
+      3,
+      66.0
+     ],
+     "p4.s4": [
+      2,
+      68.0
+     ],
+     "p4.s4.c0": [
+      3,
+      67.0
+     ],
+     "p4.s4.c1": [
+      3,
+      68.0
+     ],
+     "p4.s4.c2": [
+      3,
+      69.0
+     ],
+     "p4.s5": [
+      2,
+      74.5
+     ],
+     "p4.s5.c0": [
+      3,
+      70.0
+     ],
+     "p4.s5.c1": [
+      3,
+      71.0
+     ],
+     "p4.s5.c2": [
+      3,
+      72.0
+     ],
+     "p4.s5.c3": [
+      3,
+      73.0
+     ],
+     "p5": [
+      1,
+      80.0
+     ],
+     "p6": [
+      1,
+      88.125
+     ],
+     "p6.s0": [
+      2,
+      81.0
+     ],
+     "p6.s0.c0": [
+      3,
+      81.0
+     ],
+     "p6.s1": [
+      2,
+      82.5
+     ],
+     "p6.s1.c0": [
+      3,
+      82.0
+     ],
+     "p6.s1.c1": [
+      3,
+      83.0
+     ],
+     "p6.s2": [
+      2,
+      85.25
+     ],
+     "p6.s2.c0": [
+      3,
+      84.25
+     ],
+     "p6.s2.c1": [
+      3,
+      85.25
+     ],
+     "p6.s2.c2": [
+      3,
+      86.25
+     ],
+     "p6.s3": [
+      2,
+      88.75
+     ],
+     "p6.s3.c0": [
+      3,
+      87.25
+     ],
+     "p6.s3.c1": [
+      3,
+      88.25
+     ],
+     "p6.s3.c2": [
+      3,
+      89.25
+     ],
+     "p6.s3.c3": [
+      3,
+      90.25
+     ],
+     "p6.s4": [
+      2,
+      91.25
+     ],
+     "p6.s5": [
+      2,
+      95.25
+     ],
+     "p6.s5.c0": [
+      3,
+      92.25
+     ],
+     "p7": [
+      1,
+      106.875
+     ],
+     "p7.s0": [
+      2,
+      99.75
+     ],
+     "p7.s0.c0": [
+      3,
+      99.25
+     ],
+     "p7.s0.c1": [
+      3,
+      100.25
+     ],
+     "p7.s1": [
+      2,
+      102.25
+     ],
+     "p7.s1.c0": [
+      3,
+      101.25
+     ],
+     "p7.s1.c1": [
+      3,
+      102.25
+     ],
+     "p7.s1.c2": [
+      3,
+      103.25
+     ],
+     "p7.s2": [
+      2,
+      106.0
+     ],
+     "p7.s2.c0": [
+      3,
+      104.5
+     ],
+     "p7.s2.c1": [
+      3,
+      105.5
+     ],
+     "p7.s2.c2": [
+      3,
+      106.5
+     ],
+     "p7.s2.c3": [
+      3,
+      107.5
+     ],
+     "p7.s3": [
+      2,
+      108.5
+     ],
+     "p7.s4": [
+      2,
+      109.5
+     ],
+     "p7.s4.c0": [
+      3,
+      109.5
+     ],
+     "p7.s5": [
+      2,
+      114.0
+     ],
+     "p7.s5.c0": [
+      3,
+      110.5
+     ],
+     "p7.s5.c1": [
+      3,
+      111.5
+     ],
+     "p0.s5.x0": [
+      3,
+      11.25
+     ],
+     "p2.s5.x0": [
+      3,
+      32.5
+     ],
+     "p3.s5.x0": [
+      3,
+      52.75
+     ],
+     "p4.s5.x0": [
+      3,
+      74.0
+     ],
+     "p6.s5.x0": [
+      3,
+      93.25
+     ],
+     "p7.s5.x0": [
+      3,
+      112.5
+     ],
+     "p0.s5.x1": [
+      3,
+      12.25
+     ],
+     "p2.s5.x1": [
+      3,
+      33.5
+     ],
+     "p3.s5.x1": [
+      3,
+      53.75
+     ],
+     "p4.s5.x1": [
+      3,
+      75.0
+     ],
+     "p6.s5.x1": [
+      3,
+      94.25
+     ],
+     "p7.s5.x1": [
+      3,
+      113.5
+     ],
+     "p0.s5.x2": [
+      3,
+      13.25
+     ],
+     "p2.s5.x2": [
+      3,
+      34.5
+     ],
+     "p3.s5.x2": [
+      3,
+      54.75
+     ],
+     "p4.s5.x2": [
+      3,
+      76.0
+     ],
+     "p6.s5.x2": [
+      3,
+      95.25
+     ],
+     "p7.s5.x2": [
+      3,
+      114.5
+     ],
+     "p0.s5.x3": [
+      3,
+      14.25
+     ],
+     "p2.s5.x3": [
+      3,
+      35.5
+     ],
+     "p3.s5.x3": [
+      3,
+      55.75
+     ],
+     "p4.s5.x3": [
+      3,
+      77.0
+     ],
+     "p6.s5.x3": [
+      3,
+      96.25
+     ],
+     "p7.s5.x3": [
+      3,
+      115.5
+     ],
+     "p0.s5.x4": [
+      3,
+      15.25
+     ],
+     "p2.s5.x4": [
+      3,
+      36.5
+     ],
+     "p3.s5.x4": [
+      3,
+      56.75
+     ],
+     "p4.s5.x4": [
+      3,
+      78.0
+     ],
+     "p6.s5.x4": [
+      3,
+      97.25
+     ],
+     "p7.s5.x4": [
+      3,
+      116.5
+     ],
+     "p0.s5.x5": [
+      3,
+      16.25
+     ],
+     "p2.s5.x5": [
+      3,
+      37.5
+     ],
+     "p3.s5.x5": [
+      3,
+      57.75
+     ],
+     "p4.s5.x5": [
+      3,
+      79.0
+     ],
+     "p6.s5.x5": [
+      3,
+      98.25
+     ],
+     "p7.s5.x5": [
+      3,
+      117.5
+     ],
+     "p0.s5.x6": [
+      3,
+      17.25
+     ]
+    },
+    "edges": [
+     [
+      "root",
+      "p0"
+     ],
+     [
+      "p0",
+      "p0.s0"
+     ],
+     [
+      "p0",
+      "p0.s1"
+     ],
+     [
+      "p0.s1",
+      "p0.s1.c0"
+     ],
+     [
+      "p0",
+      "p0.s2"
+     ],
+     [
+      "p0.s2",
+      "p0.s2.c0"
+     ],
+     [
+      "p0.s2",
+      "p0.s2.c1"
+     ],
+     [
+      "p0",
+      "p0.s3"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c0"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c1"
+     ],
+     [
+      "p0.s3",
+      "p0.s3.c2"
+     ],
+     [
+      "p0",
+      "p0.s4"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c0"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c1"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c2"
+     ],
+     [
+      "p0.s4",
+      "p0.s4.c3"
+     ],
+     [
+      "p0",
+      "p0.s5"
+     ],
+     [
+      "root",
+      "p1"
+     ],
+     [
+      "root",
+      "p2"
+     ],
+     [
+      "p2",
+      "p2.s0"
+     ],
+     [
+      "p2.s0",
+      "p2.s0.c0"
+     ],
+     [
+      "p2.s0",
+      "p2.s0.c1"
+     ],
+     [
+      "p2",
+      "p2.s1"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c0"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c1"
+     ],
+     [
+      "p2.s1",
+      "p2.s1.c2"
+     ],
+     [
+      "p2",
+      "p2.s2"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c0"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c1"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c2"
+     ],
+     [
+      "p2.s2",
+      "p2.s2.c3"
+     ],
+     [
+      "p2",
+      "p2.s3"
+     ],
+     [
+      "p2",
+      "p2.s4"
+     ],
+     [
+      "p2.s4",
+      "p2.s4.c0"
+     ],
+     [
+      "p2",
+      "p2.s5"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.c0"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.c1"
+     ],
+     [
+      "root",
+      "p3"
+     ],
+     [
+      "p3",
+      "p3.s0"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c0"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c1"
+     ],
+     [
+      "p3.s0",
+      "p3.s0.c2"
+     ],
+     [
+      "p3",
+      "p3.s1"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c0"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c1"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c2"
+     ],
+     [
+      "p3.s1",
+      "p3.s1.c3"
+     ],
+     [
+      "p3",
+      "p3.s2"
+     ],
+     [
+      "p3",
+      "p3.s3"
+     ],
+     [
+      "p3.s3",
+      "p3.s3.c0"
+     ],
+     [
+      "p3",
+      "p3.s4"
+     ],
+     [
+      "p3.s4",
+      "p3.s4.c0"
+     ],
+     [
+      "p3.s4",
+      "p3.s4.c1"
+     ],
+     [
+      "p3",
+      "p3.s5"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c0"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c1"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.c2"
+     ],
+     [
+      "root",
+      "p4"
+     ],
+     [
+      "p4",
+      "p4.s0"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c0"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c1"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c2"
+     ],
+     [
+      "p4.s0",
+      "p4.s0.c3"
+     ],
+     [
+      "p4",
+      "p4.s1"
+     ],
+     [
+      "p4",
+      "p4.s2"
+     ],
+     [
+      "p4.s2",
+      "p4.s2.c0"
+     ],
+     [
+      "p4",
+      "p4.s3"
+     ],
+     [
+      "p4.s3",
+      "p4.s3.c0"
+     ],
+     [
+      "p4.s3",
+      "p4.s3.c1"
+     ],
+     [
+      "p4",
+      "p4.s4"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c0"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c1"
+     ],
+     [
+      "p4.s4",
+      "p4.s4.c2"
+     ],
+     [
+      "p4",
+      "p4.s5"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c0"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c1"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c2"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.c3"
+     ],
+     [
+      "root",
+      "p5"
+     ],
+     [
+      "root",
+      "p6"
+     ],
+     [
+      "p6",
+      "p6.s0"
+     ],
+     [
+      "p6.s0",
+      "p6.s0.c0"
+     ],
+     [
+      "p6",
+      "p6.s1"
+     ],
+     [
+      "p6.s1",
+      "p6.s1.c0"
+     ],
+     [
+      "p6.s1",
+      "p6.s1.c1"
+     ],
+     [
+      "p6",
+      "p6.s2"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c0"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c1"
+     ],
+     [
+      "p6.s2",
+      "p6.s2.c2"
+     ],
+     [
+      "p6",
+      "p6.s3"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c0"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c1"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c2"
+     ],
+     [
+      "p6.s3",
+      "p6.s3.c3"
+     ],
+     [
+      "p6",
+      "p6.s4"
+     ],
+     [
+      "p6",
+      "p6.s5"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.c0"
+     ],
+     [
+      "root",
+      "p7"
+     ],
+     [
+      "p7",
+      "p7.s0"
+     ],
+     [
+      "p7.s0",
+      "p7.s0.c0"
+     ],
+     [
+      "p7.s0",
+      "p7.s0.c1"
+     ],
+     [
+      "p7",
+      "p7.s1"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c0"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c1"
+     ],
+     [
+      "p7.s1",
+      "p7.s1.c2"
+     ],
+     [
+      "p7",
+      "p7.s2"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c0"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c1"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c2"
+     ],
+     [
+      "p7.s2",
+      "p7.s2.c3"
+     ],
+     [
+      "p7",
+      "p7.s3"
+     ],
+     [
+      "p7",
+      "p7.s4"
+     ],
+     [
+      "p7.s4",
+      "p7.s4.c0"
+     ],
+     [
+      "p7",
+      "p7.s5"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.c0"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.c1"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x0"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x0"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x0"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x0"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x0"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x0"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x1"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x1"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x1"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x1"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x1"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x1"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x2"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x2"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x2"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x2"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x2"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x2"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x3"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x3"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x3"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x3"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x3"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x3"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x4"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x4"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x4"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x4"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x4"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x4"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x5"
+     ],
+     [
+      "p2.s5",
+      "p2.s5.x5"
+     ],
+     [
+      "p3.s5",
+      "p3.s5.x5"
+     ],
+     [
+      "p4.s5",
+      "p4.s5.x5"
+     ],
+     [
+      "p6.s5",
+      "p6.s5.x5"
+     ],
+     [
+      "p7.s5",
+      "p7.s5.x5"
+     ],
+     [
+      "p0.s5",
+      "p0.s5.x6"
+     ]
+    ],
+    "size": [
+     4,
+     118.5
+    ],
+    "order": [
+     "root",
+     "p0",
+     "p0.s0",
+     "p0.s1",
+     "p0.s1.c0",
+     "p0.s2",
+     "p0.s2.c0",
+     "p0.s2.c1",
+     "p0.s3",
+     "p0.s3.c0",
+     "p0.s3.c1",
+     "p0.s3.c2",
+     "p0.s4",
+     "p0.s4.c0",
+     "p0.s4.c1",
+     "p0.s4.c2",
+     "p0.s4.c3",
+     "p0.s5",
+     "p0.s5.x0",
+     "p0.s5.x1",
+     "p0.s5.x2",
+     "p0.s5.x3",
+     "p0.s5.x4",
+     "p0.s5.x5",
+     "p0.s5.x6",
+     "p1",
+     "p2",
+     "p2.s0",
+     "p2.s0.c0",
+     "p2.s0.c1",
+     "p2.s1",
+     "p2.s1.c0",
+     "p2.s1.c1",
+     "p2.s1.c2",
+     "p2.s2",
+     "p2.s2.c0",
+     "p2.s2.c1",
+     "p2.s2.c2",
+     "p2.s2.c3",
+     "p2.s3",
+     "p2.s4",
+     "p2.s4.c0",
+     "p2.s5",
+     "p2.s5.c0",
+     "p2.s5.c1",
+     "p2.s5.x0",
+     "p2.s5.x1",
+     "p2.s5.x2",
+     "p2.s5.x3",
+     "p2.s5.x4",
+     "p2.s5.x5",
+     "p3",
+     "p3.s0",
+     "p3.s0.c0",
+     "p3.s0.c1",
+     "p3.s0.c2",
+     "p3.s1",
+     "p3.s1.c0",
+     "p3.s1.c1",
+     "p3.s1.c2",
+     "p3.s1.c3",
+     "p3.s2",
+     "p3.s3",
+     "p3.s3.c0",
+     "p3.s4",
+     "p3.s4.c0",
+     "p3.s4.c1",
+     "p3.s5",
+     "p3.s5.c0",
+     "p3.s5.c1",
+     "p3.s5.c2",
+     "p3.s5.x0",
+     "p3.s5.x1",
+     "p3.s5.x2",
+     "p3.s5.x3",
+     "p3.s5.x4",
+     "p3.s5.x5",
+     "p4",
+     "p4.s0",
+     "p4.s0.c0",
+     "p4.s0.c1",
+     "p4.s0.c2",
+     "p4.s0.c3",
+     "p4.s1",
+     "p4.s2",
+     "p4.s2.c0",
+     "p4.s3",
+     "p4.s3.c0",
+     "p4.s3.c1",
+     "p4.s4",
+     "p4.s4.c0",
+     "p4.s4.c1",
+     "p4.s4.c2",
+     "p4.s5",
+     "p4.s5.c0",
+     "p4.s5.c1",
+     "p4.s5.c2",
+     "p4.s5.c3",
+     "p4.s5.x0",
+     "p4.s5.x1",
+     "p4.s5.x2",
+     "p4.s5.x3",
+     "p4.s5.x4",
+     "p4.s5.x5",
+     "p5",
+     "p6",
+     "p6.s0",
+     "p6.s0.c0",
+     "p6.s1",
+     "p6.s1.c0",
+     "p6.s1.c1",
+     "p6.s2",
+     "p6.s2.c0",
+     "p6.s2.c1",
+     "p6.s2.c2",
+     "p6.s3",
+     "p6.s3.c0",
+     "p6.s3.c1",
+     "p6.s3.c2",
+     "p6.s3.c3",
+     "p6.s4",
+     "p6.s5",
+     "p6.s5.c0",
+     "p6.s5.x0",
+     "p6.s5.x1",
+     "p6.s5.x2",
+     "p6.s5.x3",
+     "p6.s5.x4",
+     "p6.s5.x5",
+     "p7",
+     "p7.s0",
+     "p7.s0.c0",
+     "p7.s0.c1",
+     "p7.s1",
+     "p7.s1.c0",
+     "p7.s1.c1",
+     "p7.s1.c2",
+     "p7.s2",
+     "p7.s2.c0",
+     "p7.s2.c1",
+     "p7.s2.c2",
+     "p7.s2.c3",
+     "p7.s3",
+     "p7.s4",
+     "p7.s4.c0",
+     "p7.s5",
+     "p7.s5.c0",
+     "p7.s5.c1",
+     "p7.s5.x0",
+     "p7.s5.x1",
+     "p7.s5.x2",
+     "p7.s5.x3",
+     "p7.s5.x4",
+     "p7.s5.x5"
+    ],
+    "depth": {
+     "root": 0,
+     "p0": 1,
+     "p0.s0": 2,
+     "p0.s1": 2,
+     "p0.s1.c0": 3,
+     "p0.s2": 2,
+     "p0.s2.c0": 3,
+     "p0.s2.c1": 3,
+     "p0.s3": 2,
+     "p0.s3.c0": 3,
+     "p0.s3.c1": 3,
+     "p0.s3.c2": 3,
+     "p0.s4": 2,
+     "p0.s4.c0": 3,
+     "p0.s4.c1": 3,
+     "p0.s4.c2": 3,
+     "p0.s4.c3": 3,
+     "p0.s5": 2,
+     "p0.s5.x0": 3,
+     "p0.s5.x1": 3,
+     "p0.s5.x2": 3,
+     "p0.s5.x3": 3,
+     "p0.s5.x4": 3,
+     "p0.s5.x5": 3,
+     "p0.s5.x6": 3,
+     "p1": 1,
+     "p2": 1,
+     "p2.s0": 2,
+     "p2.s0.c0": 3,
+     "p2.s0.c1": 3,
+     "p2.s1": 2,
+     "p2.s1.c0": 3,
+     "p2.s1.c1": 3,
+     "p2.s1.c2": 3,
+     "p2.s2": 2,
+     "p2.s2.c0": 3,
+     "p2.s2.c1": 3,
+     "p2.s2.c2": 3,
+     "p2.s2.c3": 3,
+     "p2.s3": 2,
+     "p2.s4": 2,
+     "p2.s4.c0": 3,
+     "p2.s5": 2,
+     "p2.s5.c0": 3,
+     "p2.s5.c1": 3,
+     "p2.s5.x0": 3,
+     "p2.s5.x1": 3,
+     "p2.s5.x2": 3,
+     "p2.s5.x3": 3,
+     "p2.s5.x4": 3,
+     "p2.s5.x5": 3,
+     "p3": 1,
+     "p3.s0": 2,
+     "p3.s0.c0": 3,
+     "p3.s0.c1": 3,
+     "p3.s0.c2": 3,
+     "p3.s1": 2,
+     "p3.s1.c0": 3,
+     "p3.s1.c1": 3,
+     "p3.s1.c2": 3,
+     "p3.s1.c3": 3,
+     "p3.s2": 2,
+     "p3.s3": 2,
+     "p3.s3.c0": 3,
+     "p3.s4": 2,
+     "p3.s4.c0": 3,
+     "p3.s4.c1": 3,
+     "p3.s5": 2,
+     "p3.s5.c0": 3,
+     "p3.s5.c1": 3,
+     "p3.s5.c2": 3,
+     "p3.s5.x0": 3,
+     "p3.s5.x1": 3,
+     "p3.s5.x2": 3,
+     "p3.s5.x3": 3,
+     "p3.s5.x4": 3,
+     "p3.s5.x5": 3,
+     "p4": 1,
+     "p4.s0": 2,
+     "p4.s0.c0": 3,
+     "p4.s0.c1": 3,
+     "p4.s0.c2": 3,
+     "p4.s0.c3": 3,
+     "p4.s1": 2,
+     "p4.s2": 2,
+     "p4.s2.c0": 3,
+     "p4.s3": 2,
+     "p4.s3.c0": 3,
+     "p4.s3.c1": 3,
+     "p4.s4": 2,
+     "p4.s4.c0": 3,
+     "p4.s4.c1": 3,
+     "p4.s4.c2": 3,
+     "p4.s5": 2,
+     "p4.s5.c0": 3,
+     "p4.s5.c1": 3,
+     "p4.s5.c2": 3,
+     "p4.s5.c3": 3,
+     "p4.s5.x0": 3,
+     "p4.s5.x1": 3,
+     "p4.s5.x2": 3,
+     "p4.s5.x3": 3,
+     "p4.s5.x4": 3,
+     "p4.s5.x5": 3,
+     "p5": 1,
+     "p6": 1,
+     "p6.s0": 2,
+     "p6.s0.c0": 3,
+     "p6.s1": 2,
+     "p6.s1.c0": 3,
+     "p6.s1.c1": 3,
+     "p6.s2": 2,
+     "p6.s2.c0": 3,
+     "p6.s2.c1": 3,
+     "p6.s2.c2": 3,
+     "p6.s3": 2,
+     "p6.s3.c0": 3,
+     "p6.s3.c1": 3,
+     "p6.s3.c2": 3,
+     "p6.s3.c3": 3,
+     "p6.s4": 2,
+     "p6.s5": 2,
+     "p6.s5.c0": 3,
+     "p6.s5.x0": 3,
+     "p6.s5.x1": 3,
+     "p6.s5.x2": 3,
+     "p6.s5.x3": 3,
+     "p6.s5.x4": 3,
+     "p6.s5.x5": 3,
+     "p7": 1,
+     "p7.s0": 2,
+     "p7.s0.c0": 3,
+     "p7.s0.c1": 3,
+     "p7.s1": 2,
+     "p7.s1.c0": 3,
+     "p7.s1.c1": 3,
+     "p7.s1.c2": 3,
+     "p7.s2": 2,
+     "p7.s2.c0": 3,
+     "p7.s2.c1": 3,
+     "p7.s2.c2": 3,
+     "p7.s2.c3": 3,
+     "p7.s3": 2,
+     "p7.s4": 2,
+     "p7.s4.c0": 3,
+     "p7.s5": 2,
+     "p7.s5.c0": 3,
+     "p7.s5.c1": 3,
+     "p7.s5.x0": 3,
+     "p7.s5.x1": 3,
+     "p7.s5.x2": 3,
+     "p7.s5.x3": 3,
+     "p7.s5.x4": 3,
+     "p7.s5.x5": 3
+    },
+    "folds": {
+     "root": 0,
+     "p0": 0,
+     "p0.s1": 0,
+     "p0.s2": 0,
+     "p0.s3": 0,
+     "p0.s4": 0,
+     "p0.s5": 0,
+     "p1": 24,
+     "p2": 0,
+     "p2.s0": 0,
+     "p2.s1": 0,
+     "p2.s2": 0,
+     "p2.s4": 0,
+     "p2.s5": 0,
+     "p3": 0,
+     "p3.s0": 0,
+     "p3.s1": 0,
+     "p3.s3": 0,
+     "p3.s4": 0,
+     "p3.s5": 0,
+     "p4": 0,
+     "p4.s0": 0,
+     "p4.s2": 0,
+     "p4.s3": 0,
+     "p4.s4": 0,
+     "p4.s5": 0,
+     "p5": 22,
+     "p6": 0,
+     "p6.s0": 0,
+     "p6.s1": 0,
+     "p6.s2": 0,
+     "p6.s3": 0,
+     "p6.s5": 0,
+     "p7": 0,
+     "p7.s0": 0,
+     "p7.s1": 0,
+     "p7.s2": 0,
+     "p7.s4": 0,
+     "p7.s5": 0
+    },
+    "frames": [
+     {
+      "group": "ways",
+      "members": [
+       "p0.s0",
+       "p0.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p2.s0",
+       "p2.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p3.s0",
+       "p3.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p4.s0",
+       "p4.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p6.s0",
+       "p6.s1"
+      ]
+     },
+     {
+      "group": "ways",
+      "members": [
+       "p7.s0",
+       "p7.s1"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

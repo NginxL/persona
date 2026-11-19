@@ -745,6 +745,50 @@ func (n *Node) backgroundWork(id string) string {
 	return ""
 }
 
+// turnOver: session id's Claude Code in a pane is at rest as far as the node knows (its turn ended: not working, not
+// waiting on the user, not starting or moving to another launcher). From what the node holds, without asking the host.
+func (n *Node) turnOver(id string) bool {
+	a, ok := n.agent(id)
+	if !ok || a.Agent != "" && a.Agent != "claude" {
+		return false
+	}
+	return (a.AgentStatus == proto.StatusDone || a.AgentStatus == proto.StatusIdle) && !n.restarting(id)
+}
+
+// backgroundRuns: session id is known to have background work running: a background command, a workflow or a
+// background subagent. False while that is not known (the transcript's background work still being read): a Stop on a
+// session at rest is then answered as it always was.
+func (n *Node) backgroundRuns(id string) bool {
+	p := n.transcriptPath(id)
+	if p == "" {
+		return false
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	m := n.meta(p, fi)
+	if _, _, _, pending := n.backgroundTasks(p); m.bgWait || pending {
+		return false
+	}
+	if n.liveBackground(p, n.processSince(id)) > 0 {
+		return true
+	}
+	s := proto.Session{SessionID: id}
+	n.setBackground(&s, m)
+	for _, w := range s.Workflows {
+		if w.Running {
+			return true
+		}
+	}
+	for _, sub := range n.subagents(id) {
+		if sub.Running && sub.Background {
+			return true
+		}
+	}
+	return false
+}
+
 // processSince is when session id's claude process started as far as the node saw it (its ultracode process
 // boundary: a start or resume of Persona's, a SessionStart hook), zero when it did not.
 func (n *Node) processSince(id string) time.Time {
@@ -1036,7 +1080,7 @@ func (n *Node) switched(id string, ps proto.PendingSwitch) {
 func (n *Node) noteSwitchedModel(id string, ps proto.PendingSwitch) {
 	n.mu.Lock()
 	if m, ok := n.modes[id]; ok {
-		m.Model = nil
+		m.Model, m.Awaited = nil, nil // a switch typed into the old launcher's process is not this one's
 		n.modes[id] = m
 	}
 	n.mu.Unlock()

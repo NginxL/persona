@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -24,14 +25,16 @@ func init() { firstWait = 0 }
 
 // fakeHost is the hub as the devices see it in tests: it keeps what they report and answers what they ask.
 type fakeHost struct {
-	mu        sync.Mutex
-	states    []devicewire.States
-	desktops  []devicewire.Desktops
-	notified  []string // every event's name, in order
-	events    []devicewire.NodeEvent
-	connected []devicewire.Connected
-	ended     []devicewire.RequestEnd
-	creds     map[string]devicewire.ConnectorCred
+	revokedDevices     map[string]bool
+	credentialCheckErr error
+	mu                 sync.Mutex
+	states             []devicewire.States
+	desktops           []devicewire.Desktops
+	notified           []string // every event's name, in order
+	events             []devicewire.NodeEvent
+	connected          []devicewire.Connected
+	ended              []devicewire.RequestEnd
+	creds              map[string]devicewire.ConnectorCred
 	// reply is what devices.connected answers; request what a node's request the hub answers gets.
 	reply   devicewire.ConnectedReply
 	request func(ctx context.Context, p devicewire.NodeCall) (json.RawMessage, error)
@@ -98,6 +101,15 @@ func (f *fakeHost) Call(ctx context.Context, method string, params, out any) err
 	raw, _ := json.Marshal(params)
 	var res any
 	switch method {
+	case bus.MethodCredentialRevoked:
+		p := params.(bus.DeviceCredential)
+		f.mu.Lock()
+		res = bus.CredentialStatus{Revoked: f.revokedDevices[p.ID]}
+		err := f.credentialCheckErr
+		f.mu.Unlock()
+		if err != nil {
+			return err
+		}
 	case devicewire.MethodConnected:
 		var p devicewire.Connected
 		_ = json.Unmarshal(raw, &p)

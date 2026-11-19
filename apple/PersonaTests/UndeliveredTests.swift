@@ -25,6 +25,22 @@ struct UndeliveredTests {
         #expect(try session(#","undelivered":"broken""#).undelivered == nil, "a malformed list never hides the row")
     }
 
+    /// Both of the hub's names read and write (#10966): `next_at` (when it is tried again) and `delete_only` (a message
+    /// from a signed-out device: Delete, no Retry), once two enums each knew only one of them.
+    @Test func nextAtAndDeleteOnlyRoundTrip() throws {
+        let json = #"{"id":"k3","text":"from the old phone","at":"2026-11-17T10:00:00Z","state":"failed","attempts":3,"next_at":"2026-11-17T10:05:00Z","delete_only":true}"#
+        let kept = try JSON.decoder.decode(UndeliveredMessage.self, from: Data(json.utf8))
+        #expect(kept.nextAt == ISO8601DateFormatter().date(from: "2026-11-17T10:05:00Z"))
+        #expect(kept.deleteOnly == true && kept.gaveUp && !kept.canRetry)
+        let written = try JSONSerialization.jsonObject(with: JSON.encoder.encode(kept)) as? [String: Any]
+        #expect(written?["delete_only"] as? Bool == true)
+        #expect(written?["next_at"] != nil && written?["nextAt"] == nil && written?["deleteOnly"] == nil)
+        let again = try JSON.decoder.decode(UndeliveredMessage.self, from: JSON.encoder.encode(kept))
+        #expect(again.deleteOnly == true && again.attempts == 3)
+        let retryable = try JSON.decoder.decode(UndeliveredMessage.self, from: Data(#"{"id":"k4","text":"t","at":"2026-11-17T10:00:00Z","state":"failed"}"#.utf8))
+        #expect(retryable.deleteOnly == nil && retryable.nextAt == nil && retryable.canRetry)
+    }
+
     @Test func aKeptSendLeavesTheOutboxForTheRow() async throws {
         let hub = FakeHub()
         hub.on("POST", "/api/v1/sessions/m/s/messages",

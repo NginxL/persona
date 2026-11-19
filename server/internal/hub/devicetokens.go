@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,12 +15,45 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
 )
+
+func init() {
+	handleBus(bus.MethodCredentialRevoked, (*Hub).busCredentialRevoked)
+}
+
+// busCredentialRevoked checks durable credential state for a manager about to deliver a queued message.
+func (h *Hub) busCredentialRevoked(ctx context.Context, c *busConn, raw json.RawMessage) (any, error) {
+	if c.ident.Role != bus.RoleManager {
+		return nil, &rpc.Error{Code: "forbidden", Message: "only managers can check device credentials"}
+	}
+	var p bus.DeviceCredential
+	if err := json.Unmarshal(raw, &p); err != nil || p.ID == "" {
+		return nil, &rpc.Error{Code: "bad_request", Message: "credential_id is required"}
+	}
+	if h.isDeviceRevoked(p.ID) {
+		return bus.CredentialStatus{Revoked: true}, nil
+	}
+	if h.store == nil {
+		return nil, errors.New("no database")
+	}
+	tokens, err := h.store.DeviceTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if token.ID == p.ID {
+			return bus.CredentialStatus{Revoked: token.RevokedAt != nil}, nil
+		}
+	}
+	return bus.CredentialStatus{Revoked: true}, nil
+}
 
 // One credential per device (docs/protocol/protocol.md "Authentication"). The pairing token in hub.json still opens everything (the CLI,
 // apps from before this); an app trades it for a token of its own right after pairing and stops keeping it, so a lost
@@ -465,8 +499,8 @@ func (h *Hub) revokeWebToken(ctx context.Context, id string) (bool, error) {
 	return h.store.RevokeDeviceToken(ctx, id)
 }
 
-// revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too) and stops
-// its pushes.
+// revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too), stops
+// its pushes and tells managers to fail its queued messages.
 func (h *Hub) revoked(id string) {
 	t := &h.devtok
 	t.mu.Lock()
@@ -488,6 +522,9 @@ func (h *Hub) revoked(id string) {
 	}
 	// Registration holds h.mu while checking t.mu; release t.mu before taking h.mu.
 	t.mu.Unlock()
+	go func() {
+		_ = h.notifyManagers(bus.EventCredentialRevoked, bus.DeviceCredential{ID: id})
+	}()
 	h.mu.Lock()
 	for deviceID, r := range h.phoneTools {
 		if deviceID == id || r.CredentialID == id {

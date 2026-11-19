@@ -33,6 +33,10 @@ type ToolResult struct {
 	ErrorKind string `json:"error_kind,omitempty"`
 	// RetryAfter is how many seconds a rate limit lasts (ErrorKind rate_limited), when it is known.
 	RetryAfter int `json:"retry_after,omitempty"`
+	// SourceDeviceName and SourceDevicePlatform identify the connected phone that executed the call. The hub fills
+	// them from that phone's registration and client hello; older hubs and queued receipts leave them absent.
+	SourceDeviceName     string `json:"source_device_name,omitempty"`
+	SourceDevicePlatform string `json:"source_device_platform,omitempty"`
 }
 
 // The kinds of a tool's failure (ToolResult.ErrorKind), as personad tool's exit codes have them.

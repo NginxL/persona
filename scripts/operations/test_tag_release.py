@@ -428,7 +428,8 @@ class TagReleaseTests(unittest.TestCase):
         receipt = Path(config["receipt"])
         receipt.parent.mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps({"commit": self.commit, "assets": assets}))
-        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), patch.object(tag_release, "upload") as upload:
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), patch.object(tag_release, "upload") as upload, \
+                patch.object(tag_release, "check_windows_artifacts"):
             with self.assertRaisesRegex(tag_release.ConfigError, "another build"):
                 tag_release.publish_once(config, "v0.2.1", self.commit)
             upload.assert_not_called()
@@ -476,7 +477,7 @@ class TagReleaseTests(unittest.TestCase):
         assets = self.windows_receipt(config)
         events = []
         with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), \
-                patch.object(tag_release, "check_windows_archives", side_effect=lambda *args: events.append("verified")) as verify, \
+                patch.object(tag_release, "check_windows_artifacts", side_effect=lambda *args: events.append("verified")) as verify, \
                 patch.object(tag_release, "upload", side_effect=lambda *args: events.append("uploaded")):
             tag_release.publish_once(config, "v0.5.3", self.commit)
         verify.assert_called_once_with(assets, "0.5.3")

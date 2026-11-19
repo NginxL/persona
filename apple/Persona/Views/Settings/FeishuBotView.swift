@@ -36,7 +36,7 @@ struct FeishuBotView: View {
                 await model.load()
             }
         }
-        .confirmationDialog("Unpair?", isPresented: $confirmUnpair, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Unpair?", isPresented: $confirmUnpair, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) { Task { await model.unpair() } }
         } message: {
             Text("The bot will stop responding to the current Lark account until you pair again.")

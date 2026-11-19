@@ -22,7 +22,7 @@ export const SHELVE_AFTER_MS = 48 * 3600_000;
 export const JUST_DONE_MS = 24 * 3600_000;
 export const PR_STATUS_FRESH_MS = 15 * 60_000;
 
-function normalizedPR(url: string | undefined): string {
+export function normalizedPR(url: string | undefined): string {
   return (url ?? "").trim().replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
 }
 

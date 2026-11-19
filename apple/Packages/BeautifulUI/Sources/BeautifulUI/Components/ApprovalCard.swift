@@ -14,11 +14,14 @@ public struct ApprovalQuestion: Identifiable, Sendable {
         public var label: String
         public var detail: String?
         public var tag: String?
+        /// Off, the choice shows dimmed and can't be picked (a host that takes only some answers right now).
+        public var isEnabled: Bool
 
-        public init(_ label: String, detail: String? = nil, tag: String? = nil) {
+        public init(_ label: String, detail: String? = nil, tag: String? = nil, isEnabled: Bool = true) {
             self.label = label
             self.detail = detail
             self.tag = tag
+            self.isEnabled = isEnabled
         }
     }
 
@@ -323,7 +326,7 @@ public struct ApprovalCard<Context: View>: View {
                                 HStack(spacing: 6) {
                                     Text(choice.label)
                                         .buiFont(BUITextStyle(size: 13, lineHeight: 1))
-                                        .foregroundStyle(on ? theme.colors.ink : theme.colors.ink2)
+                                        .foregroundStyle(!choice.isEnabled ? theme.colors.ink3 : on ? theme.colors.ink : theme.colors.ink2)
                                         .fixedSize(horizontal: false, vertical: true)
                                     if let tag = choice.tag { BUIPill(tag, tone: .accent) }
                                 }
@@ -342,6 +345,7 @@ public struct ApprovalCard<Context: View>: View {
                         .contentShape(.rect(cornerRadius: theme.radii.control))
                     }
                     .buttonStyle(PressHighlightStyle(radius: theme.radii.control, color: theme.colors.hover))
+                    .disabled(!choice.isEnabled)
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
                 if question.allowsCustom {

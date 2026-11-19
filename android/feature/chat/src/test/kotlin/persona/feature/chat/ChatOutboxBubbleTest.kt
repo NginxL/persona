@@ -136,7 +136,7 @@ class ChatOutboxBubbleTest {
 
     /** A pending message carries everything a sent one does: the forward's card, the other contexts, the files, the note. */
     @Test fun aWaitingMessageKeepsItsForwardAndItsOtherContextsAndFiles() {
-        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"jarvis://session/m/s?at=x%230\"" +
+        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"persona://session/m/s?at=x%230\"" +
             " msg=\"x#0\" role=\"persona\" author=\"Persona\" chat=\"Persona\">\n原文\n</persona-context>"
         val context = "<persona-context kind=\"context\" title=\"修复登录\" url=\"\">\n页面原文\n</persona-context>"
         val file = "<persona-file kind=\"file\" path=\"/up/a.txt\" name=\"a.txt\" size=\"10\"/>"

@@ -1,11 +1,13 @@
 # Lessons: testing and validation
 
-- A UI test that lands on the wrong page in the wrong language did not get its launch (#10109). xcodebuild installs the
-  app at the start of each run; a Live Activity the previous run left is stopped by that install, and liveactivitiesd
-  wakes the app in the background a few milliseconds before XCTest's launch, which then attaches to that argument-less
-  process. Longer waits never help: read SpringBoard's `OpenApplication … ForRequester(…)` lines around the launch, and
-  end what a test leaves (Debug builds end their Live Activities on SIGTERM). A test that waits for one of two
-  renderings (a folded box shows the caption, not the line) waits on the hub's own count first, then either rendering.
+- New relayed routes need both extension-scope inventories checked (#7100): `TestRouteScopes` records the exact
+  scope, and `TestEveryExtensionRouteIsBounded` records how ownership is enforced. Updating `extwire.RouteScopes`
+  alone leaves those checks failing. Exercise allowed and refused tokens, another manager's Todo and explicit manager
+  selectors, and body-named machines before recording the classification; keep every existing scope unchanged.
+  Regenerate the route inventory after merging additions so shared-prefix routes remain sorted.
+
+- A viewer's Close button existing, or being non-hittable, does not prove that its picture and tap recognizers are ready, or that a tap hid the chrome (#8562). The full-screen presentation may still be settling, the decoded page may still be a spinner, or a SpringBoard alert may cover the app. Dismiss the known icon-change alert, wait for the decoded `viewer-page-N` and a hittable Close before the first tap, and only then assert the hide/show sequence. A delayed-decode launch turns the old race into a deterministic failure; a longer poll after a mistimed tap only hides the synchronization gap.
+
 
 - Fixture teardown is part of a test's elapsed time (#5730). A scripted terminal whose shell is ready immediately
   does not need a fixed startup pause. When a test has finished its assertions, cancel background prompt checks
@@ -13,6 +15,13 @@
   must still await the check before their assertions; cancellation at teardown must not substitute for those checks.
   Keep normal detached delivery and production wait limits unchanged, and measure serial and partitioned commands
   separately when evaluating the gain.
+
+- A UI test that lands on the wrong page in the wrong language did not get its launch (#10109). xcodebuild installs the
+  app at the start of each run; a Live Activity the previous run left is stopped by that install, and liveactivitiesd
+  wakes the app in the background a few milliseconds before XCTest's launch, which then attaches to that argument-less
+  process. Longer waits never help: read SpringBoard's `OpenApplication … ForRequester(…)` lines around the launch, and
+  end what a test leaves (Debug builds end their Live Activities on SIGTERM). A test that waits for one of two
+  renderings (a folded box shows the caption, not the line) waits on the hub's own count first, then either rendering.
 
 - A fake peer recording a user line is not the send's completion (#9673). The desktop launcher's first message
   continues in the background and still reads the shared confirmation timeout. After observing inbox receipt, wait
@@ -392,8 +401,10 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 path, and Gradle treats that path as the only input. A change to the Rust code rebuilt the library at the same path, and
 Gradle then called the tests up to date and skipped them. A deliberately broken rule still "passed". The fix:
 
-- The Exec task that builds the library declares it with `outputs.file(...)`.
-- The test task takes that task's outputs as inputs, with `inputs.files(buildHostCore)`.
+- The task that builds the library declares it as its output (`HostCoreLibrary` copies cargo's result into the build
+  directory, with the core's sources, manifests, lockfile and toolchain file as its inputs; #10712).
+- The test task takes that output as an input by its contents (`FileContentProperty`, `PathSensitivity.NONE`), which
+  also passes its path to the test JVM.
 
 **To check the setup**, break one rule on purpose and confirm the binding tests fail before trusting them.
 

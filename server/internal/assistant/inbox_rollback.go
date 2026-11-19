@@ -70,6 +70,8 @@ func (b *inboxBook) restore(w *inboxWrite) {
 	for i := range cv.NumField() {
 		switch name := cv.Type().Field(i).Name; name {
 		case "ArrivedOf", "ArrivedAt": // the save's own stamp, not the change's
+		case "SuggestionAttempts":
+			cur.SuggestionAttempts = restoreSuggestionAttempts(p.SuggestionAttempts, cur.SuggestionAttempts)
 		default:
 			if !reflect.DeepEqual(cv.Field(i).Interface(), pv.Field(i).Interface()) {
 				cv.Field(i).Set(pv.Field(i))

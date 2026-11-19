@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -49,6 +50,10 @@ type modelExecution struct {
 	// Interject: a message this one carries, sent while the conversation answers, moves its foreground work to the
 	// background (assistant_interject.go). Per message, never part of the fingerprint.
 	Interject bool `json:"-"`
+	// Interactive: run a Claude conversation as interactive Claude Code instead of claude -p (assistant_tui.go), the
+	// assistant's claude_interactive setting. Part of the fingerprint, so a change resumes an idle conversation in a
+	// new process; omitted when off, so fingerprints from before it stay the same.
+	Interactive bool `json:",omitempty"`
 	// SecretTicket: the hand-off a new Claude Code start puts in its environment (secretenv.go). Per start, never
 	// part of a fingerprint, never kept for a resume.
 	SecretTicket string `json:"-"`
@@ -62,7 +67,7 @@ type modelExecution struct {
 }
 
 func supervisionRuntimeRefusal(ctx context.Context) error {
-	return refusal("assistant_supervision_runtime", i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_runtime"), nil)
+	return refusal(assistantwire.CodeSupervisionRuntime, i18n.T(i18n.From(ctx), "rpc-errors.assistant_supervision_runtime"), nil)
 }
 
 // check refuses a model that is not a model id (proto.ValidModelID, #1644) before anything runs; the error's text is
@@ -123,9 +128,10 @@ func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExec
 		MainCompact             int                      `json:"main_compact_window"`
 		External                *proto.ExternalExecution `json:"external"`
 		SupervisionInstructions *string                  `json:"supervision_instructions"`
+		ClaudeInteractive       bool                     `json:"claude_interactive"` // #10058: a send's own flag, here for starts no send makes
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
 		return "", modelExecution{}
 	}
-	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External}).withSupervision(res.SupervisionInstructions)
+	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions)
 }

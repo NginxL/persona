@@ -116,6 +116,11 @@ iOS / Android have both entry points (Android Machines is under Agents: **List s
 
 Windows: herdr has native Windows support since 0.9.5; except live terminal, capabilities match above. Orca works too. See [windows.md](../operations/windows.md), "herdr."
 
+Antigravity CLI panes can show chat history after the hook installed by `herdr integration install antigravity-cli`
+reports the pane's conversation ID. Persona reads that conversation's local `transcript.jsonl` from the node's Antigravity data
+directory and uses the reported ID to restore Persona-started panes with `agy --conversation`. Until herdr
+reports a usable ID, the pane remains accessible through the terminal and can still receive prompts.
+
 Orca's native Claude chats (structured, no terminal) connect through node's bridge: list, state, send text / images, interrupt, close,
 answer approvals / questions, change permission / thinking (no plan mode); no screen reads, keys, or live terminal. Chats appear only after their first message;
 Codex chats not listed in this version. See `docs/plans/plan-orca-support.md` ("Structured sessions").
@@ -166,6 +171,11 @@ Selecting `herdr-both` attaches both herdr and herdr-core hosts:
   conversations, other tools' sessions, Agents Persona did not start, panes without Persona's mark for the session. An
   Agent that quit has its shell closed only on Herdr (the #9648 checks). The transcript stays and Resume opens a new tab
   (`server/internal/assistant/agent_terminal_close.go`).
+- **Closing one task's tab after acceptance** (#10201): the owner can opt in when starting a new planned task. After
+  `task_review` saves its acceptance as done, Persona can close the original Herdr tab of that task's Claude Code or
+  Codex Agent. It checks the tab and running process from dispatch, the current layout and focus, open terminal views,
+  input, pending interactions and live work. A split tab or a workspace's last tab stays open. The transcript and
+  worktree stay. See `docs/assistant/todos.md` ("Close a task's tab after acceptance").
 - **Close already dispatched when the Agent exits** (#9648): a normal `session.close` can still close its original
   marked Herdr shell. The node reads the selected server directly, requires a matching session marker, no active or
   rebound Agent and a known foreground shell, then rechecks ownership and layout before closing only that pane.

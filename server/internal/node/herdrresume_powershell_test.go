@@ -97,7 +97,7 @@ func decodedResume(t *testing.T, argv []string) string {
 // windowsResumeCmd is the command a PowerShell resume hands Git Bash for the r3 launch: main's direct start command
 // (r3MainDirect, captured from origin/main) with --resume, behind the start file's PERSONA_HOME / unset prefix.
 func windowsResumeCmd() string {
-	return "unset " + strings.Join(assistantOnlyEnvNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' ` +
+	return "unset " + strings.Join(agentUnsetNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' ` + agentMarkEnv + " " +
 		strings.Replace(r3MainDirect, "--session-id ", "--resume ", 1)
 }
 
@@ -185,7 +185,7 @@ func TestHerdrRestoreOutsideWindowsIgnoresDefaultShell(t *testing.T) {
 func TestWindowsHerdrRestorePowerShellOtherAgents(t *testing.T) {
 	withWindowsRestore(t, "pwsh.exe")
 	n := &Node{dir: `C:\node dir`, home: t.TempDir()}
-	prefix := "unset " + strings.Join(assistantOnlyEnvNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' `
+	prefix := "unset " + strings.Join(agentUnsetNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' ` + agentMarkEnv + " "
 	for _, tc := range []struct{ kind, launcher, model, want string }{
 		{"codex", "cx", "", "cx resume " + startID},
 		{traexAgent, "tx", "", "tx resume " + startID},
@@ -315,7 +315,7 @@ func TestWindowsHerdrRestorePowerShellIsReported(t *testing.T) {
 	if !reported {
 		t.Fatal("no session report")
 	}
-	if cmd := decodedResume(t, want); !strings.Contains(cmd, "PERSONA_HOME="+shellQuote(personaDir(home))+" claude --resume "+startID) {
+	if cmd := decodedResume(t, want); !strings.Contains(cmd, "PERSONA_HOME="+shellQuote(personaDir(home))+" "+agentMarkEnv+" claude --resume "+startID) {
 		t.Fatalf("Git Bash gets %q", cmd)
 	}
 }

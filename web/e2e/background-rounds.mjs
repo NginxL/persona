@@ -28,11 +28,11 @@ const items = [
   item(1, "user", "text", { text: "Plan the example launch for Friday.", client_msg_id: "demo-1" }),
   item(2, "assistant", "text", { text: "Here is the plan for the example launch on Friday." }),
   item(3, "user", "text", { text: source({ kind: "conversation", conversation_id: "demo-side", title: "Release desk" }) + "Check that the fictional release notes mention the new export button." }),
-  item(4, "assistant", "tool_use", { tool_name: "Read", tool_use_id: "demo-read", tool_input: { file_path: "/tmp/fictional-notes.md" } }),
-  item(5, "user", "tool_result", { tool_use_id: "demo-read", text: "The export button is listed." }),
+  item(4, "assistant", "tool_use", { tool_name: "mcp__persona__notify_user", tool_use_id: "demo-notify-failed", tool_input: { text: "The export button is listed." } }),
+  item(5, "user", "tool_result", { tool_use_id: "demo-notify-failed", text: "Unavailable", is_error: true }),
   item(6, "assistant", "text", { text: "The fictional release notes mention the export button." }),
   item(7, "user", "text", { text: prompt, injected: { kind: "followup", state: "daily", title: "Morning brief", line: "Scheduled task “Morning brief” started", detail: prompt }, source: { kind: "patrol", title: "Morning brief" } }),
-  item(8, "assistant", "text", { text: "Nothing new in the example inboxes since yesterday." }),
+  item(8, "assistant", "text", { text: "Checking the example inboxes.", narration: true }),
   item(9, "user", "text", { text: prompt, injected: { kind: "followup", state: "daily", title: "Evening brief", line: "Scheduled task “Evening brief” started", detail: prompt }, source: { kind: "patrol", title: "Evening brief" } }),
   item(10, "assistant", "tool_use", { tool_name: "mcp__persona__notify_user", tool_use_id: "demo-notify", tool_input: { text: "Two example invoices are due tomorrow." } }),
   item(11, "user", "tool_result", { tool_use_id: "demo-notify", text: "sent" }),
@@ -101,15 +101,15 @@ async function run(browser, size, theme) {
     assert(text.includes("Only the example screenshots are left."), "the user's own rounds stay shown");
     assert(text.includes("Two example invoices") || text.includes("two example invoices"), "a round that told the user stays shown");
     if (folded) {
-      assert.equal(await rounds.count(), 2, "the supervisor's and the morning brief's rounds fold");
+      assert.equal(await rounds.count(), 1, "only the round without a final reply folds");
       assert(!text.includes(prompt), "no scheduled prompt in the main chat");
-      assert(!text.includes("The fictional release notes mention the export button."), "the folded answer is hidden");
-      await rounds.nth(0).locator(":scope > button").click();
-      await rounds.nth(1).locator(":scope > button").click();
-      await page.getByText("The fictional release notes mention the export button.", { exact: false }).waitFor();
+      const answer = chat.getByText("The fictional release notes mention the export button.", { exact: true });
+      assert.equal(await answer.count(), 1, "the completed reply is visible despite the failed notification");
+      assert.equal(await answer.locator("xpath=ancestor::*[@data-supervision]").count(), 0);
+      assert.equal(await chat.locator("[data-work-group] > button[aria-expanded=false]").count(), 2, "both tool traces stay closed");
+      await rounds.locator(":scope > button").click();
       const opened = await chat.textContent();
-      assert(opened.includes("Check that the fictional release notes mention the new export button."), "the supervisor's message shows when opened");
-      assert(opened.includes("Nothing new in the example inboxes since yesterday."), "the scheduled round's answer shows when opened");
+      assert(opened.includes("Checking the example inboxes."), "the scheduled round's work shows when opened");
       assert(!opened.includes(prompt), "the scheduled prompt stays hidden when opened");
       assert(!opened.includes("persona-context"), "an opened round draws its inputs as source blocks, not raw model input");
       await shot("opened");

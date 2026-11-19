@@ -4,7 +4,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Item, ItemsPage } from "../../lib/types";
+import type { EngineLeg, Item, ItemsPage } from "../../lib/types";
+import EarlierStretches from "./EarlierStretches";
+import { useEarlierStretches, type Stitched } from "./useEarlierStretches";
 import { useTranscript, type Transcript } from "./useTranscript";
 
 interface Pending {
@@ -33,6 +35,17 @@ let shown: Transcript;
 function Probe({ sid }: { sid: string }) {
   shown = useTranscript("m", sid);
   return null;
+}
+
+let stitched: Stitched;
+const engineHistory: EngineLeg[] = [
+  { session_id: "A", agent: "claude", until: "2026-11-15T09:10:00Z" },
+  { session_id: "B", agent: "codex", until: "2026-11-15T09:20:00Z" },
+];
+function StitchedProbe() {
+  const tr = useTranscript("m", "A");
+  stitched = useEarlierStretches("m", "A", engineHistory, tr);
+  return stitched.host && <EarlierStretches {...stitched.host} />;
 }
 
 const render = (sid: string) => act(() => root.render(<Probe sid={sid} />));
@@ -69,7 +82,7 @@ describe("useTranscript older pages", () => {
     render("A");
     await answer(["/m/A/items?", "turns=2"], { items: [item("a10", 10)], has_more: true, to_seq: 10 });
     expect(shown.hasMore).toBe(true);
-    let pending!: Promise<void>;
+    let pending!: Promise<symbol | undefined>;
     act(() => void (pending = shown.loadEarlier()));
     expect(shown.loadingEarlier).toBe(true);
 
@@ -87,7 +100,7 @@ describe("useTranscript older pages", () => {
   it("does not show the last conversation's older-page failure in the new one", async () => {
     render("A");
     await answer(["/m/A/items?", "turns=2"], { items: [item("a10", 10)], has_more: true, to_seq: 10 });
-    let pending!: Promise<void>;
+    let pending!: Promise<symbol | undefined>;
     act(() => void (pending = shown.loadEarlier()));
     render("B");
     await answer(["/m/B/items?", "turns=2"], { items: [item("b50", 50)], has_more: true, to_seq: 50 });
@@ -131,6 +144,40 @@ describe("useTranscript older pages", () => {
     // the next ask goes out once the first is in
     act(() => void shown.loadEarlier());
     expect(calls.filter((c) => c.url.includes("before_seq=5"))).toHaveLength(1);
+  });
+
+  it("joins an A → B → A page until the earlier stretch renders, then asks from its new cursor", async () => {
+    act(() => root.render(<StitchedProbe />));
+    await answer(["/m/A/items?", "turns=2"], {
+      items: [{ ...item("live-a", 9), ts: "2026-11-15T09:25:00Z" }], has_more: true,
+    });
+    act(() => void stitched.loadEarlier());
+    await answer(["/m/A/items?", "before_seq=9"], {
+      items: [{ ...item("old-a", 3), ts: "2026-11-15T09:06:00Z" }], has_more: true,
+    });
+    act(() => void stitched.loadEarlier());
+    await answer(["/m/B/items?"], {
+      items: [{ ...item("middle-b", 2), ts: "2026-11-15T09:15:00Z" }], has_more: false,
+    });
+    expect(host.querySelector('[data-engine-stretch="A"]')?.textContent).toContain("old-a");
+
+    let joined!: Promise<symbol | undefined>;
+    let result: symbol | undefined;
+    await act(async () => {
+      const first = stitched.loadEarlier();
+      const pending = calls.shift()!;
+      expect(pending.url).toContain("before_seq=3");
+      pending.resolve({ items: [{ ...item("first-a", 1), ts: "2026-11-15T09:01:00Z" }], has_more: true });
+      result = await first;
+      expect(host.querySelector('[data-engine-stretch="A"]')?.textContent).not.toContain("first-a");
+      joined = stitched.loadEarlier();
+      expect(calls).toHaveLength(0);
+    });
+    expect(await joined).toBe(result);
+    expect(host.querySelector('[data-engine-stretch="A"]')?.textContent).toContain("first-a");
+    act(() => void stitched.loadEarlier());
+    await answer(["/m/A/items?", "before_seq=1"], { items: [], has_more: false });
+    expect(stitched.hasMore).toBe(false);
   });
 
   it("reports a fold read cut off by the page cap as incomplete", async () => {

@@ -88,13 +88,16 @@ func foldUsage(run []proto.Item) []proto.TokenUsage {
 
 // seedUsage looks back at most seedUsageLines lines and seedUsageBytes of them for the request a window's first lines
 // go on from. A line over seedUsageLine bytes is read only as far as seedUsageHead (a request blob repeats the whole
-// conversation; a reply with a huge tool input says its request's id near its start). A rollout's latest token_count
-// further back than that is found by a byte search over at most seedCodexSearch bytes.
+// conversation; a reply with a huge tool input says its request's id near its start), unless its head does not say
+// whether it is a reply (a gateway can write the message's content before its id and role): such lines are read whole,
+// at most seedUsageUnsaid bytes of them. A rollout's latest token_count further back than that is found by a byte
+// search over at most seedCodexSearch bytes.
 const (
 	seedUsageLines  = 64
 	seedUsageBytes  = 2 << 20
 	seedUsageLine   = 256 << 10
 	seedUsageHead   = 64 << 10
+	seedUsageUnsaid = 4 << 20
 	seedCodexSearch = 64 << 20
 )
 
@@ -126,13 +129,16 @@ func (f *File) seedUsage(r seedLines, b int, codex bool) (tokenuse.Request, int6
 	}
 	var req tokenuse.Request
 	found := false
-	budget := int64(seedUsageBytes)
+	budget, unsaid := int64(seedUsageBytes), int64(seedUsageUnsaid)
 	for n := b - 1; n >= 1 && n >= b-seedUsageLines; n-- {
 		sz := r.size(n)
 		if sz > seedUsageLine {
 			// A reply this big says its request's id near its start, and put the request's usage on an item: a later
 			// line of the request adds nothing (Claude Code repeats a request's usage on every line of it).
-			switch id := replyHeadID(r.head(n, seedUsageHead), f.meta.Sidechain); {
+			id, said := replyHeadID(r.head(n, seedUsageHead), f.meta.Sidechain)
+			switch {
+			case !said && sz <= unsaid:
+				unsaid -= sz // read whole below, as a short line is
 			case id == "":
 				continue // no reply: further back
 			case !found || id == req.ID():
@@ -140,8 +146,7 @@ func (f *File) seedUsage(r seedLines, b int, codex bool) (tokenuse.Request, int6
 			default:
 				return req, 0
 			}
-		}
-		if budget -= sz; budget < 0 {
+		} else if budget -= sz; budget < 0 {
 			break
 		}
 		line := r.line(n)
@@ -208,16 +213,17 @@ func seedCodexTotal(r seedLines, b int) int64 {
 // replyHeadID is the request id of a Claude Code reply line read only as far as head, "" when head is not one's: the
 // line's message (the first one in it, before any content) says role "assistant" and an id among the keys before its
 // content. In a session's transcript a sidechain line is no reply of the session's (sidechain: the file is a
-// subagent's own, every line sidechain).
-func replyHeadID(head []byte, sidechain bool) string {
+// subagent's own, every line sidechain). said is false when head cannot tell: the message's keys before its content
+// (or before head ends) leave out its role, as a gateway that writes content first does.
+func replyHeadID(head []byte, sidechain bool) (id string, said bool) {
 	if bytes.HasPrefix(head, apiRequestHead) {
-		return ""
+		return "", true
 	}
 	i := bytes.Index(head, messageMark)
 	if i < 0 || !sidechain && bytes.Contains(head[:i], sidechainMark) {
-		return ""
+		return "", true
 	}
-	var id, role string
+	var role string
 	rest := head[i+len(messageMark):]
 	for {
 		rest = rest[skipJSONSpace(rest, 0):]
@@ -252,8 +258,11 @@ func replyHeadID(head []byte, sidechain bool) string {
 			rest = rest[1:]
 		}
 	}
-	if role != "assistant" || strings.ContainsRune(id, '\\') {
-		return ""
+	if role == "" {
+		return "", false
 	}
-	return id
+	if role != "assistant" || strings.ContainsRune(id, '\\') {
+		return "", true
+	}
+	return id, true
 }

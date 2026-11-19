@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoConversations, autoOrigin, externalFrom, externalOpening, externalOrigin, matchesOrigin, openerOf, originMarkLabel, parseOriginFilter, recentConversations } from "./conversation-origins";
+import { autoConversations, autoOrigin, externalFrom, externalOpening, externalOrigin, matchesOrigin, openerOf, originMarkLabel, parseOriginFilter, recentConversations, unlistedConversations } from "./conversation-origins";
 import type { Item, Session } from "./types";
 
 const conv = (id: string, extra: Partial<Session> = {}) => ({ machine_id: "hub", session_id: id, title: id, cwd: "", status: "idle", ...extra }) as Session;
@@ -126,6 +126,27 @@ describe("the sidebar's Recent (#4873, #5195)", () => {
   it("takes an ended leader back and is empty when nothing else is left", () => {
     expect(recentConversations(list, "main", [], "bg").map((c) => c.session_id).slice(0, 3)).toEqual(["inbox", "lead", "a"]);
     expect(recentConversations(list.slice(0, 3), "main", ["lead"], "bg")).toEqual([]);
+  });
+
+  it("names the assistant's conversations the held answer does not list, whoever made them, to read it again (#10190)", () => {
+    const held = { main: "main", background_supervisor: "bg", conversations: [conv("listed", { assistant: true })] };
+    const known = [
+      conv("main", { assistant: true }), // the main one, which the answer names
+      conv("bg", { assistant: true, origin: "task" }), // the background supervisor it names
+      conv("listed", { assistant: true, state: "working" }), // listed: its change is laid over it, nothing is read
+      conv("agent", { origin: "user" }), // an Agent's session, not the assistant's
+      conv("old", { assistant: true, archived: true }), // the answer leaves archived ones out
+      conv("gone", { assistant: true, deleted: true }),
+      conv("health", { assistant: true, space: "health" }), // another space's
+    ];
+    const made = [
+      conv("lark", { assistant: true, origin: "lark_agent" }), // an integration's POST /assistant/conversations
+      conv("phone", { assistant: true, origin: "user" }), // started on the phone
+      conv("morning", { assistant: true, origin: "task", origin_ref: "task_1" }), // a scheduled task's
+    ];
+    expect(unlistedConversations(held, known)).toEqual([]);
+    expect(unlistedConversations(held, [...known, ...made])).toEqual(["lark", "phone", "morning"]);
+    expect(unlistedConversations({ conversations: [] }, [conv("first", { assistant: true })])).toEqual(["first"]);
   });
 });
 

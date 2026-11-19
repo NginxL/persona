@@ -276,6 +276,11 @@
     <string name="settings_ext_token_changed">Token changed</string>
     <string name="settings_ext_remove_market_title">Remove %1$s?</string>
     <string name="settings_ext_remove_market_text">The hub stops reading this market. Extensions installed from it stay, but stop upgrading until the market is added again with the same address.</string>
+    <plurals name="settings_ext_remove_market_affected">
+        <item quantity="one">The hub stops reading this market. %1$d extension installed from it stays, but stops upgrading until the market is added again with the same address.</item>
+        <item quantity="other">The hub stops reading this market. %1$d extensions installed from it stay, but stop upgrading until the market is added again with the same address.</item>
+    </plurals>
+    <string name="settings_ext_remove_market_unused">The hub stops reading this market. No installed extension came from it.</string>
     <string name="settings_ext_remove">Remove</string>
     <string name="settings_ext_market_removed">Market removed</string>
     <string name="settings_ext_market_address">Address</string>
@@ -419,4 +424,17 @@
         <item quantity="one">Stopped on %1$d machine</item>
         <item quantity="other">Stopped on %1$d machines</item>
     </plurals>
+    <string name="settings_ext_graph">Graph</string>
+    <string name="settings_ext_graph_zoom_out">Zoom out</string>
+    <string name="settings_ext_graph_zoom_in">Zoom in</string>
+    <string name="settings_ext_graph_fit">Fit</string>
+    <string name="settings_ext_graph_full_screen">Full screen</string>
+    <string name="settings_ext_graph_open">Open graph full screen</string>
+    <string name="settings_ext_graph_fold">Fold</string>
+    <plurals name="settings_ext_graph_show_hidden">
+        <item quantity="one">Show %1$d hidden</item>
+        <item quantity="other">Show %1$d hidden</item>
+    </plurals>
+    <string name="settings_ext_graph_under">under %1$s</string>
+    <string name="settings_ext_graph_progress">%1$d%%</string>
 </resources>

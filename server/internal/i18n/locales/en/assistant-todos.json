@@ -9,5 +9,7 @@
   "reopen_card": "Reopen the task “{title}”",
   "supervision_needs_deployment": "Merged; deployment and live verification still required",
   "someday_closed": "Only an open to-do can be put off to Someday",
-  "someday_until": "Pick a time ahead, no later than the year 9999"
+  "someday_until": "Pick a time ahead, no later than the year 9999",
+  "not_found": "This to-do no longer exists",
+  "round_not_found": "That part of the to-do's conversation is no longer there"
 }

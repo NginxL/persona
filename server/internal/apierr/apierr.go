@@ -227,18 +227,23 @@ func LocalizedBody(status int, code string, err error, l i18n.Lang) map[string]a
 }
 
 var rpcFailureKeys = map[string]string{
-	"rewind_busy":        "rpc-errors.rewind_busy",
-	"rewind_unsupported": "rpc-errors.rewind_unsupported",
-	"rewind_mismatch":    "rpc-errors.rewind_mismatch",
-	"rewind_nothing":     "rpc-errors.rewind_nothing",
-	"rewind_failed":      "rpc-errors.rewind_failed",
-	proto.CodeNotLoaded:  "rpc-errors.not_loaded", // a read that would start an agent its engine let go (Paseo, #8132)
-	"skill_unavailable":  "rpc-errors.skill_unavailable",
-	"timeout":            "rpc-errors.timeout",
-	"node_unreachable":   "rpc-errors.unreachable",
-	"internal":           "rpc-errors.failed",
-	"input_draft":        "rpc-errors.input_draft",
-	"dialog_open":        "rpc-errors.dialog_open",
+	"rewind_busy":                "rpc-errors.rewind_busy",
+	"rewind_unsupported":         "rpc-errors.rewind_unsupported",
+	"rewind_mismatch":            "rpc-errors.rewind_mismatch",
+	"rewind_nothing":             "rpc-errors.rewind_nothing",
+	"rewind_failed":              "rpc-errors.rewind_failed",
+	proto.CodeNotLoaded:          "rpc-errors.not_loaded", // a read that would start an agent its engine let go (Paseo, #8132)
+	"skill_unavailable":          "rpc-errors.skill_unavailable",
+	"timeout":                    "rpc-errors.timeout",
+	"node_unreachable":           "rpc-errors.unreachable",
+	"internal":                   "rpc-errors.failed",
+	"input_draft":                "rpc-errors.input_draft",
+	proto.CodeTurnOverBackground: "rpc-errors.turn_over_background", // a Stop that found the turn over (#10828)
+	"dialog_open":                "rpc-errors.dialog_open",
+	// an owner's message to an Agent with older messages held for it (devices held.go, #10661)
+	"held_ahead":    "rpc-errors.held_ahead",
+	"held_not_kept": "rpc-errors.held_not_kept",
+	"held_full":     "rpc-errors.held_full",
 	// the first message to a Codex opened with no first message (node/codex_waiting.go, #4961)
 	"codex_not_ready":          "rpc-errors.codex_not_ready",
 	"codex_first_text":         "rpc-errors.codex_first_text",
@@ -251,13 +256,15 @@ var rpcFailureKeys = map[string]string{
 	"attach_busy":              "rpc-errors.attach_busy",
 	proto.CodeTerminalNotReady: "rpc-errors.terminal_not_ready",
 	// a start's new tab stopped on its shell (node/shellsettle.go, #2570)
-	proto.CodeShellWaiting:               "rpc-errors.shell_waiting",
-	proto.CodeStartLineRejected:          "rpc-errors.start_line_rejected",
-	"start_tab_gone":                     "rpc-errors.start_tab_gone", // the app's answer to its question (node/startcontinue.go, #10365)
-	"start_not_waiting":                  "rpc-errors.start_not_waiting",
-	"choice_not_offered":                 "rpc-errors.choice_not_offered",
-	proto.CodeSecretEnvGone:              "rpc-errors.secret_env_gone", // a hand-off's values went with the start that took them
-	"node_outdated":                      "rpc-errors.node_outdated",
+	proto.CodeShellWaiting:      "rpc-errors.shell_waiting",
+	proto.CodeStartLineRejected: "rpc-errors.start_line_rejected",
+	"start_tab_gone":            "rpc-errors.start_tab_gone", // the app's answer to its question (node/startcontinue.go, #10365)
+	"start_not_waiting":         "rpc-errors.start_not_waiting",
+	"choice_not_offered":        "rpc-errors.choice_not_offered",
+	proto.CodeSecretEnvGone:     "rpc-errors.secret_env_gone", // a hand-off's values went with the start that took them
+	"node_outdated":             "rpc-errors.node_outdated",
+	// A private-profile switch is refused before any message reaches the CLI.
+	"assistant_launcher_profile_switch":  "rpc-errors.assistant_launcher_profile_switch",
 	"assistant_service_tier_start_only":  "rpc-errors.assistant_service_tier_start_only",
 	"assistant_service_tier_unsupported": "rpc-errors.assistant_service_tier_unsupported",
 	"assistant_service_tier_refused":     "rpc-errors.assistant_service_tier_refused",
@@ -368,7 +375,7 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	// a summary that names {reason} carries the original words (git's, for a failed pull or push)
 	body["error"] = i18n.T(l, key, i18n.Args{"reason": original})
 	switch code {
-	case "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
+	case "assistant_launcher_profile_switch", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
 		// The native diagnostic is not a person-facing instruction; the stable, translated refusal says what to do.
 		return
 	}

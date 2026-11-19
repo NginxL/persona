@@ -542,6 +542,7 @@ export function providerBody(f: ProviderForm, old: ProviderView | null, clearLeg
   }
   if (!chat && f.headers_touched) body.headers = f.headers.trim();
   if (!chat && f.env_touched) body.env = f.env.replace(/\s+$/, ""); // the start kept: the hub's line numbers match the box
+  // The hub migrates affected purpose aliases in the same transaction as these clears.
   if (chat && clearLegacyChat) Object.assign(body, legacyChatClears(old));
   if (api && f.via_machine !== (old?.via_machine ?? "")) body.via_machine = f.via_machine;
   return body;

@@ -15,5 +15,14 @@
   "chosen_count_other": "已选 {count} 项",
   "done": "完成",
   "search_choices": "搜索",
-  "no_match": "没有匹配的选项"
+  "no_match": "没有匹配的选项",
+  "graph": "图",
+  "graph_zoom_in": "放大",
+  "graph_zoom_out": "缩小",
+  "graph_fit": "适应视图",
+  "graph_full_screen": "全屏",
+  "graph_close": "关闭",
+  "graph_fold": "折叠",
+  "graph_show_hidden_other": "展开 {count} 个隐藏项",
+  "graph_under": "属于{title}"
 }

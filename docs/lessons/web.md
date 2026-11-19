@@ -1321,6 +1321,19 @@ own and reloads when idle (docs/web/web.md "New versions"). When verifying a web
 before it, not only a fresh load.
 ## Workspace identity outlives its Agents
 
+An optional lazy panel needs a local error boundary at every mount (#7100).
+Settings' boundary did not protect the Todo detail: a naming import failure
+reached the route boundary and unmounted its dirty title and notes. Exercise the
+real Todo lifecycle with the import pending, reject it after both fields are
+dirty, and check that the same editors can still save. Test actual chunk failure
+and Reload in a browser too; saved-field recovery after a full reload is distinct
+from retaining unsaved drafts while the local error is displayed.
+
+Naming-preview retries must reconcile selected repository IDs after reloading task associations (#7100). Keeping a
+draft does not mean keeping IDs for removed repositories: an invisible stale ID made every retry fail even after
+reloading. Intersect the selection with the fetched associations, preserve unchecked choices, and leave newly added
+repositories unselected. Verify the request after a real association removal, not only the rendered checkbox list.
+
 An Agent collection cannot serve as a workspace inventory: empty ancestors disappear, and pinning or filtering can remove the only row carrying a parent edge. Keep discovery independent of the board and count actual Agents separately from catalog containers. Bind actions to credential generation, manager, computer, host and runtime workspace ID; matching paths do not grant ownership. A combined browser fixture must stamp its sessions and discovery with the same manager, or it correctly exercises isolation instead of navigation.
 
 The current assistant and the roster's default are different scopes. Workspace discovery and management entry points follow `shownManager`, while an item without a manager still belongs to `defaultManager`. A choice change must cancel reads and invalidate deletion previews immediately, even if the user switches back before a response arrives; subscribing only to changes of the roster's default misses that transition.
@@ -1452,6 +1465,12 @@ owner retyped it on the computer. Keep the node's code on the entry and word the
 entries kept from before), draw an uncertain one as waiting (caution color, no "Not sent"), and make a Check that finds
 nothing new say so. The node tells held from merely unconfirmed by the session's permission mode (`peer_held`).
 
+- Keep delivery receipts on the synchronous send path when deferring optional failure UI. The kept-message renderer and its retry/delete actions can load together, while receipt validation and row reconciliation stay immediate. Put the deferred row under a local error boundary and show the existing user bubble while it loads; verify that a failed import leaves the composer and its draft mounted. Keep words used only by deferred dialogs in the full client catalog: the existing lazy-import wait loads it before rendering. The startup literal-key guard and normal app/public build must still pass without changing the budget or counter. Startup selectors are prefixes: rewind.editing also selects rewind.editing_hint, so do not list both.
+
+## Filter history after folding, and reconcile search snapshots (#10240)
+
+A stopped parent can own a working child or a pending side request. Fold the complete sidebar rows before selecting non-running history, or the parent disappears from live work and its children become duplicate history rows. A frozen content-search result can also outlive Resume or deletion: use the current complete row for its identity and drop identities removed from a loaded snapshot. Compute day headings and counts after all filters, with local calendar fields rather than UTC date substrings.
+
 ## A terminal menu must own focus before taking typing keys (#10239)
 
 An open Menu listens in the window's capture phase. Merely hiding pane controls from session rows does not make its
@@ -1460,6 +1479,12 @@ toolbar opts into Menu's focus scope, accepts keys only from its own trigger or 
 trigger when opening. Check a real xterm textarea and a non-editable element as well as ordinary search input. Raw
 pane addresses also need to resolve a listed Agent before closing, or they would fall back to a shell confirmation
 and lose the busy-Agent warning.
+
+## Local font preferences (#10243)
+
+A stylesheet's normal custom property loses to a theme's inline value. An explicit font preference needs precedence while keeping the inline default intact for reset and fallback. Do not replace the theme's token in place. Keep before-paint validation and runtime validation contract-tested, quote a custom family as one CSS string, and treat FontFaceSet checks as advisory: they cannot reliably establish whether every installed family exists.
+
+Full UI retains a machine's xterm feed between surfaces. Reading font family only in `mount()` misses a newly opened surface that reuses that feed. Refresh its family on attachment, preserve font size, and guard asynchronous local CJK loading against a later family choice.
 
 ## Deep tree rows need space for their counts (#10477)
 

@@ -23,5 +23,17 @@
   "small": "小",
   "standard": "標準",
   "large": "大",
-  "swatch_label": "{name}、{origin}"
+  "swatch_label": "{name}、{origin}",
+  "font": "フォント",
+  "font_sans": "インターフェースのフォント",
+  "font_mono": "コードのフォント",
+  "font_hint": "このブラウザに保存します。ターミナルを開き直すとコードのフォントを使います。",
+  "font_system_sans": "システム UI",
+  "font_system_mono": "システム等幅",
+  "font_custom": "カスタム",
+  "font_family": "インストール済みのフォント名",
+  "font_custom_label": "{kind}：カスタムフォント",
+  "font_invalid": "カンマや CSS 記号を含めず、フォント名を一つ入力してください。",
+  "font_unavailable": "このフォントは使えない可能性があります。選択を保持し、代替フォントを使います。",
+  "font_local": "このコンピュータにあるフォントを使います。ダウンロードは行いません。"
 }

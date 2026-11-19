@@ -286,3 +286,21 @@ func (b *baseDelay) min() uint32 {
 	}
 	return out
 }
+
+// resumed: the connection goes on over a new transport (resume.go), whose other side read every frame through peerRead.
+// Those are acknowledged without a sample; the ones after it go again now, so they count from now. What the window
+// learned of the old route (its delays, its rate) is let go: the new one is measured afresh, from the start's window.
+func (w *creditWindow) resumed(peerRead uint64, now time.Time) {
+	i := 0
+	for ; i < len(w.sent) && w.sent[i].seq <= peerRead; i++ {
+		w.inFlight -= w.sent[i].bytes
+		w.done += int64(w.sent[i].bytes)
+	}
+	w.sent = append(w.sent[:0], w.sent[i:]...)
+	for i := range w.sent {
+		w.sent[i].at = now
+	}
+	sent, inFlight, done := w.sent, w.inFlight, w.done
+	*w = newCreditWindow()
+	w.sent, w.inFlight, w.done = sent, inFlight, done
+}

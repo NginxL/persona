@@ -26,7 +26,7 @@ import { toast } from "../ui/atoms";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
 import { inFolderFilter } from "./inbox-folders";
-import { actedText, actOnSuggestion, statusOf, type ChainEntry, type InboxHandling, type InboxRelated, type InboxStatus, type InboxSuggestion, type SuggestionAction } from "./inbox-events";
+import { actedText, actOnSuggestion, statusOf, type ChainEntry, type InboxHandling, type InboxRelated, type InboxStatus, type InboxSuggestion, type InboxSuggestionAttempt, type SuggestionAction } from "./inbox-events";
 
 // ── wire types (docs/protocol/protocol.md "Inbox API") ─────────
 
@@ -146,6 +146,8 @@ export interface InboxItem {
   recap?: string;
   handling?: InboxHandling;
   suggestion?: InboxSuggestion;
+  /** Authoritative reply outcomes retained by the server, including superseded suggestion versions. */
+  suggestion_attempts?: InboxSuggestionAttempt[];
   /** Handling chain, oldest first. */
   chain?: ChainEntry[];
   /** The rows merged into this one by hand (the hub hides them; #6480). */
@@ -559,9 +561,22 @@ export function contextXML(kind: string, title: string, url: string, text: strin
 /** "Hand to AI" to Persona's main conversation (docs/assistant/inbox.md "Item actions"): the item's manager sends text there
  *  after a block naming the item, or starts the conversation with it, and the conversation may write back to the item.
  *  The same clientID again sends nothing more. Resolves to the conversation it went to. */
-export async function handOffToMain(item: InboxItem, text: string, clientID: string): Promise<InboxHandoff> {
-  const r = await api<{ session: InboxHandoff }>(`${itemPath(item.id)}/handoff`, { method: "POST", json: { text, client_id: clientID }, headers: itemRequest(item) });
-  return r.session;
+const pendingHandoffs = new Map<string, Promise<InboxHandoff>>();
+
+export function handOffToMain(item: InboxItem, text: string, clientID: string, reusePending = false): Promise<InboxHandoff> {
+  const snapshot = suggestionSnapshot(item);
+  const observed = state.uncertainReplies;
+  const key = JSON.stringify([itemKey(snapshot), text, reusePending ? true : clientID]);
+  const pending = pendingHandoffs.get(key);
+  if (pending) return pending;
+  const request = api<{ session: InboxHandoff; item?: InboxItem }>(`${itemPath(item.id)}/handoff`, {
+    method: "POST", json: { text, client_id: clientID, ...(reusePending ? { reuse_pending: true } : {}) }, headers: itemRequest(item),
+  }).then((r) => {
+    if (r.item?.id === item.id) reconcileSuggestionItem(snapshot, r.item, observed);
+    return r.session;
+  }).finally(() => { if (pendingHandoffs.get(key) === request) pendingHandoffs.delete(key); });
+  pendingHandoffs.set(key, request);
+  return request;
 }
 
 // ── Feishu messages (docs/protocol/protocol.md "Lark API") ──────
@@ -735,6 +750,8 @@ interface InboxState {
   error: string;
   /** Items whose reply is being sent (the row shows a spinner, a second tap does nothing). */
   sending: string[];
+  /** A confirmation whose result/readback is unavailable. Only matching server receipts can clear this local safety hint. */
+  uncertainReplies: Record<string, InboxSuggestionAttempt>;
   /** Status moves being written, by "<item>|<row>|<field>". */
   moving: string[];
   /** Done items older than the list's few days, from the hub's history (GET /api/v1/inbox/done, #2200), newest first. */
@@ -756,7 +773,7 @@ interface InboxState {
   routing: string[];
 }
 
-const EMPTY: InboxState = { items: [], triage: null, loaded: false, loading: false, error: "", sending: [], moving: [], history: [], historyMore: [""], historyLoading: false, historyError: {}, doneDays: {}, groupLoading: [], groupComplete: [], routing: [] };
+const EMPTY: InboxState = { items: [], triage: null, loaded: false, loading: false, error: "", sending: [], uncertainReplies: {}, moving: [], history: [], historyMore: [""], historyLoading: false, historyError: {}, doneDays: {}, groupLoading: [], groupComplete: [], routing: [] };
 let state: InboxState = EMPTY;
 const listeners = new Set<() => void>();
 /** A Map that tells its watchers when it changes. The unsent replies live outside InboxState: a keystroke in the draft
@@ -991,6 +1008,7 @@ export function reloadInbox(): Promise<void> {
           let status = 0;
           let etag = "";
           const held = lastList;
+          const observed = state.uncertainReplies;
           // "0" until a list is held: one no list has, so the hub answers the whole list and its cursor
           const since = Date.now() < deltasOff ? "" : held?.cursor || "0";
           // If-None-Match too: a hub that knows no `since` still answers a list it has with a 304
@@ -1010,7 +1028,8 @@ export function reloadInbox(): Promise<void> {
             list = { etag, cursor, items: r.delta && held ? applyInboxDelta(held.items, r.items ?? [], r.removed ?? []) : r.items ?? [], triage: r.triage ?? null };
             lastList = etag || cursor ? list : null;
           }
-          if (list) set({ items: keepSameItems(state.items, withPending(list.items, seq)), triage: list.triage, loaded: true, error: "" });
+          if (list) set({ items: keepSameItems(state.items, withPending(list.items, seq)), triage: list.triage, loaded: true, error: "",
+            uncertainReplies: replyHintsAfterRead(status === 304 ? [] : r.items ?? [], observed) });
         } finally {
           endList(seq);
         }
@@ -1047,9 +1066,11 @@ export function applyInboxDelta(held: InboxItem[], changed: InboxItem[], removed
 export async function refreshInbox(): Promise<void> {
   set({ loading: true });
   const seq = beginList();
+  const observed = state.uncertainReplies;
   try {
     const r = await api<{ items?: InboxItem[]; triage?: InboxTriage }>("/inbox/refresh?sources=all", { method: "POST" });
-    set({ items: keepSameItems(state.items, withPending(r.items ?? [], seq)), triage: r.triage ?? null, loaded: true, error: "" });
+    set({ items: keepSameItems(state.items, withPending(r.items ?? [], seq)), triage: r.triage ?? null, loaded: true, error: "",
+      uncertainReplies: replyHintsAfterRead(r.items ?? [], observed) });
   } catch (e) {
     toast(t("lib-inbox.refresh_failed", { error: errorText(e) }), "error");
   } finally {
@@ -1508,25 +1529,89 @@ export async function sendReply(item: InboxItem, text: string, changes: DocChang
   }
 }
 
-/** "Send" / "Start" / "Got it" / "Confirm", "Reject", "Say something" on the item's suggestion: the hub's item replaces ours. A suggestion that
- * changed meanwhile is not run: "Suggestion updated" and the item as it is now. Resolves to whether it went through. */
-export async function suggestionAct(item: InboxItem, action: SuggestionAction, text?: string, due?: string): Promise<boolean> {
-  const s = item.suggestion;
-  const key = itemKey(item);
-  if (!s || state.sending.includes(key)) return false;
+/** Identity of a local confirmation whose delivery could not be read back. */
+export function uncertainReplyKey(item: InboxItem, version: number, conversation = item.suggestion?.conversation?.session_id ?? ""): string {
+  return JSON.stringify([itemKey(item), version, conversation]);
+}
+
+function suggestionSnapshot(item: InboxItem): InboxItem {
+  return listed(item) ?? state.history.find((x) => sameItem(x, item)) ?? item;
+}
+
+/** Only receipts returned by this read clear hints it already knew about; held delta rows are not fresh receipts. */
+function replyHintsAfterRead(items: InboxItem[], observed: InboxState["uncertainReplies"]): InboxState["uncertainReplies"] {
+  const hints = { ...state.uncertainReplies };
+  for (const item of items) for (const a of item.suggestion_attempts ?? []) {
+    const key = uncertainReplyKey(item, a.version, a.conversation?.session_id ?? "");
+    if (hints[key] === observed[key]) delete hints[key];
+  }
+  return hints;
+}
+
+/** Keep a store update that arrived during this request; only merge its reply receipts into that current item. */
+function reconcileSuggestionItem(ref: InboxItem, fresh: InboxItem, observed = state.uncertainReplies): boolean {
+  if (fresh.id !== ref.id || fresh.manager && !sameManager(fresh.manager, ref.manager)) return false;
+  const before = listed(ref) ?? state.history.find((x) => sameItem(x, ref));
+  const attempts = new Map<number, InboxSuggestionAttempt>();
+  for (const a of before?.suggestion_attempts ?? []) attempts.set(a.version, a);
+  for (const a of fresh.suggestion_attempts ?? []) {
+    const old = attempts.get(a.version);
+    if (old && (Date.parse(old.at) > Date.parse(a.at) || old.status === "sent" || old.status === "unknown" && a.status === "failed")) continue;
+    attempts.set(a.version, a);
+  }
+  const latest = (it: InboxItem | undefined) => Math.max(it?.suggestion?.version ?? 0, ...(it?.suggestion_attempts ?? []).map((a) => a.version));
+  const kept = before && (before !== ref || latest(before) > Math.max(latest(fresh), ref.suggestion?.version ?? 0)) ? before : fresh;
+  // Match the server's existing bounded handling-chain history; missing older receipts stay unknown to the UI.
+  const receipts = [...attempts.values()].sort((a, b) => a.version - b.version).slice(-50);
+  const next = { ...kept, ...(receipts.length ? { suggestion_attempts: receipts } : {}) };
+  const uncertain = replyHintsAfterRead([keepStamp(fresh, ref)], observed);
+  const replace = (it: InboxItem) => sameItem(it, ref) ? keepStamp(next, it) : it;
+  set({ items: state.items.map(replace), history: state.history.map(replace), uncertainReplies: uncertain });
+  return true;
+}
+
+async function readSuggestionItem(item: InboxItem): Promise<void> {
+  const snapshot = suggestionSnapshot(item);
+  const observed = state.uncertainReplies;
+  try {
+    const fresh = await api<InboxItem>(itemPath(item.id), { headers: itemRequest(item) });
+    reconcileSuggestionItem(snapshot, fresh, observed);
+  } catch { /* The local uncertain hint stays; a failed GET cannot authorize another send. */ }
+}
+
+/** Run only the displayed suggestion version; reconcile its outcome with updates received while it was in flight. */
+export async function suggestionAct(item: InboxItem, action: SuggestionAction, text?: string, due?: string, expectedVersion = item.suggestion?.version): Promise<boolean> {
+  const current = suggestionSnapshot(item);
+  const s = current.suggestion;
+  const key = itemKey(current);
+  if (!s || s.version !== expectedVersion || state.sending.includes(key)) return false;
+  const attempt = current.suggestion_attempts?.find((a) => a.version === s.version);
+  const confirmation = action === "confirm" && s.kind === "reply" && !s.handback;
+  const uncertainKey = uncertainReplyKey(current, s.version);
+  if (confirmation && (state.uncertainReplies[uncertainKey] || attempt && (attempt.status !== "failed" || !attempt.retryable))) return false;
+  // A stale editor must not silently confirm different words from the frozen attempt.
+  if (confirmation && attempt && text !== undefined && text !== attempt.text) return false;
+  const sentText = attempt?.text ?? text ?? s.text;
   set({ sending: [...state.sending, key] });
   try {
-    const r = await actOnSuggestion(itemPath(item.id), s.version, action, text, undefined, item.manager, due);
+    // A Retry confirms the frozen server payload; it never submits the current editor's draft as a new send.
+    const r = await actOnSuggestion(itemPath(current.id), s.version, action, confirmation && attempt ? undefined : text, undefined, current.manager, due);
     if (r.ok) {
-      if (r.item?.id === item.id) replaceItem(r.item, item.manager);
+      if (r.item?.id === current.id) reconcileSuggestionItem(current, r.item);
       toast(actedText(s, action), "ok");
       return true;
     }
     if (r.stale) {
-      if (r.item) replaceItem(r.item, item.manager);
+      if (r.item) reconcileSuggestionItem(current, r.item);
       else void reloadInbox();
       toast(r.error, "info");
     } else {
+      if (confirmation) {
+        set({ uncertainReplies: { ...state.uncertainReplies, [uncertainKey]: {
+          version: s.version, status: "unknown", retryable: false, text: sentText, at: new Date().toISOString(), conversation: s.conversation,
+        } } });
+        if (!r.item || !reconcileSuggestionItem(current, r.item)) await readSuggestionItem(current);
+      }
       if (r.code === "inbox_item_done") void reloadInbox();
       toast(t("lib-inbox.suggestion_failed", { error: r.error }), "error");
     }
@@ -1616,6 +1701,7 @@ export function resetInboxForTests() {
   listSeq = 0;
   unsentReplies.clear();
   droppedChanges.clear();
+  pendingHandoffs.clear();
 }
 
 /** Someone a sent message @s: Feishu notifies them; the text holds their `@name` ("Everyone" is `user_id` "all"). */

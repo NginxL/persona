@@ -280,7 +280,7 @@ func (s *Service) deliverApprovalResult(a approvalJournalEntry) error {
 		working = c.Status == proto.StatusWorking || c.Starting
 	}
 	if !working {
-		if err := s.deliverRelay(ctx, a.MachineID, a.SessionID, msg); err == nil {
+		if err := s.tryDirectRelay(ctx, a.MachineID, a.SessionID, &msg); err == nil {
 			return nil
 		} else if !relayInDoubt(err) {
 			// A transient send refusal may still be retried through the durable

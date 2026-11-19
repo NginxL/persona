@@ -21,6 +21,10 @@ The generic screenshot mock folds tool calls without production's `fold.supervis
 review hidden in such a fold falsely makes the entire synthetic round quiet. Emit the same retained evidence as
 production when testing this case; do not disable folding or force-open the UI to make the screenshot pass.
 
+Keep a successful silent finish's call and receipt in the paged transcript (#10418). The clients need both even
+when a partial merge replaces an adjacent work fold. Either one alone does not establish that the round finished
+silent. They still appear inside the ordinary work summary when the reader opens the round.
+
 ## An exchange ends where its turn ends: a wake starts the next one (#9140; replaces #2796's rule)
 
 The chat grouped everything between two of the user's messages into one exchange and showed its last words as the

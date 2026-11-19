@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import UIKit
+import PersonaWire
 @testable import Persona
 
 /// Export as Image of a long reply with a table, a list and code (#2216; made-up text), light and dark. With
@@ -39,6 +40,44 @@ import UIKit
             try png.write(to: URL(fileURLWithPath: dir).appending(path: "share-\(dark ? "dark" : "light").png"))
         }
         #expect(image.size.height > 0)
+    }
+
+    @Test func aGraphCardDrawsItsStillSceneImmediately() throws {
+        let card = """
+        {
+          "fallback": "Work",
+          "title": "Work",
+          "sections": [
+            {
+              "items": [
+                {
+                  "type": "graph",
+                  "key": "work",
+                  "selected": "a",
+                  "nodes": [
+                    {"id": "a", "title": "Design"},
+                    {"id": "b", "title": "Build"}
+                  ],
+                  "edges": [
+                    {"from": "a", "to": "b"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let raw = try JSONDecoder().decode(ExtensionView.self, from: Data(card.utf8))
+        #expect(AssistantRichMarkdown.supports(raw))
+        let decoded = try #require(AssistantRichMarkdown.decode(card))
+        #expect(ShareCardParts.drawable(decoded))
+        let message = ShareMessage(text: "```persona-view\n\(card)\n```", isUser: false, source: "MacBook",
+                                   date: Date(timeIntervalSince1970: 1_793_000_000), agent: "Claude")
+        let image = try #require(MessageShareCard.render(message, dark: false))
+        #expect(image.size.height >= 200)
+        if let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"], let png = image.pngData() {
+            try png.write(to: URL(fileURLWithPath: dir).appending(path: "share-graph.png"))
+        }
     }
 
     static let message = ShareMessage(text: reply, isUser: false, source: "MacBook · shop-web",

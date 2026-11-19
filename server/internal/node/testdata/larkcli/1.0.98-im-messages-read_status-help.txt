@@ -1,0 +1,31 @@
+批量查询当前用户对消息的已读状态。Identity: `user` only (`user_access_token`); accepts up to 50 message IDs and returns `items[].is_read` plus `invalid_message_ids` for messages that cannot be determined.Must-read
+
+Risk: read
+
+Full parameter schema:
+  lark-cli schema im.messages.read_status
+
+Usage:
+  lark-cli im messages read_status [flags]
+
+Request Body:
+      --data string   JSON request body. Supports - and @file.
+
+Raw Parameter Input:
+      --params string   Raw URL/query params JSON. Supports - and @file.
+
+Execution:
+      --as string   identity type: user | bot
+      --dry-run     print request without executing
+
+Output:
+      --format string   output format: json|ndjson|table|csv (default json)
+  -q, --jq string       jq expression to filter JSON output
+  -o, --output string   output file path for binary responses
+
+Other:
+  -h, --help   help for read_status
+      --json   shorthand for --format json
+
+Global Flags:
+      --profile string   use a specific profile

@@ -110,6 +110,25 @@ func (s *Service) assistantAccepts(ctx context.Context, t Todo, a acceptAsk) {
 // NoCard), for retryAcceptance.
 func (s *Service) postAsk(ctx context.Context, t Todo, a acceptAsk) bool {
 	b := &s.accept
+	if a.Conclusion && !a.ForBriefing {
+		// The accepted task is already closed. Keep its complete conclusion and round key before any provider call:
+		// a manager exit inside that call must leave retryAcceptance something to deliver (#10393).
+		b.mu.Lock()
+		if c := b.asks[t.ID]; c != nil && c.AskedAt.IsZero() {
+			a.Earlier = c.Earlier
+			prepared := a
+			c.prepared = &prepared
+		}
+		err := s.saveAcceptErrLocked(ctx)
+		if err != nil {
+			b.asks[t.ID] = &a // release the claim for a later sweep; it must save before sending too
+		}
+		b.mu.Unlock()
+		if err != nil {
+			s.logf("task %s: conclusion: save before send: %v (tried again on the next tick)", t.ID, err)
+			return false
+		}
+	}
 	var st FeishuStatus
 	var stErr error
 	if !a.ForBriefing {

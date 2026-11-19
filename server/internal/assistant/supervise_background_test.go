@@ -102,7 +102,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	listBackground(t, s, f, bg)
 	waitFor(t, "the background supervisor's message", func() bool { return len(f.noticesTo(bg)) == 1 })
 	n := f.noticesTo(bg)[0]
-	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "signal=review", "hub 判断做完了，等你验收", "pull/7"} {
+	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "signal=review", "待逐项复核，不代表完成", "pull/7"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the background supervisor's message lacks %q:\n%s", want, n)
 		}
@@ -290,7 +290,7 @@ func TestMainSupervisesOwnTasksSetting(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
 	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
-	if n := f.noticesTo("conv1")[0]; strings.Contains(n, "后台督办") || !strings.Contains(n, "hub 判断做完了，等你验收") {
+	if n := f.noticesTo("conv1")[0]; strings.Contains(n, "后台督办") || !strings.Contains(n, "待逐项复核，不代表完成") {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	if got := s.settings(ctx).BackgroundSupervisor; got != "" || len(conversationStarts(f)) != 0 {
@@ -338,7 +338,7 @@ func TestBackgroundSupervisorThatCannotStartFallsBackToMain(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
 	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
-	if n := f.noticesTo("conv1")[0]; !strings.Contains(n, "hub 判断做完了，等你验收") || strings.Contains(n, "你是后台督办对话") {
+	if n := f.noticesTo("conv1")[0]; !strings.Contains(n, "待逐项复核，不代表完成") || strings.Contains(n, "你是后台督办对话") {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	if got := s.settings(ctx).BackgroundSupervisor; got != "" {

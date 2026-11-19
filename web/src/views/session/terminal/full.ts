@@ -101,6 +101,7 @@ export class FullFeed {
   private view: FullView;
   private listeners = new Set<() => void>();
   private term: XTerm | null = null;
+  private fontFamily = "";
   private fit: XFit | null = null;
   private search: XSearch | null = null;
   private cleanup: (() => void)[] = [];
@@ -226,6 +227,7 @@ export class FullFeed {
     const { Terminal, FitAddon, ClipboardAddon, WebLinksAddon, SearchAddon, matchHerdrWidths } = mod;
     const size = savedFontSize();
     const family = getComputedStyle(host).fontFamily;
+    this.fontFamily = family;
     await terminalFontReady(size, family);
     if (this.disposed) return;
     const palette = this.theme();
@@ -314,7 +316,7 @@ export class FullFeed {
     this.bindHost();
     this.patch({ ready: true, palette });
     void cjkFontStack(family).then((stack) => {
-      if (stack && !this.disposed && this.term) this.term.options.fontFamily = stack; // the cell is the same width: nothing resizes
+      if (stack && !this.disposed && this.term && this.fontFamily === family) this.term.options.fontFamily = stack; // the cell is the same width: nothing resizes
     });
     this.measure(true);
     this.begin();
@@ -372,6 +374,19 @@ export class FullFeed {
       term.refresh(0, term.rows - 1);
     } else if (term && !this.hostCleanup.length) {
       this.bindHost();
+    }
+    // A retained machine feed can move into a newly opened view without mount() running again.
+    // Read its current mono choice on attachment, keeping size and the local CJK width correction.
+    const family = getComputedStyle(host).fontFamily;
+    if (term && family !== this.fontFamily) {
+      this.fontFamily = family;
+      void terminalFontReady(term.options.fontSize ?? savedFontSize(), family).then(async () => {
+        if (this.disposed || this.term !== term || this.fontFamily !== family) return;
+        term.options.fontFamily = family;
+        this.measure(true);
+        const stack = await cjkFontStack(family);
+        if (stack && !this.disposed && this.term === term && this.fontFamily === family) term.options.fontFamily = stack;
+      });
     }
     this.retarget(sid);
     if (this.released) this.reconnect(delay);

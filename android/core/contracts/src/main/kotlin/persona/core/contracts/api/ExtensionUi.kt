@@ -12,6 +12,9 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
+import persona.core.contracts.generated.ExtensionGauge
+import persona.core.contracts.generated.ExtensionGraphEdge
+import persona.core.contracts.generated.ExtensionGraphNode
 
 /**
  * An extension's declarative UI (docs/extensions/extensions.md "Declarative UI"): the extension never runs code in the app; it answers with a
@@ -362,6 +365,12 @@ data class ExtensionViewItem(
     val center: String? = null,
     /** chart (candlestick): `green` (default) or `red`, a rising candle's colour. */
     val rising: String? = null,
+    // UI version 10 (#9727): a graph's nodes and edges, laid out by the shared fixture algorithm.
+    val nodes: List<ExtensionGraphNode>? = null,
+    val edges: List<ExtensionGraphEdge>? = null,
+    val layout: String? = null,
+    val direction: String? = null,
+    val folded: List<String>? = null,
 )
 
 /**
@@ -431,6 +440,8 @@ data class ExtensionTile(
     val control: ExtensionRowControl? = null,
     val actions: List<ExtensionRowAction>? = null,
     val action: ExtensionViewAction? = null,
+    /** UI version 9: the tile's value drawn in a ring, instead of its icon. */
+    val gauge: ExtensionGauge? = null,
 )
 
 @Serializable

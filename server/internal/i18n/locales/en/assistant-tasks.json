@@ -1,6 +1,10 @@
 {
   "decision_review_changed": "This decision has changed or was already handled. Refresh before trying again.",
   "decision_review_fields": "This request is missing a valid review time or Undo receipt.",
+  "ask_stale": "This question was already answered or has changed. Refresh before answering it.",
+  "answer_in_session": "This is the agent’s own question: answer it in its session.",
+  "not_declinable": "This can’t be set to Don’t handle.",
+  "ask_not_found": "This to-do doesn’t have that question. Refresh to see what it asks now.",
   "draft_changed": "This draft has changed or is no longer pending. Refresh before trying again.",
   "draft_dismissed": "You chose not to handle this draft. Undo that decision before sending it.",
   "draft_decision_question": "Reply drafted from the task’s progress",

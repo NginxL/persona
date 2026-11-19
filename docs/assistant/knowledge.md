@@ -803,7 +803,7 @@ chat's progress, each Agent's last words, to-do conclusions) and chat summaries,
   events (`kb.changed` with kind `topics`) like the other kinds, through the app API, the assistant's `kb_list` / `kb_get` / `kb_search` and the extension `kb.*` RPC. `kb.recent`
   does not include them by default (it is what came in, and topics are derived). The web shows them under Knowledge › Topics and in the knowledge map (`docs/web/web.md`); the iPhone
   and iPad too (#7251: Knowledge › Topics, a topic's points by subtopic, a point in a sheet, and the map as an outline, with a detail
-  column where there is room; `docs/design/DESIGN_SYSTEM.md` "Knowledge map outline"). The Android app does not show the kind yet and skips it.
+  column where there is room; `docs/design/DESIGN_SYSTEM.md` "Knowledge map outline"). The Android app shows them too (#7678: Knowledge › Topics, a topic's points by subtopic, a point in a sheet, and the map as an outline; `docs/android/android.md` "Inbox AI drafting and handoff; knowledge base categories, entries and tagging"), without the web's graph canvas.
 - **Deleting a source** removes the points that came only from it ("Deleting a connector's saved knowledge" above).
 
 ## Who uses it

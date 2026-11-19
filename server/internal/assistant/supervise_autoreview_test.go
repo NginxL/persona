@@ -272,7 +272,7 @@ func TestAutoReviewCleanWaitsForReview(t *testing.T) {
 	}
 	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) == 1 })
 	msg := f.notices()[0]
-	for _, want := range []string{"hub 判断做完了，等你验收", "独立评审（评审员只看了任务要求和改动", "没有阻断问题，1 条非阻断发现", "变量名可以更清楚"} {
+	for _, want := range []string{"待逐项复核，不代表完成", "独立评审（评审员只看了任务要求和改动", "没有阻断问题，1 条非阻断发现", "变量名可以更清楚"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the message lacks %q:\n%s", want, msg)
 		}

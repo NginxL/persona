@@ -117,6 +117,7 @@ export function IconButton({
   className = "",
   disabled,
   iconSize = 15,
+  buttonRef,
 }: {
   icon: IconName;
   label: string;
@@ -127,10 +128,13 @@ export function IconButton({
   className?: string;
   disabled?: boolean;
   iconSize?: number;
+  /** The button itself (not forwarded through `ref`: these buttons are plain, and a named prop keeps the call sites explicit). */
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <button
       type="button"
+      ref={buttonRef}
       aria-label={label}
       title={label}
       disabled={disabled}

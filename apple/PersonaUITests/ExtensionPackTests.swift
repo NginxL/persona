@@ -178,15 +178,19 @@ final class ExtensionPackTests: XCTestCase {
         guard let hub = env["PERSONA_EXTENSION_PACK_HUB"] else {
             throw XCTSkip("needs the current pack mock")
         }
+        let switchLooks = [looks[0], looks[1],
+                           (name: "large-dark", args: ["-ui.scheme", "dark", "-UIPreferredContentSizeCategoryName",
+                                                       "UICTContentSizeCategoryAccessibilityXXXL"]),
+                           looks[2]]
         let languages = [
             ("en", "en_US", "Turning the pack off turns off its members too", "Turning the pack back on turns on"),
             ("zh-Hans", "zh_CN", "停用合集会一起停用它的成员", "重新启用合集会重新启用"),
         ]
         for (language, locale, onText, offText) in languages {
-            for look in looks {
+            for look in switchLooks {
                 try await setPackEnabled(true, hub: hub)
                 let app = try launch(["-openExtension", "example-pack", "-AppleLanguages", "(\(language))",
-                                      "-AppleLocale", locale] + look.args)
+                                      "-AppleLocale", locale, "-probes", "YES"] + look.args)
                 let enabled = app.switches["plugin-enabled"]
                 XCTAssertTrue(enabled.waitForExistence(timeout: 15), app.debugDescription)
                 value("1", of: enabled)
@@ -205,6 +209,9 @@ final class ExtensionPackTests: XCTestCase {
                 let confirmHeight = confirm.frame.height
                 XCTAssertGreaterThan(confirmHeight, 0)
                 systemShot("switch-confirm-\(language)", look.name)
+                let confirmContext = "\(confirm.label) at \(look.name) in \(language)"
+                let confirmLabel = try labelFrame(for: confirm, in: app)
+                assertLabel(confirmLabel, inside: confirm, context: confirmContext)
 
                 // The compact iOS 27 dialog exposes cancellation by outside tap; older layouts also render a Cancel button.
                 if cancel.exists {
@@ -214,6 +221,9 @@ final class ExtensionPackTests: XCTestCase {
                     XCTAssertGreaterThan(cancel.frame.height, 0)
                     XCTAssertEqual(confirmHeight, cancel.frame.height, accuracy: 2,
                                    "the dialog buttons must stay on one line")
+                    let cancelContext = "\(cancel.label) at \(look.name) in \(language)"
+                    let cancelLabel = try labelFrame(for: cancel, in: app)
+                    assertLabel(cancelLabel, inside: cancel, context: cancelContext)
                 }
 
                 if language == "en" && look.name == "light" {
@@ -239,8 +249,39 @@ final class ExtensionPackTests: XCTestCase {
                 toggle(enabled, in: app, changingTo: "1")
                 value("1", of: enabled)
                 XCTAssertFalse(confirm.exists, "switching a pack on must not ask")
+                // End each look cleanly; relaunching or tearing down while the previous app is still active can be
+                // reported as a crash by XCTest even after every action and state assertion has passed.
+                app.terminate()
             }
         }
+    }
+
+    private struct DialogLabel: Decodable {
+        let text: String
+        let x, y, width, height: Double
+        var frame: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+    }
+
+    @MainActor private func labelFrame(for button: XCUIElement, in app: XCUIApplication) throws -> CGRect {
+        let probe = app.descendants(matching: .any)["probe.confirmation-dialog-labels"].firstMatch
+        let value = try XCTUnwrap(probe.value as? String, "missing dialog-label probe")
+        let labels = try JSONDecoder().decode([DialogLabel].self, from: Data(value.utf8))
+        return try XCTUnwrap(labels.first(where: { $0.text == button.label })?.frame,
+                             "no UIKit label for \(button.label) in \(value)")
+    }
+
+    @MainActor private func assertLabel(_ labelFrame: CGRect, inside button: XCUIElement, context: String) {
+        let buttonFrame = button.frame
+        // A shared edge can round differently between accessibility frames; half a point covers only that rounding.
+        let contained = buttonFrame.insetBy(dx: -0.5, dy: -0.5).contains(labelFrame)
+        if !contained {
+            let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            evidence.name = "Confirmation label overflow: \(context)"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+        }
+        XCTAssertTrue(contained,
+                      "\(context): label \(labelFrame) is outside button \(buttonFrame)")
     }
 
     @MainActor func testPackSwitchOnLegacyHub() async throws {

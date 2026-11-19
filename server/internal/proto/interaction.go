@@ -44,16 +44,21 @@ func (ix Interaction) AskedWithoutWaiting() bool { return ix.ToolName == "ask_us
 
 // OneTapQuestion is the question ix asks when one tap may answer it without opening the app (a notification's
 // options, a to-do's row): a question card with exactly one question, options to choose from and no fields to fill in,
-// not raised in a Just me turn (whose push says nothing of what it asks). A health conversation's card is never
-// answered so either; only the hub and the manager can tell one (identity.InHealthSpace on its cwd), and each checks
-// it beside this. False otherwise.
+// not raised in a Just me turn (whose push says nothing of what it asks), and whose asker did not say going ahead
+// cannot be undone (cannotUndo: an answer that cannot be taken back needs a look first). A health conversation's card
+// is never answered so either; only the hub and the manager can tell one (identity.InHealthSpace on its cwd), and each
+// checks it beside this. False otherwise.
 func (ix Interaction) OneTapQuestion() (Question, bool) {
 	if ix.Kind != IxQuestion || len(ix.Questions) != 1 || len(ix.Fields) > 0 || len(ix.Questions[0].Options) == 0 ||
-		ix.Private {
+		ix.Private || ix.cannotUndo() {
 		return Question{}, false
 	}
 	return ix.Questions[0], true
 }
+
+// cannotUndo: ix's asker said going ahead cannot be undone (an ask_user's reversible false), the card's twin of a
+// decision that cannot be undone. A card that said nothing can be.
+func (ix Interaction) cannotUndo() bool { return ix.Reversible != nil && !*ix.Reversible }
 
 // QuestionOptionDefer dismisses a triage question without sending an agent reply.
 // Other question runtimes do not interpret this triage-only action.

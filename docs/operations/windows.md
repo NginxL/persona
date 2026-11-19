@@ -35,9 +35,9 @@ The table below is for Orca; where the herdr engine differs is in the table in t
 
 ## Install and start at logon
 
-Releases publish `persona-link-windows-amd64.exe.gz` and `persona-link-windows-arm64.exe.gz` on [GitHub](https://github.com/nwverse/persona/releases/latest). They are single executables compressed with gzip, not ZIP archives. The POSIX `install.sh` is for Linux and macOS, not Windows; use PowerShell on Windows.
+Releases publish `persona-link-windows-amd64.exe.gz` and `persona-link-windows-arm64.exe.gz` on [GitHub](https://github.com/nwverse/persona/releases/latest), together with `personad-windows-<arch>.exe.gz` and `persona-node-windows-<arch>.exe.gz` for the resident node. They are single executables compressed with gzip, not ZIP archives. The POSIX `install.sh` is for Linux and macOS, not Windows; use PowerShell on Windows.
 
-The following downloads the matching architecture, verifies the archive against the release's `SHA256SUMS`, and expands it. It installs only the connector: a computer that should also run Agents needs a resident node, which can be built from source as shown below. Windows `personad` / `persona-node` release assets and their release-feed packages are outside the connector release.
+The following downloads the matching architecture, verifies the archive against the release's `SHA256SUMS`, and expands it. For a computer that runs Agents, repeat the download and decompression with `personad-windows-$arch.exe.gz` (or `persona-node-windows-$arch.exe.gz` for the device's own program), then pass the resulting `personad.exe` to the install command below. `personad` is the full resident-node program, not a native Windows hub.
 
 ```powershell
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
@@ -62,6 +62,7 @@ try {
 } finally { $input.Dispose() }
 
 & "$dir\$name" version
+& "$dir\$name" version -v
 & "$dir\$name" install --no-node --pair '<the persona://link?… link from the hub>'
 & "$env:USERPROFILE\.persona\bin\persona-link.exe" status
 ```
@@ -131,7 +132,7 @@ The hub updates a Windows node the way it updates any other ([node-update.md](no
 - **Stopping the new program on a rollback**: the restarted node is a new process. A build that can take updates here records its pid at startup; one that cannot (a build from before this, which therefore never confirms) does not. The marker also names the supervisor, and after putting the old file back the watchdog stops the supervisor's children that run from the node's file and started before the restore, so the supervisor starts the old program again.
 - **Backups in use**: the watchdog runs from the backup until it sees the update confirmed, so a backup that cannot be deleted yet is moved aside and deleted later.
 
-The first update needs a supervisor that passes `--supervised`: install once with a persona-link and personad from this change on. The hub sends the `personad-windows-<arch>` it finds among its node builds (`~/.persona/bin/nodes`, "Node packages" in [node-update.md](node-update.md)); release feeds do not carry Windows builds yet.
+The first update needs a supervisor that passes `--supervised`: install once with a persona-link and personad from this change on. The hub sends the `personad-windows-<arch>.exe` it finds among its node builds (`~/.persona/bin/nodes`, "Node packages" in [node-update.md](node-update.md)), or the same program's `.exe.gz` from the immutable versioned release manifest. A Windows node's downloaded filename keeps `.exe`, including in the manager's cache.
 
 ## Reconnect without a tray
 

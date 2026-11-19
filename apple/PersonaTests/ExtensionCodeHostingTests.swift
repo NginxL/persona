@@ -193,7 +193,7 @@ struct ExtensionCodeHostingTests {
         try hub.sent("POST", "/api/v1/plugins/github/-/ui/pr").map { try JSON.decoder.decode(JSONValue.self, from: $0.body ?? Data()) }
     }
 
-    @Test func anActionsOwnValuesWinOverTheComponentsAndTheAppSaysVersion8() async throws {
+    @Test func anActionsOwnValuesWinOverTheComponentsAndTheAppSaysVersion10() async throws {
         let hub = FakeHub()
         hub.on("POST", "/api/v1/plugins/github/-/ui/pr", json: #"{"view":\#(try Self.example("View.code-review.json"))}"#)
         let m = page(hub)
@@ -201,16 +201,16 @@ struct ExtensionCodeHostingTests {
         let reply = ExtensionAction(id: "reply", values: ["thread": "t1"])
         _ = await m.perform(reply, with: ["body": "ok", "thread": "other"])
         let sent = try bodies(hub)
-        #expect(sent.first?["context"]?["ui_version"] == .number(8))
+        #expect(sent.first?["context"]?["ui_version"] == .number(10))
         #expect(sent.last?["action"] == .string("reply"))
         #expect(sent.last?["values"] == .object(["body": .string("ok"), "thread": .string("t1")]))
     }
 
-    @Test func pagesAndCardsSayVersion8AndWidgetsStayOnTheSharedVersion() {
+    @Test func pagesAndCardsSayVersion10AndWidgetsStayOnTheSharedVersion() {
         #expect(ExtensionUIContext.here().forPage().uiVersion == ExtensionUIContext.pageVersion)
-        #expect(ExtensionUIContext.here(size: "full").forPage().uiVersion == 8)
+        #expect(ExtensionUIContext.here(size: "full").forPage().uiVersion == 10)
         // A card is drawn by the app's renderer too (version 4–5's code components read-only).
-        #expect(ExtensionViewModel(plugin: "p", ui: "u", context: .here(size: "compact")).context.uiVersion == 8)
+        #expect(ExtensionViewModel(plugin: "p", ui: "u", context: .here(size: "compact")).context.uiVersion == 10)
         // Widgets, the watch and the system extensions draw none of it: the Shared version.
         #expect(ExtensionUIContext.here().uiVersion == ExtensionUIContext.version && ExtensionUIContext.version == 3)
     }

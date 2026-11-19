@@ -169,10 +169,12 @@ nonisolated extension Interaction {
     }
 
     /// Why the app can't answer it, for the line under its greyed card (#6868; Android `approvalBlockedReason`, the
-    /// watch's `blockedReason`): nil where it can (`canAnswer`).
+    /// watch's `blockedReason`): nil where it can (`canAnswer`), and on a manager work card whose local defer and dismiss
+    /// still work (#6839). An attachable session keeps its live-link line.
     func answerBlock(session: Session?) -> AnswerBlock? {
         guard !canAnswer(session: session) else { return nil }
-        return session?.canAttach == true ? .attach : .computer
+        if session?.canAttach == true { return .attach }
+        return isManagerWork ? nil : .computer
     }
 
     /// The words a list row shows for this card: the question, else the summary, else the tool.
@@ -183,6 +185,28 @@ nonisolated extension Interaction {
         if let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty { return Fmt.plain(summary) }
         if let tool = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !tool.isEmpty { return tool }
         return nil
+    }
+
+    /// A manager's work card on an Agent (`persona_triage`). Its put-off choices and its dismiss send nothing to the Agent,
+    /// so they stay open once the Agent has stopped and the rest of the card can't be answered (#6839, web #6753).
+    var isManagerWork: Bool { kind == .question && toolName == "persona_triage" }
+
+    /// A choice that only clears the card on the hub: a manager work card's single-choice option marked `defer`.
+    func isLocalChoice(_ option: QuestionOption, in question: Question) -> Bool {
+        isManagerWork && !question.multiSelect && option.action == "defer"
+    }
+
+    /// An answer that sends nothing to the Agent (web `workCardLocalResolution`): on a manager work card, a bare dismiss, or
+    /// only put-off choices. Continue, retry and typed answers still need `canAnswer`.
+    func isLocalResolution(_ r: Resolution) -> Bool {
+        guard isManagerWork else { return false }
+        if r == .dismissed { return true }
+        guard r == Resolution(answers: r.answers), let answers = r.answers?.filter({ !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }),
+              !answers.isEmpty else { return false }
+        return answers.allSatisfy { question, answer in
+            guard let q = questions?.first(where: { $0.question == question }) else { return false }
+            return q.options.contains { $0.label == answer.trimmingCharacters(in: .whitespaces) && isLocalChoice($0, in: q) }
+        }
     }
 
     /// Where a sessionless card comes from, for its list row: the title the node gave it, else its directory's name.

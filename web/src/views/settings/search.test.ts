@@ -148,6 +148,7 @@ describe("the settings search's index", () => {
   it("lands every entry on something a page draws, and lists each once", async () => {
     const { SEARCH_INDEX } = await import("./search");
     const { LOCAL_SHORTCUTS, SHORTCUTS } = await import("../../lib/shortcuts");
+    const { TERMINAL_LABS_ID } = await import("../../lib/labs-terminal");
     const views = new URL("../", import.meta.url);
     const sources = (readdirSync(views, { recursive: true }) as string[])
       .filter((f) => f.endsWith(".tsx") && !f.includes(".test."))
@@ -158,6 +159,7 @@ describe("the settings search's index", () => {
       [/^shortcut-(.+)$/, "anchor={`shortcut-${s.id}`}", (id) => [...SHORTCUTS, ...LOCAL_SHORTCUTS].some((s) => s.id === id)],
       [/^knowledge-(.+)$/, "anchor={`knowledge-${kind}`}", (kind) => kind === "messages" || kind === "docs"],
       [/^settings-(.+)$/, "id={`settings-${id}`}", (id) => ["claude", "codex", "agy", "omp", "grok"].includes(id)],
+      [/^configuration-(.+)$/, "data-settings-row={`configuration-${doc.id}-${field.id}`}", (id) => id === `${TERMINAL_LABS_ID}-renderer`],
     ];
     const drawn = (anchor: string) =>
       new RegExp(`\\b(anchor|data-settings-row|data-settings-group|id)="${anchor}"`).test(sources) ||

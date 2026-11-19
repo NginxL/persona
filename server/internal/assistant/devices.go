@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devices"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -68,6 +69,14 @@ type Devices interface {
 	// confirmed it handed card's notification to Notification Center: false at once while there is none
 	// (notifyInteraction).
 	LinkRang(ctx context.Context, card string, within time.Duration) bool
+	// HeldMessages are the owner's messages held for machine's Agents while it was away (internal/devices held.go,
+	// #10661), by session id, oldest first, worded in lang for their rows; nil when there are none.
+	HeldMessages(machine string, lang i18n.Lang) map[string][]proto.UndeliveredMessage
+	// HeldRetry and HeldDelete are Retry and Delete on held message msg of session sid, whatever its machine: the
+	// assistant's undelivered routes, which older apps call for every row, end there for one they do not keep.
+	// found is false when no machine holds such a message; err is an *rpc.Error coded for the app otherwise.
+	HeldRetry(ctx context.Context, sid, msg string) (found bool, err error)
+	HeldDelete(ctx context.Context, sid, msg string) (found bool, err error)
 }
 
 // localDeviceCall is a device.call the manager answers itself: a node's method on a machine it has. The hub still

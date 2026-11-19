@@ -8,6 +8,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type frameReader struct {
 	start, end int
 	err        error
 	seq        uint64               // the last data frame read
+	seqAt      uint32               // when it was read (clockMS)
+	lastRead   atomic.Uint64        // seq, for a resume asked from another goroutine (resume.go)
+	resumed    bool                 // the transport was replaced: frames read already come again, and are dropped
 	creditRead bool                 // a frame with credit was read since the last ack asked for
 	creditSeq  uint64               // the last of them
 	creditAt   uint32               // when it was read (clockMS)
@@ -36,6 +40,7 @@ type frameReader struct {
 	owned      bool
 	ack        func(seq uint64, at uint32)       // ask for an acknowledgement of every frame read through seq, read at at
 	acked      func(seq uint64, at uint32) error // the other side read every frame this side sent through seq, the last at at
+	ackAll     func(seq uint64, at uint32)       // resuming: ask for an acknowledgement of every frame read through seq
 	// middle, when set, is told of each read that went on with a line begun before it, did not finish it and has
 	// already grown past pingFrameMiddleBytes, as lineReader.middle is (PingActivity).
 	middle func()
@@ -111,10 +116,20 @@ func (s *frameReader) frame(h frameHead, payload []byte) ([]byte, bool, error) {
 		}
 		return nil, false, s.acked(h.seq, binary.BigEndian.Uint32(payload))
 	}
+	if s.resumed && h.seq <= s.seq {
+		return nil, false, nil // written again after a resume, read already over the old transport
+	}
 	if h.seq != s.seq+1 {
 		return nil, false, fmt.Errorf("%w: frame %d after %d", ErrFrame, h.seq, s.seq)
 	}
-	s.seq = h.seq
+	s.resumed = false
+	s.seq, s.seqAt = h.seq, s.readAt
+	s.lastRead.Store(h.seq)
+	if s.ackAll != nil {
+		// Resuming: as each frame is taken, not before the next read, so a read loop slow over its lines (a handler
+		// that blocks it) is not taken for a silent transport by the other side (watchStale).
+		s.ackAll(s.seq, s.seqAt)
+	}
 	if creditLane(h.lane) {
 		s.creditRead, s.creditSeq, s.creditAt = true, h.seq, s.readAt
 	}
@@ -231,6 +246,13 @@ func (s *frameReader) fill() {
 		if n < 0 || len(s.buf)-s.end < n {
 			s.setErr(bufio.ErrBadReadCount)
 			return
+		}
+		if err == errResumed {
+			// A new transport: the part of a frame read from the old one comes again whole, after what this side read.
+			s.end = s.start
+			s.marks = s.marks[:0]
+			s.resumed, carried = true, false
+			continue
 		}
 		s.end += n
 		if n > 0 { // a read that ends the input may bring the last frames too

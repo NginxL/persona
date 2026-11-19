@@ -1,0 +1,63 @@
+{
+  "version": "workspace-naming/v1",
+  "source": {
+    "manager": "example",
+    "todo_id": "todo_123",
+    "title": "Fix / Login.. Bug",
+    "machine_id": "computer",
+    "planned_at": "2026-11-13T16:30:00Z",
+    "timezone": "Asia/Shanghai",
+    "rules": {
+      "base_directory": "{home}/workspace",
+      "task_directory_template": "{yyyy}{mmdd}/{task-id}-{task-slug}",
+      "branch_template": "persona/{task-id}"
+    },
+    "layout": "container",
+    "repository_snapshot": {
+      "schema_version": 1,
+      "manager": "example",
+      "todo_id": "todo_123",
+      "revision": 1,
+      "repositories": [
+        {
+          "repo_id": "web",
+          "requested_ref": {
+            "kind": "default"
+          },
+          "source_snapshot": {
+            "identity": {
+              "provider": "github",
+              "instance_url": "https://github.com",
+              "path": "example/web",
+              "canonical_url": "https://github.com/example/web"
+            },
+            "clone_url": "https://github.com/example/web",
+            "transport_origin": "canonical_default",
+            "catalog_revision": 1
+          }
+        }
+      ],
+      "digest": "sha256:0ccc3dff0ee2659158c1b73ba2a96faae6563b66338a86ae3a35f946b1cec084"
+    }
+  },
+  "node": {
+    "home": "/home/example",
+    "persona_home": "/home/example/.persona",
+    "path_flavor": "posix"
+  },
+  "task_slug": "fix-login-bug",
+  "base_path": "/home/example/workspace",
+  "root_path": "/home/example/workspace/20261114/todo_123-fix-login-bug",
+  "repositories": [
+    {
+      "repo_id": "web",
+      "requested_ref": {
+        "kind": "default"
+      },
+      "relative_path": "web",
+      "absolute_path": "/home/example/workspace/20261114/todo_123-fix-login-bug/web",
+      "task_branch": "persona/todo_123"
+    }
+  ],
+  "digest": "sha256:b0ff981f5d43618be48ed7d2540d4b759e6706558b2cd0190894caab362b69ed"
+}

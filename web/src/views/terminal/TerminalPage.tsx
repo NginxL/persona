@@ -6,14 +6,13 @@ import { api, enc, errorText } from "../../lib/api";
 import { isStoppedAgent } from "../../lib/format";
 import { useScopedMachines } from "../../lib/current-assistant";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
-import { SESSIONS_LIST_FEATURE } from "../../lib/session-list";
 import { openPanel } from "../../lib/panel";
 import { getSession, refresh as refreshSessions, useStore } from "../../lib/store";
 import { usePanes, type Listing } from "../../lib/terminal-panes";
 import { buildTerminalTree, homeShellHost, keepOnlyShown, keepRecent, paneCwd, paneTrail, sameTerminal, type OpenTerminal, type TermSpace } from "../../lib/terminals";
 import type { Machine } from "../../lib/types";
 import { NARROW, useMedia } from "../../lib/viewport";
-import { finishedCount, readListView, rememberListView, resolveListView, type TerminalListView } from "../../lib/terminal-list";
+import { finishedCount, resolveListView, type TerminalListView } from "../../lib/terminal-list";
 import { Button, Collapse, cx, IconButton, toast } from "../../ui/atoms";
 import { contextMenuProps } from "../../ui/context-menu";
 import type { MenuAt } from "../../ui/menu-model";
@@ -22,8 +21,7 @@ import { useFolded } from "../../lib/use-folded";
 import { NodeMenu } from "../NodeMenu";
 import { onNodeChanged, setKnownTree } from "../../lib/node-palette";
 import { Icon } from "../../ui/icons";
-import { WorkSessionBrowser } from "../agents/WorkSessionBrowser";
-import { AgentsList } from "../Sidebar";
+import { HistoryBrowser } from "../agents/HistoryBrowser";
 import { Segmented } from "../assistant/parts";
 import { Empty } from "../session/files/parts";
 import { TerminalPanel } from "../session/TerminalPanel";
@@ -47,7 +45,6 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
   const panesOn = useStore((s) => s.features.includes("terminal_panes"));
   // New terminal on a computer with no workspace yet (#6362): a hub that checks the node can (else 409 node_outdated)
   const newSpaceOn = useStore((s) => s.features.includes("pane_new_space"));
-  const legacyList = useStore((s) => s.loaded && !s.features.includes(SESSIONS_LIST_FEATURE) && !s.features.includes("sessions_dimensions"));
   const addressed = route?.mid ?? detail?.selected?.mid;
   // A bookmarked terminal or session may name another assistant's computer. Only the current one's are listed.
   const targets = addressed && !machines.some((m) => m.id === addressed) ? allMachines.filter((m) => machines.includes(m) || m.id === addressed) : machines;
@@ -68,13 +65,10 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
   const narrow = useMedia(NARROW);
   const hideList = hasDetail && narrow;
 
-  // Sessions | Terminals: the address's, else this browser's last choice; the sessions beside an open session
-  const [remembered, setRemembered] = useState(readListView);
-  const listView = resolveListView(route?.view, remembered, { panes: panesOn && machines.length > 0, session: Boolean(detail) });
+  // History by default, including a return from Open terminals in the same mounted page; explicit inventory links stay valid.
+  const listView = resolveListView(route?.view, "sessions", { panes: panesOn && machines.length > 0, session: Boolean(detail) });
   const browse: TerminalRoute = listView === "terminals" ? { name: "terminal", view: "terminals" } : { name: "terminal" };
   const chooseView = (view: TerminalListView) => {
-    rememberListView(view);
-    setRemembered(view);
     // an open terminal stays open beside the other list; from a session's page the list is the page's own
     if (detail) navigate({ name: "terminal", view });
     else navigate({ name: "terminal", ...(shown ? { mid: shown.mid, id: shown.id } : {}), view }, true);
@@ -134,7 +128,7 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
   return (
     <div className="flex h-full min-w-0 flex-col">
       <header className={cx("flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4", hasDetail && "max-lg:hidden")}>
-        <h1 className="hidden min-w-0 flex-1 truncate text-[14px] font-semibold text-ink lg:block">{t("work-entry.title")}</h1>
+        <h1 className="hidden min-w-0 flex-1 truncate text-[14px] font-semibold text-ink lg:block">{t(listView === "terminals" ? "terminal-terminalpage.terminals" : "work-entry.title")}</h1>
         <ShellHeaderSlots page="agents" onToggleSidebar={onToggleSidebar} endWide end={<IconButton icon="plus" label={t("agentspage.new_agent")} onClick={onNewAgent} />} />
       </header>
       {hasDetail && (
@@ -184,10 +178,7 @@ export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWor
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
-              {legacyList ? <AgentsList route={route ?? browse} onNewAgent={onNewAgent} /> : <WorkSessionBrowser
-                activeSession={selected ? { machineId: selected.mid, sessionId: selected.sid } : undefined}
-                onSelect={(s) => navigate({ name: "session", mid: s.machine_id, sid: s.session_id, work: true })}
-              />}
+              <HistoryBrowser activeSession={selected ? { machineId: selected.mid, sessionId: selected.sid } : undefined} />
             </div>
           )}
         </section>

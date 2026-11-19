@@ -33,6 +33,7 @@ import { PageBoundary } from "../PageBoundary";
 
 const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
 const Repositories = lazyPage(() => import("./Repositories").then((m) => m.Repositories));
+const WorkspaceNaming = lazyPage(() => import("../../ui/WorkspaceNaming").then((m) => m.WorkspaceNaming));
 
 interface AssistantState extends AgentAutoNamingState {
   manager?: string;
@@ -82,6 +83,9 @@ interface AssistantState extends AgentAutoNamingState {
   /** "Suggest the next message" (#4644, docs/assistant/assistant.md "Next-message suggestions"): off by default; unset
    *  from a hub before it. */
   next_suggestions?: boolean;
+  /** "Run Claude chats in interactive Claude Code" (#10058, docs/assistant/assistant.md "Interactive Claude Code"): off
+   *  by default; unset from a hub before it. */
+  claude_interactive?: boolean;
   /** Hours an idle Agent Persona started runs before Persona stops it (#4754, docs/integrations/engines.md "Agents run
    *  in a terminal"); its terminal stays. 0 is never, at most 8760; unset from a hub before it. */
   idle_close_hours?: number;
@@ -195,6 +199,21 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setSuggestBusy(false);
+    }
+  };
+
+  const [interactiveBusy, setInteractiveBusy] = useState(false);
+  const setInteractive = async (on: boolean) => {
+    setInteractiveBusy(true);
+    setInfo((i) => (i ? { ...i, claude_interactive: on } : i));
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { claude_interactive: on } });
+      setInfo((i) => (i ? { ...i, claude_interactive: r.claude_interactive ?? on } : i));
+    } catch (e) {
+      setInfo((i) => (i ? { ...i, claude_interactive: !on } : i));
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally {
+      setInteractiveBusy(false);
     }
   };
 
@@ -371,7 +390,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Group>
       )}
 
-      <Group title={t("settings-assistantsettings.start_title")} footer={t("settings-assistantsettings.start_footer")}>
+      <Group anchor="dispatch-tasks" title={t("settings-assistantsettings.start_title")} footer={t("settings-assistantsettings.start_footer")}>
         <Row label={t("settings-assistantsettings.start_requested")} anchor="start-requested">
           <Switch on={info?.start_requested_tasks ?? true} onChange={(on) => void setStartRequested(on)} disabled={!info || startBusy} label={t("settings-assistantsettings.start_requested")} />
         </Row>
@@ -384,6 +403,11 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
             <option value="prefer-new">{t("settings-assistantsettings.workspace_prefer_new")}</option>
           </select>
         </Row>
+        {info?.manager === manager && info.task_workspace_preference === "prefer-new" && <PageBoundary page="workspace-naming">
+          <Suspense fallback={<Loading />}>
+            <WorkspaceNaming manager={manager} owner={owner} />
+          </Suspense>
+        </PageBoundary>}
         <TaskTrust manager={manager} machineName={(id) => machines.find((machine) => machine.id === id)?.name || id} />
       </Group>
 
@@ -530,6 +554,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Suspense>
       </PageBoundary>
 
+
       <SkillsGroup manager={manager} />
 
       <Group
@@ -546,8 +571,8 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           </Row>
         )}
         {runtime.runtime && (
-          <Row label={t("settings-assistantsettings.main_runtime")}>
-            <span data-main-runtime-tool className="max-w-[220px] truncate">{runtime.runtime}</span>
+          <Row label={t("settings-assistantsettings.main_runtime")} hint={runtime.note} wrapHint>
+            <span data-main-runtime-tool className="max-w-[220px] truncate" title={runtime.runtime}>{runtime.runtime}</span>
           </Row>
         )}
         <Row label={t("settings-assistantsettings.cwd")} mono anchor="runs-on-cwd">
@@ -555,6 +580,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
         {info?.timezone && <Row label={t("settings-assistantsettings.timezone")}>{info.timezone}</Row>}
       </Group>
+
+      {/* Interactive Claude Code instead of claude -p (#10058): an advanced, off-by-default switch, only from a hub that has it */}
+      {typeof info?.claude_interactive === "boolean" && (
+        <Group anchor="claude-interactive" footer={t("settings-assistantsettings.claude_interactive_footer")}>
+          <Row label={t("settings-assistantsettings.claude_interactive")}>
+            <Switch on={info.claude_interactive} onChange={(on) => void setInteractive(on)} disabled={interactiveBusy} label={t("settings-assistantsettings.claude_interactive")} />
+          </Row>
+        </Group>
+      )}
 
       {open && (
         <MemoryDialog

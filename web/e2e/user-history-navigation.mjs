@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-const [address, directory, count = "678", conversation = "main", initialPage = "2", textSize = "standard"] = process.argv.slice(2);
+const [address, directory, count = "678", conversation = "main", initialPage = "2", textSize = "standard", mode] = process.argv.slice(2);
 const base = new URL(address);
 assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(base.hostname));
 assert.ok(!base.username && !base.password && !base.search && !base.hash && base.pathname === "/");
@@ -46,6 +46,9 @@ try {
     await context.addInitScript(({ theme, textSize }) => { localStorage.setItem("persona.token", "synthetic-only"); localStorage.setItem("persona.language", "en"); localStorage.setItem("persona.theme", theme); localStorage.setItem("persona.text-size", textSize); }, { theme, textSize });
     let release;
     const ready = new Promise((done) => { release = done; });
+    let olderGate;
+    let olderStarted;
+    let failNextOlder = false;
     await context.route("**/*", async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin !== base.origin) return route.abort("blockedbyclient");
@@ -55,7 +58,15 @@ try {
       if (path.endsWith("/items") && url.searchParams.get("user_inputs") === "1") { await ready; return route.fulfill({ json: index }); }
       if (path.endsWith("/items")) {
         const before = Number(url.searchParams.get("before_seq") ?? 0);
-        if (before) run.olderReads++;
+        if (before) {
+          run.olderReads++;
+          olderStarted?.();
+          if (olderGate) await olderGate;
+          if (failNextOlder) {
+            failNextOlder = false;
+            return route.fulfill({ status: 400, json: { code: "bad_request", error: "Synthetic older-page failure" } });
+          }
+        }
         const after = Number(url.searchParams.get("after_seq") ?? 0);
         return route.fulfill({ json: after ? { items: [], history: index.history, to_seq: items.at(-1).seq, more_after: false } : pageFor(before) });
       }
@@ -102,12 +113,74 @@ try {
     await first.hover(); assert.equal(run.olderReads, 0, "Hover does not fetch old transcript bodies");
     await page.locator("[data-nav-preview]").waitFor(); await shot("hover");
     assert.ok((await page.locator("[data-nav-preview]").textContent()).includes(String(firstOrdinal)));
-    await first.click();
+    const started = Date.now();
+    if (mode === "slow") {
+      failNextOlder = true;
+      let resume;
+      olderGate = new Promise(resolve => { resume = resolve; });
+      await page.evaluate(() => {
+        window.navFrameGaps = [];
+        let last = performance.now();
+        const frame = now => {
+          window.navFrameGaps.push(now - last);
+          last = now;
+          window.navFrame = requestAnimationFrame(frame);
+        };
+        window.navFrame = requestAnimationFrame(frame);
+      });
+      await first.click();
+      await page.locator("[data-nav-loading]").waitFor();
+      run.feedbackMs = Date.now() - started;
+      await first.locator("[data-nav-mark^='current']").waitFor();
+      assert.equal(await first.getAttribute("aria-current"), null, "The pending mark is highlighted without moving the current position");
+      await shot("loading");
+      resume();
+      olderGate = undefined;
+      await page.getByText("This input could not be loaded. Try again.", { exact: true }).waitFor();
+      await page.locator("[data-nav-loading]").waitFor({ state: "hidden" });
+      // Both selections arrive during backoff, before the server receives another page request.
+      const next = page.locator(`${RAIL} [data-tick='1']`);
+      const readsBefore = run.olderReads;
+      olderGate = new Promise(resolve => { resume = resolve; });
+      const retryRequest = new Promise(resolve => { olderStarted = resolve; });
+      const retryStartedAt = Date.now();
+      await first.click();
+      await page.locator("[data-nav-loading]").waitFor();
+      await next.click();
+      await next.locator("[data-nav-mark^='current']").waitFor();
+      assert.equal(run.olderReads, readsBefore, "Both selections precede a retry");
+      await retryRequest;
+      olderStarted = undefined;
+      assert.equal(run.olderReads, readsBefore + 1, "Overlapping selections share the retry");
+      resume();
+      olderGate = undefined;
+      await page.waitForFunction(id => {
+        const row = document.querySelector(`[data-line='seg:${id}']`)?.firstElementChild;
+        const sc = document.querySelector("[data-chat-scroll]");
+        return row && sc && Math.abs(row.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12) <= 2;
+      }, inputs[COUNT - INITIAL_MARKS + 1].id);
+      run.retryLandingMs = Date.now() - retryStartedAt;
+      run.maxFrameGapMs = await page.evaluate(() => {
+        cancelAnimationFrame(window.navFrame);
+        return Math.max(...window.navFrameGaps.slice(1));
+      });
+      await page.locator("[data-nav-loading]").waitFor({ state: "hidden" });
+      assert.equal(run.olderReads, readsBefore + 1, "The latest target is in the shared page");
+    }
+    const warmStarted = Date.now();
+    const readsBeforeRepeat = run.olderReads;
+    if (mode === "slow") {
+      await page.getByRole("button", { name: new RegExp(`^Jump to user input ${firstOrdinal}:`) }).click();
+    } else await first.click();
     await page.waitForFunction(([id]) => {
       const row = document.querySelector(`[data-line='seg:${id}']`)?.firstElementChild;
       const sc = document.querySelector("[data-chat-scroll]");
       return row && sc && row.getBoundingClientRect().top - sc.getBoundingClientRect().top >= -2 && row.getBoundingClientRect().top - sc.getBoundingClientRect().top <= 32;
     }, [inputs[COUNT - INITIAL_MARKS].id]);
+    if (mode === "slow") {
+      run.repeatLandingMs = Date.now() - warmStarted;
+      assert.equal(run.olderReads, readsBeforeRepeat, "Loaded repeat requires no older read");
+    }
     if (INITIAL_BODIES < INITIAL_MARKS) assert.ok(run.olderReads > 0, "The unloaded target must fetch earlier pages before positioning");
     await page.mouse.move(box.x + 40, box.y + box.height / 2);
     await page.waitForFunction(() => !document.querySelector("[data-nav-preview]"));

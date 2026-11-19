@@ -83,9 +83,16 @@ func (m *Machine) writeNotes(n *nodeNotes) {
 		if p == nil {
 			continue
 		}
-		watch := watchNote(p.LastWrite, func() {
+		// While the connection waits to be resumed nothing is written (resume.go): the note is watched again from the
+		// resume, which counts as a write.
+		watch := watchNote(p.LastWrite, p.Lost, func() {
+			stalled := errors.New("the node stopped taking events")
+			if p.Lose(stalled) { // the node keeps the connection: a new transport takes it back
+				m.d.logf("[%s] its node took nothing for %s: resuming on a new transport", m.cfg.ID, noteStall)
+				return
+			}
 			m.d.logf("[%s] its node took nothing for %s: connecting it again", m.cfg.ID, noteStall)
-			p.Close(errors.New("the node stopped taking events"))
+			p.Close(stalled)
 		})
 		_ = p.Notify(e.event, e.params)
 		watch.stop()
@@ -105,14 +112,15 @@ func (n *nodeNotes) drop(budget *atomic.Int64) int {
 }
 
 // noteWatch closes a connection (stalled) once nothing it writes has gone through for noteStall (written: its last
-// write) while a note waits to be written.
+// write) while a note waits to be written. While waiting says the connection waits for something else (to be resumed),
+// it looks again a noteStall later.
 type noteWatch struct {
 	mu   sync.Mutex
 	t    *time.Timer
 	done bool
 }
 
-func watchNote(written func() time.Time, stalled func()) *noteWatch {
+func watchNote(written func() time.Time, waiting func() bool, stalled func()) *noteWatch {
 	w := &noteWatch{}
 	var check func()
 	check = func() {
@@ -123,6 +131,10 @@ func watchNote(written func() time.Time, stalled func()) *noteWatch {
 		}
 		if idle := time.Since(written()); idle < noteStall {
 			w.t = time.AfterFunc(noteStall-idle, check) // it moves: look again when it would have stalled
+			return
+		}
+		if waiting() {
+			w.t = time.AfterFunc(noteStall, check)
 			return
 		}
 		w.done = true

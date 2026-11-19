@@ -40,9 +40,17 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 	if p.State != planOpen {
 		return nil, errPlanNotOpen
 	}
+	supervisors := make([]string, len(p.Tasks))
 	for i := range p.Tasks {
 		if i < len(edits) {
 			applyPlanEdit(&p.Tasks[i], edits[i])
+		}
+		task := &p.Tasks[i]
+		task.CloseTabOnAccept = ownerStarts(ctx) && i < len(edits) && edits[i].CloseTabOnAccept
+		task.TerminalTarget, task.TerminalCleanup = taskTerminalTarget{}, ""
+		task.TerminalAuthorized = false
+		if task.CloseTabOnAccept && (task.ReuseTodo != "" || task.Continues != "" || task.Parent != "") {
+			return nil, planInvalid{errors.New("close_tab_on_accept requires a new to-do from this plan")}
 		}
 		p.Tasks[i].normalizeReadonlyPermission(readonlyModeOf(s.settings(ctx)))
 		if err := p.Tasks[i].normalizeMachinePolicy(); err != nil {
@@ -69,7 +77,6 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			return nil, planInvalid{err}
 		}
 		s.resolveTaskRepo(ctx, &p.Tasks[i]) // where it runs after the card's edits (its workspace, not the plan's cwd)
-		task := &p.Tasks[i]
 		if task.Continues != "" && task.Brief == nil {
 			// Cards saved before briefs must bind the current scope before they can start.
 			if err := s.planBriefs(ctx, "", p.Conversation, p.Tasks[i:i+1]); err != nil {
@@ -78,6 +85,9 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		}
 		if err := s.checkContinuationScope(task); err != nil {
 			return nil, planInvalid{err}
+		}
+		if supervisors[i], err = s.planTaskSupervisor(ctx, p.Conversation, *task); err != nil {
+			return nil, err
 		}
 	}
 	p.State = planStarted
@@ -159,26 +169,13 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		t.TodoID = todo.ID
 		s.briefStarted(ctx, p, t, todo) // what was asked, kept from now on (task_brief_plan.go)
 		s.setTaskStageKind(ctx, todo.ID, "", "", taskStageKind(t.Readonly, t.DoneWhen, todo.PRURL), false)
-		// The main conversation or a leader follows up what it hands out (supervise.go); a task the main conversation
-		// handed to a leader is that leader's, while it still is one (else the main conversation's again).
-		if sup := p.Conversation; s.supervises(ctx, sup) {
-			if t.Supervisor != "" && s.isLeader(ctx, t.Supervisor) {
-				sup = t.Supervisor
-				if t.ReuseTodo == "" {
-					s.taskCard(ctx, sup, todo.ID, "") // the leader sees its task's card too; the plan's stays where it was made
-				}
-			}
-			s.supervisePlanTask(ctx, todo.ID, sup, t)
-		} else if sup, ok := s.defaultPlanSupervisor(ctx, p.Conversation, t.Parent); ok {
-			// Any other conversation's task is its own to supervise: its signals go to the conversation that planned it,
-			// which also sees its card and reviews it. No second card when that is the planning conversation itself.
-			if t.ReuseTodo == "" && sup != p.Conversation {
+		if sup := supervisors[i]; sup != "" {
+			if t.Parent == "" && t.ReuseTodo == "" && sup != p.Conversation {
 				s.taskCard(ctx, sup, todo.ID, "")
 			}
 			s.supervisePlanTask(ctx, todo.ID, sup, t)
 		}
 		if t.Parent != "" { // a task leader's worker: supervised by its leader's agent, with no conversation to show a card in
-			s.supervisePlanTask(ctx, todo.ID, p.Conversation, t)
 			continue
 		}
 		if t.ReuseTodo != "" {
@@ -613,6 +610,15 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		// (#6540) reaches here after taskStartTimeout, and a database write on that context fails at once, which
 		// would fail the task although its agent is running. The link gets its own time, like the bookkeeping below.
 		linkCtx, linkCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+		if t.TerminalTarget.Machine != "" {
+			if saveErr := s.patchPlanTask(linkCtx, planID, i, func(pt *PlanTask) {
+				if pt.TodoID == t.TodoID && pt.CloseTabOnAccept && pt.TerminalCleanup == "" && pt.TerminalTarget.Machine == "" {
+					pt.TerminalTarget = t.TerminalTarget
+				}
+			}); saveErr != nil {
+				s.logf("task %s: record terminal identity: %v", t.TodoID, saveErr)
+			}
+		}
 		err = s.linkPlanAgent(linkCtx, t, mid, sid, false)
 		linkCancel()
 		if errors.Is(err, db.ErrTodoCompleted) {
@@ -874,6 +880,12 @@ func (s *Service) retryTaskStart(ctx context.Context, todoID string, with retryW
 	// over through todo_id) is: the plan that binds it is found below (currentPlanAssignment, #8770).
 	if cur.Origin == "" {
 		return nil, false, errTaskNotRetryable
+	}
+	// A caller that saw one failure starts only that one again: once the to-do is open or failed anew it is answered as
+	// it is, and no cut-off agent of it is told to go on.
+	if !with.failedAt.IsZero() && (cur.DoneAt == nil || !cur.DoneAt.Equal(with.failedAt) || !cur.failedStart()) {
+		view, err := s.todoView(ctx, todoID)
+		return view, false, err
 	}
 	if cur.DoneAt == nil {
 		if with.answer != "" { // open: started again, or remedied by the assistant

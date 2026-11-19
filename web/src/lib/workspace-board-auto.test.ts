@@ -14,11 +14,13 @@ describe("autoLaneOf", () => {
   it("puts a card where its most urgent agent is", () => {
     expect(autoLaneOf([])).toBe("idle");
     expect(autoLaneOf([session({ status: "offline" })])).toBe("idle");
-    expect(autoLaneOf([session({ state: "idle" })])).toBe("review");
+    expect(autoLaneOf([session({ state: "idle" })])).toBe("idle");
+    expect(autoLaneOf([session({ state: "idle", work: { phase: "done", just_finished: true } })])).toBe("review");
+    expect(autoLaneOf([session({ state: "unread" })])).toBe("review");
     expect(autoLaneOf([session({ state: "idle" }), session({ state: "working" })])).toBe("working");
     expect(autoLaneOf([session({ state: "working" }), session({ state: "needs_you" })])).toBe("needs_you");
     expect(autoLaneOf([session({ state: "needs_you" }), session({ status: "offline" })])).toBe("needs_you");
-    expect(autoLaneOf([session({ state: "idle" }), session({ status: "offline" })])).toBe("review");
+    expect(autoLaneOf([session({ state: "idle" }), session({ status: "offline" })])).toBe("idle");
   });
 
   it("follows the agents as they change, with nothing stored", () => {
@@ -27,6 +29,8 @@ describe("autoLaneOf", () => {
     sessions[0] = session({ state: "needs_you" });
     expect(autoLaneOf(sessions)).toBe("needs_you");
     sessions[0] = session({ state: "idle" });
+    expect(autoLaneOf(sessions)).toBe("idle");
+    sessions[0] = session({ state: "idle", work: { phase: "done", just_finished: true } });
     expect(autoLaneOf(sessions)).toBe("review");
   });
 });
@@ -60,8 +64,8 @@ describe("autoSort / autoLanes", () => {
     const lanes = autoLanes([...byCard.keys()].map((id) => card(id)), sessionsOf);
     expect(lanes.map((l) => l.lane)).toEqual(["needs_you", "working", "review", "idle"]);
     expect(lanes.find((l) => l.lane === "working")?.cards.map((c) => c.id)).toEqual(["busy", "stale"]);
-    expect(lanes.find((l) => l.lane === "review")?.cards.map((c) => c.id)).toEqual(["done"]);
-    expect(lanes.find((l) => l.lane === "idle")?.cards.map((c) => c.id)).toEqual(["quiet"]);
+    expect(lanes.find((l) => l.lane === "review")?.cards.map((c) => c.id)).toEqual([]);
+    expect(lanes.find((l) => l.lane === "idle")?.cards.map((c) => c.id)).toEqual(["done", "quiet"]);
     expect(lanes.flatMap((l) => l.cards)).toHaveLength(byCard.size);
   });
 });
@@ -84,18 +88,27 @@ describe("all work in one panel", () => {
     expect(unboundSessions([inside, outside, main], bound).map((s) => s.session_id)).toEqual(["out"]);
     expect(sessionItem(outside).lane).toBe("needs_you");
     expect(sessionItem(inside).lane).toBe("working");
-    expect(sessionItem(session({ state: "idle" })).lane).toBe("review");
+    expect(sessionItem(session({ state: "idle" })).lane).toBe("idle");
+    expect(sessionItem(session({ state: "idle", work: { phase: "done", just_finished: true } })).lane).toBe("review");
+    expect(sessionItem(session({ state: "unread" })).lane).toBe("review");
     expect(sessionItem(session({ status: "offline" })).lane).toBe("idle");
   });
 
-  it("maps to-dos onto the lanes through todoStatus", async () => {
+  it("maps to-dos onto the lanes through todoStatus and their outstanding review", async () => {
     const { todoItem } = await import("./workspace-board-auto");
     const base = { id: "t1", title: "Write the report", created_at: "2026-11-09T00:00:00Z", updated_at: "2026-11-09T01:00:00Z" };
+    const agents = [{ machine_id: "m", session_id: "s1", linked_at: "x" }];
+    const accepted = { supervisor: "main", state: "accepted" as const, reviews: [{ at: "2026-11-09T02:00:00Z", verdict: "accepted" as const }] };
     expect(todoItem(base).lane).toBe("planned"); // no agent attached
-    expect(todoItem({ ...base, done_at: "2026-11-09T02:00:00Z" }).lane).toBe("review");
+    expect(todoItem({ ...base, done_at: "2026-11-09T02:00:00Z" }).lane).toBe("idle");
+    expect(todoItem({ ...base, agents, supervision: accepted }, () => session({ state: "unread" })).lane).toBe("idle");
+    expect(todoItem({ ...base, supervision: accepted, ask: { outcome: "decide", verdict: "Choose A or B", asked_at: "2026-11-09T03:00:00Z" } }).lane).toBe("review");
+    expect(todoItem({ ...base, agents, supervision: { supervisor: "main", state: "pending_review" as const } }, () => session({ state: "idle" })).lane).toBe("review");
+    expect(todoItem({ ...base, ask: { verdict: "Please verify", asked_at: "2026-11-09T02:00:00Z" } }).lane).toBe("review");
+    expect(todoItem({ ...base, agents }, () => session({ state: "unread" })).lane).toBe("review");
     expect(todoItem({ ...base, start_error: "no launcher" }).lane).toBe("needs_you");
-    expect(todoItem({ ...base, agents: [{ machine_id: "m", session_id: "s1", linked_at: "x" }] }, () => session({ state: "working" })).lane).toBe("working");
-    expect(todoItem({ ...base, agents: [{ machine_id: "m", session_id: "s1", linked_at: "x" }] }, () => session({ state: "needs_you" })).lane).toBe("needs_you");
+    expect(todoItem({ ...base, agents }, () => session({ state: "working" })).lane).toBe("working");
+    expect(todoItem({ ...base, agents }, () => session({ state: "needs_you" })).lane).toBe("needs_you");
   });
 
   it("groups every kind of work and keeps the planned lane", async () => {
@@ -103,13 +116,15 @@ describe("all work in one panel", () => {
     const items = [
       workspaceItem(card("ws"), [session({ state: "idle" })]),
       sessionItem(session({ session_id: "out", state: "needs_you" })),
+      sessionItem(session({ session_id: "finished", state: "unread" })),
       todoItem({ id: "t", title: "todo", created_at: "", updated_at: "" }),
     ];
     const lanes = workLanes(items);
     expect(lanes.map((l) => l.lane)).toEqual(["needs_you", "working", "review", "planned", "idle"]);
     expect(lanes.find((l) => l.lane === "needs_you")?.items[0]?.kind).toBe("session");
-    expect(lanes.find((l) => l.lane === "review")?.items[0]?.kind).toBe("workspace");
+    expect(lanes.find((l) => l.lane === "review")?.items[0]?.kind).toBe("session");
     expect(lanes.find((l) => l.lane === "planned")?.items[0]?.kind).toBe("todo");
-    expect(lanes.flatMap((l) => l.items)).toHaveLength(3);
+    expect(lanes.find((l) => l.lane === "idle")?.items[0]?.kind).toBe("workspace");
+    expect(lanes.flatMap((l) => l.items)).toHaveLength(4);
   });
 });

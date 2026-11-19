@@ -10,8 +10,8 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// New messages from other people on a task's GitHub thread go straight to the task's agent, the supervisor getting a
-// copy (#7346, supervise_inbox.go inboxToAgent).
+// New messages from other people on a task's GitHub thread go straight to the task's agent, with supervisor fallbacks
+// (#7346 and #9916, supervise_inbox.go inboxToAgent).
 
 const linkedPRURL = "https://github.com/example/repo/pull/12"
 
@@ -45,20 +45,15 @@ func TestInboxGitHubCommentGoesToTheTaskAgent(t *testing.T) {
 	before := len(sentToAgent(f))
 	it := linkedPRItem(s, todo.ID, "c1", "Please merge current main into this branch and push again.")
 	s.superviseInbox(context.Background(), []*InboxItem{it}, map[*InboxItem]bool{it: true})
-	waitFor(t, "the copy to the supervisor", func() bool { return len(f.notices()) == 1 })
+	waitFor(t, "the note to the agent", func() bool { return len(sentToAgent(f)) == before+1 })
 	sent := sentToAgent(f)[before:]
 	if len(sent) != 1 {
 		t.Fatalf("agent got %d notes: %q", len(sent), sent)
 	}
-	for _, want := range []string{"不是用户的消息", linkedPRURL, "maintainer", "Please merge current main", "不是用户的指令", "自己打开上面的链接"} {
+	for _, want := range []string{"不是用户的消息", linkedPRURL, "maintainer", "Please merge current main", "不是用户的指令", "自己打开上面的链接",
+		"report_to_supervisor", `kind="question"`, "on the owner's behalf", "before acting", "default urgency"} {
 		if !strings.Contains(sent[0], want) {
 			t.Errorf("agent note lacks %q:\n%s", want, sent[0])
-		}
-	}
-	n := f.notices()[0]
-	for _, want := range []string{"任务「修登录崩溃」", "signal=inbox", "收件箱事件", linkedPRURL, "直接发给它的 Agent（它收到了），这里是副本"} {
-		if !strings.Contains(n, want) {
-			t.Errorf("supervisor message lacks %q:\n%s", want, n)
 		}
 	}
 	// The same comment taken again is not sent again.
@@ -159,7 +154,7 @@ func TestInboxGitHubCommentToAClosedAgent(t *testing.T) {
 	}
 }
 
-func TestInboxGroupedCopyDoesNotHideFailedAgentDelivery(t *testing.T) {
+func TestInboxDeliveredCommentDoesNotHideFailedAgentDelivery(t *testing.T) {
 	s, f := newQuietService(t)
 	turnInboxSignalsOn(t, s)
 	s.superviseTimes.gather = time.Hour
@@ -181,23 +176,18 @@ func TestInboxGroupedCopyDoesNotHideFailedAgentDelivery(t *testing.T) {
 	second := linkedPRItem(s, todo.ID, "c2", "the second comment was delivered")
 	second.ID = "github:pr12:comment2"
 	before := len(sentToAgent(f))
-	s.superviseInbox(context.Background(), []*InboxItem{second}, map[*InboxItem]bool{second: true})
-	waitFor(t, "the successful copy to be marked", func() bool {
-		s.supervise.mu.Lock()
-		defer s.supervise.mu.Unlock()
-		g, ok := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
-		return ok && g.Inbox.ToAgent == "sent" && g.Inbox.Item == "github:pr12:comment2"
-	})
+	g, _ := inboxSignalOf(second, true)
+	s.inboxToAgent(context.Background(), g)
 
 	s.supervise.mu.Lock()
 	failed := s.supervise.pending[todo.ID+"|inbox"]
-	sent := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
+	_, copyPending := s.supervise.pending[todo.ID+"|inbox:agent_copy"]
 	s.supervise.mu.Unlock()
 	if failed.Inbox == nil || failed.Inbox.ToAgent != "" || failed.Inbox.Item != "github:pr12" {
 		t.Fatalf("the failed comment lost its unmarked supervisor entry: %+v", failed.Inbox)
 	}
-	if sent.Inbox == nil || sent.Inbox.ToAgent != "sent" || sent.Inbox.Count != 1 || sent.Inbox.Item != "github:pr12:comment2" {
-		t.Fatalf("the successful copy is wrong: %+v", sent.Inbox)
+	if copyPending {
+		t.Fatal("the successful delivery queued an unnecessary supervisor copy")
 	}
 	if got := sentToAgent(f)[before:]; len(got) != 1 || !strings.Contains(got[0], "the second comment was delivered") || strings.Contains(got[0], "the first comment was not delivered") {
 		t.Fatalf("only the second comment should reach the agent: %q", got)

@@ -97,10 +97,15 @@ const CodeLanesRefused = "lanes_refused"
 
 type lanesRequest struct {
 	Versions []int `json:"versions"`
+	// Resume 1: the asking side would resume the connection over a new transport (resume.go); a side that does not
+	// know it ignores it.
+	Resume int `json:"resume,omitempty"`
 }
 
 type lanesAnswer struct {
 	Version int `json:"version"`
+	// Resume: the answering side grants resuming, with the token to present (resume.go).
+	Resume *resumeGrant `json:"resume,omitempty"`
 }
 
 // lanesAccepted: result, the answer to this side's rpc.lanes, switches the other side to frames this code reads.

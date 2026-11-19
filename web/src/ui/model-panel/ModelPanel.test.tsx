@@ -192,7 +192,7 @@ describe("the model panel", () => {
   it("draws each provider's Agent mark once, first: on its launcher summary and at the start of its rows, never a letter (#5497)", async () => {
     await open({ providers: [claude(), codex(), { ...codex(), id: "dsh", name: "dsh", engine: "dsh" }] });
     const mark = (el: Element) => el.querySelector("[data-agent-mark]")?.getAttribute("data-agent-mark");
-    expect(["claude", "codex", "dsh"].map((p) => mark(launcher(p)))).toEqual(["claude", "codex", "generic"]);
+    expect(["claude", "codex", "dsh"].map((p) => mark(launcher(p)))).toEqual(["claude", "codex", "dsh"]);
     expect(row("Opus").querySelectorAll("[data-agent-mark]")).toHaveLength(1);
     expect(mark(row("Opus").firstElementChild!)).toBe("claude");
     act(() => launcher("codex").click());

@@ -160,6 +160,8 @@ type Machine struct {
 	// for (conn.go noteFrameFailure). Under mu.
 	frameFails    []time.Time
 	lanesOffUntil time.Time
+	// resumes counts this computer's dropped connections that could resume, and how they ended (resume.go). Under mu.
+	resumes resumeCounts
 	// opened is what the hub has open on the node through the bus connection of the moment (hubopen.go).
 	opened hubOpened
 	// claudeDirsMu serializes the read-modify-writes of the remembered and blocked Claude config dirs (claudedirs.go).
@@ -665,6 +667,15 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 		snapshot.peer, snapshot.revision = p, m.sessionRevision
 		m.mu.Unlock()
 	}
+	if method == proto.MethodSessionEchoStatus && !nodeHas(info, nodeproto.SessionEchoStatus) {
+		return errEchoStatusUnsupported
+	}
+	if try, ok := ctx.Value(heldDeliveryKey{}).(*heldTry); ok && try.checkUnseen && method == "session.send" {
+		if !nodeHas(info, nodeproto.SessionEchoStatus) {
+			return errEchoStatusUnsupported
+		}
+		method = proto.MethodSessionSendUnseen
+	}
 	if nodeHas(info, nodeproto.OwnerControls) {
 		method = ownerControlMethod(ctx, method)
 	}
@@ -829,6 +840,7 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 		defer m.sessionsEventMu.Unlock() // held through OnEvent and forward below
 		if list, ok := m.decodeSessions(params); ok {
 			m.setSessions(list)
+			m.d.heldWake(m.cfg.ID) // a message held for a session listed now goes (held.go)
 		}
 	case "sessions.revs":
 		var p struct {

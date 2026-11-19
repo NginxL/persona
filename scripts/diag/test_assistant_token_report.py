@@ -75,6 +75,28 @@ class ClassifyTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_cli_counts_each_resolved_transcript_path_once(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            nested = root / "nested"
+            nested.mkdir()
+            first = nested / "first.jsonl"
+            second = root / "second.jsonl"
+            for path in (first, second):
+                path.write_text(json.dumps(reply("m", output=17)) + "\n")
+            alias = root / "alias.txt"
+            alias.symlink_to(first)
+
+            def run(*paths):
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(report.main(["--json", *map(str, paths)]), 0)
+                return json.loads(out.getvalue())
+
+            unique = run(first, second)
+            self.assertEqual((unique["files"], unique["total"]["model_calls"], unique["total"]["output_tokens"]),
+                             (2, 2, 34))
+            self.assertEqual(run(first, root, nested, alias), unique)
+
     def run_lines(self, lines, since=None):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "conv.jsonl"

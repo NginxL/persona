@@ -1,6 +1,11 @@
 package persona.feature.settings
 
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
@@ -31,8 +36,11 @@ class ExtensionUpgradePausedTest {
 
     @Test fun aRemovedMarketSaysItNoLongerUpgrades() {
         page("market_removed")
-        rule.onNodeWithText("market was removed", substring = true).assertExists()
+        rule.onAllNodesWithText("market was removed", substring = true).assertCountEquals(1)
+        rule.onAllNodesWithText("Add the same market address again to restore upgrades", substring = true).assertCountEquals(1)
         rule.onNodeWithText("while this extension is off", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("Auto-upgrade", useUnmergedTree = false).assertIsOn().assertIsNotEnabled()
+        rule.onNodeWithText("Check for updates").assertIsEnabled()
     }
 
     @Test fun aSwitchedOffExtensionKeepsItsWords() {

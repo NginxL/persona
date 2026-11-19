@@ -1111,14 +1111,14 @@ struct AssistantSidebarPresenters: ViewModifier {
         content
         .confirmClose(Bindable(ui).ending)
         .renameSessionAlert(Bindable(ui).renaming)
-        .confirmationDialog(
+        .accessibleConfirmationDialog(
             ui.leaderConfirm.map { session in
                 model.assistantLeaders.contains(session.sessionID)
                     ? String(localized: "Unpin Confirmation Title [Leader Actions 6214]")
                     : String(localized: "Pin Confirmation Title [Leader Actions 6214]")
             } ?? "",
             isPresented: Binding(get: { ui.leaderConfirm != nil }, set: { if !$0 { ui.leaderConfirm = nil } }),
-            titleVisibility: .visible, presenting: ui.leaderConfirm) { session in
+            titleVisibility: .visible, hasCancel: true, presenting: ui.leaderConfirm) { session in
             // The hub stays the only state source: only the second choice calls make/end (#6214).
             let lead = model.assistantLeaders.contains(session.sessionID)
             Button(lead ? String(localized: "Unpin [Assistant Sidebar b7c40e]")

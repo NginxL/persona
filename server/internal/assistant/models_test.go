@@ -47,6 +47,13 @@ func (s *downStore) Setting(ctx context.Context, key string, out any) (bool, err
 	return s.memStore.Setting(ctx, key, out)
 }
 
+func (s *downStore) SettingsPrefix(ctx context.Context, prefix string) (map[string]json.RawMessage, error) {
+	if s.down() {
+		return nil, errors.New("database unavailable")
+	}
+	return s.memStore.SettingsPrefix(ctx, prefix)
+}
+
 func (s *downStore) PutSetting(ctx context.Context, key string, v any) error {
 	if s.down() {
 		return errors.New("database unavailable")

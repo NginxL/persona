@@ -25,7 +25,7 @@ func artifactNames(name string) []string {
 }
 
 func artifactIdentity(name string) (program, platform string) {
-	base := strings.TrimSuffix(filepath.Base(name), ".gz")
+	base := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(name), ".gz"), ".exe")
 	for _, prog := range SplitPrograms {
 		if platform, ok := strings.CutPrefix(base, prog+"-"); ok {
 			return prog, platform

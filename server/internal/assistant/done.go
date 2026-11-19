@@ -175,7 +175,8 @@ func (s *Service) lastTurnItems(ctx context.Context, machine, sid string) (items
 	if err := s.call(cctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": 1}, &res); err != nil {
 		return nil, false
 	}
-	return res.Items, true
+	_, items = splitLastTurn(res.Items)
+	return items, true
 }
 
 // lastTwoTurns are the items of the agent's turn before its latest one (earlier; none when there is none) and of its

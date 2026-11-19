@@ -8,7 +8,7 @@ Question routing: timeout_minutes=5, low_distraction=false.
    - 卡片 interaction_id=ix1（machine=Mac，问题，session_id=b2c3d4e5）：
      用哪个分支？
 
-2. 任务「修登录崩溃」（t1，signal=review）：hub 判断做完了，等你验收；在 Mac session_id=a1b2c3d4
+2. 任务「修登录崩溃」（t1，signal=review）：待逐项复核，不代表完成；在 Mac session_id=a1b2c3d4
    验收标准：PR 合并到 main
    Agent 最后说的：
    做完了，PR 已合并

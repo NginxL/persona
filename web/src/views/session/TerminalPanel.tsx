@@ -48,11 +48,16 @@ import { LinkStatus } from "./terminal/LinkStatus";
 import { PaneActions } from "./terminal/PaneActions";
 import { ModeToggle } from "./terminal/ModeToggle";
 import { ShortcutsEditor } from "./terminal/Shortcuts";
+import { lazyDialog } from "../LazyOverlay";
 import { Surface } from "./terminal/Surface";
 import { TerminalOptions } from "./terminal/TerminalOptions";
 import { UploadStatus } from "./terminal/UploadStatus";
 import { t } from "../../i18n";
 import { SegmentedTrack } from "../../ui/Segmented";
+
+// Labs over the page from Terminal settings › Renderer (settings/Labs.tsx, with the configuration form): loaded on first
+// open, not with this panel (src/startup-preload.ts FIRST_SCREEN_BUDGET).
+const LabsDialog = lazyDialog(() => import("../settings/Labs").then((m) => m.LabsDialog));
 
 const nothing = () => () => {};
 
@@ -92,6 +97,7 @@ function PaneTerminal({
   const [keyBar, setKeyBar] = useState(savedKeyBar);
   const [options, setOptions] = useState<HTMLElement | null>(null);
   const [editing, setEditing] = useState(false);
+  const [labs, setLabs] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const [find, dispatchFind] = useReducer(findReducer, FIND_CLOSED);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: boolean } | null>(null);
@@ -368,6 +374,7 @@ function PaneTerminal({
           keyBar={keyBar}
           onKeyBar={chooseKeyBar}
           onEditShortcuts={() => setEditing(true)}
+          onOpenLabs={() => setLabs(true)}
           onClose={() => setOptions(null)}
         />
       )}
@@ -383,6 +390,7 @@ function PaneTerminal({
           width={176}
         />
       )}
+      <LabsDialog open={labs} onClose={() => setLabs(false)} />
       <ShortcutsEditor
         open={editing}
         onClose={() => {

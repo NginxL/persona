@@ -205,6 +205,20 @@ class PublisherTransactionTests(unittest.TestCase):
         self.assertEqual(receipt['source'], 'a' * 40)
         self.assertEqual(self.commands, ['stage', 'refresh', 'check', 'refresh', 'start', 'status', 'confirm', 'status'])
 
+    def test_empty_manager_keeps_candidate_rereads_and_confirmation(self):
+        self.target.update(main='', machine_id='')
+        self.identity = dict(manager='m-fixture', main='', machine_id='', machines=[])
+        promoter.snapshot.return_value = ({'version': self.manifest['version']}, self.identity, 'c' * 64)
+        promoter.nodes.return_value = {}
+        receipt = promoter.promote(self.payload)
+        self.assertEqual(receipt['phase'], 'confirmed')
+        self.assertEqual(self.commands, ['stage', 'refresh', 'check', 'refresh', 'start', 'status', 'confirm', 'status'])
+        self.assertEqual(promoter.idle_evidence.call_count, 2)
+        for call in promoter.idle_evidence.call_args_list:
+            self.assertEqual(call.args[1]['main'], '')
+            self.assertEqual(call.args[1]['machine_id'], '')
+            self.assertEqual(call.args[2], self.identity)
+
     def test_transfer_over_one_minute_refreshes_idle_proof_before_start(self):
         initial = dt.datetime.now(dt.timezone.utc)
         clock = [initial]

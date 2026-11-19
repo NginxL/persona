@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 vi.hoisted(() => { window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {} })) as typeof window.matchMedia; });
 vi.mock("../../ui/Markdown", () => ({ Markdown: () => null }));
 vi.mock("./ModelProfiles", () => ({ ModelProfiles: () => null }));
@@ -38,6 +38,8 @@ async function current(id: string) {
   await flush();
 }
 const permission = "settings-assistantsettings.default_permissions";
+// Check ownership and preference gating independently of loading the optional editor.
+beforeAll(async () => { await import("../../ui/WorkspaceNaming"); });
 beforeEach(async () => {
   await initI18n("en");
   history.replaceState(null, "", "/settings?tab=assistant");
@@ -156,4 +158,39 @@ it("keeps a pending save and leaving-page notes pinned to their original owner",
     { manager: "assistant", body: { default_permission_mode: "bypassPermissions" } },
     { manager: "assistant", body: { notes: "draft for personal" } },
   ]);
+});
+
+const namingEntry = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Workspace naming");
+it("owns naming inside Dispatch tasks and reveals it only for confirmed prefer-new", async () => {
+  await render(); expect(namingEntry()).toBeUndefined();
+  await choose("settings-assistantsettings.workspace_preference", "prefer-new");
+  const group = select("settings-assistantsettings.workspace_preference").closest("section")!;
+  expect(group.contains(namingEntry()!)).toBe(true);
+  expect(host.querySelectorAll('[data-workspace-naming]')).toHaveLength(1);
+  expect(namingEntry()!.getAttribute("aria-expanded")).toBe("false");
+  await choose("settings-assistantsettings.workspace_preference", "prefer-existing");
+  expect(namingEntry()).toBeUndefined();
+  expect(writes.every(({ body }) => Object.keys(body).length === 1 && "task_workspace_preference" in body)).toBe(true);
+});
+it.each([undefined, "unknown"])("hides naming for missing or unknown preference %s", async (preference) => {
+  const real = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith("/assistant")
+    ? Promise.resolve(json({ manager: "assistant", task_workspace_preference: preference })) : real(input, init)));
+  await render(); expect(namingEntry()).toBeUndefined();
+});
+it("waits for matching manager confirmation and preserves preference after a failed save", async () => {
+  const real = globalThis.fetch;
+  let finish: ((r: Response) => void) | undefined;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith("/assistant")
+    ? new Promise<Response>((resolve) => { finish = resolve; }) : real(input, init)));
+  await render(); expect(namingEntry()).toBeUndefined();
+  await act(async () => finish!(json({ manager: "other", task_workspace_preference: "prefer-new" })));
+  await flush(); expect(namingEntry()).toBeUndefined();
+  await current("work"); expect(namingEntry()).toBeUndefined();
+  await act(async () => finish!(json({ manager: "work", task_workspace_preference: "prefer-existing" })));
+  await flush(); await choose("settings-assistantsettings.workspace_preference", "prefer-new");
+  expect(namingEntry()).toBeUndefined();
+  await act(async () => finish!(new Response("{}", { status: 503 })));
+  await flush(); expect(namingEntry()).toBeUndefined();
+  expect(select("settings-assistantsettings.workspace_preference").value).toBe("prefer-existing");
 });

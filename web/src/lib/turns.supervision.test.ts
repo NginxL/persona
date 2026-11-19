@@ -9,14 +9,47 @@ import type { Item } from "./types";
 const raw = '📋 督办：你派出去的任务有 2 个要你处理\n<persona-supervision level="triage" />\n这是 Persona 的督办消息\nCheck the fictional release task.';
 const user = (seq: number, text = raw, extra: Partial<Item> = {}): Item => ({ id: `u${seq}#0`, seq, role: "user", kind: "text", text, ...extra });
 const answer = (seq: number, text = "The fictional task was checked."): Item => ({ id: `a${seq}#0`, seq, role: "assistant", kind: "text", text });
+const narration = (seq: number): Item => ({ ...answer(seq, "Checking the fictional task."), narration: true });
 const call = (seq: number, name: string, tool_input: Record<string, unknown> = {}): Item => ({ id: `t${seq}#0`, seq, role: "assistant", kind: "tool_use", tool_use_id: `call${seq}`, tool_name: name, tool_input });
 const result = (seq: number, use: Item, text = "ok", is_error = false): Item => ({ id: `r${seq}#0`, seq, role: "user", kind: "tool_result", tool_use_id: use.tool_use_id, text, is_error });
 const fold = (promoted = false): Item => ({ id: "fold:t2#0", seq: 2, role: "assistant", kind: "fold", fold: { items: 4, tools: 2, thoughts: 0, through_seq: 5, supervision_user: promoted } });
 const receipt = (visibility: "silent" | "user") => JSON.stringify({ visibility, summary: "Checked the fictional release.", level: visibility === "user" ? "user" : "triage" });
 
 describe("supervision rounds", () => {
+  it("shows a completed answer even when no visibility tool succeeds", () => {
+    const notify = call(2, "mcp__persona__notify_user");
+    const reply = answer(4, "The fictional release is ready for review.");
+    for (const work of [[], [notify, result(3, notify, "unavailable", true)], [fold()]]) {
+      const items = [user(1), ...work, reply];
+      const [live] = chatLines(items, { live: true });
+      expect(live.kind).toBe("supervision");
+      const [shown] = chatLines(items);
+      expect(shown.kind === "segment" && shown.seg.answer).toEqual(reply);
+    }
+  });
+
+  it("keeps commentary, generated heartbeat acknowledgements and work without a final reply quiet", () => {
+    const use = call(3, "Read");
+    for (const work of [[narration(2)], [{ ...answer(2), codex_heartbeat_quiet: true }],
+      [answer(2, "Checking the fictional release."), use, result(4, use)], [answer(2, " \n ")]]) {
+      expect(chatLines([user(1), ...work])[0].kind).toBe("supervision");
+    }
+  });
+
+  it("keeps a silent reply quiet after a partial replay around its retained receipt", () => {
+    const use = call(4, "supervision_finish", { visibility: "user" });
+    const f = fold();
+    const inputs = [user(1), { ...f, fold: { ...f.fold!, through_seq: 3 } }, use, result(5, use, receipt("silent")), answer(6)];
+    // A history request can replace a folded work range with only its first raw step.
+    for (const items of [inputs, mergeItems(inputs, [call(2, "Read")])]) {
+      expect(chatLines(items)[0].kind).toBe("supervision");
+    }
+    const failed = inputs.map((i) => i.id === "r5#0" ? { ...i, is_error: true } : i);
+    expect(chatLines(failed)[0].kind).toBe("segment");
+  });
+
   it("retains feed placement and day separators around the quiet round's original input", () => {
-    const lines = chatLines([user(1, raw, { ts: "2026-11-01T10:00:00Z" }), answer(2), user(3, "Next real request", { ts: "2026-11-01T11:00:00Z" })]);
+    const lines = chatLines([user(1, raw, { ts: "2026-11-01T10:00:00Z" }), narration(2), user(3, "Next real request", { ts: "2026-11-01T11:00:00Z" })]);
     const feed = { id: "fictional-feed", conversation: "fictional-chat", kind: "notice" as const, at: "2026-11-01T09:00:00Z", body: { text: "Fictional prior notice" } };
     const shown = displayLines(lines, [feed]);
     expect(shown.map((l) => l.kind)).toEqual(["day", "feed", "chat", "chat"]);
@@ -32,10 +65,10 @@ describe("supervision rounds", () => {
     expect(parseInjected('A real request\n<persona-supervision level="user" />')).toBeNull();
     expect(injectedOf(user(1, raw, { client_msg_id: "fictional-message" }))).toBeNull();
     expect(injectedOf(user(1, raw, { from: "fictional-agent" }))).toBeNull();
-    expect(chatLines([user(1), answer(2)])[0].kind).toBe("supervision");
-    expect(chatLines([user(1, raw, { injected: { kind: "system", state: "supervise", line: "Check tasks" } }), answer(2)])[0].kind).toBe("supervision");
-    expect(chatLines([user(1, raw, { injected: { kind: "system", state: "supervise", level: "user", line: "Check tasks" } }), answer(2)])[0].kind).toBe("segment");
-    expect(chatLines([user(1, raw.replace('level="triage"', 'level="user"')), answer(2)])[0].kind).toBe("segment");
+    expect(chatLines([user(1)])[0].kind).toBe("supervision");
+    expect(chatLines([user(1, raw, { injected: { kind: "system", state: "supervise", line: "Check tasks" } })])[0].kind).toBe("supervision");
+    expect(chatLines([user(1, raw, { injected: { kind: "system", state: "supervise", level: "user", line: "Check tasks" } })])[0].kind).toBe("segment");
+    expect(chatLines([user(1, raw.replace('level="triage"', 'level="user"'))])[0].kind).toBe("segment");
   });
 
   it("preserves every original input block and its images before display parsing", () => {
@@ -55,7 +88,7 @@ describe("supervision rounds", () => {
     const use = call(2, "Read");
     const later = user(6, "A new real request", { queued: true, client_msg_id: "fictional-next" });
     const image: Item = { id: "u6#1", seq: 6, role: "user", kind: "image", image: { mime: "image/png", lazy: true } };
-    const lines = chatLines([user(1, "First real request"), use, user(3, raw, { queued: true }), answer(4), later, image, answer(7)]);
+    const lines = chatLines([user(1, "First real request"), use, user(3, raw, { queued: true }), narration(4), later, image, answer(7)]);
     expect(lines.map((l) => l.kind)).toEqual(["segment", "supervision", "segment"]);
     const last = lines[2];
     expect(last.kind === "segment" && last.seg.user?.text).toBe(later.text);
@@ -87,8 +120,8 @@ describe("supervision rounds", () => {
 
   it.each(["notify_user", "ask_user", "mcp__persona__notify_user", "mcp__persona__ask_user"])("promotes successful %s but never an error", (name) => {
     const use = call(2, name);
-    expect(chatLines([user(1), use, result(3, use), answer(4)])[0].kind).toBe("segment");
-    expect(chatLines([user(1), use, result(3, use, receipt("user"), true), answer(4)])[0].kind).toBe("supervision");
+    expect(chatLines([user(1), use, result(3, use)])[0].kind).toBe("segment");
+    expect(chatLines([user(1), use, result(3, use, receipt("user"), true)])[0].kind).toBe("supervision");
   });
 
   it("shows pending ask_user work but not an unfinished notify_user or supervision_finish", () => {
@@ -105,17 +138,17 @@ describe("supervision rounds", () => {
   it("uses the successful finish receipt, not its requested visibility or an error", () => {
     const use = call(2, "mcp__persona__supervision_finish", { visibility: "user", summary: "Requested user visibility" });
     for (const text of [receipt("silent"), "not JSON", "null", '{"level":"user"}', '[{"visibility":"user"}]']) {
-      expect(chatLines([user(1), use, result(3, use, text), answer(4)])[0].kind).toBe("supervision");
+      expect(chatLines([user(1), use, result(3, use, text)])[0].kind).toBe("supervision");
     }
-    expect(chatLines([user(1), use, result(3, use, receipt("user")), answer(4)])[0].kind).toBe("segment");
-    expect(chatLines([user(1), use, result(3, use, receipt("user"), true), answer(4)])[0].kind).toBe("supervision");
+    expect(chatLines([user(1), use, result(3, use, receipt("user"))])[0].kind).toBe("segment");
+    expect(chatLines([user(1), use, result(3, use, receipt("user"), true)])[0].kind).toBe("supervision");
     expect(supervisionTool("mcp__fictional__notify_user")).toBeUndefined();
   });
 
   it.each(["accepted", "needs_user", "rework", "cancelled"])("keeps successful task_review %s consistent with fold promotion", (verdict) => {
     const use = call(2, "mcp__persona__task_review", { verdict });
-    expect(chatLines([user(1), use, result(3, use), answer(4)])[0].kind).toBe(verdict === "accepted" || verdict === "needs_user" ? "segment" : "supervision");
-    expect(chatLines([user(1), use, result(3, use, "error", true), answer(4)])[0].kind).toBe("supervision");
+    expect(chatLines([user(1), use, result(3, use)])[0].kind).toBe(verdict === "accepted" || verdict === "needs_user" ? "segment" : "supervision");
+    expect(chatLines([user(1), use, result(3, use, "error", true)])[0].kind).toBe("supervision");
   });
 
   it("associates a late result with its call rather than the next real user's turn", () => {
@@ -144,7 +177,7 @@ describe("supervision rounds", () => {
     const silent = call(4, "supervision_finish", { visibility: "silent" });
     page = mergeItems(page, [read, result(3, read), silent, result(5, silent, receipt("silent"))]);
     expect(chatLines(page)[0].kind).toBe("segment");
-    expect(chatLines(mergeItems([], [user(1), fold(), answer(6)]))[0].kind).toBe("supervision");
+    expect(chatLines(mergeItems([], [user(1), fold()]))[0].kind).toBe("supervision");
     expect(chatLines(page).map((l) => l.id)).toEqual(["seg:u1#0"]);
   });
 });

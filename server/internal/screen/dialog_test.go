@@ -531,3 +531,57 @@ func TestDialogWhole(t *testing.T) {
 		t.Error("no dialog is whole")
 	}
 }
+
+// A trust prompt drawn with a `>` cursor and a `↑/↓ Navigate · enter Confirm` footer (Antigravity CLI), the path
+// synthetic: its rows are options, picked by arrow moves and enter.
+const angleCursorScreen = `Accessing workspace:
+
+/work/example-project
+
+Do you trust the contents of this project?
+
+Antigravity CLI requires permission to read, edit, and execute files here.
+
+> Yes, I trust this folder
+  No, exit
+
+  ↑/↓ Navigate · enter Confirm
+                                                                     auto · Example model · medium`
+
+func TestAngleCursorListUnderNavigateFooterIsADialog(t *testing.T) {
+	if !Choosing(angleCursorScreen) {
+		t.Fatal("the footer should say a dialog has the keyboard")
+	}
+	d := ParseDialog(angleCursorScreen)
+	if d == nil || len(d.Options) != 2 {
+		t.Fatalf("dialog %+v", d)
+	}
+	if d.Options[0].Label != "Yes, I trust this folder" || d.Options[1].Label != "No, exit" {
+		t.Fatalf("options %+v", d.Options)
+	}
+	if !slices.Equal(d.Options[0].Keys, []string{"enter"}) || !slices.Equal(d.Options[1].Keys, []string{"down", "enter"}) {
+		t.Fatalf("keys %v / %v", d.Options[0].Keys, d.Options[1].Keys)
+	}
+	// With the cursor on the second row, the first is reached by up.
+	moved := strings.Replace(strings.Replace(angleCursorScreen, "> Yes", "  Yes", 1), "  No, exit", "> No, exit", 1)
+	if d := ParseDialog(moved); d == nil || !slices.Equal(d.Options[0].Keys, []string{"up", "enter"}) {
+		t.Fatalf("moved cursor: %+v", d)
+	}
+}
+
+func TestAngleRowsWithoutNavigateFooterAreNotOptions(t *testing.T) {
+	for name, screen := range map[string]string{
+		// The input box: a `> text` row, its wrapped line lined up under it, and a status hint.
+		"input box": "Some answer\n\n> fix the login bug and\n  then run the tests\n\n  ? for shortcuts",
+		// Quoted output with `>` in it, no footer.
+		"output": "$ cat notes.md\n> first quote\n  second line\n> third quote\nDone.",
+		// The footer is there but the `>` row has no row lined up with it: nothing to choose between.
+		"single": "Pick one\n\n> only row\n\n  ↑/↓ Navigate · enter Confirm",
+		// A footer of other hints (or a `>` row far above it, under other text) is not the arrow-key list.
+		"other footer": "Pick one\n\n> Yes\n  No\n\n  Esc to cancel",
+	} {
+		if d := ParseDialog(screen); d != nil {
+			t.Errorf("%s: read as a dialog %+v", name, d)
+		}
+	}
+}

@@ -41,10 +41,13 @@ export function createAgyRuntime(options = {}) {
   const log = options.log || ((m) => console.error(m))
   const listDays = options.listDays ?? 14
   const maxSessions = options.maxSessions ?? 80
+  const exportPollMs = options.exportPollMs ?? 400
+  const exportSettleTimeoutMs = options.exportSettleTimeoutMs ?? 15_000
 
   const activeTurns = new Map() // personaId -> { streamingText, startedAt }
   const promptTurns = new Map() // the prompt executing, before any queued successor
-  const unexportedTurns = new Map() // agyId -> { baseMaxIndex, seq, steps } settled turns awaiting native transcript export
+  const unexportedTurns = new Map() // agyId -> { baseMaxIndex, seq, steps, hasReply, expiresAt } settled turns awaiting native transcript export
+  const exportPolls = new Map() // agyId -> interval watching for a settled turn's native transcript flush
   const sentMsgIds = new Map() // `${agyId}:${stepIndex}` -> { text, clientMsgId }
   let nextTurnSeq = 1
   const createdAt = new Map() // owned sessions remain discoverable before their first transcript export
@@ -69,6 +72,7 @@ export function createAgyRuntime(options = {}) {
 
   const acp = new AgyAcpClient({
     bin: existsSync(agyBin) ? agyBin : 'agy',
+    ...(Array.isArray(options.agyArgs) ? { args: options.agyArgs } : {}),
     log,
     onPermissionRequest: async (params) => handlePermissionRequest(params),
   })
@@ -518,10 +522,11 @@ export function createAgyRuntime(options = {}) {
     const steps = Number.isInteger(limit) && limit >= 0
       ? transcript.steps.filter((step, index) => (step.step_index ?? index) < limit)
       : transcript.steps
+    const compact = transcript.compact ? ':compact' : ''
     const branch = transcript.branch ? `:branch:${transcript.branch}` : ''
     const revision = transcript.revision ? `:revision:${transcript.revision}` : ''
     const cut = steps.length < transcript.steps.length ? `:cut:${limit}` : ''
-    return { steps, history: historyOf(rawId) + branch + revision + cut }
+    return { steps, history: historyOf(rawId) + compact + branch + revision + cut }
   }
 
   function tailKey(transcript, native) {
@@ -531,6 +536,46 @@ export function createAgyRuntime(options = {}) {
 
   function maxStepIndex(steps) {
     return steps.reduce((max, step, index) => Math.max(max, typeof step?.step_index === 'number' ? step.step_index : index), -1)
+  }
+
+  function exportedHasReply(steps, baseMaxIndex) {
+    return steps.some((step, index) => {
+      const idx = typeof step?.step_index === 'number' ? step.step_index : index
+      if (idx <= baseMaxIndex) return false
+      if (step?.type === 'ERROR_MESSAGE') return true
+      return step?.type === 'PLANNER_RESPONSE' && typeof step.content === 'string' && step.content.trim().length > 0
+    })
+  }
+
+  function pendingReplaced(pending, steps, curMax = maxStepIndex(steps)) {
+    return curMax > pending.baseMaxIndex &&
+      (!pending.hasReply || exportedHasReply(steps, pending.baseMaxIndex) || Date.now() >= pending.expiresAt)
+  }
+
+  function clearExportPoll(rawId) {
+    clearInterval(exportPolls.get(rawId))
+    exportPolls.delete(rawId)
+  }
+
+  function scheduleExportPoll(rawId, baseMaxIndex, expectReply) {
+    clearExportPoll(rawId)
+    const pid = toPersonaId(rawId)
+    const deadline = Date.now() + exportSettleTimeoutMs
+    const timer = setInterval(() => {
+      if (stopped || archived.has(rawId) || activeTurns.has(pid)) {
+        clearExportPoll(rawId)
+        return
+      }
+      syncTranscriptAppend(rawId)
+      const exported = exportedTranscriptOf(rawId)
+      const settled = !unexportedTurns.has(rawId) &&
+        (!expectReply || exportedHasReply(exported.steps, baseMaxIndex))
+      if (settled || Date.now() >= deadline) {
+        clearExportPoll(rawId)
+      }
+    }, exportPollMs)
+    timer.unref?.()
+    exportPolls.set(rawId, timer)
   }
 
   function clientMsgIdFor(rawId) {
@@ -605,7 +650,7 @@ export function createAgyRuntime(options = {}) {
     }
     const pending = unexportedTurns.get(rawId)
     if (pending) {
-      if (curMax > pending.baseMaxIndex) {
+      if (pendingReplaced(pending, transcript.steps, curMax)) {
         unexportedTurns.delete(rawId)
       } else {
         return {
@@ -1044,10 +1089,11 @@ export function createAgyRuntime(options = {}) {
   }
 
   function beginLiveTurn(rawId, pid, turn) {
+    clearExportPoll(rawId)
     const base = exportedTranscriptOf(rawId)
     const curMax = maxStepIndex(base.steps)
     const pending = unexportedTurns.get(rawId)
-    const priorPending = pending && curMax <= pending.baseMaxIndex ? pending.steps : []
+    const priorPending = pending && !pendingReplaced(pending, base.steps, curMax) ? pending.steps : []
     const baseMax = maxStepIndex([...base.steps, ...priorPending])
     turn.priorPending = priorPending
     turn.exportedBaseMax = curMax
@@ -1163,11 +1209,15 @@ export function createAgyRuntime(options = {}) {
             const wasCancelled = cancelling.has(rawId)
             cancelling.delete(rawId)
             withdrawPermissionAsks(rawId, 'the turn ended')
+            const expectReply = Boolean(turn.streamingText.trim())
+            let awaitExport = false
             if (!stopped && !turn.failed && !wasCancelled && !archived.has(rawId) && turn.exportedBaseMax !== undefined) {
-              const curMax = maxStepIndex(exportedTranscriptOf(rawId).steps)
+              const exported = exportedTranscriptOf(rawId)
+              const curMax = maxStepIndex(exported.steps)
+              const exportedComplete = curMax > turn.exportedBaseMax && (!expectReply || exportedHasReply(exported.steps, turn.exportedBaseMax))
               if (curMax <= turn.exportedBaseMax) {
                 const settled = [...turn.priorPending, ...liveTurnSteps(turn)]
-                if (turn.streamingText.trim()) {
+                if (expectReply) {
                   settled.push({
                     step_index: (settled.length ? maxStepIndex(settled) : turn.baseMaxIndex) + 1,
                     type: 'PLANNER_RESPONSE',
@@ -1178,10 +1228,18 @@ export function createAgyRuntime(options = {}) {
                   })
                 }
                 if (settled.length > 0) {
-                  unexportedTurns.set(rawId, { baseMaxIndex: turn.exportedBaseMax, seq: turn.seq, steps: settled })
+                  unexportedTurns.set(rawId, {
+                    baseMaxIndex: turn.exportedBaseMax,
+                    seq: turn.seq,
+                    steps: settled,
+                    hasReply: expectReply,
+                    expiresAt: Date.now() + exportSettleTimeoutMs,
+                  })
+                  awaitExport = true
                 }
               } else {
                 unexportedTurns.delete(rawId)
+                awaitExport = !exportedComplete
               }
             }
             if (promptTurns.get(pid) === turn) {
@@ -1194,6 +1252,9 @@ export function createAgyRuntime(options = {}) {
               completedTurns.add(pid)
               syncTranscriptAppend(rawId)
               rt.sessionsChanged(0)
+              if (awaitExport && turn.exportedBaseMax !== undefined) {
+                scheduleExportPoll(rawId, turn.exportedBaseMax, expectReply)
+              }
             }
           } finally {
             leases--
@@ -1227,6 +1288,7 @@ export function createAgyRuntime(options = {}) {
     const rawId = ownedId(params.session_id)
     return busyCall(async () => {
       archived.add(rawId)
+      clearExportPoll(rawId)
       unexportedTurns.delete(rawId)
       await interrupt(params)
       await acp.closeSession(rawId)
@@ -1276,6 +1338,7 @@ export function createAgyRuntime(options = {}) {
         throw new RpcError('The selected message moved. Reload the conversation before rewinding', 'rewind_mismatch')
       }
       const before = transcriptOf(rawId)
+      clearExportPoll(rawId)
       unexportedTurns.delete(rawId)
       for (const k of sentMsgIds.keys()) if (k.startsWith(`${rawId}:`)) sentMsgIds.delete(k)
       lastPushedHistory.set(pid, before.history)
@@ -1372,6 +1435,8 @@ export function createAgyRuntime(options = {}) {
       clearInterval(turn.pollTimer)
       clearTimeout(turn.thoughtTimer)
     }
+    for (const timer of exportPolls.values()) clearInterval(timer)
+    exportPolls.clear()
     activeTurns.clear()
     promptTurns.clear()
     unexportedTurns.clear()

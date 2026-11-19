@@ -1,0 +1,13 @@
+{
+  "title": "履歴",
+  "search": "タイトルと会話を検索",
+  "computer": "コンピュータ",
+  "agent": "Agent",
+  "all_computers": "すべてのコンピュータ",
+  "all_agents": "すべての Agent",
+  "earlier": "以前",
+  "empty": "実行されていないセッションはまだありません。",
+  "older_search": "このハブはタイトルとプレビューのみ検索します。会話の検索には更新が必要です。",
+  "open_terminals": "ターミナルを開く",
+  "resume_named": "{title} を再開"
+}

@@ -531,7 +531,7 @@ struct LarkChatView: View {
                 composer
             }
         }
-        .confirmationDialog("Start Over?", isPresented: $confirmDraftRecovery, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Start Over?", isPresented: $confirmDraftRecovery, titleVisibility: .visible, hasCancel: true) {
             Button("Clear Draft and Start Over", role: .destructive) {
                 Task {
                     do {
@@ -544,7 +544,7 @@ struct LarkChatView: View {
         } message: {
             Text("This clears this chat's draft, pending messages and attachments on this device. Messages already sent in Lark aren't affected.")
         }
-        .confirmationDialog("Restore to Current Lark Account?", isPresented: $confirmLegacyDraft, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Restore to Current Lark Account?", isPresented: $confirmLegacyDraft, titleVisibility: .visible, hasCancel: true) {
             Button("It's This Account, Restore") { restoreLegacyDraft() }.lineLimit(1)
             Button("Cancel", role: .cancel) {}
         } message: {

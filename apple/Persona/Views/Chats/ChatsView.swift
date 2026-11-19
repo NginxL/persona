@@ -238,6 +238,8 @@ struct ChatsView: View {
     /// Which space page sits at which depth of `path` (only this view pushes them), so a chat opened from a space
     /// page goes back to it instead of stacking another copy.
     @State private var spaceAt: [Int: String] = [:]
+    /// Opens a space's page from a chat on this page (`\.openSpace`): the same object for the page's life (#10303).
+    @State private var spaceOpener = SpaceOpener()
     @State private var query = ""
     @State private var searching = false
     /// What was searched for when a result was opened: closing the search empties the system field (our text stays,
@@ -432,9 +434,9 @@ struct ChatsView: View {
         }
         #endif
         .animation(Theme.Motion.state, value: path.isEmpty)
-        .environment(\.openSpace) { space in
+        .environment(\.openSpace, spaceOpener.set { space in
             if spaceAt[path.count - 2] == space { path.removeLast() } else { pushSpace(space) }
-        }
+        })
     }
 
     /// The list column: its own property, so Xcode 26.0 type-checks it apart from the split around it (#5333, #7173).
@@ -485,7 +487,9 @@ struct ChatsView: View {
     @ViewBuilder private func withBarItems(_ column: some View) -> some View {
         // The Mac's buttons are in the list column's own title row (below); the shell is the phone's.
         #if os(iOS) || os(visionOS)
-        if #available(iOS 26.0, *) {
+        if columnHidesBar {
+            column
+        } else if #available(iOS 26.0, *) {
             column.pageToolbar { barItems }
         } else {
             column.pageToolbar { barItemsBeforeGlass }
@@ -517,7 +521,7 @@ struct ChatsView: View {
             .onChange(of: workAtRoot, initial: true) { _, root in shell?.workAtRoot = root }
             .onChange(of: path) { _, p in stackPathChanged(to: p) }
             .onChange(of: pickedRoot) { _, root in sidebarRootPicked(root) }
-            .onChange(of: model.agentsListReveal) { _, request in revealAgentsList(request) }
+            .background { AgentsRevealWatch { request in revealAgentsList(request) } }
     }
 
     /// Stage 4: taking what is asked for from outside, the list's first appearance and the assistant's switches.
@@ -559,6 +563,18 @@ struct ChatsView: View {
             if showsHideList { hideListItem }
             #endif
         }
+    }
+
+    /// The one sidebar's column hides its navigation bar (`agentsColumn`); its head and its Agents heading have the bar's
+    /// buttons. Handed to the hidden bar all the same, UIKit was given them anew, their images looked up again, each time
+    /// the column came back into the window: about a fifth of the main thread of every switch between the tabs of the
+    /// open iPhone Duo or the iPad (#10303).
+    private var columnHidesBar: Bool {
+        #if os(iOS)
+        unified != nil
+        #else
+        false
+        #endif
     }
 
     /// The shell's own bar floats over this one (AgentsTopBar). Searching on a phone the field takes the bar's row: no
@@ -4932,6 +4948,21 @@ struct QuietSpaceRow: View {
             Spacer()
             Text(Fmt.relative(group.updatedAt(feed))).font(Theme.Font.label).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// An explicit Agents-tab selection (`AppModel.agentsListReveal`), read in a view of its own: `ChatsView` only acts on it.
+/// Read in the page's body, every choice of the Agents tab ran both tabs' pages again, the Persona conversation and each
+/// of its messages with them (#10303).
+private struct AgentsRevealWatch: View {
+    @Environment(AppModel.self) private var model
+    let reveal: (Int) -> Void
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChange(of: model.agentsListReveal) { _, request in reveal(request) }
     }
 }
 

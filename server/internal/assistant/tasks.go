@@ -76,6 +76,11 @@ type PlanTask struct {
 	// OwnerStarted: the owner tapped Start on the plan's card (POST …/start), as against the hub starting it without
 	// asking; the hub's, never what a tool call or an edit says. What a suggested rule counts (rule_suggest.go, #4929).
 	OwnerStarted bool `json:"owner_started,omitempty"`
+	// CloseTabOnAccept is set only by the owner's Start request.
+	CloseTabOnAccept   bool               `json:"close_tab_on_accept,omitempty"`
+	TerminalTarget     taskTerminalTarget `json:"terminal_target,omitzero"`
+	TerminalCleanup    string             `json:"terminal_cleanup,omitempty"`
+	TerminalAuthorized bool               `json:"terminal_authorized,omitempty"`
 	// Schedule and ScheduleTitle: the scheduled task whose own round planned this (#8045), so its card can offer to let
 	// that schedule start this kind by itself. The hub's: set from the round the hub started, never from a tool call
 	// or an edit.
@@ -309,6 +314,7 @@ type tasksState struct {
 	// waited on, as a card's). The tasks are one blob that movePlan writes whole, so two tasks changing at once (their
 	// starts failing together) would each write back the other's old fields.
 	planEdits cardLocks
+	reviews   cardLocks
 	// trustMu serializes the read-modify-writes of tasks.trust (trustKinds, forgetTrust), so that two plans
 	// remembered at once, or a forget racing a remember, do not drop each other's kinds.
 	trustMu sync.Mutex
@@ -327,8 +333,8 @@ func newTasksState() tasksState {
 		working: map[string]time.Time{}, receipted: map[string]time.Time{}, retrying: map[string]*taskStart{},
 		outcomes: map[string]time.Time{}, reusing: map[string]bool{}, taking: map[string]*taskStart{}, sendsOut: map[[2]string]*sendsOut{},
 		sendsRetryAfter: sendsRetryEvery,
-		turns: turnsState{again: map[string]bool{}, looked: map[string]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
-			retry:   map[string]turnRetry{},
+		turns: turnsState{again: map[string]bool{}, looked: map[turnRecoveryKey]turnLook{}, recovering: map[string]bool{}, tries: map[string]int{},
+			retry:   map[turnRecoveryKey]turnRetry{},
 			judging: map[string]int{}, closed: map[SessionRef]turnLook{}}}
 }
 
@@ -784,6 +790,7 @@ func (s *Service) trustKinds(ctx context.Context, tasks []PlanTask) {
 func (s *Service) taskRoutes() {
 	s.draftDecisionRoutes()
 	s.doneCheckRoute()
+	s.taskTerminalRoute()
 	s.handle("POST /api/v1/task-plans/{id}/workspace-preview", s.previewPlanWorkspaces)
 	s.handle("GET /api/v1/task-plans/{id}", func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.loadPlan(r.Context(), r.PathValue("id"))

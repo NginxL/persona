@@ -78,6 +78,24 @@ the hub keeps the arrangement and that a second browser draws the same groups; `
 the browser and the setting says so. Light and dark screenshots of the sidebar (the phone's drawer open) and of the editor
 at 1440 × 900 and 390 × 844, and `results.json`, go to the artifact directory; a 300-second watchdog ends the run.
 
+## Sidebar heading spacing (#10637)
+
+```sh
+MOCK_SESSIONS_LIST=1 MOCK_MANAGERS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/sidebar-heading-spacing.mjs <loopback-web-origin> [--shots <artifact-directory>] [--chromium <executable>]
+```
+
+Against an exclusively owned mock-backed web server, in Simplified Chinese, light and dark. It measures the sidebar's
+top-level headings (Pages, Persona chats, Personal Agents when listed, Agents) with both Agents lists: the complete one
+(the mock's pinned space keeps the sidebar on it) and the paged one (the run clears the pins and puts them back; the
+paged list needs one assistant, hence `MOCK_MANAGERS=1`). At 1440 × 1000 (standard and Large text), 390 × 844 with a
+mouse and 390 × 844 on a touch screen (the drawer, where Pages is a grid), folded and then unfolded, it checks that every heading's row is as
+tall and its title centred as far down it, that folded the title-to-title gaps are equal, and that unfolded each title
+stands as far below the group before it, all within 0.5 px (iOS: `SidebarHeadingGapsUITests`, #10561). Only the
+mock's own requests leave the browser. Screenshots and `results.json` go to the artifact directory; a four-minute
+watchdog ends the run, and the last line is the verdict.
+
 ## Start page (#9071)
 
 ```sh
@@ -152,6 +170,27 @@ two rings a line; with Settings › Appearance's Large text the values still who
 arc does not ease. It waits for the page's finite animations to end, never for a fixed time. Only the mock's own requests leave the
 browser. Screenshots and `results.json` go to the artifact directory; a 180-second watchdog ends the run, and the last line is the
 verdict.
+
+## An extension's work graph: UI version 10's graph (#9727)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_GRAPH=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/extension-graph.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server (Vite or `vite preview`), in English, light and dark. It opens a made-up
+"Work" page (a 200-node tree, one part folded by the view, a step selected) and checks what jsdom cannot lay out: the canvas
+holds to 50%–100% on opening, centred on the selected node; the visible nodes in reading order with the group frames, edges
+in one SVG and the selected node's ring; the fold beside a node both folds (hiding its subtree behind a +N) and presses a
+node through to its own page and back; a drag pans and the zoom buttons zoom, with Fit centring everything (down to 25%,
+and kept as the person's view across a redraw — Fit survives a live graph's polls); the person's fold, pan and zoom survive
+the page's own redraw with the same key; Full screen covers the window and Esc closes it, the focus returning to the button
+that opened it (the page's Full screen button, a card's preview button); at 390 × 844 the canvas is 70% of the visible height
+clamped to 320–900; and the Overview card draws the same
+graph as a 200-px still preview whose only press is opening Full screen. It waits for the page's finite animations to end,
+never for a fixed time. Only the mock's own requests leave the browser. Screenshots and `results.json` go to the artifact
+directory; a 180-second watchdog ends the run, and the last line is the verdict.
 
 ## User-input navigation acceptance
 
@@ -454,3 +493,13 @@ second. A trivial script is run in the page again and again; one not answered wi
 slowest answer and the stuck ones; a screenshot of each is taken when the page can still draw. It fails on any task over
 1 second, a stuck answer, a page error, a request leaving the origin, or a conversation not drawn within 30 seconds;
 the last line is the verdict, and a watchdog ends a run that overruns with a timeout verdict.
+
+## Local interface and code fonts (#10243)
+
+```sh
+PORT=<mock-port> python3 scripts/mock/mock_hub.py
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<mock-port> npx vite --port <web-port> --strictPort)
+node web/e2e/font-preferences.mjs http://127.0.0.1:<web-port> <artifact-directory>
+```
+
+Use exclusively owned mock/Vite processes and a fresh Chrome profile. This drives the real Settings page at wide/phone widths, light/dark and standard/large text, captures Default and Custom, checks immediate and cross-tab application/reset, before-paint reload, zero additional font requests and actual CJK/symbol fallback faces. It mounts the production single-pane and Full UI renderers against the synthetic hub and checks their first font family, retained-view attachment and unchanged size; it does not verify a live shell. All network access is restricted to the supplied loopback origin. Results and sixteen screenshots go outside the repository; a four-minute watchdog bounds the run.

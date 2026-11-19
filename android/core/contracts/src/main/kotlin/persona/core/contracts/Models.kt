@@ -454,6 +454,11 @@ data class Session(
     @SerialName("origin") val origin: String? = null,
     /** What it was opened for: the inbox item, the task, the conversation, the channel, the extension. */
     @SerialName("origin_ref") val originRef: String? = null,
+    /**
+     * The extension whose token opened it (`POST /api/v1/assistant/conversations`, docs/protocol/protocol.md "Origin of
+     * assistant chats"); absent for everyone else and from older hubs. Its mark draws that extension's icon (#10358).
+     */
+    @SerialName("opened_by") val openedBy: String? = null,
     @SerialName("space_id") val spaceId: String? = null,
     @SerialName("space_name") val spaceName: String? = null,
     @SerialName("slot_name") val slotName: String? = null,
@@ -868,6 +873,8 @@ data class Item(
     val model: String? = null,
     /** What the model requests this item stands for used (#5426). Older hubs omit it. */
     val usage: List<TokenUsage> = emptyList(),
+    val narration: Boolean? = null,
+    @SerialName("codex_heartbeat_quiet") val codexHeartbeatQuiet: Boolean? = null,
 )
 
 /**
@@ -1092,6 +1099,7 @@ data class Interaction(
     @SerialName("questions") val questions: List<Question>? = null,
     /** The runtime can discard this question without answering or interrupting the task. */
     @SerialName("can_cancel") val canCancel: Boolean? = null,
+    val reversible: Boolean? = null,
     @SerialName("plan") val plan: String? = null,
     @SerialName("plan_then") val planThen: String? = null,
     @SerialName("tool_input") val toolInput: JsonElement? = null,

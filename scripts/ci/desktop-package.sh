@@ -25,6 +25,14 @@ if [[ -n "${PERSONA_DESKTOP_VERSION:-}" ]]; then
     exit 2
   fi
   args+=("-c.extraMetadata.version=$PERSONA_DESKTOP_VERSION")
+  if [[ "$PERSONA_DESKTOP_VERSION" == *-beta.* ]]; then
+    # electron-builder otherwise writes latest.yml even for a prerelease version. The beta updater channel and
+    # immutable prerelease are a pair: a stable package's latest.yml is never named or replaced here.
+    args+=("-c.publish.channel=beta" "-c.publish.releaseType=prerelease")
+  elif [[ "$PERSONA_DESKTOP_VERSION" == *-* ]]; then
+    printf 'desktop-package: FAIL only beta prereleases have a supported update channel: %s\n' "$PERSONA_DESKTOP_VERSION" >&2
+    exit 2
+  fi
 fi
 if [[ "${PERSONA_DESKTOP_REQUIRE_SIGNING:-}" == 1 ]]; then
   if [[ -z "${CSC_LINK:-}" ]]; then
@@ -48,4 +56,13 @@ if [[ -n "${CSC_LINK:-}" ]]; then
 else
   printf 'desktop-package: no signing certificate supplied; producing an explicitly unsigned development package\n'
   ci_run 'Desktop unsigned package' 2400 npm --prefix desktop run dist:unsigned -- "${args[@]}"
+fi
+if [[ "$target" == mac ]]; then
+  images=(desktop/release/Persona-*-mac-universal.dmg)
+  if [[ ${#images[@]} -ne 1 || ! -f "${images[0]}" ]]; then
+    printf 'desktop-package: FAIL expected exactly one universal macOS DMG\n' >&2
+    exit 1
+  fi
+  ci_run 'Desktop macOS 15 universal artifact' 180 python3 scripts/release/check_macos_artifact.py \
+    desktop/release/mac-universal/Persona.app "${images[0]}"
 fi

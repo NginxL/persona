@@ -460,6 +460,7 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 		return nil, fmt.Errorf("创建终端标签页失败：%w", err)
 	}
 	markPersonaTab(ctx, launch, created.Pane, id)
+	markTaskTerminal(ctx, launch, created.Pane)
 	n.agentTerminalOpened(launch, created.Pane) // finished_close.go
 	return created, nil
 }

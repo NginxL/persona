@@ -100,6 +100,17 @@ class NotificationExecutionTest {
         assertEquals(mapOf("target" to "terminal", "machine" to "machine & test", "session" to "session/分支"), parameters)
     }
 
+    @Test fun staleNotificationChoiceCannotSubmitAfterAnIrreversibleRefresh() = runBlocking {
+        val card = request.copy(kind = "question", questions = listOf(
+            Question("Continue?", options = listOf(QuestionOption("Continue"))),
+        ))
+        val center = Center(card).apply { remote = card.copy(reversible = false) }
+        val executor = NotificationActionExecutor(center, { error("An irreversible action must not be claimed") }, { now })
+        assertEquals(NotificationActionResult.Invalid, executor.execute(card.id, "answer.0", null, { false }))
+        assertEquals(1, center.refreshes)
+        assertEquals(0, center.writes)
+    }
+
     @Test fun refreshExpiryLockAndDurableClaimGuardEveryResolve() = runBlocking {
         val center = Center(request)
         val claims = mutableMapOf<String, String>()

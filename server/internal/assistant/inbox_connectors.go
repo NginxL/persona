@@ -244,7 +244,7 @@ func (s *Service) replyConnectorItem(ctx context.Context, r inboxReplyReq) (alre
 	c := r.item
 	b := &s.inbox
 	b.mu.Lock()
-	sent := r.once.repeated(r.live, r.text)
+	sent := !suggestionSendOnly(ctx) && r.once.repeated(r.live, r.text)
 	b.mu.Unlock()
 	if sent {
 		return true, nil

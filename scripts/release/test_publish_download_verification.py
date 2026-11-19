@@ -152,15 +152,14 @@ class PublishDownloadVerificationTests(unittest.TestCase):
         result = self.check("versioned", fail_get="dl/1.2.3/persona-node-linux-amd64.gz")
         self.assertNotEqual(result.returncode, 0, "a failed versioned archive GET passed")
 
-    def test_versioned_serves_the_connector_of_linux_and_macos(self):
-        # A switch of an ssh computer to Persona Link fetches the connector of the hub's version from dl/<version>/
-        # (devices/connector_package.go): it goes up and is checked there; a Windows build is not fetched from there.
-        self.archive("persona-link-linux-amd64.gz", b"new-artifact-bytes", b"new-artifact-bytes", True)
-        self.archive("persona-link-windows-amd64.exe.gz", b"windows-connector", b"not-served-there", True)
+    def test_versioned_serves_windows_node_programs_and_the_connector(self):
+        # A Windows resident node is downloaded from the hub's immutable version directory, like Linux and macOS.
+        for name in ("persona-link-windows-amd64.exe.gz", "personad-windows-amd64.exe.gz", "persona-node-windows-amd64.exe.gz"):
+            self.archive(name, b"new-artifact-bytes", b"new-artifact-bytes", True)
         result = self.check("versioned")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("GET dl/1.2.3/persona-link-linux-amd64.gz", self.requests())
-        self.assertNotIn("persona-link-windows-amd64.exe.gz", self.requests())
+        for name in ("persona-link-windows-amd64.exe.gz", "personad-windows-amd64.exe.gz", "persona-node-windows-amd64.exe.gz"):
+            self.assertIn("GET dl/1.2.3/" + name, self.requests())
 
     def test_versioned_rejects_a_stale_connector(self):
         self.archive("persona-link-linux-amd64.gz", b"new-artifact-bytes", b"old-artifact-bytez", True)

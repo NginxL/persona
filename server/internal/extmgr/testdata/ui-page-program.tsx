@@ -2,7 +2,7 @@
 import { createInterface } from "node:readline";
 import { createServer } from "node:net";
 import { connect, componentPage } from "../../../../sdk/ts/src/index.ts";
-import { createElement, View, Section, Text, Button, Row, Code, callback } from "../../../../sdk/ts/src/components.ts";
+import { createElement, View, Section, Text, Button, Row, Code, Graph, callback } from "../../../../sdk/ts/src/components.ts";
 import { useState, useInterval, useEffect, useLoadEffect } from "../../../../sdk/ts/src/hooks.ts";
 
 // A real Node source program over an injected test host, not a sandbox E2E.
@@ -11,7 +11,7 @@ let update: (n: number) => void = () => {};
 let prompt = "Synthetic confirmation", effectUpdates = false, renders = 0, disposes = 0;
 let rootGate: Promise<void> | undefined, releaseRoot: (() => void) | undefined;
 let nativeResult: unknown, reviewEnabled = false, lastValues: unknown;
-let navigationEnabled = false, mountUIVersion = 0;
+let navigationEnabled = false, graphEnabled = false, mountUIVersion = 0;
 let loadingEnabled = false, loadingDelay = 200, loadingFailure = false, cached = false;
 let loadReads = 0, loadCanceled = 0, loadActive = 0, snapshotTransport = 0;
 let callbackMode = "", callbackActive = 0, callbackCanceled = 0, callbackCompleted = 0, callbackMaxActive = 0;
@@ -71,6 +71,12 @@ const save = async (values: unknown, { signal }: { signal: AbortSignal }) => {
   }
   return nativeResult;
 };
+function GraphPage() {
+  return <View key="root"><Section key="main">
+    <Text key="count" text="graph" />
+    <Graph key="g" nodes={[{ id: "a", title: "Synthetic node", action: callback(() => { writes++; }) }, { id: "b", title: "Synthetic other" }]} edges={[{ from: "a", to: "b" }]} />
+  </Section></View>;
+}
 function Page() {
   renders++;
   const [count, setCount] = useState(0); update = setCount;
@@ -91,7 +97,7 @@ const service = setInterval(() => serviceTicks++, 10);
 function start(inputStream: NodeJS.ReadableStream, outputStream: NodeJS.WritableStream) {
 let heldMethod = "";
 const methods = new Map<string, string>(), held: string[] = [];
-const protocol = connect({ id:"example-page",version:"1.0.0",manifest:{manifest_version:1,id:"example-page",name:"Synthetic page",version:"1.0.0",engines:{extension_protocol:1},runtime:{mode:"process",command:"program",rpc:"stdio"},activation_events:["on_call"],contributes:{ui:[{id:"home",title:"Synthetic page",placement:"extension_page"}]}},ui:{home:componentPage(async request => { if (rootGate) await rootGate; mountUIVersion = request.ui_version; snapshotTransport = request.transport === "snapshot" ? 1 : 0; return loadingEnabled ? <LoadingPage key="page" /> : navigationEnabled ? <Navigation key="page" uiVersion={request.ui_version} /> : <Page key="page" />; }, pageOptions)},
+const protocol = connect({ id:"example-page",version:"1.0.0",manifest:{manifest_version:1,id:"example-page",name:"Synthetic page",version:"1.0.0",engines:{extension_protocol:1},runtime:{mode:"process",command:"program",rpc:"stdio"},activation_events:["on_call"],contributes:{ui:[{id:"home",title:"Synthetic page",placement:"extension_page"}]}},ui:{home:componentPage(async request => { if (rootGate) await rootGate; mountUIVersion = request.ui_version; snapshotTransport = request.transport === "snapshot" ? 1 : 0; return loadingEnabled ? <LoadingPage key="page" /> : navigationEnabled ? <Navigation key="page" uiVersion={request.ui_version} /> : graphEnabled ? <GraphPage key="page" /> : <Page key="page" />; }, pageOptions)},
  namespaces:{ test: async (method, params) => {
   if(method==="delay") { heldMethod=params.method; return {}; }
   if(method==="release") { heldMethod=""; for (const line of held.splice(0)) outputStream.write(line+"\n"); return {}; }
@@ -105,6 +111,7 @@ const protocol = connect({ id:"example-page",version:"1.0.0",manifest:{manifest_
   if(method==="prompt") { prompt=params.prompt; update(params.count); await new Promise(resolve => setTimeout(resolve, 5)); return {}; }
   if(method==="restart") process.exit(0);
   if(method==="navigation") { navigationEnabled=params.enabled; return {}; }
+  if(method==="graph") { graphEnabled=params.enabled; return {}; }
   if(method==="loading") { loadingEnabled = params.enabled; cached = params.cached ?? false; loadingFailure = params.fail ?? false; loadingDelay = params.delay ?? 200; pageOptions.snapshotTimeoutMs = params.timeout ?? 1000; return {}; }
   if(method==="callback") { callbackMode=params.mode; return {}; }
   if(method==="releaseCallback") { releaseCallback?.(); return {}; }

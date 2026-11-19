@@ -1,0 +1,20 @@
+{
+  "sections": [
+    {
+      "title": "Moving house",
+      "items": [
+        {"type": "graph", "key": "plan", "layout": "layered", "direction": "down", "nodes": [
+          {"id": "date", "title": "Pick a date", "tone": "positive", "badge": {"text": "Done", "tone": "positive"}},
+          {"id": "movers", "title": "Book movers", "tone": "positive", "badge": {"text": "Done", "tone": "positive"}},
+          {"id": "boxes", "title": "Buy boxes", "tone": "caution", "progress": 0.4},
+          {"id": "pack", "title": "Pack", "subtitle": "Kitchen, books, clothes"},
+          {"id": "address", "title": "Change address", "icon": "mail"},
+          {"id": "move", "title": "Moving day", "icon": "calendar", "action": {"id": "day"}}
+        ], "edges": [
+          {"from": "date", "to": "movers"}, {"from": "date", "to": "address"}, {"from": "boxes", "to": "pack"},
+          {"from": "movers", "to": "move"}, {"from": "pack", "to": "move"}, {"from": "address", "to": "move"}
+        ]}
+      ]
+    }
+  ]
+}

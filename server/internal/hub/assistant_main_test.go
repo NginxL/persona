@@ -238,6 +238,36 @@ func TestCompactConversation(t *testing.T) {
 	}
 }
 
+// Manual compaction forwards the selected side conversation, not the main one, and preserves node refusal codes.
+func TestCompactNonMainConversation(t *testing.T) {
+	for _, id := range []string{"trip-0002", "code-0003", "codex-0004"} {
+		t.Run(id, func(t *testing.T) {
+			h, n := conversationsHub(t)
+			post := mainServer(t, h)
+			path := "/api/v1/assistant/conversations/" + id + "/compact"
+			if code, out := post(path, `{"machine_id":"server"}`); code != http.StatusOK || out["ok"] != true {
+				t.Fatalf("compact side conversation: %d %v", code, out)
+			}
+			for _, reason := range []string{"busy", "compacting", "unsupported", "gone"} {
+				n.mu.Lock()
+				n.compactErr = &rpc.Error{Code: reason, Message: "Example refusal: " + reason}
+				n.mu.Unlock()
+				if code, out := post(path, `{}`); code != http.StatusConflict || out["code"] != reason {
+					t.Fatalf("%s: %d %v", reason, code, out)
+				}
+			}
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if !slices.Equal(n.compacts, []string{id, id, id, id, id}) {
+				t.Fatalf("compacted another conversation: %v", n.compacts)
+			}
+			if got := h.assistantProfile().Main; got != "main-0001" {
+				t.Fatalf("changed the main conversation: %q", got)
+			}
+		})
+	}
+}
+
 // Android starts the new main conversation empty and then sends the message: what the old one left waits for that
 // message instead of being a turn of its own.
 func TestNewMainStartedEmptyCarriesOverInTheFirstMessage(t *testing.T) {

@@ -2,6 +2,8 @@ Plan Agent work (code, repo research, or more than a few tool calls) instead of 
 
 When repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight.
 
+Terminal cleanup on acceptance is an owner choice made at Start. This tool cannot set it.
+
 Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-change"}} names its branch; {"existing":"<cwd or workspace_id>"} selects one; "none" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/<todo id>. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.
 
 ```json
@@ -53,6 +55,7 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "description": "the project directory: absolute path or ~/…"
           },
           "workspace": {
+            "type": ["string", "object"],
             "description": "Task workspace policy. Omit to use the assistant preference and readonly/busy exceptions. new uses the machine engine and default branch task/<todo id>; existing accepts an absolute/~/ path or a workspace id on that machine; none creates nothing. To choose a branch use {new:{branch:...}}. No custom worktree root.",
             "oneOf": [
               { "type": "string", "enum": ["new", "none"] },

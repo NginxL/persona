@@ -139,6 +139,53 @@ final class RenderBudgetTests: XCTestCase {
         XCTAssertLessThanOrEqual(drawn["ShellComposerBar"] ?? 0, 3 + Self.slack, "the composer bar ran during the slide: \(text)")
     }
 
+    /// What one switch between the system tab bar's Persona and Agents may draw again on the tabs at regular width, the
+    /// open iPhone Duo and the iPad in the Separate layout (#10303, docs/apple/performance.md P5). The system TabView takes
+    /// the tab going behind out of the window and puts the other one back, and each switch ran both tabs' pages three or
+    /// four times, the Persona conversation and every message in it too: what the split, the Agents page and the chat
+    /// handed down held closures that never compared equal (`SplitShowList`, `SpaceOpener`, `FileOpener`), a choice of the
+    /// Agents tab ran both pages (`AgentsRevealWatch`), and the column's hidden bar items were handed to UIKit anew. Now the
+    /// messages, the Agents page and both columns run not at all; the chat, coming back to Persona, once as it appears
+    /// (its probe's count) and once for the assistant's settings, read again then, which the column's head shows too.
+    /// Switched by the frame probe's cue, as the tab bar chooses a tab. Where the shell is the root (an iPhone's width)
+    /// `testShellSwitch` measures the switch instead.
+    func testTabsSwitch() throws {
+        launch(["-app.navigation", "separate", "-app.tab", "assistant", "-tab", "assistant", "-openAssistant", Self.persona,
+                "-dev.openChat", "", "-showFrameProbe", "YES"])
+        guard app.windows.firstMatch.frame.width > 600 else {
+            throw XCTSkip("the tabs at regular width only (an iPad, the iPhone Duo open); testShellSwitch measures the shell")
+        }
+        func choose(_ tab: String) {
+            CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                                 CFNotificationName("com.persona.perf.tab.\(tab)" as CFString), nil, nil, true)
+            sleep(2)
+        }
+        // Agents is built by its first visit, and both pages have been in front twice.
+        choose("chats"); choose("assistant"); choose("chats"); choose("assistant")
+        let before = settled()
+        let rounds = 3
+        for _ in 0..<rounds { choose("chats"); choose("assistant") }
+        let after = bodies()
+        let per = after.compactMap { k, v -> (String, Double)? in
+            let d = Double(v - (before[k] ?? 0)) / Double(rounds)
+            return d > 0 ? (k, d) : nil
+        }.sorted { $0.1 > $1.1 }
+        let text = "one Persona → Agents → Persona round of the tab bar: " + per.map { String(format: "%@ %.1f", $0.0, $0.1) }.joined(separator: ", ")
+        print("PERF " + text)
+        let att = XCTAttachment(string: text)
+        att.name = "budget tabs switch"
+        att.lifetime = .keepAlways
+        add(att)
+        let drawn = Dictionary(uniqueKeysWithValues: per)
+        for view in ["ChatsView", "UnifiedSidebarColumn", "AgentsList", "AssistantText", "UserBubble"] {
+            XCTAssertLessThanOrEqual(drawn[view] ?? 0, Self.slack, "\(view) ran on a switch that changes nothing it draws: \(text)")
+        }
+        // Coming back to Persona: the chat's appearing and the settings read again (above); before, 7 and more.
+        for view in ["ChatView", "ChatTranscript.body", "AssistantSidebar"] {
+            XCTAssertLessThanOrEqual(drawn[view] ?? 0, 2 + Self.slack, "\(view) ran more than coming back to Persona needs: \(text)")
+        }
+    }
+
     func testAgentsList() {
         launch(["-app.tab", "chats", "-tab", "dev", "-dev.openChat", ""])
         // The bumped agent is a working one, and its row has to be on screen: below the asks (five of them since the

@@ -81,6 +81,10 @@ function create(mid: string, sid: string, id: string, old = flights.get(key(mid,
   flights.set(key(mid, sid, id), e);
   return e;
 }
+/** What every message send says on its own request (#10661), as client_hello does (lib/api.ts CLIENT_FEATURES): it shows a
+ *  message the hub holds for an Agent whose computer is away (lib/undelivered.ts). The hub holds one only for a page that
+ *  declares it, and a page whose socket is down has no client_hello to go by. */
+const SEND_HEADERS = { "X-Persona-Features": "agent_message_hold" };
 /** Capture the request owner before queuing, so quiet retries cannot move to another login or manager. */
 export function beginMessageSend(mid: string, sid: string, id: string, text?: string) {
   listenOwners();
@@ -98,7 +102,7 @@ export function beginMessageSend(mid: string, sid: string, id: string, text?: st
   return {
     current: isCurrent,
     echoed: () => Boolean(e.echoed),
-    request: { token: getToken(), tokenOwner: credentialOwner(), isAuthContextCurrent: isCurrent, headers: manager ? { [MANAGER_HEADER]: manager } : undefined },
+    request: { token: getToken(), tokenOwner: credentialOwner(), isAuthContextCurrent: isCurrent, headers: manager ? { [MANAGER_HEADER]: manager, ...SEND_HEADERS } : SEND_HEADERS },
     finish(phase?: "delivered" | "failed" | "unknown") {
       pending = false;
       if (requests.get(k) === e) requests.delete(k);

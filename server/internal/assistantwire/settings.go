@@ -48,8 +48,9 @@ const (
 	// MethodKeepUndelivered: KeepUndeliveredParams → {undelivered}: the owner's message to one of its conversations
 	// went nowhere (nothing was typed: its process did not start, its computer was away), its transport outcome is
 	// unknown, or SendParams answered CodeUndeliveredAhead. The manager keeps it and sends it again by itself, once
-	// (#10194); an unknown first attempt is checked in the transcript before any retry. An older manager answers
-	// "unknown method": the hub answers the app with the failure, as before.
+	// (#10194); an unknown first attempt is only looked for in the transcript, never sent again by itself, and left to
+	// the owner's Retry or Delete when it is not found (#10669). An older manager answers "unknown method": the hub
+	// answers the app with the failure, as before.
 	MethodKeepUndelivered = "assistant.keep_undelivered"
 )
 
@@ -58,7 +59,8 @@ const (
 const CodeUndeliveredAhead = "undelivered_ahead"
 
 // CodeDeliveryUnknown: the node connection or caller's wait ended before a send's result was known. The first attempt
-// may have typed the message, so the manager looks for it in the transcript before trying again.
+// may have typed the message, so the manager only looks for it in the transcript and leaves it to the owner when it
+// is not found, never sending it again by itself (#10669).
 const CodeDeliveryUnknown = "delivery_unknown"
 
 // The node's methods the assistant calls for its directory, its conversations and its settings
@@ -162,15 +164,17 @@ type SendParams struct {
 // launcher, model; never what SendParams made of it): a retry runs SendParams again. Human is SendParams.Human for it;
 // Error the failure the owner is told, Code its code ("" for none).
 type KeepUndeliveredParams struct {
-	MachineID string         `json:"machine_id"`
-	SessionID string         `json:"session_id"`
-	Params    map[string]any `json:"params"`
-	Human     bool           `json:"human,omitempty"`
-	Lang      string         `json:"lang,omitempty"`
-	Code      string         `json:"code,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	// TriedAt is when the first send began for CodeDeliveryUnknown. Zero means nothing was typed, so no landed-check is
-	// needed before a retry. The original start, not when the connection ended, covers a slow first attempt.
+	MachineID    string         `json:"machine_id"`
+	SessionID    string         `json:"session_id"`
+	Params       map[string]any `json:"params"`
+	Human        bool           `json:"human,omitempty"`
+	Lang         string         `json:"lang,omitempty"`
+	Code         string         `json:"code,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	CredentialID string         `json:"credential_id,omitempty"`
+	// TriedAt is when the first send began for CodeDeliveryUnknown: its line is looked for from then on. Zero means
+	// nothing was typed, so the message is simply sent again. The original start, not when the connection ended,
+	// covers a slow first attempt.
 	TriedAt time.Time `json:"tried_at,omitempty"`
 }
 

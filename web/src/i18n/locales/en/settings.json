@@ -48,7 +48,7 @@
   "zshrc_title": "From {file} {count}",
   "zshrc_footer": "Functions and aliases that call claude / codex in each computer's login shell config (~/.zshrc, ~/.bashrc), synced each time you open this page. New ones show up on their own.",
   "path_title": "From PATH {count}",
-  "path_footer": "Wrapper scripts on each computer's PATH that start claude, and the runtimes' own launchers, synced each time you open this page.",
+  "path_footer": "Agent wrapper scripts on each computer's PATH and runtime-provided launchers, synced each time you open this page.",
   "hidden_title": "Hidden {count}",
   "hidden_footer": "Only hidden in Persona; the config file is unchanged. Open one to restore it.",
   "deleted": "Deleted {name}",

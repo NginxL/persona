@@ -184,7 +184,7 @@ internal fun rememberExtensionView(model: ExtensionViewModel, appLink: (String) 
  * cards, a row of them at a time; with one (a phone, and anywhere a page is not measured) it is the stack.
  */
 internal fun LazyListScope.extensionViewItems(key: String, state: ExtensionViewState, handle: ExtensionViewHandle, showTitles: Boolean = true,
-                                             streamSectionKeys: List<String>? = null, columns: Int = 1) {
+                                             streamSectionKeys: List<String>? = null, columns: Int = 1, compactGraph: Boolean = false) {
     val view = state.view ?: return
     view.tabs?.takeIf { it.items.size >= 2 && it.name.isNotEmpty() }?.let { tabs ->
         item("$key-tabs") { ExtensionTabs(tabs, state.values[tabs.name] ?: tabs.value, state, handle, Modifier.padding(bottom = Tokens.Space.s)) }
@@ -250,7 +250,11 @@ internal fun LazyListScope.extensionViewItems(key: String, state: ExtensionViewS
                         JGroupItem(GroupPosition.of(index, run.size), moving.then(if (index == 0 && start > 0) Modifier.padding(top = Tokens.Space.s) else Modifier)) {
                             GroupedItem(item, state, itemHandle)
                         }
-                    } else Box(moving) { StandaloneItem(item, state, itemHandle, first = start == 0) }
+                    } else Box(moving) {
+                        CompositionLocalProvider(LocalExtensionGraphCompact provides compactGraph) {
+                            StandaloneItem(item, state, itemHandle, first = start == 0)
+                        }
+                    }
                 }
             }
         }
@@ -441,6 +445,8 @@ internal fun StandaloneItem(item: ExtensionViewItem, state: ExtensionViewState, 
         "image" -> ExtensionImage(item, handle, top)
         "grid" -> ExtensionGrid(item, state, handle, top)
         "carousel" -> ExtensionCarousel(item, state, handle, top)
+        // UI version 10: a card or an in-place reply block shows the same still preview as an overview card.
+        "graph" -> ExtensionGraph(item, state, handle, top, compact = LocalExtensionCard.current || LocalExtensionGraphCompact.current)
     }
 }
 
@@ -449,6 +455,9 @@ internal fun StandaloneItem(item: ExtensionViewItem, state: ExtensionViewState, 
  * drawn at all (the hub never lets an extension's view have one).
  */
 internal val LocalViewHtml = staticCompositionLocalOf<(@Composable (ExtensionViewItem, Modifier) -> Unit)?> { null }
+
+/** Only the graph changes presentation inside an in-place card; existing panels keep their original chrome. */
+private val LocalExtensionGraphCompact = staticCompositionLocalOf { false }
 
 /**
  * A view drawn in place, not in a lazy list (an assistant's ```persona-view in a reply): the same items in the same
@@ -459,23 +468,25 @@ internal fun ExtensionViewColumn(state: ExtensionViewState, handle: ExtensionVie
     val view = state.view ?: return
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-        view.title?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.headline, color = palette.ink) }
-        view.sections.forEach { section ->
-            // UI version 8: the section's icon and link beside its title, and its rows side by side where there is room
-            if (ExtensionColumns.head(section)) SectionCardHead(section, state, handle)
-            else section.title?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink2) }
-            val items = section.items.filter(ExtensionViewText::drawable)
-            var i = 0
-            while (i < items.size) {
-                val start = i
-                if (ExtensionViewText.grouped(items[i])) while (i < items.size && ExtensionViewText.grouped(items[i])) i++ else i++
-                val run = items.subList(start, i)
-                if (ExtensionViewText.grouped(run.first()) && ExtensionColumns.sideBySide(section)) SideBySideRows(section, run, state, handle)
-                else if (ExtensionViewText.grouped(run.first())) JGroup(rows = run.map { item -> { GroupedItem(item, state, handle) } })
-                else run.forEach { StandaloneItem(it, state, handle, first = true) }
+    CompositionLocalProvider(LocalExtensionGraphCompact provides true) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            view.title?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.headline, color = palette.ink) }
+            view.sections.forEach { section ->
+                // UI version 8: the section's icon and link beside its title, and its rows side by side where there is room
+                if (ExtensionColumns.head(section)) SectionCardHead(section, state, handle)
+                else section.title?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink2) }
+                val items = section.items.filter(ExtensionViewText::drawable)
+                var i = 0
+                while (i < items.size) {
+                    val start = i
+                    if (ExtensionViewText.grouped(items[i])) while (i < items.size && ExtensionViewText.grouped(items[i])) i++ else i++
+                    val run = items.subList(start, i)
+                    if (ExtensionViewText.grouped(run.first()) && ExtensionColumns.sideBySide(section)) SideBySideRows(section, run, state, handle)
+                    else if (ExtensionViewText.grouped(run.first())) JGroup(rows = run.map { item -> { GroupedItem(item, state, handle) } })
+                    else run.forEach { StandaloneItem(it, state, handle, first = true) }
+                }
+                section.footer?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink3) }
             }
-            section.footer?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink3) }
         }
     }
 }
@@ -575,8 +586,10 @@ private fun CardItem(item: ExtensionViewItem, state: ExtensionViewState, handle:
         }
         // UI version 6: a card's grid has at most four tiles, its carousel six (the hub holds them to it)
         "image" -> ExtensionImage(item, handle, compact = true)
-        "grid" -> ExtensionGrid(item, state, handle, limit = 4)
-        "carousel" -> ExtensionCarousel(item, state, handle, limit = 6)
+        "grid" -> ExtensionGrid(item, state, handle, limit = 4, compact = true)
+        "carousel" -> ExtensionCarousel(item, state, handle, limit = 6, compact = true)
+        // UI version 10: a still preview; only its whole surface opens the full-screen canvas.
+        "graph" -> ExtensionGraph(item, state, handle, compact = true)
     }
 }
 

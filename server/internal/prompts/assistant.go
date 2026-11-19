@@ -751,6 +751,19 @@ type TaskEnded struct {
 
 func RenderTaskEnded(n TaskEnded) string { return render("assistant/task_ended", n) }
 
+// ChatReply tells a conversation that wrote into a Lark chat as the user that others wrote there since (#10777): the
+// chat's name (Group: a group, else a direct chat with that person), when the conversation last wrote there (local
+// "01-02 15:04"), how many new messages and who wrote the newest, whether Context also repeats messages it was told
+// before (Earlier), and the messages' text, which goes in a context block as someone else's words.
+type ChatReply struct {
+	Language                     string // answerLanguage: "" Chinese, "English", "日本語"
+	Title, Sender, Sent, Context string
+	Group, Earlier               bool
+	Count                        int
+}
+
+func RenderChatReply(d ChatReply) string { return render("assistant/chat_reply", d) }
+
 // AskTodoAnswer is the message to the conversation whose ask_user question became a to-do (#1617): the user's call on it
 // (Thread: said in the to-do's Lark topic), or that the to-do was closed without one (Dropped). The questions and choices
 // are escaped by the caller.
@@ -914,7 +927,7 @@ type SuperviseInbox struct {
 	Item, Title, Sender, Preview string
 	Count                        int
 	// URL is a GitHub PR's or issue's address; ToAgent is "sent" once the note reached the task's agent (InboxToAgent,
-	// #7346), "" when the supervisor is the only one told.
+	// #7346), "unhandled" when its bounded retry failed, "" when only the supervisor is told.
 	URL, ToAgent string
 }
 
@@ -923,6 +936,7 @@ type SuperviseInbox struct {
 type InboxToAgent struct {
 	Sender, Preview, URL string
 	Count                int
+	Event                string // server-authored delivery identity, absent for legacy callers
 }
 
 // RenderInboxToAgent is that note.
@@ -1237,6 +1251,7 @@ type SuperviseCloseout struct {
 	Artifacts         []string
 	// CheckedMerged, CheckedDeployed: what the hub found itself, "yes", "no" or "" when it could not tell.
 	CheckedMerged, CheckedDeployed string
+	LocalDeployment                bool
 }
 
 // Route is the system prompt of assistant.route (assistant/route): is a New chat's first message a direction or a quick

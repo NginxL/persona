@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -20,6 +21,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.*
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.api.ExtensionTile
 import persona.core.contracts.api.ExtensionViewAction
 import persona.core.contracts.api.ExtensionViewItem
 import persona.core.contracts.stream.NativeStreamState
@@ -250,8 +252,49 @@ private fun NativeTile(tile: JsonObject, state: NativeStreamState, local: Native
                        press: NativePress, edit: (String, String) -> Unit) {
     val key = tile.getValue("key").jsonPrimitive.content
     val item = ExtensionViewItem(type = "row", key = key, title = tile.text("title"))
+    val gaugeTile = remember(tile) {
+        if (tile["gauge"] is JsonObject) JsonCodec.decodeFromJsonElement(ExtensionTile.serializer(), tile) else null
+    }
+    val gauge = gaugeTile?.gauge
+    if (gaugeTile != null && gauge != null) {
+        val control = tile["control"] as? JsonObject
+        val switchOn = control?.text("kind") == "switch" && nativeControlValue(control, state.drafts[key]?.value) == "true"
+        val active = tile["active"] == JsonPrimitive(true) || switchOn
+        val primary = tile["action"] as? JsonObject
+        val canToggle = control?.text("kind") == "switch" && control["disabled"] != JsonPrimitive(true) &&
+            state.phase == persona.core.contracts.stream.NativeStreamPhase.Ready
+        val click = when {
+            primary != null -> ({ press(key, item, primary.action(), emptyMap(), "press") })
+            control != null && canToggle -> ({
+                val next = (!switchOn).toString()
+                val action = control.getValue("action").jsonObject.action()
+                if (action.confirm.isNullOrBlank()) edit(key, next)
+                press(key, item, action, mapOf(control.text("name").orEmpty() to next), "change")
+            })
+            else -> null
+        }
+        val hasTrailing = control != null || (tile["actions"] as? JsonArray)?.isNotEmpty() == true
+        NativeActionContainer(tile, local, press, modifier) {
+            JTile(gaugeTile.title, Modifier.fillMaxWidth(), subtitle = gaugeTile.subtitle, value = gaugeTile.value,
+                gauge = { ExtensionGaugeRing(gaugeTile, compact = false, modifier = Modifier.testTag("native-gauge-$key")) },
+                gaugePercent = gaugePercent(gauge.ratio).toFloat(),
+                accessibilityLabel = gaugeReadout(gaugeTile),
+                hue = ExtensionViewText.hue(gaugeTile.color), active = active,
+                badge = gaugeTile.badge?.takeIf { it.text.isNotBlank() }?.let { badge -> { ExtensionBadge(badge) } },
+                trailing = if (hasTrailing) ({
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        control?.let { NativeControl(key, item.title.orEmpty(), it, state, local, press, edit) }
+                        NativeMenu(tile, local, press)
+                    }
+                }) else null,
+                state = if (active) stringResource(R.string.settings_ext_tile_on) else null,
+                onClick = click)
+        }
+        return
+    }
     NativeActionContainer(tile, local, press, modifier) {
-        JCard(Modifier.fillMaxWidth(), onClick = (tile["action"] as? JsonObject)?.let { action -> { press(key, item, action.action(), emptyMap(), "press") } }) {
+        JCard(Modifier.fillMaxWidth(),
+            onClick = (tile["action"] as? JsonObject)?.let { action -> { press(key, item, action.action(), emptyMap(), "press") } }) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 tile.text("icon")?.let { JIcon(ExtensionIcons.of(it), null, tint = if (tile["active"] == JsonPrimitive(true)) PersonaTheme.palette.accent else PersonaTheme.palette.ink3) }
                 (tile["image"] as? JsonObject)?.let { src -> AsyncImage(src.text("url"), item.title,

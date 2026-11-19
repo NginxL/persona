@@ -71,7 +71,7 @@ func TestLeaderSupervisesItsTasks(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
 	waitFor(t, "the leader's message", func() bool { return len(f.noticesTo("lead1")) == 1 })
 	n := f.noticesTo("lead1")[0]
-	for _, want := range []string{"📋 督办", "你是这些任务的 leader 对话", "signal=review", "hub 判断做完了，等你验收", "pull/7"} {
+	for _, want := range []string{"📋 督办", "你是这些任务的 leader 对话", "signal=review", "待逐项复核，不代表完成", "pull/7"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the leader's message lacks %q:\n%s", want, n)
 		}

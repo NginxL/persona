@@ -1,5 +1,7 @@
 """Windows release receipts bind native version checks to the archive being uploaded."""
 import copy
+import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -294,6 +296,144 @@ func main() {
                 with self.assertRaisesRegex(ValueError, "command outputs"):
                     release.verify_native(self.archive, VERSION, BUILD)
 
+
+class WindowsGzipReleaseTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="windows-gzip-release-tests-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.program = "persona-link"
+        self.path = self.root / "persona-link-windows-amd64.exe.gz"
+        self.binary = pe_fixture(b"the exact native executable")
+        self.path.write_bytes(gzip.compress(self.binary, mtime=0))
+        self.metadata = self.root / "BUILD.json"
+        self.metadata.write_text(json.dumps({"version": VERSION, "build": BUILD}))
+        self.outputs = {"version": VERSION, "verbose": "%s\nchannel release, build %d" % (VERSION, BUILD)}
+
+    def report(self, program=None):
+        program = program or self.program
+        platform_name = self.path.name.removesuffix(".exe.gz").rsplit("-", 2)[-2] + "-" + self.path.name.removesuffix(".exe.gz").rsplit("-", 1)[-1]
+        archive, members = release.inspect_gzip(self.path, program, platform_name)
+        return {"schema": 2, "version": VERSION, "build": BUILD, "platform": platform_name,
+                "channel": "release", "program": program, "archive": archive,
+                "binaries": members, "outputs": copy.deepcopy(self.outputs)}
+
+    def assets(self, report=None, with_report=True):
+        paths = [self.path, self.metadata]
+        latest = self.root / "latest.json"
+        if latest.is_file():
+            paths.append(latest)
+        report_path = self.root / release.report_name(self.path.name)
+        if with_report:
+            report_path.write_text(json.dumps(report or self.report()))
+            paths.append(report_path)
+        return [{"name": path.name, "path": str(path)} for path in paths]
+
+    def test_current_link_archive_requires_and_accepts_its_exact_native_report(self):
+        assets = self.assets()
+        release.check_windows_artifacts(assets, VERSION)
+        with self.assertRaisesRegex(ValueError, "native verification report"):
+            release.check_windows_artifacts(assets[:-1], VERSION)
+        for change in ("version", "build", "platform", "program", "channel", "archive", "binaries", "outputs"):
+            report = self.report()
+            if change == "archive":
+                report[change]["sha256"] = "0" * 64
+            elif change == "binaries":
+                report[change]["persona-link.exe"]["sha256"] = "0" * 64
+            elif change == "outputs":
+                report[change]["version"] = "0.5.0"
+            elif change == "build":
+                report[change] = BUILD - 1
+            elif change == "version":
+                report[change] = "0.5.0"
+            else:
+                report[change] = "different"
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                release.check_windows_artifacts(self.assets(report), VERSION)
+
+    def test_the_report_binds_the_decompressed_program_not_only_a_filename(self):
+        stale = self.report()
+        self.path.write_bytes(gzip.compress(pe_fixture(b"same-named replacement"), mtime=0))
+        with self.assertRaisesRegex(ValueError, "hashes"):
+            release.check_windows_artifacts(self.assets(stale), VERSION)
+        self.path.write_bytes(b"not a gzip archive")
+        with self.assertRaises((OSError, EOFError, gzip.BadGzipFile)):
+            release.check_windows_artifacts(self.assets(), VERSION)
+
+    def test_node_program_must_be_listed_in_the_exact_manifest_and_self_check(self):
+        self.program = "persona-node"
+        self.path = self.root / "persona-node-windows-amd64.exe.gz"
+        self.path.write_bytes(gzip.compress(self.binary, mtime=0))
+        self.outputs["node_check"] = {"version": VERSION, "os": "windows", "arch": "amd64", "program": "persona-node"}
+        latest = self.root / "latest.json"
+        file_entry = {"name": self.path.name, "sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
+                      "binary_sha256": hashlib.sha256(self.binary).hexdigest()}
+        latest.write_text(json.dumps({"version": VERSION, "build": BUILD,
+                                      "nodes": {"persona-node": {"windows-amd64": file_entry}}}))
+        release.check_windows_artifacts(self.assets(), VERSION)
+        for mutation in (lambda d: d.update(build=BUILD - 1),
+                         lambda d: d["nodes"]["persona-node"]["windows-amd64"].update(name="other.exe.gz"),
+                         lambda d: d["nodes"]["persona-node"]["windows-amd64"].update(binary_sha256="0" * 64)):
+            manifest = json.loads(latest.read_text())
+            mutation(manifest)
+            latest.write_text(json.dumps(manifest))
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                release.check_windows_artifacts(self.assets(), VERSION)
+        latest.write_text(json.dumps({"version": VERSION, "build": BUILD,
+                                      "nodes": {"persona-node": {"windows-amd64": file_entry}}}))
+        for program in ("personad", "another"):
+            outputs = self.report()
+            outputs["outputs"]["node_check"]["program"] = program
+            with self.subTest(program=program), self.assertRaisesRegex(ValueError, "command outputs"):
+                release.check_windows_artifacts(self.assets(outputs), VERSION)
+
+    def test_beta_verbose_output_is_not_misreported_as_stable(self):
+        self.path = self.root / "persona-link-windows-arm64.exe.gz"
+        self.path.write_bytes(gzip.compress(pe_fixture(b"the exact native executable", machine=0xAA64), mtime=0))
+        self.metadata.write_text(json.dumps({"version": "0.5.3-beta.1", "build": BUILD}))
+        report = self.report()
+        report.update(version="0.5.3-beta.1", platform="windows-arm64", channel="beta")
+        report["outputs"]["verbose"] = "0.5.3-beta.1\nchannel release, build %d" % BUILD
+        report["outputs"]["version"] = "0.5.3-beta.1"
+        report["archive"], report["binaries"] = release.inspect_gzip(self.path, "persona-link", "windows-arm64")
+        release.check_windows_artifacts(self.assets(report), "0.5.3-beta.1")
+        report["channel"] = "release"
+        with self.assertRaisesRegex(ValueError, "identity"):
+            release.check_windows_artifacts(self.assets(report), "0.5.3-beta.1")
+
+    def test_native_commands_are_bounded_and_isolated(self):
+        with patch.object(release.platform, "system", return_value="Windows"), \
+                patch.object(release.platform, "machine", return_value="AMD64"), \
+                patch.object(release.subprocess, "run") as run:
+            run.side_effect = lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 0, self.outputs["verbose"] if command[1:] == ["version", "-v"] else VERSION + "\r\n", "")
+            result = release.verify_native(self.path, VERSION, BUILD)
+        self.assertEqual(result["outputs"], self.outputs)
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs["timeout"], release.COMMAND_TIMEOUT)
+            self.assertNotIn("PERSONA_TOKEN", call.kwargs["env"])
+        with patch.object(release.platform, "system", return_value="Darwin"), \
+                patch.object(release.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "native Windows"):
+                release.verify_native(self.path, VERSION, BUILD)
+            run.assert_not_called()
+
+    def test_main_writes_a_gzip_report_only_after_a_valid_native_run(self):
+        with patch.object(release.platform, "system", return_value="Windows"), \
+                patch.object(release.platform, "machine", return_value="AMD64"), \
+                patch.object(release.subprocess, "run") as run:
+            run.side_effect = lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 0, self.outputs["verbose"] if command[1:] == ["version", "-v"] else VERSION + "\r\n", "")
+            self.assertEqual(release.main(["--archive", str(self.path), "--version", VERSION, "--build", str(BUILD)]), 0)
+        report = json.loads((self.root / release.report_name(self.path.name)).read_text())
+        self.assertEqual(report["program"], "persona-link")
+        self.assertEqual(report["binaries"]["persona-link.exe"]["sha256"], hashlib.sha256(self.binary).hexdigest())
+        release.check_windows_artifacts(self.assets(), VERSION)
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 if __name__ == "__main__":
     unittest.main()

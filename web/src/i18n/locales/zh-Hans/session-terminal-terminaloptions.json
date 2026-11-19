@@ -22,8 +22,11 @@
   "cursor_style": "光标样式",
   "cursor_blink": "光标闪烁",
   "cursor_blink_hint": "获得焦点时一明一暗",
-  "webgl": "WebGL 渲染",
-  "webgl_hint_long": "用显卡画终端，输出多、字号小时更顺；关掉用默认渲染",
-  "webgl_hint": "输出多时更顺，关闭为默认渲染",
+  "renderer": "渲染方式",
+  "renderer_standard": "此终端：标准",
+  "renderer_webgl": "此终端：WebGL",
+  "renderer_fell_back": "此终端：标准（WebGL 已停止）",
+  "renderer_tooltip": "在「设置 › 实验室」中选择，更改后对之后打开的终端生效。",
+  "renderer_open_labs": "实验室",
   "edit_shortcuts": "编辑快捷命令…"
 }

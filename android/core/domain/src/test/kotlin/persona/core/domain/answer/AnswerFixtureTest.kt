@@ -96,6 +96,6 @@ class AnswerFixtureTest(private val name: String, private val input: JsonObject,
 
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun cases(): List<Array<Any>> = fixtures("answer").map { arrayOf(it.name, it.input, it.expected) }
+        fun cases(): List<Array<Any>> = fixtures("spec/fixtures/answer").map { arrayOf(it.name, it.input, it.expected) }
     }
 }

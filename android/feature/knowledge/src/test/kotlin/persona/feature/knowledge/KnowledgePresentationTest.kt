@@ -40,9 +40,12 @@ class KnowledgePresentationTest {
         assertTrue(kindSections(emptyList(), null).isEmpty())
     }
 
-    @Test fun allSevenKindsAndEveryConversationAreShown() {
-        assertEquals(listOf("项目", "会话", "人", "文档", "会议", "日程", "录音"), KnowledgeKind.entries.map { it.title.shown })
-        assertEquals(listOf("projects", "chats", "people", "docs", "meetings", "events", "recordings"), KnowledgeKind.entries.map { it.wire })
+    @Test fun allEightKindsAndEveryConversationAreShown() {
+        assertEquals(listOf("项目", "会话", "人", "文档", "会议", "日程", "录音", "主题"), KnowledgeKind.entries.map { it.title.shown })
+        assertEquals(listOf("projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics"), KnowledgeKind.entries.map { it.wire })
+        assertEquals(KnowledgeKind.Topics, KnowledgeKind.fromWire("topics"))
+        assertEquals("2", KnowledgeDetail("topics", "t", "p", points = listOf(TopicPoint(text = "a"), TopicPoint(text = "b"))).entry().extra)
+        assertEquals("", KnowledgeDetail("topics", "t", "p").entry().extra)
         assertEquals(KnowledgeKind.Recordings, KnowledgeKind.fromWire("recordings"))
         assertTrue(KnowledgeEntry("recordings", "r", "录音").inScope())
         assertTrue(KnowledgeEntry("chats", "dm", "私聊", extra = "dm").inScope())

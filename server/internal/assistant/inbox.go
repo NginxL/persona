@@ -116,12 +116,13 @@ type InboxItem struct {
 	// The event's part (inbox_events.go, inbox_handling.go): its section (listed only), urgent (someone waits, a
 	// deadline is near), the manager's recap, the processing conversation, the one current suggestion, the handling chain
 	// and the items related to it across atoms.
-	Status     string            `json:"status,omitempty"`
-	Urgent     bool              `json:"urgent,omitempty"`
-	Recap      string            `json:"recap,omitempty"`
-	Handling   *InboxHandling    `json:"handling,omitempty"`
-	Suggestion *InboxSuggestion  `json:"suggestion,omitempty"`
-	Chain      []InboxChainEntry `json:"chain,omitempty"`
+	Status             string                    `json:"status,omitempty"`
+	Urgent             bool                      `json:"urgent,omitempty"`
+	Recap              string                    `json:"recap,omitempty"`
+	Handling           *InboxHandling            `json:"handling,omitempty"`
+	Suggestion         *InboxSuggestion          `json:"suggestion,omitempty"`
+	SuggestionAttempts []*InboxSuggestionAttempt `json:"suggestion_attempts,omitempty"`
+	Chain              []InboxChainEntry         `json:"chain,omitempty"`
 	// ChainCount is set only in a list asked with chain=last (inbox_list_memo.go, #4742): a done item's chain is then
 	// its newest entry alone, and this is how many it has. GET /api/v1/inbox/{id} has them all.
 	ChainCount int            `json:"chain_count,omitempty"`
@@ -230,6 +231,7 @@ func conversationOf(it *InboxItem) *wire.MessagingConversationRef {
 // listed is the item as the list shows it (no context).
 func (it *InboxItem) listed() InboxItem {
 	c := *it
+	c.SuggestionAttempts = listedSuggestionAttempts(it.SuggestionAttempts)
 	c.Context, c.Last, c.TriagedAt, c.BodyOf, c.JudgedAt, c.Rules, c.ArrivedOf, c.FolderOf = "", "", "", "", "", "", "", ""
 	c.TriageRev, c.SettledOf, c.RuleOf, c.RepliedOf = 0, "", "", ""
 	c.ArrivedAt = time.Time{}
@@ -253,6 +255,7 @@ func (it *InboxItem) listed() InboxItem {
 		g := *g
 		g.Changes, g.Cwd = slices.Clone(g.Changes), ""
 		g.MailTarget = nil // the reply's internal conflict check, not a client's target to choose
+		g.Owner, g.SourceOf = nil, ""
 		c.Suggestion = &g
 		if c.Handling == nil && g.Conversation == nil && it.Agent != nil { // an old draft: its conversation is done with this round
 			c.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}
@@ -263,6 +266,14 @@ func (it *InboxItem) listed() InboxItem {
 	c.Conversation = conversationOf(it)
 	if it.Agent != nil { // the copy is encoded after the lock is released
 		a := *it.Agent
+		if g := currentSuggestion(it); g != nil && suggestionAttempt(it, g.Version) != nil {
+			// Old clients send the unversioned draft through /reply. Once a version has a confirmed attempt,
+			// only its versioned retry can preserve the frozen payload and original send identity.
+			a.Draft, a.Note, a.Changes = "", "", nil
+			if a.State == AgentDrafted {
+				a.State = AgentSkipped
+			}
+		}
 		a.Pending, a.Wake, a.SentOf, a.Lost = nil, false, "", nil
 		a.ProcessingTurn = ""
 		a.DeferredAt, a.WakeSlot = nil, false

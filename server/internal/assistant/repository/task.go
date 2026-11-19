@@ -127,11 +127,27 @@ func ValidateAlias(alias string) error {
 			return Problem("invalid")
 		}
 	}
-	base := strings.ToUpper(strings.SplitN(alias, ".", 2)[0])
-	if slices.Contains([]string{"CON", "PRN", "AUX", "NUL"}, base) || len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9' {
+	if IsWindowsReservedName(alias) {
 		return Problem("invalid")
 	}
 	return nil
+}
+
+// IsWindowsReservedName checks one directory component, independently of the
+// alias character/length rules. Templates use it before and after expansion.
+// Extensions and spaces before the extension do not escape a device name;
+// Windows also reserves COM/LPT with the superscript digits 1, 2 and 3.
+func IsWindowsReservedName(name string) bool {
+	base, _, _ := strings.Cut(name, ".")
+	base = strings.ToUpper(strings.TrimRight(base, " "))
+	if slices.Contains([]string{"CON", "PRN", "AUX", "NUL"}, base) {
+		return true
+	}
+	if strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT") {
+		number := base[3:]
+		return len(number) == 1 && number[0] >= '1' && number[0] <= '9' || number == "\u00b9" || number == "\u00b2" || number == "\u00b3"
+	}
+	return false
 }
 
 // RepositoryPath maps only explicitly selected layouts; legacy cwd requests never use it.

@@ -160,7 +160,7 @@ func TestSubagentSeedsSkipLargeRequestBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	_, seeds, _, _, _, _, err := scanLines(f, int64(len(data)))
+	_, seeds, _, _, _, _, _, err := scanLines(f, int64(len(data)))
 	if err != nil || len(seeds) != 0 {
 		t.Fatalf("request blob should not become expensive agent state seed: %+v %v", seeds, err)
 	}

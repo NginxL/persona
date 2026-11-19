@@ -32,7 +32,8 @@ describe("per-message hub feedback", () => {
     const flight = beginMessageSend("example", "chat", "message");
     expect(feedback()).toBe("sending");
     expect(fake.send).toHaveBeenCalledWith(expect.objectContaining({ type: "subscribe", machine_id: "example", session_id: "chat" }));
-    expect(flight.request.headers).toEqual({ "X-Persona-Manager": "assistant" });
+    // beside the manager, the send declares that it shows a message held for an Agent whose computer is away (#10661)
+    expect(flight.request.headers).toEqual({ "X-Persona-Manager": "assistant", "X-Persona-Features": "agent_message_hold" });
   });
   it("selects the newest active feedback while preserving ended, missing and per-ID projections", () => {
     const older = beginMessageSend("example", "chat", "older");

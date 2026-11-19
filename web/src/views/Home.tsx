@@ -387,7 +387,8 @@ export function rowTags(title: string, parts: (string | false | null | undefined
 function SessionTask({ s, i, machine, pill, footer }: { s: Session; i: number; machine: string; pill: React.ReactNode; footer?: React.ReactNode }) {
   const title = sessionTitle(s);
   // the source is a tag once, not again in front of the latest words
-  return <TaskRow i={i} state={stateOf(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={sessionPreview(s)} pill={pill} footer={footer} />;
+  // the latest words are Markdown: one line of them reads without its marks, as the sidebar's row line does (#10939)
+  return <TaskRow i={i} state={stateOf(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={plainMarkdown(sessionPreview(s))} pill={pill} footer={footer} />;
 }
 
 // One tab's agents as one row (#2320): the "Lead"'s title (the first pane's when the panes are peers), the most urgent
@@ -396,7 +397,7 @@ function GroupTask({ g, i, machine, pill, footer }: { g: TabGroup; i: number; ma
   if (g.sessions.length === 1) return <SessionTask s={g.lead} i={i} machine={machine} pill={pill} footer={footer} />;
   const head = g.launcher ?? g.sessions[0]!;
   const s = g.lead;
-  const preview = sessionPreview(s);
+  const preview = plainMarkdown(sessionPreview(s));
   return (
     <TaskRow
       i={i}

@@ -24,10 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import persona.core.designsystem.icons.PhIcon
@@ -65,6 +69,9 @@ fun JTile(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     value: String? = null,
+    gauge: (@Composable () -> Unit)? = null,
+    gaugePercent: Float? = null,
+    accessibilityLabel: String? = null,
     icon: PhIcon? = null,
     picture: (@Composable BoxScope.() -> Unit)? = null,
     hue: JHue? = null,
@@ -88,33 +95,58 @@ fun JTile(
     Column(
         modifier.clip(shape).background(palette.surface).then(if (wash != null) Modifier.background(wash) else Modifier)
             .border(if (active) 1.5.dp else 1.dp, edge, shape).onSecondaryClick(onLongClick).then(click)
-            .semantics(mergeDescendants = true) { if (state != null) stateDescription = state }
+            .semantics(mergeDescendants = true) {
+                if (state != null) stateDescription = state
+                if (accessibilityLabel != null) contentDescription = accessibilityLabel
+                if (gaugePercent != null) progressBarRangeInfo = ProgressBarRangeInfo(gaugePercent, 0f..100f)
+            }
             .stableAlpha(if (enabled) 1f else 0.45f),
     ) {
         if (picture != null) Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(palette.sunken), content = picture)
-        Column(Modifier.fillMaxWidth().padding(Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
-            if (picture == null && (icon != null || badge != null || trailing != null)) {
-                Row(Modifier.fillMaxWidth().heightIn(min = TileSize.icon), verticalAlignment = Alignment.CenterVertically) {
-                    if (icon != null) Box(
-                        Modifier.size(TileSize.icon).clip(if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(Tokens.Radius.badge) else CircleShape)
-                            .background(if (active) colors?.dot ?: palette.accent else colors?.tint ?: palette.surfaceStrong),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        JIcon(icon, null, size = Tokens.Size.iconXS, decorative = true, selected = active,
-                            tint = if (active) colors?.onDot ?: palette.onAccent else colors?.dot ?: palette.ink2)
+        val content: @Composable () -> Unit = {
+            Column(Modifier.fillMaxWidth().padding(Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
+                horizontalAlignment = if (gauge != null) Alignment.CenterHorizontally else Alignment.Start) {
+                if (gauge == null && picture == null && (icon != null || badge != null || trailing != null)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = TileSize.icon), verticalAlignment = Alignment.CenterVertically) {
+                        if (icon != null) Box(
+                            Modifier.size(TileSize.icon).clip(if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(Tokens.Radius.badge) else CircleShape)
+                                .background(if (active) colors?.dot ?: palette.accent else colors?.tint ?: palette.surfaceStrong),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            JIcon(icon, null, size = Tokens.Size.iconXS, decorative = true, selected = active,
+                                tint = if (active) colors?.onDot ?: palette.onAccent else colors?.dot ?: palette.ink2)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        badge?.invoke()
+                        trailing?.let { Spacer(Modifier.width(Tokens.Space.xs)); it() }
                     }
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.size(Tokens.Space.xs))
+                } else if (gauge == null && (badge != null || trailing != null)) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f)); badge?.invoke(); trailing?.let { Spacer(Modifier.width(Tokens.Space.xs)); it() }
+                }
+                gauge?.let {
+                    Box(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.xs), contentAlignment = Alignment.Center) { it() }
+                }
+                Text(title, Modifier.fillMaxWidth(), style = type.bodyStrong, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = if (gauge != null) TextAlign.Center else null)
+                subtitle?.let { Text(it, Modifier.fillMaxWidth(), style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = if (gauge != null) TextAlign.Center else null) }
+                if (gauge == null) value?.let { JChangingText(it, style = type.callout.copy(fontWeight = FontWeight.SemiBold), color = palette.ink) }
+                spark?.let { Spacer(Modifier.size(Tokens.Space.xxs)); JSparkline(it, Modifier.fillMaxWidth().heightIn(min = SparkSize.height).size(SparkSize.width, SparkSize.height)) }
+            }
+        }
+        if (gauge != null && (badge != null || trailing != null)) {
+            // Gauges sit side by side and read as shapes of one size, so their badges and switches float over the tile's top
+            // end instead of taking a row above the ring (as the web and iOS do); every ring then starts at the same height.
+            Box(Modifier.fillMaxWidth()) {
+                content()
+                Row(Modifier.align(Alignment.TopEnd).padding(Tokens.Space.m), verticalAlignment = Alignment.CenterVertically) {
                     badge?.invoke()
                     trailing?.let { Spacer(Modifier.width(Tokens.Space.xs)); it() }
                 }
-                Spacer(Modifier.size(Tokens.Space.xs))
-            } else if (badge != null || trailing != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.weight(1f)); badge?.invoke(); trailing?.let { Spacer(Modifier.width(Tokens.Space.xs)); it() }
             }
-            Text(title, style = type.bodyStrong, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            subtitle?.let { Text(it, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            value?.let { JChangingText(it, style = type.callout.copy(fontWeight = FontWeight.SemiBold), color = palette.ink) }
-            spark?.let { Spacer(Modifier.size(Tokens.Space.xxs)); JSparkline(it, Modifier.fillMaxWidth().heightIn(min = SparkSize.height).size(SparkSize.width, SparkSize.height)) }
+        } else {
+            content()
         }
     }
 }

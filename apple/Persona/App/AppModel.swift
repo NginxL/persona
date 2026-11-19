@@ -3111,7 +3111,8 @@ final class AppModel {
     /// the hub would refuse it (`SecretHandoff`).
     func resolve(_ ix: Interaction, _ r: Resolution, handoffCard: Bool = false) async {
         // To the hub of the interaction's own group (docs/protocol/multi-hub.md「Connections and routing」).
-        guard canAnswer(ix), let api = api(ix.group) else { return }
+        // A stopped Agent's work card still takes the answers that send it nothing: put off, or dismissed (#6839).
+        guard canAnswer(ix) || ix.isLocalResolution(r), let api = api(ix.group) else { return }
         let handoff = ix.isSecretHandoff && r.allow == true
         if handoff && !handoffCard {
             toast = Toast(String(localized: "Approve it on its card in the chat."), style: .error)
@@ -4269,6 +4270,7 @@ final class AppModel {
         drafts = drafts.filter { !gone.contains($0.key.group) }
         heldAttachments = heldAttachments.filter { !gone.contains($0.key.group) }
         healthReports = healthReports.filter { !gone.contains($0.key) }
+        TodosV1.shared.forget(gone)
         if let k = openChat, gone.contains(k.group) { openChat = nil }
         if let k = assistantCurrent, gone.contains(k.group) { assistantCurrent = nil }
         for g in gone {

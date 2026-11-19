@@ -131,7 +131,7 @@ done
 // A read-only MCP investigation and inbox_suggest both complete without a permission request. Reverting the Inbox
 // clamp to Plan makes the CLI record the observed mode:plan rejection; removing mcp__persona records a prompt instead.
 func TestInboxClaudeReadOnlyMCPAndSuggestionSkipPermission(t *testing.T) {
-	f := cliTest(t)
+	f := cliTestBash(t)
 	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
 		t.Fatal(err)
 	}

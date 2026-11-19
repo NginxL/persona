@@ -100,3 +100,7 @@ export const Composer = native<ComponentProps<"composer">>("composer");
 export const Image = native<ComponentProps<"image">>("image");
 export const Grid = native<ComponentProps<"grid">>("grid");
 export const Carousel = native<ComponentProps<"carousel">>("carousel");
+/** A graph's node (UI version 10). It carries an id, so UIProps would take it for an action: its fields are mapped here. */
+export type GraphNodeProps = Omit<Wire.GraphNode, "action"> & { action?: NativeAction | CallbackAction };
+export type GraphProps = Omit<ComponentProps<"graph">, "nodes"> & { nodes: GraphNodeProps[] };
+export const Graph = native<GraphProps>("graph");

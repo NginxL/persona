@@ -32,7 +32,7 @@ struct MessageSourceTests {
         #expect(MessageSource.of(decoded)?.name == "Review")
         #expect(MessageSource.of(decoded)?.conversationID == "source-1")
         #expect(try JSON.decoder.decode(Item.self, from: JSON.encoder.encode(decoded)).source == decoded.source)
-        #expect(ChatCache.folder == "chats-v20")
+        #expect(ChatCache.folder == "chats-v21")
     }
 
     @Test func missingMalformedAndFutureFieldsDoNotDropTheItem() throws {

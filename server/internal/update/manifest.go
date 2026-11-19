@@ -183,7 +183,8 @@ func BuildManifest(dir string, m Manifest) (*Manifest, error) {
 			if m.Nodes[p] == nil {
 				m.Nodes[p] = map[string]File{}
 			}
-			m.Nodes[p][strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz")] = f
+			platform := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz"), ".exe")
+			m.Nodes[p][platform] = f
 		}
 	}
 	for _, p := range HelperPrograms {

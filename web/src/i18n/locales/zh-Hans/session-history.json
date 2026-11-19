@@ -1,0 +1,13 @@
+{
+  "title": "历史记录",
+  "search": "搜索标题和对话",
+  "computer": "电脑",
+  "agent": "Agent",
+  "all_computers": "所有电脑",
+  "all_agents": "所有 Agent",
+  "earlier": "更早",
+  "empty": "暂无未运行的会话。",
+  "older_search": "此中枢仅搜索标题和预览。更新后可搜索对话。",
+  "open_terminals": "打开终端",
+  "resume_named": "继续 {title}"
+}

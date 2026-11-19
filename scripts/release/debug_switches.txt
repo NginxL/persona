@@ -400,6 +400,7 @@ showSamplePermission
 showSampleQuestion
 showSampleQuotes
 showSampleScreen
+showSampleStoppedWork
 showScreenFallbackDemo
 showScreenMobileData
 showScreenRoutes

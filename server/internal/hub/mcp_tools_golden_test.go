@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +17,7 @@ import (
 func TestGoldenMCPTools(t *testing.T) {
 	show := func(tools []proto.Tool) string {
 		assertNoEmptyToolEnums(t, tools)
+		assertToolSchemaTypes(t, tools)
 		b, err := json.MarshalIndent(tools, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -107,5 +109,69 @@ func assertNoEmptyToolEnums(t *testing.T, tools []proto.Tool) {
 			t.Fatalf("%s: invalid input_schema: %v", tl.Name, err)
 		}
 		walk(schema, tl.Name)
+	}
+}
+
+// assertToolSchemaTypes checks the complete wire lists, including connector tools added to the embedded prompts.
+// A property or array item needs an explicit type; nested schemas with properties, items, enum or const need one too.
+// A reference is the explicit exception: its target is checked in $defs.
+func assertToolSchemaTypes(t *testing.T, tools []proto.Tool) {
+	t.Helper()
+	var walk func(node any, path string, requireType bool)
+	walk = func(node any, path string, requireType bool) {
+		obj, ok := node.(map[string]any)
+		if !ok {
+			return
+		}
+		_, hasType := obj["type"]
+		_, hasProperties := obj["properties"]
+		_, hasItems := obj["items"]
+		_, hasEnum := obj["enum"]
+		_, hasConst := obj["const"]
+		_, hasRef := obj["$ref"]
+		if !hasType && (requireType || hasProperties || hasItems || hasEnum || hasConst) &&
+			(!hasRef || hasProperties || hasItems || hasEnum || hasConst) {
+			t.Errorf("%s: type is not defined", path)
+		}
+		for k, v := range obj {
+			switch k {
+			case "enum", "const":
+				continue
+			case "properties", "$defs", "definitions", "patternProperties", "dependentSchemas":
+				if children, ok := v.(map[string]any); ok {
+					for ck, cv := range children {
+						walk(cv, path+"."+k+"."+ck, k == "properties")
+					}
+				}
+			case "items":
+				switch items := v.(type) {
+				case []any:
+					for i, item := range items {
+						walk(item, fmt.Sprintf("%s.items[%d]", path, i), true)
+					}
+				default:
+					walk(items, path+".items", true)
+				}
+			default:
+				switch x := v.(type) {
+				case map[string]any:
+					walk(x, path+"."+k, false)
+				case []any:
+					for i, item := range x {
+						walk(item, fmt.Sprintf("%s.%s[%d]", path, k, i), false)
+					}
+				}
+			}
+		}
+	}
+	for _, tl := range tools {
+		if len(tl.InputSchema) == 0 {
+			continue
+		}
+		var schema any
+		if err := json.Unmarshal(tl.InputSchema, &schema); err != nil {
+			t.Fatalf("%s: invalid input_schema: %v", tl.Name, err)
+		}
+		walk(schema, tl.Name, false)
 	}
 }

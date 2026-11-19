@@ -7,7 +7,7 @@ import {
   actOnSuggestion, canExpand, chainRows, chainTap, chainTime, firstLine, handlingFailed, handlingWord, preparing, suggestionButtons, suggestionTitle,
   type ChainEntry, type ChainTap, type InboxSuggestion,
 } from "../../lib/inbox-events";
-import { conversationRoute, isDone, itemKey, itemPath, itemRoute, reloadInbox, replaceItem, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
+import { conversationRoute, isDone, itemKey, itemPath, itemRoute, reloadInbox, replaceItem, suggestionAct, uncertainReplyKey, useInbox, type InboxItem } from "../../lib/inbox";
 import { markdownBody, markdownInSummary, withoutMarks } from "../../lib/inbox-markdown";
 import { docChangeLine } from "../../lib/inbox-page";
 import { otherManager } from "../../lib/manager-choice";
@@ -384,6 +384,8 @@ export function dueOf(day: string, time: string): string | undefined {
 
 function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: InboxSuggestion }) {
   const busy = useInbox((st) => st.sending.includes(itemKey(item)));
+  const uncertain = useInbox((st) => st.uncertainReplies[uncertainReplyKey(item, s.version)]);
+  const attempt = s.kind === "reply" ? uncertain ?? item.suggestion_attempts?.find((a) => a.version === s.version) : undefined;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(s.text);
   const [say, setSay] = useState("");
@@ -397,6 +399,24 @@ function TextSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
     if (ok) setEditing(false);
   };
   const edited = text.trim() && text !== s.text ? text : undefined;
+  if (attempt) {
+    const retryable = attempt.status === "failed" && attempt.retryable && !isDone(item) && item.suggestion?.version === s.version;
+    const label = attempt.status === "failed" ? "failed" : attempt.status === "sending" ? "sending" : attempt.status === "sent" ? "sent" : "uncertain";
+    return (
+      <section className="rounded-[14px] bg-surface p-3.5 shadow-card" data-suggestion={s.kind} data-delivery={attempt.status}>
+        <p className={cx("text-submeta font-medium", label === "failed" ? "text-red" : "text-ink-2")}>{t(`assistant-handoffcard.${label}`)}</p>
+        <p className="mt-1.5 text-meta leading-relaxed whitespace-pre-wrap text-ink" data-suggestion-text>{attempt.text}</p>
+        {Number.isFinite(Date.parse(attempt.at)) && <time dateTime={attempt.at} className="mt-1 block text-submeta text-ink-3">{chainTime(attempt.at)}</time>}
+        {label !== "sent" && <p role="status" className="mt-2 text-meta text-ink-2">
+          {t(`assistant-handoffcard.${label === "failed" ? retryable ? "retry_hint" : "failed_hint" : label + "_hint"}`)}
+          {retryable && attempt.retry_after ? " " + t("assistant-handoffcard.retry_after", { seconds: Math.ceil(attempt.retry_after) }) : ""}
+        </p>}
+        {retryable && <div className="mt-3 flex justify-end">
+          <Button tone="accent" className="min-h-11" disabled={busy} busy={acting === "confirm"} onClick={() => void act("confirm")} testId="suggestion-retry">{t("assistant-handoffcard.retry")}</Button>
+        </div>}
+      </section>
+    );
+  }
   return (
     <section className="rounded-[14px] bg-surface p-3.5 shadow-card" data-suggestion={s.kind} data-handback={s.handback ? "" : undefined}>
       <p className="flex items-center gap-1.5 text-submeta font-medium whitespace-nowrap text-accent-ink">

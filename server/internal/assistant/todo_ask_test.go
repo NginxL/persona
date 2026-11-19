@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +310,51 @@ func TestDecisionPushCarriesTheTodoAndItsRound(t *testing.T) {
 	}
 	if rec := acceptAt(s, todo.ID, at); rec.Code != http.StatusOK {
 		t.Fatalf("the push's OK: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A decision's push says how it may be answered, as the to-do's view says it (#10465): its ask is the view's own
+// decision, and its lock-screen rule the same, open_only for a step that cannot be undone, answer for a call on
+// priority, with the options the recommended first.
+func TestDecisionPushSaysItsLockscreen(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		review map[string]any
+		want   string
+	}{
+		{"a call on priority", rolloutDecision(), assistantwire.OwnerAskLockscreenAnswer},
+		{"a step that cannot be undone", dropTableDecision(), assistantwire.OwnerAskLockscreenOpenOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo := newSupervisedService(t)
+			waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
+			if _, err := reviewErr(s, todo.ID, tc.review); err != nil {
+				t.Fatal(err)
+			}
+			pushes := decidePushes(t, f)
+			if len(pushes) != 1 {
+				t.Fatalf("%d decide pushes", len(pushes))
+			}
+			td, _ := pushes[0]["todo"].(map[string]any)
+			var own map[string]any
+			view, _ := listedTodos(t, s)[todo.ID]["view"].(map[string]any)
+			asks, _ := view["asks"].([]any)
+			for _, a := range asks {
+				if m, _ := a.(map[string]any); m["kind"] == assistantwire.OwnerAskKindDecision {
+					own = m
+				}
+			}
+			if own == nil || td["ask"] != own["id"] || td["lockscreen"] != tc.want || own["lockscreen"] != tc.want {
+				t.Fatalf("push %v, the view's decision %v", td, own)
+			}
+			var labels []any
+			for _, o := range tc.review["options"].([]map[string]string) {
+				labels = append(labels, o["label"])
+			}
+			if labels[0] != tc.review["recommend"] || !reflect.DeepEqual(td["options"], labels) {
+				t.Fatalf("push options %v, want %v", td["options"], labels)
+			}
+		})
 	}
 }
 

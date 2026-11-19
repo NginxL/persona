@@ -24,7 +24,7 @@ import { ModelPicker, type ModelList } from "../../ui/ModelPicker";
 import { Group, Pill, Row } from "./SettingsParts";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { ConfigurationManager } from "./ConfigurationManager";
-import { DirectAPIEditor } from "./DirectAPIEditor";
+import { DirectAPIEditor, DirectEffortSelect, directEffortState } from "./DirectAPIEditor";
 import { ModelProfiles } from "./ModelProfiles";
 
 const UNVERIFIED_STATUS = "未验证"; // i18n-ignore: stable wire sentinel, not user-facing text.
@@ -182,8 +182,10 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   catalog?: ModelPurpose[]; onClose: () => void; onSaved: () => void;
 }) {
   const alive = useRef(true);
+  const loads = useRef(0);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [data, setData] = useState<ModelPurposeBody | null>(null);
+  const [linkedParent, setLinkedParent] = useState<ModelPurpose>();
   const [draft, setDraft] = useState<ModelDraft>({ provider: "", model: "", effort: "", runtime: "" });
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -208,13 +210,22 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   const kept = useStore((s) => s.features.includes(ASSISTANT_MODEL_PICK_FEATURE));
   const load = async () => {
     if (!id) return;
+    const at = ++loads.current;
     try {
       const r = await modelPurpose(id, manager);
+      if (!alive.current || at !== loads.current) return;
+      // A direct link can outlive the catalog request. A saved model override hides the parent model that clearing it
+      // will inherit, so load that parent before offering model-specific efforts; failure keeps the retry visible.
+      const parent = !catalog && r.purpose.override.model && r.purpose.parent
+        ? (await modelPurpose(r.purpose.parent, manager)).purpose : undefined;
+      if (!alive.current || at !== loads.current) return;
+      setLinkedParent(parent);
       setData(r);
       setDraft(draftFor(r.purpose));
       setError("");
       setConflict(false);
     } catch (e) {
+      if (!alive.current || at !== loads.current) return;
       setError(errorText(e));
     }
   };
@@ -233,7 +244,8 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   // The draft names no provider of its own: once saved it runs on what it follows. While nothing is overridden that is
   // what is in effect; with an override, the binding of the category a use with a record of its own follows (from the
   // page's catalog), as the reset makes it (#7980). Without that, what is in effect, as before.
-  const parent = p && catalog ? parentCategory(p, catalog) : undefined;
+  const parent = (p && catalog ? parentCategory(p, catalog) : undefined)
+    ?? (linkedParent?.id === p?.parent ? linkedParent : undefined);
   const following = !!p && overridden(p.override) && !!parent;
   const runsOn = draft.provider || (following ? parent?.effective?.provider : p?.effective?.provider);
   const chosen = data?.providers.find((v) => v.id === runsOn);
@@ -249,7 +261,8 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   const directAPI = !!p && p.kind === "api" && !ownRecord(p) && chosen?.kind === "api" && writable;
   const effectiveProvider = data?.providers.find((v) => v.id === p?.effective?.provider);
   // by the provider the draft runs on, not only by the fields the hub sent for the one in effect
-  const effortAllowed = !!p && effortOffered(p, chosen, effectiveProvider, followsAgents);
+  const effortAllowed = !!p && effortOffered(p, chosen, effectiveProvider, followsAgents,
+    !!data?.providers.some((provider) => provider.chat_effort === true));
   const listProvider = p?.kind !== "plugin" && chosen?.kind === "launcher" && supportsField(p!, "model") ? chosen.id : "";
   useEffect(() => {
     const refresh = refreshNext.current;
@@ -269,8 +282,20 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
   const picker = launcherList.status === "loading" || (launcherList.status === "ready" && !!launcherList.list?.models.length);
   // Left empty, the model is inherited while the provider is too (what runs now when nothing here is set; with an
   // override, the category's); with a provider picked here it is that provider's default (the list's "Default").
-  const inheritedModel = draft.provider ? undefined : following ? parent?.effective?.model : !p?.override?.model ? p?.effective?.model : undefined;
+  // An own record that names its parent's provider still inherits an empty model or effort from that parent. Another
+  // provider starts from its own default. Use the current draft, not the saved override being cleared.
+  const sameParentProvider = !draft.provider || draft.provider === parent?.effective?.provider;
+  const sameEffectiveProvider = !draft.provider || draft.provider === p?.effective?.provider;
+  const inheritedModel = following
+    ? sameParentProvider ? parent?.effective?.model : undefined
+    : sameEffectiveProvider && !p?.override?.model ? p?.effective?.model : undefined;
   const inherited: ModelBinding = inheritedModel ? { model: inheritedModel } : {};
+  const effortModel = draft.model.trim() || inheritedModel || chosen?.model || p?.effective?.model || "";
+  const inheritedEffort = following
+    ? sameParentProvider ? parent?.effective?.effort : undefined
+    : sameEffectiveProvider && !p?.override.effort ? p?.effective?.effort : undefined;
+  const chatEffort = !directAPI && chosen?.kind === "api" && chosen.api === "chat"
+    ? directEffortState(chosen, [], effortModel) : undefined;
   const listedEfforts = launcherList.status === "ready" && launcherList.list && takesEffort(launcherList.list.agent)
     ? effortChoices(launcherList.list, draft.model, inherited) : (p?.id === "inbox.triage" || p?.kind === "api" ? ["off", "low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "xhigh", "max"]);
   const effectiveAgent = providerAgent(effectiveProvider, p?.effective?.provider);
@@ -303,7 +328,7 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
       // one patch: the reset's, keeping the runtime and the profile (a use with a record of its own clears all three
       // whatever this page grouped it under),
       // else the draft's fields, effort with them where the provider it runs on takes one
-      const patch = restore ? resetPatch(p, draft.runtime, draft.config_dir) : modelPatch(p, draft, supportsField(p, "effort") || effortAllowed);
+      const patch = restore ? resetPatch(p, draft.runtime, draft.config_dir) : modelPatch(p, draft, effortAllowed);
       const r = await saveModelPurpose(p, patch, manager);
       if (!alive.current) return;
       setData(r);
@@ -398,12 +423,13 @@ function PurposeEditor({ manager, id, sourceName, catalog, onClose, onSaved }: {
             </span>
           )}
         </div>}
-        {!directAPI && effortAllowed && <label className="block">
+        {!directAPI && effortAllowed && (chatEffort ? <DirectEffortSelect state={chatEffort} value={draft.effort} inherited={inheritedEffort} disabled={busy}
+          onChange={(effort) => setDraft((d) => ({ ...d, effort }))} /> : <label className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
           <input className={inputClass} value={draft.effort} disabled={busy} placeholder={(following && !draft.provider ? parent?.effective?.effort : p.effective?.effort) || t("settings-modelconfiguration.follow_default")} list="model-efforts"
             onChange={(e) => setDraft((d) => ({ ...d, effort: e.target.value }))} />
           <datalist id="model-efforts">{listedEfforts.map((v) => <option key={v} value={v} />)}</datalist>
-        </label>}
+        </label>)}
         {runtimes.length > 0 && <div className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.runtime")}</span>
           <Segmented label={t("settings-modelconfiguration.runtime")} value={chosenAgent === "claude" ? draft.runtime : "cli"} options={runtimes.map((r) => ({ v: r.id, label: r.label }))}

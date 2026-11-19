@@ -26,6 +26,8 @@
   "change_briefing_waits": "Briefing wait rows: {before} → {after}",
   "title_interject_background": "Move running work to the background when I interject",
   "change_interject_background": "“Move running work to the background when I interject”: {before} → {after}",
+  "title_claude_interactive": "Run Claude chats in interactive Claude Code",
+  "change_claude_interactive": "“Run Claude chats in interactive Claude Code”: {before} → {after}",
   "title_load_all_tools": "Load every Persona tool up front",
   "change_load_all_tools": "“Load every Persona tool up front”: {before} → {after}",
   "title_agent_tasks": "Every Agent Persona starts is a supervised task",

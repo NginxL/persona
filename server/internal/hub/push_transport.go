@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"time"
 
@@ -250,19 +251,21 @@ const apnsMaxAlert = 4096
 const relayMaxPlain = relayproto.MaxSealed/4*3 - pushcrypto.MinSealed
 
 // fitAlert is payload as JSON of at most most bytes: its alert texts are shortened (1000 characters, then half that…)
-// until it fits; the full text is in the app. payload's "aps" is replaced in place by a shortened copy.
+// until it fits; the full text is in the app. It edits the map it is given, so callers pass a copy of a payload other
+// devices share: "aps" is replaced by a shortened copy, and dropAnswers may delete "ask" or replace "todo".
 func fitAlert(payload map[string]any, most int) ([]byte, error) {
 	b, _ := json.Marshal(payload)
 	full := payload["aps"]
 	for limit := 1000; len(b) > most; limit /= 2 {
-		if limit < 20 {
-			if _, ok := payload["ask"]; !ok {
+		if limit < shortestAlert(payload) {
+			aps, ok := dropAnswers(payload, full)
+			if !ok {
 				return nil, fmt.Errorf("payload of %d bytes does not fit", len(b))
 			}
-			// Option labels must remain complete. Without ask, the client opens the app;
-			// retry from the full alert so dropping options does not leave a tiny preview.
-			delete(payload, "ask")
-			payload["aps"] = full
+			// Option labels must remain complete. Without them, the client opens the app (or takes the
+			// recommendation); retry from the full alert so dropping options does not leave a tiny preview.
+			full = aps
+			payload["aps"] = aps
 			b, _ = json.Marshal(payload)
 			limit = 2000 // The loop halves this before retrying the alert at 1000 characters.
 			continue
@@ -271,6 +274,48 @@ func fitAlert(payload map[string]any, most int) ([]byte, error) {
 		b, _ = json.Marshal(payload)
 	}
 	return b, nil
+}
+
+// decideAlertShortest is how short fitAlert lets a decision's alert get to keep its option labels: the alert is what
+// the owner reads before answering from the lock screen, and a label long enough to cost it more is one an action's
+// title could not show whole anyway, so the push falls back to Take Recommendation.
+const decideAlertShortest = 500
+
+// shortestAlert is how short fitAlert may cut payload's alert before it drops the options a notification answers with:
+// decideAlertShortest characters for a decision's `todo.options`; for a card's `ask`, whose question travels in `ask`
+// itself, the shortest alert there is.
+func shortestAlert(payload map[string]any) int {
+	if td, _ := payload["todo"].(map[string]any); td["options"] != nil {
+		return decideAlertShortest
+	}
+	return 20
+}
+
+// dropAnswers takes out of payload, in place, the options a notification answers with, for when its alert may not be
+// shortened further (shortestAlert): a card's whole `ask`, or a decision's `todo.options` with the mutable-content that
+// has a newer app's extension offer them as actions (#10465), never the decision's category, `todo.lockscreen` or
+// `todo.ask`, so a decision only the app may answer stays so and one the lock screen may answer falls back to Take
+// Recommendation. It answers the aps to start again from: full (payload's aps before any shortening), less its
+// mutable-content once the options went. full and the `todo` map are copied before an edit, since other devices'
+// payloads share them. False: nothing to drop.
+func dropAnswers(payload map[string]any, full any) (any, bool) {
+	if _, ok := payload["ask"]; ok {
+		delete(payload, "ask")
+		return full, true
+	}
+	td, _ := payload["todo"].(map[string]any)
+	if _, ok := td["options"]; !ok {
+		return full, false
+	}
+	td = maps.Clone(td)
+	delete(td, "options")
+	payload["todo"] = td
+	if aps, ok := full.(map[string]any); ok {
+		aps = maps.Clone(aps)
+		delete(aps, "mutable-content")
+		full = aps
+	}
+	return full, true
 }
 
 // shortenAlert returns a copy of aps whose alert texts have at most n characters (the original is shared by all devices).

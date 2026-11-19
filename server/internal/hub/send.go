@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/channel"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -326,6 +327,20 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		callErr(w, &rpc.Error{Code: "codex_send_guard", Message: i18n.T(l, "hub-send.guard_need_id"), Data: json.RawMessage(`{"delivered":"none"}`)})
 		return
 	}
+	if apply, _ := p["apply_switch"].(bool); id != "" && known && !assistantConv && todoID == "" && !fresh && !apply &&
+		personSent(r.Context()) {
+		// The owner's message to an Agent the hub lists (#10661), from a person's own full device: the row draws a held
+		// one as the owner's bubble and only a full device can Retry or Delete it. Not a to-do's hand-off, an Agent's
+		// first prompt or a launcher switch: those are decided now, not replayed later. It never overtakes messages held
+		// for the Agent (NodeCall.Ordered: the manager refuses it, nothing typed, while they wait). From a client that
+		// draws a held message it may be held itself while the computer is away, answered held instead of offline
+		// (deliverOnce); one that does not would take 202 "later" for sent.
+		if h.requestWants(r, featureAgentMessageHold) {
+			ctx = withHold(ctx, l)
+		} else {
+			ctx = withOrdered(ctx)
+		}
+	}
 	modelSent := func(status int) { // the picked model ran: the manager may remember it
 		if status == http.StatusOK && picked != "" {
 			launcher, _ := p["launcher"].(string)
@@ -381,8 +396,9 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 			h.conversationSent(m.cfg.ID, sid, f.status, f.body, outcome)
 		}
 		if assistantConv && (outcome == sendUnknown || f.status >= http.StatusInternalServerError) && asSent != nil {
-			// Nothing was typed, or the connection ended before the outcome was known: the manager keeps the message and
-			// sends it again only after its landed-check, and the app is told it is kept (#10194, #10503).
+			// Nothing was typed, or the connection ended before the outcome was known: the manager keeps the message,
+			// sends it again in the first case and only looks for it in the second (the owner decides when it is not
+			// found), and the app is told it is kept (#10194, #10503, #10669).
 			keepCode := errorCodeOf(f.body)
 			if outcome == sendUnknown {
 				keepCode = assistantwire.CodeDeliveryUnknown
@@ -440,6 +456,12 @@ func (h *Hub) deliverOnce(ctx context.Context, m *Machine, p map[string]any) (in
 			out = json.RawMessage("{}")
 		}
 		return http.StatusOK, append(out, '\n'), outcome
+	case rpcCodeOf(err) == devicewire.CodeHeld && holdOf(ctx) != nil:
+		// The machine's manager holds it until the computer is back (withHold, #10661): nothing was typed, it goes by
+		// itself, and a retry of the id is answered as kept (sendLater). Only for a send that asked to be held: any other
+		// held answer is an ordinary refusal, never a kept message its client cannot draw.
+		status, body := heldBody(err)
+		return status, body, sendLater
 	case outcome == sendUnknown && !hasDelivered(err):
 		l := h.contextLang(ctx)
 		status, body := callErrBytes(l, unknownDelivery(l, "hub-send.lost_during"))
@@ -564,8 +586,14 @@ func (h *Hub) keepUndelivered(ctx context.Context, m *Machine, sid string, msg m
 	if code == assistantwire.CodeDeliveryUnknown {
 		tried = sendTimingOf(ctx).start
 	}
+	p := principalOf(ctx)
+	credential := ""
+	if p.Role == roleFull || p.Role == roleAnswer {
+		credential = p.ID
+	}
 	err := h.asstOf(h.sessionOwner(m.cfg.ID, sid)).call(kctx, assistantwire.MethodKeepUndelivered, assistantwire.KeepUndeliveredParams{
 		MachineID: m.cfg.ID, SessionID: sid, Params: msg, Human: personSent(ctx), Lang: string(h.contextLang(ctx)), Code: code, Error: why, TriedAt: tried,
+		CredentialID: credential,
 	}, &res)
 	if err != nil || res.Undelivered == nil {
 		h.logf("send to %s/%s: not kept for later: %v", m.cfg.ID, sid, err)
@@ -584,6 +612,57 @@ func laterBody(kept *proto.UndeliveredMessage) (int, []byte) {
 	}
 	b, _ := json.Marshal(out)
 	return http.StatusAccepted, append(b, '\n')
+}
+
+// featureAgentMessageHold is what a client declares (client_hello's features, or X-Persona-Features on the request) when
+// it draws a message held for an Agent on its row (proto.UndeliveredMessage.Computer); the hub lists the same name in
+// proto.Features.
+const featureAgentMessageHold = "agent_message_hold"
+
+// holdKey marks the owner's message to an Agent (#10661): a heldSend, which busNode.Call puts on its session.send.
+type holdKey struct{}
+
+// heldSend is holdKey's mark: the message goes after any held for its Agent (NodeCall.Ordered), and, when hold, its
+// manager may hold it while the computer is away, its answer worded in lang (NodeCall.Hold).
+type heldSend struct {
+	hold bool
+	lang i18n.Lang
+}
+
+// withOrdered marks ctx's session.send as one that never overtakes messages held for its Agent.
+func withOrdered(ctx context.Context) context.Context {
+	return context.WithValue(ctx, holdKey{}, heldSend{})
+}
+
+// withHold is withOrdered for a message its manager may hold itself, its answer worded in l.
+func withHold(ctx context.Context, l i18n.Lang) context.Context {
+	return context.WithValue(ctx, holdKey{}, heldSend{hold: true, lang: l})
+}
+
+// orderedOf is the NodeCall.Ordered of ctx's session.send: whether withOrdered or withHold marked it.
+func orderedOf(ctx context.Context) bool {
+	_, ok := ctx.Value(holdKey{}).(heldSend)
+	return ok
+}
+
+// holdOf is the NodeCall.Hold of ctx's session.send: nil unless withHold marked it.
+func holdOf(ctx context.Context) *devicewire.Hold {
+	m, ok := ctx.Value(holdKey{}).(heldSend)
+	if !ok || !m.hold {
+		return nil
+	}
+	return &devicewire.Hold{Lang: string(m.lang)}
+}
+
+// heldBody is the answer to a message the machine's manager holds (devicewire.CodeHeld): laterBody with the held
+// message as its row shows it.
+func heldBody(err error) (int, []byte) {
+	var held devicewire.HeldAnswer
+	var re *rpc.Error
+	if errors.As(err, &re) {
+		_ = json.Unmarshal(re.Data, &held)
+	}
+	return laterBody(held.Undelivered)
 }
 
 func rpcCodeOf(err error) string {

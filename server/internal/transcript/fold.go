@@ -36,18 +36,18 @@ func FoldWorkLatest(items []proto.Item) []proto.Item {
 // A call whose result is not in the page (still running) and a result whose call is not (on an older page) are not
 // folded: the app pairs them with what comes later or earlier, and a fold hides them from that.
 func foldWork(items []proto.Item, latestPage bool) []proto.Item {
-	uses, results, agents := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	results, agents := map[string]*proto.Item{}, map[string]bool{}
 	taskUses := map[string]proto.Item{}
-	for _, it := range items {
+	for i := range items {
+		it := &items[i]
 		switch it.Kind {
 		case proto.KindToolUse:
-			uses[it.ToolUseID] = true
-			taskUses[it.ToolUseID] = it
+			taskUses[it.ToolUseID] = *it
 			if subagentTools[it.ToolName] {
 				agents[it.ToolUseID] = true
 			}
 		case proto.KindToolResult:
-			results[it.ToolUseID] = true
+			results[it.ToolUseID] = it
 		}
 	}
 	// The latest commentary is the turn's current answer until a final answer follows it. Keep it visible on a
@@ -72,7 +72,11 @@ func foldWork(items []proto.Item, latestPage bool) []proto.Item {
 			return it.Narration && index != latestNarration
 		case proto.KindToolUse, proto.KindToolResult, proto.KindImage: // a tool's image goes with its call
 			// a subagent's call stays on the page: the chat draws it as a card, which never folds (#5602)
-			return it.ToolUseID != "" && uses[it.ToolUseID] && results[it.ToolUseID] && !agents[it.ToolUseID]
+			use, hasUse := taskUses[it.ToolUseID]
+			result, hasResult := results[it.ToolUseID]
+			// Keep the silent receipt and its call so even a partial history replay can respect the disposition.
+			return it.ToolUseID != "" && hasUse && hasResult && !agents[it.ToolUseID] &&
+				!silentSupervisionFinish(use.ToolName, *result)
 		}
 		return false
 	}

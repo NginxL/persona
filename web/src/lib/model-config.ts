@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { MANAGER_HEADER } from "./manager-choice";
 import { api, enc } from "./api";
-import type { ProviderAPI } from "./providers";
+import type { ProviderAPI, ProviderModel } from "./providers";
 
 export interface ModelBinding {
   provider?: string;
@@ -20,7 +20,14 @@ export interface ModelProvider {
   kind: "api" | "launcher" | "plugin";
   agent?: string;
   api?: ProviderAPI;
+  /** A current hub accepts purpose effort on this Chat connection; absent on older hubs. */
+  chat_effort?: boolean;
+  /** The connection's saved default, inherited when a purpose effort is unset. */
+  effort?: string;
   model?: string;
+  models?: ProviderModel[];
+  /** Legacy Chat tier aliases resolved to the stored model IDs whose capabilities apply. */
+  model_aliases?: Record<string, string>;
   machines?: string[];
   hidden?: boolean;
   has_key?: boolean;

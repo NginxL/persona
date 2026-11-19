@@ -205,7 +205,7 @@ func TestExternalNeverEntersAutomaticFallbackCandidates(t *testing.T) {
 	if got := s.fallbackAPIProvider(t.Context()); got != "" {
 		t.Fatalf("external launcher chosen as API fallback: %s", got)
 	}
-	if names, err := s.healthLaunchers(t.Context(), "server"); err != nil || slices.Contains(names, l.Name) {
+	if names, _, err := s.healthLaunchers(t.Context(), "server"); err != nil || slices.Contains(names, l.Name) {
 		t.Fatalf("reserved managed record became a health candidate: %v %v", names, err)
 	}
 	// The manual availability-test endpoint is not permission to execute this source.

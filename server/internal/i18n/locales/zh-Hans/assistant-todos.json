@@ -9,5 +9,7 @@
   "reopen_card": "重新打开任务「{title}」",
   "supervision_needs_deployment": "已合并，仍需部署并在真实环境验证",
   "someday_closed": "只有未完成的待办才能放到「以后再做」",
-  "someday_until": "请选一个之后的时间，最晚到 9999 年"
+  "someday_until": "请选一个之后的时间，最晚到 9999 年",
+  "not_found": "这个待办已不存在",
+  "round_not_found": "待办对话里的这一段已经不在了"
 }

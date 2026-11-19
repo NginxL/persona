@@ -24,6 +24,33 @@ const (
 	MessageSendKept = "kept"
 )
 
+// Held-message reconciliation methods are used between the devices manager and the node.
+const (
+	MethodSessionEchoStatus = "session.echo_status"
+	MethodSessionSendUnseen = "session.send_unseen"
+	CodeEchoUnconfirmed     = "echo_unconfirmed"
+)
+
+// SessionEchoParams identifies one send in one session.
+type SessionEchoParams struct {
+	SessionID   string `json:"session_id"`
+	ClientMsgID string `json:"client_msg_id"`
+}
+
+// SessionEchoState describes the evidence the node has for a send.
+type SessionEchoState string
+
+const (
+	EchoSeen        SessionEchoState = "seen"
+	EchoKnownUnseen SessionEchoState = "known_unseen"
+	EchoUnknown     SessionEchoState = "unknown"
+)
+
+// SessionEchoStatus is the node's answer to a session.echo_status request.
+type SessionEchoStatus struct {
+	State SessionEchoState `json:"state"`
+}
+
 // SendTraceID is a bounded diagnostic correlation, never the original message ID.
 // Empty IDs carry no cross-process correlation; timings remain useful locally.
 func SendTraceID(id string) string {

@@ -168,8 +168,8 @@ private struct RewindDialogs: ViewModifier {
         // A session whose node declares rewind (#6294) restores files only where it says so, and has no Claude input box.
         let offer = menu.rewindOffer()
         content
-            .confirmationDialog("Rewind to Here", isPresented: Binding(get: { menu.rewinding != nil }, set: { if !$0 { menu.rewinding = nil } }),
-                                titleVisibility: .visible, presenting: menu.rewinding) { ask in
+            .accessibleConfirmationDialog("Rewind to Here", isPresented: Binding(get: { menu.rewinding != nil }, set: { if !$0 { menu.rewinding = nil } }),
+                                titleVisibility: .visible, hasCancel: true, presenting: menu.rewinding) { ask in
                 if block.isEmpty {
                     Button(Rewind.Restore.conversation.title) { menu.rewind?(ask.id, ask.text, .conversation) }
                     if offer.code {

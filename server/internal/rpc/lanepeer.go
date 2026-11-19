@@ -64,7 +64,13 @@ func (p *Peer) UpgradeLanes(ctx context.Context) error {
 		delete(p.methods, id)
 		p.mu.Unlock()
 	}()
-	params, err := marshal(lanesRequest{Versions: []int{lanesVersion}})
+	req := lanesRequest{Versions: []int{lanesVersion}}
+	p.mu.Lock()
+	if p.resume != nil {
+		req.Resume = 1 // resume.go: the other side grants it with its answer, or ignores it
+	}
+	p.mu.Unlock()
+	params, err := marshal(req)
 	if err != nil {
 		return err
 	}
@@ -118,15 +124,19 @@ func (p *Peer) answerLanes(m message) {
 	p.mu.Lock()
 	// Once only, and not while this side asks itself: both asking at once keep lines.
 	ok = ok && p.unnegotiatedLocked()
+	answer := lanesAnswer{Version: lanesVersion}
 	if ok {
 		p.lanesAsked = true
+		if token := p.grantResumeLocked(req.Resume == 1); token != "" {
+			answer.Resume = &resumeGrant{Token: token}
+		}
 	}
 	p.mu.Unlock()
 	if !ok {
 		_ = p.write(message{ID: m.ID, Error: &Error{Message: "rpc: lanes refused", Code: CodeLanesRefused}}, controlRoute)
 		return
 	}
-	result, _ := marshal(lanesAnswer{Version: lanesVersion})
+	result, _ := marshal(answer)
 	p.switchOutput(message{ID: m.ID, Result: result})
 }
 
@@ -148,6 +158,8 @@ func (p *Peer) frameWriter() *laneWriter {
 	if p.lw == nil {
 		p.lw = newLaneWriter(p.w, p.closed, p.Close, p.LineFilter)
 		p.lw.wrote = &p.lastWrite
+		p.lw.keep = p.resumeOnLocked() // resume.go: agreed before either side's first frame
+		p.lw.lose = p.lose
 	}
 	return p.lw
 }
@@ -193,11 +205,20 @@ func (p *Peer) framedInput(lr *lineReader, act *readActivity, maximum int) *fram
 	if lr.err != nil { // lr read to the end already: what is left is what it buffered, then its error
 		rest = errReader{lr.err}
 	}
-	fr := newFrameReader(io.MultiReader(bytes.NewReader(bytes.Clone(lr.buffered())), rest), maximum)
 	lw := p.frameWriter()
+	fr := newFrameReader(io.MultiReader(bytes.NewReader(bytes.Clone(lr.buffered())), rest), maximum)
 	fr.ack = lw.ack
 	fr.acked = lw.acked
 	fr.middle = lr.middle
+	p.mu.Lock()
+	if rs := p.resume; rs != nil && rs.on && lr.err == nil {
+		// resume.go: what follows is read through a transport a resume replaces, every frame acknowledged.
+		rs.sr, rs.fr = newSwapReader(p, act.r), fr
+		act.r = rs.sr
+		fr.ackAll = lw.ackAll
+		go p.watchStale(resumeStale, resumeCheck)
+	}
+	p.mu.Unlock()
 	return fr
 }
 

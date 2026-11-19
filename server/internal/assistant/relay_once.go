@@ -15,23 +15,21 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// A relayed message (drainRelays) goes in once. Its send waits a bounded time; a node slow to answer (one building a
-// long session list) may have written the line already when the time runs out. Taken as failed, the message stayed
-// queued and went in again on the next drain, and again after that while the node stayed slow: the conversation read
-// it a dozen times. Two guards:
-//   - every try of a message carries one once_id (relayMsgID), and the node sends an id once: a try while the first
-//     still runs waits for it, one after it is answered by it (node: sendsafe.go sentLog). It is not the message's
-//     client_msg_id: a line tied to one reads as the owner's own message (its source, briefs, user inputs);
-//   - a try with no answer in time looks for its line in the conversation's latest turns (relayArrived) before the
-//     message stays queued: the node may have been restarted in between, and its memory of ids with it. An older
-//     node ignores once_id; this guard still holds there.
-
-// relayCheckWait bounds the look at a conversation after a send whose outcome is in doubt.
-var relayCheckWait = 15 * time.Second
+// Every try carries the same once_id. The node keeps it for ten minutes or until restart (sentLog).
+// The queue also saves the start of a try before sending and checks the transcript when the outcome is in doubt.
+// A line can appear late even after a successful read, so both a miss and a read error get another look.
+const (
+	relayCheckWait = 15 * time.Second
+	relayLookGap   = 10 * time.Second
+	relayLookLimit = 3
+)
 
 // relayMsgID is the once_id every try of message msg to conversation to goes under: made from the message, so
 // the same after the manager restarts and for messages queued before ids existed, and different for any other one.
 func relayMsgID(to string, msg relayMsg) string {
+	if msg.OnceID != "" {
+		return msg.OnceID
+	}
 	h := sha256.New()
 	for _, part := range []string{to, msg.From, msg.Tool, msg.State, msg.At.UTC().Format(time.RFC3339Nano), msg.Text} {
 		h.Write([]byte(part))
@@ -59,92 +57,125 @@ func relayWords(s string) string {
 	return strings.TrimSpace(relayContextRe.ReplaceAllString(s, ""))
 }
 
-// relayArrived says whether message msg is in conversation to's latest turns: a line of the user's with its words,
-// written no earlier than the try that began at tried (an older one with the same words is another message), and for
-// a message from another conversation, from that conversation. A conversation that cannot be read says no: the
-// message stays queued, as before.
-func (s *Service) relayArrived(machine, to string, msg relayMsg, tried time.Time) bool {
-	want := relayWords(relayDeliveryText(msg))
-	if want == "" {
-		return false
-	}
+// relayArrived checks the latest turns for the relay's text and source since the first try that may have gone in.
+// An error means the transcript could not be read. A successful read without a match can still miss a late write.
+func (s *Service) relayArrived(machine, to string, msg relayMsg) (bool, error) {
+	text := strings.TrimSpace(relayDeliveryText(msg))
+	want := relayWords(text)
 	ctx, cancel := context.WithTimeout(context.Background(), relayCheckWait)
 	defer cancel()
 	var res struct {
 		Items []proto.Item `json:"items"`
 	}
 	if err := s.call(ctx, machine, DeviceSessionItems, map[string]any{"session_id": to, "turns": 3, "lazy_images": true}, &res); err != nil {
-		return false
+		return false, err
 	}
 	fromConversation := msg.Tool == "conversation_send" || msg.Tool == "conversation_new"
+	var onceID string
+	if want == "" {
+		onceID = relayMsgID(to, msg)
+	}
 	for _, it := range res.Items {
 		if it.Role != "user" || it.Kind != proto.KindText {
 			continue
 		}
-		if !it.TS.IsZero() && it.TS.Before(tried.Add(-relayClockSlack)) {
+		if !it.TS.IsZero() && it.TS.Before(msg.TriedAt.Add(-relayClockSlack)) {
 			continue
+		}
+		if fromConversation {
+			if src := prompts.ItemSource(it); src == nil || src.Kind != proto.SourceConversation || src.ConversationID != msg.From {
+				continue
+			}
+		}
+		if want == "" {
+			if id := prompts.RelayMessageID(it.Text); id != "" {
+				if id == onceID && it.ClientMsgID == "" {
+					return true, nil
+				}
+				continue
+			}
+			// A relay sent before ids were kept in the transcript must match its rendered context.
+			if text == "" || !strings.HasSuffix(strings.TrimSpace(it.Text), text) {
+				continue
+			}
 		}
 		if relayWords(it.Text) != want {
 			continue
 		}
-		if fromConversation {
-			if src := prompts.ParseRelaySource(it.Text); src == nil || src.ConversationID != msg.From {
-				continue // the same words from another conversation, or the owner's own
+		return true, nil
+	}
+	return false, nil
+}
+
+// lookForRelay notes a match as delivered. Otherwise it advances the relay's look schedule.
+func (s *Service) lookForRelay(machine, to string, msg *relayMsg) bool {
+	landed, err := s.relayArrived(machine, to, *msg)
+	if landed {
+		s.logf("relay to %s: a try in doubt is in the conversation, taken as delivered", short(to))
+		s.relayDelivered(context.Background(), to, *msg)
+		return true
+	}
+	if err != nil {
+		s.logf("relay to %s: transcript check failed: %v", short(to), err)
+	}
+	msg.Looks = min(msg.Looks+1, relayLookLimit)
+	msg.LookAfter = time.Now().UTC().Add(relayLookGap)
+	return false
+}
+
+// tryDirectRelay carries an immediate try's start into the queue if the send ends in doubt.
+func (s *Service) tryDirectRelay(ctx context.Context, machine, to string, msg *relayMsg) error {
+	tried := time.Now().UTC()
+	err := s.deliverRelay(ctx, machine, to, *msg)
+	if relayInDoubt(err) {
+		msg.TriedAt = tried
+		if msg.Tool == superviseTool {
+			if s.lookForRelay(machine, to, msg) {
+				return nil
 			}
+			s.releasePushes(context.Background(), to)
 		}
-		return true
 	}
-	return false
+	return err
 }
 
-// relaySettled decides a send of msg that began at tried and ended with err. In doubt and found in the conversation,
-// it went in: noted as delivered, and true. Otherwise false: still in doubt, the try is kept so the next one looks
-// before sending (relayLanded), and a supervision message lets the conversation's pushes go (deliverRelay held them
-// while in doubt).
-func (s *Service) relaySettled(machine, to string, msg relayMsg, tried time.Time, err error) bool {
+// tryQueuedRelay sends the queue head after reconciliation and updates head to its saved pre-send state.
+// A positive wait keeps the returned message queued for another drain.
+func (s *Service) tryQueuedRelay(ctx context.Context, machine, to string, head *relayMsg) (relayMsg, time.Duration, error) {
+	previous := *head
+	msg := previous
+	if msg.TriedAt.IsZero() {
+		msg.TriedAt = time.Now().UTC()
+	} else {
+		// A duplicate relay is less harmful than a lost one when there is no owner to ask. Retry under the same id.
+		s.logf("relay to %s: no match after %d transcript checks; trying again", short(to), relayLookLimit)
+	}
+	msg.Looks, msg.LookAfter = 0, time.Time{}
+
+	// The draining head is reserved for this try. A manager stopped during the send must find the mark on restart.
+	b := &s.relays
+	b.mu.Lock()
+	q := b.st.Queue[to]
+	q[0] = msg
+	err := s.saveRelayLocked()
+	if err != nil {
+		q[0] = previous
+	}
+	b.mu.Unlock()
+	if err != nil {
+		return previous, relayRetryGap, err
+	}
+	*head = msg
+	err = s.deliverRelay(ctx, machine, to, msg)
 	if !relayInDoubt(err) {
-		return false
+		// A refusal does not add any doubt. Retain the earlier try's mark, if there was one.
+		return previous, 0, err
 	}
-	if s.relayArrived(machine, to, msg, tried) {
-		s.logf("relay to %s: %v; it is in the conversation, taken as delivered", short(to), err)
-		s.relayDelivered(context.Background(), to, msg)
-		s.forgetDoubt(to, msg)
-		return true
+	if s.lookForRelay(machine, to, &msg) {
+		return msg, 0, nil
 	}
-	b := &s.relays
-	b.mu.Lock()
-	if b.doubted == nil {
-		b.doubted = map[string]time.Time{}
-	}
-	if _, ok := b.doubted[relayMsgID(to, msg)]; !ok {
-		b.doubted[relayMsgID(to, msg)] = tried
-	}
-	b.mu.Unlock()
 	if msg.Tool == superviseTool {
-		s.releasePushes(context.Background(), to) // it did not go in, as far as can be seen: no turn of its to hold
+		s.releasePushes(context.Background(), to)
 	}
-	return false
-}
-
-// relayLanded says whether an earlier try of msg that ended in doubt has gone in since: its line may come after the
-// look (relaySettled), and a node restarted in between no longer knows the once_id. Found, it is noted as delivered.
-func (s *Service) relayLanded(machine, to string, msg relayMsg) bool {
-	b := &s.relays
-	b.mu.Lock()
-	tried, ok := b.doubted[relayMsgID(to, msg)]
-	b.mu.Unlock()
-	if !ok || !s.relayArrived(machine, to, msg, tried) {
-		return false
-	}
-	s.logf("relay to %s: an earlier try in doubt is in the conversation, taken as delivered", short(to))
-	s.relayDelivered(context.Background(), to, msg)
-	s.forgetDoubt(to, msg)
-	return true
-}
-
-func (s *Service) forgetDoubt(to string, msg relayMsg) {
-	b := &s.relays
-	b.mu.Lock()
-	delete(b.doubted, relayMsgID(to, msg))
-	b.mu.Unlock()
+	return msg, relayLookGap, nil
 }

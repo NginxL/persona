@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "id": "example-preferences",
+  "revision": "revision-1",
+  "title": "Preview preferences",
+  "description": "A synthetic form used to verify the shared configuration contract.",
+  "groups": [
+    {
+      "id": "appearance",
+      "title": "Appearance",
+      "fields": [
+        {
+          "id": "compact",
+          "kind": "toggle",
+          "title": "Compact layout",
+          "description": "Use less space between rows.",
+          "default": false
+        },
+        {
+          "id": "label",
+          "kind": "text",
+          "title": "Display label",
+          "description": "The name shown above the preview.",
+          "default": "Preview",
+          "text": {
+            "placeholder": "A short label",
+            "min_length": 1,
+            "max_length": 20
+          }
+        },
+        {
+          "id": "notes",
+          "kind": "text",
+          "title": "Notes",
+          "description": "Keep a short note for this preview.",
+          "default": "",
+          "text": {
+            "multiline": true,
+            "max_length": 200
+          }
+        },
+        {
+          "id": "layout",
+          "kind": "select",
+          "title": "Layout",
+          "default": "comfortable",
+          "select": {
+            "presentation": "list",
+            "options": [
+              {
+                "value": "comfortable",
+                "title": "Comfortable",
+                "description": "More room for each item."
+              },
+              {
+                "value": "dense",
+                "title": "Dense",
+                "description": "Show more items at once."
+              }
+            ]
+          }
+        },
+        {
+          "id": "accent",
+          "kind": "select",
+          "title": "Accent",
+          "default": "blue",
+          "select": {
+            "presentation": "dropdown",
+            "options": [
+              {
+                "value": "blue",
+                "title": "Blue"
+              },
+              {
+                "value": "green",
+                "title": "Green"
+              }
+            ]
+          }
+        },
+        {
+          "id": "motion",
+          "kind": "select",
+          "title": "Motion",
+          "default": "standard",
+          "select": {
+            "presentation": "segmented",
+            "options": [
+              {
+                "value": "standard",
+                "title": "Standard"
+              },
+              {
+                "value": "reduced",
+                "title": "Reduced"
+              }
+            ]
+          }
+        },
+        {
+          "id": "sections",
+          "kind": "multiselect",
+          "title": "Visible sections",
+          "description": "Choose up to two sections.",
+          "default": [
+            "summary"
+          ],
+          "multiselect": {
+            "min_selected": 1,
+            "max_selected": 2,
+            "options": [
+              {
+                "value": "summary",
+                "title": "Summary",
+                "description": "The overview."
+              },
+              {
+                "value": "activity",
+                "title": "Activity",
+                "description": "Recent changes."
+              },
+              {
+                "value": "files",
+                "title": "Files",
+                "description": "Shared documents."
+              }
+            ]
+          }
+        },
+        {
+          "id": "interval",
+          "kind": "number",
+          "title": "Refresh interval",
+          "description": "Seconds between preview updates.",
+          "default": 30,
+          "number": {
+            "integer": true,
+            "minimum": 5,
+            "maximum": 120,
+            "step": 5
+          }
+        },
+        {
+          "id": "managed",
+          "kind": "toggle",
+          "title": "Managed preference",
+          "description": "An example of a value that cannot be edited here.",
+          "default": true,
+          "read_only": true,
+          "disabled_reason": "This preference is managed elsewhere.",
+          "details": [
+            {
+              "title": "Applies to",
+              "description": "This preview only."
+            },
+            {
+              "title": "Takes effect",
+              "description": "When a new preview opens."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "values": {
+    "compact": false,
+    "label": "Preview",
+    "notes": "",
+    "layout": "comfortable",
+    "accent": "blue",
+    "motion": "standard",
+    "sections": [
+      "summary"
+    ],
+    "interval": 30,
+    "managed": true
+  },
+  "notices": {
+    "notes": {
+      "kind": "info",
+      "message": "Notes are optional."
+    }
+  }
+}

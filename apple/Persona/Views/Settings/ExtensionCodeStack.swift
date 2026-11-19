@@ -25,7 +25,7 @@ struct CodeBlockStack: View {
 
     var body: some View {
         content
-            .confirmationDialog(pendingConfirm?.0.action.confirm ?? "", isPresented: confirming, titleVisibility: .visible) {
+            .accessibleConfirmationDialog(pendingConfirm?.0.action.confirm ?? "", isPresented: confirming, titleVisibility: .visible, hasCancel: true) {
                 if let (b, go) = pendingConfirm {
                     Button(role: b.tone == "danger" ? .destructive : nil) { go() } label: { Text(b.title).lineLimit(1) }
                         .accessibilityIdentifier("plugin-ui-confirm")

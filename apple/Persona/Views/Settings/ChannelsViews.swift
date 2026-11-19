@@ -193,7 +193,7 @@ struct ChannelDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: model.config) { await page.load() }
         .refreshable { await page.load() }
-        .confirmationDialog("Unbind \(unbindName)?", isPresented: $confirmUnbind, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Unbind \(unbindName)?", isPresented: $confirmUnbind, titleVisibility: .visible) {
             Button("Unbind", role: .destructive) { Task { await page.unbind() } }
         } message: {
             Text("It will stop passing messages to Persona, and pending answers and questions are cleared. To use it again, bind it again.")

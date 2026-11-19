@@ -6,6 +6,25 @@ import PersonaWire
 /// The main conversation's Compact Context / New Main Chat (#1762): what the chat shows for a compaction, the divider's words, and
 /// the session's `compaction` from the hub.
 struct MainConversationActionsTests {
+    @Test @MainActor func sideConversationsCanCompactButCannotReplaceOrClearTheMain() {
+        let model = AppModel()
+        model.connectOnly(.demo)
+        model.link("")?.received(HubHello(features: [
+            MainConversationActions.compactFeature, MainConversationActions.newMainFeature, "assistant_main_clear",
+        ]))
+        for id in ["example-direction", "example-side", "example-supervisor"] {
+            let key = SessionKey(machineID: "example", sessionID: id)
+            #expect(key != model.assistantMain)
+            #expect(model.canCompact(key))
+            #expect(!model.canClearMain(key))
+            #expect(!model.canStartNewMain(key))
+        }
+        #expect(!model.canCompact(nil))
+        #expect(!model.canCompact(SessionKey(group: "other", machineID: "example", sessionID: "example-side")))
+        model.link("")?.received(HubHello(features: []))
+        #expect(!model.canCompact(SessionKey(machineID: "example", sessionID: "example-direction")))
+    }
+
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func run(_ state: CompactionRun.State, finishedAgo: TimeInterval? = nil, error: String? = nil) -> CompactionRun {
         CompactionRun(state: state, error: error, startedAt: now.addingTimeInterval(-120),

@@ -7,8 +7,9 @@ import PersonaWire
 /// (schema/extension/examples/showcase/grid.json, carousel.json, home-demo.json).
 @MainActor
 struct ExtensionTilesTests {
-    private static let showcase = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().appending(path: "schema/extension/examples/showcase")
+    private static let showcase = repo.appending(path: "schema/extension/examples/showcase")
+    private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
 
     private static func items(_ name: String) throws -> [ExtensionComponent] {
         try JSONDecoder().decode(ExtensionView.self, from: Data(contentsOf: showcase.appending(path: name))).sections.flatMap(\.items)
@@ -34,5 +35,33 @@ struct ExtensionTilesTests {
         for c in tiles.compactMap(\.control) {
             #expect(c.kind == ExtensionRowControlKind.switch && c.drawable, "a tile's control is a switch: \(c.name)")
         }
+    }
+
+    @Test func gaugeRingsKeepTheTilesWordsAndReadTheSameValue() throws {
+        for name in ["View.v9-quota.json", "View.v9-gauge-percent.json"] {
+            let view = try JSONDecoder().decode(ExtensionView.self,
+                from: Data(contentsOf: Self.repo.appending(path: "schema/extension/examples/" + name)))
+            let tiles = view.sections.flatMap(\.items).flatMap { item -> [ExtensionTile] in
+                switch item {
+                case .grid(let grid): grid.tiles
+                case .carousel(let carousel): carousel.tiles
+                default: []
+                }
+            }
+            let gauge = try #require(tiles.compactMap(\.gauge).first, "\(name)")
+            let tile = try #require(tiles.first { $0.gauge != nil }, "\(name)")
+            #expect(ExtensionGaugeReading.percent(gauge.ratio) == Int((gauge.ratio * 100).rounded()))
+            #expect(ExtensionGaugeReading.center(tile, gauge: gauge) ==
+                    (tile.value?.isEmpty == false ? tile.value! : "\(ExtensionGaugeReading.percent(gauge.ratio))%"))
+            #expect(!ExtensionGaugeReading.accessibilityValue(tile, gauge: gauge).isEmpty)
+        }
+
+        let amount = ExtensionTile(title: "5 hours", value: "4.69")
+        let gauge = ExtensionGauge(ratio: 0.938, unit: "USD", color: "green")
+        #expect(ExtensionGaugeReading.accessibilityValue(amount, gauge: gauge) == "4.69 USD, 94%")
+        let percent = ExtensionTile(title: "Disk")
+        #expect(ExtensionGaugeReading.center(percent, gauge: gauge) == "94%")
+        #expect(ExtensionGaugeReading.accessibilityValue(percent, gauge: gauge) == "94%")
+        #expect(ExtensionGaugeReading.percent(-1) == 0 && ExtensionGaugeReading.percent(2) == 100)
     }
 }

@@ -190,7 +190,30 @@ struct MaxWidthLayout: Layout {
 
 extension EnvironmentValues {
     /// Opens a path mentioned in the conversation on the session's machine (set by ChatView).
-    @Entry var openFile: ((String) -> Void)? = nil
+    @Entry var openFile: FileOpener? = nil
+}
+
+/// `\.openFile`, one object for the chat's life (`ChatActions`). Handed down as a closure, SwiftUI reported it changed each
+/// time it looked: every message and work step that reads it ran its body again whenever SwiftUI looked at its inputs again,
+/// which the chat's list does for its rows as it leaves the window and comes back (three or four times on each switch
+/// between the open iPhone Duo's tabs, #10303).
+@MainActor final class FileOpener {
+    let open: (String) -> Void
+
+    init(_ open: @escaping (String) -> Void) {
+        self.open = open
+    }
+
+    func callAsFunction(_ path: String) { open(path) }
+}
+
+/// `\.loadImage`, one object for the chat's life, as `FileOpener`.
+@MainActor final class ImageLoader {
+    let load: @Sendable (String) async -> ImagePayload?
+
+    init(_ load: @escaping @Sendable (String) async -> ImagePayload?) {
+        self.load = load
+    }
 }
 
 extension EnvironmentValues {
@@ -199,7 +222,7 @@ extension EnvironmentValues {
     /// Puts an (edited) image into this chat's composer as an attachment for the next message (set by ChatView).
     @Entry var attachImage: ((UIImage) -> Void)? = nil
     /// Loads an image file on the session's machine (photos sent from the phone are saved there; set by ChatView).
-    @Entry var loadImage: (@Sendable (String) async -> ImagePayload?)? = nil
+    @Entry var loadImage: ImageLoader? = nil
     /// Fetches the whole text of an item the page cut (`Item.fullSize`), by item id (set by ChatView).
     @Entry var loadFullText: ((String) async throws -> String)? = nil
     /// Opens the full-screen image viewer from the chat page (set by ChatView). A viewer presented by the row it was
@@ -260,7 +283,7 @@ struct UserBubble: View, Equatable {
         VStack(alignment: .trailing, spacing: Theme.Space.sm) {
             if quotes.isEmpty, !parsed.refs.isEmpty { ContextGroup(refs: parsed.refs, key: item.id) }
             if !images.isEmpty, let loadImage {
-                AttachedImages(paths: images, load: loadImage)
+                AttachedImages(paths: images, load: loadImage.load)
             }
             if !d.attached.isEmpty { AttachedFileCards(files: d.attached) }
             if !shown.isEmpty || !quotes.isEmpty {
@@ -273,7 +296,7 @@ struct UserBubble: View, Equatable {
                         }
                 }
             }
-            if let openFile { FileChips(paths: d.chips, open: openFile) }
+            if let openFile { FileChips(paths: d.chips, open: openFile.open) }
             // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it; an extension opened the conversation
             // with it: 「来自 飞书 /agent」.
             if ChannelSource.possible(item.clientMsgID) {
@@ -494,7 +517,7 @@ struct UndeliveredBubble: View {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 Spacer(minLength: 40)
                 Menu {
-                    if message.gaveUp {
+                    if message.canRetry {
                         Button(action: retry) { Label("Retry", systemImage: Theme.Icon.retry) }
                     }
                     Button(role: .destructive, action: discard) { Label("Delete", systemImage: Theme.Icon.delete) }
@@ -507,10 +530,11 @@ struct UndeliveredBubble: View {
                             .contentShape(.rect)
                     }
                 }
-                .accessibilityLabel(message.gaveUp ? Text("Not delivered. Retry or delete.") : Text("Not delivered yet. It will be sent automatically."))
+                .accessibilityLabel(message.deleteOnly == true ? Text(verbatim: reason) :
+                    message.gaveUp ? Text("Not delivered. Retry or delete.") : Text("Not delivered yet. It will be sent automatically."))
                 // The menu's items as actions too (VoiceOver's Actions rotor, the Runtime CLI), as on PendingBubble.
                 .accessibilityActions {
-                    if message.gaveUp { Button("Retry", action: retry) }
+                    if message.canRetry { Button("Retry", action: retry) }
                     Button("Delete", action: discard)
                 }
                 let split = MessageComments.inBubble(shown)
@@ -523,7 +547,9 @@ struct UndeliveredBubble: View {
                     }
             }
             Group {
-                if message.gaveUp {
+                if message.deleteOnly == true {
+                    Text(verbatim: reason).foregroundStyle(Theme.danger)
+                } else if message.gaveUp {
                     Text("Not delivered: \(reason)").foregroundStyle(Theme.danger)
                 } else {
                     Text("Not delivered: \(reason). It will be sent automatically.").foregroundStyle(Theme.cautionText)
@@ -707,8 +733,8 @@ struct AssistantText: View, Equatable {
                 .messageLongPress(id: item.id, card: !boxed) { answer(d) }
             if let openFile {
                 // Documents as cards with their first page (#1543), the rest as chips.
-                FileChips(paths: d.chips, open: openFile)
-                DocumentCards(paths: d.files.filter(DocumentCards.isDocument), open: openFile)
+                FileChips(paths: d.chips, open: openFile.open)
+                DocumentCards(paths: d.files.filter(DocumentCards.isDocument), open: openFile.open)
             }
             PortChips(text: item.text ?? "")
         }

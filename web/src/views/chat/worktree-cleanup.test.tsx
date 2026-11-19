@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { cleanupReady, WorktreeCleanup, type Cleanup } from "./SessionDialogs";
+import { cleanupReady, WorktreeCleanup, type Cleanup } from "./SessionWorktreeCleanup";
 
 // The worktree a closed or deleted agent worked in (#6115): keep it by default; removing it says what it loses, with the
 // counts, and waits for the user to confirm that.
@@ -28,5 +30,18 @@ describe("WorktreeCleanup", () => {
     expect(branch).toContain("分支上有 1 个提交不在 main 上");
     // nothing to lose: no confirmation needed
     expect(cleanupReady({ ...st, dirty: 0, unmerged: 0 }, { ...remove, deleteBranch: true })).toBe(true);
+  });
+});
+
+describe("WorktreeCleanup's loading boundary", () => {
+  it("stays with the intent-loaded dialogs and out of the startup catalog", () => {
+    const eager = readFileSync(join(__dirname, "SessionDialogs.tsx"), "utf8");
+    expect(eager).not.toContain("WorktreeCleanup");
+    expect(eager).not.toContain("chat-sessiondialogs.wt_");
+    for (const name of ["CloseAgentDialog.tsx", "SessionMenuDialogs.tsx"]) {
+      expect(readFileSync(join(__dirname, name), "utf8")).toContain('from "./SessionWorktreeCleanup"');
+    }
+    const startup = JSON.parse(readFileSync(join(__dirname, "../../i18n/startup-namespaces.json"), "utf8")) as string[];
+    expect(startup).not.toContain("chat-sessiondialogs.wt_");
   });
 });

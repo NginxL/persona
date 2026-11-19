@@ -20,7 +20,7 @@ class InboxBarFixtureTest internal constructor(private val fixture: ListFixture)
         private val operations = setOf("inbox_bar", "inbox_bar_landing", "inbox_bar_search")
 
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun cases(): List<Array<Any>> = listFixtures("inbox").filter { (it[0] as ListFixture).operation in operations }
+        fun cases(): List<Array<Any>> = listFixtures("spec/fixtures/inbox").filter { (it[0] as ListFixture).operation in operations }
             .also { cases -> check(cases.map { (it[0] as ListFixture).operation }.toSet() == operations) { "Missing a section bar fixture" } }
     }
 

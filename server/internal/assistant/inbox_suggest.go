@@ -243,12 +243,25 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 		}
 	}
 	if in.Kind != "" && it.open() {
+		if from != nil {
+			for i := range it.Handoffs {
+				if it.Handoffs[i].MachineID == from.MachineID && it.Handoffs[i].SessionID == from.SessionID {
+					it.Handoffs[i].PendingSuggestion = false
+				}
+			}
+		}
 		if legacySuggestion(it) != nil {
 			it.SuggestSeq = max(it.SuggestSeq, 1)
 		}
-		it.SuggestSeq++
-		g := &InboxSuggestion{Version: it.SuggestSeq, Kind: in.Kind, Text: in.Text, Note: clip(strings.TrimSpace(in.Note), 600),
+		g := &InboxSuggestion{Version: it.SuggestSeq + 1, Kind: in.Kind, Text: in.Text, Note: clip(strings.TrimSpace(in.Note), 600),
 			Handback: in.Handback, Due: in.Due, Changes: in.Changes, At: now, Cwd: strings.TrimSpace(in.Cwd), Conversation: from}
+		if from != nil {
+			owner := *from
+			g.Owner = &owner
+		} else if it.Agent != nil {
+			g.Owner = &SessionRef{MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}
+		}
+		g.SourceOf = suggestionReplyTarget(it)
 		if in.Kind == SuggestReply && !in.Handback {
 			g.MailTarget = mailTarget(*it)
 		}
@@ -257,7 +270,14 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 				g.MachineID = m.ID
 			}
 		}
+		if samePendingReply(it, g) {
+			// The reply and its authority/target are unchanged. Keep its card/version and any failed or uncertain
+			// attempt, while still saving this call's independently supplied recap/title/relationship updates.
+			goto suggestionKept
+		}
+		it.SuggestSeq++
 		it.Suggestion = g
+		inheritReplyUncertainty(it, g, g.Text)
 		var link *InboxChainLink
 		if from == nil {
 			it.Agent.Wake, it.Agent.Back = false, ""
@@ -296,6 +316,7 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 		}
 		handed = handoffCardOf(it, g, in.Outcome)
 	}
+suggestionKept:
 	if in.Follow != nil && it.open() {
 		if g := legacySuggestion(it); g != nil {
 			it.SuggestSeq = max(it.SuggestSeq, 1)

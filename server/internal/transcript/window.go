@@ -3,11 +3,13 @@ package transcript
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"hash/crc32"
 	"io"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +32,8 @@ import (
 // shown (a repeat is dropped) and the calls they name, the reports subagents handed back before their
 // notification, and the last "! cmd" input (its output line becomes the call) are read from the earlier lines that
 // mention them, as is ultracode's pending command (its delayed attachment repeats command output), and the request
-// whose usage the lines just before put on items (a reply's blocks are lines of their own; item_usage.go).
+// whose usage the lines just before put on items (a reply's blocks are lines of their own; item_usage.go), and the
+// backgrounded Codex commands still running (their terminal record gives only the result, codexPendingAt).
 // Those lines are found by a byte search while counting lines, so a Claude window may start at any line; a
 // Codex rollout records an item twice only within its turn, so its windows start at a turn (task_started).
 
@@ -44,9 +47,11 @@ type window struct {
 	notif     []notifSeed
 	bash      []int // lines mentioning a "! cmd" (input or output)
 	ultracode []int // lines mentioning ultracode attachments or local command output
-	codex     bool
-	start     int             // the first window's first line: the File's meta parses from there
-	ids       map[string]bool // tasks whose earlier notifications the File's meta has seen
+	// background: lines mentioning a backgrounded Codex command (codexPendingAt); none in most rollouts.
+	background []int
+	codex      bool
+	start      int             // the first window's first line: the File's meta parses from there
+	ids        map[string]bool // tasks whose earlier notifications the File's meta has seen
 }
 
 // notifSeed is a line mentioning a background-task notification, or a subagent handing its report back, and the
@@ -67,44 +72,64 @@ var (
 	seedAgentID      = []byte(`agentId:`)
 	seedAgentRecord  = []byte(`"agentId"`)
 	seedPeer         = []byte(`"peer"`)
+	seedBackgrounded = []byte(`"backgrounded"`)
+	// seedMarkers are what scanLines looks for; seedBackgrounded stays last (it is left out of a Claude transcript).
+	seedMarkers = [][]byte{seedNotification, seedBash, seedUltracode, seedStdout, seedHandback, seedAgent, seedTask, seedAgentID,
+		seedAgentRecord, seedPeer, seedBackgrounded}
 )
 
 // scanLines reads a file once without parsing it: where each complete line starts, which lines mention a seed marker,
 // the first line, and where the last complete line ends (what follows is a line still being written). Big blocks and
 // byte searches: a few hundred MB in a fraction of a second.
-func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash, ultracode []int, first []byte, lastNL int64, err error) {
+func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash, ultracode, background []int, first []byte, lastNL int64, err error) {
 	const block = 4 << 20
 	keep := int64(max(len(seedNotification), len(seedStdout), len(seedHandback)) - 1) // a marker split across two blocks
 	buf := make([]byte, block+keep)
 	type hit struct {
-		off       int64
-		id        string // a notification's task id; bash: "!"
-		bash      bool
-		ultracode bool
+		off        int64
+		id         string // a notification's task id; bash: "!"
+		bash       bool
+		ultracode  bool
+		background bool
 	}
 	var hits []hit
 	starts = append(starts, 0)
 	firstDone := false
+	claude := false // the first line is read and is no Codex rollout's
 	for off := int64(0); off < size; off += block {
 		n := min(block+keep, size-off)
 		if _, err := fh.ReadAt(buf[:n], off); err != nil && err != io.EOF {
-			return nil, nil, nil, nil, nil, 0, err
+			return nil, nil, nil, nil, nil, nil, 0, err
 		}
 		data := buf[:n]
 		own := min(int64(block), n) // bytes this block owns; the rest is the next block's start, read for markers
-		for _, m := range [][]byte{seedNotification, seedBash, seedUltracode, seedStdout, seedHandback, seedAgent, seedTask, seedAgentID, seedAgentRecord, seedPeer} {
+		if !firstDone {
+			if j := bytes.IndexByte(data[:own], '\n'); j >= 0 {
+				first, firstDone = append(first, data[:j]...), true
+				claude = !isCodexLine(first)
+			} else {
+				first = append(first, data[:own]...)
+			}
+		}
+		markers := seedMarkers
+		if claude {
+			markers = markers[:len(markers)-1] // only a Codex rollout backgrounds commands: a Claude transcript pays nothing
+		}
+		for _, m := range markers {
 			for i := 0; ; {
 				j := bytes.Index(data[i:], m)
 				if j < 0 || int64(i+j) >= own {
 					break
 				}
-				h := hit{off: off + int64(i+j), bash: bytes.Equal(m, seedBash), ultracode: bytes.Equal(m, seedUltracode) || bytes.Equal(m, seedStdout)}
+				h := hit{off: off + int64(i+j), bash: bytes.Equal(m, seedBash), ultracode: bytes.Equal(m, seedUltracode) || bytes.Equal(m, seedStdout),
+					background: bytes.Equal(m, seedBackgrounded)}
+				// A backgrounded command's id, and whether the line is one, are read with the line (codexPendingAt).
 				if bytes.Equal(m, seedHandback) {
 					near := data[i+j+len(m) : min(len(data), i+j+len(m)+200)]
 					if z := bytes.IndexByte(near, '"'); z > 0 {
 						h.id = string(near[:z])
 					}
-				} else if !h.bash && !h.ultracode { // the task id follows the marker: "<task-notification>\n<task-id>…</task-id>"
+				} else if !h.bash && !h.ultracode && !h.background { // the task id follows the marker: "<task-notification>\n<task-id>…</task-id>"
 					near := data[i+j : min(len(data), i+j+300)]
 					if a := bytes.Index(near, []byte("<task-id>")); a >= 0 {
 						if z := bytes.Index(near[a:], []byte("</task-id>")); z > 0 {
@@ -114,13 +139,6 @@ func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash
 				}
 				hits = append(hits, h)
 				i += j + 1
-			}
-		}
-		if !firstDone {
-			if j := bytes.IndexByte(data[:own], '\n'); j >= 0 {
-				first, firstDone = append(first, data[:j]...), true
-			} else {
-				first = append(first, data[:own]...)
 			}
 		}
 		for i := int64(0); i < own; {
@@ -140,7 +158,11 @@ func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash
 			break
 		}
 		line := sort.Search(len(starts), func(i int) bool { return starts[i] > h.off }) // 1-based line holding h
-		if h.ultracode {
+		if h.background {
+			if len(background) == 0 || background[len(background)-1] != line {
+				background = append(background, line)
+			}
+		} else if h.ultracode {
 			if len(ultracode) == 0 || ultracode[len(ultracode)-1] != line {
 				ultracode = append(ultracode, line)
 			}
@@ -163,13 +185,13 @@ func scanLines(fh *os.File, size int64) (starts []int64, notif []notifSeed, bash
 			notif = append(notif, notifSeed{line, h.id})
 		}
 	}
-	return starts, notif, bash, ultracode, first, lastNL, nil
+	return starts, notif, bash, ultracode, background, first, lastNL, nil
 }
 
 // openWindow reads a big file cold: counts its lines, parses the window at its end. ok is false when no turn start
 // is close enough to the end to make a window worth it (the caller reads the file whole). Callers hold f.mu.
 func (f *File) openWindow(fh *os.File, size int64) (fresh []proto.Item, ok bool, err error) {
-	starts, notif, bash, ultracode, first, lastNL, err := scanLines(fh, size)
+	starts, notif, bash, ultracode, background, first, lastNL, err := scanLines(fh, size)
 	if err != nil {
 		return nil, false, err
 	}
@@ -177,7 +199,7 @@ func (f *File) openWindow(fh *os.File, size int64) (fresh []proto.Item, ok bool,
 	if n == 0 {
 		return nil, false, nil
 	}
-	w := &window{starts: starts, notif: notif, bash: bash, ultracode: ultracode, codex: isCodexLine(first)}
+	w := &window{starts: starts, notif: notif, bash: bash, ultracode: ultracode, background: background, codex: isCodexLine(first)}
 	// The window starts at the line windowBytes before the end (Codex: the turn starting there or before).
 	from := sort.Search(n, func(i int) bool { return starts[i] >= size-windowBytes })
 	b := max(from, 1)
@@ -389,12 +411,102 @@ func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) M
 			return lastMentionWithin(fh, w.starts, at, max(at-seedCodexSearch, 0), [][]byte{codexTokenCount})
 		},
 	}, b, w.codex)
+	var pending map[string]bool
+	var pendingIDs []string
+	if w.codex {
+		pending, pendingIDs = f.codexPendingAt(fh, w, b, end, readLine)
+	}
 	// A subagent's own work starts at its first user line (a fork's copied context is its first two lines at most): a
-	// later window is past it.
+	// later window is past it. A window at the second line is past it when the first line is the subagent's prompt.
+	sawUser := b > 2
+	if b == 2 && f.meta.Sidechain {
+		if line := readLine(1); line != nil {
+			probe := Meta{Sidechain: true}
+			ParseLine(1, line, &probe)
+			sawUser = probe.sawUser
+		}
+	}
 	return Meta{Sidechain: f.meta.Sidechain, Codex: w.codex, notified: scratch.notified, taskCalls: scratch.taskCalls,
 		handbacks: scratch.handbacks, agentCalls: scratch.agentCalls, bashInput: bash,
 		Ultracode: ultra.Ultracode, UltracodeAt: ultra.UltracodeAt, UltracodeSince: ultra.UltracodeSince, ultracodeCommand: ultra.ultracodeCommand,
-		usage: usage, codexTotal: tokenuse.CodexTotalFrom(codexTotal), sawUser: b > 2}
+		usage: usage, codexTotal: tokenuse.CodexTotalFrom(codexTotal), sawUser: sawUser,
+		codexPending: pending, codexPendingIDs: pendingIDs}
+}
+
+// codexPendingAt is the backgrounded Codex commands a full read has pending when it reaches line b: started in the
+// background (codexCommandLines) with no terminal record yet. A window starting with them gives only the result of
+// their terminal record, under the call an earlier window shows (#10817). Only the lines that mention such a command
+// are read: the backgrounded records scanLines found, and back from b to the turn of each command's last one, the lines
+// naming its id. That last record leaves the command pending unless a terminal record for it is in that turn (before
+// it: the repeat is dropped as one already finished; after it: it finished) or in a later turn before b. Rollouts
+// with no backgrounded command before b read nothing.
+func (f *File) codexPendingAt(fh *os.File, w *window, b int, end int64, readLine func(int) []byte) (map[string]bool, []string) {
+	last := map[string]int{} // a command's last backgrounded record before b
+	for _, n := range w.background {
+		if n >= b {
+			break
+		}
+		line := readLine(n)
+		if line == nil {
+			continue
+		}
+		items := ParseLine(n, line, &Meta{Codex: true})
+		for _, it := range items {
+			if it.Kind == proto.KindToolUse && it.ToolUseID != "" && !slices.ContainsFunc(items, func(r proto.Item) bool {
+				return r.Kind == proto.KindToolResult && r.ToolUseID == it.ToolUseID
+			}) {
+				last[it.ToolUseID] = n
+			}
+		}
+	}
+	if len(last) == 0 {
+		return nil, nil
+	}
+	turn := map[string]int{} // the line starting the turn of a command's last backgrounded record
+	floor := int64(-1)
+	var needles [][]byte
+	for id, n := range last {
+		t := max(f.findTurn(fh, w, n, w.lineStart(n+1, end), 0), 1)
+		turn[id] = t
+		if floor < 0 || w.starts[t-1] < floor {
+			floor = w.starts[t-1]
+		}
+		needles = append(needles, quoteID(id))
+	}
+	finished := map[string]bool{}
+	for at := w.starts[b-1]; at > floor && len(finished) < len(last); {
+		m := lastMentionWithin(fh, w.starts, at, floor, needles)
+		if m == 0 {
+			break
+		}
+		if line := readLine(m); line != nil {
+			for _, it := range ParseLine(m, line, &Meta{Codex: true}) {
+				if it.Kind == proto.KindToolResult && last[it.ToolUseID] > 0 && m >= turn[it.ToolUseID] {
+					finished[it.ToolUseID] = true
+				}
+			}
+		}
+		at = w.starts[m-1]
+	}
+	var ids []string
+	for id := range last {
+		if !finished[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// oldest first, as a full read queues them; the cap keeps the newest (codexPendingAdd)
+	slices.SortFunc(ids, func(a, b string) int { return cmp.Compare(last[a], last[b]) })
+	if len(ids) > codexPendingKept {
+		ids = ids[len(ids)-codexPendingKept:]
+	}
+	pending := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		pending[id] = true
+	}
+	return pending, ids
 }
 
 // codexTokenCount marks a rollout's token_count line (seedCodexTotal).

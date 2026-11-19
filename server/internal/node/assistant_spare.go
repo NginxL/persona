@@ -79,6 +79,17 @@ func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) er
 	execution.MainCompactWindow = n.mainWindowOn(launcher, execution.IsMain, execution.MainCompactWindow)
 	if agent, err := n.assistantAgent(context.Background(), launcher); err != nil {
 		return err
+	} else if agent == "claude" && execution.Interactive {
+		// No spare for interactive Claude Code (assistant_tui.go): it would start before its conversation's mode is
+		// known, and one in print mode would be adopted by a conversation that asked for interactive.
+		n.mu.Lock()
+		old := n.spare
+		n.spare = nil
+		n.mu.Unlock()
+		if old != nil {
+			old.stop()
+		}
+		return nil
 	} else if agent == "claude" {
 		execution.ConfigDir, err = n.assistantProfileSelection(context.Background(), "", launcher, execution.ConfigDir, false)
 		if err != nil {

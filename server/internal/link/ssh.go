@@ -727,7 +727,7 @@ func tunnelClient(c *Config, t *sshTunnel) *http.Client {
 					}
 				}
 				tc := tls.Client(raw, tlsCfg)
-				if err := tc.HandshakeContext(ctx); err != nil {
+				if err := tracedHandshake(ctx, tc); err != nil {
 					_ = raw.Close()
 					return nil, t.wrapHandshakeError(ctx, err)
 				}
@@ -759,10 +759,10 @@ func dialSSH(ctx context.Context, c *Config, sshBin string) (*link, error) {
 		base := tunnelBaseURL(c, *cfg)
 		actx, acancel := context.WithTimeout(ctx, dialTimeout)
 		client := tunnelClient(c, t)
-		conn, resp, err := websocket.Dial(actx, wsURL(base, Path), &websocket.DialOptions{
+		conn, resp, err := diagnosticDial(actx, wsURL(base, Path), &websocket.DialOptions{
 			HTTPClient: client,
 			HTTPHeader: bearer(c.Token),
-		})
+		}, "control", KindSSH, attempt+1)
 		acancel()
 		if err != nil {
 			retryBind := attempt == 0 && t.isDone() && t.localBindBusy()

@@ -2,19 +2,20 @@
 // computed from the agents a card has, so a card moves as its agents change, and nothing is persisted for them.
 // Needs you → Working → To review → Idle; reviewing and clearing a card is the existing Archive action.
 import { stateOf } from "./format";
+import { justFinished } from "./agent-groups";
 import { sameDirectory } from "./workspace-board";
-import { todoStatus, type SessionLookup, type Todo } from "./todos";
+import { acceptedAtRest, awaitsReview, todoStatus, type SessionLookup, type Todo } from "./todos";
 import type { BoardCard } from "./workspace-board";
 import type { Session } from "./types";
 
 export type AutoLane = "needs_you" | "working" | "review" | "idle";
 export const AUTO_LANES: readonly AutoLane[] = ["needs_you", "working", "review", "idle"];
 
-/** A card's lane: the most urgent thing any of its agents says. No agents, or only offline ones: idle. */
+/** A card's lane: the most urgent thing any of its agents says. Seen, idle and offline history stays in Idle. */
 export function autoLaneOf(sessions: readonly Session[]): AutoLane {
   if (sessions.some((s) => stateOf(s) === "needs_you")) return "needs_you";
   if (sessions.some((s) => stateOf(s) === "working")) return "working";
-  if (sessions.some((s) => stateOf(s) !== "offline")) return "review";
+  if (sessions.some((s) => stateOf(s) === "unread" || justFinished(s))) return "review";
   return "idle";
 }
 
@@ -81,17 +82,20 @@ export function workspaceItem(card: BoardCard, sessions: readonly Session[]): Wo
 
 export function sessionItem(s: Session): WorkItem {
   const st = stateOf(s);
-  const lane: WorkLane = st === "needs_you" ? "needs_you" : st === "working" ? "working" : st === "offline" ? "idle" : "review";
+  const lane: WorkLane = st === "needs_you" ? "needs_you" : st === "working" ? "working" : st === "unread" || justFinished(s) ? "review" : "idle";
   return { kind: "session", id: `session:${s.machine_id}/${s.session_id}`, lane, title: s.title || s.session_id, activity: autoActivity([s]), pinned: false, session: s };
 }
 
-/** A to-do follows todoStatus: what needs an answer is Needs you, finished work is To review, the rest is Planned. */
+/** A to-do waits for review only while its owner review or finished-unseen result stands; accepted and closed work is history. */
 export function todoItem(t: Todo, lookup?: SessionLookup): WorkItem {
   const st = todoStatus(t, lookup);
   const lane: WorkLane =
     st === "needs_you" || st === "interrupted" || st === "usage_limit" || st === "failed" ? "needs_you"
     : st === "working" ? "working"
-    : st === "done" || st === "unread" ? "review"
+    : st === "done" ? "idle"
+    : awaitsReview(t, st) ? "review"
+    : acceptedAtRest(t, st) ? "idle"
+    : st === "unread" ? "review"
     : "planned";
   return { kind: "todo", id: `todo:${t.id}`, lane, title: t.title, activity: Date.parse(t.updated_at ?? "") || 0, pinned: false, todo: t };
 }

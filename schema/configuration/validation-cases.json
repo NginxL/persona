@@ -1,0 +1,448 @@
+{
+  "cases": [
+    {
+      "name": "all_types",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "compact": true,
+          "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "notes": "First line\nSecond line",
+          "layout": "dense",
+          "accent": "green",
+          "motion": "reduced",
+          "sections": [
+            "files",
+            "summary"
+          ],
+          "interval": 35
+        }
+      },
+      "code": ""
+    },
+    {
+      "name": "empty_text",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "notes": ""
+        }
+      },
+      "code": ""
+    },
+    {
+      "name": "reset",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "reset": [
+          "label",
+          "layout"
+        ]
+      },
+      "code": ""
+    },
+    {
+      "name": "toggle_is_not_a_string",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "compact": "true"
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "compact",
+          "code": "type"
+        }
+      ]
+    },
+    {
+      "name": "null_is_not_reset",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "label": null
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "label",
+          "code": "type"
+        }
+      ]
+    },
+    {
+      "name": "unicode_scalar_max",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "label",
+          "code": "max_length"
+        }
+      ]
+    },
+    {
+      "name": "empty_required_text",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "label": ""
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "label",
+          "code": "min_length"
+        }
+      ]
+    },
+    {
+      "name": "unknown_choice",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "layout": "future"
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "layout",
+          "code": "option"
+        }
+      ]
+    },
+    {
+      "name": "duplicate_multiselect",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "sections": [
+            "summary",
+            "summary"
+          ]
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "sections",
+          "code": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "unknown_multiselect",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "sections": [
+            "unknown"
+          ]
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "sections",
+          "code": "option"
+        }
+      ]
+    },
+    {
+      "name": "empty_multiselect",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "sections": []
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "sections",
+          "code": "min_selected"
+        }
+      ]
+    },
+    {
+      "name": "too_many_multiselect",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "sections": [
+            "summary",
+            "activity",
+            "files"
+          ]
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "sections",
+          "code": "max_selected"
+        }
+      ]
+    },
+    {
+      "name": "null_multiselect_item",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "sections": [
+            null
+          ]
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "sections",
+          "code": "type"
+        }
+      ]
+    },
+    {
+      "name": "fractional_integer",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "interval": 5.5
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "interval",
+          "code": "integer"
+        }
+      ]
+    },
+    {
+      "name": "below_minimum",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "interval": 4
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "interval",
+          "code": "minimum"
+        }
+      ]
+    },
+    {
+      "name": "above_maximum",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "interval": 121
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "interval",
+          "code": "maximum"
+        }
+      ]
+    },
+    {
+      "name": "step_is_a_hint",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "interval": 6
+        }
+      },
+      "code": ""
+    },
+    {
+      "name": "readonly_change",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "managed": false
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "managed",
+          "code": "read_only"
+        }
+      ]
+    },
+    {
+      "name": "readonly_reset",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "reset": [
+          "managed"
+        ]
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "managed",
+          "code": "read_only"
+        }
+      ]
+    },
+    {
+      "name": "unknown_id",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "missing": true
+        }
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "missing",
+          "code": "unknown"
+        }
+      ]
+    },
+    {
+      "name": "change_and_reset",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "label": "New"
+        },
+        "reset": [
+          "label"
+        ]
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "label",
+          "code": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "duplicate_reset",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "reset": [
+          "label",
+          "label"
+        ]
+      },
+      "code": "configuration_invalid",
+      "field_errors": [
+        {
+          "id": "label",
+          "code": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "wrong_resource",
+      "update": {
+        "schema_version": 1,
+        "id": "another-resource",
+        "revision": "revision-1",
+        "changes": {
+          "compact": true
+        }
+      },
+      "code": "configuration_conflict"
+    },
+    {
+      "name": "stale_revision",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "old",
+        "changes": {
+          "compact": true
+        }
+      },
+      "code": "configuration_conflict"
+    },
+    {
+      "name": "unknown_version",
+      "update": {
+        "schema_version": 2,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {
+          "compact": true
+        }
+      },
+      "code": "configuration_version"
+    },
+    {
+      "name": "empty_update",
+      "update": {
+        "schema_version": 1,
+        "id": "example-preferences",
+        "revision": "revision-1",
+        "changes": {}
+      },
+      "code": "configuration_invalid"
+    }
+  ]
+}

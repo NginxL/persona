@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentId, agentLetter, agentName, isMarked, MARKED_AGENTS, markId, providerAgent, sessionAgent, sessionAgentName } from "./agent-kind";
+import { agentId, agentLetter, agentName, isMarked, markId, providerAgent, sessionAgent, sessionAgentName } from "./agent-kind";
 
 describe("agentId", () => {
   it("reads nothing as Claude Code and folds the other names of a program into one", () => {
@@ -15,13 +15,14 @@ describe("agentId", () => {
 
   it("keeps any other agent as it is", () => {
     expect(["traex", "dsh", "amp"].map(agentId)).toEqual(["traex", "dsh", "amp"]);
-    expect(["traex", "dsh", "amp"].some(isMarked)).toBe(false);
+    expect(["traex", "omp", "amp"].some(isMarked)).toBe(false);
   });
 });
 
 describe("agentName", () => {
   it("names the known agents by their product", () => {
-    expect(MARKED_AGENTS.map((a) => agentName(a))).toEqual(["Claude Code", "Codex", "opencode", "pi", "Gemini CLI", "Cursor", "TRAE"]);
+    expect(["claude", "codex", "opencode", "pi", "gemini", "cursor", "trae"].map((a) => agentName(a)))
+      .toEqual(["Claude Code", "Codex", "opencode", "pi", "Gemini CLI", "Cursor", "TRAE"]);
     expect(agentName("traex")).toBe("TRAEX");
     expect(agentName("")).toBe("Claude Code");
   });
@@ -76,9 +77,12 @@ describe("providerAgent", () => {
 describe("markId", () => {
   it("draws the mark a name says when the agent has none of its own (#8142)", () => {
     expect(["Cursor", "TRAE CLI", "OpenCode", "Pi", "Gemini"].map((l) => markId("paseo", l))).toEqual(["cursor", "trae", "opencode", "pi", "gemini"]);
-    expect(markId("paseo", "Grok")).toBe("paseo");
+    expect(markId("paseo", "Grok · Official")).toBe("grok");
+    expect(["grok-chat", "grok-cli", "Grok Build", "Google Antigravity", "DeepSeek Harness", "Kimi CLI", "GitHub Copilot CLI"]
+      .map((name) => markId(name))).toEqual(["grok", "grok", "grok", "agy", "dsh", "kimi", "copilot"]);
     expect(markId("paseo", "Oh My Pi")).toBe("paseo");
     expect(markId("paseo", "  ")).toBe("paseo");
+    expect(markId("paseo", "· Official")).toBe("paseo");
     expect(markId("paseo")).toBe("paseo");
     // an agent with a mark of its own keeps it, whatever its label says
     expect(markId("codex", "Cursor")).toBe("codex");

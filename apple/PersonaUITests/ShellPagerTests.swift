@@ -13,13 +13,15 @@ final class ShellPagerTests: XCTestCase {
         continueAfterFailure = false
     }
 
-    @MainActor private func launch(_ extra: [String] = []) {
+    @MainActor private func launch(_ extra: [String] = [], hub: String? = nil, settle: Bool = true) {
         app = XCUIApplication()
         // Not a chat an earlier test left open on Agents (it comes back when Agents is first built).
-        app.launchArguments = ["-demo.on", "YES", "-probes", "YES", "-newAssistant", "YES", "-dev.openChat", ""] + extra
+        let pair = hub.map { "persona://pair?url=" + $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock" }
+        app.launchArguments = (pair.map { ["-pairURL", $0] } ?? [])
+            + ["-demo.on", hub == nil ? "YES" : "NO", "-probes", "YES", "-newAssistant", "YES", "-dev.openChat", ""] + extra
         app.launchPinned()
         XCTAssertTrue(app.buttons["assistant-sidebar-button"].firstMatch.waitForExistence(timeout: 15), "no shell")
-        sleep(1)
+        if settle { sleep(1) }
     }
 
     /// Attached to the run; with TEST_RUNNER_PERSONA_SHOTS=<dir> also saved there (TEST_RUNNER_PERSONA_STYLE names it).
@@ -63,6 +65,58 @@ final class ShellPagerTests: XCTestCase {
         drag(from: CGVector(dx: 0.85, dy: 0.45), to: CGVector(dx: 0.1, dy: 0.45))
         expectAgents(true, "a drag to the left on 助手")
         XCTAssertTrue(app.buttons["agents-new"].firstMatch.waitForExistence(timeout: 3), "no 新建会话 on Agents")
+    }
+
+    /// #9961 AC1: the held strip must not leave the visible main composer beyond a first tap's reach.
+    @MainActor func testComposerFirstTapAfterHeldStrip() {
+        var args = ["-showShellPagerAt", "0.3"]
+        if ProcessInfo.processInfo.environment["PERSONA_LARGE_TEXT"] == "1" {
+            args += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        launch(args)
+        sleep(1) // the fixture holds the strip one second after the shell appears
+        attachScreen("composer-held-strip")
+        let field = app.descendants(matching: .any)["shell-composer-field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "no main-conversation composer")
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the composer's first tap did not open the keyboard")
+        let probe = "pager probe 9961"
+        field.typeText(probe)
+        XCTAssertEqual(field.value as? String, probe, "the composer did not accept the probe")
+        XCTAssertTrue(app.expectShell(agents: false, "the composer recovered"), app.shellTrace)
+        attachScreen("composer-held-strip-keyboard")
+    }
+
+    @MainActor func testRecoveryExposesOnlyTheDragStartingPage() {
+        launch(["-showShellPagerAt", "0.7"])
+        sleep(1)
+        let destination = app.buttons["agents.filter.unread"].firstMatch
+        destination.tap()
+        XCTAssertFalse(destination.isSelected, "the destination page took a tap while recovery returned to Assistant")
+        let field = app.descendants(matching: .any)["shell-composer-field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "the starting page's composer is not exposed")
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the starting page's composer did not focus")
+    }
+
+    /// #9961 AC2: a full-screen interruption cancels a real drag; Hang Up must restore first-tap composer focus.
+    @MainActor func testComposerFirstTapAfterUrgentCallInterruptsDrag() throws {
+        guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else { throw XCTSkip("needs mock Hub") }
+        launch(["-tab", "assistant", "-showUrgentCallSample", "YES"], hub: hub, settle: false)
+        let w = app.windows.firstMatch
+        w.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.45)),
+                   withVelocity: .slow, thenHoldForDuration: 4)
+        let hangUp = app.buttons["urgentCall.hangUp"].firstMatch
+        XCTAssertTrue(hangUp.waitForExistence(timeout: 30), "the urgent call did not interrupt the drag\n\(app.debugDescription)")
+        hangUp.tap()
+        XCTAssertTrue(hangUp.waitForNonExistence(timeout: 10), "the urgent call did not dismiss")
+        let field = app.descendants(matching: .any)["shell-composer-field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "no main-conversation composer after Hang Up")
+        XCTAssertTrue(field.isHittable, "the composer is not in reach after Hang Up: \(app.shellTrace)")
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
+                      "the composer's first tap after Hang Up did not open the keyboard: \(app.shellTrace)")
     }
 
     @MainActor func testDragLeftOnTheAssistantAndRightOnAgents() {

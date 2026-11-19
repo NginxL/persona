@@ -361,7 +361,7 @@ func TestWindowsAdoptedPowerShellPaneUsesHandoff(t *testing.T) {
 			if want := n.agentStartCommand("claude --session-id "+startID, shellQuote, newPane...); cmd != want {
 				t.Fatalf("start file command = %q, want a new PowerShell pane's %q", cmd, want)
 			}
-			if !strings.HasPrefix(cmd, "unset ") || !strings.Contains(cmd, "PERSONA_HOME="+shellQuote(n.dir)+" claude ") {
+			if !strings.HasPrefix(cmd, "unset ") || !strings.Contains(cmd, "PERSONA_HOME="+shellQuote(n.dir)+" "+agentMarkEnv+" claude ") {
 				t.Fatalf("start file lost the PERSONA_HOME / unset prefix: %q", cmd)
 			}
 			typed, err := n.typeStart(ctx, launch, created, "w1", startID, cmd, shells...)
@@ -489,7 +489,7 @@ func TestWindowsRunAgentHereInPowerShellUsesHandoff(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(files) != 1 || !strings.Contains(files[0], "PERSONA_HOME="+shellQuote(n.dir)+" cursor-agent") ||
+	if len(files) != 1 || !strings.Contains(files[0], "PERSONA_HOME="+shellQuote(n.dir)+" "+agentMarkEnv+" cursor-agent") ||
 		strings.Contains(files[0], "HERDR_AGENT=") {
 		t.Fatalf("start files = %q, want the POSIX cursor-agent command a new PowerShell pane gets", files)
 	}

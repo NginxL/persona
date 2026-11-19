@@ -134,6 +134,8 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "schedule_fired")
 	case strings.HasPrefix(s, transcript.PaseoScheduleNotice+"："):
 		return tt(l, "schedule_fired_what", i18n.Args{"what": strings.TrimPrefix(s, transcript.PaseoScheduleNotice+"：")})
+	case s == i18n.T(i18n.Default, "node-engine.agy_pane_integration"):
+		return i18n.T(l, "node-engine.agy_pane_integration")
 	}
 	return s
 }

@@ -1,11 +1,18 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- Persist a complete delivery round before its first external send (#10393). Saving only when the call returns handles a returned error but loses the result if the manager exits inside the call, after task acceptance has committed. Keep the original timestamp/key and acceptance metadata on disk while retaining an in-memory claim to block overlapping sends. Every other book save must preserve that prepared record too; retry must not send from memory when its preparation could not be saved. Use a child-process exit at the real provider boundary and a fresh manager on the same disposable database to prove recovery, with the returned-error case as a control.
+- A review wake is not a completion verdict (#8373). PR events and judged-done candidates share the same signal. Keep its wording neutral, preserve the actual reason and criterion evidence, and leave acceptance gates and display grouping unchanged.
+
 - Snapshot display projections must not initialize the knowledge base (#10108). Publication already holds
   `pubMu`; read an already-open engine and retain the canonical cached project-name fallback rather than calling
   an accessor that may initialize storage. Let direction synchronization refresh project names asynchronously.
   Keep a regression proving that building a snapshot leaves an unopened knowledge base unopened.
 
 - A terminal review covers its criteria, not every later scope (#6880). Explicitly replacing criteria on an open, previously accepted or cancelled task must invalidate its terminal supervision state; otherwise unfinished or unjudged follow-up work is silently suppressed. Keep review history and unchanged criteria's evidence. Metadata-only changes and ordinary follow-up conversation do not invalidate the review, and existing stale records still need a real supervisor review rather than an automatic migration.
+
+- A nearby empty turn is not proof that a PR event reached an Agent (#10050). Match the actual input and source association: an owner may have explicitly asked for no reply. Record external delivery provenance before sending, keep transport distinct from acknowledgement, and persist the bounded retry before making it. A feed write failing after the node accepts delivery does not undo that receipt: retain the event and wait for its actual turn, not a false redelivery failure. Pin redelivery and completion to the recorded recipient, including recovery while a peer works; another Agent's newer row is not this event's turn. Trim paged items to the current turn before interpreting a stop. A still-unhandled source must survive both duplicate completions and a manager reload, independently of ordinary Inbox signals; ordinary owner input must never spend its retry.
+
+- External-event escalations must keep their source and recipient identity (#10050). Render the failed source against that recorded recipient, not whichever Agent now has the newest reply. Its escalation also needs a task-bounded, per-source fingerprint: a process-local sent cache and short semantic window replay failures after a restart, and a successor Agent or ordinary Inbox message must not change that identity. Reuse delivery reservation rollback and keep unsent sources pending for revalidation, rather than merging them into rendered relay queues whose enqueue result does not prove persistence. Recover every eligible recorded recipient independently, with per-recipient look/backoff and serialized task reads; the first unreadable transcript must not monopolize recovery. An owner wait may discard a rendered signal, not its persisted source: restore it on the next sweep and deduplicate actual delivery durably instead of trusting a sent marker written before validation.
 
 - Process lifetime is not model-health evidence (#8480). Keep an observed completed answer and its original timestamp independently of the live session row. Otherwise releasing an idle process drops the only recovery evidence while an older failed probe remains, reviving an already repaired authentication error. Capture completed-turn evidence without requiring a client poll, scope it to the model binding, retire superseded probes and let newer failures win. Failed persistence must remain retryable.
 - A retry that puts a failed send back for the next digest must first ask whether the next try can succeed (#8518).
@@ -35,6 +42,11 @@
   back onto the presence window, or the cap is not authoritative. The gate is memory-only on purpose: a restart
   degrades to the persisted presence window. Update the time-window tests by shortening the new limits in lockstep
   with the presence timers instead of waiting real minutes.
+
+- A delivered Inbox note is not automatically a reason to wake its supervisor (#9916). Keep the routed task feed,
+  but suppress the successful copy only for active work, checking waits before and after the send. Preserve failed
+  delivery and parked/review fallbacks. Scope and claimed-owner requests need the Agent's full-thread judgment and
+  an urgent-by-default supervisor question, not a keyword classifier over a clipped preview.
 
 - Inbox handling chats are implementation details, not user-created conversations (#5723). `Untitled` suppresses
   automatic naming but does not hide a chat, and `titleFixed` still gives it the item's subject. Apply default
@@ -418,6 +430,10 @@ its task decision together before sending it to a hook. A plan approval must sel
 mode can fall back to bypass permissions on the node. Count confirmation dispatch at `tellUser`, not interaction
 creation or app presentation; quiet tasks and supervisor routing also show cards without ringing the user.
 
+## Supervisor assignment must respect the policy channel (#10338)
+
+A runtime-backed chat can plan work and receive owner replies. A task reviewer needs a separate policy channel on every supervised turn. Check the session's execution source when dispatch assigns the reviewer, including plans that waited for approval and scheduled chats listed as leaders. A permanent policy refusal ends that relay. The task and its worker reports stay available for review.
+
 ## The supervision fingerprint only sees the agent's words (#6027)
 
 `digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
@@ -630,10 +646,12 @@ The manager waits 90 s for a relayed message (`drainRelays`) and kept it queued 
 written it after the first of two session-list rebuilds inside the send and was still building the second when the
 time ran out, so every later drain wrote it again: one conversation read the same message 32 times in an hour, and the
 messages queued behind it waited. A send in doubt is not a failure. Relays now carry one `once_id` per message
-(`relayMsgID`), which the node sends once (`sentLog`); a try in doubt first looks for the message's line in the
-conversation's latest turns (`relayArrived`: context blocks left out, no line older than the try, the sending
-conversation as its source), and one not found then is looked for again before the next try (`relayLanded`), which
-covers a line that lands late and a node restarted in between; and the send pushes the session list in the background, waiting for it only briefly
+(`relayMsgID`), which the node sends once while it remembers the id (`sentLog`). Save the attempt with the queued
+message before sending (#10690). Look for its line in the latest turns (`relayArrived`) using its text, time and
+sending conversation. A context-only relay also carries its `once_id` in its message-source metadata, so it can be
+found even if the transcript reader removes its original context. A failed read or
+a late transcript write can hide the line, so check again on a bounded schedule before retrying. The send pushes
+the session list in the background, waiting for it only briefly
 (`notifySessionsSoon`, `listPushWait`). The id is deliberately not a `client_msg_id`: a line tied to one reads as the
 owner's own message everywhere (its source label, task briefs, user-input counts, extensions). The web had the same
 blind spot for the owner's own sends: a send answered 502 `delivered: "unknown"` stayed a failed bubble unless the hub
@@ -748,6 +766,24 @@ as delivered instead of moving to the replacement. A check that a resource is fr
 mark the conversation as being replaced under that same lock (`relayBook.replacing`), have every drain and every direct
 delivery respect the mark (the direct ones queue), and clear it only where what waited has moved or the replacement
 failed, draining it again then (`TestNothingGoesIntoABackgroundSupervisorBeingReplaced`).
+
+## A queued supervision digest is not a snapshot of work that still needs review (#10424)
+
+An interruption and an unjudged turn can wait behind a busy supervisor while that task recovers and is accepted.
+Replaying only the rendered text then starts obsolete work or retries a refusal forever. Persist the structured signals
+with the relay, recheck the loaded task ledger immediately before delivery, and render only the surviving entries.
+A failed ledger read or checkpoint is unknown: keep the original queue. Move a changed conversation destination and
+remove its source entries in the same saved relay state. Do not change an uncertain send's text or destination: its
+old once-only identity may already have reached the node. Test both an entirely obsolete digest and a mixed one,
+including a real database reload into a new service; the in-memory signal map alone does not survive restart.
+
+## Manual compaction is not a main-only policy (#10064)
+
+The manual HTTP and node paths already accept side conversations, but all three client menus hid the action behind
+the main-chat check. Android also read and displayed only the main chat's progress. When extending a conversation
+action, trace its eligibility, request target and progress source together; progress must reset when the selected
+conversation changes. Keep automatic main-chat policy and the main-only clear/new actions separate. Menu regressions
+must exercise a real non-main selection and fail when the old guard is restored.
 
 ## A check that passes must have sent what the chat sends (#10365)
 

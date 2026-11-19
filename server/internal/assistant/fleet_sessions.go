@@ -36,6 +36,9 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	// dropped) can list a turn still running as stopped. Its transcript says whether such a stop ended the turn.
 	reconnected := len(before) > 0 && !connected.Equal(beforeConn)
 	var unsure []proto.Session
+	var inlineUpdates []SessionRef
+	fm, hasMachine := s.fleetMachine(machine)
+	_, hasInlineStore := s.store().(inlineViewStore)
 	now := time.Now()
 	for i := range list {
 		list[i].MachineID = machine
@@ -82,6 +85,16 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
 			s.inOrder(func() { s.afterSettle(context.Background(), s.taskTurnSettled, ref.MachineID, ref.SessionID) })
 		}
+		// A stopped assistant session whose rev or last text advances (for example after an unexported runtime turn
+		// flushes to disk with final persisted item ids) registers its latest persona-view blocks without waiting for
+		// the full settle window.
+		if hasInlineStore && hasMachine &&
+			(prev == proto.StatusDone || prev == proto.StatusIdle) &&
+			(sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) &&
+			(sess.Rev != was.Rev || sess.LastText != was.LastText) &&
+			fm.isAssistant(sess) {
+			inlineUpdates = append(inlineUpdates, SessionRef{MachineID: machine, SessionID: sess.SessionID})
+		}
 		if sess.Status != prev && sess.Status != proto.StatusWorking && !(prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle)) {
 			// Stopped with no end seen (a restart, an interrupt, a card): a meeting turn there is over (meeting_turns.go).
 			s.meetingTurnStopped(machine, sess.SessionID, sess, prev == "")
@@ -96,6 +109,9 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
 	s.pruneGoneQuiet(machine)        // the verdicts and Stops of task Agents no longer listed (silent_turns.go)
 	s.fleetKeep(machine, list, connected, unsure)
+	for _, ref := range inlineUpdates {
+		s.inOrder(func() { go s.registerInlineTurn(context.Background(), ref) })
+	}
 	for _, sess := range unsure {
 		go s.reconnectedTurnEnd(machine, sess)
 	}
@@ -415,6 +431,12 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	shown, via := r.sessions, r.marks
 	r.mu.RUnlock()
 	lang := s.lang(context.Background())
+	// The owner's messages to Agents held while their computer is away (internal/devices held.go, #10661): once for
+	// the whole list, worded as the rows are.
+	var held map[string][]proto.UndeliveredMessage
+	if s.devs != nil {
+		held = s.devs.HeldMessages(machine, lang)
+	}
 	// A done turn nobody has seen is Just finished when it ended after this (#9751).
 	finishedSince := time.Now().Add(-justFinishedFor(s.triageCfg(context.Background())))
 	dir := m.assistantCwd() // once, not a path.Join for each row
@@ -453,6 +475,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 				kept := slices.Clone(u) // the owner's messages that could not go in (undelivered.go, #10194)
 				list[i].Undelivered = &kept
 			}
+		} else if u := held[list[i].SessionID]; len(u) > 0 {
+			kept := u // an Agent's, fresh from HeldMessages; its own variable, so only a row with some is allocated
+			list[i].Undelivered = &kept
 		}
 		list[i].SeenAt = seen[list[i].SessionID]
 		localizeSession(lang, &list[i]) // the node's Chinese activity line… (fleet_text.go)

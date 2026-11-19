@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -222,6 +223,32 @@ const markFeedSentSQL = `UPDATE assistant_feed SET body = body || $4::jsonb,
 // sent_at yet (the column follows the body), and returns them as they are now.
 func (d *DB) MarkFeedSent(ctx context.Context, kind, ref string, at time.Time, patch json.RawMessage) ([]FeedRow, error) {
 	rows, err := d.pool.Query(ctx, markFeedSentSQL, kind, ref, at, []byte(patch))
+	if err != nil {
+		return nil, err
+	}
+	return scanFeed(rows)
+}
+
+// feedByRefSQL is FeedByRef's query. Its WHERE matches the partial index assistant_feed_unsent (migrations/0392), as
+// markFeedSentSQL's does: only a message card ever gets sent_at, so for every other kind the predicate leaves nothing
+// out, and a to-do's history is read off the index instead of the whole feed, which is never pruned.
+const feedByRefSQL = `SELECT id, conversation, at, kind, ref, body FROM assistant_feed
+	WHERE kind = ANY($1) AND ref = $2 AND NOT body ? 'sent_at'
+	ORDER BY at DESC, id DESC LIMIT $3`
+
+// ErrFeedByRefMessage: FeedByRef was asked for message cards, which it cannot read whole (a sent one left its index).
+var ErrFeedByRefMessage = errors.New("FeedByRef does not read message cards")
+
+// FeedByRef lists the items of kinds about ref, whatever conversation they are in, newest first, at most limit (#10465:
+// a to-do's history). It refuses the message kind (ErrFeedByRefMessage) rather than leave the sent cards out.
+func (d *DB) FeedByRef(ctx context.Context, ref string, kinds []string, limit int) ([]FeedRow, error) {
+	if slices.Contains(kinds, "message") {
+		return nil, ErrFeedByRefMessage
+	}
+	if len(kinds) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	rows, err := d.pool.Query(ctx, feedByRefSQL, kinds, ref, limit)
 	if err != nil {
 		return nil, err
 	}

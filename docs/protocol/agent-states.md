@@ -207,7 +207,7 @@ State computation takes it into account: **done**, or **blocked on something the
 for a decision you need to make, the hub opens a question card, so it's `needs_you`. Anything not triaged (just stopped, model failure, can't tell) stays `unread`.
 There is only one set of colors: `apple/Shared/StatusPalette.swift`, shared by the App, the watch and Live Activities (`docs/apple/ios.md` ("Design language")).
 The Agents list also has "Waiting": the state is Seen, but a `/loop` hasn't fired yet (`Session.isWaiting`), so a new message will come. Sessions whose background commands / sub-Agents are still running are counted as Working directly by the hub (#2228, `backgroundState`) and no longer go into Waiting; the assistant chat's background tasks and Monitor are always running and don't count.
-A long-running process started in the background (such as a dev server) keeps the Agent Working until it exits (node stops listing background tasks older than 24 hours). Turn-end decisions such as the "done" push and hub self-update look at the host state and aren't affected by this.
+A long-running process started in the background (such as a dev server) keeps the Agent Working until it exits (node stops listing background tasks older than 24 hours). Stop on such a session, once its turn is over, interrupts nothing: the node presses the Escape as always and answers `turn_over_background`, so the app says the turn had ended and the background work still runs instead of "Interrupted" (#10828); ending the background work itself is done in the terminal. Turn-end decisions such as the "done" push and hub self-update look at the host state and aren't affected by this.
 
 ### Background workflows and Monitor (#2935)
 

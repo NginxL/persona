@@ -57,6 +57,8 @@ func (c *Client) WithHTTP(h *http.Client) *Client {
 
 func (c *Client) AppID() string { return c.appID }
 
+func (c *Client) Domain() string { return c.domain }
+
 // APIError is Feishu's {code, msg} for a failed call.
 type APIError struct {
 	Op   string

@@ -281,6 +281,8 @@ func (h *Manager) uiStream(ctx context.Context, call extwire.UIStreamCall) (json
 		s.pending = pending
 		nativeVersion := s.native.Version
 		nativeGeneration := s.native.Generation
+		// a graph node's row carries the graph's `key/id`; the source registered the node's callback under the graph's key
+		pressKey := streamEventKey(s.native.View, event)
 		saved := s.tree
 		ps.mu.Unlock()
 		defer func() {
@@ -334,7 +336,7 @@ func (h *Manager) uiStream(ctx context.Context, call extwire.UIStreamCall) (json
 			Result   json.RawMessage `json:"result"`
 		}
 		// The native render revision is independent of the emitted wire revision.
-		err = s.process.Call(cctx, "ui.page.event", map[string]any{"session": s.id, "ticket": randomHex(16), "interaction": map[string]any{"generation": nativeGeneration, "version": nativeVersion, "eventId": event.EventID, "key": event.Key, "actionId": event.Action, "values": event.Value}}, &result)
+		err = s.process.Call(cctx, "ui.page.event", map[string]any{"session": s.id, "ticket": randomHex(16), "interaction": map[string]any{"generation": nativeGeneration, "version": nativeVersion, "eventId": event.EventID, "key": pressKey, "actionId": event.Action, "values": event.Value}}, &result)
 		cancel()
 		callErr := err
 		var presentation json.RawMessage
@@ -470,4 +472,31 @@ func (h *Manager) uiStream(ctx context.Context, call extwire.UIStreamCall) (json
 	}
 	s.suspended = false
 	return frame, nil
+}
+
+// streamEventKey is the key the source registered event's callback under: a graph node's action is registered under
+// its graph's key (the SDK lowers every node callback with the graph), while the row an older stream's client pressed
+// carries the graph's `key/id`. Action ids are unique within a stream view, so the first node match is the one.
+func streamEventKey(native json.RawMessage, event wire.UIStreamEvent) string {
+	if len(native) == 0 {
+		return event.Key
+	}
+	var view wire.View
+	if json.Unmarshal(native, &view) != nil {
+		return event.Key
+	}
+	for i := range view.Sections {
+		for j := range view.Sections[i].Items {
+			e := &view.Sections[i].Items[j]
+			if e.Type != wire.ComponentGraph {
+				continue
+			}
+			for k := range e.Nodes {
+				if a := e.Nodes[k].Action; a != nil && a.ID == event.Action {
+					return e.Key
+				}
+			}
+		}
+	}
+	return event.Key
 }

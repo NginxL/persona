@@ -231,7 +231,7 @@ func (b *inboxBook) setHandling(it *InboxItem, state, errText string, now time.T
 		a.WakeSlot = false
 	}
 	h.MachineID, h.SessionID = a.MachineID, a.SessionID
-	if g := it.Suggestion; g != nil && g.Kind == SuggestReply && !g.Handback {
+	if g := it.Suggestion; g != nil && g.Kind == SuggestReply && !g.Handback && suggestionAttempt(it, g.Version) == nil {
 		at := g.At
 		a.State, a.Draft, a.Note, a.Changes, a.Error, a.DraftedAt = AgentDrafted, g.Text, g.Note, g.Changes, "", &at
 		return

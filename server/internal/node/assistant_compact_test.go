@@ -113,6 +113,44 @@ func TestAssistantManualCompaction(t *testing.T) {
 	}
 }
 
+// The node's manual path is independent of the main-only automatic policy: every Assistant process can compact.
+func TestAssistantManualCompactionDoesNotRequireMain(t *testing.T) {
+	for _, main := range []bool{true, false} {
+		name := "non-main"
+		if main {
+			name = "main"
+		}
+		t.Run(name, func(t *testing.T) {
+			n := assistantNode(t)
+			const id = "11111111-2222-3333-4444-555555555555"
+			n.state.put(id, sessionState{IsMain: main})
+			in := &stdinBuf{}
+			p := &assistantProc{id: id, agent: "claude", stdin: in, busy: true}
+			n.procs[id] = p
+			if code := refusalCode(n.assistantCompact(t.Context(), id, false)); code != "busy" {
+				t.Fatalf("answering: %q", code)
+			}
+			p.busy = false
+			if err := n.assistantCompact(t.Context(), id, false); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(in.String()); got != `{"message":{"content":"/compact","role":"user"},"type":"user"}` {
+				t.Fatalf("not compacting the selected conversation: %s", got)
+			}
+			if code := refusalCode(n.assistantCompact(t.Context(), id, false)); code != "compacting" {
+				t.Fatalf("already compacting: %q", code)
+			}
+			n.readAssistant(p, strings.NewReader(
+				"{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"compact_metadata\":{\"trigger\":\"manual\",\"pre_tokens\":380000,\"post_tokens\":9500}}\n"+
+					"{\"type\":\"result\",\"subtype\":\"success\"}\n"))
+			st, _ := n.state.get(id)
+			if st.IsMain != main || st.Compaction == nil || st.Compaction.State != proto.CompactionDone || st.Compaction.FinishedAt == nil {
+				t.Fatalf("compaction did not finish or changed the main flag: %+v", st)
+			}
+		})
+	}
+}
+
 // What a new main conversation is told: the last compaction's summary (Claude Code's or Codex's), and the messages
 // after it, the newest kept.
 func TestHandoffReadsTheLastSummaryAndWhatCameAfter(t *testing.T) {

@@ -132,10 +132,11 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		n.displayHook(req.Input)
 		return
 	}
+	sent := req // as it came: what the spool keeps of a hook event the connection could not send (hook_outbox.go)
 	req.SessionID = n.resolveAssistantKey(req.SessionID)
 	req.Pane = n.ownPane(req.Pane)
 	// The caller going away (hook killed because the user answered in the terminal) cancels the request.
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(withHookCall(ctx, sent))
 	defer cancel()
 	go func() {
 		_, _ = r.ReadByte()
@@ -362,6 +363,9 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 	if json.Unmarshal(req.Input, &in) != nil {
 		return nil, nil
 	}
+	if hookCallOf(ctx) == nil { // not from node.sock (serveSock): as it is
+		ctx = withHookCall(ctx, req)
+	}
 	defer n.hookFlights.enter(in.SessionID)() // its process waits on this call: not idle (model_restore.go)
 	if req.ReportOnly && !n.takesReport(in) {
 		return nil, nil // before the counters: a session the plugin reports for would count each prompt twice
@@ -382,7 +386,7 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 	}
 	if req.ReportOnly {
 		n.rememberTranscript(in)
-		n.notifyHookEvent(in, stopSig, true)
+		n.notifyHookEvent(ctx, req, in, stopSig)
 		return nil, nil
 	}
 	// An Orca pane is bound only on a machine that enables Orca: elsewhere nothing could drive it, and the hook
@@ -398,7 +402,7 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 	}
 	n.rememberTranscript(in)
 	if !req.Resume { // the event was reported on the first attempt
-		n.notifyHookEvent(in, stopSig, false)
+		n.notifyHookEvent(ctx, req, in, stopSig)
 	}
 	// Every Bash call of every agent waits on this hook. Only the assistant's go to larkGate, and another agent's
 	// needs only the cua-driver check below: one that does not name cua-driver goes on here, before the card's
@@ -658,12 +662,34 @@ func (n *Node) rememberTranscript(in hookInput) {
 	n.setPath(in.SessionID, in.TranscriptPath)
 }
 
-// notifyHookEvent tells the hub what a hook saw. reportOnly marks an event from a global hook (globalhooks.go), so
-// that the hub does not take the session for one with Persona's hooks, which would hold its screen cards back for a
-// hook card that never comes (hub/machine.go, hasHooks). stopSig lets the hub tell a second completion of the same
-// reply from a new one.
-func (n *Node) notifyHookEvent(in hookInput, stopSig string, reportOnly bool) {
-	_ = n.peer.Notify("hook.event", hookEventParams(in, stopSig, reportOnly))
+// notifyHookEvent tells the hub what a hook saw. A report-only request marks an event from a global hook
+// (globalhooks.go), so that the hub does not take the session for one with Persona's hooks, which would hold its screen
+// cards back for a hook card that never comes (hub/machine.go, hasHooks). stopSig lets the hub tell a second completion
+// of the same reply from a new one.
+//
+// A resident node's connection may be waiting for the manager to resume it: its events go through the outbox
+// (hook_outbox.go), in order, and the hook waits for its own at most hookEventWait, not at all while the transport is
+// lost. A card it asks for afterwards waits for it all the same (afterHookEvent).
+func (n *Node) notifyHookEvent(ctx context.Context, req sockRequest, in hookInput, stopSig string) {
+	params := hookEventParams(in, stopSig, req.ReportOnly)
+	if n.resumeWindow <= 0 { // its connection ends with its transport: written here, as it always was
+		_ = n.peer.Notify("hook.event", params)
+		return
+	}
+	hc := hookCallOf(ctx) // handleHook made one if serveSock did not
+	if hc == nil {
+		hc = &hookCall{sent: req}
+	}
+	e := &hookOut{req: hc.sent, in: in, at: time.Now(), params: params, sent: make(chan struct{})}
+	hc.event.Store(e)
+	n.hookOut.add(n, e)
+	if n.peer.Lost() {
+		return // written once the manager resumes the connection, or kept for the next one
+	}
+	select {
+	case <-e.sent:
+	case <-time.After(hookEventWait):
+	}
 }
 
 // paneKindOK: a hook's pane is one this machine's hosts can drive (an Orca or Tern pane only where the set enables
@@ -805,6 +831,7 @@ func (n *Node) watchAgent(ctx context.Context, req sockRequest) (_ context.Conte
 // ask forwards an interaction to the hub and blocks until the phone answers, it expires, or the hook is cancelled.
 // It fails with errNodeGone when the hub connection ends first: a resumable hook then asks the next node.
 func (n *Node) ask(ctx context.Context, ix proto.Interaction) (proto.Resolution, bool, error) {
+	afterHookEvent(ctx) // a hook's card goes after its event
 	if c, ok := ctx.Value(codexApprovalOwner{}).(*codexConn); ok {
 		return c.askResumable(ctx, ix)
 	}

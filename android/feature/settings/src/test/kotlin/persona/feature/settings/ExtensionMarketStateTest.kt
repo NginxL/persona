@@ -412,6 +412,42 @@ class ExtensionMarketStateTest {
         assertNull(extensionRemovalNotice(res, "Example", members = false, removal = old))
     }
 
+    @Test fun marketRemovalCountsOnlyKnownAffectedExtensionsAndWordsItsFallbacks() {
+        val ownOn = HubExtension("on", source = "installed", market = "m1", manager = "assistant", autoUpgrade = true)
+        val ownOff = HubExtension("off", source = "installed", market = "m1", manager = "assistant", autoUpgrade = false)
+        val otherManager = HubExtension("other-manager", source = "installed", market = "m1", manager = "other", autoUpgrade = true)
+        val otherMarket = HubExtension("other-market", source = "installed", market = "m2", manager = "assistant", autoUpgrade = true)
+        val notFromMarket = HubExtension("local", manager = "assistant", autoUpgrade = null)
+        val configuredWithMarket = HubExtension("configured", source = "hub.json", market = "m1", autoUpgrade = true)
+        val attachedWithMarket = HubExtension("attached", source = "installed", market = "m1", autoUpgrade = true,
+            attached = kotlinx.serialization.json.JsonObject(emptyMap()))
+        val installed = listOf(ownOn, ownOff, otherManager, otherMarket, notFromMarket, configuredWithMarket, attachedWithMarket)
+        val roster = ManagerRoster(listOf(
+            HubManager("assistant", "Default", online = true, isDefault = true),
+            HubManager("other", "Other", online = true),
+        ), "assistant")
+        val defaultAssistant = CurrentAssistant(roster = roster, choice = AssistantManagerChoice.Choice(defaultId = "assistant"))
+        val selectedAssistant = CurrentAssistant(roster = roster, choice = AssistantManagerChoice.Choice(manager = "other", defaultId = "assistant"))
+        assertEquals(2, affectedExtensionCount("m1", installed, defaultAssistant))
+        assertEquals(0, affectedExtensionCount("m1", listOf(otherMarket, notFromMarket), defaultAssistant))
+        // An unstamped extension belongs to the default assistant, never to a selected non-default assistant.
+        assertEquals(0, affectedExtensionCount("m1", listOf(ownOn.copy(manager = null)), selectedAssistant))
+        assertEquals(0, affectedExtensionCount("m1", listOf(ownOn.copy(manager = null)), selectedAssistant.copy(roster = null)))
+        assertEquals(1, affectedExtensionCount("m1", listOf(ownOn.copy(manager = null)), defaultAssistant))
+        assertEquals(1, affectedExtensionCount("m1", listOf(ownOn.copy(manager = "other")), selectedAssistant))
+        assertNull(affectedExtensionCount("m1", listOf(ownOn.copy(market = null)), defaultAssistant))
+        assertNull(affectedExtensionCount("m1", installed, defaultAssistant.copy(roster = null)))
+
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val en = context.createConfigurationContext(android.content.res.Configuration(res.configuration).apply {
+            setLocale(java.util.Locale.ENGLISH)
+        }).resources
+        assertEquals("The hub stops reading this market. No installed extension came from it.", marketRemovalText(en, 0))
+        assertEquals("The hub stops reading this market. 1 extension installed from it stays, but stops upgrading until the market is added again with the same address.", marketRemovalText(en, 1))
+        assertEquals("The hub stops reading this market. 2 extensions installed from it stay, but stop upgrading until the market is added again with the same address.", marketRemovalText(en, 2))
+        assertEquals(en.getString(R.string.settings_ext_remove_market_text), marketRemovalText(en, null))
+    }
+
     @Test fun managesTheMarkets() = runBlocking {
         val api = FakeMarket()
         val model = MarketsModel(api, res)

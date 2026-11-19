@@ -1,0 +1,41 @@
+{
+  "title": "Release checklist",
+  "sections": [
+    {
+      "items": [
+        {"type": "header", "title": "Release checklist", "subtitle": "Started 12 minutes ago",
+         "badges": [{"text": "Running", "tone": "caution"}]},
+        {"type": "graph", "key": "work", "selected": "tests", "folded": ["docs"], "nodes": [
+          {"id": "root", "title": "Release checklist", "subtitle": "6 of 11 parts ended", "icon": "list",
+           "badge": {"text": "Running", "tone": "caution"}, "progress": 0.55,
+           "action": {"id": "open", "values": {"id": "root"}}},
+          {"id": "plan", "title": "Write the plan", "subtitle": "4 min", "tone": "positive",
+           "badge": {"text": "Done", "tone": "positive"}, "action": {"id": "open", "values": {"id": "plan"}}},
+          {"id": "build", "title": "Build", "tone": "positive", "badge": {"text": "Done", "tone": "positive"},
+           "action": {"id": "open", "values": {"id": "build"}}},
+          {"id": "build.small", "title": "Smallest change", "group": "Two ways", "color": "green",
+           "badge": {"text": "Chosen", "color": "green"}, "action": {"id": "open", "values": {"id": "build.small"}}},
+          {"id": "build.cause", "title": "Remove the cause", "group": "Two ways", "color": "gray",
+           "badge": {"text": "Not chosen", "color": "gray"}, "action": {"id": "open", "values": {"id": "build.cause"}}},
+          {"id": "tests", "title": "Run the tests", "subtitle": "2 of 3 suites", "tone": "caution", "icon": "check",
+           "progress": 0.66, "badge": {"text": "Running", "tone": "caution"},
+           "action": {"id": "open", "values": {"id": "tests"}}},
+          {"id": "tests.unit", "title": "Unit tests", "tone": "positive", "badge": {"text": "Done", "tone": "positive"}},
+          {"id": "tests.ui", "title": "Interface tests", "tone": "caution", "badge": {"text": "Running", "tone": "caution"}},
+          {"id": "tests.review", "title": "Review", "tone": "danger", "icon": "warning",
+           "badge": {"text": "Needs you", "tone": "danger"}, "subtitle": "Which screenshots go in?",
+           "action": {"id": "open", "values": {"id": "tests.review"}}},
+          {"id": "docs", "title": "Docs", "subtitle": "2 parts", "badge": {"text": "Queued"}},
+          {"id": "docs.en", "title": "English"},
+          {"id": "docs.ja", "title": "Japanese"}
+        ], "edges": [
+          {"from": "root", "to": "plan"}, {"from": "root", "to": "build"}, {"from": "root", "to": "tests"},
+          {"from": "root", "to": "docs"},
+          {"from": "build", "to": "build.small"}, {"from": "build", "to": "build.cause"},
+          {"from": "tests", "to": "tests.unit"}, {"from": "tests", "to": "tests.ui"}, {"from": "tests", "to": "tests.review"},
+          {"from": "docs", "to": "docs.en"}, {"from": "docs", "to": "docs.ja"}
+        ]}
+      ]
+    }
+  ]
+}

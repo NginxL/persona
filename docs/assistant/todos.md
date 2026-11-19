@@ -142,6 +142,8 @@ Server state is stored in the hub's Postgres database (read/written by the assis
 
   A fresh current-head change request can also end a typed merge wait (#9570). The same PR observer records optional `changes_requested_at` from an active review's provider `submitted_at`, only with a known reviewer and a `commit_id` matching the observed PR head. Later approval or dismissal by that reviewer supersedes the request; a saturated 100-review page supplies no automatic-wake timestamp. The exact recorded `merge_review` source must match, and the provider time must be strictly after this park and no later than `checked_at`; missing or ambiguous same-second times do not prove a new event. The captured park, current task/stage and latest saved facts are rechecked before changing the existing state to `pending_review`. This actionable review need not wait for other PRs to become terminal. Its provider time persists with PR facts, so a failed ledger write can reconcile after reload without another review-state edge. It preserves the original review/history and supervisor, queues the existing review signal, and never accepts/closes the task, fabricates an owner answer or sends an Agent instruction itself. Poll cadence and Inbox switches are unchanged; this does not add ordinary-comment, participant-reply, CI, GitLab or version observers.
 
+   Review notifications ask the supervisor to check each current acceptance criterion; they are not completion verdicts (#8373). The shared message retains the actual PR event or judge's reason and any recorded criterion evidence. A prerequisite PR merging or closing, or receiving a change request, does not prove the delivery criteria passed. A judged-done result is still a review candidate, not acceptance. Review state, acceptance gates and task display grouping are unchanged.
+
 ### 2. todo_spaces table
 Records project workspaces (herdr workspaces) linked as a whole to a to-do:
 - `todo_id` (text, NOT NULL, FK → `todos(id)` ON DELETE CASCADE): linked to-do ID.
@@ -233,7 +235,8 @@ Link/release semantics:
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/api/v1/todos` | All to-dos (`created_at` descending; the apps sort them themselves), each with `due_at` / `due_date`, `remind_at`, `reminded_at`, `priority`, `project` when set, and `spaces` and `agents` lists (removed rows filtered out; active first by `linked_at` descending, previously involved after by `released_at` descending); a to-do waiting for the owner also has `ask` ("Waiting for the owner"), an open one nobody works on `orphaned` ("Nobody is working on this"); the hub's merged answer carries `ETag: W/"t1-<hash of its bytes>"`, and a request whose `If-None-Match` names it gets `304` with no body (#9590: most `{"type":"todos"}` change nothing the list holds, and the list is about 200 KB on a busy hub; the iOS app reads it that way); each row also has `view` and the answer `counts`, the To-dos view the manager works out (#10226, `docs/assistant/todo-status-sop.md` "The hub's view"), with the managers' counts added up by the hub before it takes the tag; they cover every manager only while the hub's features list `todo_view`, and clients order a merged section by `rank`, then `manager`, then `id` |
-| GET | `/api/v1/todos/{id}` | One to-do as the list has it, `view` included → `{"todo": row}` (#10226), without the list's `manager` stamp (clients keep the row's and send it as `?manager=`); missing 404 `todo_not_found`; to-dos not loaded yet 503; an older hub or manager answers 405 (`PATCH` / `DELETE` match the path); clients take 405, and a 404 with another `code`, as "not there" |
+| GET | `/api/v1/todos/{id}` | One to-do as the list has it, `view` included → `{"todo": row}` (#10226), without the list's `manager` stamp (clients keep the row's and send it as `?manager=`); with it (#10465, `assistantwire.TodoItemDetail`) what the paper shows of its history: `rounds` (the latest two that are not Background ones, the latest Background ones making up the rest; `[]` when none), `rounds_total`, `recap` and `results` when there are any, all four left out when its history cannot be read (`docs/assistant/todo-status-sop.md` "The to-do's timeline"); `rounds` can leave out Background rounds `rounds_total` counts, so earlier rounds are paged from the timeline route's own latest page, never from the item's; missing 404 `todo_not_found`; to-dos not loaded yet 503; an older hub or manager answers 405 (`PATCH` / `DELETE` match the path); clients take 405, and a 404 with another `code`, as "not there" |
+| GET | `/api/v1/todos/{id}/timeline?before=&limit=` | Its conversation, grouped into rounds (#10465, `assistantwire.TodoTimeline`) → `{"rounds", "more"?}`: the latest `limit` rounds (20 by default, at most 100) before the round `before` names, oldest first, `more` while earlier ones are left; worked out on each read from the feed's items about it (the newest 1000: past them only the rounds that began within them), its decisions, ledger, brief and runs; a `before` that names no round 409 `round_not_found`; missing 404 `todo_not_found`; its history unreadable 503; clients send the row's `manager` as `?manager=`, as for the item; read-only role allowed; an extension's token (`todos.read`) gets no answered cards, and 404 `todo_not_found` for a to-do that may hold the health space's words (opened from or written to by a health conversation, a run there at any time, or a space that cannot be told: `docs/extensions/extensions.md` "Never shown to extensions"); an older hub or manager answers 404 with another `code`, which clients take as "not there". Clients use both only while the hub's features list `todo_timeline` |
 | GET | `/api/v1/todos/places` | The To-dos sidebar's places with the list's counts → `{"places", "counts"}` (#10226, `assistantwire.TodoPlaces`): All To-dos, Today and Upcoming, then each project with an open to-do and its part of Needs you; across managers the hub adds All To-dos', Today's and Upcoming's numbers and the counts up and keeps each manager's projects, stamped with `manager`; no manager with the route 404 (a manager that failed otherwise: its answer), an older hub 405 |
 | POST | `/api/v1/todos` | Create `{"title", "notes"?, "due_at"? \| "due_date"?, "remind_at"?, "priority"?, "project"?, "kind"?}` → `{"todo": Todo}`; `kind` `concern` records one of the owner's concerns ("Concerns"; without the hub's database 503), `todo` or none a to-do, anything else 400; nonempty `title` required (400); `due_at` / `remind_at` RFC 3339, `due_date` `YYYY-MM-DD`, `priority` `high` / `normal` / `low` / `""`, `project` a knowledge-base project's slug or name (stored as its slug), anything else (or both due fields, or no such project) 400; read-only role (watch) 403 |
 | PATCH | `/api/v1/todos/{id}` | Edit `{"title"?, "notes"?, "done"?, "due_at"? \| "due_date"?, "remind_at"?, "priority"?, "project"?, "part_of"?, "after"?}` → `{"todo": Todo}`; only supplied fields change; `part_of` / `after` as "Requests in pieces" says (`""` / `null` / `[]` clear them, a link the manager refuses 400); `null` (or `""`) clears a due date or reminder, `""` takes it out of its project; either due field replaces the other; a new `remind_at` is pushed again; user completion-state changes clear `done_by` / `done_reason`, and reopening records `reopened_at`; `"done": true` on a to-do whose agent never started (closed by the hub with `start_error`) is the owner closing it: `start_error` cleared, `done_at` now (#3713); `"done": true` on an open concern 409 (only its report closes it, "Concerns"); missing 404; read-only role 403 |
@@ -597,6 +600,26 @@ effective from the next judgment and next dispatched task. When on:
 - **Never closed by the judge**: a rework round (the supervisor was promised the next review, and asked for more than `done_when` says), a task that was reopened or was ever accepted or cancelled before, and a task the supervisor reviewed while the judge was deciding. `live` counts only when the judge itself says so, never on the Agent's delivery line alone; checks that do not come one per criterion with each criterion copied in its place count as not met.
 - When the independent review (`supervise_autoreview.go`) starts for a task, it runs first and its result waits for `task_review`; the judge's check does not close it.
 
+## Close a task's tab after acceptance
+
+When starting a new task from a plan, an owner API client can set `close_tab_on_accept: true` on that task in the
+`tasks` array sent to `POST /api/v1/task-plans/{id}/start`. Omit it to keep the tab on acceptance. The plan shows the
+recorded choice. To withdraw it, send `DELETE /api/v1/todos/{id}/terminal-cleanup`. The request returns
+`{"terminal_cleanup":"skipped"}` until the manager has given the node its final authorization to close, including
+while the node is still checking the tab. An authorized close returns 409. This is a per-task choice.
+
+Only a supervisor or main conversation's `task_review` that saves `accepted` with outcome `done` uses that choice.
+Tasks still waiting for the owner's verification keep their tabs. The original Claude Code or Codex tab must have
+been created for this start on Herdr, with the same agent process still in its only pane. The node checks focus,
+terminal viewers, drafts, queued input, interactions and work again. If there is no other tab in that workspace,
+cleanup skips the close so the workspace remains open. Eligible cleanup uses the dispatch consent with no extra
+phone card. The transcript, files and worktree remain available.
+
+The `task_review` result and plan report `closed` when the node confirms the close, `skipped` when cleanup was
+ineligible or could not be sent, and `pending` if the close may have been sent but its result is unknown. Repeating
+the review reports the recorded result and does not send another close or conclusion. Ordinary archive-and-close
+still asks for confirmation.
+
 ## Stop Agents of completed tasks
 
 Completing a to-do stops Persona's automatic follow-ups for its linked Agents, including when a turn ends after
@@ -731,7 +754,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
 (#2056, `assistant/todo_ask.go`.) A to-do whose result waits for the owner carries that ask on itself, so the apps can show it in the to-do list and take it with one tap, not only the briefing and the Lark card.
 
 - **`ask` on `GET /api/v1/todos`**: `{"outcome"?, "verdict", "recommend"?, "asked_at", "risk"?}` (a decision carries more, "Decisions the owner can answer" below), the same rows and words as a `brief` item's `accept[]` but for `risk`, which only the list carries (`docs/protocol/protocol.md`, "Tasks and the chat feed"), read from the same acceptance book: a deployed to-do's "Please verify" (no `outcome`), or a supervised task's conclusion (#1226: `outcome` `done`, `cannot` or `decide`). `verdict` is the verdict line as its Lark card says it, in the request's language (the reason is as the review wrote it); `recommend` only on a decision (`decide`) that recommends an option; `asked_at` the round, which `POST /api/v1/todos/{id}/accept` takes; `risk` how risky answering it is, `open` when it cannot be undone or other people will see it, else `safe` (#10465, `docs/assistant/todo-status-sop.md` "The hub's view"), absent from an older manager, which clients read as `open`. A to-do with nothing waiting has no `ask`: never asked, verified, taken, acknowledged, asked before its latest reopen, or a decision the review moved on from (rework, cancelled) or whose task closed. A client that does not know the field ignores it.
-- **Taking it**: `POST /api/v1/todos/{id}/accept {"asked_at"}` stays the one way, as the briefing's Accept button: a decision's recommendation goes to the task's Agent and is recorded in its decisions (the same path as the Lark card's "Take the recommendation"), a conclusion that only tells is acknowledged, a deployed to-do is verified. An `asked_at` from an earlier round is 409 "already handled" and takes nothing. If no Agent can receive the recommendation, the hub still records it, answers the round, tells the supervisor to pass it on, and returns 200 `delivered:"none"`. Another delivery failure returns 502 `accept_not_taken` and takes nothing.
+- **Taking it**: `POST /api/v1/todos/{id}/accept {"asked_at"}`, as the briefing's Accept button (or, while the hub lists `todo_asks`, the asks route of "Decisions the owner can answer" below): a decision's recommendation goes to the task's Agent and is recorded in its decisions (the same path as the Lark card's "Take the recommendation"), a conclusion that only tells is acknowledged, a deployed to-do is verified. An `asked_at` from an earlier round is 409 "already handled" and takes nothing. If no Agent can receive the recommendation, the hub still records it, answers the round, tells the supervisor to pass it on, and returns 200 `delivered:"none"`. Another delivery failure returns 502 `accept_not_taken` and takes nothing.
 - **Direct completion of a decision** (#3038): the owner may end an open `needs_user` task without taking its recommendation. Use the existing `PATCH /api/v1/todos/{id}` with `{"done":true}` → `{"todo": Todo}` (200, `todo.done_at` set, `done_by` / `done_reason` cleared); carry its `manager` in `X-Persona-Manager` as for any to-do write. This is a completion-state edit, not a round-specific acceptance: no `asked_at` is required and no new endpoint is added. The decision disappears from `GET /api/v1/todos[].ask`, the briefing's pending `accept[]` and the board; historical feed cards remain history. A later Accept on that decision returns 409 and sends nothing. Completion itself never sends a recommendation or message to an Agent and never resumes a closed Agent. It keeps existing outcome recording and idle cleanup ("Stop Agents of completed tasks"): eligible task Agents stop, keeping their terminals, after both completion and inactivity reach 3 minutes; working or blocked Agents are not forcibly stopped. Later Agent activity does not reopen a user-completed task. Explicit `PATCH {"done":false}` reopens it but does not revive its earlier ask. Automatic rework and recommendation sends recheck completion/reopening after slow session/device lookups, before dispatch; ordinary user messages to an Agent retain their existing behavior.
 - **Don't handle and Later (web, #4808)**: the Needs you row offers both actions beside the decision choices. Later hides only this browser session's copy of the current review. Don't handle persists a dismissal of the current review through `POST /api/v1/todos/{id}/decision-dismiss {review_at}`; it never completes the task, chooses an option or sends a message. The returned `dismissal_id` is the Undo receipt: `POST /api/v1/todos/{id}/decision-undo-dismiss {review_at, dismissal_id}` restores only that dismissal. `GET /api/v1/todos[].decision_review` carries `review_at` and an optional `dismissal_id`; a newer review naturally appears again. A dismissed decision is never taken by its deadline and is not reminded. It reads the same everywhere: the To-dos page does not file it under Needs you (it is not `owner_decides`, `todo_triage.go` / `todo-triage.ts`), its badge says Not handling, and the assistant's snapshot calls it "you chose not to handle this decision" instead of waiting on you. An answer given later (OK or an option on a card, an answer in the chat or on Lark, `task_decided`) is the owner handling it after all: it undoes the dismissal only once a valid answer is taken. Invalid or stale answers, failed acceptance saves and retryable delivery failures keep the dismissal. A choice that is recorded and handed to the supervisor because no Agent can receive it still counts as taken. Both writes require a full device role and the exact current review; stale rounds/receipts return 409. Old `needs_user` reviews without an `ask` initially remain visible with their original `reason` or `note` and these actions, not invented options or a fabricated acceptance timestamp; after the one `undecidable` hand-back they leave the owner queue until a fresh review. iOS and Android are unchanged in this web-only client fix.
 - **The push**: a review's `needs_user` with a `recommend` (`task_review`) is pushed to the owner's devices once (not when it can wait: "Decisions that can wait" below), besides its Lark card and whether or not the bot is on: a `decide` notification (`notify.request` kind `decide`, `docs/protocol/protocol.md` "Bus") to the devices that take "needs you" pushes (quiet hours make it silent, like a card's), opening the conversation the task came from. Its APNs payload:
@@ -740,12 +763,15 @@ Something the owner raises in the main conversation and wants an answer to is a 
   {"aps": {"alert": {"title": "Conclusion: <task>", "subtitle": "Persona", "body": "🤔 Needs your decision: <reason>\nRecommended: <option>"},
            "sound": "default", "thread-id": "<origin conversation>", "category": "TODO_DECIDE", "interruption-level": "time-sensitive"},
    "machine_id": "<the assistant's machine>", "session_id": "<origin conversation>",
-   "todo": {"id": "<to-do id>", "asked_at": "<RFC 3339, the round>", "recommend": "<option>", "manager": "<manager id>"}}
+   "todo": {"id": "<to-do id>", "asked_at": "<RFC 3339, the round>", "recommend": "<option>", "manager": "<manager id>",
+            "ask": "todo:decision@<asked_at>", "lockscreen": "answer", "options": ["<option>", "<option>"]}}
   ```
+
+  `todo` is `TodoDecidePush` in `schema/wire/todo-view.schema.json`; the cases are in `spec/fixtures/todo-push`. From a manager that says how the push may answer it (#10465), `todo` also has `ask`, the decision's ask in the to-do's view, which an answer from the notification names, and `lockscreen`, the view's rule for that ask (`open_only` exactly when answering it is `open`: it cannot be undone or other people will see it, `docs/assistant/todo-status-sop.md` "The hub's view"). `open_only` (or a value the hub does not know, written `open_only`) sends category `TODO_DECIDE_OPEN`, which no app gives actions, so the notification has none and a tap opens the app, on older apps too, which lose Take Recommendation on such decisions; `answer` keeps `TODO_DECIDE` and adds `options` (the labels whole, no empty one or repeat, the recommended first, at most 4) with `aps.mutable-content: 1`, so a newer app's notification service extension can offer them as actions. A push too big for APNs or the relay's sealed limit has its alert shortened first, down to 500 characters; if it still does not fit, the hub drops `options` and `mutable-content` and fits the full alert again, never the category, `lockscreen` or `ask`, so Take Recommendation is then its one action. A push from an older manager has none of the three and is sent as before, byte for byte; the rule also needs a hub from #10465 on, since an older hub sends every decision as `TODO_DECIDE`.
 
   `todo.manager` is the manager whose to-do it is (`assistant` for the assistant the hub starts), as the merged list stamps each item's `manager`; OK names it in `X-Persona-Manager`, so it reaches that manager whichever one is the default. All rounds of one to-do share an `apns-collapse-id`, so a later round's push takes the earlier one's place. Through the push relay `category` and `todo` are sealed with the rest (`docs/operations/push-relay.md` "Encryption"). On the WebSocket (`ws_notify`) it is a `notify` of kind `assistant` with the same `todo`, so a client that does not know decisions shows a plain notification. The app's OK action on `TODO_DECIDE` calls the accept route with `todo.asked_at`. No push for a decision without a recommendation (nothing for OK to take), for a task from a health conversation (the lock screen says nothing of those) or a muted conversation; a deployed to-do's "Please verify" and conclusions that only tell are not pushed either.
 - **The supervisor** is told what went out. With a Lark card, as before (don't ask again), plus that a push with OK went too. With the bot off it still asks the owner as before (the hub taking a push says neither that a device got it nor that its app shows OK), and is told that OK on the push may take the recommendation first.
-- **Clients**: the web shows the ask on the to-do's row, its page, the main chat's task card and the task panel, with the one button that takes it (`docs/web/web.md`, "Waiting for you"); a stopped to-do with an open ask sorts with Awaiting review. The iOS / Mac / Watch part (the to-do row and detail, the `TODO_DECIDE` action) is not built yet; Android shows the ask in the Needs you tray and on the task's page (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on").
+- **Clients**: the web shows the ask on the to-do's row, its page, the main chat's task card and the task panel, with the one button that takes it (`docs/web/web.md`, "Waiting for you"); a stopped to-do with an open ask sorts with Awaiting review. iOS shows the ask in the Needs You tray and on the task board ("iOS" below) and offers Take Recommendation on a `TODO_DECIDE` push, none on `TODO_DECIDE_OPEN`; the push's `options` are not actions yet, and the watch has none of it; Android shows the ask in the Needs you tray and on the task's page (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on").
 - Not done here: the push is not withdrawn when the decision is taken elsewhere (an OK on it then answers 409, "already handled"); the watch's answer-only credential can neither read `/api/v1/todos` nor call the accept route.
 
 ## Decisions the owner can answer
@@ -762,13 +788,14 @@ Something the owner raises in the main conversation and wants an answer to is a 
   - `not_what_i_asked`: the task stops waiting for the owner and its Agent gets no automatic follow-up (continue, wake, CI follow-up; `workGuard`) until the supervisor reviews the task again (re-scoped with `rework`, `cancelled`, or the link to the owner's request explained in a new decision) or sends its Agent on.
   - `explain_first`: the decision stays as it is, no longer taken by default, and the supervisor re-issues it with a short background.
   - Counted: each is a work event `owner_cannot_answer` and `GET /api/v1/agents/work/stats` sums them per supervisor conversation (`docs/assistant/agent-work.md`, "Evaluation").
-- **Choosing an option**: `POST /api/v1/todos/{id}/accept {"asked_at", "option"}` with the recommended label is the plain OK; another option goes to the task's Agent as the owner's choice with what it leads to, is recorded in the to-do's decisions and ends the decision. With no Agent to receive either kind, the choice is still recorded, the decision ends, and the supervisor gets one `decision_not_delivered` signal for that round; the response is 200 `delivered:"none"`. The Lark card has a button per option and one per fixed answer. The `decide` push's `todo` also carries `options` (the labels, the recommended first) and `responses`, so an app can offer them from the notification; its body lists the background, the options and the cost of waiting.
+- **Choosing an option**: `POST /api/v1/todos/{id}/accept {"asked_at", "option"}` with the recommended label is the plain OK; another option goes to the task's Agent as the owner's choice with what it leads to, is recorded in the to-do's decisions and ends the decision. With no Agent to receive either kind, the choice is still recorded, the decision ends, and the supervisor gets one `decision_not_delivered` signal for that round; the response is 200 `delivered:"none"`. The Lark card has a button per option and one per fixed answer. The manager's `decide` notification also names the options (the labels, the recommended first) and `responses`; the push carries the options only where the owner may answer from the lock screen (`lockscreen: answer`, "Waiting for the owner" above, #10465), and never the fixed answers, so an app can offer the options from the notification; its body lists the background, the options and the cost of waiting.
 - **Answered in the chat** (#6470, `assistant/task_decided.go`): the owner often answers in their own words in the main chat instead of on the card. The main conversation, or the task's supervisor, records that answer with the assistant tool `task_decided` (`todo_id`, `option`: one of the waiting decision's labels, `said`: the owner's words, `told_agent`). Without `told_agent` the option is taken exactly as the accept route takes it (sent to the task's Agent, then recorded). With `told_agent: true` (the answer already went to the Agent with `agent_send`) nothing is sent again. Either way the decision ends as a card answer ends it: the ask is answered and leaves Needs you, its deadline default and daily raise stop, the supervision leaves `needs_user`, the to-do's decisions get a `manual` row with the conversation as its source and the owner's words as its reason, and an `owner_decided` event is written. An option that is none of the decision's, a conversation that is neither the main one nor the supervisor, and a decision no longer waiting are refused. Relaying the answer with `agent_send` alone used to leave the decision waiting.
 - **Owner message in the task's Agent chat** (#9370, `assistant/decision_agent_reply.go`): a message to an active task Agent while its `needs_user` decision waits pauses that round's automatic default. The pause and source conversation are kept with the ask in Postgres, so they survive a manager restart. A person's own authenticated app also supplies the message text privately to the assistant manager. A single letter (`A`, `B`, etc., case-insensitive) selects by displayed option order; a complete option label matches after removing whitespace and punctuation, without case-folding the label. A unique exact match immediately records and ends the decision through the same record-only path as `task_decided` with `told_agent: true`, using the Agent conversation as the source and preserving the owner's words. Nothing is sent to the Agent again. Conflicting letter/label matches, duplicate normalized labels and prose are not guessed. An exact answer can also settle a decision paused by an earlier unclear message.
 - **Unclear Agent replies get supervisor attention**: an unmatched reply stays pending, without its default countdown or unanswered-owner reminders. Its `decision_reply` signal asks the supervisor to read the original conversation and confirm with `task_decided`, or clarify. A validated notice is sent into an already-running supervisor turn instead of waiting in its relay queue, using the node's existing interjection support (Codex steers the live turn; supported Claude versions move foreground work to the background). Existing runtime capability limits still apply; no global setting is changed. Failed delivery leaves the round paused and its notice recoverable, not marked told. Terminal hooks still carry no prompt text: only `UserPromptSubmit` marked `prompt_source=user` pauses the decision and requests confirmation. A replay from before the decision round is ignored, and a new decision round has its own deadline.
 - **Answered in words on Lark, not delivered** (#7911, `assistant/acceptance_reply.go`): a reply in words to a decision's Lark card is recorded in the to-do's decisions and then relayed to the task's Agent. When the relay fails (a dialog open in the Agent's terminal, its computer away), the decision is still made: the supervision leaves `needs_user`, the ask is answered, and the task's supervisor gets an `idle` signal naming the owner's answer and why it did not reach the Agent, to pass it on itself. The hub never resends it, so the Agent cannot get the same answer twice; the reply tells the owner it is recorded and will be passed on. Explicit options and recommendations use the same recorded-but-undelivered outcome when no Agent can receive them; other delivery failures still take nothing.
+- **One route for every answer** (#10465, `assistant/todo_asks_routes.go`, hello feature `todo_asks`): `POST /api/v1/todos/{id}/asks/{ask}/answer` answers any of a to-do's own asks by the id its `view` lists (`todo:decision@<asked_at>`, `todo:retry@<done_at>`, `step:<step>/<id>` for a step's ask on its parent's row) and maps the answer onto the paths above: an `option` (the recommended one is the plain OK), a fixed `response`, the owner's `text`, or an `outcome` (`later`, which writes nothing; `decline`, Don't handle; `undo`, with the decline's receipt); an empty answer starts a failed start again or acknowledges a conclusion that says the work cannot be done, never a decision's recommendation. The id carries the round, so an answer from a screen that is behind is 409 `ask_stale` with the row as it is now, and the first answer anywhere wins. An answer to a round handed back to its supervisor ("Old decisions are checked first", "The backlog") is `ask_stale` too: the route reads the same rounds the view lists. It names no conversation: words for a to-do no conversation opened go to its Agent the way the hub's other relays to it go, where the conversation route refuses another conversation's task (its guard stays for that route), and words no Agent can receive are recorded and handed to the supervisor (`delivered: "none"`), as a chosen option is. A run's ask is answered at its card (409 `answer_in_session`). The reply carries the row with its view, which says whether the ask still waits (`explain_first` answers `answered` and leaves it waiting while the supervisor explains), and the hub keeps an operation receipt for it, so a notification action or a phone that lost the reply asks again with the same `X-Persona-Op-Id` and gets the first reply; one cut off while the manager had it is in doubt (502 `assistant_in_doubt`), never "nothing reached it". The routes above stay for clients without the feature. Cases: `spec/fixtures/todo-asks`.
 - **A decision is not replaced by "Please verify"**: while a decision waits, a turn of the task's Agent that says "deployed" (or a held deploy landing) no longer starts a "Please verify" round in its place; and a review that arrives while such a round is still being written keeps its decision, the round giving way. Before, either order left a `needs_user` task with no `ask`, passed by the supervising assistant as if it were a deployed task.
-- **iOS** (`DecisionRow`, `docs/apple/ios.md` "Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)"): the same row as the web's in the Needs You tray and on the task board, answered through the accept route with `option` or `response`; an option of an `irreversible` or `visible_to_others` decision takes two taps. The `TODO_DECIDE` push's OK and its `options` / `responses` are not actions in the app yet.
+- **iOS** (`DecisionRow`, `docs/apple/ios.md` "Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)"): the same row as the web's in the Needs You tray and on the task board, answered through the accept route with `option` or `response`; an option of an `irreversible` or `visible_to_others` decision takes two taps. The `TODO_DECIDE` push's one action is Take Recommendation, which calls the accept route with `todo.asked_at`; a `TODO_DECIDE_OPEN` push has none, and the push's `options` are not actions in the app yet.
 - Not done here: offering the options from the decision push on Android (its notification opens the conversation) and on iOS. A task that only waits is parked: "Parked tasks" below.
 
 ## Decisions that can wait
@@ -805,6 +832,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
 - **Legacy owner visibility**: the watch moves an open, current `owner_priority` park to the existing `needs_user` state, so Needs you includes it before its old `until`. It preserves the actual review, reason, timestamps, history, supervisor and independent owner-wait record; it creates no question, recommendation, option, deadline, consent or Agent instruction. The existing `undecidable` signal asks the current supervisor once to restate a complete question, without the modern question-write settle delay or treating an older Ask as the current question. Fresh `task_review needs_user` admission remains strict. A real owner decision stored after that park wins over reconciliation and is retried after a failed write; a failed decision lookup postpones migration rather than guessing that nothing was answered. Older decision cards are stale while the latest review is that legacy park: neither clicking an old recommendation nor its automatic default can answer the new owner wait. Deadline reminders are also skipped without changing the old Ask. This lasts until a real newer review replaces the legacy marker; non-decision verification asks remain unaffected. Other external/date parks, closed tasks and newer reviews are untouched; no historical card or decision is replayed.
 - **Kept on the review**: `reviews[]` carries `reason`, `until`, `waiting_on`, `parks`, `evidence` when recorded, and the existing `due_at`, `decided` and `decided_told` fields. `supervision.parked` is read from the latest review while the state is `parked`; no new column is added. A legacy review without evidence stays without it.
 - **Web wait display**: use the lazy `TaskWaitInfo` display and the `ParkedTaskRow` API independently of the grouping implementation on the Parked tray, To-dos, All board and task details. It renders recorded wait, source and wake information; callers retain existing membership, owner-decision and live-work eligibility. It adds no grouping rule or lifecycle/status change. iOS and Android continue to show supervised tasks as in progress.
+- **Web wait source names** (#9730): source links name the recorded PR, issue or comment instead of an ordinal. An explicit park uses its own evidence URL; unrelated task PR facts do not become evidence for that wait. Without explicit evidence, the existing multi-PR merge fallback remains. A recorded Lark topic title is used only when its chat and thread IDs match the source AppLink; a recorded contact keeps its channel name. Missing names stay an honest Lark conversation label, missing or unsafe URLs produce no source placeholder, and full URLs remain inspectable without another request.
 - **Wait count and age**: `Parked.count` is the consecutive parks in the current streak without an Agent turn; wait age is the earliest known request or review time in that matching streak, never `todo.updated_at` or a PR check time. Match the same wait kind, target and object (for `person_reply`, the same channel), scanning only the trailing `count` parked reviews; an Agent turn resets the streak. For each matching park, a valid sent contact's `sent_at` takes precedence over that review's `at`. A valid sent-contact start reads **Waiting**; a review-time fallback reads **Parked**. Sort wait slots oldest known first, unknown starts last, with a stable to-do-ID tie-break (`web/src/lib/task-wait.ts`, `waitStart`, `compareWaitAge`).
 - **Contact and provenance**: show a last request only when its contact is complete, `status: "sent"`, its URL is a non-root HTTP(S) source without credentials, and `sent_at` is no later than now (`sentWaitContact` in `web/src/lib/task-wait.ts`; display projection `taskWait` in `web/src/lib/task-wait-info.ts`). Review evidence also requires `ready: true` and a PR/MR object URL. `recorded_by` identifies the recording conversation, not the contact or sender. Evidence is the supervisor's source-backed account; the hub does not fetch or independently verify that source. A legacy park with no evidence has unknown contact, source and wake; an implicit PR wait keeps its known PR link but has unknown contact, wake and start time. Do not invent missing values. Only waits that can record a sent request say when none is recorded (`person_reply`, `merge_review`, a legacy park, an implicit PR wait); `external_event` and `date` evidence never carries a contact, so their display shows the target, source, wake and fallback time with no request line (#10527). A target that describes a prompt to the owner is shown as written: it is not read as a sent request, a pending owner decision or consent. Park evidence has no field linking it to an owner decision; a task with a pending one (`needs_user`, an ask to decide, or an Agent asking the owner) is already filed under Waiting on you, ahead of Parked (`web/src/lib/todo-triage.ts`).
 - **Due and reminder draft**: a passed `until` or a valid last contact older than 24 hours (`person_reply`) or 72 hours (`merge_review`) reads as due for follow-up. Only the last-contact threshold enables the editable reminder draft; Copy copies it locally and Open channel follows the recorded contact. Successful copy dismisses the editor; failed copying or an edit made while clipboard permission is pending keeps the draft. No external message is sent, no event is watched, no park is automatically ended, and no round is incremented. A minute clock refreshes displayed age/due text only. At `until`, `parked_due` is for the supervisor and the task remains parked until the supervisor acts.
@@ -1204,6 +1232,11 @@ as its install permission says. Reports skip such addresses while the extension 
 unavailable, and the one-time import of older `pr_url` / `prs` references never
 asks an extension.
 
+Task repository storage uses manager migration `0516_todo_repositories.sql`.
+Earlier branch builds recorded it as `0513` or `0514`; the existing migration
+renumbering moves either record before applying the search migration that now
+owns that number. Existing association data is kept.
+
 Shared Go types and validators: `server/internal/assistant/repository/task.go`.
 Web types/helpers: `web/src/lib/task-repositories.ts`. Fixed consumer fixture:
 `spec/fixtures/task-repositories/contract.json`. Directory aliases use one ASCII
@@ -1222,10 +1255,130 @@ catalog entry's `clone_url` when there is one (`transport_origin: "catalog"`),
 else from the clone address a provider extension answered for its repository
 (`"provider"`), else from its canonical URL (`"canonical_default"`).
 
-Preparation consumers use `db.ReadTodoRepositoriesTx` with the expected revision,
+Preparation consumers use `repositorystore.ReadTodoRepositoriesTx` with the expected revision,
 select repository IDs through `repository.Snapshot`, and persist that value with
 their operation in the same transaction. The reader locks the Todo, including an
 empty set. Digests exclude links and association revision. Consumers retain the
 operation's snapshot for retries; no permanent business-association seal or
 legacy-start hook exists. Physical records, paths, resolved commits and cleanup
 belong to the workspace preparation service.
+
+
+## Backend workspace naming
+
+People configuring coding tasks can open **Workspace naming** inside Assistant
+settings’ **Starting tasks** group after choosing **New workspaces**.
+The entry waits for the matching assistant’s confirmed preference; other, missing
+or unknown preferences hide it without deleting saved rules. A to-do’s details
+keep an independent naming entry. Template help appears beneath each field by
+default; preview options open on request. Labels and fields form compact desktop
+rows and stack on narrow screens. Unset inputs are blank, with localized
+placeholders showing the system default (Assistant settings) or the effective
+Assistant default (task overrides). Clearing and saving removes that override;
+there are no inheritance status labels or reset buttons. A preview shows the task
+folder once, then a labeled branch for a root repository or each repository's
+folder-to-branch mapping for a container, without repeating the parent path. The
+computer and layout selectors and the preview action form one compact row that
+stacks on phones; a task's repository choices sit above it. Routine planning
+time, time zone and disclaimer text are left out of the result.
+It applies only to explicitly selected backend preparation. It does not change Engine creation, legacy `new`, `existing`
+or `none`, existing preferences, task progress or cleanup.
+
+The fields are `base_directory` (default `{home}/workspace`),
+`task_directory_template` (`task-{task-id}`), and `branch_template`
+(`persona/{task-id}`). Each field inherits task override → Assistant → product
+default. Omitted patch fields preserve saved values; `null` removes an override;
+empty strings are invalid on the wire. The Web editor converts a cleared field
+to a null patch and uses the same fallback in preview and after reload. Assistant
+writes still require the explicit manager.
+Assistant GET and PUT responses keep `workspace_rules` as the saved partial
+object (`{}` when unset or wholly reset); `effective_workspace_rules` separately
+contains all resolved fields. Saving a value equal to a default still records
+an explicit override. Reading defaults never materializes them in saved rules.
+Task overrides have their own CAS revision, independent of legacy Todo edits.
+
+Folder templates support `{task-id}`, `{task-slug}`, `{yyyy}` and `{mmdd}`.
+Branches also support `{repo}`, `{branch}` and `{base-branch}`. The last two
+require an explicit branch; default, tag, commit and arbitrary typed refs are
+preserved without guessing a branch. Only a template using an unavailable field
+fails. A root repository maps to `.`, while containers use each repository's
+explicit alias or the shared repository-name default. Duplicate names fail.
+
+| Route | Contract |
+| --- | --- |
+| `GET/PUT /api/v1/assistant` | `workspace_rules`, `effective_workspace_rules`, `workspace_naming_version` (`workspace-naming/v1`); PUT patches rules with explicit manager ownership. |
+| `GET/PUT /api/v1/todos/{id}/workspace-rules` | `{todo_id, revision, workspace_rules}`; PUT requires `expected_revision` and a rule patch. |
+| `POST /api/v1/assistant/workspace-naming/preview` | Clearly labeled sample, using selected computer and layout; optional draft rules. |
+| `POST /api/v1/todos/{id}/workspace-naming/preview` | Trusted saved Todo/repositories, explicit `machine_id`, `layout` (`root` or `container`) and `selected_repo_ids`, optional draft rules. |
+| `POST /api/v1/todos/{id}/workspace-naming/plans` | Same selection plus required stable `operation_id`, without draft rules; saves one immutable snapshot for this operation. |
+| `GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}` | Reads a saved snapshot, including after a lost save response. |
+
+Preview calls the selected computer's read-only `workspace.naming.resolve` RPC.
+It supplies its own home and native path semantics; no browser-provided home or
+resolved path is trusted. The pure resolver checks lexical paths; on Darwin it
+compares components without case to conservatively reserve private state even
+on case-sensitive volumes, while Linux comparisons remain case-sensitive.
+The Node resolves existing symlink ancestors of the base, task root and every
+repository's absolute path through its existing guarded walker, then rejects
+credential paths and physical private state. Only a missing tail is accepted;
+other resolution errors fail closed. This includes the private-state root itself:
+the guarded walk returns its physical existing ancestors plus missing tail even
+with `ErrNotExist`, and containment uses that returned path. It also validates local branch format.
+No directory is created, no repository is
+queried or fetched, and no Engine is opened. `.persona` and `.git` task path
+segments and private state directories are unavailable; `{persona-home}` has no
+registered public workspace subtree in this version and is unsupported.
+Windows device and extended namespaces (`//?/`, `//./` and `/??/`, including
+extended UNC paths) are rejected rather than stripped: they can name the same
+private directory with a different lexical volume. A Windows Node with a
+namespace-form home or state directory returns `context_invalid`; ordinary
+drive and UNC paths retain their native case and separator semantics.
+Task-directory components follow portable rules both when saving a template and
+after expanding it on the Node. Windows device names (`CON`, `PRN`, `AUX`, `NUL`,
+`COM1`–`COM9`, `LPT1`–`LPT9`, and their superscript-digit forms) are rejected in
+every component, regardless of case or extension. The shared repository helper
+checks only reserved names: task paths still allow Unicode, internal spaces and
+components longer than a repository alias. Ordinary near-matches such as
+`COM10` and `NUL-backup` remain valid. This is naming validation, not proof that
+the target filesystem can create the path. Preparation must recheck physical
+paths when it creates or reuses resources; preview does not freeze the filesystem.
+
+The sole resolver and wire contract are in
+`server/internal/workspacenaming/naming.go`, with an exact shared vector in
+`spec/fixtures/workspace-naming/contract.json`. It freezes the instant, assistant
+timezone (explicit UTC fallback), title slug, effective rules, T1 selected source
+snapshot, paths and task branches. `digest` is SHA-256 of the Go JSON encoding
+with its own digest cleared; repositories are ordered by repository ID.
+
+The manager persists `todo_workspace_rules` and `workspace_naming_plans` in
+PostgreSQL. Their schema migration is `20261118234802_workspace_naming.sql`. Earlier
+branch builds recorded `0515_workspace_naming.sql`; the existing renumbering step
+moves that record before applying pending migrations. Saved rules, revisions and
+operation snapshots are kept, including when an older build left both records.
+Snapshot saves check the current override revision and selected source
+digest in the same Todo transaction. Link-only edits do not alter that source
+digest. Retrying an existing operation returns its original snapshot without
+rereading settings, title, clock or computer context. Changing input requires a
+new operation; associations and overrides remain editable, including after a
+snapshot. Operation IDs are global: reusing another Todo's ID returns a generic
+conflict before calling the computer, while a read under the wrong Todo remains
+not found. Concurrent saves preserve one immutable snapshot; incompatible input
+returns a conflict rather than a database uniqueness error.
+Preparation can call `repositorystore.ReadWorkspaceNamingPlanTx` in its own
+transaction. This read does not permanently bind the Todo or attest readiness;
+preparation owns cancellation, intent checks, physical ownership, Git source
+resolution, recovery and existing cleanup semantics.
+
+Web reuses `WorkspaceRulesEditor`, `WorkspaceNamingPreview`, settings inputs,
+Group and Button. Saves confirm returned values; failures keep drafts and can
+reload the saved baseline without discarding local edits. Reloading also removes
+preview selections for repositories no longer associated with the task; existing
+selections stay unchanged and newly associated repositories require selection.
+Both entry points load the shared editor through `lazyPage` when rendered, keeping
+its module out of the first screen's page-preload dependencies. The connection
+context guard is shared with the repository editor. Both Assistant settings and
+Todo details wrap naming in a local `PageBoundary`, retaining the existing
+one-time chunk reload and recoverable error. A persistent import failure leaves
+the other editors mounted and saveable.
+Edits and computer or assistant changes invalidate pending preview responses.
+These controls never select a creation mode or start an Agent.

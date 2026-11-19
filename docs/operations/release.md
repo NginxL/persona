@@ -491,7 +491,7 @@ The same workflow attaches the Electron desktop packages to the Release (`docs/d
 - Nothing extra to run: push the stable tag as above. After the `authorize` job, `desktop-gate` checks which signing secrets are configured, `desktop-mac` and `desktop-win` build and verify signed packages on native runners with the tag's version, and `desktop-publish` attaches them after the Release exists: packages and block maps first, `latest-mac.yml` and `latest.yml` last.
 - **Without the signing secrets the release still succeeds and has no desktop packages.** The run's summary says which platform was skipped and which secrets are missing. This is the state today: no Developer ID or Windows code-signing certificate has been supplied (`docs/desktop/desktop.md`, "What the owner must provide", lists the eight secrets and what each must contain).
 - Each platform stands alone: with only the macOS secrets configured, the Release gets the macOS packages and the summary says Windows was skipped.
-- Prerelease tags (`v1.3.0-rc1`) and manual dispatches publish no desktop packages.
+- Prerelease `vX.Y.Z-beta.N` tags publish signed desktop packages when the same signing prerequisites exist. electron-updater reads the prerelease channel (`beta.yml` / `beta-mac.yml`); stable packages continue to read `latest.yml` / `latest-mac.yml` and never opt into prereleases. The prerelease's own immutable Release owns its metadata. Other prerelease spellings and manual dispatches publish no desktop packages.
 - If a desktop job fails after the Release was created, rerun the failed jobs for the same tag; uploads replace assets of the same name. The hub image and the Release itself are not affected by a desktop failure.
 - After the first signed release, check on a real Mac and a real Windows PC that an installed older version offers "Restart to update" and reopens as the new one. That path is not covered by any automated test (the update test uses an unsigned build and a local feed).
 
@@ -570,21 +570,23 @@ A private configuration has only these fields, with no secrets:
   `releases/latest/download` never sees a manifest whose files are not there yet.
 - A receipt that carries `android.json` (the Android platform's) must ship the
   APK it names, at its size and sha256, for the tag's version.
-- Windows CLI bundles (`Persona-<version>-windows-<arch>.zip`) also require a
-  native verification report before upload (#8338). On Windows of that
-  architecture, run `python scripts/operations/windows_release.py --archive
-  <archive.zip> --version <version> --build <build>`. It runs the bundled
-  `persona-link version`, `personad version -v`, and `personad node-update-check`
-  with time limits, without installing or starting services. Success writes
-  `<archive-stem>.verification.json` beside the ZIP; failure removes a previous
-  report. Include the ZIP, report and `BUILD.json` or `latest.json` in the
-  private artifact receipt. The coordinator checks the requested version,
-  build, command results, ZIP digest and executable digests before any upload.
-  This report is output from the trusted release pipeline, preventing stale or
-  mismatched verification; it is not a signed attestation against a malicious
-  publisher. Cross-compilation or a matching build number alone does not prove
-  the Windows programs report the intended version. A missing Windows runner
-  is an explicit publication prerequisite, not a passed or skipped check.
+- Windows CLI bundles (`Persona-<version>-windows-<arch>.zip`) and each current
+  `persona-link-windows-<arch>.exe.gz`, `personad-windows-<arch>.exe.gz` and
+  `persona-node-windows-<arch>.exe.gz` require native verification before upload (#8338).
+  On Windows of that architecture, run `python scripts/operations/windows_release.py --archive
+  <archive.zip-or.exe.gz> --version <version> --build <build>` for each artifact. It runs the actual
+  `version`, `version -v`, and for `personad` / `persona-node` `node-update-check` with time limits,
+  without installing or starting services. Link's native report cannot stand in for a node's.
+  Success writes `<artifact-stem>.verification.json` beside the artifact; failure removes a previous
+  report. Include the artifact, report and `BUILD.json` or `latest.json` in the private artifact
+  receipt. Node programs also require the receipt's `latest.json` to list their exact platform, name
+  and compressed and unpacked hashes. The coordinator checks the requested version, build, command
+  results, PE architecture, archive digest and executable digests before any upload.
+  This report is output from the trusted release pipeline, preventing stale or mismatched verification;
+  it is not a signed attestation against a malicious publisher, nor an Authenticode signature.
+  Cross-compilation or a matching build number alone does not prove the Windows programs report the
+  intended version. A missing Windows runner is an explicit publication prerequisite, not a passed
+  or skipped check.
 
 For the first release, merge this consumer's PR before pushing `v0.1.0` from
 the merged `main` commit. The public workflow creates the Release and image;

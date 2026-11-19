@@ -91,6 +91,8 @@ class StandaloneScheduledChatTest {
             style = candidate
             Snapshot.sendApplyNotifications()
             rule.waitForIdle()
+            // Projection and list placement finish off the main thread; Compose idle does not cover that work (#10747).
+            rule.waitUntil(20_000) { rule.onNodeWithText("Daily briefing pushed to your phone.").isDisplayed() }
             rule.onNodeWithText("Daily briefing pushed to your phone.").assertIsDisplayed()
         }
     }

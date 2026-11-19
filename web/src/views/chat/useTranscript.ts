@@ -1,6 +1,6 @@
 import { conversationDeleted, onConversationDeleted } from "../../lib/conversation-deleted";
 // A session's items: the newest page over HTTP, then live over the WebSocket (docs/protocol/protocol.md "Continuity of items").
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, ApiError, errorText, isAbort, READ_TIMEOUT_MS, sessionPath } from "../../lib/api";
 import { sessionLoadError } from "../../lib/session-link";
 import { getState, listenSession, markConversationDeleted, send, type ItemsEvent } from "../../lib/store";
@@ -22,6 +22,24 @@ const lastPulls = new Map<string, number>();
 const EARLIER_RETRY_MS = 3000;
 const EARLIER_RETRY_MAX_MS = 30_000;
 
+interface EarlierRead {
+  controller: AbortController;
+  promise: Promise<symbol | undefined>;
+  page?: symbol;
+}
+
+export function waitForEarlierRetry(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const settle = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", settle);
+      resolve();
+    };
+    const timer = window.setTimeout(settle, ms);
+    signal.addEventListener("abort", settle, { once: true });
+  });
+}
+
 /** The first page refused because reading it would start the agent: one its engine let go (Paseo's closed and archived
  *  agents), which only a watched chat reads (docs/integrations/paseo.md "Content", #8132). The subscribe that follows
  *  loads it, and its backlog brings the page. */
@@ -42,7 +60,10 @@ export interface Transcript {
   error: string;
   hasMore: boolean;
   loadingEarlier: boolean;
-  loadEarlier: () => Promise<void>;
+  /** Identifies the last older page applied to items. */
+  earlierPage?: symbol;
+  /** Returns the page's identity if older items were queued. Navigation may wait out a failed read's backoff. */
+  loadEarlier: (options?: { waitForRetry: boolean }) => Promise<symbol | undefined>;
   expandFold: (fold: Item) => Promise<boolean | void>;
   /** The reply as it is written, before the transcript has it: the headless assistant's, or an agent's as Claude shows it
    *  (a Claude session Persona started; docs/integrations/claude-integration.md "Live replies"). "" for none. */
@@ -81,7 +102,13 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   const [firstRead, setFirstRead] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(initial?.hasMore ?? false);
+  const hasMoreRef = useRef(hasMore);
+  const updateHasMore = useCallback((next: boolean) => {
+    hasMoreRef.current = next;
+    setHasMore(next);
+  }, []);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [earlierPage, setEarlierPage] = useState<symbol>();
   const [streaming, setStreaming] = useState("");
   const [nonce, setNonce] = useState(0);
   const [notLive, setNotLive] = useState(false);
@@ -102,7 +129,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
   // Bumped whenever the shown conversation starts over (another session, or the file was rewritten): an older page or a
   // fold asked for before that is dropped when it lands, so it never merges into the conversation shown by then.
   const generation = useRef(0);
-  const earlierInFlight = useRef(false); // set at once, unlike loadingEarlier, so scroll events before a render do not ask twice
+  const earlierInFlight = useRef<EarlierRead | null>(null);
   const rewrite = useRef<() => void>(() => {}); // the effect's cache invalidation, shared with older-page reads below
   // The back-off after a failed older page: when loadEarlier may ask again, and how long the last wait was.
   const earlierRetryAt = useRef(0);
@@ -123,26 +150,40 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     setItems((have) => mergeItems(have, batch));
   }, []);
 
+  const invalidateHistoryReads = useCallback(() => {
+    generation.current++;
+    const earlier = earlierInFlight.current;
+    earlierInFlight.current = null;
+    earlier?.controller.abort();
+    earlierRetryAt.current = 0;
+    earlierWait.current = 0;
+  }, []);
+
+  useLayoutEffect(() => {
+    // A caller arriving after HTTP completes but before these items commit still joins that page.
+    if (earlierPage && earlierInFlight.current?.page === earlierPage) earlierInFlight.current = null;
+  }, [earlierPage]);
+
   useEffect(() => {
     let dead = false;
     const ctl = new AbortController();
+    // Older pages and folds still on their way were asked for from what is shown now: they must not land on what replaces it.
+    const disownReads = () => {
+      invalidateHistoryReads();
+      setEarlierPage(undefined);
+      setLoadingEarlier(false);
+    };
     const offDeleted = onConversationDeleted((machine, session) => {
       if (machine !== mid || session !== sid) return;
       dead = true;
       ctl.abort();
-      generation.current++;
+      disownReads();
       snapshot.current = null;
       setItems([]);
       setStreaming("");
       deltas.current.cancel();
       send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     });
-    // Older pages and folds still on their way were asked for from what is shown now: they must not land on what replaces it.
-    const disownReads = () => {
-      generation.current++;
-      earlierInFlight.current = false;
-      setLoadingEarlier(false);
-    };
     disownReads();
     const kept = snapshot.current;
     const cached = cacheScope && kept?.scope === cacheScope && kept.page.machineID === mid && kept.page.sessionID === sid && (kept.page.manager ?? "") === cacheManager
@@ -151,13 +192,11 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     setLoading(!cached);
     setFirstRead(false);
     setError("");
-    setHasMore(cached?.hasMore ?? false);
+    updateHasMore(cached?.hasMore ?? false);
     deltas.current.flush("");
     liveRaw.current = liveShown.current = "";
     covered.current = 0;
     history.current = cached?.history ?? "";
-    earlierRetryAt.current = 0;
-    earlierWait.current = 0;
     setNotLive(false);
     let tally: StaleTally = FRESH_TALLY;
     let lastArrival = Date.now();
@@ -208,8 +247,8 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       if (ready && !gap) save(); // a page with a hole is not kept: the fill saves once it is closed
     };
     const rewritten = () => {
-      dead = true; // invalidate in-flight reads before React runs the next effect
-      generation.current++;
+      dead = true;
+      disownReads(); // invalidate in-flight reads before React runs the next effect
       if (cacheScope) discardFeedCache(cacheScope);
       else discardMemoryPage(memoryScope, mid, sid);
       snapshot.current = null;
@@ -308,7 +347,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       if (e.has_more !== undefined) {
         // The replay of a subscribe without since_seq (the first read failed or was refused) stands in for that read.
         latestMore = e.has_more;
-        setHasMore(latestMore);
+        updateHasMore(latestMore);
         setError("");
         const fresh = e.items ?? [];
         const skips = skipsCached(fresh);
@@ -373,7 +412,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         setItems(refreshed);
         latest = refreshed(latest);
         latestMore = Boolean(p.has_more);
-        setHasMore(latestMore);
+        updateHasMore(latestMore);
         if (p.history) history.current = p.history;
         save();
         showLive(batch);
@@ -400,6 +439,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
 
     return () => {
       dead = true;
+      invalidateHistoryReads();
       ctl.abort();
       offDeleted();
       off();
@@ -413,45 +453,60 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       send({ type: "unsubscribe", machine_id: mid, session_id: sid });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mid, sid, nonce, cacheScope, cacheManager, assistant]);
+  }, [mid, sid, nonce, cacheScope, cacheManager, assistant, invalidateHistoryReads, updateHasMore]);
 
   // After the effect above, which starts each conversation's watch from the rev it has then.
   useEffect(() => {
     revWatch.current?.heard(opts.rev, Date.now());
   }, [opts.rev]);
 
-  const loadEarlier = useCallback(async () => {
-    const first = itemsRef.current[0];
-    if (!first || earlierInFlight.current || !hasMore || Date.now() < earlierRetryAt.current) return;
-    const gen = generation.current;
-    earlierInFlight.current = true;
+  const loadEarlier = useCallback<Transcript["loadEarlier"]>((options) => {
+    if (conversationDeleted(mid, sid)) return Promise.resolve(undefined);
+    if (earlierInFlight.current) return earlierInFlight.current.promise;
+    const delay = earlierRetryAt.current - Date.now();
+    if (!itemsRef.current.length || !hasMoreRef.current || (delay > 0 && !options?.waitForRetry)) return Promise.resolve(undefined);
+    const read: EarlierRead = { controller: new AbortController(), promise: Promise.resolve(undefined) };
+    earlierInFlight.current = read;
     setLoadingEarlier(true);
-    try {
-      const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}&before_seq=${first.seq}`);
-      if (gen !== generation.current) return;
-      if (p.history && history.current && p.history !== history.current) {
-        rewrite.current();
-        return;
+    read.promise = (async () => {
+      const { signal } = read.controller;
+      const current = () => earlierInFlight.current === read && !signal.aborted;
+      try {
+        if (delay > 0) await waitForEarlierRetry(delay, signal);
+        if (!current() || !hasMoreRef.current) return;
+        const first = itemsRef.current[0];
+        if (!first) return;
+        const p = await api<ItemsPage>(`${sessionPath(mid, sid)}/items?${PAGE}&before_seq=${first.seq}`, { signal });
+        if (!current()) return;
+        if (p.history && history.current && p.history !== history.current) {
+          rewrite.current();
+          return;
+        }
+        apply(p.items ?? []);
+        updateHasMore(Boolean(p.has_more));
+        setError("");
+        earlierRetryAt.current = 0;
+        earlierWait.current = 0;
+        if (p.items?.some((item) => item.seq < first.seq)) {
+          read.page = Symbol();
+          setEarlierPage(read.page);
+          return read.page;
+        }
+      } catch (e) {
+        if (!current()) return;
+        // Kept in state for the caller to show; the next try waits instead of firing on every scroll tick.
+        earlierWait.current = Math.min(earlierWait.current ? earlierWait.current * 2 : EARLIER_RETRY_MS, EARLIER_RETRY_MAX_MS);
+        earlierRetryAt.current = Date.now() + earlierWait.current;
+        setError(sessionLoadError(errorText(e)));
+      } finally {
+        if (earlierInFlight.current === read) {
+          if (!read.page) earlierInFlight.current = null;
+          setLoadingEarlier(false);
+        }
       }
-      apply(p.items ?? []);
-      setHasMore(Boolean(p.has_more));
-      setError("");
-      earlierRetryAt.current = 0;
-      earlierWait.current = 0;
-    } catch (e) {
-      if (gen !== generation.current) return;
-      // Kept in state for the caller to show; the next try waits instead of firing on every scroll tick.
-      earlierWait.current = Math.min(earlierWait.current ? earlierWait.current * 2 : EARLIER_RETRY_MS, EARLIER_RETRY_MAX_MS);
-      earlierRetryAt.current = Date.now() + earlierWait.current;
-      setError(sessionLoadError(errorText(e)));
-    } finally {
-      // a start-over already cleared both for the conversation shown now
-      if (gen === generation.current) {
-        earlierInFlight.current = false;
-        setLoadingEarlier(false);
-      }
-    }
-  }, [mid, sid, hasMore, apply]);
+    })();
+    return read.promise;
+  }, [mid, sid, apply, updateHasMore]);
 
   const expandFold = useCallback(
     async (fold: Item): Promise<boolean> => {
@@ -478,5 +533,5 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
     [mid, sid, apply],
   );
 
-  return { items, history: history.current, loading, firstRead, error, hasMore, loadingEarlier, loadEarlier, expandFold, streaming, notLive, reload: () => setNonce((x) => x + 1) };
+  return { items, history: history.current, loading, firstRead, error, hasMore, loadingEarlier, earlierPage, loadEarlier, expandFold, streaming, notLive, reload: () => setNonce((x) => x + 1) };
 }

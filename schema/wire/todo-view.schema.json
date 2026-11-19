@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "todo-view.schema.json",
   "title": "To-do view",
-  "description": "What the manager works out for each to-do and for the To-dos list (#10226, docs/design/proposals/todos-redesign.md 3.3, 3.6, 3.7, 6.1, 6.3): the row's view and its asks, the places and the counts, and a to-do's conversation grouped into rounds with its results and what changed since the owner looked (#10465). The hub only adds counts up and merges places; the cases are in spec/fixtures/todo-view, spec/fixtures/todo-counts and spec/fixtures/todo-rounds.",
+  "description": "What the manager works out for each to-do and for the To-dos list (#10226, docs/design/proposals/todos-redesign.md 3.3, 3.6, 3.7, 6.1, 6.3): the row's view and its asks, the places and the counts, a to-do's conversation grouped into rounds with its results and what changed since the owner looked, the answer to one of a to-do's own asks with its reply, and the todo a decision's push carries (#10465). The hub only adds counts up and merges places; the cases are in spec/fixtures/todo-view, spec/fixtures/todo-counts, spec/fixtures/todo-rounds, spec/fixtures/todo-asks and spec/fixtures/todo-push.",
   "x-out": {
     "ts": "web/src/lib/todo-view-wire.ts",
     "swift": "apple/Packages/PersonaWire/Sources/PersonaWire/TodoViewWire.swift",
@@ -542,6 +542,133 @@
           "propertyNames": {"$ref": "#/$defs/TodoEntryType"},
           "additionalProperties": {"type": "integer", "minimum": 1},
           "description": "How many entries of each type came since then, each of a run line's turns counted; only the types that have any. The owner's own acts are left out, and so is what a round folds under one of them (the hub's relay of their answer, the run their message started)."
+        }
+      }
+    },
+    "TodoDecidePush": {
+      "description": "The top-level `todo` of a decision's push (category TODO_DECIDE, or TODO_DECIDE_OPEN, which no app gives actions; docs/assistant/todos.md \"Waiting for the owner\") and of its WebSocket notify: what its Take Recommendation needs, and from a manager that says how the push may answer it (#10465) the ask, the lock-screen rule and the options. A push from an older manager carries the first four only and keeps TODO_DECIDE. The cases are in spec/fixtures/todo-push.",
+      "type": "object",
+      "required": ["id", "asked_at", "recommend"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The to-do."
+        },
+        "asked_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The round the decision waits in, as POST /api/v1/todos/{id}/accept takes it: an answer to an earlier round takes nothing."
+        },
+        "recommend": {
+          "type": "string",
+          "description": "The label of the recommended option, which Take Recommendation takes."
+        },
+        "manager": {
+          "type": "string",
+          "description": "The manager whose to-do it is, which every answer names in X-Persona-Manager."
+        },
+        "ask": {
+          "type": "string",
+          "description": "The decision's ask in the to-do's view (OwnerAsk.id), which an answer from the notification names; absent from an older manager."
+        },
+        "lockscreen": {
+          "$ref": "#/$defs/OwnerAskLockscreen",
+          "description": "What the notification may offer: answer, the category stays TODO_DECIDE and the options may be its actions; open_only, the category is TODO_DECIDE_OPEN, with no action, and a tap opens the app. Absent from an older manager: Take Recommendation only, as before."
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {"type": "string"},
+          "description": "The decision's option labels, whole, the recommended first; only with lockscreen answer, and with aps.mutable-content so the app's notification service extension can offer them. The hub drops both rather than cut the alert under 500 characters when the push would not fit otherwise, never the category, lockscreen or ask."
+        }
+      }
+    },
+    "TodoAskOutcome": {
+      "description": "What came of an answer to one of a to-do's asks (TodoAskAnswered): answered, the answer was taken (an option, a fixed answer, the owner's words, a failed start started again, a conclusion acknowledged), though the ask may still wait (explain_first leaves it waiting while the supervisor explains), so a client draws the reply's todo rather than dropping the ask; declined, Don't handle was kept, with a receipt that undoes it; later, nothing was written and the ask still waits (the client keeps Later for its app session); undone, a Don't handle was undone and the ask waits again. Open: a newer hub may send other values.",
+      "type": "string",
+      "enum": ["answered", "declined", "later", "undone"]
+    },
+    "TodoAskAnswerOutcome": {
+      "description": "An answer that is an outcome rather than an option, a fixed answer or words (TodoAskAnswer.outcome): later, not now: nothing is written; decline, Don't handle a decision, kept with a receipt; undo, that Don't handle undone, with its receipt.",
+      "type": "string",
+      "enum": ["later", "decline", "undo"]
+    },
+    "TodoAskAnswer": {
+      "description": "The body of POST /api/v1/todos/{id}/asks/{ask}/answer (#10465), the answer to one of the to-do's own asks, named by its view's ask id: at most one of option, response, text and outcome. None is the ask's one action: a failed start started again, a conclusion that says the work cannot be done acknowledged. A run's ask is answered at its card, not here. The operation's id is the X-Persona-Op-Id header, never the body.",
+      "type": "object",
+      "properties": {
+        "option": {
+          "type": "string",
+          "description": "The label of one of a decision's options, as its ask lists it; the recommended one takes the recommendation."
+        },
+        "response": {
+          "type": "string",
+          "enum": ["decide_yourself", "not_what_i_asked", "explain_first"],
+          "description": "A fixed answer to a decision that says the owner cannot answer it as asked: nothing is taken, and the to-do's supervisor is told."
+        },
+        "text": {
+          "type": "string",
+          "description": "The owner's own words answering a decision, at most 4000 characters (400 beyond): sent to the to-do's Agent as they are, and kept with its decisions."
+        },
+        "outcome": {
+          "$ref": "#/$defs/TodoAskAnswerOutcome"
+        },
+        "receipt": {
+          "type": "string",
+          "description": "With outcome undo: the receipt the decline answered."
+        }
+      }
+    },
+    "TodoAskAnswered": {
+      "description": "The answer of POST /api/v1/todos/{id}/asks/{ask}/answer (#10465): what came of the answer, and the to-do as it reads after it, so a client sets its row from one answer.",
+      "type": "object",
+      "required": ["ask", "outcome"],
+      "properties": {
+        "ask": {
+          "type": "string",
+          "description": "The ask answered, as the path named it."
+        },
+        "outcome": {
+          "$ref": "#/$defs/TodoAskOutcome"
+        },
+        "delivered": {
+          "type": "string",
+          "enum": ["none"],
+          "description": "none: no Agent could receive the answer, which is recorded and handed to the to-do's supervisor to pass on. Absent when it reached the Agent or nothing had to be sent."
+        },
+        "receipt": {
+          "type": "string",
+          "description": "With outcome declined: the receipt outcome undo takes."
+        },
+        "todo": {
+          "description": "The to-do's row with its view, as GET /api/v1/todos/{id} answers it under todo (for a step's ask, the to-do whose row lists it), read after the answer: it says whether the ask still waits, whatever the outcome; absent when it could not be read."
+        }
+      }
+    },
+    "TodoItemDetail": {
+      "description": "What GET /api/v1/todos/{id} answers beside `todo` (the list's hand-typed row, which clients read as their own row type) from a manager that names todo_timeline (#10465): the paper's Conversation block, Results and Since you looked (proposal 3.5 rows 3, 9 and 10), so the paper needs no second read. All four are absent from an older manager, and when the manager could not read the to-do's history (the row still answers); recap and results also when there is none.",
+      "type": "object",
+      "properties": {
+        "rounds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/TodoRound"},
+          "x-go-pointer": true,
+          "description": "The rounds the paper shows, oldest first: the latest two that are not Background ones, the latest Background ones making up the rest (spec/fixtures/todo-rounds/README.md R7); empty when the to-do has none. GET /api/v1/todos/{id}/timeline has every round."
+        },
+        "rounds_total": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-pointer": true,
+          "description": "How many rounds the to-do's conversation has in all, the ones rounds leaves out included."
+        },
+        "recap": {
+          "$ref": "#/$defs/TodoRecap",
+          "description": "What changed since the owner last looked; absent when they never did, or nothing but their own acts came since."
+        },
+        "results": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/TodoResult"},
+          "description": "What the to-do's work produced, newest first, at most 3; absent when nothing was."
         }
       }
     }

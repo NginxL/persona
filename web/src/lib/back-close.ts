@@ -49,6 +49,15 @@ export function isOverlayEntry(state: unknown, id: string): boolean {
   return Boolean(state && typeof state === "object" && (state as Record<string, unknown>)[KEY] === id);
 }
 
+/** Removes only overlay metadata, preserving the page's other history state. */
+function clearOverlayMarkers(state: Record<string, unknown>) {
+  const rest = { ...state };
+  delete rest[KEY];
+  delete rest[AT];
+  delete rest[DEPTH];
+  history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
+}
+
 /** Opens one overlay's history entry: Back calls `onClose`. Returns the close (from the page) that takes it off. */
 export function openOverlay(onClose: () => void): () => void {
   const id = `o${++next}`;
@@ -78,11 +87,7 @@ export function openOverlay(onClose: () => void): () => void {
     if (popped || !isOverlayEntry(history.state, id)) return; // popped, or a navigation went on top: leave it
     if (location.href !== at) {
       // the page moved under it: take its marker off this entry and stay on the new page
-      const rest = { ...(history.state as Record<string, unknown>) };
-      delete rest[KEY];
-      delete rest[AT];
-      delete rest[DEPTH];
-      history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
+      clearOverlayMarkers(history.state);
       return;
     }
     const p = {
@@ -104,7 +109,7 @@ export function openOverlay(onClose: () => void): () => void {
 export async function settleOverlayEntry(ms = 500): Promise<void> {
   const marked = () => {
     const st = history.state as Record<string, unknown> | null;
-    return st && typeof st === "object" && typeof st[KEY] === "string" ? st : null;
+    return onOverlayEntry(st) ? st : null;
   };
   for (let i = 0; i < 5; i++) {
     const st = marked();
@@ -120,11 +125,7 @@ export async function settleOverlayEntry(ms = 500): Promise<void> {
   }
   const st = marked();
   if (!st) return;
-  const rest = { ...st };
-  delete rest[KEY];
-  delete rest[AT];
-  delete rest[DEPTH];
-  history.replaceState(Object.keys(rest).length ? rest : null, "", location.href);
+  clearOverlayMarkers(st);
 }
 
 /** While `open` (and `enabled`, e.g. only on a narrow screen), Back closes it through `onClose`. A navigation away while

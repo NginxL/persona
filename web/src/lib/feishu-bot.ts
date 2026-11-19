@@ -23,7 +23,16 @@ export interface BotFeatures {
   answer_new_card?: boolean;
 }
 
+export interface BotTopicChat {
+  chat_id: string;
+  name?: string;
+  home?: boolean;
+  require_owner_mention?: boolean;
+  added_at?: number;
+}
+
 export interface FeishuBotStatus {
+  topic_chats?: BotTopicChat[];
   enabled: boolean;
   app_id: string;
   /** The open platform's URL the hub resolved (feishu / lark / a custom one). */
@@ -66,6 +75,7 @@ export interface LarkCLIStatus {
 
 /** The edit sent to PUT: only what is set changes. */
 export interface FeishuBotUpdate {
+  topic_chats?: BotTopicChat[];
   enabled?: boolean;
   app_id?: string;
   app_secret?: string;

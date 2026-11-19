@@ -181,6 +181,8 @@ func (s *Service) collectSource(ctx context.Context, src assistantwire.InboxSour
 	if len(src.Things) == 0 && !src.Settles {
 		return nil
 	}
+	// The conversations that wrote into a batch's chat as the user hear of it (chat_reply.go); the batch goes on as it is.
+	s.tellChatWriters(ctx, src)
 	// State reports update their existing events; batches of new messages go to the model, not the list.
 	things, changed := s.applyGroupStates(ctx, src, src.Things)
 	things = s.relateBatches(ctx, src, things)

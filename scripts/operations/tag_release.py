@@ -28,7 +28,7 @@ import sys
 import tempfile
 import time
 
-from windows_release import check_windows_archives
+from windows_release import check_windows_artifacts
 
 TAG = re.compile(r"v[0-9A-Za-z][0-9A-Za-z._-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -480,7 +480,7 @@ def publish_once(config, tag, commit):
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
     assets = drop_missing_helpers(assets, config["state_dir"])
     try:
-        check_windows_archives(assets, tag[1:])
+        check_windows_artifacts(assets, tag[1:])
     except ValueError as error:
         raise ConfigError(str(error)) from error
     if is_beta_tag(tag):

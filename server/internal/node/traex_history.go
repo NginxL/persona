@@ -33,7 +33,7 @@ func traexHistoryStamp(db, thread, stamp string) string {
 			NextRolloutOrdinal *int64  `json:"next_rollout_ordinal"`
 			ActiveTurnID       *string `json:"active_turn_id"`
 		}
-		if err := queryCodexAppDB(context.Background(), db,
+		if err := querySQLite(context.Background(), db,
 			`SELECT thread_id, next_rollout_ordinal, active_turn_id FROM thread_history_projection_state`, &rows); err == nil {
 			for _, row := range rows {
 				if row.ThreadID == "" || row.NextRolloutOrdinal == nil || *row.NextRolloutOrdinal < 0 {

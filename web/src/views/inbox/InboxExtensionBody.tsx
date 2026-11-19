@@ -9,6 +9,7 @@
 // Back and the page's back button both return to the extension.
 import { useEffect, useMemo, useState } from "react";
 import { useCloseOnBack } from "../../lib/back-close";
+import { ExtensionOwnerScope } from "../../lib/extension-owner";
 import { ApiError, errorText } from "../../lib/api";
 import type { InboxItem } from "../../lib/inbox";
 import type { UIPlace } from "../../lib/extension-ui";
@@ -72,20 +73,24 @@ export function InboxExtensionBody({ item, place, own, onOwn }: { item: InboxIte
         </div>
       )}
       <ExtensionPage hidden={source} place={place}>
-        <ExtensionUI
-          key={n}
-          extension={place.extension}
-          ui={place.id}
-          context={context}
-          manager={item.manager}
-          bare
-          title={place.title}
-          revision={item.version}
-          onUnsupported={() => setFallback({ quiet: true })}
-          onMissing={() => setFallback({ quiet: true })}
-          onFailed={(e) => setFallback(fallbackOf(e))}
-          onOpenSource={() => setSource(true)}
-        />
+        {/* the extension's own id scopes what a graph's `key` keeps (lib/extension-owner.tsx), so this page's
+            graphs never share their pan, zoom and folds with another surface's */}
+        <ExtensionOwnerScope owner={place.extension}>
+          <ExtensionUI
+            key={n}
+            extension={place.extension}
+            ui={place.id}
+            context={context}
+            manager={item.manager}
+            bare
+            title={place.title}
+            revision={item.version}
+            onUnsupported={() => setFallback({ quiet: true })}
+            onMissing={() => setFallback({ quiet: true })}
+            onFailed={(e) => setFallback(fallbackOf(e))}
+            onOpenSource={() => setSource(true)}
+          />
+        </ExtensionOwnerScope>
       </ExtensionPage>
     </>
   );

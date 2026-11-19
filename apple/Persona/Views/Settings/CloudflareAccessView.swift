@@ -116,7 +116,7 @@ struct HubCloudflareAccessPage: View {
         #if os(macOS)
         .formStyle(.grouped)
         #endif
-        .confirmationDialog("Remove Service Token?", isPresented: $clearing, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Remove Service Token?", isPresented: $clearing, titleVisibility: .visible) {
             Button("Remove Service Token", role: .destructive) {
                 model.setHubAccess(nil, hub: hubID)
                 dismiss()

@@ -175,6 +175,11 @@ func TestChatProviderAndPurposeAcceptEffort(t *testing.T) {
 	if got := s.storedLaunchers(context.Background())[0].Effort; got != "high" {
 		t.Fatalf("saved default effort = %q", got)
 	}
+	if !slices.ContainsFunc(s.modelProviders(context.Background()), func(p ModelProvider) bool {
+		return p.ID == "launcher.chat" && p.ChatEffort
+	}) {
+		t.Fatal("Chat provider does not advertise purpose effort support")
+	}
 	update := `{"kind":"api","api":"chat","base_url":"https://api.example.com","model":"m","effort":"max"}`
 	if code, body := launcherCall(t, mux, "PUT", "/api/v1/launchers/chat", update); code != 200 {
 		t.Fatalf("edit default effort: %d %s", code, body)
@@ -205,6 +210,31 @@ func TestChatProviderAndPurposeAcceptEffort(t *testing.T) {
 	}
 	if got := s.storedLaunchers(context.Background())[0].Effort; got != "" {
 		t.Fatalf("cleared default effort = %q", got)
+	}
+}
+
+func TestChatModelProviderIncludesStoredCapabilities(t *testing.T) {
+	s, mux := launcherTestService(t)
+	create := `{"name":"chat","kind":"api","api":"chat","base_url":"https://api.example.com","model":"m","effort":"high","models":[{"id":"m","no_effort":true}]}`
+	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", create); code != 200 {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	providers := s.modelProviders(context.Background())
+	i := slices.IndexFunc(providers, func(p ModelProvider) bool { return p.ID == "launcher.chat" })
+	if i < 0 || len(providers[i].Models) != 1 || !providers[i].Models[0].NoEffort || providers[i].Effort != "high" {
+		t.Fatalf("stored capabilities or default effort missing from model configuration: %+v", providers)
+	}
+}
+
+func TestChatModelProviderIncludesTierAliases(t *testing.T) {
+	s, _ := launcherTestService(t)
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{
+		Name: "old", Kind: "api", API: "chat", BaseURL: "https://api.example.com", Model: "sonnet", SonnetModel: "gw/sonnet",
+	}})
+	providers := s.modelProviders(context.Background())
+	i := slices.IndexFunc(providers, func(p ModelProvider) bool { return p.ID == "launcher.old" })
+	if i < 0 || providers[i].ModelAliases["sonnet"] != "gw/sonnet" {
+		t.Fatalf("Chat tier alias missing from model configuration: %+v", providers)
 	}
 }
 

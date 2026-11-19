@@ -100,8 +100,9 @@ type Closeout struct {
 // CloseoutChecked: "yes" or "no" where the hub could tell, empty where it could not. Deployed is about the running
 // hub, so it is only ever known for the hub's own repository.
 type CloseoutChecked struct {
-	Merged   string `json:"merged,omitempty"`
-	Deployed string `json:"deployed,omitempty"`
+	Merged          string `json:"merged,omitempty"`
+	Deployed        string `json:"deployed,omitempty"`
+	LocalDeployment bool   `json:"local_deployment,omitempty"` // the running build names the PR independently of its upstream merge
 }
 
 // WorkCI records the target and fallback across manager restarts.

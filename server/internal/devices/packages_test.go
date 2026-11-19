@@ -102,6 +102,7 @@ func (r *fakeRelease) publish(t *testing.T, dir string, m update.Manifest, lates
 		outer, inner := sha256.Sum256(gz.Bytes()), sha256.Sum256(raw)
 		f := update.File{Name: name + ".gz", Size: int64(gz.Len()), SHA256: hex.EncodeToString(outer[:]), BinarySHA256: hex.EncodeToString(inner[:])}
 		if plat, ok := strings.CutPrefix(name, "persona-node-"); ok {
+			plat = strings.TrimSuffix(plat, ".exe")
 			if m.Nodes == nil {
 				m.Nodes = map[string]map[string]update.File{"persona-node": {}}
 			}
@@ -112,7 +113,7 @@ func (r *fakeRelease) publish(t *testing.T, dir string, m update.Manifest, lates
 			}
 			m.Links[plat] = f
 		} else {
-			m.Files[strings.TrimPrefix(name, "personad-")] = f
+			m.Files[strings.TrimSuffix(strings.TrimPrefix(name, "personad-"), ".exe")] = f
 		}
 		r.mu.Lock()
 		r.files["/"+dir+"/"+f.Name] = gz.Bytes()
@@ -150,6 +151,51 @@ func packageDevices(t *testing.T, hub, site string) (*Devices, string, string) {
 func overlapping(version string, build int64) update.Manifest {
 	return update.Manifest{Version: version, Build: build, NodeProtocol: nodeproto.Version, NodeProtocolMin: nodeproto.MinManagerVersion,
 		NodeCapabilities: nodeproto.Announced}
+}
+
+// Windows node downloads keep .exe through manifest lookup, download and the on-disk cache. A hub never acquires a
+// Windows self-update entry; these files are only node packages fetched by a manager.
+func TestWindowsNodePackagesRetainExecutableNames(t *testing.T) {
+	const goos, arch = "windows", "amd64"
+	plat := goos + "-" + arch
+	full := updatetest.Program(t, nodeproto.ProgramPersonad, goos, arch)
+	node := updatetest.Program(t, nodeproto.ProgramPersonaNode, goos, arch)
+	ctx := context.Background()
+	for _, program := range []string{nodeproto.ProgramPersonad, nodeproto.ProgramPersonaNode} {
+		t.Run(program, func(t *testing.T) {
+			site := newFakeRelease(t)
+			site.publish(t, "v2", overlapping("v2", 2), false, map[string]string{
+				nodeproto.ProgramPersonad + "-" + plat + ".exe": full,
+				program + "-" + plat + ".exe": map[string]string{
+					nodeproto.ProgramPersonad: full, nodeproto.ProgramPersonaNode: node}[program]})
+			d, _, _ := packageDevices(t, "v2", site.srv.URL)
+			pkg, err := d.nodePackageFor(ctx, goos, arch, program)
+			if err != nil || pkg.Program != program || pkg.file.Name != program+"-"+plat+".exe.gz" {
+				t.Fatalf("lookup: %+v %v", pkg, err)
+			}
+			bin, err := d.fetchPackage(ctx, pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(bin, program+"-"+plat+".exe") {
+				t.Fatalf("the cached Windows executable lost its suffix: %s", bin)
+			}
+			if update.ProgramOf(bin) != program {
+				t.Fatalf("the wrong program was downloaded: %s", bin)
+			}
+			// A cache hit uses the same executable filename and bytes rather than dropping .exe or redownloading.
+			asked := len(site.requests())
+			again, err := d.fetchPackage(ctx, pkg)
+			if err != nil || again != bin || len(site.requests()) != asked {
+				t.Fatalf("cache hit: %q %q %v, requests %v", again, bin, err, site.requests())
+			}
+			for _, wrong := range []string{program + "-" + plat + ".gz", program + "-windows-arm64.exe.gz", "../" + program + "-" + plat + ".exe.gz"} {
+				if fileFor(update.File{Name: wrong}, plat) {
+					t.Errorf("accepted an unrelated Windows artifact: %s", wrong)
+				}
+			}
+		})
+	}
 }
 
 // The hub's own builds come first and need no network; a persona-node device gets the release's persona-node when
@@ -227,6 +273,35 @@ func TestNodePackageLookupOrder(t *testing.T) {
 		if err != nil || update.ProgramOf(bin) != nodeproto.ProgramPersonaNode || !strings.HasPrefix(bin, identity.NodePackageCacheDir()) {
 			t.Fatalf("fetched %s %v", bin, err)
 		}
+		t.Run("cached Windows node", func(t *testing.T) {
+			const goos, arch = "windows", "amd64"
+			plat := goos + "-" + arch
+			full := updatetest.Program(t, nodeproto.ProgramPersonad, goos, arch)
+			node := updatetest.Program(t, nodeproto.ProgramPersonaNode, goos, arch)
+			d, dir, _ := packageDevices(t, "v2", "")
+			for name, program := range map[string]string{"personad-windows-amd64.exe": full, "persona-node-windows-amd64.exe": node} {
+				raw, err := os.ReadFile(program)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), raw, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, name+".version"), []byte("v2\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, tc := range []struct{ program, name string }{
+				{nodeproto.ProgramPersonad, "personad-windows-amd64.exe"},
+				{nodeproto.ProgramPersonaNode, "persona-node-windows-amd64.exe"},
+			} {
+				pkg, err := d.nodePackageFor(ctx, goos, arch, tc.program)
+				if err != nil || pkg.path != filepath.Join(dir, tc.name) || pkg.Program != tc.program {
+					t.Errorf("local %s: %+v %v", plat, pkg, err)
+				}
+			}
+		})
+
 		// A personad node is sent the hub's own personad: no download for it.
 		if pkg, _ := d.nodePackageFor(ctx, otherOS, otherArch, nodeproto.ProgramPersonad); pkg.path != filepath.Join(dir, "personad-"+plat) {
 			t.Fatalf("personad: %+v", pkg)

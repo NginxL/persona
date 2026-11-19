@@ -173,7 +173,7 @@ struct GitPRSheet: View {
                 }
                 SheetClose(disabled: pr.busy != nil) { dismiss() }
             }
-            .confirmationDialog(Text(asking.map(askTitle) ?? ""), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
+            .accessibleConfirmationDialog(Text(asking.map(askTitle) ?? ""), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
                                 titleVisibility: .visible, presenting: asking) { how in
                 Button { Task { await go(how) } } label: { Text(askButton(how)).lineLimit(1) }
                     .accessibilityIdentifier("git.pr.confirm")
@@ -471,7 +471,7 @@ struct GitPRCreateSheet: View {
                     }
                 }
             }
-            .confirmationDialog(Text("Open a Pull Request?"), isPresented: $asking, titleVisibility: .visible) {
+            .accessibleConfirmationDialog(Text("Open a Pull Request?"), isPresented: $asking, titleVisibility: .visible) {
                 Button { Task { await go() } } label: { Text("Open Pull Request").lineLimit(1) }
                     .accessibilityIdentifier("git.pr.create.confirm")
             } message: {

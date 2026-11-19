@@ -22,15 +22,26 @@ import Testing
         lines.first { if case .supervision = $0.content { true } else { false } }
     }
 
+    private func narration(_ seq: Int) -> Item {
+        var value = item(seq, text: "Checking synthetic evidence")
+        value.narration = true
+        return value
+    }
+
     @Test func quietRoundIsOneLineAndExpansionRestoresOriginalInputAndAnswer() {
-        let items = [input(), item(2)]
+        var call = item(2, kind: .toolUse)
+        call.toolName = "supervision_finish"
+        call.toolUseID = "silent-finish"
+        var result = item(3, role: "user", kind: .toolResult, text: #"{"visibility":"silent"}"#)
+        result.toolUseID = call.toolUseID
+        let items = [input(), call, result, item(4)]
         let folded = build(items)
         #expect(folded.count == 1)
         guard let header = quiet(folded) else { Issue.record("missing supervision header"); return }
         let expanded = build(items, open: [header.id])
-        #expect(expanded.count == 3)
+        #expect(expanded.count == 4)
         #expect(expanded.contains { if case .supervisionInput(let i) = $0.content { i.text == items[0].text } else { false } })
-        #expect(expanded.contains { if case .row(.assistant(let i)) = $0.content { i.id == items[1].id } else { false } })
+        #expect(expanded.contains { if case .row(.assistant(let i)) = $0.content { i.id == items[3].id } else { false } })
         #expect(build(items).count == 1)
     }
 
@@ -40,7 +51,7 @@ import Testing
         call.toolUseID = "synthetic-call"
         var result = item(4, role: "user", kind: .toolResult, text: "Synthetic result")
         result.toolUseID = call.toolUseID
-        let items = [input(), item(2), call, result, item(5, kind: .recap), item(6)]
+        let items = [input(), item(2), call, result, item(5, kind: .recap), narration(6)]
         let folded = build(items)
         #expect(folded.count == 1)
         guard case .supervision(_, let trace, _, _)? = quiet(folded)?.content else { return }
@@ -53,7 +64,7 @@ import Testing
         var next = item(3, role: "user", text: "Real input")
         next.queued = true
         next.clientMsgID = "synthetic-real-user"
-        let lines = build([input(), item(2), next, item(4)])
+        let lines = build([input(), narration(2), next, item(4)])
         #expect(lines.count == 3)
         #expect(quiet(lines) != nil)
         #expect(lines.contains { if case .row(.user(let i)) = $0.content { i.id == next.id } else { false } })
@@ -61,22 +72,40 @@ import Testing
     }
 
     @Test func userLevelAndRetainedPromotionDisplayOrdinaryLines() {
-        #expect(quiet(build([input(level: "user"), item(2)])) == nil)
-        var answer = item(2)
+        #expect(quiet(build([input(level: "user"), narration(2)])) == nil)
+        var answer = narration(2)
         answer.supervisionUser = true
         #expect(quiet(build([input(), answer])) == nil)
     }
 
-    @Test func successfulNotifyPromotesTheReplyButKeepsTheCallInsideWork() {
+    @Test func successfulNotifyShowsTheRoundButKeepsTheCallInsideWork() {
         var call = item(2, kind: .toolUse)
         call.toolName = "mcp__persona__notify_user"
         call.toolUseID = "notify"
         var result = item(3, role: "user", kind: .toolResult, text: "sent")
         result.toolUseID = "notify"
-        let lines = build([input(), call, result, item(4)])
+        let lines = build([input(), call, result])
         #expect(quiet(lines) == nil)
         #expect(!lines.contains { if case .workStep = $0.content { true } else { false } })
         #expect(lines.contains { if case .work(_, let items, _, _, _) = $0.content { items.contains { if case .step(.call(let c)) = $0 { c.id == call.id } else { false } } } else { false } })
+    }
+
+    @Test func completedReplyAfterFailedNotifyStaysVisibleWithCollapsedWork() throws {
+        var call = item(2, kind: .toolUse)
+        call.toolName = "mcp__persona__notify_user"
+        call.toolUseID = "notify"
+        var result = item(3, role: "user", kind: .toolResult, text: "Unavailable")
+        result.toolUseID = call.toolUseID
+        result.isError = true
+        let reply = item(4, text: "The example release is ready.")
+        let items = [input(), call, result, reply]
+        #expect(quiet(build(items, active: true)) != nil)
+        let replay = try JSONDecoder().decode([Item].self, from: JSONEncoder().encode(items))
+        let shown = build(replay)
+        #expect(quiet(shown) == nil)
+        #expect(shown.last?.holds(reply.id) == true)
+        #expect(shown.contains { if case .work = $0.content { true } else { false } })
+        #expect(!shown.contains { if case .workStep = $0.content { true } else { false } })
     }
 
     @Test func liveTriageHidesStreamingUntilOpenedAndPendingQuestionPromotes() {
@@ -99,19 +128,19 @@ import Testing
     }
 
     @Test func stoppedQuietRoundStillHidesItsPendingStreamUntilTheNextInput() {
-        let folded = build([input(), item(2)])
+        let folded = build([input(), narration(2)])
         guard let header = quiet(folded) else { Issue.record("Expected a quiet supervision record"); return }
         #expect(ChatLines.hidesLiveSupervision(folded, open: []))
         #expect(ChatLines.hidesLiveSupervision(folded + [.day(Date(timeIntervalSince1970: 0))], open: []))
         #expect(!ChatLines.hidesLiveSupervision(folded, open: [header.id]))
         let next = item(3, role: "user", text: "A genuine next input")
-        #expect(!ChatLines.hidesLiveSupervision(build([input(), item(2), next, item(4)]), open: []))
+        #expect(!ChatLines.hidesLiveSupervision(build([input(), narration(2), next, item(4)]), open: []))
     }
 
     @Test func splitInjectedInputPartsAreAllRawAuditContentRatherThanUserBubbles() {
         var extra = item(1, role: "user", text: "Additional synthetic model instructions")
         extra.id = "synthetic-1#1"
-        let items = [input(), extra, item(2)]
+        let items = [input(), extra, narration(2)]
         let folded = build(items)
         guard let header = quiet(folded) else { Issue.record("Expected a quiet supervision record"); return }
         let expanded = build(items, open: [header.id])

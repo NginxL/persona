@@ -14,8 +14,12 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import androidx.annotation.StringRes
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 internal data class KnowledgeFilter(
     val kind: KnowledgeKind = KnowledgeKind.Projects,
@@ -323,4 +327,88 @@ internal fun loadMessage(error: Exception): Int {
         error is IOException -> R.string.knowledge_unreachable
         else -> R.string.knowledge_unreadable
     }
+}
+
+/** The two outlines of the knowledge map: the topics' points, or the projects and what each says. */
+internal enum class MapSide(val kind: KnowledgeKind) { Topics(KnowledgeKind.Topics), Projects(KnowledgeKind.Projects) }
+
+/**
+ * What the knowledge map draws: the list of [side]'s kind and, as they arrive, the details the outline is built from.
+ * [loading] holds while details are still coming (the rows already there stay); [failed] counts details that could not be
+ * read (their entries still have a row).
+ */
+internal data class KnowledgeMapPage(
+    val scope: HubScope? = null,
+    val side: MapSide = MapSide.Topics,
+    val paired: Boolean = true,
+    val loading: Boolean = true,
+    /** The list is the answer to [side] (not what the other side left while this one loads). */
+    val loaded: Boolean = false,
+    val entries: List<KnowledgeEntry> = emptyList(),
+    val details: Map<String, KnowledgeDetail> = emptyMap(),
+    val failed: Int = 0,
+    @StringRes val message: Int? = null,
+)
+
+/** How many details the map reads at once (as iOS's map). */
+internal const val MAP_DETAIL_PARALLEL = 6
+
+internal class KnowledgeMapViewModel(
+    connection: KnowledgeConnection,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** The assistant whose knowledge base the map was opened in: every read names it, whoever is current later. */
+    val owner: String? = null,
+) : ViewModel() {
+    private val pins: kotlin.coroutines.CoroutineContext = ManagerPins.of(KnowledgePrefixes, owner, AssistantManagerChoice.current.value.hubId)
+        ?: kotlin.coroutines.EmptyCoroutineContext
+    private data class Query(val side: MapSide = MapSide.Topics, val revision: Int = 0)
+
+    private val query = MutableStateFlow(Query())
+    private val last = mutableMapOf<MapSide, KnowledgeMapPage>()
+
+    val page = combine(connection.current, query) { repository, selection -> repository to selection }
+        .flatMapLatest { (repository, selection) -> channelFlow {
+            val side = selection.side
+            val initial = KnowledgeMapPage(scope = repository?.scope, side = side, paired = repository != null)
+            if (repository == null) { send(initial.copy(loading = false)); return@channelFlow }
+            // Reloading keeps what the side showed until the new answer comes; a failed reload keeps it too.
+            val shown = last[side]?.takeIf { it.scope == repository.scope }
+            send(initial.copy(entries = shown?.entries.orEmpty(), details = shown?.details.orEmpty(), failed = shown?.failed ?: 0,
+                loaded = shown?.loaded == true))
+            try {
+                val result = withContext(pins) { repository.list(side.kind) }
+                val entries = withContext(dispatcher) { result.items.filter { it.kind == side.kind.wire }.distinctBy { it.key } }
+                // Merged and "not a project" ones are not on the projects' map: their details are not read.
+                val wanted = entries.filter { side == MapSide.Topics || it.projectStatus !in setOf("ignored", "merged") }
+                val got = ConcurrentHashMap<String, KnowledgeDetail>().also { map ->
+                    shown?.details?.forEach { (id, detail) -> if (wanted.any { it.id == id }) map[id] = detail }
+                }
+                val failures = AtomicInteger(0)
+                val finished = AtomicInteger(0)
+                fun snapshot(loading: Boolean) = initial.copy(loading = loading, loaded = true, entries = entries, details = got.toMap(),
+                    failed = failures.get())
+                send(snapshot(loading = wanted.isNotEmpty()))
+                val gate = Semaphore(MAP_DETAIL_PARALLEL)
+                coroutineScope {
+                    wanted.forEach { entry -> launch {
+                        gate.withPermit {
+                            try { got[entry.id] = withContext(pins) { repository.detail(side.kind, entry.id) } }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { failures.incrementAndGet() }
+                        }
+                        if (finished.incrementAndGet() % MAP_DETAIL_PARALLEL == 0) send(snapshot(loading = true))
+                    } }
+                }
+                send(snapshot(loading = false))
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                send(initial.copy(loading = false, entries = shown?.entries.orEmpty(), details = shown?.details.orEmpty(),
+                    failed = shown?.failed ?: 0, message = loadMessage(error), loaded = shown?.loaded == true))
+            }
+        } }
+        .onEach { if (!it.loading && it.message == null && it.paired) last[it.side] = it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, 0), KnowledgeMapPage(loading = true))
+
+    fun side(side: MapSide) { query.update { it.copy(side = side) } }
+    fun refresh() { query.update { it.copy(revision = it.revision + 1) } }
 }

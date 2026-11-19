@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,9 +23,19 @@ var ErrOffline = errors.New("not connected to the hub")
 // stableAfter: a connection that stayed up this long starts the backoff over when it drops.
 const stableAfter = time.Minute
 
+// A wait longer than probeOver asks the hub's health every probeEvery, each probe given up after probeEvery
+// (Client.pause). Settings, not measurements: a laptop that wakes reconnects within about probeEvery of its hub
+// answering again.
+const (
+	probeOver  = 3 * time.Second
+	probeEvery = 2 * time.Second
+)
+
 // Client keeps a service's connection to the hub's bus up until Run's context ends: dial with the token, say the
 // handshake, serve the hub's calls and events until the connection drops, dial again. Between tries it waits
-// Backoff, doubling up to MaxBackoff; a rejected token (ErrRejected) waits MaxBackoff every time.
+// Backoff, doubling up to MaxBackoff; a rejected token (ErrRejected) waits MaxBackoff every time. A long wait ends
+// early when the hub, out of reach as it began, answers again (pause): a laptop waking from sleep, its backoff long
+// grown by the failed tries while it slept, is back within seconds of its network.
 type Client struct {
 	Hub        string       // the hub's base URL, http(s)://host:port
 	Token      string       // the service's bus token
@@ -57,6 +70,9 @@ type Client struct {
 	// context (about 0.85 MB) and its largest compressed message. A hub only compresses when it is offered.
 	Uncompressed bool
 
+	// probeOver, probeEvery replace the constants of the same names (tests).
+	probeOver, probeEvery time.Duration
+
 	mu   sync.Mutex
 	peer *rpc.Peer     // the connection that said its handshake; nil between connections
 	up   chan struct{} // closed while peer is set
@@ -82,6 +98,7 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	first, most := orDefault(c.Backoff, time.Second), orDefault(c.MaxBackoff, time.Minute)
 	delay := first
+	reach := c.prober()
 	for {
 		began := time.Now()
 		helloed, err := c.session(ctx)
@@ -99,19 +116,108 @@ func (c *Client) Run(ctx context.Context) error {
 			c.logf("bus: the hub refused this token: %v; not trying again", err)
 			return fmt.Errorf("%w (%v)", ErrRevoked, err)
 		}
-		wait := delay
+		wait, probe := delay, reach
 		if errors.Is(err, ErrRejected) {
-			wait = most
+			wait, probe = most, nil // the hub answered, and said no: only someone fixing the token helps
 		} else {
 			delay = min(delay*2, most)
 		}
 		c.logf("bus: the connection to the hub ended: %v; again in %s", err, wait)
+		if err := c.pause(ctx, wait, probe); err != nil {
+			return err
+		}
+	}
+}
+
+// pause waits d before the next try, or ctx's end (its error). A wait longer than probeOver whose hub was out of
+// reach as it began (reach: its health did not answer) ends as soon as the hub answers again, looking every
+// probeEvery: the network, a tunnel to the hub or the hub itself came back, and the next try goes at once. A hub that
+// answered as the wait began says the try failed past its health (a reset during the handshake, a bus that refuses
+// for now): that wait runs to its end, so such a hub is still tried only as the backoff says, and sees one probe a
+// wait. A nil reach waits d whole.
+func (c *Client) pause(ctx context.Context, d time.Duration, reach func(context.Context, time.Duration) bool) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	var look <-chan time.Time
+	every := orDefault(c.probeEvery, probeEvery)
+	if reach != nil && d > orDefault(c.probeOver, probeOver) && !reach(ctx, every) {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		look = t.C
+	}
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(wait):
+		case <-timer.C:
+			return nil
+		case <-look:
+			if reach(ctx, every) {
+				c.logf("bus: the hub answers again; trying now")
+				return nil
+			}
 		}
 	}
+}
+
+// healthPath is the hub's one route without authentication (hub/hello.go): {"ok": true, …} while it runs.
+const healthPath = "/api/v1/health"
+
+// prober is how pause looks whether the hub answers: GET healthPath with the client's own HTTP client (the default
+// one when it has none, as websocket.Dial), so the probe goes the bus's own way to the hub: pinned to its key,
+// through a proxy, over an SSH forward. Something that answers for a hub it cannot reach (a forward whose tunnel
+// stalled, a proxy whose upstream is gone) does not pass for it. Given up after within. nil for a hub URL that does
+// not parse (each try says so).
+func (c *Client) prober() func(ctx context.Context, within time.Duration) bool {
+	u, err := healthURL(c.Hub)
+	if err != nil {
+		return nil
+	}
+	hc := c.HTTPClient
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	return func(ctx context.Context, within time.Duration) bool {
+		ctx, cancel := context.WithTimeout(ctx, within)
+		defer cancel()
+		return healthy(ctx, hc, u)
+	}
+}
+
+// healthy says the hub answers its health at u: a 2xx whose body says "ok": true, as `personad hub doctor` reads it.
+func healthy(ctx context.Context, hc *http.Client, u string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var body struct {
+		OK bool `json:"ok"`
+	}
+	err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body)
+	return resp.StatusCode/100 == 2 && err == nil && body.OK
+}
+
+// healthURL is healthPath under the hub's base URL (a reverse proxy's path kept), over http(s) for ws(s).
+func healthURL(hub string) (string, error) {
+	if _, err := Endpoint(hub); err != nil {
+		return "", err
+	}
+	base, err := url.Parse(strings.TrimRight(hub, "/") + "/")
+	if err != nil {
+		return "", err
+	}
+	switch base.Scheme {
+	case "ws":
+		base.Scheme = "http"
+	case "wss":
+		base.Scheme = "https"
+	}
+	return base.JoinPath(strings.TrimPrefix(healthPath, "/")).String(), nil
 }
 
 // session is one connection: dial, handshake, serve until it drops. helloed: the handshake went through.

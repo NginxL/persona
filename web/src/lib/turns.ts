@@ -756,6 +756,7 @@ export function supervisionTool(rawName?: string): "notify_user" | "ask_user" | 
 /** Visibility is round-wide and derived again after every page merge. Arguments alone never prove success. */
 export function supervisionVisible(ordered: Item[], results: ReadonlyMap<string, Item>, live: boolean): boolean {
   if (ordered.some((i) => i.supervisionUser || i.fold?.supervision_user || (injectedOf(i)?.state === "supervise" && injectedOf(i)?.level === "user"))) return true;
+  let silent = false;
   for (const use of ordered) {
     if (use.kind !== "tool_use") continue;
     const name = supervisionTool(use.tool_name);
@@ -774,12 +775,26 @@ export function supervisionVisible(ordered: Item[], results: ReadonlyMap<string,
     if (name !== "supervision_finish") return true;
     try {
       const value: unknown = JSON.parse(result.text ?? "");
-      if (value && typeof value === "object" && !Array.isArray(value) && "visibility" in value && value.visibility === "user") return true;
+      if (value && typeof value === "object" && !Array.isArray(value) && "visibility" in value) {
+        if (value.visibility === "user") return true;
+        if (value.visibility === "silent") silent = true;
+      }
     } catch {
-      // A failed or malformed receipt cannot promote the round from its requested visibility.
+      // A failed or malformed receipt does not decide visibility.
     }
   }
-  return false;
+  return !live && !silent && hasBackgroundReply(ordered);
+}
+
+/** An answer ends the round's work. Older runtimes also emit plain intermediate text before their next call. */
+function hasBackgroundReply(items: Item[]): boolean {
+  let last: Item | undefined;
+  for (const item of items) {
+    const relevant = isAnswerText(item) || item.kind === "tool_use" || item.kind === "thinking" || item.kind === "fold" ||
+      item.wake || item.model_refusal || isInterruptNotice(item);
+    if (relevant && (!last || blockOrder(last, item) < 0)) last = item;
+  }
+  return !!last && isAnswerText(last) && !last.narration && !last.codex_heartbeat_quiet;
 }
 
 /** Message sources whose rounds fold in the main conversation while `assistant.main_background_folded` is on
@@ -915,9 +930,8 @@ export type ChatLine =
 export interface ChatLinesOptions {
   /** The agent is at work: the last exchange is the live one. */
   live?: boolean;
-  /** Fold background rounds (the main conversation while `assistant.main_background_folded` is on): rounds another
-   *  conversation, a scheduled task or a follow-up started fold like quiet supervision rounds, and a scheduled task's
-   *  prompt is not shown (docs/assistant/assistant.md "Background rounds"). */
+  /** Fold quiet background rounds in the main and leader conversations. A scheduled task's prompt stays hidden
+   *  (docs/assistant/assistant.md "Background rounds"). */
   background?: boolean;
 }
 
@@ -994,7 +1008,7 @@ export function chatLines(items: Item[], opts: ChatLinesOptions = {}): ChatLine[
       append([isCompaction(b.item) ? { kind: "compact", id: b.item.id, item: b.item } : { kind: "recaps", id: b.item.id, items: [b.item] }], [b.item], false);
     } else {
       const live = b.turn.id === liveId;
-      append(turnLines(b.turn, live, results), b.turn.ordered, live);
+      append(turnLines(b.turn, live, results), round ? [...b.turn.ordered, ...b.turn.trailing] : b.turn.ordered, live);
     }
   }
   // Working with nothing of this run yet (the last thing is a recap): retain the supervision round's visibility.

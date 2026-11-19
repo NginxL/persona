@@ -9,8 +9,8 @@ import Testing
 struct AllSessionsReadersTests {
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
-    /// The files under `Persona/Views` that may read it, how many times, and why. Exact: a read taken out
-    /// lowers its number here, a new one needs a reason here.
+    /// The files under `Persona/Views` and `Persona/Features` that may read it, how many times, and why. Exact: a read
+    /// taken out lowers its number here, a new one needs a reason here.
     private static let allowed: [String: (count: Int, why: String)] = [
         "SpaceView.swift": (1, "a space's agents"),
         "MachineSpacesView.swift": (1, "a machine's spaces and agents"),
@@ -29,19 +29,23 @@ struct AllSessionsReadersTests {
             .reduce(0) { $0 + $1.components(separatedBy: "allSessions").count - 1 }
     }
 
+    private static let folders = ["Persona/Views", "Persona/Features"]
+
+    private static func swiftFiles(_ dir: String) -> [URL] {
+        (FileManager.default.enumerator(at: apple.appending(path: dir), includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []).filter { $0.pathExtension == "swift" }
+    }
+
     /// The folders it reads are there (after a move, a check reading nothing passes for nothing).
     @Test func readsTheSources() {
-        let n = (FileManager.default.enumerator(at: Self.apple.appending(path: "Persona/Views"), includingPropertiesForKeys: nil)?
-            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }.count) ?? 0
-        #expect(n > 50)
+        #expect(Self.swiftFiles("Persona/Views").count > 50)
+        #expect(Self.swiftFiles("Persona/Features").count > 0)
     }
 
     @Test func onlyListsOfAgentsReadThemAll() {
         var found: [String: Int] = [:]
-        for dir in ["Persona/Views"] {
-            let files = (FileManager.default.enumerator(at: Self.apple.appending(path: dir), includingPropertiesForKeys: nil)?
-                .compactMap { $0 as? URL } ?? []).filter { $0.pathExtension == "swift" }
-            for file in files {
+        for dir in Self.folders {
+            for file in Self.swiftFiles(dir) {
                 let n = (try? String(contentsOf: file, encoding: .utf8)).map(Self.reads) ?? 0
                 if n > 0 { found[file.lastPathComponent, default: 0] += n }
             }

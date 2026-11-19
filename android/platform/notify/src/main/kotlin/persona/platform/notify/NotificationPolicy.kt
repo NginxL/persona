@@ -56,6 +56,7 @@ internal object NotificationPolicy {
                 ApprovalAction.ApproveEdits -> listOf(action(policy.id.wire, null, AnswerAction.ApproveEdits, labelRes = R.string.notify_action_approve))
                 ApprovalAction.Reject -> listOf(action(policy.id.wire, null, AnswerAction.Reject, labelRes = R.string.notify_action_reject))
                 ApprovalAction.ChooseOption -> when {
+                    AnswerRequirement.QuestionNotIrreversible in policy.requirements && ix.reversible == false -> emptyList()
                     AnswerRequirement.SingleQuestionSingleChoice in policy.requirements ->
                         ix.questions?.singleOrNull()?.takeUnless { it.multiSelect }?.let { question ->
                             question.options.take(policy.maxOptions ?: 0).mapIndexed { index, option ->

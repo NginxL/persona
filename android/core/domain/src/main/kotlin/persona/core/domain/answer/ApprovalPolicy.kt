@@ -23,7 +23,7 @@ enum class AnswerRetry { Never }
 enum class AnswerRequirement(val wire: String) {
     FullPlanRead("full_plan_read"), FeedbackEmpty("feedback_empty"), ReasonEmpty("reason_empty"),
     SessionPresent("session_present"), SingleQuestionSingleChoice("single_question_single_choice"),
-    PlainDialogOption("plain_dialog_option"),
+    QuestionNotIrreversible("question_not_irreversible"), PlainDialogOption("plain_dialog_option"),
     /** Claude's card, or another agent's that names what "always" allows (always_label), as on iOS. */
     AlwaysOffered("always_offered"),
 }
@@ -83,9 +83,10 @@ object ApprovalPolicy {
             AnswerEntry.Notification -> when (kind) {
                 "plan" -> listOf(edits, action(ApprovalAction.Reject, Authentication.None, input = "feedback"), open)
                 "permission" -> listOf(allow, deny.copy(input = "message"), open)
-                "question", "screen" -> listOf(action(ApprovalAction.ChooseOption, requirements = listOf(
-                    if (kind == "question") AnswerRequirement.SingleQuestionSingleChoice
-                    else AnswerRequirement.PlainDialogOption), maxOptions = 3), open)
+                "question" -> listOf(action(ApprovalAction.ChooseOption, requirements = listOf(
+                    AnswerRequirement.SingleQuestionSingleChoice, AnswerRequirement.QuestionNotIrreversible), maxOptions = 3), open)
+                "screen" -> listOf(action(ApprovalAction.ChooseOption, requirements = listOf(
+                    AnswerRequirement.PlainDialogOption), maxOptions = 3), open)
                 else -> emptyList()
             }
             AnswerEntry.LockScreen -> when (kind) {

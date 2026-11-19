@@ -115,8 +115,8 @@ private fun split(items: List<Item>): List<Seg> {
         if (it.role == "assistant" && it.kind == "text" && !it.text.isNullOrBlank()) seg.answerId = it.id
     }
     for (seg in out) {
-        val at = seg.items.filter { !isInterrupt(it) }.maxOfOrNull { it.seq } ?: Int.MIN_VALUE
-        seg.cut = seg.items.any { isInterrupt(it) && it.seq > at }
+        val at = seg.items.filter { !isTurnInterrupt(it) }.maxOfOrNull { it.seq } ?: Int.MIN_VALUE
+        seg.cut = seg.items.any { isTurnInterrupt(it) && it.seq > at }
     }
     return out
 }
@@ -154,7 +154,7 @@ private fun placeReports(segs: List<Seg>, items: List<Item>) {
         for (id in seg.userIds) own(id, k)
         val leadingWake = seg.userIds.isEmpty() && seg.items.firstOrNull()?.let { isWake(it) } == true
         for (it in seg.items) {
-            if (isInterrupt(it) || it.kind == "turn_duration" || it.kind == "tool_result") continue
+            if (isTurnInterrupt(it) || it.kind == "turn_duration" || it.kind == "tool_result") continue
             if (leadingWake && it.id == seg.items.first().id) continue
             if (it.kind == "text" && it.text.isNullOrBlank()) continue
             own(it.id, k)
@@ -209,7 +209,7 @@ private fun isUserMessage(it: Item) =
 private fun isWake(it: Item) = it.wake == true && (it.kind == "notice" || (it.kind == "tool_result" && it.task?.kind == "agent"))
 
 /** The transcript's "Interrupted" notice. Its tokens belong to the exchange it stopped; the notice stays its own line. */
-private fun isInterrupt(it: Item) =
+internal fun isTurnInterrupt(it: Item) =
     it.kind == "notice" && it.task == null && (it.text ?: "").contains("中断") // i18n-ignore: the transcript's interrupt notice
 
 private val viewErrors = Regex("""<persona-view-errors\b[^>]*>[\s\S]*?</persona-view-errors>\s*""")

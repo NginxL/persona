@@ -4,6 +4,7 @@
 
 import { isDone, type InboxItem } from "./inbox";
 import type { FeedItem } from "./feed";
+import type { InboxSuggestionAttempt } from "./inbox-events";
 
 /** The card's body (assistant/inbox_handoff_card.go handoffCard). */
 export interface HandoffCardBody {
@@ -24,7 +25,10 @@ export type HandoffCardState =
   /** The item's suggestion is still this one from this conversation: Send / OK works. */
   | { state: "live" }
   /** Persona sent a reply on the user's confirmation; text: what went out. */
-  | { state: "sent"; text: string }
+  | { state: "sent"; text: string; attempt?: InboxSuggestionAttempt }
+  /** Only the current version's confirmed non-delivery may be retried. */
+  | { state: "failed"; attempt: InboxSuggestionAttempt; retryable: boolean }
+  | { state: "sending" | "uncertain"; attempt: InboxSuggestionAttempt }
   /** The user answered at the source themselves. */
   | { state: "self" }
   /** Handled without this reply going out (OK on a conclusion, Done, read elsewhere, filed by the AI). */
@@ -44,6 +48,16 @@ export function handoffCardBody(it: FeedItem): HandoffCardBody | undefined {
  *  conversation (only the newest one says how the item ended). */
 export function handoffCardState(card: HandoffCardBody, conversation: string, item: InboxItem | undefined, newest: boolean): HandoffCardState {
   if (!item) return { state: "unknown" };
+  const attempt = handoffCardAttempt(card, conversation, item);
+  if (attempt) {
+    switch (attempt.status) {
+      case "sent": return { state: "sent", text: attempt.text, attempt };
+      case "failed": return { state: "failed", attempt, retryable: attempt.retryable && !isDone(item) &&
+        item.suggestion?.version === card.version && item.suggestion?.conversation?.session_id === conversation };
+      case "sending": return { state: "sending", attempt };
+      default: return { state: "uncertain", attempt }; // unknown or a future outcome cannot authorize another send
+    }
+  }
   if (isDone(item)) {
     if (!newest) return { state: "replaced" };
     if (item.done_by === "replied") {
@@ -58,6 +72,11 @@ export function handoffCardState(card: HandoffCardBody, conversation: string, it
   return { state: "replaced" };
 }
 
+/** Historical cards use their own version's receipt, never the current suggestion's text or delivery. */
+function handoffCardAttempt(card: HandoffCardBody, conversation: string, item: InboxItem | undefined): InboxSuggestionAttempt | undefined {
+  return item?.suggestion_attempts?.find((a) => a.version === card.version && (!a.conversation || a.conversation.session_id === conversation));
+}
+
 /** How many "Wrap up" chips a conversation shows at most, newest hand-off first. */
 export const WRAP_UP_MAX = 2;
 
@@ -69,6 +88,7 @@ export type WrapUpWait = "send" | "confirm" | undefined;
 export function wrapUpWait(it: InboxItem): WrapUpWait {
   const s = it.suggestion;
   if (!s) return undefined;
+  if (it.suggestion_attempts?.some((a) => a.version === s.version)) return undefined;
   return s.kind === "reply" ? "send" : "confirm";
 }
 

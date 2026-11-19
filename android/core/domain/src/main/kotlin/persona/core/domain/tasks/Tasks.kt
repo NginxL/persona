@@ -127,9 +127,13 @@ sealed interface TaskNow {
  *
  * [itemId] is the id of the item the phone made, which Undo deletes. The phone's calendar ids are numbers, so a result
  * whose id is not one (an iPhone's event or reminder) still draws its card, without an Undo button.
+ *
+ * [sourceDeviceName] and [sourceDevicePlatform] are the hub-attested phone that created it, when known. Older results
+ * leave both null and make no source claim.
  */
 data class QuickResult(
     val reminder: Boolean, val callId: String, val itemId: Long?, val title: String, val time: String?, val place: String?,
+    val sourceDeviceName: String? = null, val sourceDevicePlatform: String? = null,
 ) {
     companion object {
         fun of(call: ToolCall): QuickResult? {
@@ -143,10 +147,12 @@ data class QuickResult(
             if (result.isError == true) return null
             val o = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull() ?: return null
             fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+            fun nonBlank(k: String) = s(k)?.trim()?.takeIf { it.isNotEmpty() }
             // No card without an id (iOS QuickResult.init), so an old or broken result says nothing it cannot back.
             val id = s("id")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             return QuickResult(reminder, call.use.id, id.toLongOrNull()?.takeIf { it > 0 },
-                s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"))
+                s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"),
+                nonBlank("source_device_name"), nonBlank("source_device_platform"))
         }
     }
 }

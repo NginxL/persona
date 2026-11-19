@@ -3,7 +3,7 @@ package assistant
 import (
 	"cmp"
 	"context"
-	"errors"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,6 +11,8 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The To-dos view on the wire (#10226, docs/assistant/todo-status-sop.md "The hub's view"): every row of
@@ -103,9 +105,40 @@ func (s *Service) todosViewed(ctx context.Context, briefs bool) ([]listedTodo, t
 	return list, p, nil
 }
 
+// todoItem is GET /api/v1/todos/{id}'s answer: the to-do's row, and beside it the paper's rounds, results and recap
+// (todo_timeline.go, #10465).
+type todoItem struct {
+	Todo json.RawMessage `json:"todo"`
+	assistantwire.TodoItemDetail
+}
+
+// viewedTodo is to-do id as GET /api/v1/todos/{id} answers it: its row as the list has it, with its view and its
+// brief; false when there is none.
+func (s *Service) viewedTodo(ctx context.Context, id string) (listedTodo, bool, error) {
+	t, _, found, err := s.viewedTodoRuns(ctx, id)
+	return t, found, err
+}
+
+// viewedTodoRuns is viewedTodo with the sessions of the to-do's active runs as its view read them (todoFactsOf),
+// which its timeline reads rather than ask the computers again (todo_timeline.go).
+func (s *Service) viewedTodoRuns(ctx context.Context, id string) (listedTodo, []proto.Session, bool, error) {
+	list, p, err := s.todosViewed(ctx, false)
+	if err != nil {
+		return listedTodo{}, nil, false, err
+	}
+	for i, t := range list {
+		if t.ID == id {
+			t.Todo = s.withBrief(t.Todo) // as withBriefFrom gives it in the list
+			return t, p.facts[i].Sessions, true, nil
+		}
+	}
+	return listedTodo{}, nil, false, nil
+}
+
 func (s *Service) todoViewRoutes() {
-	// GET /api/v1/todos/{id}: one to-do as GET /api/v1/todos lists it, its view included → {"todo": row}; an unknown
-	// id 404 todo_not_found.
+	// GET /api/v1/todos/{id}: one to-do as GET /api/v1/todos lists it, its view included, and what the paper shows of
+	// its history (todoItemDetail; an extension's token as todoTimelineOf reads it) → {"todo": row, "rounds",
+	// "rounds_total", "recap"?, "results"?}; an unknown id 404 todo_not_found.
 	s.handle("GET /api/v1/todos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if err := s.ensureTodosLoaded(r.Context()); err != nil {
@@ -116,22 +149,25 @@ func (s *Service) todoViewRoutes() {
 		_, known := s.todos.todos[id]
 		s.todos.mu.RUnlock()
 		if !known { // before the whole list's pass, which only a known id needs
-			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", errors.New("todo not found"))
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
 			return
 		}
-		list, _, err := s.todosViewed(r.Context(), false)
-		if err != nil {
+		t, sessions, found, err := s.viewedTodoRuns(r.Context(), id)
+		switch {
+		case err != nil:
 			apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
-			return
-		}
-		for _, t := range list {
-			if t.ID == id {
-				t.Todo = s.withBrief(t.Todo) // as withBriefFrom gives it in the list
-				apierr.WriteJSON(w, map[string]any{"todo": t})
+		case !found: // deleted meanwhile
+			apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", i18n.Err("assistant-todos.not_found"))
+		default:
+			raw, err := json.Marshal(t)
+			if err != nil {
+				apierr.Write(w, http.StatusInternalServerError, err)
 				return
 			}
+			// Its runs' sessions as its view read them: the timeline asks no computer again.
+			ext := r.Header.Get(RoleHeader) == roleExtension
+			apierr.WriteJSON(w, todoItem{Todo: raw, TodoItemDetail: s.todoItemDetail(r.Context(), t.Todo, raw, sessions, ext)})
 		}
-		apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", errors.New("todo not found")) // deleted meanwhile
 	})
 	// GET /api/v1/todos/places: the To-dos sidebar's places with the list's counts (assistantwire.TodoPlaces).
 	s.handle("GET /api/v1/todos/places", func(w http.ResponseWriter, r *http.Request) {

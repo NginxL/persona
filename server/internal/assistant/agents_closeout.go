@@ -92,17 +92,26 @@ func (s *Service) checkCloseout(ctx context.Context, c *proto.Closeout, artifact
 func closeoutChecked(r deployResult) *proto.CloseoutChecked {
 	switch r.State {
 	case deployIn:
-		return &proto.CloseoutChecked{Merged: proto.CloseoutYes, Deployed: proto.CloseoutYes}
+		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutYes, LocalDeployment: r.Receipt != "" && r.Receipt != r.Merge}
+		if r.Merge != "" {
+			checked.Merged = proto.CloseoutYes
+		} else if r.NotMerged {
+			checked.Merged = proto.CloseoutNo
+		}
+		return checked
 	case deployOut:
 		return &proto.CloseoutChecked{Merged: proto.CloseoutYes, Deployed: proto.CloseoutNo}
 	case deployUnmerged:
 		return &proto.CloseoutChecked{Merged: proto.CloseoutNo, Deployed: proto.CloseoutNo}
 	case deployNotIn:
-		return &proto.CloseoutChecked{Deployed: proto.CloseoutNo}
-	case deployUnverified:
-		if r.Merge != "" { // merged, in a repository the running hub is not built from
-			return &proto.CloseoutChecked{Merged: proto.CloseoutYes}
+		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutNo}
+		if r.Merge != "" {
+			checked.Merged = proto.CloseoutYes
 		}
+		return checked
+	}
+	if r.Merge != "" {
+		return &proto.CloseoutChecked{Merged: proto.CloseoutYes} // upstream merge was found, deployment could not be checked
 	}
 	return nil
 }

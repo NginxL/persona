@@ -10,7 +10,7 @@ import { dropSession, refresh, refreshAssistant, upsertSession } from "../../lib
 import type { Session } from "../../lib/types";
 import { Button, Dialog, toast } from "../../ui/atoms";
 import { t } from "../../i18n";
-import { cleanupReady, KEEP, runCleanup, useAgentWorktree, WorktreeCleanup, type Cleanup } from "./SessionDialogs";
+import { cleanupReady, KEEP, runCleanup, useAgentWorktree, WorktreeCleanup, type Cleanup } from "./SessionWorktreeCleanup";
 
 // "Rename": the herdr tab and the session's name (Claude's /rename), each only when changed (iOS RenameSessionAlert).
 export function RenameDialog({ session, open, onClose }: { session: Session; open: boolean; onClose: () => void }) {

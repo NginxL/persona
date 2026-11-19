@@ -393,7 +393,8 @@ export interface Session {
    *  the turn ends, and the strip's actions leave them alone (#4342). */
   queued_relayed?: number;
   /** In a Persona chat, the owner's messages that could not go in and that the assistant keeps and sends again by
-   *  itself, oldest first (#10194, lib/undelivered.ts). Drawn as the owner's bubbles marked not delivered. */
+   *  itself, oldest first (#10194, lib/undelivered.ts); in an Agent's chat, the ones held while its computer was away
+   *  (#10661, `computer` set on each). Drawn as the owner's bubbles marked not delivered. */
   undelivered?: UndeliveredMessage[];
   subagents?: Subagent[];
   loop?: LoopInfo;
@@ -697,6 +698,8 @@ export interface Item {
   full_size?: number;
   queued?: boolean;
   wake?: boolean;
+  narration?: boolean;
+  codex_heartbeat_quiet?: boolean;
   task?: TaskNote;
   fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[]; sources?: FoldSource[] };
   image?: { mime: string; data?: string; lazy?: boolean; size?: number; width?: number; height?: number };
@@ -1068,4 +1071,9 @@ export interface UndeliveredMessage {
   attempts?: number;
   next_at?: string;
   error?: string;
+  /** A failed message that can only be deleted. */
+  delete_only?: boolean;
+  /** Held for an Agent while its computer was away (#10661): that computer's name. `error` is then the whole line to
+   *  show under the bubble, and Retry / Delete go to the session's held routes (lib/undelivered-actions.ts). */
+  computer?: string;
 }

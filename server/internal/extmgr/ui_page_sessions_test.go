@@ -234,6 +234,47 @@ func TestPageSourceSDKEventFenceAndReceipts(t *testing.T) {
 }
 func strconvID(i int) string { return fmt.Sprintf("event-%d", i) }
 
+// A native stream of 10 gets a graph as rows, and pressing one must run the node's callback: the source registered it
+// under the graph's key, not the row's "key/id", so the manager maps the press back.
+func TestPageStreamGraphNodePressReachesSource(t *testing.T) {
+	h, process, _ := pageProcessManager(t)
+	if err := process.Call(t.Context(), "test.graph", map[string]bool{"enabled": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	request := wire.UIStreamRequest{Request: "open", Protocol: 1, RequestID: "open-graph", Extension: "example-page", Contribution: "home",
+		Context: &wire.UIContext{UIVersion: 10, Platform: "web", Stream: &wire.UIStreamCapability{Protocol: 1, Components: []string{"text", "button", "row", "code"}}}}
+	raw, err := pageCall(t, h, pageWho, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := uistream.DecodeSnapshot(envelope["snapshot"])
+	if err != nil {
+		t.Fatalf("snapshot: %v %s", err, raw)
+	}
+	reply, err := pageCall(t, h, pageWho, pageEvent(t, tree, "g/a", "press-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame struct {
+		Receipt struct {
+			Status string `json:"status"`
+		} `json:"receipt"`
+	}
+	if err := json.Unmarshal(reply, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Receipt.Status != "accepted" {
+		t.Fatalf("status %q: %s", frame.Receipt.Status, reply)
+	}
+	if pageStats(t, process)["writes"] != 1 {
+		t.Fatal("the node's callback did not run")
+	}
+}
+
 func TestPageSourceAsyncSuspendResumeOwnershipAndExpiry(t *testing.T) {
 	h, process, transport := pageProcessManager(t)
 	tree := pageOpenTest(t, h, pageWho)

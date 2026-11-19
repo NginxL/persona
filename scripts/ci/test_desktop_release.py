@@ -47,16 +47,18 @@ class DesktopReleaseGateTests(unittest.TestCase):
         values, _ = self.gate("v1.2.0", set(MAC) | set(WIN))
         self.assertEqual(values, {"version": "1.2.0", "mac": "true", "win": "true"})
 
-    def test_the_version_is_the_tag_and_must_be_a_stable_semver(self):
+    def test_the_version_is_the_tag_and_a_stable_or_beta_semver(self):
         self.assertEqual(self.gate("v10.20.30", set(MAC) | set(WIN))[0], {"version": "10.20.30", "mac": "true", "win": "true"})
-        for tag in ("v1.2", "vnext", "v1.2.0+build", "v1.2.0 x"):
+        for tag in ("v1.2", "vnext", "v1.2.0+build", "v1.2.0 x", "v1.3.0-rc1"):
             with self.subTest(tag=tag):
                 values, summary = self.gate(tag, set(MAC) | set(WIN))
                 self.assertEqual((values["mac"], values["win"]), ("false", "false"))
                 self.assertIn("is not v<major>.<minor>.<patch>", summary)
-        values, summary = self.gate("v1.3.0-rc1", set(MAC) | set(WIN))
-        self.assertEqual(values, {"version": "1.3.0-rc1", "mac": "false", "win": "false"})
-        self.assertIn("is a prerelease tag", summary)
+        for tag in ("v1.3.0-beta.2",):
+            values, summary = self.gate(tag, set(MAC) | set(WIN))
+            self.assertEqual(values, {"version": tag[1:], "mac": "true", "win": "true"})
+            self.assertIn("beta channel", summary)
+            self.assertIn("stable latest.yml is not replaced", summary)
 
     def test_a_secret_value_never_reaches_the_gate(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
@@ -86,6 +88,18 @@ class DesktopPackageScriptTests(unittest.TestCase):
         result = self.package(PERSONA_DESKTOP_VERSION="1.2")
         self.assertEqual(result.returncode, 2)
         self.assertIn("not a semantic version", result.stderr)
+
+    def test_beta_packaging_uses_its_own_update_channel_and_prerelease(self):
+        script = PACKAGE.read_text()
+        self.assertIn('"$PERSONA_DESKTOP_VERSION" == *-beta.*', script)
+        self.assertIn('"-c.publish.channel=beta"', script)
+        self.assertIn('"-c.publish.releaseType=prerelease"', script)
+        self.assertIn("only beta prereleases have a supported update channel", script)
+        # The pinned builder derives the metadata filename from publish.channel, not from extraMetadata.version.
+        builder = (ROOT / "desktop/node_modules/app-builder-lib/out/publish/updateInfoBuilder.js")
+        if builder.is_file():
+            self.assertIn('publishConfig.channel || "latest"', builder.read_text())
+            self.assertIn('`${channel}${osSuffix}', builder.read_text())
 
     def test_no_registered_identity_is_written_into_the_repository(self):
         production = yaml.load((ROOT / "desktop/electron-builder.yml").read_text(), Loader=yaml.BaseLoader)

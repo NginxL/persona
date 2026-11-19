@@ -228,7 +228,7 @@ func TestNoteStallIsNoProgressAtAll(t *testing.T) {
 	written := func() time.Time { return time.Unix(0, last.Load()) }
 	stalled := make(chan time.Time, 1)
 	start := time.Now()
-	w := watchNote(written, func() { stalled <- time.Now() })
+	w := watchNote(written, func() bool { return false }, func() { stalled <- time.Now() })
 	defer w.stop()
 	moving := time.Now().Add(time.Second)
 	for time.Now().Before(moving) { // the connection keeps writing
@@ -246,6 +246,34 @@ func TestNoteStallIsNoProgressAtAll(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("never closed once nothing went through")
+	}
+}
+
+// A note whose connection waits to be resumed is watched again once it is: a resume whose transport takes nothing
+// either still ends in a stall (#10829's review).
+func TestNoteStallWatchesOnAfterAResume(t *testing.T) {
+	old := noteStall
+	noteStall = 100 * time.Millisecond
+	t.Cleanup(func() { noteStall = old })
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	written := func() time.Time { return time.Unix(0, last.Load()) }
+	var lost atomic.Bool
+	lost.Store(true)
+	stalled := make(chan struct{}, 1)
+	w := watchNote(written, lost.Load, func() { stalled <- struct{}{} })
+	defer w.stop()
+	select {
+	case <-stalled:
+		t.Fatal("stalled while the connection waited to be resumed")
+	case <-time.After(4 * noteStall):
+	}
+	last.Store(time.Now().UnixNano()) // resumed: it counts as a write, then nothing goes through
+	lost.Store(false)
+	select {
+	case <-stalled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("not watched after the resume")
 	}
 }
 

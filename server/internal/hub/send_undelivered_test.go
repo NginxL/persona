@@ -168,6 +168,19 @@ func TestSendBehindKeptMessagesIsKeptToo(t *testing.T) {
 	}
 }
 
+func TestKeepUndeliveredCarriesAuthenticatedDeviceCredential(t *testing.T) {
+	h, m, k := undeliveredHub(t, func(context.Context) error { return errors.New("machine unavailable") })
+	ctx := context.WithValue(context.Background(), principalKey{}, principal{ID: "dev_sender", Role: roleFull})
+	status, body, ok := h.keepUndelivered(ctx, m, "s1",
+		map[string]any{"client_msg_id": "kept", "text": "hello", "credential_id": "untrusted"}, "machine_offline", "")
+	if !ok || status != http.StatusAccepted {
+		t.Fatalf("keep: %d %s", status, body)
+	}
+	if kept := k.keeps(); len(kept) != 1 || kept[0].CredentialID != "dev_sender" || !kept[0].Human {
+		t.Fatalf("kept: %+v", kept)
+	}
+}
+
 // A manager that cannot keep it (an older one): the app gets the failure as before, and a retry may send it.
 func TestSendNotKeptFailsAsBefore(t *testing.T) {
 	h, m, k := undeliveredHub(t, func(context.Context) error { return errors.New("did not start") })

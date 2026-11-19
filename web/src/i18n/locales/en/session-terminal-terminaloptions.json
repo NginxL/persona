@@ -22,8 +22,11 @@
   "cursor_style": "Cursor style",
   "cursor_blink": "Blinking cursor",
   "cursor_blink_hint": "Blinks while the terminal has focus",
-  "webgl": "WebGL rendering",
-  "webgl_hint_long": "Draws the terminal on the GPU, smoother with lots of output or small text; off uses the default renderer",
-  "webgl_hint": "Smoother with lots of output; off uses the default",
+  "renderer": "Renderer",
+  "renderer_standard": "This terminal: Standard",
+  "renderer_webgl": "This terminal: WebGL",
+  "renderer_fell_back": "This terminal: Standard (WebGL stopped)",
+  "renderer_tooltip": "Chosen in Settings › Labs. A change there applies to terminals opened afterwards.",
+  "renderer_open_labs": "Labs",
   "edit_shortcuts": "Edit shortcuts…"
 }

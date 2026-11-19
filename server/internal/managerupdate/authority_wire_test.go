@@ -15,16 +15,41 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
+func TestAuthorityWireReadsPersistedIdentityWithoutMigrationOrWrites(t *testing.T) {
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	values := [][]byte{[]byte("persisted-main"), []byte("original-machine"), []byte("42"),
+		[]byte(at.Format("2006-01-02 15:04:05.999999-07:00")), []byte(at.Format("2006-01-02 15:04:05.999999-07:00")),
+		[]byte("object"), []byte("string"), []byte("string")}
+	assertAuthorityWire(t, values, "persisted-main", "original-machine", false, false)
+}
+
+func TestAuthorityWireRejectsAbsentSettingsWithoutExplicitEmptyRow(t *testing.T) {
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	values := [][]byte{nil, nil, nil, nil, []byte(at.Format("2006-01-02 15:04:05.999999-07:00")), nil, nil, nil}
+	assertAuthorityWire(t, values, "", "", false, true)
+}
+
+func TestAuthorityWireRejectsMalformedExistingSettings(t *testing.T) {
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	stamp := []byte(at.Format("2006-01-02 15:04:05.999999-07:00"))
+	for name, values := range map[string][][]byte{
+		"row":       {nil, nil, []byte("42"), stamp, stamp, []byte("array"), nil, nil},
+		"main type": {[]byte("[]"), []byte("machine"), []byte("42"), stamp, stamp, []byte("object"), []byte("array"), []byte("string")},
+	} {
+		t.Run(name, func(t *testing.T) { assertAuthorityWire(t, values, "", "", false, true) })
+	}
+}
+
 // This is a disposable PostgreSQL wire fixture, not db.Open and not a connection
 // to any configured product database. It rejects anything except one SELECT.
-func TestAuthorityWireReadsPersistedIdentityWithoutMigrationOrWrites(t *testing.T) {
+func assertAuthorityWire(t *testing.T, values [][]byte, wantMain, wantMachine string, wantUnassigned, wantErr bool) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
 	finished := make(chan error, 1)
-	at := time.Now().UTC().Truncate(time.Microsecond)
 	go func() {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -62,12 +87,12 @@ func TestAuthorityWireReadsPersistedIdentityWithoutMigrationOrWrites(t *testing.
 			return
 		}
 		query, ok := next.(*pgproto3.Query)
-		if !ok || !strings.HasPrefix(query.String, "SELECT value->>'main', value->>'machine_id', xmin::text") || !strings.HasSuffix(query.String, "WHERE key = 'assistant'") {
+		if !ok || !strings.HasPrefix(query.String, "SELECT s.value->>'main', s.value->>'machine_id', s.xmin::text") ||
+			!strings.Contains(query.String, "LEFT JOIN public.settings AS s ON s.key = 'assistant'") {
 			finished <- fmt.Errorf("unexpected authority SQL message: %#v", next)
 			return
 		}
-		fields := make([]pgproto3.FieldDescription, 5)
-		values := [][]byte{[]byte("persisted-main"), []byte("original-machine"), []byte("42"), []byte(at.Format("2006-01-02 15:04:05.999999-07:00")), []byte(at.Format("2006-01-02 15:04:05.999999-07:00"))}
+		fields := make([]pgproto3.FieldDescription, 8)
 		for i := range fields {
 			fields[i] = pgproto3.FieldDescription{Name: []byte(fmt.Sprint(i)), DataTypeOID: 25, DataTypeSize: -1}
 		}
@@ -114,7 +139,12 @@ func TestAuthorityWireReadsPersistedIdentityWithoutMigrationOrWrites(t *testing.
 	if err := <-finished; err != nil {
 		t.Fatalf("fake Postgres: %v (ReadAuthority: %v)", err, readErr)
 	}
-	if readErr != nil || result.Main != "persisted-main" || result.MachineID != "original-machine" || result.ManagerID != p.ManagerID || len(result.Revision) != 64 {
+	if wantErr {
+		if readErr == nil {
+			t.Fatalf("malformed settings were accepted as authority: %+v", result)
+		}
+	} else if readErr != nil || result.Main != wantMain || result.MachineID != wantMachine || result.Unassigned != wantUnassigned ||
+		result.ManagerID != p.ManagerID || len(result.Revision) != 64 || result.ObservedAt.IsZero() {
 		t.Fatalf("persisted authority: %+v %v", result, readErr)
 	}
 	if !reflect.DeepEqual(before, tree(t, c.Home)) {

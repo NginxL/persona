@@ -160,7 +160,7 @@ class NewAgentAsyncTest {
 
     /** A forwarded start whose answer was lost comes back with its card and what was typed after it, not a blank field. */
     @Test fun aPendingForwardStartIsRestoredWithItsCard() = test {
-        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"jarvis://session/m/s?at=x%230\"" +
+        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"persona://session/m/s?at=x%230\"" +
             " msg=\"x#0\" role=\"persona\" author=\"Persona\" chat=\"Persona\">\n原文\n</persona-context>"
         val store = MemoryStore().apply {
             operation = AgentStartOperation("op", AgentStartRequest("first", "/code", "claude", async = true),
@@ -192,7 +192,7 @@ class NewAgentAsyncTest {
 
     /** A restored forward keeps the other block beside it and the words after them. */
     @Test fun aPendingForwardStartKeepsItsOtherContexts() = test {
-        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"jarvis://session/m/s?at=x%230\"" +
+        val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"persona://session/m/s?at=x%230\"" +
             " msg=\"x#0\" role=\"persona\" author=\"Persona\" chat=\"Persona\">\n原文\n</persona-context>"
         val context = "<persona-context kind=\"context\" title=\"修复登录\" url=\"\">\n页面原文\n</persona-context>"
         val saved = forward + "\n" + context + "\n\n看这个"

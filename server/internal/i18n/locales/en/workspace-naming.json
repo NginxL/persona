@@ -1,0 +1,4 @@
+{
+  "invalid": "Couldn't resolve these naming rules. Check the templates and try again.",
+  "node_unavailable": "The selected computer is offline or does not support naming previews. Check its connection and version."
+}

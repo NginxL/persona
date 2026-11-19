@@ -18,7 +18,8 @@ enum class KnowledgeKind(val title: CoreText) {
     @SerialName("docs") Docs(CoreText.of(Key.KnowledgeDocs)),
     @SerialName("meetings") Meetings(CoreText.of(Key.KnowledgeMeetings)),
     @SerialName("events") Events(CoreText.of(Key.KnowledgeEvents)),
-    @SerialName("recordings") Recordings(CoreText.of(Key.KnowledgeRecordings));
+    @SerialName("recordings") Recordings(CoreText.of(Key.KnowledgeRecordings)),
+    @SerialName("topics") Topics(CoreText.of(Key.KnowledgeTopics));
 
     val wire: String get() = name.lowercase()
     companion object {
@@ -58,6 +59,28 @@ data class KnowledgeDetail(
     val segments: List<KnowledgeSegment>? = null,
     /** A recording's meeting minutes, once the hub wrote them (#2738, docs/assistant/meeting-minutes.md); `meta.minutes_state` says where newer ones stand. */
     val minutes: RecordingMinutes? = null,
+    /** A topic's knowledge points (topics only, docs/assistant/knowledge.md "Topics"). */
+    val points: List<TopicPoint>? = null,
+)
+
+/** A source a knowledge point was said in; [day] is YYYY-MM-DD. */
+@Serializable
+data class TopicSource(val kind: String = "", val id: String = "", val day: String? = null)
+
+/**
+ * One knowledge point of a topic. [path] is the subtopics below the topic, outermost first (0 to 2); [kind] is concept,
+ * decision, practice, pitfall, fact or question, and the hub may add more; [why] is a decision's reason or a pitfall's
+ * cause; [confirmed] is the day it was last confirmed (YYYY-MM-DD).
+ */
+@Serializable
+data class TopicPoint(
+    val id: String = "",
+    val path: List<String>? = null,
+    val kind: String = "",
+    val text: String = "",
+    val why: String? = null,
+    val sources: List<TopicSource>? = null,
+    @SerialName("when") val confirmed: String? = null,
 )
 
 /**

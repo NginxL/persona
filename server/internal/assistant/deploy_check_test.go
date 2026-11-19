@@ -226,7 +226,7 @@ func TestDeployCheckFailingIsNotDeployed(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 	waitFor(t, "the held delivery", func() bool { return todoNow(s, todo.ID).Delivery != nil })
 	got := todoNow(s, todo.ID)
-	if got.Delivery.State != deliveryMerged || got.Stage != "merge" || !strings.Contains(got.Delivery.Gate, "等确认部署") {
+	if got.Delivery.State != deliveryPR || got.Stage != "review" || !strings.Contains(got.Delivery.Gate, "等确认部署") {
 		t.Fatalf("todo %q %+v", got.Stage, got.Delivery)
 	}
 	waitReportQueue(t, s)

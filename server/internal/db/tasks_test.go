@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -114,6 +115,108 @@ func TestMarkFeedSentUsesUnsentIndex(t *testing.T) {
 		}
 		if !strings.Contains(strings.Join(plan, "\n"), "assistant_feed_unsent") {
 			t.Fatalf("%s: MarkFeedSent does not use assistant_feed_unsent:\n%s", mode, strings.Join(plan, "\n"))
+		}
+	}
+}
+
+// FeedByRef (#10465, a to-do's history): the items of the kinds asked about the ref, in any conversation, newest first
+// (equal times by id), at most limit; never message cards, which it refuses.
+func TestFeedByRef(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	if _, err := d.pool.Exec(ctx, `TRUNCATE assistant_feed`); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Hour)
+	add := func(id, conversation, kind, ref string, at time.Time) {
+		t.Helper()
+		if err := d.AppendFeed(ctx, FeedRow{ID: id, Conversation: conversation, At: at, Kind: kind, Ref: ref,
+			Body: json.RawMessage(`{"text":"` + id + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("r1", "c1", "routed", "todo_1", t0)
+	add("p1", "c1", "receipt", "todo_1", t0.Add(time.Minute))
+	add("p2", "c2", "receipt", "todo_1", t0.Add(2*time.Minute)) // another conversation's (a supervisor's)
+	add("p3", "", "receipt", "todo_1", t0.Add(2*time.Minute))   // equal time: by id, newest first
+	add("s1", "c1", "start_remedy", "todo_1", t0.Add(3*time.Minute))
+	add("o1", "c1", "receipt", "todo_2", t0.Add(4*time.Minute))
+	add("m1", "c1", "message", "todo_1", t0.Add(5*time.Minute))
+	ids := func(kinds []string, limit int) string {
+		t.Helper()
+		rows, err := d.FeedByRef(ctx, "todo_1", kinds, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rows {
+			if r.Ref != "todo_1" || !json.Valid(r.Body) || r.At.IsZero() {
+				t.Fatalf("row %+v", r)
+			}
+			out = append(out, r.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids([]string{"routed", "receipt"}, 100); got != "p3,p2,p1,r1" {
+		t.Fatalf("routed and receipts: %s", got)
+	}
+	if got := ids([]string{"routed", "receipt"}, 2); got != "p3,p2" {
+		t.Fatalf("limit 2: %s", got)
+	}
+	if got := ids([]string{"start_remedy"}, 100); got != "s1" {
+		t.Fatalf("start_remedy: %s", got)
+	}
+	if got := ids(nil, 100); got != "" {
+		t.Fatalf("no kinds: %s", got)
+	}
+	if rows, err := d.FeedByRef(ctx, "todo_1", []string{"receipt", "message"}, 100); !errors.Is(err, ErrFeedByRefMessage) || rows != nil {
+		t.Fatalf("message cards: %+v, %v", rows, err)
+	}
+}
+
+// FeedByRef reads a to-do's items through assistant_feed_unsent, as MarkFeedSent does (its predicate is the index's):
+// no migration, and no scan of the whole feed on a to-do's read. Checked as TestMarkFeedSentUsesUnsentIndex checks
+// MarkFeedSent, on a feed shaped like a real one, for the plan a statement starts with and the one it can switch to.
+func TestFeedByRefUsesUnsentIndex(t *testing.T) {
+	ctx := context.Background()
+	d, err := Open(ctx, migratedDatabase(t, AllSets), AllSets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	// 8000 items about 2000 to-dos and inbox items, one of each kind per ref; every other message card is sent.
+	if _, err := d.pool.Exec(ctx, `INSERT INTO assistant_feed (id, conversation, at, kind, ref, body, sent_at)
+		SELECT 'f' || n, 'c' || n % 20, $1::timestamptz + n * interval '1 second',
+			(ARRAY['message', 'task', 'routed', 'receipt'])[1 + n % 4], 'todo_' || n / 4,
+			CASE WHEN n % 8 = 0 THEN jsonb_build_object('sent_at', $1::timestamptz) ELSE '{}' END,
+			CASE WHEN n % 8 = 0 THEN $1::timestamptz END
+		FROM generate_series(0, 7999) n`, time.Now().UTC().Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `ANALYZE assistant_feed`); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := d.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `PREPARE feed_by_ref (text[], text, int) AS `+feedByRefSQL); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+		if _, err := conn.Exec(ctx, `SET plan_cache_mode = `+mode); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := conn.Query(ctx, `EXPLAIN EXECUTE feed_by_ref ('{routed,receipt,task}', 'todo_1', 1000)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(plan, "\n"), "assistant_feed_unsent") {
+			t.Fatalf("%s: FeedByRef does not use assistant_feed_unsent:\n%s", mode, strings.Join(plan, "\n"))
 		}
 	}
 }

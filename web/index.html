@@ -41,6 +41,51 @@
         if (size === "small" || size === "large") document.documentElement.dataset.textSize = size;
       } catch (e) {}
     </script>
+    <script>
+      // Browser-local fonts before first paint. Keep in sync with ui/font-preference.ts (contract-tested).
+      (function () {
+        function refreshFonts() {
+          var fonts;
+          try { fonts = JSON.parse(localStorage.getItem("persona.font") || "null"); }
+          catch (e) { fonts = null; }
+          var presets = { sans: { system: "system-ui", georgia: "Georgia", sourceHan: "Source Han Serif SC" }, mono: { system: "ui-monospace", menlo: "Menlo", consolas: "Consolas" } };
+          var fallbacks = {
+            sans: 'Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif',
+            mono: '"JetBrains Mono", "SF Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, Menlo, Consolas, monospace'
+          };
+          var declarations = [];
+          ["sans", "mono"].forEach(function (kind) {
+            var choice = fonts && typeof fonts === "object" && fonts[kind];
+            if (!choice || typeof choice !== "object") return;
+            var family = null;
+            if (choice.preset === "custom" && typeof choice.family === "string" && choice.family.trim().length > 0 && choice.family.trim().length <= 100 && !/[\u0000-\u001f\u007f,;{}<>]/u.test(choice.family)) family = choice.family.trim();
+            else if (typeof choice.preset === "string" && Object.hasOwn(presets[kind], choice.preset)) family = presets[kind][choice.preset];
+            if (!family) return;
+            var first = choice.preset === "system" ? family : '"' + family.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+            declarations.push("--font-" + kind + ": " + first + ", " + (document.documentElement.style.getPropertyValue("--font-" + kind) || fallbacks[kind]) + " !important;");
+            if (kind === "mono") declarations.push("--font-inline-code: var(--font-mono);");
+          });
+          var fontStyle = document.getElementById("persona-font");
+          if (!declarations.length) {
+            if (fontStyle) fontStyle.remove();
+            return;
+          }
+          if (!fontStyle) {
+            fontStyle = document.createElement("style");
+            fontStyle.id = "persona-font";
+            document.head.appendChild(fontStyle);
+          }
+          var css = ":root { " + declarations.join(" ") + " }";
+          if (fontStyle.textContent !== css) fontStyle.textContent = css;
+        }
+        refreshFonts();
+        addEventListener("storage", function (event) {
+          if (event.key === null || event.key === "persona.font") refreshFonts();
+        });
+        // Also keep the chosen family ahead of the defaults applied by a late theme change.
+        new MutationObserver(refreshFonts).observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+      })();
+    </script>
   </head>
   <body>
     <!-- 100dvh: the visible height with the browser's bars, not the tallest one (100vh hides the bottom on phones) -->

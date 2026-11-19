@@ -198,6 +198,9 @@ impl WorkflowRun {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct WorkState {
     pub phase: String,
+    /// Current work summary searched by iOS's conversation, assistant and errors scopes.
+    #[serde(default)]
+    pub line: Option<String>,
     #[serde(default)]
     pub on: Option<String>,
     #[serde(default)]

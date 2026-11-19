@@ -1,0 +1,10 @@
+{
+  "unavailable": "The settings could not be confirmed. Reload before trying again.",
+  "bad_request": "This settings change could not be read.",
+  "version": "This settings format is not supported. Update the app and try again.",
+  "too_large": "This settings change is too large.",
+  "conflict": "These settings changed elsewhere. Reload and review your changes before saving.",
+  "invalid": "Check the highlighted settings and try again.",
+  "forbidden": "You cannot change these settings.",
+  "not_found": "These settings are no longer available."
+}

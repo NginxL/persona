@@ -32,6 +32,7 @@ import { keepView, NATIVE_UI_VERSION, readKeptView } from "../../lib/extension-v
 import type { UIRowControl } from "../../lib/extension-ui-v6";
 import { currentLanguage, t } from "../../i18n";
 import { SUBSCRIPTIONS_UI } from "../../lib/subscriptions-ui";
+import { ExtensionOwnerScope } from "../../lib/extension-owner";
 
 const inputClass =
   "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
@@ -777,7 +778,10 @@ function LauncherSection({ place, launcher, machine }: { place: UIPlace; launche
         <Icon name="extension" size={11} className="shrink-0" />
         {place.title}
       </div>
-      <ExtensionUI extension={place.extension} ui={place.id} context={context} embedded onUnsupported={() => setGone(true)} />
+      {/* the extension's own id scopes what a graph's `key` keeps (lib/extension-owner.tsx) */}
+      <ExtensionOwnerScope owner={place.extension}>
+        <ExtensionUI extension={place.extension} ui={place.id} context={context} embedded onUnsupported={() => setGone(true)} />
+      </ExtensionOwnerScope>
     </div>
   );
 }

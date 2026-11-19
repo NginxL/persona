@@ -29,11 +29,40 @@ type laneWriter struct {
 	err     error         // why the writer stopped; nil while it goes on
 	lanes   [laneCount]laneQueue
 	seq     uint64 // the last data frame numbered
-	ackDue  uint64 // the reader has read every frame through this one, and wants it acknowledged
+	ackDue  uint64 // the reader has read every frame with credit through this one, and wants it acknowledged
 	ackAt   uint32 // when it read it (clockMS)
 	ackSent uint64
 	win     creditWindow
 	totals  [laneCount]laneTotals
+
+	// Resuming (resume.go): keep says frames are kept until the other side acknowledges them (kept, keptBytes; none
+	// through gapThrough: not kept, so the connection resumes only once those are acknowledged, ackedThrough).
+	// allDue / allAt / allSent are the acknowledgement of every frame read, as ackDue is of those with credit. lost:
+	// the transport of generation gen failed and the writer waits for the next; resend is the index in kept from which
+	// it writes again what the other side did not read (-1: nothing to write again).
+	keep         bool
+	kept         []keptFrame
+	keptBytes    int
+	gapThrough   uint64
+	ackedThrough uint64
+	allDue       uint64
+	allAt        uint32
+	allSent      uint64
+	allWaiting   bool // a write for the acknowledgement of every frame read is due (ackAll)
+	gen          uint64
+	lost         bool
+	resend       int
+	resent       int64      // frames written again, every resume together
+	held         []*outLine // lines whose last frame went with a write that failed, until written again (run)
+	lose         func(err error, gen uint64) bool
+}
+
+// keptFrame is a data frame kept for a resume, its header and payload. Frames after a gap are kept on: once the other
+// side acknowledges the gap, the connection is resumable again.
+type keptFrame struct {
+	seq uint64
+	b   []byte
+	at  time.Time
 }
 
 // laneSlots is how many lines of one lane may be in progress at once (laneQueue.slots); a frame's slot says which.
@@ -65,7 +94,7 @@ type outLine struct {
 }
 
 func newLaneWriter(w io.Writer, closed <-chan struct{}, fail func(error), filter func([]byte) []byte) *laneWriter {
-	return &laneWriter{w: w, closed: closed, fail: fail, filter: filter, wake: make(chan struct{}, 1), win: newCreditWindow()}
+	return &laneWriter{w: w, closed: closed, fail: fail, filter: filter, wake: make(chan struct{}, 1), win: newCreditWindow(), resend: -1}
 }
 
 func (lw *laneWriter) poke() {
@@ -131,6 +160,29 @@ func (lw *laneWriter) ack(seq uint64, at uint32) {
 	lw.mu.Unlock()
 }
 
+// ackAll asks for an acknowledgement of every frame read through seq (resuming: what the other side need not keep).
+// It goes with the next write, or on its own after allAckDelay: one a read would be a write a read the other way.
+func (lw *laneWriter) ackAll(seq uint64, at uint32) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if seq <= lw.allDue {
+		return
+	}
+	lw.allDue, lw.allAt = seq, at
+	if !lw.allWaiting {
+		lw.allWaiting = true
+		time.AfterFunc(allAckDelay, func() {
+			lw.mu.Lock()
+			lw.allWaiting = false
+			lw.mu.Unlock()
+			lw.poke()
+		})
+	}
+}
+
+// allAckDelay bounds how long an acknowledgement of every frame read waits for a write to go with.
+const allAckDelay = 500 * time.Millisecond
+
 // acked takes the other side's acknowledgement of every frame through seq, the last read at at by its clock.
 func (lw *laneWriter) acked(seq uint64, at uint32) error {
 	lw.mu.Lock()
@@ -138,6 +190,7 @@ func (lw *laneWriter) acked(seq uint64, at uint32) error {
 	if seq > lw.seq {
 		return fmt.Errorf("%w: acknowledges frame %d, %d sent", ErrFrame, seq, lw.seq)
 	}
+	lw.dropKeptLocked(seq)
 	lw.win.acked(seq, at, time.Now())
 	if len(lw.lanes[LaneInteractive].lines)+len(lw.lanes[LaneBulk].lines) > 0 { // what may wait for credit
 		lw.poke()
@@ -157,7 +210,13 @@ func (lw *laneWriter) run() {
 		}
 		lw.mu.Lock()
 		var batch []byte
-		batch, finished = lw.fillLocked(buf[:0], finished[:0], time.Now())
+		if !lw.lost {
+			if lw.resend >= 0 {
+				batch, finished = lw.resendLocked(buf[:0]), finished[:0]
+			} else {
+				batch, finished = lw.fillLocked(buf[:0], finished[:0], time.Now())
+			}
+		}
 		if len(batch) == 0 {
 			lw.mu.Unlock()
 			select {
@@ -168,19 +227,35 @@ func (lw *laneWriter) run() {
 			}
 			continue
 		}
+		w, gen := lw.w, lw.gen
 		lw.busy = true
 		lw.mu.Unlock()
-		n, err := lw.w.Write(batch)
+		n, err := w.Write(batch)
 		if err == nil && n != len(batch) {
 			err = io.ErrShortWrite
 		}
 		if err == nil && lw.wrote != nil {
 			lw.wrote.Store(time.Now().UnixNano())
 		}
+		resuming := err != nil && lw.lose != nil && lw.lose(err, gen)
 		lw.mu.Lock()
 		lw.busy = false
-		for _, l := range finished {
-			l.done <- err
+		switch {
+		case resuming:
+			// What this write carried is kept and goes again on the next transport: its lines are written once the
+			// frames written again are (or told the error if the peer closes first).
+			lw.held = append(lw.held, finished...)
+			err = nil
+		default:
+			for _, l := range finished {
+				l.done <- err
+			}
+			if err == nil && lw.resend < 0 {
+				for _, l := range lw.held {
+					l.done <- nil
+				}
+				lw.held = nil
+			}
 		}
 		lw.mu.Unlock()
 		if err != nil {
@@ -209,18 +284,16 @@ func (lw *laneWriter) stop(err error) {
 		}
 		*q = laneQueue{}
 	}
+	for _, l := range lw.held {
+		l.done <- lw.err
+	}
+	lw.held = nil
 }
 
 // fillLocked makes the next write: the acknowledgement due, then frames in priority order while they fit in frameMax
 // (the first always does). finished is the lines whose last frame it holds.
 func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Time) ([]byte, []*outLine) {
-	if lw.ackDue > lw.ackSent {
-		var h [frameHeader + ackPayload]byte
-		putHead(h[:], frameHead{kind: frameAck, size: ackPayload, seq: lw.ackDue})
-		binary.BigEndian.PutUint32(h[frameHeader:], lw.ackAt)
-		batch = append(batch, h[:]...)
-		lw.ackSent = lw.ackDue
-	}
+	batch = lw.acksLocked(batch)
 	for {
 		l, n, ok := lw.pickLocked(frameMax-len(batch), len(batch) == 0, now)
 		if !ok {
@@ -230,7 +303,9 @@ func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Tim
 		fin := l.off+n == len(l.b)
 		var h [frameHeader]byte
 		putHead(h[:], frameHead{kind: frameData, lane: l.lane, fin: fin, slot: l.slot, size: n, seq: lw.seq})
+		at := len(batch)
 		batch = append(append(batch, h[:]...), l.b[l.off:l.off+n]...)
+		lw.keepLocked(lw.seq, batch[at:], now)
 		l.off += n
 		lw.totals[l.lane].frames++
 		if l.credit {
@@ -336,6 +411,10 @@ type LaneStats struct {
 	InFlight int           // those sent and not acknowledged
 	RTT      time.Duration // the latest round trip of such a frame
 	Queued   time.Duration // how long the latest such frame spent queued on its way
+	// Resuming (resume.go): frames are kept for it, their bytes, and the frames written again, every resume together.
+	Resume bool
+	Kept   int
+	Resent int64
 }
 
 // LaneCounters is one lane's: what waits now, the frames sent, and the longest a line waited for its first frame (one
@@ -361,9 +440,13 @@ func (s LaneStats) String() string {
 		wait[i] = c.MaxWait.Round(time.Millisecond).String()
 		sent[i] = fmt.Sprint(c.SentFrames)
 	}
-	return fmt.Sprintf("lanes=on queued=%s bytes=%s maxwait=%s sent=%s window=%s inflight=%s rtt=%s queued=%s",
+	line := fmt.Sprintf("lanes=on queued=%s bytes=%s maxwait=%s sent=%s window=%s inflight=%s rtt=%s queued=%s",
 		strings.Join(queued[:], "/"), strings.Join(size[:], "/"), strings.Join(wait[:], "/"), strings.Join(sent[:], "/"),
 		sizeText(int64(s.Window)), sizeText(int64(s.InFlight)), s.RTT.Round(time.Millisecond), s.Queued.Round(time.Millisecond))
+	if s.Resume {
+		line += fmt.Sprintf(" resume=on kept=%s resent=%d", sizeText(int64(s.Kept)), s.Resent)
+	}
+	return line
 }
 
 func sizeText(n int64) string {
@@ -388,7 +471,8 @@ func (lw *laneWriter) stats() LaneStats {
 	now := time.Now()
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
-	s := LaneStats{Framed: true, Window: lw.win.cwnd, InFlight: lw.win.inFlight, RTT: lw.win.rtt, Queued: lw.win.queued}
+	s := LaneStats{Framed: true, Window: lw.win.cwnd, InFlight: lw.win.inFlight, RTT: lw.win.rtt, Queued: lw.win.queued,
+		Resume: lw.keep, Kept: lw.keptBytes, Resent: lw.resent}
 	for i := range lw.lanes {
 		c := &s.Lanes[i]
 		c.SentFrames, c.MaxWait = lw.totals[i].frames, lw.totals[i].maxWait
@@ -402,4 +486,135 @@ func (lw *laneWriter) stats() LaneStats {
 		}
 	}
 	return s
+}
+
+// acksLocked appends the acknowledgements due: of the frames with credit (the window's samples), then, resuming, of
+// every frame read when that goes further.
+func (lw *laneWriter) acksLocked(batch []byte) []byte {
+	sent := uint64(0)
+	if lw.ackDue > lw.ackSent {
+		batch = appendAck(batch, lw.ackDue, lw.ackAt)
+		lw.ackSent, sent = lw.ackDue, lw.ackDue
+	}
+	if lw.allDue > lw.allSent {
+		if lw.allDue > sent {
+			batch = appendAck(batch, lw.allDue, lw.allAt)
+		}
+		lw.allSent = lw.allDue
+	}
+	return batch
+}
+
+func appendAck(batch []byte, seq uint64, at uint32) []byte {
+	var h [frameHeader + ackPayload]byte
+	putHead(h[:], frameHead{kind: frameAck, size: ackPayload, seq: seq})
+	binary.BigEndian.PutUint32(h[frameHeader:], at)
+	return append(batch, h[:]...)
+}
+
+// keepLocked keeps frame seq, b (header and payload), for a resume. Past resumeKeepMax bytes, or with the oldest kept
+// for resumeKeepAge (the other side does not acknowledge), nothing is kept through seq: a gap the other side must
+// acknowledge before the connection can resume again.
+func (lw *laneWriter) keepLocked(seq uint64, b []byte, now time.Time) {
+	if !lw.keep {
+		return
+	}
+	if lw.keptBytes+len(b) > resumeKeepMax || len(lw.kept) > 0 && now.Sub(lw.kept[0].at) > resumeKeepAge {
+		lw.kept, lw.keptBytes, lw.gapThrough = nil, 0, seq
+		return
+	}
+	lw.kept = append(lw.kept, keptFrame{seq: seq, b: bytes.Clone(b), at: now})
+	lw.keptBytes += len(b)
+}
+
+// dropKeptLocked lets go what the other side read, every frame through seq.
+func (lw *laneWriter) dropKeptLocked(seq uint64) {
+	lw.ackedThrough = max(lw.ackedThrough, seq)
+	i := 0
+	for i < len(lw.kept) && lw.kept[i].seq <= seq {
+		lw.keptBytes -= len(lw.kept[i].b)
+		i++
+	}
+	if i > 0 {
+		clear(lw.kept[:i]) // the frames' bytes go; the slice moves on (append makes it anew when it outgrows its end)
+		lw.kept = lw.kept[i:]
+		if lw.resend >= 0 {
+			lw.resend = max(lw.resend-i, 0)
+		}
+	}
+}
+
+// oldestKept is when the oldest frame waiting to be acknowledged was written; zero with none.
+func (lw *laneWriter) oldestKept() time.Time {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if len(lw.kept) == 0 {
+		return time.Time{}
+	}
+	return lw.kept[0].at
+}
+
+// resumable: what is kept would resume the connection, every frame after those the other side acknowledged.
+func (lw *laneWriter) resumable() bool {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.keptAfterLocked(lw.ackedThrough)
+}
+
+// canResume: the frames after peerRead, which a resume writes again, are all kept.
+func (lw *laneWriter) canResume(peerRead uint64) bool {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.keptAfterLocked(peerRead)
+}
+
+// keptAfterLocked: every frame written after seq is kept. What is kept is every frame after the gap and the
+// acknowledged ones, so seq must be at least both.
+func (lw *laneWriter) keptAfterLocked(seq uint64) bool {
+	return lw.keep && max(lw.gapThrough, lw.ackedThrough) <= seq && seq <= lw.seq
+}
+
+// loseGen: the transport of generation gen failed; nothing more is written until resume. w is what it was written on.
+func (lw *laneWriter) loseGen(gen uint64) (w io.Writer) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if gen != lw.gen {
+		return nil
+	}
+	lw.lost = true
+	return lw.w
+}
+
+// resume writes on w, generation gen, from now on: first again what came after peerRead, then on as before. The
+// acknowledgements go again too, the last ones may have been lost with the old transport.
+func (lw *laneWriter) resume(w io.Writer, gen, peerRead uint64) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	lw.dropKeptLocked(peerRead)
+	lw.w, lw.gen, lw.lost = w, gen, false
+	lw.resend = -1
+	if len(lw.kept) > 0 {
+		lw.resend = 0
+	}
+	lw.ackSent, lw.allSent = 0, 0
+	lw.win.resumed(peerRead, time.Now())
+	lw.poke()
+}
+
+// resendLocked is the next write of frames written again (resume), whole frames up to frameMax (the first always).
+func (lw *laneWriter) resendLocked(batch []byte) []byte {
+	batch = lw.acksLocked(batch)
+	for lw.resend >= 0 && lw.resend < len(lw.kept) {
+		f := lw.kept[lw.resend]
+		if len(batch) > 0 && len(batch)+len(f.b) > frameMax {
+			break
+		}
+		batch = append(batch, f.b...)
+		lw.resend++
+		lw.resent++
+	}
+	if lw.resend >= len(lw.kept) {
+		lw.resend = -1
+	}
+	return batch
 }

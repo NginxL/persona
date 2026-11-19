@@ -16,6 +16,7 @@ Read and change Persona's own settings for the user: their inbox sorting rules, 
       "description": "the setting, from list (inbox.rules, mail.accounts, extension.<id>…)"
     },
     "value": {
+      "type": ["string", "number", "integer", "boolean", "object", "array", "null"],
       "description": "set: the new value; add: the item (each setting's list entry says what)"
     },
     "id": {

@@ -249,6 +249,7 @@ func TestGuestSettingsIgnoreThePrivateProfileAdditions(t *testing.T) {
 // Persona's skill picker lists, for a conversation in a private profile, what its settings let it use: the user's
 // switched-off skills are left out, one its own settings switch on is listed.
 func TestSkillCatalogMatchesThePrivateProfileSettings(t *testing.T) {
+	fakeClaudeManagedSettings(t)
 	f := cliTest(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	os.Unsetenv("CLAUDE_CONFIG_DIR")

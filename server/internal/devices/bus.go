@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -102,9 +103,14 @@ func (d *Devices) Request(ctx context.Context, method string, params json.RawMes
 	return nil, false, nil
 }
 
-// Event takes the hub's devices.* events; false: not one of them.
+// Event takes the hub's devices.* and credential revocation events; false: not one of them.
 func (d *Devices) Event(name string, params json.RawMessage) bool {
 	switch name {
+	case bus.EventCredentialRevoked:
+		var p bus.DeviceCredential
+		if json.Unmarshal(params, &p) == nil && p.ID != "" {
+			d.heldCredentialRevoked(p.ID)
+		}
 	case devicewire.EventNotify:
 		var p devicewire.NodeEvent
 		if json.Unmarshal(params, &p) == nil {
@@ -274,6 +280,8 @@ func (d *Devices) Handler(next http.Handler) http.Handler {
 	route("GET /api/v1/sessions/{mid}/{sid}/skills", d.getSessionSkills)
 	route("GET /api/v1/sessions/{mid}/{sid}/mode-changes", d.getModeChanges)
 	route("POST /api/v1/sessions/{mid}/{sid}/start/continue", d.postStartContinue)
+	route("POST /api/v1/sessions/{mid}/{sid}/held/{msg}/retry", d.postHeldRetry)
+	route("DELETE /api/v1/sessions/{mid}/{sid}/held/{msg}", d.deleteHeld)
 	route("POST /api/v1/machines/{mid}/codex/{sid}/takeover", d.commitCodexTakeover)
 	route("PUT /api/v1/machines/{mid}/engine", d.putEngine)
 	route("GET /api/v1/machines/{mid}/herdr", d.getHerdr)

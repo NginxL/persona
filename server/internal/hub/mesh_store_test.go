@@ -556,6 +556,9 @@ func (s *meshStore) FeedItem(context.Context, string) (*db.FeedRow, error) { ret
 func (s *meshStore) MarkFeedSent(context.Context, string, string, time.Time, json.RawMessage) ([]db.FeedRow, error) {
 	return nil, nil
 }
+func (s *meshStore) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
+	return nil, nil
+}
 func (s *meshStore) LinkTodoSpace(context.Context, string, string, string, time.Time) (string, error) {
 	return "", nil
 }

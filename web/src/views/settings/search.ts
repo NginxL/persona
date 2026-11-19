@@ -37,6 +37,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "general", group: words(t("settings.theme_light"), t("settings.theme_dark")), hint: t("language.system"), anchor: "theme" },
   { tab: "general", group: t("ui-look.accent"), anchor: "theme-color" },
   { tab: "general", group: t("ui-look.text_size"), anchor: "text-size" },
+  { tab: "general", group: t("ui-look.font"), hint: words(t("ui-look.font_sans"), t("ui-look.font_mono")), anchor: "font" },
   { tab: "general", group: t("language.label"), anchor: "language" },
   { tab: "general", group: t("settings.reply_motion"), anchor: "reply-motion" },
   { tab: "general", group: t("ui-look.recent_chats"), anchor: "recent-chats" },
@@ -66,6 +67,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "persona", group: t("settings-assistantsettings.background_folded"), anchor: "background-folded" },
   { tab: "persona", group: t("settings-assistantsettings.recent_task_chats"), anchor: "recent-task-chats" },
   { tab: "persona", group: t("settings-assistantsettings.next_suggestions"), anchor: "next-suggestions" },
+  { tab: "persona", group: t("settings-assistantsettings.claude_interactive"), anchor: "claude-interactive" },
   { tab: "persona", group: t("settings-assistantsettings.start_requested"), hint: t("settings-assistantsettings.start_title"), anchor: "start-requested" },
   { tab: "persona", group: t("settings-assistantsettings.workspace_preference"), anchor: "workspace-preference" },
   { tab: "persona", group: t("settings-assistantsettings.trust_title"), anchor: "task-trust" },
@@ -148,6 +150,10 @@ export const SEARCH_INDEX: SearchGroup[] = [
   ...SHORTCUTS.map((s): SearchGroup => ({ tab: "shortcuts", group: s.label, anchor: `shortcut-${s.id}` })),
   { tab: "shortcuts", group: t("settings-shortcutsettings.terminal_title"), anchor: "shortcuts-terminal" },
   ...LOCAL_SHORTCUTS.map((s): SearchGroup => ({ tab: "shortcuts", group: s.label, anchor: `shortcut-${s.id}` })),
+  // Labs: each module's settings by their names and choices (Labs.tsx; the form marks a field's row
+  // configuration-<document>-<field>)
+  { tab: "labs", group: t("settings-nav.tab_labs"), hint: t("settings-labs.trial"), anchor: "labs" },
+  { tab: "labs", group: path(t("settings-labs.area_agents"), t("settings-labs.terminal_renderer")), hint: words(t("settings-labs.terminal_renderer_standard"), t("settings-labs.terminal_renderer_webgl")), anchor: "configuration-terminal-renderer" },
   // This hub
   { tab: "hub", group: t("settings-hubsettings.version"), hint: words(t("settings-hubsettings.last_check"), t("settings-hubsettings.branch"), t("settings-hubsettings.current_commit"), t("settings-hubsettings.latest_commit")), anchor: "hub-version" },
   { tab: "hub", group: t("settings-hubsettings.channel"), hint: words(t("settings-hubsettings.source"), t("settings-hubsettings.web_dev")), anchor: "hub-channel" },

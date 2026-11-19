@@ -400,6 +400,7 @@
     <string name="designsystem_core_knowledge_meetings">会议</string>
     <string name="designsystem_core_knowledge_events">日程</string>
     <string name="designsystem_core_knowledge_recordings">录音</string>
+    <string name="designsystem_core_knowledge_topics">主题</string>
     <string name="designsystem_core_mail_error">错误</string>
     <string name="designsystem_core_mail_outlook">Outlook · Microsoft 账号登录</string>
     <string name="designsystem_core_mail_gmail">Gmail · Google 账号登录</string>

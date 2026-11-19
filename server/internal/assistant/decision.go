@@ -370,36 +370,76 @@ func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, ask
 	if !ok || t.Origin != conversation {
 		return FeedItem{}, i18n.Err("assistant-tasks.route_no_task")
 	}
-	a, err := s.askRound(id, asked)
-	if err != nil {
-		return FeedItem{}, err
+	item, result, err := s.answerDecisionTextLocked(ctx, st, t, asked, text, false)
+	if err == nil && !result.taken {
+		err = i18n.Err("assistant-feishu_cards.already_handled")
 	}
-	if a == nil {
-		return FeedItem{}, i18n.Err("assistant-feishu_cards.already_handled")
+	return item, err
+}
+
+// answerDecisionText is the owner's own words answering task id's decision (asked: its round) from the asks route
+// (todo_asks_routes.go), which names no conversation: the words go where the hub's other relays to the task go, and
+// words no Agent can receive are still the owner's answer, recorded and handed to the supervisor as a chosen option
+// is (result.undelivered). A zero result means the round is over.
+func (s *Service) answerDecisionText(ctx context.Context, id, asked, text string) (acceptResult, error) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	st := s.todoDB()
+	if st == nil {
+		return acceptResult{}, errAcceptStore
+	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return acceptResult{}, err
+	}
+	t, ok := s.todoNow(id)
+	if !ok {
+		return acceptResult{}, nil
+	}
+	_, result, err := s.answerDecisionTextLocked(ctx, st, t, asked, text, true)
+	return result, err
+}
+
+// answerDecisionTextLocked answers task t's decision with text, its caller holding t's action lock: relayed to its
+// Agent in its origin conversation (none for a to-do no conversation opened, as chooseOption relays), recorded as a
+// manual decision whose source is the routed item, the round ended. undeliverable: words no Agent can take are
+// recorded and handed to the supervisor instead of failing. A zero result means the round is over.
+func (s *Service) answerDecisionTextLocked(ctx context.Context, st todoStore, t Todo, asked, text string, undeliverable bool) (FeedItem, acceptResult, error) {
+	id := t.ID
+	a, err := s.askRound(id, asked)
+	if err != nil || a == nil {
+		return FeedItem{}, acceptResult{}, err
 	}
 	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
 	if err != nil {
-		return FeedItem{}, err
+		return FeedItem{}, acceptResult{}, err
 	}
 	s.deadlineAnswered(ctx, id, a.AskedAt)
-	item, err := s.routeToTaskChecked(ctx, conversation, id, text, func(cur Todo) bool {
+	item, sendErr := s.routeToTaskChecked(ctx, t.Origin, id, text, func(cur Todo) bool {
 		return cur.DoneAt == nil && !acceptAskStale(a, cur)
 	})
-	if err != nil {
-		return FeedItem{}, err
+	if sendErr != nil {
+		if !undeliverable || !noAgentCanTake(sendErr) {
+			return FeedItem{}, acceptResult{}, sendErr
+		}
+		s.logf("task %s: decision in words to agent: %v", id, sendErr)
 	}
 	at := decisionNow()
 	row := db.TodoDecisionRow{ID: "dec_" + randomHex(8), TodoID: id,
 		Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")),
 		Choice:   decisionText(text), Source: db.DecisionManual, SourceMessage: item.ID, CreatedAt: at}
 	if _, err := s.insertDecision(ctx, st, row); err != nil {
-		return FeedItem{}, err
+		return FeedItem{}, acceptResult{}, err
 	}
 	completeDismissal()
 	s.decisionsChanged(ctx, id, at)
-	s.userDecided(ctx, id)
+	result := acceptSucceeded()
+	if sendErr != nil {
+		result = s.decisionNotDelivered(ctx, id, a.AskedAt, text, sendErr)
+	} else {
+		s.userDecided(ctx, id)
+	}
 	s.endAsk(ctx, id, a.AskedAt, "", row.Choice)
-	return item, nil
+	return item, result, nil
 }
 
 // askCardNow: card is one of the cards of task id's ask as it is now ("" when Feishu does not say: taken as one), so a

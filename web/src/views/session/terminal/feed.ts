@@ -65,6 +65,7 @@ import {
 } from "../../../lib/terminal-details";
 import { FIND_LIMIT, findIndex, findInLines, marksFor, stepFind, type FindMarks, type FindPos, type RowMatch } from "../../../lib/terminal-search";
 import { subscribeAppearance } from "../../../lib/terminal-appearance";
+import { readTerminalRenderer, writeTerminalRenderer, type TerminalRenderer } from "../../../lib/labs";
 import { toast } from "../../../ui/atoms";
 import { copyNotice, copyWith, osc52Text, transferFiles } from "../../../lib/terminal-clipboard";
 import { cjkFontStack, terminalFontReady } from "./cjk";
@@ -126,10 +127,16 @@ export interface FeedView {
   screen: ScreenRows | null;
   /** xterm's colors, for the rows the page draws (the terminal's Appearance: the page's light / dark, or its own). */
   palette: TerminalPalette | null;
-  /** "Cursor style" / "Blinking cursor" / "WebGL rendering": the options in "Terminal settings" (remembered). */
+  /** "Cursor style" / "Blinking cursor": options in "Terminal settings" (remembered). */
   cursorStyle: CursorStyle;
   cursorBlink: boolean;
-  webgl: boolean;
+  /** Settings › Labs › Terminal renderer as this view opened with it (lib/labs.ts): read once, when the view is made, so
+   *  changing it in Labs leaves this view as it is and applies to the next terminal opened. */
+  rendererChosen: TerminalRenderer;
+  /** What draws this view right now: "standard" until the WebGL addon has loaded, and again after it failed. */
+  renderer: TerminalRenderer;
+  /** WebGL was chosen but failed in this view (no WebGL, or the GPU context was lost): it draws with the standard renderer. */
+  rendererFellBack: boolean;
   /** The search: the current match (0-based, -1 when none is current) among `count`; null while not searching. */
   find: { index: number; count: number } | null;
   /** The page's own rows (history, and the screen when the page draws it) that hold a match. */
@@ -152,11 +159,19 @@ const WRAP_KEY = "persona.terminal.wrap";
 const FONT_KEY = "persona.terminal.fontSize";
 const CURSOR_KEY = "persona.terminal.cursorStyle";
 const BLINK_KEY = "persona.terminal.cursorBlink";
-const WEBGL_KEY = "persona.terminal.webgl";
 const MOUSE_KEY = "persona.terminal.mouse";
 export const FONT_SIZES = { min: 9, max: 20, default: 13 };
 /** Frames held while history is read; past this the screen starts over from a whole frame instead. */
 const HELD_MAX = 4 << 20;
+
+/** Disposes a renderer addon that may already be gone (a lost context disposes parts of it itself). */
+function disposeQuietly(addon: { dispose(): void }) {
+  try {
+    addon.dispose();
+  } catch {
+    // already disposed
+  }
+}
 
 function savedFontSize(): number {
   const n = Number(localStorage.getItem(FONT_KEY));
@@ -295,7 +310,9 @@ export class TerminalFeed {
       palette: null,
       cursorStyle: parseCursorStyle(localStorage.getItem(CURSOR_KEY)),
       cursorBlink: parseFlag(localStorage.getItem(BLINK_KEY)),
-      webgl: parseFlag(localStorage.getItem(WEBGL_KEY)),
+      rendererChosen: readTerminalRenderer().value,
+      renderer: "standard",
+      rendererFellBack: false,
       find: null,
       marks: null,
     };
@@ -426,7 +443,7 @@ export class TerminalFeed {
 
     this.measure(true); // the first grid sizes the empty terminal and is what driving asks for
     this.patch({ ready: true, fontFamily: family });
-    if (this.view.webgl) void this.enableWebgl();
+    if (this.view.rendererChosen === "webgl") void this.enableWebgl();
     this.tick();
     void cjkFontStack(family).then((stack) => {
       if (!stack || this.disposed || !this.term) return;
@@ -1213,48 +1230,53 @@ export class TerminalFeed {
     if (this.term) this.term.options.cursorBlink = on;
   }
 
-  /** WebGL drawing instead of the DOM renderer (off by default: the default look is unchanged). */
-  setWebgl(on: boolean) {
-    if (on) localStorage.setItem(WEBGL_KEY, "1");
-    else localStorage.removeItem(WEBGL_KEY);
-    this.patch({ webgl: on });
-    if (on) void this.enableWebgl();
-    else this.dropWebgl();
-  }
+  // ── the renderer (Settings › Labs › Terminal renderer, lib/labs.ts) ─────────
 
-  /** The addon loads on first use (its own chunk). A browser without WebGL, or a lost context, goes back to the default renderer. */
+  /** WebGL instead of the DOM renderer, for a view opened with it chosen. The addon loads on first use (its own chunk).
+   *  A browser without WebGL, or a lost GPU context, goes back to the default renderer: see webglFailed. */
   private async enableWebgl() {
     if (this.webglAddon || !this.term) return;
+    let gl: { dispose(): void } | null = null;
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
-      if (this.disposed || !this.term || !this.view.webgl || this.webglAddon) return;
-      const gl = new WebglAddon();
-      gl.onContextLoss(() => {
-        this.dropWebgl();
-        this.turnOffWebgl(t("session-terminal-feed.webgl_lost"));
-      });
-      this.term.loadAddon(gl);
-      this.webglAddon = gl;
+      if (this.disposed || !this.term || this.webglAddon || this.view.rendererFellBack) return;
+      const addon = new WebglAddon();
+      gl = addon;
+      addon.onContextLoss(() => this.webglFailed("webgl_lost"));
+      this.term.loadAddon(addon);
+      this.webglAddon = addon;
+      this.patch({ renderer: "webgl" });
     } catch {
-      this.webglAddon = null;
-      if (!this.disposed) this.turnOffWebgl(t("session-terminal-feed.webgl_unavailable"));
+      if (gl && !this.webglAddon) disposeQuietly(gl);
+      if (!this.disposed) this.webglFailed("webgl_unavailable");
     }
   }
 
-  private turnOffWebgl(why: string) {
-    localStorage.removeItem(WEBGL_KEY);
-    this.patch({ webgl: false });
-    toast(why);
+  /** WebGL failed in this view: let go of the GL context so xterm draws with the DOM again (the screen's contents are
+   *  xterm's buffer, untouched by the renderer, so nothing typed or shown is lost), and go back to the standard renderer
+   *  in Labs too, so the next terminal doesn't fail the same way. Terminals already open keep theirs. */
+  private webglFailed(why: "webgl_lost" | "webgl_unavailable") {
+    if (this.view.rendererFellBack) return;
+    this.dropWebgl();
+    this.patch({ renderer: "standard", rendererFellBack: true });
+    const kept = writeTerminalRenderer("standard").ok;
+    if (why === "webgl_lost") toast(kept ? t("session-terminal-feed.webgl_lost") : t("session-terminal-feed.webgl_lost_unsaved"));
+    else toast(kept ? t("session-terminal-feed.webgl_unavailable") : t("session-terminal-feed.webgl_unavailable_unsaved"));
   }
 
-  /** Lets go of the GL context (off, or lost): xterm draws with the DOM again. */
+  /** Lets go of the GL context (lost, or the view closing): xterm draws with the DOM again and repaints what it holds. */
   private dropWebgl() {
     const gl = this.webglAddon;
     this.webglAddon = null;
-    try {
-      gl?.dispose();
-    } catch {
-      // already disposed by the context loss
+    if (!gl) return;
+    disposeQuietly(gl);
+    const term = this.term;
+    if (term && !this.disposed) {
+      try {
+        term.refresh(0, term.rows - 1);
+      } catch {
+        // xterm is closing
+      }
     }
   }
 

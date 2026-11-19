@@ -3,9 +3,9 @@
   "summary": "まとめ",
   "sent": "あなたとして返信しました",
   "self_replied": "元の会話であなたが返信しました",
-  "filed_not_sent": "対応済み。この返信は送信されていません",
+  "filed_not_sent": "対応済み",
   "conclusion_filed": "結論 · 対応済み",
-  "replaced": "現在の提案ではありません。何も送信されていません",
+  "replaced": "現在の提案ではありません",
   "reply_as_you": "あなたとして「{title}」に返信",
   "conclusion": "結論",
   "later_line": "受信箱で待っています：{title}",
@@ -13,5 +13,15 @@
   "wrap_up_ask": "ここでまとめましょう。最終的なまとめと返信を、この受信箱の項目に書き戻してください。",
   "wrap_up_failed": "まとめの依頼を送れませんでした：{error}",
   "wrap_up_to_send": "送信待ち",
-  "wrap_up_to_confirm": "確認待ち"
+  "wrap_up_to_confirm": "確認待ち",
+  "failed": "返信は送信されませんでした",
+  "sending": "返信を送信中…",
+  "uncertain": "送信を確認できません",
+  "uncertain_hint": "重複送信を避けるため、再送信する前に元の会話を確認してください。",
+  "sending_hint": "返信を送信しています。結果が出るまでお待ちください。",
+  "retry_hint": "再試行すると、前に確認した同じ返信を送信します。",
+  "failed_hint": "受信箱または元の会話で、対応が必要な内容を確認してください。",
+  "retry": "再試行",
+  "current_suggestion": "現在の提案",
+  "retry_after": "送信元は {seconds} 秒後の再試行を推奨しています。"
 }

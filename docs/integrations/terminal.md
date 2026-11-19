@@ -591,7 +591,7 @@ Correct implementation needs node to include herdr scroll offset in frames or a 
 - Output URLs: `@xterm/addon-web-links`, http(s) only, click through `openLink`; no simultaneous `terminal_click` (`linkHit`).
 - Context menu: Copy / Paste / Select All / Find… / Clear Selection, existing `Menu` in `ui/atoms.tsx` unchanged. Since `Menu` anchors only to elements, a zero-size fixed element is placed at the mouse position. Blur xterm while menu is open (focused xterm swallows keys; Esc goes to program instead of closing menu).
 - Mac line-editing keys: ⌘⌫ → `\x15`, ⌘← → `\x01`, ⌘→ → `\x05`, only while controlling and with ⌘ alone (`lineEditBytes`).
-- Options: cursor style, blink, WebGL rendering (`@xterm/addon-webgl`, dynamically loaded on first enable; disable/context loss/no WebGL disposes and falls back to DOM); `persona.terminal.cursorStyle / cursorBlink / webgl`, defaults don't write keys. Appearance (light / dark apart from the page) is section 29.
+- Options: cursor style, blink; `persona.terminal.cursorStyle / cursorBlink`, defaults don't write keys. The renderer (`@xterm/addon-webgl`, dynamically loaded only for a terminal opened with WebGL chosen; context loss / no WebGL disposes it, falls back to DOM and sets the choice back to Standard) is chosen in Settings › Labs and read when a terminal opens (`docs/web/web.md`, "Labs"); the key `persona.terminal.webgl` is unchanged. Appearance (light / dark apart from the page) is section 29.
 - Focus: under control, clicking panel or refocusing window returns keyboard to terminal unless text is selected, a dialog/menu/popover is open, focus is in another input (including Find) or outside-panel control, or terminal is hidden beneath another retained terminal (`inert`).
 
 ### Verification
@@ -993,7 +993,7 @@ Shared `views/session/terminal/transfer.ts` (`FileTransfer`, also used by Single
 User screenshot: Claude table rows containing Chinese/fullwidth punctuation shift right border by 1–2 cells, adjacent fish pane's left border becomes jagged `||`. Moshi web lacks the issue, so its implementation was checked:
 
 - Moshi registers no Unicode-width addon (xterm default Unicode 6), no CJK font handling. Uses WebGL cell-grid rendering, bundled JetBrainsMono Nerd Font Mono, waiting on `document.fonts.load` before opening.
-- Persona Full view uses DOM renderer (Single pane WebGL optional, off by default), font stack `"JetBrains Mono", "SF Mono", ui-monospace, …`; fonts and CJK fallback (`cjk.ts`, `size-adjust` to exactly two cells) already existed, with `terminalFontReady` before opening.
+- Persona Full view uses DOM renderer (Single pane WebGL optional in Settings › Labs, off by default), font stack `"JetBrains Mono", "SF Mono", ui-monospace, …`; fonts and CJK fallback (`cjk.ts`, `size-adjust` to exactly two cells) already existed, with `terminalFontReady` before opening.
 
 So rather than copy "switch to WebGL", measurements were taken in a temporary session first.
 
