@@ -23,4 +23,12 @@ describe("a previewed page's style sheets beside it", () => {
       ["p{margin:0}", null],
     ]);
   });
+
+  it("inlines an imported style sheet exactly as it is", async () => {
+    const imported = `.tier::after{content:"$$$"}\n.price::before{content:"$&"}\n.a::after{content:"$'"}\n.b::after{content:"$\`"}`;
+    const read = files({ "/site/tier.css": imported });
+    const { html } = await inlineSiblings(`<style>@import "tier.css";\np{margin:0}</style><p>x</p>`, "/site/index.html", read);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelector("style")?.textContent).toBe(`${imported}\np{margin:0}`);
+  });
 });

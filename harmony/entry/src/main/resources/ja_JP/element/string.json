@@ -4711,6 +4711,34 @@
     {
       "name": "decrease",
       "value": "減らす"
+    },
+    {
+      "name": "agent_computer_holds",
+      "value": "{computer} はオフラインです。オンラインになるとメッセージを送信します。"
+    },
+    {
+      "name": "agent_computer_offline",
+      "value": "{computer} はオフラインです。再接続するとメッセージを送信できます。"
+    },
+    {
+      "name": "agent_stopped",
+      "value": "この Agent は停止しています。ターミナルで再開するとメッセージを送信できます。"
+    },
+    {
+      "name": "agent_delete_held_title",
+      "value": "この保留中のメッセージを削除しますか？"
+    },
+    {
+      "name": "agent_delivery_updating",
+      "value": "配信状況の更新を待っています。"
+    },
+    {
+      "name": "agent_delivery_failed",
+      "value": "{computer} にメッセージを届けられませんでした。"
+    },
+    {
+      "name": "agent_delivery_waiting",
+      "value": "{computer} を待っています。"
     }
   ]
 }

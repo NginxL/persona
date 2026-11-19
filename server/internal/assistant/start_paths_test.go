@@ -46,19 +46,21 @@ var supervisedStarts = map[string]string{
 // startOptOuts are the start paths that stay unsupervised on purpose, with why. Each is the user's own conversation or
 // Agent, the supervisor itself, or work some other part of the hub already follows.
 var startOptOuts = map[string]string{
-	"botSendIn":        "a Lark message opening a conversation: the user's own conversation",
-	"channelForward":   "a channel's message opening a conversation: the user's own conversation",
-	"request":          "the hub bus's assistant.start: an app opening a conversation for the user",
-	"startRoutes":      "the apps' POST /api/v1/sessions: the user started it by hand (assistant.agent_tasks makes it a task when on)",
-	"botStartAgent":    "the Lark bot's start card: the user started the Agent by hand in the chat",
-	"justMeSend":       "a meeting's Just me turn in the main conversation: the main conversation is the supervisor",
-	"sendHandoff":      "the inbox's hand-off into the main conversation: the main conversation is the supervisor",
-	"followupSend":     "a meeting follow-up conversation: the meeting page owns it and the user reads it there",
-	"startInboxAgent":  "an inbox event's agent: its result is the draft in the inbox, which the user reviews",
-	"runTask":          "a scheduled task's own conversation: its runs report through notify_user, and the schedule follows them",
-	"runAutoReview":    "an independent reviewer of a supervised task: the review is part of that task's supervision",
-	"startRepairAgent": "a launcher repair Agent: the launcher health checks follow it (launcher_repair.go)",
-	"startBackground":  "the background supervisor's own conversation: it is the supervisor of the tasks no leader supervises (supervise_background.go)",
+	"botSendIn":            "a Lark message opening a conversation: the user's own conversation",
+	"channelForward":       "a channel's message opening a conversation: the user's own conversation",
+	"request":              "the hub bus's assistant.start: an app opening a conversation for the user",
+	"startRoutes":          "the apps' POST /api/v1/sessions: the user started it by hand (assistant.agent_tasks makes it a task when on)",
+	"botStartAgent":        "the Lark bot's start card: the user started the Agent by hand in the chat",
+	"justMeSend":           "a meeting's Just me turn in the main conversation: the main conversation is the supervisor",
+	"sendHandoff":          "the inbox's hand-off into the main conversation: the main conversation is the supervisor",
+	"followupSend":         "a meeting follow-up conversation: the meeting page owns it and the user reads it there",
+	"startInboxAgent":      "an inbox event's agent: its result is the draft in the inbox, which the user reviews",
+	"runTask":              "a scheduled task's own conversation: its runs report through notify_user, and the schedule follows them",
+	"runAutoReview":        "an independent reviewer of a supervised task: the review is part of that task's supervision",
+	"startSessionReview":   "an explicit independent reviewer: its source session's owner asked for it and answers its result card",
+	"deliverSessionReview": "the owner chose Send on a finished review card: an explicit message or resume of the source session",
+	"startRepairAgent":     "a launcher repair Agent: the launcher health checks follow it (launcher_repair.go)",
+	"startBackground":      "the background supervisor's own conversation: it is the supervisor of the tasks no leader supervises (supervise_background.go)",
 }
 
 // supervisionCalls make or keep a ledger.

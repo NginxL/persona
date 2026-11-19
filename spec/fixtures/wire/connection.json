@@ -19,6 +19,7 @@
         "persona_contracts_v1",
         "client_ops",
         "message_send_state",
+        "session_review",
         "sessions_list",
         "assistant_views",
         "example_unknown_feature"
@@ -54,6 +55,7 @@
           "persona_contracts_v1",
           "client_ops",
           "message_send_state",
+          "session_review",
           "sessions_list",
           "assistant_views",
           "example_unknown_feature"
@@ -80,6 +82,7 @@
         "persona_contracts_v1",
         "client_ops",
         "message_send_state",
+        "session_review",
         "sessions_list",
         "assistant_views",
         "example_unknown_feature"
@@ -103,6 +106,7 @@
           "persona_contracts_v1",
           "client_ops",
           "message_send_state",
+          "session_review",
           "sessions_list",
           "assistant_views",
           "example_unknown_feature"

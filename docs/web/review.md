@@ -140,6 +140,29 @@ holds real answers, written by the node's `TestGitReviewWireFixture` (rewrite wi
   a folder that is gone (both name the folder); an old node; no default branch and no merge base (both offer Uncommitted); a commit or branch that isn't there; any
   other failure with Retry. A chat that takes no messages shows the review read-only.
 
+## Independent reviewer (#1808)
+
+The manual panel above and the independent reviewer are separate actions. With hub feature `session_review`, ⋯ in an
+Agent chat also offers **Review this work**. Opening the menu reads `GET /api/v1/sessions/{mid}/{sid}/review`; it never
+starts a review. The entry is disabled while the Agent is busy or starting, another answer is pending, a review is
+running, availability is being read, or `has_changes` is false. A finished review card alone does not block a new review.
+
+Choosing the entry gives immediate **Starting review…** feedback and POSTs the same route. Success confirms **Review
+requested**; a refusal shows the hub's localized words. The manager starts the fresh plan-mode reviewer in a disposable
+snapshot and supplies only the user's asks and the actual diff, never the source Agent's reasoning. See
+`docs/assistant/agent-work.md` ("Independent review of a session's work") for that safety boundary and persistence.
+
+The result arrives through the ordinary pending-card machinery as a question with `tool_name:
+"persona_session_review"`. The web draws the finding count (`review_count`, or the summary when no count is known), the
+full Markdown `review_report` in the same bounded scroll area a long plan uses, and the two explicit actions. **Send to
+agent** answers the source card with its existing Send option; the manager forwards the stored report once, not the
+browser. **Dismiss** answers with its defer option and sends nothing. A failed resolution leaves the card answerable.
+There is no free-answer field, notification quick answer, or hand-back action.
+
+Unit coverage: `ChatView.session-review.test.tsx` and `Interactions.session-review.test.tsx`. Browser coverage:
+`scripts/test/web_agent_review_e2e.py`, with `MOCK_AGENT_REVIEW=1 MOCK_REVIEW=1` and
+`scripts/mock/mock_agent_review.py`, at desktop and phone widths in light and dark, plus a 200% page-zoom capture.
+
 ## iOS: the review page
 
 `apple/Persona/Views/Session/ReviewPage.swift`, logic in `ReviewModel.swift` (`ReviewLogic`), API in `apple/Shared/GitReview.swift`. iPhone and iPad only: the native Mac app was frozen (`docs/archive/apple/mac.md`).

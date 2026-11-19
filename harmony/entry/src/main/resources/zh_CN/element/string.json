@@ -4711,6 +4711,34 @@
     {
       "name": "decrease",
       "value": "减少"
+    },
+    {
+      "name": "agent_computer_holds",
+      "value": "{computer} 已离线。重新上线时会发送你的消息。"
+    },
+    {
+      "name": "agent_computer_offline",
+      "value": "{computer} 已离线。重新连接后即可发送消息。"
+    },
+    {
+      "name": "agent_stopped",
+      "value": "此 Agent 已停止。请在终端中恢复后再发送消息。"
+    },
+    {
+      "name": "agent_delete_held_title",
+      "value": "删除这条待送达的消息？"
+    },
+    {
+      "name": "agent_delivery_updating",
+      "value": "正在等待送达状态更新。"
+    },
+    {
+      "name": "agent_delivery_failed",
+      "value": "未能将这条消息送达 {computer}。"
+    },
+    {
+      "name": "agent_delivery_waiting",
+      "value": "正在等待 {computer}。"
     }
   ]
 }

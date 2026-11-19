@@ -49,7 +49,7 @@ func (ix Interaction) AskedWithoutWaiting() bool { return ix.ToolName == "ask_us
 // is never answered so either; only the hub and the manager can tell one (identity.InHealthSpace on its cwd), and each
 // checks it beside this. False otherwise.
 func (ix Interaction) OneTapQuestion() (Question, bool) {
-	if ix.Kind != IxQuestion || len(ix.Questions) != 1 || len(ix.Fields) > 0 || len(ix.Questions[0].Options) == 0 ||
+	if ix.Kind != IxQuestion || ix.ToolName == "persona_session_review" || len(ix.Questions) != 1 || len(ix.Fields) > 0 || len(ix.Questions[0].Options) == 0 ||
 		ix.Private || ix.cannotUndo() {
 		return Question{}, false
 	}
@@ -85,21 +85,26 @@ type Interaction struct {
 	Manager string `json:"manager,omitempty"`
 	// Private: a Just me turn raised it (docs/assistant/meeting-minutes.md "Just me"): its push and the Fleet Live
 	// Activity say nothing of what it asks, as a health conversation's card, and it never goes to Lark or a channel.
-	Private      bool            `json:"private,omitempty"`
-	ID           string          `json:"id"`
-	MachineID    string          `json:"machine_id"`
-	SessionID    string          `json:"session_id"`
-	SessionTitle string          `json:"session_title,omitempty"`
-	TaskTitle    string          `json:"task_title,omitempty"` // the task its agent works for (docs/assistant/unified-entry.md), set when sent to clients
-	Cwd          string          `json:"cwd,omitempty"`
-	Kind         string          `json:"kind"`
-	CreatedAt    time.Time       `json:"created_at"`
-	ExpiresAt    time.Time       `json:"expires_at"`
-	ToolName     string          `json:"tool_name,omitempty"`
-	ToolUseID    string          `json:"tool_use_id,omitempty"`
-	Questions    []Question      `json:"questions,omitempty"`
-	Plan         string          `json:"plan,omitempty"`
-	ToolInput    json.RawMessage `json:"tool_input,omitempty"`
+	Private      bool       `json:"private,omitempty"`
+	ID           string     `json:"id"`
+	MachineID    string     `json:"machine_id"`
+	SessionID    string     `json:"session_id"`
+	SessionTitle string     `json:"session_title,omitempty"`
+	TaskTitle    string     `json:"task_title,omitempty"` // the task its agent works for (docs/assistant/unified-entry.md), set when sent to clients
+	Cwd          string     `json:"cwd,omitempty"`
+	Kind         string     `json:"kind"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	ToolName     string     `json:"tool_name,omitempty"`
+	ToolUseID    string     `json:"tool_use_id,omitempty"`
+	Questions    []Question `json:"questions,omitempty"`
+	Plan         string     `json:"plan,omitempty"`
+	// An explicit independent session review (tool persona_session_review) keeps the report beside its ordinary
+	// question-card fallback. Older clients ignore these additive fields and retain every other card's decoding.
+	ReviewReport      string          `json:"review_report,omitempty"`
+	ReviewCount       *int            `json:"review_count,omitempty"`
+	ReviewerSessionID string          `json:"reviewer_session_id,omitempty"`
+	ToolInput         json.RawMessage `json:"tool_input,omitempty"`
 	// PlanThen is the permission mode recorded at a plan-mode start to use after approval; empty on legacy cards.
 	PlanThen string `json:"plan_then,omitempty"`
 	// EditableText is the outgoing body text a Claude Code Lark send/reply approval card may let the user edit before

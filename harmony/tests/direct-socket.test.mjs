@@ -56,6 +56,9 @@ class TLS extends FakeSocket {
   async getRemoteCertificate() { return { encodingFormat: -1, data: new Uint8Array() }; }
 }
 globalThis.socketTestKit = {
+  rcp: {}, i18n: {getSystemLanguage: () => 'en-US'},
+  util: {TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } },
+    TextDecoder: {create: (encoding, options) => ({decodeToString: bytes => new TextDecoder(encoding,options).decode(bytes)})}},
   hilog: { error() {} }, url: { URL: { parseURL: input => new URL(input) } },
   cert: { EncodingFormat: { FORMAT_DER: 0, FORMAT_PEM: 1 } },
   connection: { getAddressesByName: name => lookup(name) },
@@ -63,6 +66,37 @@ globalThis.socketTestKit = {
     Protocol: { TLSv13: 'TLSv1.3', TLSv12: 'TLSv1.2' }, ProxyTypes: { SOCKS5: 1 } }
 };
 const { EndpointConfig, HubTransport } = await import('../entry/src/main/ets/platform/HubTransport.ets');
+
+test('held Agent HTTP 202 and client hello use the actual transport contract', async () => {
+  const requests = [], envelopes = [], rcp = globalThis.socketTestKit.rcp;
+  let reply, status = 202;
+  rcp.Request = class { constructor(target,method,headers) { Object.assign(this,{target,method,headers}); } };
+  rcp.createSession = () => ({close(){}, async fetch(request) {
+    requests.push(request); request.destination(new TextEncoder().encode(JSON.stringify(reply)).buffer);
+    return {statusCode:status, headers:{}};
+  }});
+  const client = new HubTransport(new EndpointConfig('https://desk.test/','fixture','','','owner'));
+  client.clientMetadata = () => ({platform:'harmony',version:'1',build:'1',os:{}});
+  client.send = message => {envelopes.push(JSON.parse(message));return true;};
+  assert.ok(client.hello(['elicitation']));
+  assert.deepEqual(envelopes[0].features, ['elicitation','agent_message_hold']);
+  const root = '/api/v1/sessions/my%20laptop/chat%2Fone', path = root + '/messages';
+  reply = {delivered:'later',undelivered:{id:'own-id',state:'waiting',computer:'Desk'}};
+  assert.deepEqual(JSON.parse(await client.request(path,'POST','{}','own-id')), reply);
+  assert.equal(requests.at(-1).target,'https://desk.test'+path);
+  assert.equal(requests.at(-1).headers['X-Persona-Features'],'agent_message_hold');
+  assert.equal(requests.at(-1).headers['X-Persona-Manager'],'owner');
+  for(const [response,pending] of [[{state:'unknown'},false],[{state:'pending'},true],[{},true],
+    [{...reply,undelivered:{...reply.undelivered,id:'foreign'}},true]]) {
+    reply = response;
+    await assert.rejects(client.request(path,'POST','{}','own-id'), error => error.status===202 && error.resultUnknown && error.resultPending===pending);
+  }
+  reply = {ok:true}; status = 200;
+  const route = root + '/held/op%2F1/retry';
+  await client.request(route,'POST','{}','action'); assert.equal(requests.at(-1).target,'https://desk.test'+route);
+  assert.equal(requests.at(-1).headers['X-Persona-Features'],undefined);
+  await assert.rejects(client.request('/api/v1/files/a%2Fb','GET'), /invalid_path/);
+});
 const v4 = { address: '192.0.2.20', family: 1 }, v6 = { address: '2001:db8::20', family: 2 };
 function reset(answers) {
   records = answers; refused = new Set(); dials = []; tlsCalls = []; closed = new Set(); writes = 0;

@@ -193,19 +193,20 @@ type Service struct {
 	// briefsOptional: task_plan takes a task without done_when / expect_minutes (briefRequired). Only the tests of
 	// what a plan does once it exists set it; the hub never does.
 	briefsOptional bool
-	background     backgroundBook // supervise_background.go
-	autoRuns       autoReviewBook // supervise_autoreview.go
-	reports        reportBook     // reports.go
-	upReports      reportRate     // agent_control.go: report_to_supervisor
-	noteRate       reportRate     // todo_decisions.go: todo_decision_add
-	dispatch       dispatchBook   // dispatch.go: dispatch_start, dispatch_read
-	admission      admissionBook  // admission.go: execution-agent resource and direction gate
-	adoptMu        sync.Mutex     // agent_control.go: one agent_supervise at a time
-	placeBook      placeBook      // places.go
-	accept         acceptBook     // acceptance.go
-	pushQuiet      quietSwitch    // push_quiet.go: the hub's low-distraction switch as last read
-	deploy         deployProbe    // deploy_check.go: is the work in the running hub
-	parkReplies    parkReplyBook  // park_reply.go: bounded source reads for explicitly bound person replies
+	background     backgroundBook    // supervise_background.go
+	autoRuns       autoReviewBook    // supervise_autoreview.go
+	sessionReviews sessionReviewBook // agents_session_review.go
+	reports        reportBook        // reports.go
+	upReports      reportRate        // agent_control.go: report_to_supervisor
+	noteRate       reportRate        // todo_decisions.go: todo_decision_add
+	dispatch       dispatchBook      // dispatch.go: dispatch_start, dispatch_read
+	admission      admissionBook     // admission.go: execution-agent resource and direction gate
+	adoptMu        sync.Mutex        // agent_control.go: one agent_supervise at a time
+	placeBook      placeBook         // places.go
+	accept         acceptBook        // acceptance.go
+	pushQuiet      quietSwitch       // push_quiet.go: the hub's low-distraction switch as last read
+	deploy         deployProbe       // deploy_check.go: is the work in the running hub
+	parkReplies    parkReplyBook     // park_reply.go: bounded source reads for explicitly bound person replies
 
 	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
 	repoRootsMu      sync.Mutex              // pr_number_ref.go: one write of the repository roots at a time
@@ -365,6 +366,7 @@ func New(o Options) *Service {
 	s.briefRoutes()
 	s.todoRoutes()
 	s.agentRoutes()
+	s.sessionReviewRoutes()
 	s.workspaceBoardRoutes()
 	s.navigationRoutes() // navigation.go: the page the apps open on
 	s.channelRoutes()
@@ -838,6 +840,9 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	snap.Work = s.workReport(ctx) // before the cards: they are read back with it
 	snap.Partial = snap.Partial || snap.Work == nil
 	snap.Interactions = append(s.pendingQuestions(), s.workCards()...)
+	reviewInteractions, reviewOK := s.sessionReviewInteractions(ctx)
+	snap.Interactions = append(snap.Interactions, reviewInteractions...)
+	snap.Partial = snap.Partial || !reviewOK
 	snap.Sessions = make([]SessionView, 0, len(views))
 	for _, v := range views {
 		snap.Sessions = append(snap.Sessions, *v)
@@ -911,8 +916,9 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 	if !meeting {
 		s.availTurnEnded(ctx, r.MachineID, r.SessionID, time.Now()) // an assistant conversation's round (availability.go)
 		s.afterSettle(context.WithoutCancel(ctx), s.taskTurnSettled, r.MachineID, r.SessionID)
-		// A review's reviewer answered (supervise_autoreview.go).
+		// A review's reviewer answered (supervise_autoreview.go, agents_session_review.go).
 		go s.autoReviewTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)
+		go s.sessionReviewTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)
 		go s.workTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)    // its triage (agents_work_turns.go)
 		go s.channelTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID) // a channel's answer, the sync mirror
 	}

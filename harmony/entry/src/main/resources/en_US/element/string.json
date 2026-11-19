@@ -4711,6 +4711,34 @@
     {
       "name": "decrease",
       "value": "Decrease"
+    },
+    {
+      "name": "agent_computer_holds",
+      "value": "{computer} is offline. Your message will go when it is back."
+    },
+    {
+      "name": "agent_computer_offline",
+      "value": "{computer} is offline. Reconnect it to send a message."
+    },
+    {
+      "name": "agent_stopped",
+      "value": "This Agent has stopped. Resume it in its terminal to send a message."
+    },
+    {
+      "name": "agent_delete_held_title",
+      "value": "Delete this held message?"
+    },
+    {
+      "name": "agent_delivery_updating",
+      "value": "Waiting for a delivery update."
+    },
+    {
+      "name": "agent_delivery_failed",
+      "value": "Could not deliver this message to {computer}."
+    },
+    {
+      "name": "agent_delivery_waiting",
+      "value": "Waiting for {computer}."
     }
   ]
 }

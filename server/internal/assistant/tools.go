@@ -1231,6 +1231,9 @@ func (s *Service) Action(ctx context.Context, a Action) (ActionResult, error) {
 			return ActionResult{}, err
 		}
 	}
+	if mine, err := s.sessionReviewAction(ctx, a.InteractionID, r); mine {
+		return ActionResult{OK: err == nil}, err
+	}
 	if mine, err := s.toolLoopAnswer(ctx, a.InteractionID, r); mine {
 		return ActionResult{OK: err == nil}, err
 	}

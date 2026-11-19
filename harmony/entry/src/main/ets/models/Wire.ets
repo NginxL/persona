@@ -74,6 +74,27 @@ export class ResourceRow {
   key(): string { return JSON.stringify(this.group ? [this.group, this.kind, this.manager, this.machine, this.id] : [this.kind, this.manager, this.machine, this.id]); }
 }
 
+export class HeldAgentMessage {
+  id: string = '';
+  text: string = '';
+  computer: string = '';
+  line: string = '';
+  state: string = '';
+  images: number = 0;
+  at: string = '';
+  deleteOnly: boolean = false;
+
+  static from(data: Record<string, Object>): HeldAgentMessage | undefined {
+    const id = Wire.text(data, 'id'), computer = Wire.text(data, 'computer'), state = Wire.text(data, 'state');
+    if (!id || !computer || (state !== 'waiting' && state !== 'failed')) return undefined;
+    const held = new HeldAgentMessage();
+    held.id = id; held.computer = computer; held.state = state;
+    held.text = Wire.text(data, 'text'); held.line = Wire.text(data, 'error'); held.images = Wire.number(data, 'images');
+    held.at = Wire.text(data, 'at'); held.deleteOnly = Wire.bool(data, 'delete_only');
+    return held;
+  }
+}
+
 export class ChatMessage {
   id: string = '';
   role: string = 'assistant';
@@ -88,6 +109,7 @@ export class ChatMessage {
   running: boolean = false;
   failed: boolean = false;
   deliveryState: string = '';
+  held: HeldAgentMessage | undefined;
   localOperation: string = '';
   localImageCount: number = 0;
   source: string = '';

@@ -684,10 +684,22 @@ func (s *Service) reviewerSessionsLocked() map[[2]string]bool {
 			}
 		}
 	}
+	for _, e := range mustSessionReviews(s) {
+		if e.ReviewerID != "" {
+			if out == nil {
+				out = map[[2]string]bool{}
+			}
+			out[[2]string{e.MachineID, e.ReviewerID}] = true
+		}
+	}
 	return out
 }
 
-// isReviewer: machine's sid is a review's reviewer.
+// mustSessionReviews returns the persisted explicit-review records when the store can be read, otherwise none.
+func mustSessionReviews(s *Service) []sessionReview {
+	reviews, _ := s.sessionReviewRecords(context.Background())
+	return reviews
+}
 func (s *Service) isReviewer(machine, sid string) bool {
 	return s.reviewerSessions()[[2]string{machine, sid}]
 }

@@ -22,7 +22,7 @@ import { isBackgroundSupervisor } from "../../lib/background-supervisor";
 import { launcherTitle } from "../../lib/provider-names";
 import { ASSISTANT_MODEL_PICK_FEATURE, ASSISTANT_START_SERVICE_TIER_FEATURE, assistantPickKey, assistantPillView, assistantSetup, type AssistantChat } from "../../lib/assistant-models";
 import {
-  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
+  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionModelHost, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
 } from "../../lib/session-models";
 import { turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { getSession, hubHas, useStore } from "../../lib/store";
@@ -191,12 +191,13 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   const scope = agentCatalogScope();
   const mid = session.machine_id;
   const own = sessionLauncher(session);
+  const ownHost = sessionModelHost(session);
   const switches = sessionSwitches(session);
-  const view = pillView(session, modelList(mid, own));
+  const view = pillView(session, modelList(mid, own, undefined, ownHost));
   const opens = switches.model || switches.effort || view.engine === "codex";
   useEffect(() => {
-    if (opens) void readModels(mid, own, { first: true });
-  }, [opens, mid, own, scope]);
+    if (opens) void readModels(mid, own, { first: true, host: ownHost });
+  }, [opens, mid, own, ownHost, scope]);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const key = `${mid}/${session.session_id}`;
@@ -210,8 +211,8 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   const shown = Boolean(anchor) && opens;
   // every list again behind the one shown, once per opening (while the panel's code loads, the first time)
   useEffect(() => {
-    if (shown) readForPanel(mid, own);
-  }, [shown, mid, own, scope]);
+    if (shown) readForPanel(mid, own, ownHost);
+  }, [shown, mid, own, ownHost, scope]);
 
   // a switch to another launcher that the next message carries out (#5035): its list names the model picked
   const target = session.pending_switch?.launcher;

@@ -433,6 +433,7 @@ func (s *Service) superviseLoop(ctx context.Context) {
 // main conversation's pushes that outlived superviseHoldMax.
 func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.autoReviewTick(ctx, now)
+	s.sessionReviewTick(ctx, now)
 	s.askTick(now)                 // cards held past their time go up a rung (ask_route.go)
 	s.handOverUnreviewed(ctx, now) // a review a side conversation left waiting goes to the main one's follow-up (side_handover.go)
 	routed := s.routedSessions()

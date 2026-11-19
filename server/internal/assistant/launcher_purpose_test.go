@@ -48,9 +48,12 @@ func TestAgentLauncherModelsPassExplicitHost(t *testing.T) {
 		if err := json.Unmarshal(raw, &params); err != nil {
 			return nil, err
 		}
-		model := "companion-model"
-		if params["host"] == proto.EngineHerdr {
-			model = "local-model"
+		model := "default-model"
+		switch params["host"] {
+		case proto.EngineHerdr:
+			model = "pane-model"
+		case "agy":
+			model = "companion-model"
 		}
 		if params["purpose"] == "assistant" && params["host"] != nil {
 			t.Error("assistant catalog has an engine host")
@@ -58,10 +61,12 @@ func TestAgentLauncherModelsPassExplicitHost(t *testing.T) {
 		return proto.LauncherModels{Agent: "agy", Models: []proto.AgentModel{{ID: model}}}, nil
 	})
 	for _, tc := range []struct{ query, want string }{
-		{"", "companion-model"},
-		{"?host=herdr", "local-model"},
-		{"", "companion-model"},
-		{"?purpose=assistant&host=herdr", "companion-model"},
+		{"", "default-model"},
+		{"?host=herdr", "pane-model"},
+		{"?host=agy", "companion-model"},
+		{"", "default-model"},
+		{"?purpose=assistant&host=herdr", "default-model"},
+		{"?purpose=assistant&host=agy", "default-model"},
 	} {
 		r := request(s, "GET", "/api/v1/machines/server/launchers/agy/models"+tc.query, "")
 		if r.Code != 200 || !strings.Contains(r.Body.String(), tc.want) {

@@ -13,7 +13,7 @@ import type { PanelConfig } from "../../lib/model-panel";
 import { usePanelQuotas } from "../../lib/panel-quotas";
 import { sessionLauncher } from "../../lib/model-switch";
 import { LAUNCHER_SWITCH_FEATURE, launcherEngine, pickPlan, sessionPanel, speedStep, type ModeStep, type PanelOptions } from "../../lib/session-panel";
-import { ENGINE_SWITCH_FEATURE, forgetModel, machineLauncherList, modelList, pendingView, readModels, sessionEngine, useModelLists } from "../../lib/session-models";
+import { ENGINE_SWITCH_FEATURE, forgetModel, machineLauncherList, modelList, pendingView, readModels, sessionEngine, sessionModelHost, useModelLists } from "../../lib/session-models";
 import { hubHas, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { ultracodeOffered } from "../../lib/ultracode";
@@ -31,14 +31,16 @@ export function SessionModelPanel({ session, anchor, onClose }: { session: Sessi
   const { set, latest, switchLauncher } = useModeSet(session);
   const mid = session.machine_id;
   const own = sessionLauncher(session);
+  const ownHost = sessionModelHost(session);
+  const listEntry = useCallback((name: string) => modelList(mid, name, undefined, name === own ? ownHost : undefined), [mid, own, ownHost]);
   const ultracode = useStore((s) => ultracodeOffered(session, s.features));
   const switching = useStore((s) => hubHas(s.features, LAUNCHER_SWITCH_FEATURE));
   const engineSwitch = useStore((s) => hubHas(s.features, ENGINE_SWITCH_FEATURE));
   const launchers = machineLauncherList(mid);
   const { providers, state } = useMemo(
-    () => sessionPanel(session, launchers, (name) => modelList(mid, name), { switching, engineSwitch }),
+    () => sessionPanel(session, launchers, listEntry, { switching, engineSwitch }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` stands for what was read
-    [session, launchers, mid, version, switching, engineSwitch],
+    [session, launchers, listEntry, version, switching, engineSwitch],
   );
   // the engine of a pick's launcher, as the panel shows it (a favorite from a list not read yet knows it too)
   const options = (): PanelOptions => ({ switching, engineSwitch, engineOf: (name) => providers.find((p) => p.id === name)?.engine });
@@ -68,7 +70,7 @@ export function SessionModelPanel({ session, anchor, onClose }: { session: Sessi
   );
   const quotas = usePanelQuotas(mid, providers, launchers);
 
-  const listOf = (name: string) => modelList(mid, name).list;
+  const listOf = (name: string) => listEntry(name).list;
   // the engine a launcher step moves the conversation to, when it is the other one (drawn on the pending switch at once)
   const crossEngine = (launcher: string) => {
     const to = launcherEngine(launcher, listOf(launcher), options());
@@ -98,7 +100,7 @@ export function SessionModelPanel({ session, anchor, onClose }: { session: Sessi
     // "Don't remind me again" holds once the switch it confirmed is recorded: a pick the hub refused asks again
     if (skip) skipEngineSwitchQuestion();
     // a switch waits for the next message: say so, in the words the pill now shows
-    const next = config.provider !== own && steps.length ? pendingView(latest.current, (name) => modelList(mid, name)) : null;
+    const next = config.provider !== own && steps.length ? pendingView(latest.current, listEntry) : null;
     if (next && to) toast(t("chat-modelpanel.switch_scheduled_engine", { agent: agentName(next.engine), model: next.model ?? "" }), "ok");
     else if (next) toast(t("chat-modelpanel.switch_scheduled", { target: `${next.provider} · ${next.model}` }), "ok");
     return true;
@@ -111,9 +113,9 @@ export function SessionModelPanel({ session, anchor, onClose }: { session: Sessi
     if (speed) steps.push(speed);
     return apply(steps);
   };
-  const onReload = (provider: string) => void readModels(mid, provider, { again: true, first: provider === own });
+  const onReload = (provider: string) => void readModels(mid, provider, { again: true, first: provider === own, host: provider === own ? ownHost : undefined });
   const onForget = (provider: string, model: string) => {
-    void forgetModel(mid, provider, model).then((error) => error && toast(error, "error"));
+    void forgetModel(mid, provider, model, undefined, provider === own ? ownHost : undefined).then((error) => error && toast(error, "error"));
   };
 
   return (

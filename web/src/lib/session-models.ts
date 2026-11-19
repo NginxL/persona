@@ -222,10 +222,9 @@ export function readAgentLauncherNames(mid: string): Promise<void> {
   return machineLauncherList(mid) ? Promise.resolve() : readLaunchers(mid);
 }
 
-/** An opening of the panel on computer `mid` for a session of launcher `own`: every list read again behind the one shown,
- *  the session's own first. */
-export function readForPanel(mid: string, own: string): void {
-  void readModels(mid, own, { again: true, first: true });
+/** Read the panel's lists again behind the ones shown, starting with the session's own launcher in its catalog host. */
+export function readForPanel(mid: string, own: string, host?: string): void {
+  void readModels(mid, own, { again: true, first: true, host });
   void readLaunchers(mid).then(() => {
     for (const l of machineLauncherList(mid) ?? []) if (l.name !== own) void readModels(mid, l.name, { again: true });
   });
@@ -279,6 +278,11 @@ export async function forgetModel(mid: string, launcher: string, id: string, pur
 }
 
 // ── the session's model, from what was read ──────────────────────────────────
+
+/** The catalog host for a session owned by the AGY companion. Its session has no terminal host. */
+export function sessionModelHost(s: Session): "agy" | undefined {
+  return s.source_kind === "runtime" && s.source_instance_id === "agy" ? "agy" : undefined;
+}
 
 /** The engine a session runs (AgentMark ids: claude, codex, agy…; one of Paseo's providers is that provider, grok…). */
 export const sessionEngine = (s: Session): string => agentId(sessionAgent(s).agent);

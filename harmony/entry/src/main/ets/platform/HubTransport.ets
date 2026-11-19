@@ -4,7 +4,7 @@ import { bundleManager } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { writeResultUnknown } from '../core/TransportPolicy';
+import { AGENT_MESSAGE_HOLD, isAgentMessagePost, heldReceipt202, writeResultUnknown } from '../core/TransportPolicy';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { cert } from '@kit.DeviceCertificateKit';
 import { connection, socket } from '@kit.NetworkKit';
@@ -136,10 +136,14 @@ function routePath(base: ParsedEndpoint, path: string): string {
   const query = queryAt >= 0 ? path.slice(queryAt) : '';
   if (!pathname.startsWith('/api/v1/') && pathname !== '/api/v1/ws') throw new Error('invalid_path');
   const segments = pathname.split('/');
-  for (const segment of segments) {
+  // These IDs stay escaped within their individual route segments on the wire.
+  const agentMessageRoute = /^\/api\/v1\/sessions\/[^/]+\/[^/]+\/(?:messages|held\/[^/]+(?:\/retry)?)$/.test(pathname);
+  for (let i = 0; i < segments.length; i++) {
     let decoded: string;
-    try { decoded = decodeURIComponent(segment); } catch (_) { throw new Error('invalid_path'); }
-    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')) throw new Error('invalid_path');
+    try { decoded = decodeURIComponent(segments[i]); } catch (_) { throw new Error('invalid_path'); }
+    const opaqueId = agentMessageRoute && (i === 4 || i === 5 || i === 7);
+    if (decoded.includes('\\') || decoded.split('/').some((part: string) => part === '.' || part === '..') ||
+      (decoded.includes('/') && (!opaqueId || decoded.split('/').includes('')))) throw new Error('invalid_path');
   }
   const joined = base.basePath + pathname.slice(1);
   let target: url.URL;
@@ -298,7 +302,7 @@ export class HubTransport {
 
   hello(features: string[]): boolean {
     const identity = JSON.parse(JSON.stringify(this.clientMetadata())) as Record<string, Object>;
-    identity['type'] = 'client_hello'; identity['features'] = features; identity['locale'] = clientLocale(i18n.getSystemLanguage());
+    identity['type'] = 'client_hello'; identity['features'] = features.concat([AGENT_MESSAGE_HOLD]); identity['locale'] = clientLocale(i18n.getSystemLanguage());
     return this.send(JSON.stringify(identity));
   }
   private authHeaders(): Record<string, string> {
@@ -329,6 +333,8 @@ export class HubTransport {
     const verb = method.toUpperCase();
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(verb)) throw new Error('invalid_method');
     const target = this.endpoint.origin + routePath(this.endpoint, path), headers = this.authHeaders();
+    const messagePost = isAgentMessagePost(verb, path);
+    if (messagePost) headers['X-Persona-Features'] = AGENT_MESSAGE_HOLD;
     if (body !== undefined) headers['Content-Type'] = contentType;
     if (opId) {
       if (!/^[A-Za-z0-9._:-]{1,128}$/.test(opId)) throw new Error('invalid_operation_id');
@@ -350,9 +356,12 @@ export class HubTransport {
     try {
       this.assertLive(generation); dispatched = true; const response = await session.fetch(request); this.assertLive(generation);
       if (overLimit) throw new HttpFailure(0, 'response_too_large');
-      if (response.statusCode === 202 && !['GET', 'HEAD'].includes(verb) && !acceptTransfer) throw new HttpFailure(202, 'pending', true, true);
       if (response.statusCode >= 300 && response.statusCode < 400) throw new HttpFailure(response.statusCode, 'redirect_refused');
       const bytes = concatArrays(chunks), text = response.statusCode < 200 || response.statusCode >= 300 ? utf8String(bytes, false) : '';
+      if (response.statusCode === 202 && !['GET', 'HEAD'].includes(verb) && !acceptTransfer) {
+        const state = messagePost ? heldReceipt202(utf8String(bytes, false), opId) : 'pending';
+        if (state !== 'held') throw new HttpFailure(202, state === 'unknown' ? 'result_unknown' : 'pending', true, state === 'pending');
+      }
       if (response.statusCode < 200 || response.statusCode >= 300)
         throw new HttpFailure(response.statusCode, errorCode(text), !['GET', 'HEAD'].includes(verb) && writeResultUnknown(response.statusCode, text));
       const responseType = response.headers['content-type'] || response.headers['Content-Type'];

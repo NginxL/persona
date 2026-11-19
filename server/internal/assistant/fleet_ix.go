@@ -597,6 +597,9 @@ func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bo
 // resolveApproved is resolve for an app's answer the hub relayed, with the device it vouched may approve a hand-off
 // card (nil: none). Only this way does a hand-off card take more than a no (secret_handoff.go).
 func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
+	if mine, err := s.sessionReviewResolve(ctx, id, r, approver); mine {
+		return err
+	}
 	s.fleet.mu.Lock()
 	prepared := s.fleet.interactions[id]
 	ownerSession := ""
@@ -922,6 +925,29 @@ func (s *Service) pendingCards() ([]proto.Interaction, map[string]bool) {
 		}
 	}
 	s.fleet.mu.Unlock()
+	reviewCards, _ := s.sessionReviewInteractions(context.Background())
+	reviewCurrent := map[string]bool{}
+	for _, ix := range reviewCards {
+		reviewCurrent[ix.ID] = true
+	}
+	seen := map[string]bool{}
+	unique := out[:0]
+	for _, ix := range out {
+		if ix.ToolName == sessionReviewTool && !reviewCurrent[ix.ID] {
+			continue // the book's terminal outcome wins while the queue's withdrawal is still on its way
+		}
+		if !seen[ix.ID] {
+			seen[ix.ID] = true
+			unique = append(unique, ix)
+		}
+	}
+	for _, ix := range reviewCards {
+		if !seen[ix.ID] {
+			seen[ix.ID] = true
+			unique = append(unique, ix)
+		}
+	}
+	out = unique
 	for i := range out {
 		out[i] = s.withTask(out[i])
 	}

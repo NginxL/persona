@@ -9,6 +9,7 @@ import { Choice, DigitHint } from "./Choice";
 import { DelegatedCard } from "./Delegated";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-archives";
+import { isSessionReview } from "../../lib/types";
 import type { Interaction } from "../../lib/types";
 import { defaults, elicitationDraft, elicitationResolution, elicitationSource, fields, numberInputMode, saveElicitationDraft, urlHost, urlTarget, validate, type ElicitationAction, type Field, type Values } from "../../lib/elicitation";
 import { answerLines } from "../../lib/answered";
@@ -297,6 +298,8 @@ function ToolLoopCard({ ix }: { ix: Interaction }) {
     </Card>
   );
 }
+
+const SessionReviewCard = lazyPage(() => import("./SessionReviewCard").then((m) => m.SessionReviewCard));
 
 function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean }) {
   const ime = useComposition();
@@ -1381,10 +1384,11 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
   const child = useChildRow(ix.machine_id, ix.session_id);
   const block = useStore(() => answerBlock(ix, child ?? getSession(ix.machine_id, ix.session_id)));
   const canApprove = block === null;
-  const managerWork = ix.kind === "question" && ix.tool_name === "persona_triage";
+  const managerWork = ix.kind === "question" && (ix.tool_name === "persona_triage" || isSessionReview(ix));
   // an answer still on its way (the hub away, apiOp retrying) holds the card, also after leaving the chat and coming back
   const { pending, line } = usePendingLine(ix);
-  const card = ix.kind === "question" && ix.tool_name === "persona_tool_loop" ? <ToolLoopCard key={ix.id} ix={ix} />
+  const card = isSessionReview(ix) ? <SessionReviewCard key={ix.id} ix={ix} />
+    : ix.kind === "question" && ix.tool_name === "persona_tool_loop" ? <ToolLoopCard key={ix.id} ix={ix} />
     : ix.kind === "question" ? <QuestionCard ix={ix} canApprove={canApprove} />
     : ix.kind === "plan" ? <PlanCard ix={ix} />
     : isSecretRun(ix) ? <SecretRunCard key={ix.id} ix={ix} />

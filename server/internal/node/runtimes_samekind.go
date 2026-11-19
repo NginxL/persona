@@ -39,11 +39,19 @@ func (n *Node) exclusiveRuntime(ctx context.Context) *runtimeConn {
 	return h
 }
 
-// runtimeOfIn is the runtime that runs launcher name in a start in ctx: the start host's engine runtime for a name it
-// offers when it runs only its own launchers (exclusiveRuntime), whatever else has the name; else runtimeOf.
+// runtimeOfIn resolves an explicitly selected AGY companion or an exclusive engine runtime before the default lookup.
 func (n *Node) runtimeOfIn(ctx context.Context, name string) *runtimeConn {
 	if assistantLauncherPurpose(ctx) {
 		return n.assistantRuntime(name)
+	}
+	if name == agyAgent && n.startKind(ctx) == agyAgent {
+		runtimes := n.runtimes
+		if runtimes == nil {
+			return nil
+		}
+		runtimes.mu.Lock()
+		defer runtimes.mu.Unlock()
+		return runtimes.byRuntime(agyAgent)
 	}
 	if h := n.exclusiveRuntime(ctx); h != nil {
 		if _, own := h.launcherNamed(name); own {

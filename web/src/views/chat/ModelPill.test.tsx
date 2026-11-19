@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { PanelProvider } from "../../lib/model-panel";
 import { requestModelPicker } from "../../lib/model-switch";
-import { sessionSwitches } from "../../lib/session-models";
+import { readModels, sessionSwitches } from "../../lib/session-models";
 import { setToken } from "../../lib/api";
 import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
 import { getSession, getState, upsertSession } from "../../lib/store";
@@ -342,6 +342,32 @@ describe("an Agent's pill", () => {
     // a second click closes it
     await act(async () => pill()!.click());
     expect(host.querySelector('[data-testid="panel"]')).toBeNull();
+  });
+
+  it("opens an existing AGY companion session with the companion catalog alongside a local CLI", async () => {
+    const session = agent({
+      agent: "agy", launcher: "agy", model: "companion-model", pane_id: undefined,
+      source_kind: "runtime", source_instance_id: "agy", capabilities: { read: true, send: true, model: true },
+    });
+    listAnswer = (url) => {
+      const request = new URL(url, "http://localhost");
+      if (!request.pathname.endsWith("/launchers/agy/models")) return json(claudeList());
+      const models = request.searchParams.get("host") === "agy"
+        ? [{ id: "companion-model", name: "Companion Model" }, { id: "companion-other", name: "Another Companion Model" }]
+        : [{ id: "local-model", name: "Local Pane Model" }];
+      return json({ agent: "agy", models });
+    };
+    await readModels(session.machine_id, "agy"); // New Agent has already read the default herdr catalog.
+    calls.length = 0;
+
+    await show(session);
+    expect(pill()!.textContent).toContain("Companion Model");
+    await open();
+    expect(provider("agy").models?.map((m) => m.id)).toEqual(["companion-model", "companion-other"]);
+    await act(async () => panel.props!.onReload!("agy"));
+    await flush();
+    expect(calls.filter((c) => c.url.includes("/launchers/agy/models")).map((c) => c.url.split("?")[1]))
+      .toEqual(["host=agy", "host=agy", "host=agy"]);
   });
 
   it("reads each provider's cached quota for this computer, without forcing a refresh", async () => {

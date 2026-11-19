@@ -267,10 +267,16 @@ func (s *Service) publishList(machine string) []proto.Session {
 	list = s.deletionRows(context.Background(), machine, list, true)
 	// A review's reviewer is no agent of the user's (supervise_autoreview.go): its result is on the task it reviewed.
 	hide := s.reviewerSessions()
-	if len(hide) > 0 {
+	reviewWorktrees := map[string]bool{}
+	for _, e := range mustSessionReviews(s) {
+		if e.MachineID == machine && e.Worktree != "" {
+			reviewWorktrees[e.Worktree] = true
+		}
+	}
+	if len(hide) > 0 || len(reviewWorktrees) > 0 {
 		kept := make([]proto.Session, 0, len(list))
 		for _, sess := range list {
-			if !hide[[2]string{machine, sess.SessionID}] {
+			if !hide[[2]string{machine, sess.SessionID}] && !reviewWorktrees[cmp.Or(sess.WorkspaceCwd, sess.Cwd)] {
 				kept = append(kept, sess)
 			}
 		}
