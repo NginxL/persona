@@ -102262,6 +102262,28 @@
         }
       }
     },
+    "No QR code was found in this photo. Try another one." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No QR code was found in this photo. Try another one."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この写真にはQRコードが見つかりませんでした。別の写真を試してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片中没有二维码，请另选一张。"
+          }
+        }
+      }
+    },
     "No Recordings Yet" : {
       "localizations" : {
         "en" : {
@@ -179624,6 +179646,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This photo contains more than one QR code. Choose a photo with one QR code." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo contains more than one QR code. Choose a photo with one QR code."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この写真には複数のQRコードがあります。QRコードが1つだけ写った写真を選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片中有多个二维码，请选择只有一个二维码的照片。"
+          }
+        }
+      }
     },
     "This port is no longer listening" : {
       "localizations" : {

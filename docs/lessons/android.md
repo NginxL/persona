@@ -59,6 +59,10 @@ An intermittent test is not verified by repeatedly running only its own class. I
 
 Buffered hand-off evidence is acknowledged before its recording runs, leaving the journal delivered but unrecorded until that request completes. Coalesce the buffered operation IDs with the same recovery pass's journal scan, not with a permanent attempted tombstone: a later reconnect or process owner must still retry. If a disconnect during startup IO starts another recovery generation, watch hub state from transport acquisition rather than subscribing after the blocking write. Hold the journal mutex to force a failed buffered record before the scan, and use the following reply-recovery lookup as the completion barrier (#9868).
 
+## Robolectric photo decoding needs real bitmap support and a main-looper resume
+
+`ImageDecoder`'s Robolectric shadow is not a real PNG decoder. For behavior tests of a production photo path, use `BitmapFactory` and a file-backed test `ContentProvider`, not a mocked decoder result. When production decodes on `Dispatchers.IO`, Compose `waitUntil` alone may never run the continuation queued on Android's main looper: pump `shadowOf(Looper.getMainLooper()).idle()` inside the wait condition. Assert the exact terminal error or result and that retry is enabled again, never a transient "Reading…" label (#11057).
+
 ## A Robolectric FileProvider keeps the cache directory of the test that first used it (#9365)
 
 `FileProvider` takes the folders it serves the first time it is asked and keeps them for the life of the instance (`mLocalPathStrategy`); the

@@ -42,7 +42,9 @@ type PlanTask struct {
 	WaitInputID string `json:"wait_input_id,omitempty"`
 	Title       string `json:"title"`
 	Prompt      string `json:"prompt"`
-	Machine     string `json:"machine"`
+	// Context supplies relevant facts the manager cannot resolve from the project.
+	Context string `json:"context,omitempty"`
+	Machine string `json:"machine"`
 	// InboxItem explicitly names the handed-off item this task is for, never the conversation's latest item.
 	InboxItem string `json:"inbox_item,omitempty"`
 	// InboxHandoff is the hub-owned operation validated when the plan was made.

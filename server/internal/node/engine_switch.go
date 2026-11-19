@@ -596,18 +596,20 @@ func (n *Node) startEngine(ctx context.Context, c *engineCarry, h *pendingHandof
 	defer cancel()
 	began := time.Now()
 	id, err := p.parked, error(nil)
+	fresh := p.fresh
+	fresh.TaskInstructions = c.prev.TaskInstructions
 	switch {
 	case h.Resumed:
 		err = n.resumeParked(sctx, c, cwd, prompt)
 	case p.to == "codex":
 		var s *proto.Session
-		if s, err = n.start(sctx, cwd, ps.Launcher, prompt, "", p.a.WorkspaceID, c.mode, "", "", "", "codex", p.fresh); err != nil {
+		if s, err = n.start(sctx, cwd, ps.Launcher, prompt, "", p.a.WorkspaceID, c.mode, "", "", "", "codex", fresh); err != nil {
 			return "", err
 		}
 		return s.SessionID, nil
 	default:
 		id = newUUID()
-		_, err = n.start(sctx, cwd, ps.Launcher, prompt, "", p.a.WorkspaceID, c.mode, ps.Effort, "", id, "claude", p.fresh)
+		_, err = n.start(sctx, cwd, ps.Launcher, prompt, "", p.a.WorkspaceID, c.mode, ps.Effort, "", id, "claude", fresh)
 		if err != nil && !maybeDelivered(err) {
 			n.state.setEngineHistory(id, nil)
 		}
@@ -795,6 +797,7 @@ func (n *Node) resumeParkedCodex(ctx context.Context, c *engineCarry, prompt str
 		return err
 	}
 	prev, had := n.state.get(id)
+	argv = codexTaskArgs(argv, codexKeptTaskInstructions(prev))
 	if had {
 		n.state.setEngineHistory(id, c.legs) // before it shows in the pane: one row for the conversation from then on
 	}
@@ -807,7 +810,7 @@ func (n *Node) resumeParkedCodex(ctx context.Context, c *engineCarry, prompt str
 	}
 	codexResumes.Delete(id)
 	st := sessionState{Pane: p.a.PaneID, Launcher: ps.Launcher, Cwd: p.parkedCwd, StartedAt: time.Now().UTC(), Model: p.resume.Model,
-		ModelEffort: p.resume.Effort, EngineHistory: c.legs}
+		ModelEffort: p.resume.Effort, EngineHistory: c.legs, TaskInstructions: prev.TaskInstructions, TaskInstructionChannel: prev.TaskInstructionChannel}
 	if had && !prev.StartedAt.IsZero() {
 		st.StartedAt = prev.StartedAt
 	}
@@ -836,7 +839,7 @@ func (n *Node) comeBack(ctx context.Context, c *engineCarry, shells []string, di
 	if err != nil {
 		return err
 	}
-	return n.resumeCodex(sctx, launch, c.id, sessionState{Cwd: p.cwd}, argv, "", p.a.WorkspaceID, "")
+	return n.resumeCodex(sctx, launch, c.id, sessionState{Cwd: p.cwd}, codexTaskArgs(argv, codexKeptTaskInstructions(c.prev)), "", p.a.WorkspaceID, "")
 }
 
 // codexResumeArgv is the host a resume of a Codex thread starts on (ctx's) and the words it runs through launcher

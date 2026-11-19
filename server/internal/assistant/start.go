@@ -1099,6 +1099,7 @@ func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (
 		s.humanSent.noteForReply(p.SessionID, id, sent)
 	}
 	if err == nil && said && owner {
+		s.endHeldChannelRuns(p.MachineID, p.SessionID)
 		s.ownerInterjects(p.SessionID, params)
 	}
 	return params, err

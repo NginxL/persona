@@ -1,10 +1,8 @@
 package persona.feature.settings
 
 import persona.core.designsystem.text
-import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.res.Resources
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.pluralStringResource
@@ -266,13 +264,7 @@ fun PairingScreen(
         }
     }
     fun scan() { scanner.launch(ScanOptions().setCaptureActivity(PairingScanActivity::class.java).setOrientationLocked(false).setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("").setBeepEnabled(false)) }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) scan() else { welcome = false; scanFromWelcome = false; credentialsSaved = false; lastRequest = null; confirm = null; failure = null; progress = emptyList(); manual = true; notice = R.string.settings_pairing_notice_camera_denied }
-    }
-    fun requestScan() {
-        if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) scan()
-        else camera.launch(Manifest.permission.CAMERA)
-    }
+    fun requestScan() { scan() }
     // The welcome page's main button goes straight to the scanner; a scan that finds nothing leaves the page as it was.
     fun scanFromWelcomePage() { scanFromWelcome = true; requestScan() }
     fun showOtherWays() { otherWays = true; passwordEntry = false; scanFromWelcome = false; welcome = false; notice = null }

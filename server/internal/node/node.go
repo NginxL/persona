@@ -856,39 +856,41 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		TabName                 *string       `json:"tab_name"`
 		TZ                      string        `json:"tz"` // the user's time zone
 		// HTTP is a quota plugin's request to send to a launcher's gateway (launchers.http); nil asks for the gateway.
-		HTTP           *quota.Request                `json:"http,omitempty"`
-		Async          bool                          `json:"async"`
-		Title          *string                       `json:"title"`
-		PermissionMode string                        `json:"permission_mode"`
-		PlanThen       string                        `json:"plan_then"`     // session.start in plan mode: the mode after its plan (planthen.go)
-		SecretTicket   string                        `json:"secret_ticket"` // session.start: a hand-off's values for this new Claude Code start (secretenv.go)
-		Effort         string                        `json:"effort"`
-		Speed          string                        `json:"speed"`
-		ServiceTier    string                        `json:"service_tier"`
-		Ultracode      *bool                         `json:"ultracode"`
-		Goal           string                        `json:"goal"` // session.start: a /goal typed after the first message is in (startgoal.go)
-		DismissLost    bool                          `json:"dismiss_lost"`
-		ResumeOnly     bool                          `json:"resume_only"`
-		OnlyRunning    bool                          `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
-		IsMain         bool                          `json:"is_main"`
-		MainCompact    int                           `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: with is_main (model_config.go)
-		FollowsSetting bool                          `json:"follows_setting"`
-		Interject      bool                          `json:"interject_background"`
-		Public         bool                          `json:"public"` // a public mention turn: no owner live snapshot on this input
-		IdleCompaction *assistantwire.IdleCompaction `json:"idle_compaction"`
-		MessageSource  *proto.MessageSource          `json:"message_source"`
-		ClientMsgID    string                        `json:"client_msg_id"`
-		AtItemID       string                        `json:"at_item_id"`     // session.fork: the reply to branch off at
-		Refresh        bool                          `json:"refresh"`        // launchers.models: ask again, not the kept list
-		Purpose        string                        `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
-		AssistantTurn  bool                          `json:"assistant_turn"` // launchers.check: shaped as an assistant turn (launchercheck_assistant.go)
-		Conversation   string                        `json:"conversation"`   // launchers.check with assistant_turn: the conversation whose profile it runs in
-		Configured     bool                          `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
-		Guest          *guestParams                  `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
-		Origin         string                        `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
-		OriginKnown    bool                          `json:"origin_known"`   // explicit manager decision; false from an older manager
-		NewSessionID   string                        `json:"new_session_id"` // assistant.send: start the new conversation under this id
-		Raw            json.RawMessage               `json:"-"`
+		HTTP             *quota.Request                `json:"http,omitempty"`
+		Async            bool                          `json:"async"`
+		Title            *string                       `json:"title"`
+		PermissionMode   string                        `json:"permission_mode"`
+		PlanThen         string                        `json:"plan_then"`     // session.start in plan mode: the mode after its plan (planthen.go)
+		SecretTicket     string                        `json:"secret_ticket"` // session.start: a hand-off's values for this new Claude Code start (secretenv.go)
+		Effort           string                        `json:"effort"`
+		Speed            string                        `json:"speed"`
+		ServiceTier      string                        `json:"service_tier"`
+		Ultracode        *bool                         `json:"ultracode"`
+		TaskAttachments  string                        `json:"task_attachments"`
+		TaskInstructions string                        `json:"task_instructions"`
+		Goal             string                        `json:"goal"` // session.start: a /goal typed after the first message is in (startgoal.go)
+		DismissLost      bool                          `json:"dismiss_lost"`
+		ResumeOnly       bool                          `json:"resume_only"`
+		OnlyRunning      bool                          `json:"only_running"` // assistant.compact: refuse not_running rather than start the process
+		IsMain           bool                          `json:"is_main"`
+		MainCompact      int                           `json:"main_compact_window"` // assistant.send, session.send, assistant.warm: with is_main (model_config.go)
+		FollowsSetting   bool                          `json:"follows_setting"`
+		Interject        bool                          `json:"interject_background"`
+		Public           bool                          `json:"public"` // a public mention turn: no owner live snapshot on this input
+		IdleCompaction   *assistantwire.IdleCompaction `json:"idle_compaction"`
+		MessageSource    *proto.MessageSource          `json:"message_source"`
+		ClientMsgID      string                        `json:"client_msg_id"`
+		AtItemID         string                        `json:"at_item_id"`     // session.fork: the reply to branch off at
+		Refresh          bool                          `json:"refresh"`        // launchers.models: ask again, not the kept list
+		Purpose          string                        `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
+		AssistantTurn    bool                          `json:"assistant_turn"` // launchers.check: shaped as an assistant turn (launchercheck_assistant.go)
+		Conversation     string                        `json:"conversation"`   // launchers.check with assistant_turn: the conversation whose profile it runs in
+		Configured       bool                          `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
+		Guest            *guestParams                  `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
+		Origin           string                        `json:"origin"`         // assistant.send: the manager-recorded source of this conversation
+		OriginKnown      bool                          `json:"origin_known"`   // explicit manager decision; false from an older manager
+		NewSessionID     string                        `json:"new_session_id"` // assistant.send: start the new conversation under this id
+		Raw              json.RawMessage               `json:"-"`
 
 		Runtime         string                   `json:"runtime"` // external admission only; never selects a native runtime
 		External        *proto.ExternalExecution `json:"external"`
@@ -1494,7 +1496,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		if p.TabName != nil {
 			tab = *p.TabName
 		}
-		rp := runtimeStartParams{Cwd: p.Cwd, Prompt: p.Prompt, Launcher: p.Launcher, Model: p.Model, PermissionMode: p.PermissionMode,
+		rp := runtimeStartParams{Cwd: p.Cwd, Prompt: taskFallback(taskFallback(p.Prompt, p.TaskInstructions), p.TaskAttachments), Launcher: p.Launcher, Model: p.Model, PermissionMode: p.PermissionMode,
 			Effort: p.Effort, WorkspaceID: p.WorkspaceID, Resume: p.ResumeSessionID, AgentType: p.AgentType}
 		if p.ResumeSessionID == "" && runtimeIDRe.MatchString(p.SessionID) {
 			// The id the hub named for a new session goes to a runtime too (Paseo gives its session that id, #8130), so
@@ -1542,11 +1544,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		asyncAgent := n.startAgentType(p.Launcher, p.AgentType)
 		if p.Async && p.ResumeSessionID == "" && (p.AgentType == "" || p.AgentType == "claude") &&
 			asyncAgent != traexAgent && asyncAgent != ompAgent && asyncAgent != agyAgent {
-			s, err := n.startAsyncIn(p.Host, p.SessionID, p.Cwd, p.Launcher, p.Prompt, p.WorkspaceID, p.PermissionMode, p.Effort, tab, modelExecution{InPane: p.InPane, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket, Goal: goal, Speed: p.Speed})
+			s, err := n.startAsyncIn(p.Host, p.SessionID, p.Cwd, p.Launcher, p.Prompt, p.WorkspaceID, p.PermissionMode, p.Effort, tab, modelExecution{InPane: p.InPane, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket, Goal: goal, Speed: p.Speed, TaskInstructions: p.TaskInstructions, TaskAttachments: p.TaskAttachments})
 			return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
 		}
 		r := resumed{cwd: p.Cwd, launcher: p.Launcher, mode: p.PermissionMode, effort: p.Effort, tab: tab,
-			execution: modelExecution{InPane: p.InPane, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket, Goal: goal, Speed: p.Speed}}
+			execution: modelExecution{InPane: p.InPane, PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket, Goal: goal, Speed: p.Speed, TaskInstructions: p.TaskInstructions, TaskAttachments: p.TaskAttachments}}
 		if p.ResumeSessionID != "" {
 			// A message carrying out a launcher switch quits the agent and starts it again in its terminal
 			// (launcher_switch.go): the Resume waits for it, then finds the agent running, or resumes it as it is.

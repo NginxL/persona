@@ -310,7 +310,7 @@ func RenderAgentCloseoutAsk(c AgentCloseoutAsk) string {
 type AgentCloseoutBrief struct {
 	Form     string // the closeout's form (closeout.Example)
 	Language string // the user's language, for the sentences inside it
-	// AfterDelivery: the same prompt asks for the delivery line (assistant/task_delivery); the block goes after it.
+	// AfterDelivery: the same block carries the task delivery disposition and responsible party.
 	AfterDelivery bool
 	// Session: it is a session's starting context, not part of a task's prompt: it says whose words these are.
 	Session bool

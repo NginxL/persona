@@ -5601,6 +5601,12 @@ save that needs a provider answers 409 `task_repositories_providers_starting`
 are still starting at the end of its budget; it never reports the provider as
 not installed.
 
+### Delegated task instructions
+
+Optional node capability `task_instructions_v1` adds `task_instructions` and `task_attachments` strings to `session.start`. The manager sends only stable framework rules in the former; assignment, caller-supplied `context`, criteria, project facts and effective decisions remain in `prompt`. The latter carries the already-authorized attachment suffix so a launcher fallback can append rules before it. Supported terminal launches use their instruction channel and retain it for resume; other launchers append the rules to the first message, with attachments last. Managers that cannot verify the capability keep the rules and attachments in `prompt`. The protocol floor is unchanged.
+
+Closeout blocks optionally carry `delivery: live|pr|merged|off|none` and `unblock: user|agent|other`. Their parsed values are additive fields of `work.closeout`; `missing` is the delivery gate and `waiting` its concrete dependency. Unknown enum values are ignored. A historical delivery line still wins, followed by explicit structured delivery, then the legacy merged/deployed/artifact inference.
+
 ### Backend workspace naming metadata
 
 Manager routes and the operation snapshot contract are documented in

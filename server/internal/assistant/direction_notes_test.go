@@ -223,7 +223,9 @@ func TestDirectionNotesReachALeadersOwnTask(t *testing.T) {
 	f.mu.Lock()
 	p, _ := f.starts[0]["prompt"].(string)
 	f.mu.Unlock()
-	if !strings.HasPrefix(p, `<persona-context kind="context" title="方向 · Platform · 说明"`) || !strings.Contains(p, "Heavy gates run on the shared runner.") {
+	if !strings.HasPrefix(p, "Background: the login page crashes.") ||
+		!strings.Contains(p, `<persona-context kind="context" title="方向 · Platform · 说明"`) ||
+		!strings.Contains(p, "Heavy gates run on the shared runner.") {
 		t.Fatalf("first prompt = %q", p)
 	}
 }

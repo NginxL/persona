@@ -143,7 +143,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			if err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}
-			t.Attachments, t.Mentioned, t.AttachFrom = atts, s.mentionedAttachments(ctx, machine, sessionID, t.Prompt, atts), ""
+			t.Attachments, t.Mentioned, t.AttachFrom = atts, s.mentionedAttachments(ctx, machine, sessionID, t.Prompt+"\n\n"+t.Context, atts), ""
 			if t.Project, err = s.todoProject(ctx, t.Project); err != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, err)
 			}

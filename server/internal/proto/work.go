@@ -80,7 +80,10 @@ const (
 // Closeout is what an agent says of its own work as a turn ends: the agent's claim, not something the hub checked.
 // Its artifacts are the work state's (WorkState.Artifacts).
 type Closeout struct {
-	Status string `json:"status"` // done, not_done or blocked
+	// Delivery, Unblock: explicit delivery disposition and the party responsible for its gate.
+	Delivery string `json:"delivery,omitempty"`
+	Unblock  string `json:"unblock,omitempty"`
+	Status   string `json:"status"` // done, not_done or blocked
 	// Waiting: who or what a blocked turn waits for.
 	Waiting string `json:"waiting,omitempty"`
 	// Did: what changed, at most three sentences.

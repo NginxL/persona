@@ -50,6 +50,7 @@
   "runtime_error_cause": "出错了：{error}",
   "runtime_exit_code": "（退出码 {code}）",
   "runtime_canceled": "（已取消）",
+  "runtime_agy_auto_refused": "agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求",
   "background_moved": "超时转到后台的命令",
   "queued_from": "【来自 {from}】",
   "act_plan": "在更新计划",

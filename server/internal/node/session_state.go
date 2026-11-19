@@ -31,6 +31,9 @@ type stateFile struct {
 }
 
 type sessionState struct {
+	TaskInstructions        string          `json:"task_instructions,omitempty"`
+	TaskInstructionFile     string          `json:"task_instruction_file,omitempty"`
+	TaskInstructionChannel  string          `json:"task_instruction_channel,omitempty"`
 	CreationID              string          `json:"creation_id,omitempty"`
 	Incarnation             string          `json:"incarnation,omitempty"`
 	Pane                    string          `json:"pane,omitempty"`

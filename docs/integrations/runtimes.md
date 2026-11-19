@@ -512,8 +512,12 @@ model change or check that finds it idle.
 
 Idle sessions can switch model, thinking level and permission mode through ACP. Native configuration updates determine
 the displayed model and effort. Each accepted field is published even if another field fails, and failures reach the caller.
-`auto` keeps native safe-operation approval, while Persona's explicit full bypass answers permission requests automatically.
-External session models stay unspecified until native metadata is available. Session discovery does not resume them.
+`auto` keeps native safe-operation approval when agy accepts it. If agy applies `default` instead, the companion changes
+to `bypassPermissions` through agy's `accept-edits`, answers later permission requests automatically, publishes that final
+mode and adds one reloadable notice through the existing localized runtime-notice path. A session's explicit mode remains
+authoritative over later settings-file changes. A mode taken from agy's settings is read again on each session projection
+and applied again before the next prompt, so changing `agentMode` needs no companion restart. External session models stay
+unspecified until native metadata is available. Session discovery does not resume them.
 
 Availability checks use optional `check({launcher, cwd, prompt})` (`caps.check`) through the companion's authenticated
 ACP client. They run the existing one-word probe, cancel tool permission requests, and close their temporary session

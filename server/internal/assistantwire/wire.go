@@ -150,6 +150,8 @@ type Device struct {
 	ModelConfiguration bool   `json:"model_configuration,omitempty"`
 	// ExternalInventory is announced only by a node with an enabled, trusted local model adapter.
 	ExternalInventory bool `json:"external_inventory,omitempty"`
+	// TaskInstructions: this node preserves delegated instructions separately, including fallback/resume.
+	TaskInstructions bool `json:"task_instructions,omitempty"`
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`

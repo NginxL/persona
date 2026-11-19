@@ -15,8 +15,7 @@ import (
 // wording, into the reader's language (docs/protocol/i18n.md). zh-Hans, and anything the hub does not recognize (an older or
 // newer node's wording), go out as the node wrote them. The items the assistant and the channels read are not touched:
 // they match some of these lines (assistant/done.go's interrupted marker). The runtime bridges' own words in the items
-// they give (transcript.Runtime*: Paseo's, opencode's and pi's failures, exit codes, cancelled calls) are rewritten the
-// same way.
+// they give (transcript.Runtime*: Paseo's, opencode's, pi's and Antigravity's runtime notices) are rewritten the same way.
 //
 // Kept in Chinese because the apps parse them: the compaction divider lines, the API error prefix
 // (the API error card), the truncation marker (cut text) and the /compact echo.
@@ -126,6 +125,8 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "codex_extension", i18n.Args{"kind": strings.TrimSuffix(strings.TrimPrefix(s, codexExtension), codexRecordNote)})
 	case strings.HasPrefix(s, codexEvent) && strings.HasSuffix(s, codexRecordNote):
 		return tt(l, "codex_event", i18n.Args{"type": strings.TrimSuffix(strings.TrimPrefix(s, codexEvent), codexRecordNote)})
+	case s == transcript.RuntimeAgyAutoRefusalNotice:
+		return tt(l, "runtime_agy_auto_refused")
 	case s == transcript.RuntimeError:
 		return tt(l, "runtime_error")
 	case strings.HasPrefix(s, transcript.RuntimeErrorLead):

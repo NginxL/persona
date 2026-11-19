@@ -50,6 +50,7 @@
   "runtime_error_cause": "Error: {error}",
   "runtime_exit_code": "(exit code {code})",
   "runtime_canceled": "(canceled)",
+  "runtime_agy_auto_refused": "agy refused Auto mode; Persona is automatically approving permission requests instead",
   "background_moved": "Command moved to the background after a timeout",
   "queued_from": "[From {from}] ",
   "act_plan": "Updating the plan",

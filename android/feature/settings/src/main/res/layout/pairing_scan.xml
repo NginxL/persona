@@ -61,6 +61,27 @@
         android:textSize="16sp"
         android:textColor="@android:color/white" />
 
+    <TextView
+        android:id="@+id/pairing_scan_photo_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="24dp"
+        android:gravity="center"
+        android:textSize="16sp"
+        android:textColor="@android:color/white"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/pairing_scan_photo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginBottom="24dp"
+        android:minHeight="48dp"
+        android:singleLine="true"
+        android:text="@string/settings_pairing_scan_photo"
+        android:visibility="gone" />
+
     <Button
         android:id="@+id/pairing_scan_manual"
         android:layout_width="match_parent"

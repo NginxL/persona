@@ -34,6 +34,9 @@ import {
 // agy acp's answer to a model it does not offer, and agy models' answer while the CLI is signed out (#10368).
 const UNKNOWN_MODEL = /\bunknown model\b|\bmodel_not_found\b/i
 const SIGNED_OUT = /\b(?:sign(?:ed)?|log(?:ged)?)[ -]?in\b/i
+// The hub localizes this exact runtime notice (transcript.RuntimeAgyAutoRefusalNotice).
+const AUTO_REFUSAL_NOTICE = 'agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求'
+const MODE_NOTICE_STEP = 'PERSONA_MODE_NOTICE'
 
 export function createAgyRuntime(options = {}) {
   const home = options.home || homedir()
@@ -62,7 +65,9 @@ export function createAgyRuntime(options = {}) {
   const sessionTitles = new Map() // agyId -> title
   const sessionCwds = new Map() // agyId -> cwd
   const sessionModels = new Map() // agyId -> modelId
-  const sessionModes = new Map() // agyId -> { mode, effort }
+  const sessionModes = new Map() // agyId -> { mode, requestedMode, modeSource, effort, autoRequested, autoRefused, applyingAuto }
+  const autoFallbacks = new Map() // agyId -> the pending change from refused auto to Persona-side automatic approval
+  const modeNotices = new Map() // agyId -> { at, created_at }, the one refusal notice woven into reloadable items
   const archived = new Set() // agyId
   const lastPushedSeq = new Map() // personaId -> number
   const lastPushedHistory = new Map()
@@ -239,22 +244,44 @@ export function createAgyRuntime(options = {}) {
     }
   }
 
-  function sessionConfiguration(rawId, result) {
+  function recordNativeMode(rawId, nativeMode, modeRequest = false) {
+    if (typeof nativeMode !== 'string' || !nativeMode) return
+    const cur = sessionModes.get(rawId) || {}
+    const mapped = agyModeToPersona(nativeMode)
+    // Model and config-option updates are not correlated with this request. Only its direct result or ACP's
+    // mode-specific current_mode_update can acknowledge or refuse auto.
+    if (cur.autoRequested && !modeRequest) return
+    if (cur.autoRequested && mapped === 'default') {
+      sessionModes.set(rawId, { ...cur, mode: 'default', autoRefused: true })
+      if (!cur.applyingAuto) {
+        void fallbackRefusedAuto(rawId).catch((error) => log(`agy auto fallback: ${error.message}`))
+      }
+      return
+    }
+    const initialBypass = !cur.mode && !cur.autoRequested && configuredMode() === 'bypassPermissions'
+    const keepBypass = cur.mode === 'bypassPermissions' && ['acceptEdits', 'default'].includes(mapped)
+    sessionModes.set(rawId, {
+      ...cur,
+      mode: initialBypass || keepBypass ? 'bypassPermissions' : mapped,
+      autoRequested: mapped === 'auto' ? cur.autoRequested : false,
+      autoRefused: mapped === 'auto' ? false : cur.autoRefused,
+    })
+  }
+
+  function sessionConfiguration(rawId, result, modeRequest = false) {
     if (!result) return
     if (result.models?.availableModels) publishSessionModels(result.models.availableModels)
     if (result.models?.currentModelId) sessionModels.set(rawId, result.models.currentModelId)
-    if (result.modes?.currentModeId) {
-      const cur = sessionModes.get(rawId) || {}
-      const initialBypass = !cur.mode && configuredMode() === 'bypassPermissions'
-      sessionModes.set(rawId, { ...cur, mode: initialBypass ? 'bypassPermissions' : agyModeToPersona(result.modes.currentModeId) })
-    }
+    recordNativeMode(rawId, result.currentModeId, modeRequest)
+    recordNativeMode(rawId, result.modes?.currentModeId, modeRequest)
     const config = result.configOptions
     if (Array.isArray(config)) {
       const model = config.find((option) => option.category === 'model' || option.id === 'model')?.currentValue
       const effort = config.find((option) => option.id === 'thought_level')?.currentValue
       const mode = config.find((option) => option.id === 'mode')?.currentValue
       const cur = sessionModes.get(rawId) || {}
-      sessionModes.set(rawId, { ...cur, ...(effort ? { effort } : {}), ...(mode && !(cur.mode === 'bypassPermissions' && ['accept-edits', 'default'].includes(mode)) ? { mode: agyModeToPersona(mode) } : {}) })
+      sessionModes.set(rawId, { ...cur, ...(effort ? { effort } : {}) })
+      recordNativeMode(rawId, mode, modeRequest)
       if (model) {
         const variant = catalog.find((entry) => entry.id === `${model}-${effort}`) || catalog.find((entry) => entry.id === model)
         if (variant) sessionModels.set(rawId, variant.id)
@@ -316,12 +343,7 @@ export function createAgyRuntime(options = {}) {
         break
       case 'current_mode_update':
         if (typeof upd.currentModeId === 'string') {
-          const cur = sessionModes.get(rawId) || {}
-          const mapped = agyModeToPersona(upd.currentModeId)
-          if (cur.mode === 'bypassPermissions' && ['acceptEdits', 'default'].includes(mapped)) {
-            break
-          }
-          sessionModes.set(rawId, { ...cur, mode: mapped })
+          recordNativeMode(rawId, upd.currentModeId, true)
           rt.sessionsChanged()
         }
         break
@@ -489,8 +511,12 @@ export function createAgyRuntime(options = {}) {
 
   function effectiveModeOf(rawId) {
     const cur = sessionModes.get(rawId)
-    if (cur?.mode) return cur.mode
-    return configuredMode()
+    if (cur?.modeSource === 'settings') {
+      const configured = configuredMode()
+      if (configured === 'auto' && cur.autoRefused) return cur.mode || 'default'
+      return configured
+    }
+    return cur?.requestedMode || cur?.mode || configuredMode()
   }
 
   function configuredModel() {
@@ -528,6 +554,11 @@ export function createAgyRuntime(options = {}) {
     const rejectOpt = opts.find((o) => o.kind === 'reject_once') || opts.find((o) => o.kind === 'reject_always')
 
     // A request that crossed the interrupt on the wire: ACP wants every pending one answered 'cancelled'.
+    if (cancelling.has(rawId) || archived.has(rawId)) return { outcome: { outcome: 'cancelled' } }
+    const fallback = autoFallbacks.get(rawId)
+    if (fallback) {
+      try { await fallback } catch { /* a failed fallback leaves the session asking */ }
+    }
     if (cancelling.has(rawId) || archived.has(rawId)) return { outcome: { outcome: 'cancelled' } }
     if (shouldBypassPermission(rawId) && allowAlwaysOpt) {
       return { outcome: { outcome: 'selected', optionId: allowAlwaysOpt.optionId } }
@@ -742,6 +773,32 @@ export function createAgyRuntime(options = {}) {
     return transcript
   }
 
+  // Keep the refusal notice at its original position when later native steps arrive. Their projected indices move
+  // behind it, so refetches and append batches see the same notice instead of losing it or reusing its sequence.
+  function withModeNotice(rawId, transcript) {
+    const notice = modeNotices.get(rawId)
+    if (!notice) return transcript
+    const steps = []
+    let inserted = false
+    for (let i = 0; i < transcript.steps.length; i++) {
+      const step = transcript.steps[i]
+      const index = typeof step?.step_index === 'number' ? step.step_index : i
+      if (!inserted && index >= notice.at) {
+        steps.push({ step_index: notice.at, type: MODE_NOTICE_STEP, status: 'DONE', created_at: notice.created_at, content: AUTO_REFUSAL_NOTICE })
+        inserted = true
+      }
+      steps.push(index >= notice.at ? { ...step, step_index: index + 1, native_step_index: step.native_step_index ?? index } : step)
+    }
+    if (!inserted) steps.push({ step_index: notice.at, type: MODE_NOTICE_STEP, status: 'DONE', created_at: notice.created_at, content: AUTO_REFUSAL_NOTICE })
+    return { ...transcript, steps, history: `${transcript.history}:auto-refusal:${notice.at}` }
+  }
+
+  function rememberAutoRefusalNotice(rawId) {
+    if (modeNotices.has(rawId)) return
+    modeNotices.set(rawId, { at: maxStepIndex(transcriptOf(rawId).steps) + 1, created_at: new Date().toISOString() })
+    syncTranscriptAppend(rawId)
+  }
+
   function withoutStaleWorking(rawId, native) {
     const mark = staleWorkingAt.get(rawId)
     if (mark === undefined || !native) return native
@@ -848,7 +905,7 @@ export function createAgyRuntime(options = {}) {
   function syncTranscriptAppend(rawId) {
     const pid = toPersonaId(rawId)
     const bDir = brainDirOf(rawId)
-    const { steps, history, synthetic } = transcriptOf(rawId)
+    const { steps, history, synthetic } = withModeNotice(rawId, transcriptOf(rawId))
     const toSeq = steps.reduce((max, step, index) => {
       const at = typeof step?.step_index === 'number' ? step.step_index : index
       return Math.max(max, at + 1)
@@ -949,12 +1006,13 @@ export function createAgyRuntime(options = {}) {
     })
 
     return chosen.map(({ rawId, pid, summary, native, cwd, mtimeMs, running, hasTranscript }) => {
-      const transcript = transcriptOf(rawId, native || null)
+      const nativeTranscript = transcriptOf(rawId, native || null)
+      const transcript = withModeNotice(rawId, nativeTranscript)
       const { steps, history } = transcript
       const parsed = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false, clientMsgIdFor: clientMsgIdFor(rawId) })
       if (!lastPushedSeq.has(pid)) lastPushedSeq.set(pid, parsed.toSeq)
       if (!lastPushedHistory.has(pid)) lastPushedHistory.set(pid, history)
-      let status = running ? 'working' : transcriptStatus(steps, native)
+      let status = running ? 'working' : transcriptStatus(nativeTranscript.steps, native)
       if (!hasTranscript && !running) {
         if (completedTurns.has(pid)) status = 'done'
         else if (createdAt.has(rawId)) status = 'idle'
@@ -1005,7 +1063,7 @@ export function createAgyRuntime(options = {}) {
     await reconcileNativeCut(rawId)
     await readNativeError(rawId)
     const bDir = brainDirOf(rawId)
-    const { steps, history } = transcriptOf(rawId)
+    const { steps, history } = withModeNotice(rawId, transcriptOf(rawId))
     const { items: allItems, toSeq } = stepsToItems(steps, { brainDir: bDir, full: false, clientMsgIdFor: clientMsgIdFor(rawId) })
     return page(allItems, params, { history, toSeq })
   }
@@ -1014,7 +1072,7 @@ export function createAgyRuntime(options = {}) {
     const rawId = ownedId(sessionId)
     await reconcileNativeCut(rawId)
     await readNativeError(rawId)
-    const { steps, history } = transcriptOf(rawId)
+    const { steps, history } = withModeNotice(rawId, transcriptOf(rawId))
     const { toSeq } = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false, clientMsgIdFor: clientMsgIdFor(rawId) })
     return { to_seq: toSeq, history }
   }
@@ -1024,7 +1082,7 @@ export function createAgyRuntime(options = {}) {
     await reconcileNativeCut(rawId)
     await readNativeError(rawId)
     const bDir = brainDirOf(rawId)
-    const { steps } = transcriptOf(rawId)
+    const { steps } = withModeNotice(rawId, transcriptOf(rawId))
     const { items: fullItems } = stepsToItems(steps, { brainDir: bDir, full: true, clientMsgIdFor: clientMsgIdFor(rawId) })
     const found = fullItems.find((it) => it.id === params.item_id)
     if (!found) throw new Error(`item ${params.item_id} not found`)
@@ -1082,7 +1140,37 @@ export function createAgyRuntime(options = {}) {
     })
   }
 
-  async function applySessionOptions(rawId, { model, permission_mode, effort }) {
+  function fallbackRefusedAuto(rawId) {
+    const existing = autoFallbacks.get(rawId)
+    if (existing) return existing
+    const work = (async () => {
+      try {
+        const res = await acp.setMode(rawId, personaModeToAgy('bypassPermissions'))
+        sessionConfiguration(rawId, res)
+        const cur = sessionModes.get(rawId) || {}
+        sessionModes.set(rawId, {
+          ...cur,
+          mode: 'bypassPermissions',
+          requestedMode: 'bypassPermissions',
+          autoRequested: false,
+          autoRefused: true,
+          applyingAuto: false,
+        })
+        rememberAutoRefusalNotice(rawId)
+      } catch (error) {
+        const cur = sessionModes.get(rawId) || {}
+        sessionModes.set(rawId, { ...cur, mode: 'default', requestedMode: 'default', autoRequested: false, autoRefused: true, applyingAuto: false })
+        throw error
+      } finally {
+        autoFallbacks.delete(rawId)
+        rt.sessionsChanged()
+      }
+    })()
+    autoFallbacks.set(rawId, work)
+    return work
+  }
+
+  async function applySessionOptions(rawId, { model, permission_mode, effort, settings_mode = false }) {
     try {
       if (model) {
         await setNativeModel(rawId, model)
@@ -1094,9 +1182,53 @@ export function createAgyRuntime(options = {}) {
         }
       }
       if (permission_mode) {
-        await acp.setMode(rawId, personaModeToAgy(permission_mode))
-        const cur = sessionModes.get(rawId) || {}
-        sessionModes.set(rawId, { ...cur, mode: permission_mode })
+        // A newer explicit choice goes after the older fallback, never behind its native accept-edits write.
+        const pendingFallback = autoFallbacks.get(rawId)
+        if (pendingFallback) {
+          try { await pendingFallback } catch { /* the new mode still gets its own chance */ }
+        }
+        const previous = sessionModes.get(rawId) || {}
+        const modeSource = settings_mode ? 'settings' : 'explicit'
+        sessionModes.set(rawId, {
+          ...previous,
+          ...(permission_mode === 'auto' ? { mode: undefined } : {}),
+          modeSource,
+          autoRequested: permission_mode === 'auto',
+          autoRefused: permission_mode === 'auto' ? false : previous.autoRefused,
+          applyingAuto: permission_mode === 'auto',
+        })
+        try {
+          const res = await acp.setMode(rawId, personaModeToAgy(permission_mode))
+          sessionConfiguration(rawId, res, true)
+          const cur = sessionModes.get(rawId) || {}
+          sessionModes.set(rawId, { ...cur, applyingAuto: false })
+          if (permission_mode === 'auto') {
+            if (cur.autoRefused) {
+              await fallbackRefusedAuto(rawId)
+            } else {
+              const mode = cur.mode || 'auto'
+              sessionModes.set(rawId, { ...sessionModes.get(rawId), mode, requestedMode: mode })
+            }
+          } else {
+            sessionModes.set(rawId, {
+              ...sessionModes.get(rawId),
+              mode: permission_mode,
+              requestedMode: permission_mode,
+              autoRequested: false,
+              autoRefused: false,
+            })
+          }
+        } catch (error) {
+          const cur = sessionModes.get(rawId) || {}
+          sessionModes.set(rawId, {
+            ...cur,
+            mode: cur.mode || previous.mode,
+            ...(cur.autoRefused ? {} : { modeSource: previous.modeSource, requestedMode: previous.requestedMode, autoRefused: previous.autoRefused }),
+            autoRequested: false,
+            applyingAuto: false,
+          })
+          throw error
+        }
       }
       if (effort) {
         const res = await acp.setConfigOption(rawId, 'thought_level', effort)
@@ -1163,6 +1295,7 @@ export function createAgyRuntime(options = {}) {
         model: params.model || configuredModel(),
         permission_mode: params.permission_mode || configuredMode(),
         effort: params.effort,
+        settings_mode: !params.permission_mode,
       })
     } catch (err) {
       removePolicy(policyRoot, rawId)
@@ -1484,7 +1617,17 @@ export function createAgyRuntime(options = {}) {
               }
               await loadSession(rawId, cwd, mcpServersFor(pid, isAsst), extraDirs)
               if (!turn.cancelled && !stopped && !archived.has(rawId)) {
-                await applySessionOptions(rawId, { model: params.model, permission_mode: params.mode, effort: params.effort })
+                const modeInfo = sessionModes.get(rawId)
+                const settingsMode = !params.mode && modeInfo?.modeSource === 'settings'
+                const explicitMode = !params.mode && modeInfo?.modeSource === 'explicit' && modeInfo.requestedMode && modeInfo.requestedMode !== modeInfo.mode
+                  ? modeInfo.requestedMode
+                  : undefined
+                await applySessionOptions(rawId, {
+                  model: params.model,
+                  permission_mode: params.mode || (settingsMode ? configuredMode() : explicitMode),
+                  effort: params.effort,
+                  settings_mode: settingsMode,
+                })
               }
             })
             if (turn.cancelled || stopped || archived.has(rawId)) { readyResolve?.(); return }

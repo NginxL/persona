@@ -56,6 +56,7 @@ internal fun DevicesPage(
             if (connect != null && "browser_qr_login" in features) item("scan-browser") {
                 JButton(stringResource(R.string.settings_browser_login_scan), {
                     scanner.launch(com.journeyapps.barcodescanner.ScanOptions().setCaptureActivity(PairingScanActivity::class.java)
+                        .addExtra(PairingScanActivity.DisablePhoto, true)
                         .setOrientationLocked(false).setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE).setPrompt("").setBeepEnabled(false))
                 }, kind = JButtonKind.Secondary, icon = PersonaIcons.scanCode)
             }

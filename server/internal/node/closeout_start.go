@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,9 @@ func (n *Node) closeoutStart(parent context.Context, req sockRequest, in hookInp
 		return nil
 	}
 	if identity.IsAssistantDir(in.Cwd) || n.isAssistantSession(in.SessionID) {
+		return nil
+	}
+	if st, ok := n.state.get(in.SessionID); ok && strings.Contains(st.TaskInstructions, "<closeout") {
 		return nil
 	}
 	text, ok := n.closeoutBriefs.get(in.SessionID)

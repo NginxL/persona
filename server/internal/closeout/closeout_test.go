@@ -141,3 +141,14 @@ func TestAskOfAllocations(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryDispositionIsIndependentOfDeploymentFacts(t *testing.T) {
+	c, _, ok := Parse("<closeout status=\"blocked\" merged=\"yes\" deployed=\"yes\">\ndelivery: off\nunblock: user\nmissing: enable the feature\nwaiting: owner approval\n</closeout>")
+	if !ok || c.Delivery != "off" || c.Unblock != "user" || c.Deployed != "yes" || c.Merged != "yes" || c.Missing != "enable the feature" || c.Waiting != "owner approval" {
+		t.Fatalf("closeout=%+v %v", c, ok)
+	}
+	c, _, ok = Parse("<closeout status=\"done\">\ndelivery: invented\nunblock: invented\n</closeout>")
+	if !ok || c.Delivery != "" || c.Unblock != "" {
+		t.Fatalf("unknown enum=%+v %v", c, ok)
+	}
+}

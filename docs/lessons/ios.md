@@ -1557,6 +1557,7 @@ Use an invalidation revision as the task key and handle the flag after completio
 
 ## System capabilities and page conventions
 
+- `VNDetectBarcodesRequest`'s default revision can fail with Vision error 9, "Could not create inference context", on a simulator while the same code is otherwise valid. Pin `VNDetectBarcodesRequestRevision1` for still-image QR detection and prove valid, blank and two-code generated images; keep image decode and Vision work off the main actor (#11057).
 - Tasks on views that may draw nothing never run (2026-11-04, #1517): Group with empty ForEach or conditional empty content leaves no child
   for modifiers, so loading never starts and list remains empty. Attach loading to an always-present page view (or page-owned model triggered by page task);
   capability-dependent tasks include `features` in `task(id:)`, since direct launch routes can appear before hello.

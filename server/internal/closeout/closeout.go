@@ -22,6 +22,8 @@ var (
 const Example = `<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
 artifact: <pr|commit|branch|doc|build|url|file> <reference>
+delivery: <live|pr|merged|off|none; omit when no delivery standard applies>
+unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>
@@ -66,6 +68,16 @@ func Parse(reply string) (c proto.Closeout, artifacts []proto.WorkArtifact, ok b
 			kind, ref = strings.ToLower(strings.TrimSuffix(kind, ":")), strings.TrimSpace(ref)
 			if len(artifacts) < 5 && ref != "" && isKind(kind) {
 				artifacts = append(artifacts, proto.WorkArtifact{Kind: kind, Ref: clip(ref, 300)})
+			}
+		case "delivery":
+			switch val {
+			case "live", "pr", "merged", "off", "none":
+				c.Delivery = val
+			}
+		case "unblock":
+			switch val {
+			case "user", "agent", "other":
+				c.Unblock = val
 			}
 		case "verified":
 			c.Verified = clip(val, 300)

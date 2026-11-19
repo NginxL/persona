@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { MCP_SERVER_NAMES } from '../../runtime-sdk/lib/compat.js'
 import { page } from '../../runtime-sdk/index.js'
@@ -164,6 +167,23 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(items[4].kind, 'tool_result')
     assert.equal(items[4].tool_use_id, items[3].tool_use_id)
     assert.equal(items[4].text.trim(), 'total 0')
+  })
+
+  it('uses native indices for files and client messages after projected steps move', () => {
+    const brainDir = mkdtempSync(join(tmpdir(), 'agy-native-index-'))
+    try {
+      const output = join(brainDir, '.system_generated', 'steps', '8', 'output.txt')
+      mkdirSync(dirname(output), { recursive: true })
+      writeFileSync(output, 'complete native output')
+      const { items } = stepsToItems([
+        { step_index: 8, native_step_index: 7, type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'hello' },
+        { step_index: 9, native_step_index: 8, type: 'GENERIC', content: 'truncated', truncated_fields: ['content'] },
+      ], { full: true, brainDir, clientMsgIdFor: (index) => `client-${index}` })
+      assert.equal(items[0].client_msg_id, 'client-7')
+      assert.equal(items[1].text, 'complete native output')
+    } finally {
+      rmSync(brainDir, { recursive: true, force: true })
+    }
   })
 
   it('does not let a call that never got a result shift the results of later calls', () => {

@@ -50,6 +50,7 @@
   "runtime_error_cause": "エラー：{error}",
   "runtime_exit_code": "（終了コード{code}）",
   "runtime_canceled": "（キャンセルされました）",
+  "runtime_agy_auto_refused": "agy が Auto モードを拒否したため、Persona が権限リクエストを自動承認します",
   "background_moved": "タイムアウトでバックグラウンドに移ったコマンド",
   "queued_from": "【{from}から】",
   "act_plan": "プラン更新中",

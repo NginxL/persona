@@ -9,6 +9,7 @@ import { createAgyRuntime } from '../lib/runtime.js'
 import { mapModels } from '../lib/models.js'
 
 const entries = ['medium', 'high', 'low'].map((level) => ({ modelId: `gemini-future-${level}`, name: `Gemini Future (${level})` }))
+const AUTO_REFUSAL_NOTICE = 'agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求'
 
 test('native catalog preserves new IDs, defaults and only advertised thinking variants', () => {
   const models = mapModels([...entries, entries[0], { modelId: 'single', name: 'Single' }], entries[1].name)
@@ -52,6 +53,20 @@ async function fixture(t, options = {}) {
   const row = () => n.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === sessionId)
   return { n, home, catalog, settings, sessionId, row, session, calls }
 }
+
+async function modePermissionFixture(t, controls = {}, startParams = {}) {
+  const f = await fixture(t, { noStart: true })
+  f.catalog({ models: entries, refuseAuto: controls.refuseAuto, settingsModeUpdates: controls.settingsModeUpdates })
+  f.settings({ model: entries[1].name, agentMode: controls.agentMode ?? 'default' })
+  const { session } = await f.n.peer.call('session.start', { cwd: f.home, ...startParams })
+  const sessionId = session.session_id
+  const row = () => f.n.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === sessionId)
+  const answers = () => f.calls().filter((call) => typeof call.id === 'string' && call.id.startsWith('read-permission-') && call.result)
+  const items = () => f.n.peer.call('session.items', { session_id: sessionId })
+  return { ...f, session, sessionId, row, answers, items }
+}
+
+const selected = (optionId) => ({ outcome: { outcome: 'selected', optionId } })
 
 test('catalog discovery and refresh use native CLI data and current settings', async (t) => {
   const { n, catalog, settings } = await fixture(t)
@@ -146,6 +161,152 @@ test('resuming a session does not replace its native model with the configured d
   const { n, calls } = await fixture(t, { noStart: true })
   await n.peer.call('session.modes', { session_id: 'agy-11111111-2222-3333-4444-555555555555', permission_mode: 'default' })
   assert.equal(calls().filter((call) => call.method === 'session/set_model').length, 0)
+})
+
+test('refused auto automatically approves git status, rg and an MCP read without phone cards', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: true }, { assistant: true, permission_mode: 'auto', prompt: 'ask-read-permissions' })
+  await until('all three read permissions are answered', () => f.answers().length === 3)
+  await until('the task turn ends', () => f.row()?.status === 'done')
+  assert.deepEqual({
+    mode: f.row()?.permission_mode ?? 'default',
+    cards: f.n.asked.map((interaction) => interaction.tool_name),
+    answers: f.answers().map((answer) => ({ id: answer.id, result: answer.result })).sort((a, b) => a.id.localeCompare(b.id)),
+  }, {
+    mode: 'bypassPermissions',
+    cards: [],
+    answers: [
+      { id: 'read-permission-git-status', result: selected('always') },
+      { id: 'read-permission-mcp', result: selected('always') },
+      { id: 'read-permission-rg', result: selected('always') },
+    ],
+  })
+})
+
+test('refused auto publishes the applied Persona mode and exactly one fallback notice', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: true }, { assistant: true, permission_mode: 'auto' })
+  // Starting a task can apply its requested mode again; the session still gets only one notice.
+  await f.n.peer.call('session.modes', { session_id: f.sessionId, permission_mode: 'auto' })
+  const page = await f.items()
+  const notices = page.items.filter((item) => item.kind === 'notice')
+  assert.deepEqual({ mode: f.session.permission_mode, notices: notices.map((item) => item.text) }, {
+    mode: 'bypassPermissions',
+    notices: [AUTO_REFUSAL_NOTICE],
+  })
+  assert.equal(notices[0]?.role, 'system')
+})
+
+test('a settings-derived session follows agentMode changes without a companion restart', async (t) => {
+  const f = await modePermissionFixture(t, { agentMode: 'default', refuseAuto: true, settingsModeUpdates: true })
+  f.settings({ model: entries[1].name, agentMode: 'auto' })
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the permission after the settings change is answered', () => f.answers().length === 1)
+  await until('the turn after the settings change ends', () => f.row()?.status === 'done')
+  assert.deepEqual({
+    mode: f.row()?.permission_mode ?? 'default',
+    cards: f.n.asked.length,
+    answer: f.answers()[0].result,
+  }, { mode: 'bypassPermissions', cards: 0, answer: selected('always') })
+})
+
+test('an explicit session mode remains authoritative over agy settings changes', async (t) => {
+  const f = await modePermissionFixture(t, { agentMode: 'default', refuseAuto: true, settingsModeUpdates: true }, { permission_mode: 'plan' })
+  f.n.resolve = () => ({ allow: true })
+  f.settings({ model: entries[1].name, agentMode: 'auto' })
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the explicitly planned permission is answered', () => f.answers().length === 1)
+  await until('the explicit-mode turn ends', () => f.row()?.status === 'done')
+  assert.deepEqual({
+    mode: f.row()?.permission_mode ?? 'default',
+    cards: f.n.asked.length,
+    answer: f.answers()[0].result,
+  }, { mode: 'plan', cards: 1, answer: selected('allow') })
+})
+
+for (const [permissionMode, nativeMode] of [['default', 'default'], ['plan', 'plan'], ['acceptEdits', 'accept-edits']]) {
+  test(`explicit ${permissionMode} keeps forwarding permission requests as phone cards`, async (t) => {
+    const f = await modePermissionFixture(t, { refuseAuto: true }, { permission_mode: permissionMode })
+    f.n.resolve = () => ({ allow: true })
+    await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+    await until('the phone answer reaches agy', () => f.answers().length === 1)
+    await until('the asking-mode turn ends', () => f.row()?.status === 'done')
+    assert.equal(f.n.asked.length, 1)
+    assert.equal(f.n.asked[0].kind, 'permission')
+    assert.deepEqual(f.answers()[0].result, selected('allow'))
+    assert.equal(f.calls().filter((call) => call.method === 'session/set_mode').at(-1)?.params?.modeId, nativeMode)
+  })
+}
+
+test('accepted native auto remains auto and is not broadened to bypass', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: false }, { permission_mode: 'auto' })
+  assert.equal(f.session.permission_mode, 'auto')
+  f.n.resolve = () => ({ allow: true })
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('native auto forwards its permission request', () => f.answers().length === 1)
+  await until('the native-auto turn ends', () => f.row()?.status === 'done')
+  assert.equal(f.row()?.permission_mode, 'auto')
+  assert.equal(f.n.asked.length, 1)
+  assert.deepEqual(f.answers()[0].result, selected('allow'))
+  assert.deepEqual(f.calls().filter((call) => call.method === 'session/set_mode').map((call) => call.params.modeId), ['auto'])
+  assert.equal((await f.items()).items.some((item) => item.kind === 'notice' && item.text === AUTO_REFUSAL_NOTICE), false)
+})
+
+test('a newer explicit asking mode wins over an in-flight auto fallback', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: false }, { permission_mode: 'auto' })
+  f.catalog({ models: entries, refuseAuto: true, holdFallback: true })
+  const autoChange = f.n.peer.call('session.modes', { session_id: f.sessionId, permission_mode: 'auto' })
+  await until('the refused-auto fallback starts', () => f.calls().some((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits'))
+  const planChange = f.n.peer.call('session.modes', { session_id: f.sessionId, permission_mode: 'plan' })
+  const deadline = Date.now() + 250
+  await until('the explicit plan is sent or the fallback can finish', () => f.calls().some((call) => call.method === 'session/set_mode' && call.params?.modeId === 'plan') || Date.now() > deadline, 500)
+  f.catalog({ models: entries, refuseAuto: true, holdFallback: true, releaseFallback: true })
+  await Promise.all([autoChange, planChange])
+  f.n.resolve = () => ({ allow: true })
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the permission after the explicit change is answered', () => f.answers().length === 1)
+  await until('the explicit-mode turn ends', () => f.row()?.status === 'done')
+  assert.equal(f.row()?.permission_mode, 'plan')
+  assert.equal(f.n.asked.length, 1)
+  assert.deepEqual(f.answers()[0].result, selected('allow'))
+  assert.equal(f.calls().filter((call) => call.method === 'session/set_mode').at(-1)?.params?.modeId, 'plan')
+})
+
+test('interrupt cancels a permission that is waiting for the auto fallback', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: false }, { permission_mode: 'auto' })
+  f.catalog({ models: entries, refuseAutoOnPrompt: true, holdFallback: true })
+  const sending = f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the refused-auto fallback starts', () => f.calls().some((call) => call.method === 'session/set_mode' && call.params?.modeId === 'accept-edits'), 10_000)
+  await until('the permission reaches the runtime', () => f.calls().some((call) => call.method === 'fake/permission'), 10_000)
+  await new Promise((resolve) => setImmediate(resolve))
+  const interrupting = f.n.peer.call('session.interrupt', { session_id: f.sessionId })
+  await until('interrupt reaches agy', () => f.calls().some((call) => call.method === 'session/cancel'))
+  f.catalog({ models: entries, refuseAutoOnPrompt: true, holdFallback: true, releaseFallback: true })
+  await Promise.all([sending, interrupting])
+  await until('the fallback settles the interrupted permission', () => f.answers().length === 1)
+  assert.deepEqual(f.answers()[0].result, { outcome: { outcome: 'cancelled' } })
+})
+
+test('an explicit asking mode is reapplied after native settings change it', async (t) => {
+  const f = await modePermissionFixture(t, { agentMode: 'default', refuseAuto: false, settingsModeUpdates: true }, { permission_mode: 'plan' })
+  f.n.resolve = () => ({ allow: true })
+  f.settings({ model: entries[1].name, agentMode: 'auto' })
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the native settings update applies', () => f.answers().length === 1)
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the next turn restores the explicit mode', () => f.answers().length === 2)
+  assert.equal(f.calls().filter((call) => call.method === 'session/set_mode' && call.params?.modeId === 'plan').length, 2)
+  assert.equal(f.row()?.permission_mode, 'plan')
+  assert.equal(f.n.asked.length, 2)
+})
+
+test('a delayed default after auto acknowledgement still uses the fallback', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: true, autoThenDefault: true }, { permission_mode: 'auto' })
+  await until('the delayed refusal finishes', () => f.row()?.permission_mode === 'bypassPermissions')
+  await f.n.peer.call('session.send', { session_id: f.sessionId, text: 'ask-read-permission' })
+  await until('the delayed-fallback permission is answered', () => f.answers().length === 1)
+  assert.equal(f.n.asked.length, 0)
+  assert.deepEqual(f.answers()[0].result, selected('always'))
+  const notices = (await f.items()).items.filter((item) => item.kind === 'notice' && item.text === AUTO_REFUSAL_NOTICE)
+  assert.equal(notices.length, 1)
 })
 
 // #11106: an expired sign-in makes agy models hang rather than fail. The timeout says what to do about it.

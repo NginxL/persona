@@ -90,6 +90,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("refs/heads/main", text)
         self.assertEqual(self.publish["jobs"]["authorize"]["environment"], "persona-release")
         self.assertEqual(self.publish["jobs"]["cli-web"]["environment"], "persona-release")
+        source = self.publish["jobs"]["source"]
+        self.assertNotIn("environment", source)
+        self.assertIn("release:", str(source))
+        self.assertIn("needs.source.outputs.pr != ''", self.publish["jobs"]["authorize"]["if"])
+        self.assertIn("needs.source.outputs.pr", str(self.publish["jobs"]["authorize"]["outputs"]))
         self.assertNotIn("pull_request_target:", text)
 
     def test_immutable_tag_and_download_verification_precede_beta_pointer(self):

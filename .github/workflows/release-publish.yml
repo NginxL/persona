@@ -21,10 +21,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source:
+    name: Check that the verified main merge is an administrator release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      pr: ${{ steps.pr.outputs.number }}
+      title: ${{ steps.pr.outputs.title }}
+    steps:
+      - name: Resolve the source PR without requesting release signing approval
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          PR_NUMBER: ${{ inputs.pr || 0 }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          if [[ "$PR_NUMBER" = 0 ]]; then
+            gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" > release/merged-pr-list.json
+            python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          commit=os.environ['HEAD_SHA']
+          candidates=[p for p in json.loads(Path('release/merged-pr-list.json').read_text()) if p.get('state')=='closed' and (p.get('merge_commit_sha') or p.get('mergeCommit',{}).get('oid'))==commit and p.get('title','').startswith('release:') and p.get('user',{}).get('login')=='chyroc']
+          if len(candidates)!=1:
+              print('No unique administrator release PR for this verified main commit; not publishing')
+              raise SystemExit(0)
+          Path('release/merged-pr.json').write_text(json.dumps(candidates[0]))
+          pr=json.loads(Path('release/merged-pr.json').read_text())
+          Path('release/merged-pr.json').write_text(json.dumps(pr))
+          PY
+          else
+            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json number,title,state,isDraft,baseRefName,headRefOid,headRepository,author,mergedBy,mergeCommit > release/merged-pr.json
+          fi
+          if [[ -s release/merged-pr.json ]] && python3 -c 'import json; d=json.load(open("release/merged-pr.json")); assert d["title"].startswith("release:")' 2>/dev/null; then
+            python3 -c 'import json; d=json.load(open("release/merged-pr.json")); print("number=%s"%d["number"])' >> "$GITHUB_OUTPUT"
+            python3 -c 'import json; d=json.load(open("release/merged-pr.json")); print("title=%s"%d["title"])' >> "$GITHUB_OUTPUT"
+          fi
+
   authorize:
     name: Resolve the merged release PR and its verified plan
-    if: >-
-      (github.event_name == 'workflow_dispatch' || (
+    needs: source
+    if: needs.source.outputs.pr != '' && (github.event_name == 'workflow_dispatch' || (
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.actor.login == 'chyroc')) &&
@@ -38,7 +78,8 @@ jobs:
     environment: persona-release
     outputs:
       channel: ${{ steps.source.outputs.channel }}
-      pr: ${{ steps.pr.outputs.number }}
+      pr: ${{ needs.source.outputs.pr }}
+      title: ${{ needs.source.outputs.title }}
       version: ${{ steps.source.outputs.version }}
       commit: ${{ steps.source.outputs.commit }}
     steps:
@@ -184,7 +225,7 @@ jobs:
 
   cli-web:
     name: Attach the release PR's verified CLI and Web downloads
-    needs: authorize
+    needs: [source, authorize]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:

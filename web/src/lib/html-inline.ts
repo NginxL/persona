@@ -101,6 +101,8 @@ export async function inlineSiblings(html: string, pagePath: string, read: ReadF
       asText(path).then(async (text) => {
         if (text === null) return;
         const style = doc.createElement("style");
+        const media = link.getAttribute("media"); // the sheet still applies only where the page asked for it
+        if (media) style.setAttribute("media", media);
         style.textContent = await sheet(text, dirOf(path));
         link.replaceWith(style);
       }),

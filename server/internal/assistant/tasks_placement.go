@@ -317,6 +317,10 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		s.grantScheduleKind(ctx, id, *t)
 	}
 	prompt := t.Prompt
+	var rules []string
+	if strings.TrimSpace(t.Context) != "" {
+		prompt += "\n\n" + t.Context
+	}
 	if t.Continues != "" {
 		prompt += "\n\n" + prompts.RenderTaskContinuation(prompts.TaskContinuation{TodoID: t.Continues, Readonly: t.Readonly})
 	}
@@ -330,30 +334,43 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
 	}
 	if t.TodoID != "" && !s.isWorkMachine(m.ID) {
-		prompt += "\n\n" + s.taskHandoff(ctx, m.ID, fit)
+		rules = append(rules, s.taskHandoff(ctx, m.ID, fit))
 	}
 	switch {
 	case t.Role == roleLeader: // what it may hand out, and how its workers reach it (task_leader.go)
-		prompt += "\n\n" + prompts.RenderTaskLeader()
+		rules = append(rules, prompts.RenderTaskLeader())
 	case t.Parent != "":
-		prompt += "\n\n" + prompts.RenderTaskWorker()
+		rules = append(rules, prompts.RenderTaskWorker())
 	}
 	// Files for the user are named by path, never pasted into the reply (task_files.go, #10511). Always asked for,
 	// unlike the closeout form below, which depends on a switch.
-	prompt += "\n\n" + prompts.RenderTaskFiles(answerLanguage(s.hello(ctx).Locale))
-	// The closeout's form, up front (agents_closeout_brief.go): after the delivery line when both are asked for.
+	rules = append(rules, prompts.RenderTaskFiles(answerLanguage(s.hello(ctx).Locale)))
+	// One structured closeout carries delivery too when both switches are on.
 	delivery := !t.Readonly && s.doneNeedsDelivery(ctx)
 	brief := s.closeoutBrief(ctx, delivery)
 	if delivery { // what done means: live and checked (delivery.go)
-		prompt += "\n\n" + prompts.RenderTaskDelivery(brief != "")
+		rules = append(rules, prompts.RenderTaskDelivery(brief != ""))
 	}
 	if brief != "" {
-		prompt += "\n\n" + brief
+		rules = append(rules, brief)
 	}
 	// The project background, and the decisions of the todo and its continuation ancestors (a task started again may
-	// have some), go before the prompt (#2820, #1618); the tab is named from the title.
-	// The direction's notes go by who follows the task up (#10623): a leader's own plan names it only in the ledger.
-	prompt = s.withProjectContext(ctx, m.ID, t.Cwd, s.taskSupervisorOf(t), s.withTodoDecisions(ctx, t.TodoID, prompt))
+	// have some), follow the assignment; they remain user context, never framework policy.
+	background := s.projectHandoffContext(ctx, m.ID, t.Cwd, s.taskSupervisorOf(t))
+	if decisions := s.todoHandoffDecisionsContext(ctx, t.TodoID); decisions != "" {
+		background = strings.TrimSpace(background + "\n\n" + decisions)
+	}
+	if background != "" {
+		prompt += "\n\n" + background
+	}
+	if len(rules) > 0 {
+		framework := strings.Join(rules, "\n\n")
+		if m.TaskInstructions {
+			params["task_instructions"] = framework
+		} else {
+			prompt += "\n\n" + framework // old nodes must receive every required rule
+		}
+	}
 	prompt, err = s.withStandingAuthorizations(ctx, m.ID, t.Cwd, prompt)
 	if err != nil {
 		return "", "", err
@@ -361,7 +378,12 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	// The user's attachments end it, copied here when this is not the assistant's computer (#2437): last, so the
 	// pictures' <attached_images> block ends the message as it does one sent straight to an agent.
 	if len(t.Attachments)+len(t.Mentioned) > 0 {
-		prompt = withAttachments(prompt, s.handAttachments(ctx, t.AttachFrom, m.ID, t.Attachments, t.Mentioned))
+		handed := s.handAttachments(ctx, t.AttachFrom, m.ID, t.Attachments, t.Mentioned)
+		prompt = withAttachments(prompt, handed)
+		if params["task_instructions"] != nil && handed.text() != "" {
+			params["task_attachments"] = handed.text()
+			prompt = strings.TrimSuffix(prompt, "\n\n"+handed.text())
+		}
 	}
 	// A to-do's stored pictures go with every start for it, as they go with the app's manual handoffs (#11084).
 	// The node decodes them on this machine; any pictures the owner attached to this turn stay in the prompt too.

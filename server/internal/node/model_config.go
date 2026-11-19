@@ -14,8 +14,10 @@ import (
 
 // modelExecution is non-secret per-turn execution metadata supplied by the hub.
 type modelExecution struct {
-	Model  string
-	Effort string
+	TaskInstructions string `json:"-"`
+	TaskAttachments  string `json:"-"`
+	Model            string
+	Effort           string
 	// Speed is a one-shot Agent start choice, resolved only against the actual terminal dispatch. FastMode is the
 	// Claude Code form. Neither is kept as process state or included in the execution fingerprint.
 	Speed    string `json:"-"`

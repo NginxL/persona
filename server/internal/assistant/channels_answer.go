@@ -271,7 +271,7 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 		res = recalledResult() // an answer read just before the recall does not go out
 	}
 	now := c.clock()
-	took := now.Sub(r.Started)
+	took := now.Sub(r.WaitFrom())
 	snap := *r
 	snap.Ext = cloneExt(r.Ext)
 	snap.Folded = slices.Clone(r.Folded)

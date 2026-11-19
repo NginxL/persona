@@ -35,6 +35,8 @@ const resumeSource = "custom:persona"
 
 // agentLaunch is what an agent in a pane was started with, to start it again the same way.
 type agentLaunch struct {
+	TaskInstructionFile              string
+	TaskInstructions                 string
 	Agent                            string // "claude" (empty means claude), "codex", "traex", "pi"
 	Launcher, Settings, Hooks, Model string
 	Effort                           string // a work agent's explicit effort, empty for its default
@@ -56,6 +58,9 @@ func (n *Node) claudeCommandLine(spec claudeLaunch, args string, q func(string) 
 	cmd := n.launcherCommandQ(spec.Launcher, q) + " " + args
 	if spec.Settings != "" {
 		cmd += " --settings " + q(spec.Settings)
+	}
+	if spec.TaskInstructionFile != "" {
+		cmd += " --append-system-prompt-file " + q(spec.TaskInstructionFile)
 	}
 	cmd += " --mcp-config " + q(filepath.Join(n.dir, "mcp.json")) + " --allowedTools " + q(n.agentAllowedTools(spec.Plugins))
 	if spec.Model != "" {
@@ -195,7 +200,7 @@ func (n *Node) agentResumeArgv(spec agentLaunch, id string) (argv []string, ok b
 			}
 			return withHerdrAgent(resumeHerdrAgent(kind), workAgentResume(kind, workAgentCommand(launcher, program, spec.Model, spec.Effort), resumeID))
 		}
-		return withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, q)+" resume "+id)
+		return withHerdrAgent(resumeHerdrAgent(kind), n.launcherCommandQ(spec.Launcher, q)+codexTaskFlags(spec.TaskInstructions, q)+" resume "+id)
 	})
 }
 
@@ -372,7 +377,7 @@ func (n *Node) backfillResume(agents []host.Agent) {
 		if n.launches == nil {
 			n.launches = map[string]agentLaunch{}
 		}
-		n.launches[a.PaneID] = agentLaunch{Agent: kind, Launcher: st.Launcher, Model: st.Model, Effort: st.ModelEffort, ID: id, AgyConversation: agy} // claimed: once
+		n.launches[a.PaneID] = agentLaunch{Agent: kind, Launcher: st.Launcher, Model: st.Model, Effort: st.ModelEffort, ID: id, AgyConversation: agy, TaskInstructions: codexKeptTaskInstructions(st), TaskInstructionFile: st.TaskInstructionFile} // claimed: once
 		work = append(work, todo{a.PaneID, id, st, kind, agy})
 	}
 	n.mu.Unlock()
@@ -416,9 +421,9 @@ func (n *Node) backfillResume(agents []host.Agent) {
 			if w.kind == "claude" || w.kind == "" {
 				settings, hooks := n.claudeStartSettings(ctx, w.st.Launcher, "claude", w.st.Cwd)
 				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks),
-					Model: w.st.Model, Plugins: n.claudeLoadsPlugins(ctx), ID: w.id}
+					TaskInstructionFile: w.st.TaskInstructionFile, Model: w.st.Model, Plugins: n.claudeLoadsPlugins(ctx), ID: w.id}
 			} else {
-				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Model: w.st.Model, Effort: w.st.ModelEffort, ID: w.id, AgyConversation: w.agy}
+				spec = agentLaunch{Agent: w.kind, Launcher: w.st.Launcher, Model: w.st.Model, Effort: w.st.ModelEffort, ID: w.id, AgyConversation: w.agy, TaskInstructions: codexKeptTaskInstructions(w.st)}
 			}
 			n.mu.Lock()
 			if cur, ok := n.launches[w.pane]; !ok || cur.ID != w.id || cur.AgyConversation != w.agy {

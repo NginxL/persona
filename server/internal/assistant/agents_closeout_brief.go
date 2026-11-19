@@ -16,7 +16,7 @@ import (
 // under the triage's main switch and its closeout switch.
 
 // closeoutBrief is what follows a task's prompt: the closeout's form and when to write it; "" while the switches are
-// off. afterDelivery: the prompt also asks for the delivery line (delivery.go), which the block then follows.
+// off. afterDelivery: the same block also carries delivery disposition and responsibility.
 func (s *Service) closeoutBrief(ctx context.Context, afterDelivery bool) string {
 	if sw := s.triageSwitches(ctx); !sw.Enabled || !sw.Closeout {
 		return ""

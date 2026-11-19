@@ -151,6 +151,44 @@ func TestRunCheck(t *testing.T) {
 	}
 }
 
+// Holding for a continuation does not move the run's original start, including when another continuation is held later.
+func TestRunHoldPreservesStarted(t *testing.T) {
+	r := &Run{Started: t0, Base: 5, MsgIDs: []string{"wechat-1"}, Probe: "original"}
+	r.Hold(10, t0.Add(time.Hour))
+	r.Hold(20, t0.Add(90*time.Minute))
+	if !r.Started.Equal(t0) {
+		t.Fatalf("Started = %v after repeated holds, want the original %v", r.Started, t0)
+	}
+}
+
+// HeldMost bounds the whole run from its original message; holding again must not renew the two-hour window.
+func TestRunHeldMostStartsAtOriginalMessage(t *testing.T) {
+	r := &Run{Started: t0}
+	r.Hold(10, t0.Add(time.Hour))
+	r.Hold(20, t0.Add(90*time.Minute))
+	step := r.Check(Look{Now: t0.Add(HeldMost + time.Second), Exists: true})
+	if step.Do != Finish || step.End != EndGaveUp {
+		t.Fatalf("past HeldMost from the original start: %+v, want Finish/EndGaveUp", step)
+	}
+}
+
+// Each hold still gets its own read and quiet-end grace, even though the absolute held deadline stays at the original
+// message. A delayed wake or late words are not cut off merely because the original turn was old.
+func TestRunHoldRenewsPerHoldGrace(t *testing.T) {
+	r := &Run{Started: t0}
+	r.Hold(10, t0.Add(time.Hour))
+	r.Hold(20, t0.Add(90*time.Minute))
+	if step := r.Check(Look{Now: t0.Add(90*time.Minute + 5*time.Second), Exists: true}); step.Do != Wait {
+		t.Fatalf("new hold did not get its read grace: %+v", step)
+	}
+	if res := r.Decide(Reading{Found: true}, Look{Now: t0.Add(90*time.Minute + 5*time.Minute)}); res != nil {
+		t.Fatalf("new hold did not get its quiet-end grace: %+v", res)
+	}
+	if res := r.Decide(Reading{Found: true}, Look{Now: t0.Add(90*time.Minute + HeldIdleMost + time.Second)}); res == nil || !res.Quiet {
+		t.Fatalf("per-hold quiet grace did not expire: %+v", res)
+	}
+}
+
 // Decide: background work answers now and holds; a held run whose work ended quietly says nothing; no words yet waits.
 func TestRunDecide(t *testing.T) {
 	r := &Run{Started: t0, Seen: true}
