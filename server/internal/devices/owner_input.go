@@ -32,7 +32,7 @@ type ownerControlKey struct{}
 var errReservedOwnerControl = errors.New("owner control is reserved for the devices manager")
 
 func reservedOwnerControl(method string) bool {
-	return method == nodeproto.OwnerInterrupt || method == nodeproto.OwnerCardAnswer
+	return method == nodeproto.OwnerInterrupt || method == nodeproto.OwnerCardAnswer || method == nodeproto.SourceSend
 }
 
 // ownerControlMethod uses a distinct RPC with newer nodes. A new node cannot mistake parameters

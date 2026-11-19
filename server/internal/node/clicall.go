@@ -245,6 +245,7 @@ func (n *Node) cliCall(ctx context.Context, c net.Conn, req sockRequest) proto.T
 	}
 	var res proto.ToolResult
 	params := map[string]any{"name": req.Name, "args": req.Args, "session_id": session, "assistant": true}
+	n.putSourcePermission(c, params, session, req.Name, req.Args)
 	if origin := n.assistantOrigin(session); origin != "" {
 		params["origin"] = origin
 	}

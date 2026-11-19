@@ -1514,3 +1514,11 @@ pin while the final catalog bytes equal the earlier unpinned snapshot.
 ## A transcript directory is not the selected launcher's sign-in
 
 When restoring an assistant conversation, finding its newest transcript does not establish that a newly selected launcher can authenticate in that profile. Check private-profile ownership before stopping the old process or writing input; a later CLI sign-in error has already accepted the wrong launch and may forward a provider-only model. A refusal should preserve the original process and session state and explain how to continue. Regression coverage needs cold resumes and live idle processes, with both an omitted model and the old provider's explicit model (#10453).
+
+## Cross-session permission evidence (#9671)
+
+- A session-list mode is a display snapshot, not evidence of the mode in which a message was written. Capture at the source node while handling the producing call; delayed reports and retries retain that observation.
+- A caller's session ID is not process identity. Resolve the nearest known Agent in the socket peer's ancestry: a nested Agent may not claim a more privileged parent. Bind external registry data to the process generation; on macOS the kernel creation time also lets an old registry file fail closed after PID reuse.
+- `encoding/json` matches struct fields case-insensitively. Drop every spelling of authority fields and rebuild them from internal context. Ordinary RPCs must ignore source claims even if an older intermediary forwards extra parameters.
+- RPC marshaling compacts `json.RawMessage` and escapes HTML characters. A call digest must use that representation at both ends, or a valid message containing `<` or `&` loses its evidence in transit.
+- A worker's observation cannot grant a class to a later automatic judge or an unknown source in the same digest. Preserve unknown evidence rather than deriving authority from copied text, labels or cached modes. This provenance never makes Agent text the owner's input.

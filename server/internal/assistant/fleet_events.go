@@ -199,17 +199,22 @@ func (s *Service) NodeRequest(ctx context.Context, machine, method string, param
 		return out, true, nil
 	case "mcp.call":
 		var p struct {
-			Name        string          `json:"name"`
-			Args        json.RawMessage `json:"args"`
-			SessionID   string          `json:"session_id"`
-			Origin      string          `json:"origin"` // the node's attested origin, including during assistant startup
-			Assistant   bool            `json:"assistant"`
-			Guest       bool            `json:"guest"`
-			WaitUpdates bool            `json:"wait_updates"`
-			CallID      json.RawMessage `json:"call_id"`
+			Name             string                 `json:"name"`
+			Args             json.RawMessage        `json:"args"`
+			SessionID        string                 `json:"session_id"`
+			Origin           string                 `json:"origin"` // the node's attested origin, including during assistant startup
+			Assistant        bool                   `json:"assistant"`
+			Guest            bool                   `json:"guest"`
+			WaitUpdates      bool                   `json:"wait_updates"`
+			CallID           json.RawMessage        `json:"call_id"`
+			SourcePermission proto.SourcePermission `json:"source_permission"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, true, err
+		}
+		ctx = devicewire.WithSourcePermission(ctx, proto.SourcePermission{})
+		if p.SourcePermission.Matches(p.SessionID, p.Name, p.Args) {
+			ctx = devicewire.WithSourcePermission(ctx, p.SourcePermission)
 		}
 		var callID string
 		_ = json.Unmarshal(p.CallID, &callID)

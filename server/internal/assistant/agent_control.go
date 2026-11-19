@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -654,6 +655,8 @@ func (r *reportRate) allow(mid, sid string, now time.Time) bool {
 // a second question does not push the first one out.
 func joinReports(cur, g superviseSignal) superviseSignal {
 	g.At = cur.At
+	// A call's permission observation cannot vouch for a report made by another call.
+	g.SourcePermission = proto.SourcePermission{}
 	if cur.Detail != "" && cur.Detail != g.Detail {
 		g.Detail = clipMiddle(cur.Detail+"\n—\n"+g.Detail, 3000)
 	}
@@ -823,7 +826,7 @@ func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, tex
 func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind, text string, evidence []string, step, steps int, now time.Time) (string, error) {
 	s.progressReported(machine, session, len(evidence), step, now) // evidence or a later step is progress (supervise_progress.go)
 	s.signal(superviseSignal{Todo: t.ID, Kind: sigReport, Key: now.UTC().Format(time.RFC3339Nano), At: now, Machine: machine,
-		Session: session, Report: kind, Detail: text, Evidence: evidence, Step: step, Steps: steps})
+		Session: session, Report: kind, Detail: text, Evidence: evidence, Step: step, Steps: steps, SourcePermission: devicewire.SourcePermissionFrom(ctx)})
 	progress := TaskProgress{Kind: kind, Step: step, Steps: steps, Text: clip(oneLine(text), 200), At: now.UTC()}
 	if text != progress.Text {
 		progress.Detail = text

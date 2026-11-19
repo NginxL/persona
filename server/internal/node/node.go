@@ -747,6 +747,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		return n.handleUpdate(ctx, method, params)
 	}
 	switch method {
+	case nodeproto.SourceSend:
+		method = "session.send"
+		ctx = withSourceDelivery(ctx, params)
 	case nodeproto.OwnerInterrupt:
 		method = "session.interrupt"
 		ctx, _ = withOwnerDelivery(ctx)

@@ -533,14 +533,15 @@ func (e leaderEscalated) Error() string { return e.err.Error() }
 func (e leaderEscalated) Unwrap() error { return e.err }
 
 // sendToLeader sends text, the supervision message for signals kept, into the leader agent's session. It states no
-// permission-mode class for the words (#9607): the assistant cannot bind a worker's report to the mode the worker wrote
-// it in, so a bypass leader outside Persona's terminals holds it for approval at its computer.
+// permission-mode class without evidence captured by the source node when the words were written. A digest
+// with missing or mixed classes states none; queued retries reuse the same immutable evidence.
 // A send the node refuses because the agent has stopped (agent_stopped: read-only until the user's Resume, node
 // stopped.go) goes the same way at once (#8518): another digest would only be refused again. So does a send the node
 // says may have arrived (delivered unknown or yes: a Claude's inbox read it but its session was not seen taking it, or
 // typing failed part way), as an unconfirmed one (#9607): the next digest must not pile another copy on it, and it is not
 // told either. A retry the leader takes calls delivered, which tells them then. Other failures are retried by the next digest.
 func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string, kept []superviseSignal, delivered func(context.Context)) error {
+	ctx = supervisionSourceContext(ctx, kept)
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
 	if err := s.call(sctx, lead.MachineID, DeviceSessionSend, sendParams(lead.SessionID, text, false), nil); err != nil {
@@ -564,7 +565,7 @@ func (s *Service) sendToLeader(ctx context.Context, lead TodoAgent, text string,
 func (s *Service) resumeLeaderForSupervision(lead TodoAgent, text string, kept []superviseSignal, completed func(context.Context, error), delivered func(context.Context)) {
 	go func() {
 		ctx := context.Background()
-		err := s.sendToLeaderNow(ctx, lead, text)
+		err := s.sendToLeaderNow(ctx, lead, text, kept)
 		completed(ctx, err)
 		if err != nil {
 			s.logf("task leader %s: resume: %v", short(lead.SessionID), err)
@@ -585,7 +586,8 @@ func (s *Service) leaderDelivered(ctx context.Context, lead TodoAgent, entries [
 
 // sendToLeaderNow is one attempt to put text into the leader's session, resuming it if closed; it waits up to
 // leaderResumeTime. Each attempt has its own time, so it can be called from a goroutine that outlives any request.
-func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text string) error {
+func (s *Service) sendToLeaderNow(ctx context.Context, lead TodoAgent, text string, kept []superviseSignal) error {
+	ctx = supervisionSourceContext(ctx, kept)
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.leaderResumeTime())
 	defer cancel()
 	return s.call(sctx, lead.MachineID, DeviceSessionSend, sendParams(lead.SessionID, text, false), nil)
@@ -618,7 +620,7 @@ func (s *Service) escalateLeaderMessage(lead TodoAgent, kept []superviseSignal, 
 				return // the leader's task is closed: its workers were rehomed, nobody is left to tell
 			}
 			s.logf("task leader %s: trying the undelivered supervision message again", short(lead.SessionID))
-			if err := s.sendToLeaderNow(ctx, lead, text); err == nil {
+			if err := s.sendToLeaderNow(ctx, lead, text, kept); err == nil {
 				if delivered != nil {
 					delivered(ctx)
 				}

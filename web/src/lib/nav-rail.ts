@@ -31,6 +31,14 @@ export const NAV_RAIL_EXCERPT_MAX = 200;
 /** The question line's cap for the label; the card truncates to one line, the label carries the whole preview. */
 export const NAV_RAIL_PREVIEW_MAX = 120;
 
+/** `text` cut to at most `max` UTF-16 units, never between the two units of a character (a cut text is read from its
+ *  head, so this looks at one unit rather than splitting the whole text into characters). */
+function cutUnits(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const last = text.charCodeAt(max - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
+
 /** The questions of the loaded lines, oldest first: one tick per turn you wrote yourself. Persona's own messages,
  *  other sessions' and other conversations' (`isOwnMessage`), /loop wake-ups (`isLoopTick`) and lines that are not
  *  turns (notices, compactions, recaps, errors) never become ticks; a question with neither words nor attachments has
@@ -94,7 +102,7 @@ export function navRailPreview(text: string): string {
   const own = lines.find((l) => l.trim() && !l.trimStart().startsWith(">"));
   const any = lines.find((l) => l.trim()) ?? "";
   const line = (own ?? any).replace(/^\s*>\s?/, "").trim();
-  return line.length > NAV_RAIL_PREVIEW_MAX ? `${line.slice(0, NAV_RAIL_PREVIEW_MAX - 1)}…` : line;
+  return line.length > NAV_RAIL_PREVIEW_MAX ? `${cutUnits(line, NAV_RAIL_PREVIEW_MAX - 1)}…` : line;
 }
 
 /** The answer's start as one plain line: Markdown marks a preview does not render are stripped (links keep their
@@ -104,9 +112,9 @@ export function navRailExcerpt(raw: string): string {
   const head = excerptHead(raw);
   if (head !== undefined) {
     const out = plainLine(head);
-    if (out.length >= NAV_RAIL_EXCERPT_MAX) return out.slice(0, NAV_RAIL_EXCERPT_MAX);
+    if (out.length >= NAV_RAIL_EXCERPT_MAX) return cutUnits(out, NAV_RAIL_EXCERPT_MAX);
   }
-  return plainLine(raw.replace(COMMENT, "").replace(LINK, "$1")).slice(0, NAV_RAIL_EXCERPT_MAX);
+  return cutUnits(plainLine(raw.replace(COMMENT, "").replace(LINK, "$1")), NAV_RAIL_EXCERPT_MAX);
 }
 
 const COMMENT = /<!--[\s\S]*?-->/g;
