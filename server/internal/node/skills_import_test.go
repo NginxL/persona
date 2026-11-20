@@ -47,6 +47,12 @@ func TestSkillImportNodeRoutingAndDiscovery(t *testing.T) {
 		}
 		return out.(assistantskills.ImportResult), nil
 	}
+	// The assistant's directory is prepared before its messages, as the manager does (assistant.prepare). Since #6806
+	// the node provisions skills only into a prepared directory. Preparing before the install leaves the uploaded skill
+	// to the provisioning entry points checked below.
+	if _, err := n.handle(context.Background(), "assistant.prepare", mustJSON(map[string]any{"dir": dir})); err != nil {
+		t.Fatal(err)
+	}
 	preview, err := call(map[string]any{"op": "preview", "archive": archive.Bytes(), "dir": dir, "scope": scope})
 	if err != nil {
 		t.Fatal(err)

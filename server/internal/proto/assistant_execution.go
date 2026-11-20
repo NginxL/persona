@@ -9,6 +9,12 @@ type AssistantExecution struct {
 	Harness      string             `json:"harness,omitempty"`
 	HarnessLabel string             `json:"harness_label,omitempty"`
 	Location     *ExecutionLocation `json:"location,omitempty"`
+
+	// Mode is how a native Claude process runs when the assistant's claude_interactive setting is on (#10058):
+	// "interactive" (interactive Claude Code) or "print" (claude -p although interactive was asked for, ModeNote
+	// saying why). Empty when the setting is off, and for anything but Claude.
+	Mode     string `json:"mode,omitempty"`
+	ModeNote string `json:"mode_note,omitempty"`
 }
 
 // ExecutionLocation describes where the harness runs, as reported by the

@@ -1,4 +1,7 @@
 {
   "cleanup_failed": "ペイン {pane} で中断した Codex の起動を停止できませんでした。このペインを閉じられるまで、新しいタブは開きません：{reason}",
-  "no_box_here": "選んだペインで Codex を起動しましたが、{seconds} 秒以内に入力欄が表示されませんでした。ペインはそのままです。"
+  "command_line_too_long": "Codex の最初のメッセージと起動引数は UTF-16 で {units} 単位必要ですが、Windows の上限は {limit} です。送信していません。最初のメッセージを短くしてください。",
+  "no_box_here": "選んだペインで Codex を起動しましたが、{seconds} 秒以内に入力欄が表示されませんでした。ペインはそのままです。",
+  "paste_unconfirmed": "Codex の入力欄で最初のメッセージを確認できませんでした（{view}）。Enter は押していません。",
+  "session_cleanup_failed": "起動に失敗したペインは閉じましたが、セッションをアーカイブできませんでした：{reason}"
 }

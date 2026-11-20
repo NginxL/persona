@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Audit items 12 and 83: the To-dos page's header counts. One definition in every grouping: Not done is the open count
-// the sidebar's badge shows (lib/todo-triage countsAsOpen), Done the to-dos in the Done section (a merged row's related
-// ones under the row's section, as the section titles count them), and the folders keep what the status sections place
+// (lib/todo-triage countsAsOpen; the sidebar's badge counts the open ones that need the owner, ownerBadge, #11085),
+// Done the to-dos in the Done section (a merged row's related ones under the row's section, as the section titles count
+// them), and the folders keep what the status sections place
 // outside Done while their Done fold holds the Done section's, so switching grouping changes no number and each one
 // matches a section's. A to-do closed in the last day stays in its folder, with Got it, until it is seen. A failed start
 // waiting on the owner is open in every grouping, and its folder says Needs you, not Done. No counts while the list is
@@ -32,7 +33,7 @@ vi.mock("../lib/api", async (orig) => ({
 
 const { getState, refreshTodos } = await import("../lib/store");
 const { TodosView } = await import("./Todos");
-const { triageTodos } = await import("../lib/todo-triage");
+const { ownerBadge, triageTodos } = await import("../lib/todo-triage");
 const { t } = await import("../i18n");
 const { treeStateLabel } = await import("../lib/todo-tree");
 
@@ -85,10 +86,11 @@ const summary = () => host.querySelector("[data-testid=todos-summary]")?.textCon
 const expected = t("todos.summary_triage", { open: 2, parked: 0, shelved: 0, done: 2 });
 
 describe("the To-dos header's counts", () => {
-  it("count open as the sidebar's badge does and done as the Done section holds", async () => {
+  it("count open as the triage does and done as the Done section holds", async () => {
     await render("status");
-    // the sidebar's badge: lib/todo-triage's open count, without quiet tasks (views/SidebarParts.tsx)
     expect(triageTodos(todos, undefined, Date.now(), new Map(), { quiet: false }).open).toBe(2);
+    // the sidebar's badge (views/SidebarParts.tsx): both open ones need the owner, the errand and the failed start
+    expect(ownerBadge(todos, undefined, Date.now()).size).toBe(2);
     expect(summary()).toBe(expected);
     expect(host.querySelector("[data-testid=todo-section][data-section=done]")?.getAttribute("data-todos")).toBe("2");
   });

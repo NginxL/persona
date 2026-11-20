@@ -1,0 +1,14 @@
+{
+  "ui": [
+    {
+      "extension": "example-garden",
+      "extension_name": "Example Garden",
+      "id": "garden",
+      "title": "Garden",
+      "placement": "nav_page",
+      "size": "full",
+      "icon": "calendar",
+      "icon_color": "green"
+    }
+  ]
+}

@@ -101,6 +101,12 @@
     <string name="inbox_group_fyi">参考</string>
     <string name="inbox_mark_all_seen">すべて確認</string>
     <string name="inbox_clear_all">すべてクリア</string>
+    <plurals name="inbox_mark_all_in_seen">
+        <item quantity="other">「%2$s」の%1$d件をすべて確認済みにする</item>
+    </plurals>
+    <plurals name="inbox_clear_all_in">
+        <item quantity="other">「%2$s」の%1$d件をすべてクリア</item>
+    </plurals>
     <string name="inbox_translated">翻訳済み</string>
     <plurals name="inbox_messages_count">
         <item quantity="other">%1$d件のメッセージ</item>

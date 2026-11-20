@@ -260,9 +260,11 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 }
 
 // A message for one of its conversations: one the machine does not list (and not the main one) keeps what it runs
-// on; the main one runs on the main chat's, a gone launcher falls back to the assistant's, a dropped model to the launcher's
-// default; the first message to a new main conversation started empty carries what the old one left, once.
+// on; the main one runs on the main chat's, a gone launcher is refused without an implicit substitute, a dropped model
+// falls back to the launcher's default; the first message to a new main conversation started empty carries what the
+// old one left, once.
 func TestSendParams(t *testing.T) {
+	fastLauncherRecovery(t)
 	ctx := context.Background()
 	f := newFakeHub().withMachine()
 	f.setSessions("server", proto.Session{SessionID: "side", Launcher: "gone-l", Model: "m", Assistant: true},
@@ -271,14 +273,16 @@ func TestSendParams(t *testing.T) {
 	f.launcherList = []proto.Launcher{{Name: "claude"}, {Name: "conv"}, {Name: "side-l"}}
 	f.agentModels = map[string][]proto.AgentModel{"side-l": {{ID: "m"}}}
 	s := newTestService(t, f)
+	setLauncherRecovery(f, 1, nil)
 	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.conv"})
-	if p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "unlisted", Params: map[string]any{"text": "hi"}}); err != nil ||
-		len(p) != 3 || p["is_main"] != false || p["supervision_instructions"] != "" {
-		t.Fatalf("unlisted: %v %v", p, err)
+	p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "unlisted", Params: map[string]any{"text": "hi"}})
+	_, attested := p["origin_known"]
+	if err != nil || len(p) != 3 || p["is_main"] != false || p["supervision_instructions"] != "" || attested {
+		t.Fatalf("unlisted and not yet backfilled must stay unknown: %v %v", p, err)
 	}
-	p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "side", Params: map[string]any{"text": "hi"}})
-	if err != nil || p["launcher"] != "conv" || p["model"] != nil || p["model_fingerprint"] == nil { // the main chat's
-		t.Fatalf("a gone launcher: %v %v", p, err)
+	p, err = s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "side", Params: map[string]any{"text": "hi"}})
+	if err == nil || p["launcher"] != nil {
+		t.Fatalf("a gone launcher used an implicit substitute: %v %v", p, err)
 	}
 	p, err = s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "side2", Params: map[string]any{"text": "hi"}})
 	if err != nil || p["launcher"] != "side-l" || p["model"] != nil {

@@ -162,27 +162,39 @@ func (m *Machine) tailcatReset() {
 // watcher never waits on it longer than a check (the ping queues behind any big write: on a slow relay that takes a
 // while, on a dead connection forever). Two idle checks in a row without an answer end the connection; closing it
 // also fails the stuck write.
-func (m *Machine) watchTailcat(ctx context.Context, peer *rpc.Peer, activity *activityConn) {
+func (m *Machine) watchTailcat(ctx context.Context, c *nodeConn) {
+	peer := c.peer
 	check := time.NewTicker(m.timings.checkEvery)
 	defer check.Stop()
 	probeTick := time.NewTicker(m.probeEvery())
 	defer probeTick.Stop()
-	m.updatePath(ctx)
+	p, via, rev, _ := c.routeState()
+	m.updatePath(ctx, p, rev)
 	misses := 0
 	for {
+		p, via, rev, _ = c.routeState()
+		if via != "tailcat" || p.src != m { // a resume moved the live connection off this watcher
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-check.C:
-			if activity == nil || activity.idle() < m.timings.checkEvery || m.ping(ctx, peer) || activity.idle() < m.timings.checkEvery {
+			activity := c.pipe().activity // a resume brings another (resume.go)
+			if peer.Lost() || activity == nil || activity.idle() < m.timings.checkEvery || m.ping(ctx, peer) || activity.idle() < m.timings.checkEvery {
 				misses = 0
-				go m.updatePath(ctx)
+				go m.updatePath(ctx, p, rev)
 				continue
 			}
 			if ctx.Err() != nil {
 				return
 			}
 			if misses++; misses >= 2 {
+				if peer.Lose(errors.New("tailcat: no answer to two pings")) { // the node keeps the connection (resume.go)
+					m.d.logf("[%s] tailcat: no answer to two pings, resuming on a new transport", m.cfg.ID)
+					misses = 0
+					continue
+				}
 				m.d.logf("[%s] tailcat: no answer to two pings, reconnecting", m.cfg.ID)
 				m.tailcatReset()
 				peer.Close(errors.New("tailcat 连接没有回应（那台电脑睡眠或断网了？）"))
@@ -200,6 +212,9 @@ func (m *Machine) watchTailcat(ctx context.Context, peer *rpc.Peer, activity *ac
 			cancel()
 			if err != nil {
 				continue
+			}
+			if !c.claimRouteExit(rev) {
+				return // the connection resumed onto another route while ssh was being probed
 			}
 			m.mu.Lock()
 			m.directFailed, m.switchedBack = time.Time{}, time.Now()
@@ -271,7 +286,7 @@ func (c *activityConn) Write(p []byte) (int, error) {
 	return written, nil
 }
 
-func (m *Machine) updatePath(ctx context.Context) {
+func (m *Machine) updatePath(ctx context.Context, p *nodePath, rev uint64) {
 	if m.dialTailcat != nil {
 		return
 	}
@@ -286,7 +301,7 @@ func (m *Machine) updatePath(ctx context.Context) {
 		return
 	}
 	m.mu.Lock()
-	changed := m.via == "tailcat" && m.path != path
+	changed := m.routeRev == rev && m.active == p && m.transport == "tailcat" && m.path != path
 	if changed {
 		m.path = path
 	}

@@ -270,7 +270,7 @@ func (t *tracker) adopt(r *voiceRun) {
 	}
 	t.runs = append(keep, r)
 	t.set(r, firstNonEmpty(r.State, runSent))
-	if at, ok := t.ended[linkKey{r.MachineID, r.SessionID}]; ok && !at.Before(r.Started) {
+	if at, ok := t.ended[linkKey{r.MachineID, r.SessionID}]; ok && !at.Before(r.WaitFrom()) {
 		r.ended, r.Seen = true, true // a turn ended while its message was being sent
 	}
 	t.last = time.Time{} // look at it on the next tick
@@ -413,7 +413,7 @@ func (t *tracker) check(ctx context.Context, r *voiceRun) {
 		r.unsent = false
 	}
 	if !rd.Found {
-		if now.Sub(r.Started) < channel.QueuedMost {
+		if now.Sub(r.WaitFrom()) < channel.QueuedMost {
 			return // it waits behind another turn: it starts the next one
 		}
 		if r.unsent {
@@ -456,7 +456,7 @@ func (t *tracker) finish(r *voiceRun, res *channel.Result, look channel.Look) {
 	t.obs.read(r, res.Last)
 	if res.End == channel.EndStopped {
 		r.Code = "stopped" // the app shows it as stopped, not done
-		if at := t.stopAsked.Load(); at != 0 && strings.TrimSpace(res.Answer) == "" && !time.Unix(0, at).Before(r.Started.Add(-time.Second)) {
+		if at := t.stopAsked.Load(); at != 0 && strings.TrimSpace(res.Answer) == "" && !time.Unix(0, at).Before(r.WaitFrom().Add(-time.Second)) {
 			t.drop(r) // the voice side stopped it: what the model was told of the stop is its end (stopped)
 			t.set(r, runDone)
 			return

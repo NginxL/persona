@@ -9,13 +9,13 @@ import PersonaWire
 nonisolated enum SendOutcome: Equatable, Sendable {
     /// kept: it did not go in, and the assistant keeps it to send by itself (#10194): the bubble left the outbox for the
     /// row's `undelivered`, and the chat's Processing ends as for a failure (nothing runs for it now).
-    case sent, failed, waiting, kept
+    case sent, failed, waiting, kept, effortWaiting
 
     var state: PendingMessage.State {
         switch self {
         case .sent: .sent
         case .failed, .kept: .failed
-        case .waiting: .waiting
+        case .waiting, .effortWaiting: .waiting
         }
     }
 }
@@ -73,9 +73,9 @@ extension AppModel {
                 }
                 store.pending.removeAll { $0.id == id }
             }
-        case .waiting where linkUp:
-            // The socket looks fine but the request got no answer (a weak network), or the chat is not in the session
-            // list yet: try again shortly.
+        case .waiting where linkUp, .effortWaiting where linkUp:
+            // Retry transient failures or a refusal that beat the session update. Known effort changes wait for
+            // the session update instead of spending the retry budget.
             retryOutboxSoon(key.group)
         default: break
         }
@@ -134,7 +134,9 @@ extension AppModel {
     /// first fetches its latest messages: one that did arrive before the link broke is in the transcript and drops
     /// out (ChatStore.apply).
     func flushOutbox() {
-        let waiting = chats.filter { $0.value.pending.contains { $0.state == .waiting } }.map(\.key)
+        let waiting = chats.compactMap { key, store in
+            outboxCanFlush(key, store) ? key : nil
+        }
         let batches = OutboxFlush.batches(waiting, ready: { self.isLive($0) }, busy: flushingOutbox)
         for (group, keys) in batches {
             flushingOutbox.insert(group)
@@ -142,27 +144,90 @@ extension AppModel {
                 defer { flushingOutbox.remove(group) }
                 for key in keys {
                     let store = chat(key)
+                    guard outboxCanFlush(key, store) else { continue }
                     // A paged session list holds only the pages loaded: ask for this chat's row (no-op otherwise).
                     if session(key) == nil { await refreshSessionDetail(key) }
                     if !isSubscribed(key) {
                         if store.loadedOnce { await fill(key) } else { await loadInitial(key) }
                     }
-                    for msg in store.pending where msg.state == .waiting {
-                        guard isLive(group) else { break }
-                        // Gone, failed with an earlier one, or resent by hand meanwhile: not this pass's to send.
-                        guard let i = store.pending.firstIndex(where: { $0.id == msg.id }), store.pending[i].state == .waiting else { continue }
+                    while isLive(group), outboxCanFlush(key, store),
+                          let i = store.pending.firstIndex(where: { $0.state == .waiting }) {
+                        if store.pending[i].refused == true, let effort = store.pending[i].requiredEffort {
+                            if latest(key)?.effort != effort {
+                                // The refusal may have arrived before the node's session update. Keep that receipt
+                                // until an exact read or a later push confirms the effort.
+                                let id = store.pending[i].id
+                                await refreshSessionDetail(key, force: true)
+                                guard outboxCanFlush(key, store) else { break }
+                                if let message = store.pending.first(where: { $0.id == id && $0.state == .waiting }),
+                                   let required = message.requiredEffort, latest(key)?.effort != required {
+                                    noteFailure(key, id, String(localized: "Thinking effort could not be confirmed. Choose it again before resending."))
+                                    settleSend(key, id, .waiting)
+                                    break
+                                }
+                                continue
+                            }
+                            store.pending[i].id = UUID()
+                            store.pending[i].refused = nil
+                            saveOutbox()
+                        }
                         store.pending[i].state = .sending
-                        store.beginSendFeedback(store.pending[i])
+                        let msg = store.pending[i]
+                        store.beginSendFeedback(msg)
                         let settled = settleSend(key, msg.id, await sendPending(key, msg))
-                        if settled == .waiting { break } // keep the order: the rest go after it
+                        if settled == .waiting || settled == .effortWaiting { break }
                     }
                 }
                 // A retry that came due during this pass found the group busy: what still waits goes again shortly.
-                if outboxLinkUp(group), chats.contains(where: { $0.key.group == group && $0.value.pending.contains { $0.state == .waiting } }) {
+                if outboxLinkUp(group), chats.contains(where: { $0.key.group == group && outboxCanFlush($0.key, $0.value) }) {
                     retryOutboxSoon(group)
                 }
             }
         }
+    }
+
+    func canKeepOutboxEffort(_ key: SessionKey, effort: String) -> Bool {
+        existingChat(key)?.pending.contains { message in
+            guard message.onlyHere, message.mayHaveArrived != true, let required = message.requiredEffort else { return false }
+            return message.state == .failed || required != effort
+        } == true
+    }
+
+    /// Cancel an active change on the node. If the change was lost, the user's choice can instead update the outbox.
+    func keepCurrentEffort(_ key: SessionKey, effort: String) async {
+        guard effortRequests[key] == nil, let row = latest(key), row.effort == effort else { return }
+        if row.pendingEffort != nil {
+            await setModes(key, effort: effort)
+        } else if canKeepOutboxEffort(key, effort: effort), allowSend(key) {
+            updateOutboxEffort(key, to: effort, includeFailed: true)
+            flushOutbox()
+        }
+    }
+
+    /// A later choice also applies to the messages still waiting behind the earlier one.
+    func updateOutboxEffort(_ key: SessionKey, to effort: String, includeFailed: Bool = false) {
+        guard let store = existingChat(key) else { return }
+        var changed = false
+        for i in store.pending.indices {
+            let message = store.pending[i]
+            guard message.mayHaveArrived != true else { continue }
+            if includeFailed && message.state == .failed && message.requiredEffort != nil {
+                store.pending[i].state = .waiting
+                store.pending[i].failure = nil
+                store.pending[i].stalledSince = nil
+            } else {
+                guard message.state == .waiting, message.requiredEffort != effort else { continue }
+            }
+            store.pending[i].requiredEffort = effort
+            changed = true
+        }
+        if changed { saveOutbox() }
+    }
+
+    private func outboxCanFlush(_ key: SessionKey, _ store: ChatStore) -> Bool {
+        guard store.pending.contains(where: { $0.state == .waiting }),
+              effortRequests[key] == nil, latest(key)?.pendingEffort == nil else { return false }
+        return !store.pending.contains { $0.state == .sending && $0.requiredEffort != nil }
     }
 
     private static let outboxName = "outbox"

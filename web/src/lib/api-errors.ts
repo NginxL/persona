@@ -46,6 +46,12 @@ const STATUS_RE = /^\s*(\d{3})\b/;
 const REQUEST_RE = /\b(?:req(?:uest)?(?:[ _-]?id)?)[:=\s"]+([A-Za-z0-9_-]{8,})/i;
 const SESSION_RE = /\bsession(?:[ _-]?id)?[:=\s"]+([A-Za-z0-9_:-]{6,})/i;
 
+/** Permanent conversation failures take precedence over generic upstream statuses and retry hints. */
+export function unrecoverableError(text?: string): boolean {
+  const s = (text ?? "").toLowerCase();
+  return s.includes("compacted natively") && s.includes("compaction is sealed") && s.includes("to that account");
+}
+
 export function parseAPIError(text?: string): APIErrorInfo | null {
   const t = (text ?? "").trim();
   let body: string;
@@ -54,6 +60,7 @@ export function parseAPIError(text?: string): APIErrorInfo | null {
   else if (t.startsWith("API 错误：")) body = t.slice("API 错误：".length);
   // what Claude Code answers when it could not call the model at all (the hub's APIErrorMarkers, assistantwire/handler.go)
   else if (MODEL_MARKERS.some((m) => t.startsWith(m))) body = t;
+  else if (unrecoverableError(t) && t.toLowerCase().startsWith("this conversation was compacted natively by ")) body = t;
   else return null;
   const m = STATUS_RE.exec(body);
   const status = m ? Number(m[1]) : undefined;
@@ -80,6 +87,7 @@ export function parseRetryAPIError(text?: string): APIErrorInfo | null {
 }
 
 function explain(s: string, status?: number): [string, boolean | undefined] {
+  if (unrecoverableError(s)) return [t("lib-api-errors.conversation_invalid"), false];
   if (fixCode(s) === "safeguards") return [t("lib-api-errors.safeguards"), false];
   if (s.trimStart().startsWith("not logged in")) return [t("lib-api-errors.not_logged_in"), false];
   if (s.includes("invalid api key")) return [t("lib-api-errors.bad_key"), false];

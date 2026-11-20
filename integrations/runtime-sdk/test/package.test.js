@@ -61,6 +61,7 @@ test('persona-antigravity-runtime hashes companion, mcp-proxy, lib and runtime-s
   for (const f of [
     'antigravity/package.json',
     'antigravity/companion.mjs',
+    'antigravity/desktop.mjs',
     'antigravity/mcp-proxy.mjs',
     'antigravity/lib/runtime.js',
     'antigravity/install.mjs',
@@ -75,6 +76,7 @@ test('persona-antigravity-runtime hashes companion, mcp-proxy, lib and runtime-s
   assert.deepEqual(files.map((f) => f.path), [
     'antigravity/package.json',
     'antigravity/companion.mjs',
+    'antigravity/desktop.mjs',
     'antigravity/mcp-proxy.mjs',
     'antigravity/lib/runtime.js',
     'runtime-sdk/package.json',

@@ -9,6 +9,10 @@ export interface MainExecution {
   source?: "native" | "runtime";
   harness?: string;
   harness_label?: string;
+  /** How a Claude main chat runs while "Run Claude chats in interactive Claude Code" is on (#10058): `interactive`, or
+   *  `print` (claude -p) with why in `mode_note`. Absent while the switch is off. */
+  mode?: "interactive" | "print";
+  mode_note?: string;
   location?: { host?: string; container?: string };
 }
 
@@ -42,7 +46,7 @@ export function mainRuntimeSummary(main: string | undefined, report?: MainExecut
  *  it. `place`: the execution side's container or host (the last one seen while it is stopped or offline), never the
  *  routing node; a proxy without a location is named as the way in. `runtime`: Claude Code, Claude Agent SDK, Codex or
  *  what the runtime calls itself. */
-export function mainRuntimeDetails(main: string | undefined, report?: MainExecution): { place?: string; runtime?: string } {
+export function mainRuntimeDetails(main: string | undefined, report?: MainExecution): { place?: string; runtime?: string; note?: string } {
   if (!main || report?.session_id !== main) return {};
   const location = report.source && (report.location?.container
     ? t("main-runtime.container", { name: report.location.container })
@@ -51,5 +55,12 @@ export function mainRuntimeDetails(main: string | undefined, report?: MainExecut
   const place = location
     ? (gone ? t("main-runtime.last_location", { location }) : location)
     : report.source === "runtime" && report.proxy ? t("main-runtime.proxy", { name: report.proxy }) : undefined;
-  return { place: place || undefined, runtime: harnessOf(report) || undefined };
+  const harness = harnessOf(report);
+  const runtime = !harness ? undefined
+    : report.mode === "interactive" ? t("main-runtime.interactive", { harness })
+    : report.mode === "print" ? t("main-runtime.print", { harness })
+    : harness;
+  // why it runs in print mode although interactive Claude Code is on: said, never a silent switch (#10058)
+  const note = runtime && report.mode === "print" && report.mode_note ? t("main-runtime.print_note", { reason: report.mode_note }) : undefined;
+  return { place: place || undefined, runtime, ...(note ? { note } : {}) };
 }

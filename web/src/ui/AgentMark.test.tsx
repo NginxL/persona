@@ -43,14 +43,14 @@ describe("AgentMark", () => {
   });
 
   it("draws a letter for an agent with no mark, in the same box", () => {
-    for (const [agent, label, letter] of [["traex", undefined, "T"], ["dsh", "DSH", "D"], ["amp", undefined, "A"]] as const) {
+    for (const [agent, label, letter] of [["traex", undefined, "T"], ["omp", "Oh My Pi", "O"], ["amp", undefined, "A"]] as const) {
       const html = draw(agent, { label });
       expect(html).toContain('data-agent-mark="letter"');
       expect(html).toContain(`>${letter}</span>`);
       expect(html).not.toContain("<img");
       expect(html).toContain("width:14px;height:14px");
     }
-    expect(draw("dsh", { label: "DSH" })).toContain('aria-label="DSH"');
+    expect(draw("omp")).toContain('aria-label="Oh My Pi"');
     expect(draw("traex")).toContain('aria-label="TRAEX"');
   });
 
@@ -64,7 +64,7 @@ describe("AgentMark", () => {
 
   it("pulls a square or tall mark in so it does not look bigger than a round one", () => {
     const inner = (a: string) => Number(/width:(\d+)px/.exec(draw(a, { size: 32 }).replace("width:32px;height:32px", ""))?.[1]);
-    expect(MARKED_AGENTS.map((a) => inner(a === "claude" ? "codex" : a))).toEqual([32, 32, 28, 28, 32, 29, 29]);
+    expect(MARKED_AGENTS.map((a) => inner(a === "claude" ? "codex" : a))).toEqual([32, 32, 28, 28, 32, 29, 29, 32, 32, 32, 28, 32]);
   });
 });
 
@@ -114,8 +114,7 @@ describe("SessionMark", () => {
     // a provider id of the user's own, with a label naming a known agent
     expect(src(paseo("my-gemini", "Gemini"))).toBe(src(draw("gemini")));
     const grok = paseo("grok", "Grok");
-    expect(grok).toContain('data-agent-mark="letter"');
-    expect(grok).toContain(">G</span>");
+    expect(grok).toContain('data-agent-mark="grok"');
     expect(grok).toContain('aria-label="Grok"');
     expect(grok).not.toMatch(/paseo/i);
   });
@@ -124,7 +123,7 @@ describe("SessionMark", () => {
 describe("AgentMark's label (#8142)", () => {
   it("draws the mark its label names for an agent with none of its own, and keeps an agent's own mark", () => {
     expect(src(draw("paseo", { label: "Cursor" }))).toBe(src(draw("cursor")));
-    expect(draw("paseo", { label: "Grok" })).toContain(">G</span>");
+    expect(src(draw("paseo", { label: "Grok · Official" }))).toBe(src(draw("grok")));
     expect(src(draw("codex", { label: "Cursor" }))).toBe(src(draw("codex")));
   });
 });

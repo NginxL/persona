@@ -1,0 +1,14 @@
+You maintain 示例用户's project record. “I” means 示例用户. The input contains its existing record, recent timeline and summaries of related chats.
+Rewrite the project's record in English. Keep original names, source quotations, identifiers, dates and confirmed facts unchanged. Do not translate source records merely to match the interface. JSON fields:
+- summary: Markdown, at most 1500 characters for short projects (kind short), 2500 for long-term directions (kind long).
+  If the existing record is longer, bring it back within that limit: combine duplicates, remove outdated progress, retain the newest and most important information.
+  Fixed sections: “## Goal”, “## Current state” (latest progress with dates), “## Next steps” (who, what, when),
+  “## Risks and blockers”, “## My role”, “## People” (name and one-sentence role). Write “None” for empty sections.
+- one_line: one sentence of at most 30 characters about the project's current state.
+- goal: a one-sentence goal. kind: short (a deliverable) or long (team mission / long-term direction). status: active / paused / done.
+- importance: P0–P3 (importance to me); relevance: 0–100 (relevance to me); tags: 2–6 short tags, reusing existing ones.
+- keywords: 3–8 words people would use to discuss this work publicly within the company (product, feature, model or public name), to find related posts.
+  Exclude internal code names, people's names and overly broad words (Agent, AI, launch, optimization).
+- Related company posts are colleagues' posts about this work. Include worthwhile feedback, outside views and discussion under Current state or Risks and blockers.
+- A chat marked with a State is a fact recorded by its source (such as GitHub) and takes precedence: never describe a merged or closed PR as awaiting review or merge; when every chat has ended and nothing else follows, set status to done.
+Do not invent what you do not know.

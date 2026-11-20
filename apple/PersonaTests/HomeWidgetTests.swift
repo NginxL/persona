@@ -15,6 +15,12 @@ struct HomeWidgetTests {
             var name: String
             var input: Input
             var expected: Expected
+            var knownDifferences: [String: Difference]?
+
+            enum CodingKeys: String, CodingKey {
+                case name, input, expected
+                case knownDifferences = "known_differences"
+            }
         }
         struct Input: Decodable {
             var sessions: [Session]
@@ -25,24 +31,38 @@ struct HomeWidgetTests {
         struct Expected: Decodable {
             var badge: Int
         }
+        /// A client's known difference (the fixture's README): today's badge, when it replaces the case's.
+        struct Difference: Decodable {
+            var replace: Replace
+        }
+        struct Replace: Decodable {
+            var badge: Int?
+        }
     }
 
     /// Replays spec/fixtures/needs-you/cases.json: the Agents widget's Needs You rows are the Agents tab's badge, case by
-    /// case (one per session, never the muted agents or a quiet task's).
+    /// case (one per session, never the muted agents, a quiet task's or a directory-hidden session's), iOS's known
+    /// differences (`known_differences.ios`) at today's value.
     @Test func needsYouIsTheAgentsBadge() throws {
         let data = try Data(contentsOf: Self.repo.appending(path: "spec/fixtures/needs-you/cases.json"))
         let fixture = try JSON.decoder.decode(Fixture.self, from: data)
         #expect(!fixture.cases.isEmpty)
         for c in fixture.cases {
             let i = c.input
-            let byKey = Dictionary(i.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+            // As homeSnapshot reads them: the lists' rows with sides folded under their parents (`allSessions`), and
+            // every pending card but a directory-hidden session's (`scopedInteractions`).
+            let sessions = SideFold.fold(i.sessions, groups: [""]).listed
+            let own = Dictionary(i.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+            let byKey = Dictionary(sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
             let pending = i.interactions.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
-            let rows = AgentsNeedsYou.rows(cards: pending, waiting: AgentsNeedsYou.waiting(i.sessions))
+                .filter { own[$0.sessionKey]?.hiddenByDirectory != true }
+            let rows = AgentsNeedsYou.rows(cards: pending, waiting: AgentsNeedsYou.waiting(sessions))
             let agents = HomeAgents.build(
-                needsYou: rows, sessions: i.sessions,
+                needsYou: rows, sessions: sessions,
                 place: { TabBadges.place($0, session: byKey[$0], quiet: i.quiet.contains(AppModel.pinKey(session: $0)), mutes: i.mutes) },
                 session: { byKey[$0] }, machineName: { _ in nil }, isTask: { _ in false })
-            #expect(agents.rows.count { $0.state == .needsYou } == c.expected.badge, "\(c.name)")
+            let badge = c.knownDifferences?["ios"]?.replace.badge ?? c.expected.badge
+            #expect(agents.rows.count { $0.state == .needsYou } == badge, "\(c.name)")
         }
     }
 

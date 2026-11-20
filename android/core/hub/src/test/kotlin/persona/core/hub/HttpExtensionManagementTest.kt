@@ -385,8 +385,8 @@ class HttpExtensionManagementTest {
     @Test fun theDeviceContextIsThePhones() {
         val context = HttpExtensionManagement.deviceContext()
         assertEquals("android", (context.platform).zhAny())
-        // UI version 8 (#9158): the columns layout and a section's span, icon, link and rows side by side are drawn.
-        assertEquals(8, context.uiVersion)
+        // UI versions 9 and 10 (#9337, #9727): gauge rings and native graph canvases are drawn.
+        assertEquals(10, context.uiVersion)
         assertEquals(java.util.TimeZone.getDefault().id, context.tz)
         assertFalse(context.locale.isNullOrEmpty())
     }
@@ -578,5 +578,43 @@ class HttpExtensionManagementTest {
         assertEquals("扩展开着时这台 Mac 不会自动锁屏。", (field.confirm).zhAny())
         assertEquals("machines", (d.nodeMachines).zhAny())
         assertEquals("running", (d.extension.nodes!!.single().state).zhAny())
+    }
+
+    @Test fun extensionUiCallsUseAReadTimeoutBeyondTheHubsUiTimeout() = runBlocking {
+        MockWebServer().use { server ->
+            val http = OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+            val timeouts = mutableListOf<Pair<String, Long?>>()
+            val api = HttpExtensionManagement({ path, method, body, timeout ->
+                timeouts += path to timeout
+                http.newCall(Request.Builder().url(server.url(path)).method(method, body).build()).execute()
+            }, device = { device }, legacy = false)
+
+            server.enqueue(MockResponse().setBody("""{"extensions":[],"can_install":false,"markets":false}"""))
+            api.listing()
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setBody("""{"view":{"title":"Markets","sections":[]}}"""))
+            assertEquals("Markets", api.renderUi("example-markets", "watchlist").title)
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setBody("""{"view":{"title":"Markets","sections":[]}}"""))
+            api.uiAction("example-markets", "watchlist", "refresh")
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setBody("""{"view":{"title":"Subscriptions","sections":[]}}"""))
+            api.renderUi(persona.core.contracts.api.SUBSCRIPTIONS_UI, "pages")
+            server.takeRequest()
+
+            assertTrue(HttpExtensionManagement.UI_READ_TIMEOUT_SECONDS >= 30L)
+            assertEquals(
+                listOf(
+                    "/api/v1/extensions" to null,
+                    "/api/v1/extensions/example-markets/-/ui/watchlist" to HttpExtensionManagement.UI_READ_TIMEOUT_SECONDS,
+                    "/api/v1/extensions/example-markets/-/ui/watchlist" to HttpExtensionManagement.UI_READ_TIMEOUT_SECONDS,
+                    "/api/v1/subscriptions/-/ui" to HttpExtensionManagement.UI_READ_TIMEOUT_SECONDS,
+                ),
+                timeouts,
+            )
+        }
     }
 }

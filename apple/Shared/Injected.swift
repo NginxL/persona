@@ -23,11 +23,12 @@ nonisolated enum Supervision {
         }
     }
 
-    static func visible(_ items: [Item], results: [String: Item], live: Bool) -> Bool {
+    static func visible(_ items: [Item], results: [String: Item], live: Bool, routineMainRelay: Bool = false) -> Bool {
         if items.contains(where: { it in
             it.supervisionUser == true || it.fold?.supervisionUser == true ||
                 (Injected.of(it).map { $0.isSupervision && $0.level == "user" } ?? false)
         }) { return true }
+        var silent = false
         for use in items where use.kind == .toolUse {
             guard let name = tool(use.toolName) else { continue }
             guard let result = use.toolUseID.flatMap({ results[$0] }) else {
@@ -41,11 +42,27 @@ nonisolated enum Supervision {
             } else if name != "supervision_finish" {
                 return true
             } else if let text = result.text, let receipt = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
-                      case .string("user")? = receipt["visibility"] {
-                return true // Only the successful receipt, never the call's requested visibility or prose.
+                      case .string(let disposition)? = receipt["visibility"] {
+                if disposition == "user" { return true }
+                if disposition == "silent" { silent = true }
             }
         }
-        return false
+        return !live && !silent && !routineMainRelay && hasBackgroundReply(items)
+    }
+
+    private static func hasBackgroundReply(_ items: [Item]) -> Bool {
+        // Display lines can put a tool before the latest text even when the tool came after that text.
+        let last = items.lazy.filter { item in
+            item.wake == true || item.modelRefusal != nil || isTurnInterrupt(item) ||
+                item.kind == .toolUse || item.kind == .thinking || item.kind == .fold || isAnswerText(item)
+        }.max { ($0.seq, $0.part) < ($1.seq, $1.part) }
+        guard let last else { return false }
+        return isAnswerText(last) && last.narration != true && last.codexHeartbeatQuiet != true
+    }
+
+    private static func isAnswerText(_ item: Item) -> Bool {
+        item.kind == .text && item.role == "assistant" &&
+            !(item.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

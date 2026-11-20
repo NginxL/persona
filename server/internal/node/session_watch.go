@@ -29,8 +29,9 @@ type watch struct {
 	// reading: new lines are being read and pushed in a goroutine of their own; the pump skips the watch meanwhile.
 	reading atomic.Bool
 	live    liveWatch
-	// codex: a Codex thread's, whose transcript may come from the Codex App's database (codex_apphistory.go).
-	codex bool
+	// A TRAE or Codex transcript that may need a fresh database projection on a follow tick.
+	dbHistory bool
+	agy       *agyWatch
 }
 
 // watchEvery is how often the pump reads the watched transcripts; every followEvery ticks it also follows the copy
@@ -67,7 +68,7 @@ func (n *Node) watch(id string, since int) error {
 func (n *Node) watchFor(parent context.Context, id string, since int) error {
 	f, err := n.file(id)
 	if err != nil {
-		if !n.startingSession(id) {
+		if !n.knownSession(id) {
 			return err
 		}
 		// A session that just started has no transcript until claude writes its first line: watch once it exists,
@@ -117,7 +118,10 @@ func (n *Node) watchFor(parent context.Context, id string, since int) error {
 		}()
 		return nil
 	}
-	_, codex := n.codexSource(id)
+	_, dbHistory := n.codexSource(id)
+	if !dbHistory {
+		_, dbHistory = n.traexThread(id)
+	}
 	n.mu.Lock()
 	if _, ok := n.watches[id]; ok {
 		n.mu.Unlock()
@@ -128,7 +132,7 @@ func (n *Node) watchFor(parent context.Context, id string, since int) error {
 		return fmt.Errorf("too many subagent conversations followed (%d): close one first", maxSubagentWatches)
 	}
 	ctx, cancel := context.WithCancel(parent)
-	w := &watch{cancel: cancel, ctx: ctx, parent: parent, id: id, f: f, codex: codex}
+	w := &watch{cancel: cancel, ctx: ctx, parent: parent, id: id, f: f, dbHistory: dbHistory}
 	n.watches[id] = w
 	if !n.pumping {
 		n.pumping = true
@@ -269,6 +273,15 @@ func (n *Node) pumpWatch(w *watch, live int) {
 	if !w.armed.Load() || w.ctx.Err() != nil { // not caught up yet, or ended (watchEnded drops it)
 		return
 	}
+	if w.agy != nil {
+		if w.reading.CompareAndSwap(false, true) {
+			go func() {
+				defer w.reading.Store(false)
+				n.pollAgyPane(w)
+			}()
+		}
+		return
+	}
 	w.ticks++
 	if w.ticks%live == 0 {
 		n.pumpLive(w) // claudestatus.go
@@ -279,11 +292,9 @@ func (n *Node) pumpWatch(w *watch, live int) {
 	// The path is cached: a lookup and a stat, a search at most every 30 s. A file being read (Changed says true without
 	// waiting for it) is followed in the goroutine that reads it, so the pump never waits for another's parse.
 	follow := w.ticks%followEvery == 0
-	// A Codex thread: if it is an App chat with no rollout (or the App deleted its rollout meanwhile), the App's new turns
-	// are written into its transcript in the reading goroutine (codex_apphistory.go), then read as any growth or followed
-	// to the new file.
-	appChat := follow && w.codex
-	if !w.f.Changed() && !appChat {
+	// TRAE database changes and a Codex rollout disappearing can both require a new projection.
+	refreshHistory := follow && w.dbHistory
+	if !w.f.Changed() && !refreshHistory {
 		if !follow || !n.followCopy(w.id, w.f) {
 			return // at rest
 		}
@@ -292,7 +303,7 @@ func (n *Node) pumpWatch(w *watch, live int) {
 	w.reading.Store(true)
 	go func() {
 		defer w.reading.Store(false)
-		if appChat {
+		if refreshHistory {
 			n.refreshCodexAppHistory(w.id)
 		}
 		if follow {

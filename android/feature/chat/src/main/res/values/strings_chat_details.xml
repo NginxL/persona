@@ -32,4 +32,11 @@
     <string name="chat_outbox_resend">Resend</string>
     <string name="chat_outbox_waiting_spoken">Waiting for network, will send once connected</string>
     <string name="chat_outbox_failed_spoken">Failed to send. Resend or delete.</string>
+    <string name="chat_undelivered_waiting">Not delivered: %1$s. It will be sent automatically.</string>
+    <string name="chat_undelivered_failed">Not delivered: %1$s</string>
+    <string name="chat_undelivered_default_reason">The assistant could not start</string>
+    <string name="chat_undelivered_images">Pictures: %1$d</string>
+    <string name="chat_undelivered_action_failed">That did not work: %1$s</string>
+    <string name="chat_undelivered_waiting_spoken">Not delivered yet. It will be sent automatically.</string>
+    <string name="chat_undelivered_failed_spoken">Not delivered. Retry or delete.</string>
 </resources>

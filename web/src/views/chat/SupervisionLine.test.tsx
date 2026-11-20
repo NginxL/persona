@@ -127,6 +127,15 @@ describe("quiet supervision rendering", () => {
     expect(tool?.closest("[data-work-group]")).not.toBeNull();
   });
 
+  it("shows a final reply after failed delivery and keeps the work collapsed", () => {
+    const notify = { ...finish, tool_name: "mcp__persona__notify_user", tool_input: { text: "Fictional notification" } };
+    draw([u, thought, use, result, notify, { ...receipt, is_error: true, text: "Unavailable" }, answer]);
+    expect(host.querySelector("[data-supervision]")).toBeNull();
+    expect(host.querySelector("[data-answer]")?.textContent).toBe(answer.text);
+    expect(host.querySelector("[data-work-group] > button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-work-detail]")).toBeNull();
+  });
+
   it.each([
     ["en", "@Supervision · Handled in the background"],
     ["zh-Hans", "@督办巡检 · 已在后台处理"],
@@ -138,9 +147,9 @@ describe("quiet supervision rendering", () => {
   });
 
   it("renders all child segments of a folded round without absorbing an unrelated sibling", () => {
-    const one = chatLines([u, answer])[0];
+    const one = chatLines(initial)[0];
     if (one.kind !== "supervision") throw new Error("Expected supervision");
-    const extra = chatLines([{ ...u, id: "input-part#0", seq: 2 }, { ...answer, id: "reply-part#0", seq: 3 }])[0];
+    const extra = chatLines([{ ...u, id: "input-part#0" }, finish, receipt, { ...answer, id: "reply-part#0" }])[0];
     if (extra.kind !== "supervision") throw new Error("Expected supervision");
     const line: ChatLine = { ...one, lines: [...one.lines, ...extra.lines] };
     act(() => root.render(<ChatLineView line={line} mid="fictional-machine" sid="fictional-chat" expandFold={async () => {}} />));

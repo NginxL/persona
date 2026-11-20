@@ -9,18 +9,24 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,8 +89,9 @@ class ChatHeaderFoldShotsTest {
             base.copy(sessionId = "tests", title = "Widget tests", paneId = "p2", slotName = "tests")))
         override suspend fun refresh() = Unit
     }
+    private val transcript = MutableStateFlow(ChatSnapshot(items = items, loading = false))
     private val chats = object : ChatRepository {
-        override fun observe(session: SessionKey) = MutableStateFlow(ChatSnapshot(items = items, loading = false))
+        override fun observe(session: SessionKey) = transcript
         override suspend fun loadOlder(session: SessionKey) = Unit
         override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int): List<Item> = emptyList()
     }
@@ -156,6 +163,65 @@ class ChatHeaderFoldShotsTest {
     /** The largest text: the slim bar's title is cut short, its capsule keeps its middle place. */
     @Config(fontScale = 2f)
     @Test fun glassLargeText() = openAndFolded(AppStyle.Glass, dark = false, suffix = "-large")
+
+    @Config(qualifiers = "en-w320dp-h800dp-xhdpi", fontScale = 2f)
+    @Test fun jumpToLatestStaysBelowTheTranscriptAtLargeText() {
+        page(AppStyle.Glass, dark = true)
+        val list = rule.onNode(hasScrollToIndexAction() and
+            androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange))
+        val jump = rule.onNode(hasContentDescription("Jump to latest", substring = true, ignoreCase = true))
+        repeat(2) {
+            list.performTouchInput { swipeDown(startY = top + height * 0.25f, endY = bottom - height * 0.15f) }
+            rule.waitForIdle()
+        }
+        val transcript = list.fetchSemanticsNode().boundsInRoot
+        val button = jump.fetchSemanticsNode().boundsInRoot
+        assertTrue("Jump to latest $button overlaps the transcript $transcript", button.top >= transcript.bottom)
+        save(rule.onNodeWithTag("page").captureToImage().asAndroidBitmap(), "jump-narrow-glass-dark-large")
+        jump.performClick()
+        rule.waitForIdle()
+        jump.assertDoesNotExist()
+    }
+
+    @Config(qualifiers = "en-w320dp-h800dp-xhdpi", fontScale = 2f)
+    @Test fun collapseControlStaysAboveTheTranscriptAtLargeText() {
+        transcript.value = ChatSnapshot(items = buildList {
+            add(items.first())
+            for (seq in 2..23) {
+                add(Item("tool$seq", seq, role = "assistant", kind = "tool_use", toolUseId = "tool$seq",
+                    toolName = "Bash", ts = start.plusSeconds(seq.toLong()).toString(),
+                    toolInput = buildJsonObject { put("command", "Run widget checks for case $seq") }))
+                add(Item("result$seq", seq, role = "user", kind = "tool_result", toolUseId = "tool$seq",
+                    text = "Passed", ts = start.plusSeconds(seq.toLong()).toString()))
+            }
+            add(items.last())
+        }, loading = false)
+        page(AppStyle.Glass, dark = true)
+        val summary = rule.onNode(hasClickAction() and hasContentDescription("Tools 22", substring = true))
+        val collapse = rule.onNode(hasClickAction() and hasText("Collapse 22 steps"))
+        val list = rule.onNode(hasScrollToIndexAction() and
+            androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange))
+        rule.onNodeWithText("Run widget checks", substring = true).assertDoesNotExist()
+        collapse.assertDoesNotExist()
+        summary.performClick()
+        rule.waitUntil(20_000) {
+            rule.onAllNodesWithText("Run widget checks", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        list.performScrollToIndex(8)
+        rule.waitForIdle()
+        val button = collapse.fetchSemanticsNode().boundsInRoot
+        val reader = list.fetchSemanticsNode().boundsInRoot
+        assertTrue("Collapse control $button overlaps the transcript $reader", button.bottom <= reader.top)
+        save(rule.onNodeWithTag("page").captureToImage().asAndroidBitmap(), "collapse-narrow-glass-dark-large")
+        collapse.performClick()
+        rule.waitUntil(20_000) {
+            rule.onAllNodes(hasClickAction() and hasContentDescription("Collapsed", substring = true))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        summary.assertExists()
+        collapse.assertDoesNotExist()
+        rule.onNodeWithText("Run widget checks", substring = true).assertDoesNotExist()
+    }
 
     /** A tap on Glass's title: Session Info (main opened the status sheet). A sheet keeps its first frame: a test each. */
     private fun titleTap(dark: Boolean) {

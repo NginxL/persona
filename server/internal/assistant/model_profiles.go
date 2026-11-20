@@ -93,13 +93,14 @@ type launcherField struct {
 
 func profileValue(v string) *string { return &v }
 
-// ModelTier is what an Agent started on a tier runs on: a launcher, and its model and effort ("" for its defaults).
-// Description says when to use it (Paseo's "When to use"): the assistant reads it to pick a tier, the New Agent
-// form shows it.
+// ModelTier is what an Agent started on a tier runs on: a launcher, and its model, effort and start speed ("" for its
+// defaults). Description says when to use it (Paseo's "When to use"): the assistant reads it to pick a tier, the New
+// Agent form shows it.
 type ModelTier struct {
 	Launcher    string `json:"launcher"`
 	Model       string `json:"model,omitempty"`
 	Effort      string `json:"effort,omitempty"`
+	Speed       string `json:"speed,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -110,6 +111,9 @@ func (t ModelTier) runs() string {
 		if v != "" {
 			parts = append(parts, v)
 		}
+	}
+	if proto.FasterSpeed(t.Speed) {
+		parts = append(parts, t.Speed)
 	}
 	return strings.Join(parts, " · ")
 }

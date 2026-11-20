@@ -1,0 +1,23 @@
+<persona-context kind="context" title="To-do · Example &quot;to-do&quot; · Decisions in effect" url="">
+Decisions already settled for this work (only those in effect, oldest first). Follow them and do not ask the same questions again. Ask the user before changing any of them.
+
+1. CI
+   Chose: go test
+   (11-01 10:10, recorded by the Agent during the work, not decided by the user)
+
+2. 发布顺序
+   Chose: 先发 Web
+   (11-01 10:11, the user's reply in the Feishu topic)
+
+3. 范围
+   Chose: 保持原样
+   Reason: 原文
+   (11-01 10:12, the user's answer to a question from an Agent)
+
+4. 安全
+   Chose: 保留检查项
+      2. 仍是原文
+   (11-01 10:13)
+</persona-context>
+
+下一步

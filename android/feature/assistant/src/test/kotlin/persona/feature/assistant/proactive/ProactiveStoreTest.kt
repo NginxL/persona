@@ -636,9 +636,9 @@ class ProactiveTextTest {
         assertEquals("每 1 小时 30 分钟", say.every(90))
         assertEquals("1 小时 30 分钟", say.interval(90))
         assertEquals("今天 11:00", say.rule(review, now, zone))
-        assertEquals("自动", patrol.runsWith(say))
+        assertEquals("自动审批", patrol.runsWith(say))
         assertNull(morning.runsWith(say))
-        assertEquals("全部放行", morning.copy(permissionMode = BypassMode).runsWith(say))
+        assertEquals("完全访问", morning.copy(permissionMode = BypassMode).runsWith(say))
     }
 
     @Test fun timelineAndSummary() {

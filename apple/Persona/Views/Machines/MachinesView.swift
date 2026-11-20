@@ -396,7 +396,7 @@ struct MachineCard: View {
         } else {
             VStack(alignment: .trailing, spacing: Theme.Space.xxs) {
                 Text("Offline [Machine Entity be1b4f]").font(Theme.Font.labelStrong).foregroundStyle(Color.secondary)
-                if let seen = machine.lastSeen, seen.timeIntervalSince1970 > 0 {
+                if let seen = model.lastSeen(machine.ref) ?? machine.lastSeen, seen.timeIntervalSince1970 > 0 {
                     Text(Fmt.relative(seen)).font(Theme.Font.label).foregroundStyle(.tertiary)
                 }
             }

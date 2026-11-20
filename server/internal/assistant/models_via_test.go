@@ -43,7 +43,11 @@ func (d *viaDevs) CallNode(ctx context.Context, id, method string, params json.R
 	if err := json.Unmarshal(params, &d.saw); err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, d.saw.URL, bytes.NewReader(d.saw.Body))
+	wireMethod := d.saw.Method
+	if wireMethod == "" {
+		wireMethod = http.MethodPost
+	}
+	req, _ := http.NewRequestWithContext(ctx, wireMethod, d.saw.URL, bytes.NewReader(d.saw.Body))
 	req.Header = d.saw.Header
 	req.Header.Set("X-Sent-By", "node")
 	resp, err := http.DefaultClient.Do(req)

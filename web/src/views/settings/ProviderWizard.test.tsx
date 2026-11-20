@@ -62,7 +62,10 @@ const flush = async () => {
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 };
 const text = () => document.body.textContent ?? "";
-const button = (label: string) => [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes(label));
+const button = (label: string) => {
+  const buttons = [...document.body.querySelectorAll("button")];
+  return buttons.find((b) => b.textContent?.trim() === label) ?? buttons.find((b) => b.textContent?.includes(label));
+};
 function type(input: HTMLInputElement, value: string) {
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
   act(() => {
@@ -357,7 +360,7 @@ describe("ProviderWizard from presets", () => {
     });
   });
 
-  it("hides unsupported chat options and excludes drafts from test and save", async () => {
+  it("keeps supported chat headers while hiding other unsupported options", async () => {
     await open();
     act(() => button("自定义兼容网关")!.click());
     act(() => button("直接 API")!.click());
@@ -365,22 +368,22 @@ describe("ProviderWizard from presets", () => {
     type(inputs.find((input) => input.placeholder.includes("my_gateway"))!, "custom");
     type(inputs.find((input) => input.inputMode === "url")!, "https://api.example.com/v1");
     type(keyInput(), "sk-test-123456");
+    const header = document.body.querySelector<HTMLTextAreaElement>('textarea[placeholder^="X-Name"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    act(() => { setter.call(header, "X-Example: value"); header.dispatchEvent(new Event("input", { bubbles: true })); });
     act(() => button("下一步")!.click());
     type(document.body.querySelector<HTMLInputElement>('input[aria-label="手动添加模型 ID"]')!, "example-chat");
     act(() => button("添加")!.click());
     act(() => button("高级")!.click());
-    const header = document.body.querySelector<HTMLTextAreaElement>('textarea[placeholder^="X-Name"]')!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-    act(() => { setter.call(header, "X-Example: value"); header.dispatchEvent(new Event("input", { bubbles: true })); });
     type(document.body.querySelector<HTMLInputElement>('input[placeholder="http://127.0.0.1:7890"]')!, "http://proxy.example.com");
     type(document.body.querySelector<HTMLInputElement>('input[placeholder="localhost,127.0.0.1"]')!, "example.com");
     type(document.body.querySelector<HTMLInputElement>('input[placeholder="3000000"]')!, "1234");
     act(() => button("上一步")!.click());
     act(() => button("Chat Completions")!.click());
     await act(async () => button("测试连接")!.click());
-    expect(keyTests()[0]!.body).not.toHaveProperty("headers");
+    expect(keyTests()[0]!.body).toHaveProperty("headers", "X-Example: value");
     act(() => button("下一步")!.click());
-    expect(text()).toContain("上下文限制、默认思考档位");
+    expect(text()).toContain("上下文限制、分档模型");
     expect(text()).toContain("模型列表中仍可记录各模型的上下文窗口");
     expect(document.body.querySelector('textarea[placeholder^="X-Name"]')).toBeNull();
     expect(document.body.querySelector('input[placeholder="http://127.0.0.1:7890"]')).toBeNull();
@@ -397,18 +400,18 @@ describe("ProviderWizard from presets", () => {
     act(() => button("下一步")!.click());
     await act(async () => button("保存")!.click());
     const body = calls.find((c) => c.method === "POST" && c.path.endsWith("/launchers"))?.body;
-    expect(body).toMatchObject({ api: "chat" });
-    for (const key of ["headers", "proxy", "no_proxy", "env", "timeout_ms", "compact_window", "max_context", "effort"]) expect(body).not.toHaveProperty(key);
+    expect(body).toMatchObject({ api: "chat", headers: "X-Example: value" });
+    for (const key of ["proxy", "no_proxy", "env", "timeout_ms", "compact_window", "max_context", "effort"]) expect(body).not.toHaveProperty(key);
   });
 
-  it("keeps model metadata while hiding unused chat thinking controls", async () => {
+  it("keeps Chat effort metadata while hiding the wizard's thinking controls", async () => {
     act(() => root.render(<ProviderWizard existing={{ name: "chat", kind: "api", api: "chat", base_url: "https://api.example.com", model: "example-chat", has_key: true, models: [{ id: "example-chat", context_window: 16000, efforts: ["high"], default_effort: "high" }] }} onClose={() => {}} onSaved={() => {}} />));
     await flush();
     act(() => button("下一步")!.click());
     expect(document.body.querySelector<HTMLInputElement>('input[aria-label="example-chat 的上下文窗口"]')?.value).toBe("16000");
     expect(document.body.querySelector('[aria-label="example-chat 支持的思考档位"]')).toBeNull();
     expect(document.body.querySelector('[aria-label="example-chat 的默认思考档位"]')).toBeNull();
-    expect(text()).toContain("Chat Completions 不使用模型的思考档位设置");
+    expect(text()).toContain("用途编辑器可以覆盖默认档位；此向导会保留这些设置");
     await act(async () => button("保存")!.click());
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("models");
   });
@@ -426,7 +429,7 @@ describe("ProviderWizard from presets", () => {
   });
 
   it("requires an explicit choice before clearing unsupported stored Chat settings", async () => {
-    const existing = { name: "chat", kind: "api" as const, api: "chat" as const, base_url: "https://api.example.com", model: "example-chat", has_key: true, has_headers: true, has_env: true, proxy: "http://proxy.example.com", no_proxy: "example.com", timeout_ms: 1200, compact_window: 100, max_context: 200, effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true };
+    const existing = { name: "chat", kind: "api" as const, api: "chat" as const, base_url: "https://api.example.com", model: "sonnet", has_key: true, has_headers: true, has_env: true, proxy: "http://proxy.example.com", no_proxy: "example.com", timeout_ms: 1200, compact_window: 100, max_context: 200, effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true };
     act(() => root.render(<ProviderWizard existing={existing} onClose={() => {}} onSaved={() => {}} />));
     await flush();
     expect(text()).toContain("保存时清除这些设置");
@@ -450,9 +453,10 @@ describe("ProviderWizard from presets", () => {
     act(() => checkbox.click());
     await act(async () => button("保存")!.click());
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).toMatchObject({
-      headers: "", env: "", proxy: "", no_proxy: "", timeout_ms: 0, compact_window: 0, max_context: 0,
-      opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
+      env: "", proxy: "", no_proxy: "", timeout_ms: 0, compact_window: 0, max_context: 0,
+      model: "sonnet", opus_model: "", sonnet_model: "", haiku_model: "", fable_model: "", subagent_force: false,
     });
+    expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("headers");
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/launchers/chat"))?.body).not.toHaveProperty("effort");
   });
 

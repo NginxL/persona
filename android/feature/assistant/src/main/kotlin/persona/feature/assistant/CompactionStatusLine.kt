@@ -11,7 +11,7 @@ import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.pagePadding
 
-/** The main conversation's compaction ("Compacting context…", "Compacted", "Compaction failed: …") as one line over it; a failure closes by hand. */
+/** The selected conversation's compaction as one line over it; a failure closes by hand. */
 @Composable
 internal fun CompactionStatusLine(line: CompactionLine, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     JInlineStatus(

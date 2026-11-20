@@ -166,19 +166,22 @@ func (s *Service) askAgain(ctx context.Context, r *channel.Run, prog *chanLive, 
 	if r.TargetKind == channel.TargetAgent {
 		return false
 	}
-	l := s.botLang(ctx)
+	locale := s.hello(ctx).Locale
 	name := r.Channel
 	if r.Channel == channel.Feishu {
-		name = i18n.T(l, "assistant-channels_runs.feishu")
+		name = i18n.T(i18n.Lang(locale), "assistant-channels_runs.feishu")
 	} else if v, ok := s.pluginChannel(ctx, r.Channel); ok && v.Name != "" {
 		name = v.Name
 	}
-	text := prompts.RenderChannelAnswerAgain(prompts.ChannelAnswerAgain{Name: name})
+	text := prompts.RenderChannelAnswerAgain(prompts.ChannelAnswerAgain{Name: name, Language: answerLanguage(locale)})
 	_, body, _ := strings.Cut(text, "\n") // the first line is the context tag
 	id := channel.ClientMsgID(r.Channel, r.ID+"-again")
 	// The manager's own words, not the owner's: they preempt no background round (owner_preempt.go).
-	p, err := s.messageParams(ctx, SendParams{MachineID: r.MachineID, SessionID: r.SessionID,
-		Params: map[string]any{"session_id": r.SessionID, "text": text, "client_msg_id": id}}, false)
+	params := map[string]any{"session_id": r.SessionID, "text": text, "client_msg_id": id}
+	if r.Ext["public"] == "1" {
+		params["public"] = true
+	}
+	p, err := s.messageParams(ctx, SendParams{MachineID: r.MachineID, SessionID: r.SessionID, Params: params}, false)
 	if err == nil {
 		err = s.sendOnce(ctx, r.MachineID, p)
 	}
@@ -268,7 +271,7 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 		res = recalledResult() // an answer read just before the recall does not go out
 	}
 	now := c.clock()
-	took := now.Sub(r.Started)
+	took := now.Sub(r.WaitFrom())
 	snap := *r
 	snap.Ext = cloneExt(r.Ext)
 	snap.Folded = slices.Clone(r.Folded)
@@ -381,6 +384,12 @@ func (s *Service) channelAnswered(ctx context.Context, machine, session string) 
 	}
 	at, ok := c.answered[[2]string{machine, session}]
 	return ok && c.clock().Sub(at) < window
+}
+
+// transientRetryTurn is a failed turn the mechanical auto-continue loop will retry. Mirroring each attempt would
+// present transient retry state as a series of final answers; the chain's eventual non-transient turn mirrors as usual.
+func (s *Service) transientRetryTurn(ctx context.Context, sess proto.Session) bool {
+	return s.triageSwitches(ctx).transientOn() && turnErrorTransient(sess)
 }
 
 // channelTurnEnded: a conversation finished a turn (session.turn_ended). Its runs are checked at once rather than on

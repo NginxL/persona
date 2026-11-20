@@ -2,4 +2,6 @@
 
 {{.}}{{end}})
 
-{{.Text}}
+{{with .Files}}{{.}}
+
+{{end}}{{.Text}}

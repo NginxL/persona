@@ -45,11 +45,22 @@ internal fun ResText.text(): String = resolve(LocalResources.current)
 /**
  * "Just now", "3 minutes ago", "5 hours ago", then the day (Nov 2) or, with [days], "2 days ago" - how settings say when
  * something last happened. Days count the midnights in [zone], not 24-hour spans, as [SentText.ago] and the web's `ago` (#9889).
+ * [showSeconds] keeps a sub-minute age as a plural number of seconds instead of "Just now".
  */
-internal fun agoText(res: Resources, at: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault(), days: Boolean = false): String {
+internal fun agoText(
+    res: Resources,
+    at: Instant,
+    now: Instant = Instant.now(),
+    zone: ZoneId = ZoneId.systemDefault(),
+    days: Boolean = false,
+    showSeconds: Boolean = false,
+): String {
     val gap = Duration.between(at, now)
     return when {
-        gap.isNegative || gap < Duration.ofMinutes(1) -> res.getString(R.string.settings_src_just_now)
+        gap.isNegative || gap < Duration.ofSeconds(1) -> res.getString(R.string.settings_src_just_now)
+        gap < Duration.ofMinutes(1) && showSeconds -> gap.seconds.toInt()
+            .let { res.getQuantityString(R.plurals.settings_src_seconds_ago, it, it) }
+        gap < Duration.ofMinutes(1) -> res.getString(R.string.settings_src_just_now)
         gap < Duration.ofHours(1) -> gap.toMinutes().toInt().let { res.getQuantityString(R.plurals.settings_src_minutes_ago, it, it) }
         gap < Duration.ofDays(1) -> gap.toHours().toInt().let { res.getQuantityString(R.plurals.settings_src_hours_ago, it, it) }
         // At least 1: a 25-hour day can leave a whole day's gap on one date.

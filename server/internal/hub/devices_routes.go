@@ -17,6 +17,24 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// awaitOwner is owner (ownership.go) after waiting for the manager the request goes to, as a call to one of its
+// machines waits (waitDevicesFor): the hub just started and it is on its way (bounded); else the forwarding answers 503
+// assistant_offline at once. False once it answered.
+func (h *Hub) awaitOwner(w http.ResponseWriter, r *http.Request, by ownerOf) (string, bool) {
+	id, ok := h.owner(w, r, by)
+	if ok {
+		_ = h.waitDevicesFor(r.Context(), id)
+	}
+	return id, ok
+}
+
+// forwardAwaited is forwardOwned (ownership.go) with awaitOwner's wait.
+func (h *Hub) forwardAwaited(w http.ResponseWriter, r *http.Request, by ownerOf) {
+	if id, ok := h.awaitOwner(w, r, by); ok {
+		h.forwardHTTP(w, r, id)
+	}
+}
+
 // metricsRoutesRelayed relays the monitoring's routes (devicewire.MetricsRoutes: the machines' samples, their history,
 // the token usage) to the manager, which keeps them.
 func (h *Hub) metricsRoutesRelayed(api *http.ServeMux) {
@@ -25,10 +43,7 @@ func (h *Hub) metricsRoutesRelayed(api *http.ServeMux) {
 		if strings.Contains(pattern, "/machines/{id}/") {
 			by = h.byMachine
 		}
-		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			_ = h.waitDevices(r.Context()) // the hub just started: the manager is on its way (bounded); else 503 at once
-			h.forwardOwned(w, r, by)
-		})
+		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.forwardAwaited(w, r, by) })
 	}
 }
 
@@ -37,10 +52,7 @@ func (h *Hub) metricsRoutesRelayed(api *http.ServeMux) {
 // it is away.
 func (h *Hub) usageRoutesRelayed(api *http.ServeMux) {
 	for _, pattern := range devicewire.UsageRoutes {
-		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			_ = h.waitDevices(r.Context()) // the hub just started: the manager is on its way (bounded); else 503 at once
-			h.forwardOwned(w, r, h.byRequest)
-		})
+		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { h.forwardAwaited(w, r, h.byRequest) })
 	}
 }
 
@@ -60,8 +72,7 @@ func (h *Hub) transferRoutesRelayed(api *http.ServeMux) {
 					return
 				}
 			}
-			_ = h.waitDevices(r.Context()) // the hub just started: the manager is on its way (bounded); else 503 at once
-			h.forwardOwned(w, r, by)
+			h.forwardAwaited(w, r, by)
 		})
 	}
 }
@@ -98,8 +109,7 @@ func (h *Hub) transferSource(w http.ResponseWriter, r *http.Request) (ownerOf, b
 func (h *Hub) adminUsageRoutesRelayed(mux *http.ServeMux) {
 	for _, pattern := range devicewire.AdminUsageRoutes {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			_ = h.waitDevices(r.Context())
-			if id, ok := h.owner(w, r, h.byRequest); ok { // the manager it names, else the default: its usage sources
+			if id, ok := h.awaitOwner(w, r, h.byRequest); ok { // the manager it names, else the default: its usage sources
 				h.forwardAdminHTTP(w, r, id)
 			}
 		})
@@ -111,13 +121,21 @@ func (h *Hub) adminUsageRoutesRelayed(mux *http.ServeMux) {
 // connected they are answered 503 assistant_offline.
 func (h *Hub) deviceRoutesRelayed(api *http.ServeMux) {
 	for _, pattern := range devicewire.Routes {
+		fullOnly := pattern == linkSwitchRoute // not an app's pairing code standing in for one (link_switch.go)
 		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			if pattern == devicewire.HeldOutboxRoute && !personSent(r.Context()) {
+				writeErrCode(w, http.StatusForbidden, proto.CodeReadOnly, i18n.Err("outbox.read_only"))
+				return
+			}
+			if fullOnly && !mayTrust(principalOf(r.Context())) {
+				writeErrCode(w, http.StatusForbidden, "forbidden", i18n.Err("hub-link_switch.forbidden"))
+				return
+			}
 			if h.localMachine(r.PathValue("mid")) == nil {
 				writeErr(w, http.StatusNotFound, i18n.Err("devices-api.unknown_machine"))
 				return
 			}
-			_ = h.waitDevices(r.Context()) // the hub just started: the manager is on its way (bounded); else 503 at once
-			h.forwardOwned(w, r, h.byMachine)
+			h.forwardAwaited(w, r, h.byMachine)
 		})
 	}
 }

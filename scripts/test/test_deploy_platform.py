@@ -145,6 +145,21 @@ class DeployBuildsEveryPlatformTests(unittest.TestCase):
         self.assertIn('rm -f "$n.version"; cat > "$n.new" && mv "$n.new" "$n"\' < "bin/persona-node-$plat"\n'
                       '        printf \'%s\\n\' "$VERSION" | remote_state "$PERSONA_HUB_SSH" \'cat > "$PERSONA_HOME/bin/nodes/\'"persona-node-$plat.version"', text)
 
+    def test_the_hub_carries_the_connector_of_its_version(self):
+        # A switch of an ssh computer to Persona Link sends the hub's persona-link-<plat> only while its version file
+        # says the hub's (devices/connector_package.go): built for every platform, it lands whole with the old version
+        # file gone first and the new one written after the binary.
+        text = DEPLOY.read_text()
+        build = text.index('for plat in "${PLATFORMS[@]}"; do\n  GOOS=${plat%-*} GOARCH=${plat#*-}')
+        self.assertIn('-o "bin/persona-link-$plat" ./cmd/persona-link', text[build:text.index('\ndone\n', build)])
+        upload = text.index('for plat in "${PLATFORMS[@]}"; do\n        remote_state "$PERSONA_HUB_SSH"')
+        loop = text[upload:text.index('\n      done\n', upload)]
+        binary = loop.index('n="$PERSONA_HOME/bin/nodes/\'"persona-link-$plat"\'"; rm -f "$n.version"; '
+                            'cat > "$n.new" && mv "$n.new" "$n"\' < "bin/persona-link-$plat"')
+        version = loop.index('printf \'%s\\n\' "$VERSION" | remote_state "$PERSONA_HUB_SSH" '
+                             '\'cat > "$PERSONA_HOME/bin/nodes/\'"persona-link-$plat.version"\'"\'')
+        self.assertLess(binary, version, 'the version file must come after the binary')
+
     def test_the_hub_and_the_nodes_do_not_pick_a_build_from_os_alone(self):
         text = DEPLOY.read_text()
         self.assertNotIn('[ "$os" = darwin ] && echo arm64', text)

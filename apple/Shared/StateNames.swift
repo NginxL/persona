@@ -7,7 +7,7 @@ import os
 /// `… [State Names]` keys; `StateNamesTests` keeps other entries and other files from defining them again.
 /// `interfaceText`, so the Live Activity follows the app's language at once.
 nonisolated enum StateName: String, CaseIterable, Sendable {
-    case needsYou, working, unread, seen, notRunning, unknown
+    case needsYou, working, unread, justFinished, seen, notRunning, unknown
     /// Waiting to be woken (`isWaiting`): a loop or a timer brings it back.
     case waiting
     /// Seen, but its last turn asks the user something (#5096).
@@ -28,6 +28,7 @@ nonisolated enum StateName: String, CaseIterable, Sendable {
         case .needsYou: interfaceText("Needs You [State Names]")
         case .working: interfaceText("Working [State Names]")
         case .unread: interfaceText("Unread [State Names]")
+        case .justFinished: interfaceText("Just finished [State Names]") // perf-ok: StateName.text caches this lookup per locale
         case .seen: interfaceText("Seen [State Names]")
         case .notRunning: interfaceText("Not Running [State Names]")
         case .unknown: interfaceText("Unknown [State Names]")
@@ -77,6 +78,32 @@ nonisolated enum StateName: String, CaseIterable, Sendable {
     /// The same words as a supervised task awaiting review (`ReviewState.pendingReview`).
     static var taskToVerify: String {
         kept("taskToVerify") { interfaceText("Awaiting review") } // perf-ok: resolved once per locale
+    }
+
+    /// The To-dos list's own words for where a to-do stands (#10465, docs/design/proposals/todos-redesign.md 3.11): a
+    /// to-do's Needs you in sentence case, as its section heading and its line say it (DESIGN_SYSTEM 5: headings in
+    /// sentence case), the shipped sentence form (`needsYouSentence`); its section bar's choice is a button, in Title
+    /// Case: `needsYou.text`, as the Inbox's bar says it. Working and Waiting are the direction tree's (`taskWorking`,
+    /// `taskWaiting`), whose Chinese words are not a session's. Just finished (finished and not ticked, or closed and not
+    /// seen yet) is the one word a to-do shares with a session: `justFinished.text`.
+    static var todoNeedsYou: String {
+        kept("todoNeedsYou") { interfaceText("Needs you [State Names]") } // perf-ok: resolved once per locale
+    }
+    /// The owner's own; nobody works on it and nothing waits.
+    static var todoToDo: String {
+        kept("todoToDo") { interfaceText("To do [State Names]") } // perf-ok: resolved once per locale
+    }
+    /// To do as the section bar's choice, a button: Title Case (DESIGN_SYSTEM 5), the same words as `todoToDo`.
+    static var todoToDoChoice: String {
+        kept("todoToDoChoice") { interfaceText("To Do [State Names]") } // perf-ok: resolved once per locale
+    }
+    /// The owner's own "not now"; never Later, which is an ask's.
+    static var todoSomeday: String {
+        kept("todoSomeday") { interfaceText("Someday [State Names]") } // perf-ok: resolved once per locale
+    }
+    /// The mark on a to-do nothing has moved on for 48 hours: a flag in its section, not a section.
+    static var todoInactive: String {
+        kept("todoInactive") { interfaceText("Inactive [State Names]") } // perf-ok: resolved once per locale
     }
 
     /// Words resolved once per interface locale (docs/apple/performance.md P4): a dictionary read after the first.

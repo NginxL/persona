@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -18,10 +19,12 @@ type assistantNode struct {
 	m     *Machine
 	mu    sync.Mutex
 	known map[string]bool
-	made  int // conversations started, for the next id
-	sends []map[string]any
-	kept  []string     // the last node.configure keep_sessions
-	items []proto.Item // session.items answers this (assistant_titles_test.go)
+	// Exact synthetic launcher/model pairs accepted by launchers.model.check; other pairs remain unsupported.
+	modelChecks map[string]string
+	made        int // conversations started, for the next id
+	sends       []map[string]any
+	kept        []string     // the last node.configure keep_sessions
+	items       []proto.Item // session.items answers this (assistant_titles_test.go)
 	// assistant.handoff answers handoff; assistant.compact notes the session and answers compactErr
 	// (assistant_main_test.go).
 	handoff    map[string]any
@@ -43,6 +46,10 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		switch method {
+		case "launchers.model.check":
+			if agent := n.modelChecks[fmt.Sprint(p["name"])+"\x00"+fmt.Sprint(p["model"])]; agent != "" {
+				return map[string]any{"agent": agent}, nil
+			}
 		case "assistant.prepare":
 			return map[string]any{"cwd": "/home/me/.persona/assistant"}, nil
 		case "node.configure":
@@ -75,6 +82,9 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 			return map[string]any{"ok": true}, nil
 		case "session.close":
 			n.sends = append(n.sends, map[string]any{"close": p["session_id"]})
+			return map[string]any{"ok": true}, nil
+		case assistantwire.DeviceAssistantAnswerAgain:
+			n.sends = append(n.sends, map[string]any{"answer_again": p})
 			return map[string]any{"ok": true}, nil
 		case "assistant.send":
 			n.sends = append(n.sends, p)

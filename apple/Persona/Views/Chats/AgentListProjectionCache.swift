@@ -65,7 +65,7 @@ nonisolated private enum AgentSortAdapter {
         }
         if !shadowNowRevision.contains(key.revision) {
             shadowNowRevision.insert(key.revision)
-            shadowNow[key.revision] = AgentParsedQuery.parse(key.settings.query).sinceHours == nil ? nil : Date()
+            shadowNow[key.revision] = AgentSearchPlan.compile(query: key.settings.query, settings: key.settings).parsed.sinceHours == nil ? nil : Date()
         }
         return shadowNow[key.revision] ?? nil
         #else

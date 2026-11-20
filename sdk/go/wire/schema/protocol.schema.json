@@ -298,7 +298,8 @@
         "opens": {"type": "string"},
         "badge": {"$ref": "view.schema.json#/$defs/Badge"},
         "connector": {"type": "string"},
-        "group": {"$ref": "manifest.schema.json#/$defs/UIGroup", "description": "A nav_page's sidebar group, its title in the request's language (#9071)."}
+        "group": {"$ref": "manifest.schema.json#/$defs/UIGroup", "description": "A nav_page's sidebar group, its title in the request's language (#9071)."},
+        "icon_color": {"$ref": "view.schema.json#/$defs/Color", "description": "A nav_page's icon color as its manifest names it, drawn only with Colored sidebar icons (#10822)."}
       },
       "required": ["id", "title", "placement"]
     },

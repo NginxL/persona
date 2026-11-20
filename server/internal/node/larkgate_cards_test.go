@@ -8,8 +8,8 @@ import (
 
 // Commands the assistant ran that asked on the phone although they only read Feishu or did not call lark-cli at all
 // (#8119), and the writes that must still ask. Only the classifier and the approval adapters see these strings;
-// nothing runs them. The helper's lark-cli knows `docs +fetch` (read) and `docs +create` (write); anything else
-// lark-cli gives no risk for, which counts as a write. The conversation is in bypass mode, where a classified
+// nothing runs them. The helper's lark-cli knows `docs +fetch` (read) and `docs +create` (write) and says it has no
+// `im messages get` (#10845); anything else lark-cli gives no risk for, which counts as a write. The conversation is in bypass mode, where a classified
 // ordinary write runs (larkBypassSafe) and sending a message still asks.
 func TestLarkCardsOnlyForWrites(t *testing.T) {
 	home := t.TempDir()
@@ -39,6 +39,7 @@ func TestLarkCardsOnlyForWrites(t *testing.T) {
 		{"variable flag value", `T=abc; lark-cli docs +fetch --as user --doc-id $T 2>&1 | jq -c '.data'`, 0},
 		{"quoted variable flag value", `lark-cli docs +fetch --doc-id "$DOCUMENT"`, 0},
 		{"literal variable in an api route", `T=abc; lark-cli api GET "/open-apis/drive/v2/permissions/$T/public" --params '{"type":"file"}' | jq -c .data`, 0},
+		{"method lark-cli does not have", `lark-cli im messages get --params '{"message_id":"om_x"}' --as user`, 0},
 		{"help into sed", `lark-cli --help 2>&1 | grep -iE "profile|config" | head -8; lark-cli config --help 2>&1 | sed -n 1,25p`, 0},
 
 		// Reads on another machine: lark-cli there acts as the user too.

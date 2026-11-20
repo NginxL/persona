@@ -15,8 +15,7 @@ import (
 // wording, into the reader's language (docs/protocol/i18n.md). zh-Hans, and anything the hub does not recognize (an older or
 // newer node's wording), go out as the node wrote them. The items the assistant and the channels read are not touched:
 // they match some of these lines (assistant/done.go's interrupted marker). The runtime bridges' own words in the items
-// they give (transcript.Runtime*: Paseo's, opencode's and pi's failures, exit codes, cancelled calls) are rewritten the
-// same way.
+// they give (transcript.Runtime*: Paseo's, opencode's, pi's and Antigravity's runtime notices) are rewritten the same way.
 //
 // Kept in Chinese because the apps parse them: the compaction divider lines, the API error prefix
 // (the API error card), the truncation marker (cut text) and the /compact echo.
@@ -66,6 +65,8 @@ func localizedItem(l i18n.Lang, it proto.Item) (proto.Item, bool) {
 		set(&it.Text, modelRefusalText(l, it.ModelRefusal))
 	case it.Kind == proto.KindNotice && it.Task != nil:
 		set(&it.Text, taskNoteText(l, it.Task, it.Text))
+	case it.Kind == proto.KindNotice && it.Wake && it.Text == transcript.BackgroundTaskUpdate:
+		set(&it.Text, tt(l, "task_updated"))
 	case it.Kind == proto.KindNotice:
 		set(&it.Text, noticeText(l, it.Text))
 	case it.Kind == proto.KindText && it.Role == "user" && it.From == transcript.PersonaPeer && it.Text == transcript.StoppedFromPhone:
@@ -126,6 +127,8 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "codex_extension", i18n.Args{"kind": strings.TrimSuffix(strings.TrimPrefix(s, codexExtension), codexRecordNote)})
 	case strings.HasPrefix(s, codexEvent) && strings.HasSuffix(s, codexRecordNote):
 		return tt(l, "codex_event", i18n.Args{"type": strings.TrimSuffix(strings.TrimPrefix(s, codexEvent), codexRecordNote)})
+	case s == transcript.RuntimeAgyAutoRefusalNotice:
+		return tt(l, "runtime_agy_auto_refused")
 	case s == transcript.RuntimeError:
 		return tt(l, "runtime_error")
 	case strings.HasPrefix(s, transcript.RuntimeErrorLead):
@@ -134,6 +137,8 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "schedule_fired")
 	case strings.HasPrefix(s, transcript.PaseoScheduleNotice+"："):
 		return tt(l, "schedule_fired_what", i18n.Args{"what": strings.TrimPrefix(s, transcript.PaseoScheduleNotice+"：")})
+	case s == i18n.T(i18n.Default, "node-engine.agy_pane_integration"):
+		return i18n.T(l, "node-engine.agy_pane_integration")
 	}
 	return s
 }
@@ -222,7 +227,7 @@ func taskNoteText(l i18n.Lang, n *proto.TaskNote, text string) string {
 	}
 	key, args := taskNoteHead(n)
 	if key == "" {
-		if text == "后台任务有更新" {
+		if text == transcript.BackgroundTaskUpdate {
 			return tt(l, "task_updated")
 		}
 		return text

@@ -396,8 +396,8 @@ struct MeetingPageBar: View {
                     confirmingStop = true
                 }
                 // On the button, so the question points at End.
-                .confirmationDialog(offers.replayClock ? String(localized: "End the Replay?") : String(localized: "End the Meeting?"),
-                                    isPresented: $confirmingStop, titleVisibility: .visible) {
+                .accessibleConfirmationDialog(offers.replayClock ? String(localized: "End the Replay?") : String(localized: "End the Meeting?"),
+                                              isPresented: $confirmingStop, titleVisibility: .visible, hasCancel: true) {
                     Button(offers.replayClock ? String(localized: "End Replay") : String(localized: "End and Write the Minutes"),
                            role: .destructive) { MeetingRecorder.shared.stop(recordingID: entry.id.uuidString) }
                     Button("Keep Going [Meeting Room]", role: .cancel) {}

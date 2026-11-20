@@ -21,7 +21,7 @@ Persona 算好的事实（这次开跑时的快照，数字以此为准，别改
   - {{.Name}}：在办 {{.Open}} 件{{if .Waiting}}，等用户拍板 {{.Waiting}} 件{{end}}{{if .Stuck}}，卡住 {{.Stuck}} 件{{end}}{{if or .Reached .Doing .NeedsYou}}；主管今天的小结：{{with .Reached}}达成 {{.}}；{{end}}{{with .Doing}}在做 {{.}}；{{end}}{{with .NeedsYou}}要用户做 {{.}}{{end}}{{else}}；主管今天还没写小结{{end}}{{end}}{{end}}{{with .Directions}}
 - 各方向停着的事（这些是 Persona 按任务账本、会话和卡片算好的，不要漏掉、不要改数字；等用户的行优先，owner 行全部列出，非 owner 行折叠时会写「另 N 件」）：{{range .}}
   - {{.Name}}：在办 {{.Open}} 件，活动 {{.Active}} 件，未派发 {{.Undispatched}} 件{{range .Waits}}
-    - {{.Line}}{{end}}{{if .More}}
+    - {{.Line}}{{with .Link}} {{.}}{{end}}{{end}}{{if .More}}
     - 另 {{.More}} 件，打开该方向查看：{{.Link}}{{end}}{{end}}{{end}}{{with .DisabledRoutines}}
 - 已关闭的每日收尾和巡检（每个一行；没记到关闭时间的必须照写「关闭时间未记录」，不能拿最后运行时间代替）：{{range .}}
   - {{.Line}}{{end}}{{end}}{{with .Briefs}}

@@ -5,6 +5,11 @@ const state = document.querySelector("#link-state");
 const result = document.querySelector("#link-result");
 const pluginToggle = document.querySelector("#claude-plugin");
 const pluginStatus = document.querySelector("#claude-plugin-status");
+const recovery = document.querySelector("#connection-recovery");
+const retryButton = document.querySelector("#retry");
+const localSettingsButton = document.querySelector("#local-settings");
+const title = document.querySelector("#setup-title");
+const settingsSections = ["#hub-settings", "#desktop-settings", "#link-settings"].map(selector => document.querySelector(selector));
 let words = {};
 
 function t(key, variables = {}) {
@@ -14,6 +19,20 @@ function t(key, variables = {}) {
 function message(value) {
   error.textContent = value || t("generic_error");
   error.hidden = false;
+}
+
+function showConnectionFailure() {
+  title.textContent = t("hub_connection_title");
+  recovery.hidden = false;
+  for (const section of settingsSections) section.hidden = true;
+}
+
+function showLocalSettings() {
+  title.textContent = t("welcome");
+  recovery.hidden = true;
+  error.hidden = true;
+  for (const section of settingsSections) section.hidden = false;
+  field.focus();
 }
 
 async function refreshLink() {
@@ -70,8 +89,24 @@ form.addEventListener("submit", async event => {
   event.preventDefault();
   error.hidden = true;
   const response = await window.desktopSetup.saveHub(field.value);
-  if (!response.ok) message(response.error || t("hub_invalid"));
+  if (!response.ok && !response.replaced) message(response.error || t("hub_invalid"));
 });
+
+retryButton.addEventListener("click", async () => {
+  retryButton.disabled = true;
+  retryButton.textContent = t("working");
+  error.hidden = true;
+  try {
+    const response = await window.desktopSetup.saveHub(field.value);
+    if (!response.ok && !response.replaced) message(t("hub_connection_retry_failed"));
+  } catch {
+    message(t("hub_connection_retry_failed"));
+  } finally {
+    retryButton.disabled = false;
+    retryButton.textContent = t("retry");
+  }
+});
+localSettingsButton.addEventListener("click", showLocalSettings);
 
 document.querySelector("#link-refresh").addEventListener("click", () => void refreshLink());
 document.querySelector("#link-install").addEventListener("click", async () => {
@@ -96,11 +131,12 @@ loginToggle.addEventListener("change", async () => {
   } finally { loginToggle.disabled = false; }
 });
 
-void window.desktopSetup.getHub().then(async ({ address, locale, strings }) => {
+void window.desktopSetup.getHub().then(async ({ address, connectionFailed, locale, strings }) => {
   field.value = address;
   words = strings;
   document.documentElement.lang = locale;
   for (const element of document.querySelectorAll("[data-i18n]")) element.textContent = t(element.dataset.i18n);
+  if (connectionFailed && address) showConnectionFailure();
   const login = await window.desktopSetup.getLaunchAtLogin();
   loginToggle.checked = login.enabled;
   document.querySelector("#launch-at-login-status").textContent = login.requiresApproval ? t("launch_requires_approval") : "";

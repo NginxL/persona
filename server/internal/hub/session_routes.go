@@ -11,6 +11,7 @@ func (h *Hub) sessionRoutes(api *http.ServeMux) {
 	// extensionReadable: an extension's token never reads a health-space conversation (extension_private.go).
 	api.HandleFunc("GET /api/v1/sessions/{mid}/{sid}/items", h.extensionReadable(h.withMachine(h.sessionItems)))
 	api.HandleFunc("GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image", h.extensionReadable(h.withMachine(h.sessionImage)))
+	api.HandleFunc("GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization", h.extensionReadable(h.withMachine(h.sessionVisualization)))
 	api.HandleFunc("GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full", h.extensionReadable(h.withMachine(h.sessionItemFull)))
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/messages", h.withoutTerminalControls(h.withClientOp("message", h.withMachine(h.sendMessage))))
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/attach", h.proxyBody("session.attach"))

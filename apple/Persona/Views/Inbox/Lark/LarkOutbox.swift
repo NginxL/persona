@@ -50,7 +50,7 @@ nonisolated struct LarkOutgoing: Identifiable, Equatable, Sendable {
     /// Drawn like my other messages: my name and avatar from the last one I sent here.
     func message(like mine: LarkMessage?) -> LarkMessage {
         var message = LarkMessage(id: rowID, position: "", senderID: mine?.senderID, senderName: mine?.senderName ?? String(localized: "Me"),
-                    senderAvatar: mine?.senderAvatar, senderType: mine?.senderType, isMine: true, type: "TEXT", text: text,
+                    senderAvatar: mine?.senderAvatar, senderAvatarURL: mine?.senderAvatarURL, senderType: mine?.senderType, isMine: true, type: "TEXT", text: text,
                     createdAt: at, recalled: false, replyCount: 0, replyTo: thread ? nil : replyTo)
         if let encrypted {
             message.olk = LarkEncryption(version: 1, state: "decrypted",

@@ -1,0 +1,260 @@
+[
+  {
+    "name": "uppercase HTTPS pull request",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/web/pull/7",
+        "title": "Preserve the source title"
+      }
+    ],
+    "valid": true,
+    "expected": [
+      {
+        "kind": "pull_request",
+        "number": "7",
+        "canonical_url": "https://github.com/example/web/pull/7",
+        "title": "Preserve the source title"
+      }
+    ]
+  },
+  {
+    "name": "mixed case HTTP public alias",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HtTp://www.github.com/Example/Web/issues/7"
+      }
+    ],
+    "valid": true,
+    "expected": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "canonical_url": "https://github.com/example/web/issues/7"
+      }
+    ]
+  },
+  {
+    "name": "uppercase self-hosted scheme retains port",
+    "provider": "gitlab",
+    "repository_url": "https://forge.example.com:8443/team/api",
+    "links": [
+      {
+        "url": "HTTPS://forge.example.com:8443/Team/API/-/issues/7"
+      }
+    ],
+    "valid": true,
+    "expected": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "canonical_url": "https://forge.example.com:8443/team/api/-/issues/7"
+      }
+    ]
+  },
+  {
+    "name": "self-hosted scheme mismatch",
+    "provider": "gitlab",
+    "repository_url": "https://forge.example.com:8443/team/api",
+    "links": [
+      {
+        "url": "HTTP://forge.example.com:8443/team/api/-/issues/7"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  },
+  {
+    "name": "self-hosted port mismatch",
+    "provider": "gitlab",
+    "repository_url": "https://forge.example.com:8443/team/api",
+    "links": [
+      {
+        "url": "HTTPS://forge.example.com:8444/team/api/-/issues/7"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  },
+  {
+    "name": "structured issue and public alias are duplicates",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "title": "First source title"
+      },
+      {
+        "url": "http://github.com/Example/Web/issues/7",
+        "title": "Different source title"
+      }
+    ],
+    "valid": false,
+    "error": "duplicate_link"
+  },
+  {
+    "name": "two aliases normalize to the same issue",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/web/issues/7"
+      },
+      {
+        "url": "http://www.github.com/Example/Web/issues/7"
+      }
+    ],
+    "valid": false,
+    "error": "duplicate_link"
+  },
+  {
+    "name": "public GitLab mixed merge request duplicates",
+    "provider": "gitlab",
+    "repository_url": "https://gitlab.com/example/subgroup/api",
+    "links": [
+      {
+        "kind": "pull_request",
+        "number": "7",
+        "title": "Original MR title"
+      },
+      {
+        "url": "HTTP://gitlab.com/Example/Subgroup/API/-/merge_requests/7",
+        "title": "Updated MR title"
+      }
+    ],
+    "valid": false,
+    "error": "duplicate_link"
+  },
+  {
+    "name": "structured duplicates are refused",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "kind": "pull_request",
+        "number": "7"
+      },
+      {
+        "kind": "pull_request",
+        "number": "7"
+      }
+    ],
+    "valid": false,
+    "error": "duplicate_link"
+  },
+  {
+    "name": "issue and pull request share a number",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "title": "Issue context"
+      },
+      {
+        "url": "HTTPS://github.com/Example/Web/pull/7",
+        "title": "Implementation title"
+      }
+    ],
+    "valid": true,
+    "expected": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "canonical_url": "https://github.com/example/web/issues/7",
+        "title": "Issue context"
+      },
+      {
+        "kind": "pull_request",
+        "number": "7",
+        "canonical_url": "https://github.com/example/web/pull/7",
+        "title": "Implementation title"
+      }
+    ]
+  },
+  {
+    "name": "different issue numbers preserve their own titles",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "title": "First source title"
+      },
+      {
+        "url": "http://github.com/Example/Web/issues/8",
+        "title": "Different source title"
+      }
+    ],
+    "valid": true,
+    "expected": [
+      {
+        "kind": "issue",
+        "number": "7",
+        "canonical_url": "https://github.com/example/web/issues/7",
+        "title": "First source title"
+      },
+      {
+        "kind": "issue",
+        "number": "8",
+        "canonical_url": "https://github.com/example/web/issues/8",
+        "title": "Different source title"
+      }
+    ]
+  },
+  {
+    "name": "wrong repository",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/other/pull/7"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  },
+  {
+    "name": "query",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/web/pull/7?view=full"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  },
+  {
+    "name": "fragment",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/web/pull/7#review"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  },
+  {
+    "name": "raw traversal",
+    "provider": "github",
+    "repository_url": "https://github.com/example/web",
+    "links": [
+      {
+        "url": "HTTPS://github.com/example/web/../web/pull/7"
+      }
+    ],
+    "valid": false,
+    "error": "link_repository_mismatch"
+  }
+]

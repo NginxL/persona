@@ -122,6 +122,8 @@ func TestExtensionScopedToken(t *testing.T) {
 		{"GET /api/v1/sessions", "/api/v1/sessions", "agents.read"},
 		{"PUT /api/v1/kb/{kind}/{id}", "/api/v1/kb/people/x", "kb.write"},
 		{"POST /api/v1/sessions/{mid}/{sid}/messages", "/api/v1/sessions/m/s/messages", "agents.control"},
+		{"GET /api/v1/assistant/dispatch-guard", "/api/v1/assistant/dispatch-guard", "dispatch.guard"},
+		{"PUT /api/v1/assistant/dispatch-guard", "/api/v1/assistant/dispatch-guard", "dispatch.guard"},
 		{"GET /api/v1/ws", "/api/v1/ws", ""},
 		{"POST /api/v1/auth/tokens", "/api/v1/auth/tokens", ""},
 	} {
@@ -134,6 +136,9 @@ func TestExtensionScopedToken(t *testing.T) {
 		{"GET", "/api/v1/extensions", ""},
 		{"GET", "/api/v1/extensions/-/market-settings", ""},
 		{"PUT", "/api/v1/extensions/-/market-settings", ""},
+		{"POST", "/api/v1/extensions/-/self/market/refresh", extension.ScopeMarketRefreshOwn},
+		{"POST", "/api/v1/extensions/-/markets/another/refresh", ""},
+		{"POST", "/api/v1/plugins/-/markets/another/refresh", ""},
 		{"GET", "/api/v1/plugins", ""},
 		{"GET", "/api/v1/extensions/other/-/", ""},
 		{"GET", "/api/v1/scopedx/y", ""},
@@ -186,6 +191,7 @@ func TestHubScopesConsent(t *testing.T) {
 	full := extension.Permissions{HubAPI: true}
 	both := extension.Permissions{HubAPI: true, Hub: []string{"kb.read"}}
 	mode := extension.Permissions{Hub: []string{extension.ScopeAgentsPermissionMode}}
+	refresh := extension.Permissions{Hub: []string{extension.ScopeMarketRefreshOwn}}
 	for _, c := range []struct {
 		name      string
 		have, ask extension.Permissions
@@ -200,6 +206,8 @@ func TestHubScopesConsent(t *testing.T) {
 		{"from the full token to hub_api with scopes", full, both, true},
 		{"the full token covers itself", full, full, true},
 		{"the full token does not cover the permission mode", full, mode, false},
+		{"the full token does not cover own-market refresh", full, refresh, false},
+		{"every scope does not cover own-market refresh", extension.Permissions{Hub: extension.EveryScope()}, refresh, false},
 		{"the full token does not cover the permission mode among others", full,
 			extension.Permissions{Hub: []string{"kb.read", extension.ScopeAgentsPermissionMode}}, false},
 		{"the permission mode covers itself", mode, mode, true},
@@ -230,6 +238,9 @@ func TestScopeOpens(t *testing.T) {
 		{[]string{extension.ScopeCallPrefix + "other"}, "/api/v1/extensions/{id}/", "/api/v1/extensions/third/x", false, extension.ScopeCallPrefix + "third"},
 		{[]string{extension.ScopeCallPrefix + "other"}, "/api/v1/extensions/{id}/", "/api/v1/extensions/other/-/config", false, ""},
 		{[]string{extension.ScopeKBRead}, "POST /api/v1/extensions/-/install", "/api/v1/extensions/-/install", false, ""},
+		{[]string{extension.ScopeMarketRefreshOwn}, "POST /api/v1/extensions/-/self/market/refresh", selfMarketRefreshPath, true, extension.ScopeMarketRefreshOwn},
+		{nil, "POST /api/v1/extensions/-/self/market/refresh", selfMarketRefreshPath, false, extension.ScopeMarketRefreshOwn},
+		{[]string{extension.ScopeMarketRefreshOwn}, "POST /api/v1/extensions/-/markets/{mid}/refresh", "/api/v1/extensions/-/markets/another/refresh", false, ""},
 	} {
 		if ok, scope := scopeOpens(c.scopes, c.pattern, c.path); ok != c.ok || scope != c.scope {
 			t.Errorf("%v on %s %s: %v %q, want %v %q", c.scopes, c.pattern, c.path, ok, scope, c.ok, c.scope)
@@ -242,6 +253,36 @@ func TestScopeOpens(t *testing.T) {
 	a := h.authorize(extwire.Authorize{Hash: hashToken(tok), Pattern: "/api/v1/extensions/", Method: "GET", Path: "/api/v1/extensions/other/page"})
 	if !a.OK || a.Extension != "example-x" || a.Scope != extension.ScopeCallPrefix+"other" {
 		t.Fatalf("%+v", a)
+	}
+
+	// Production also asks with the broad relay pattern; the manager must rematch the concrete path before checking
+	// the named-only scope. All-scope tokens and every other market-shaped path stay closed.
+	refreshToken := h.extTokens.issue("refresh", "Refresh", []string{extension.ScopeMarketRefreshOwn})
+	for _, c := range []struct {
+		path string
+		ok   bool
+	}{
+		{selfMarketRefreshPath, true},
+		{selfMarketRefreshPath + "/", false},
+		{"/api/v1/extensions/-/self%2Fmarket/refresh", false},
+		{"/api/v1/extensions/-/markets/another/refresh", false},
+		{"/api/v1/plugins/-/markets/another/refresh", false},
+		{"/api/v1/plugins/-/self/market/refresh", false},
+		{"/api/v1/admin/extensions/-/markets/another/refresh", false},
+	} {
+		a := h.authorize(extwire.Authorize{Hash: hashToken(refreshToken), Pattern: "/api/v1/extensions/", Method: http.MethodPost, Path: c.path})
+		if a.OK != c.ok {
+			t.Errorf("broad relay authorization for %s: %+v, want ok=%v", c.path, a, c.ok)
+		}
+	}
+	for _, tok := range []string{
+		h.extTokens.issue("every", "Every", extension.EveryScope()),
+		h.extTokens.issueAll("all", "All"),
+	} {
+		a := h.authorize(extwire.Authorize{Hash: hashToken(tok), Pattern: "/api/v1/extensions/", Method: http.MethodPost, Path: selfMarketRefreshPath})
+		if a.OK || a.Scope != extension.ScopeMarketRefreshOwn {
+			t.Errorf("all-scope token opened self refresh: %+v", a)
+		}
 	}
 	if a := h.authorize(extwire.Authorize{Hash: hashToken("pext_nope"), Pattern: "GET /api/v1/kb/{kind}", Method: "GET", Path: "/api/v1/kb/chats"}); a.Extension != "" || a.OK {
 		t.Fatalf("an unknown token: %+v", a)

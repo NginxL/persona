@@ -35,7 +35,7 @@ func closeoutOn(t *testing.T, s *Service) {
 }
 
 // A task's agent is told the closeout's form with its prompt only while the switches are on; with the delivery
-// standard on too, one instruction: the delivery line, then the block after it.
+// standard on too, the one block also carries delivery disposition and responsibility.
 func TestTaskPromptCarriesTheCloseoutForm(t *testing.T) {
 	s, f := newTaskService(t)
 	ctx := context.Background()
@@ -54,28 +54,27 @@ func TestTaskPromptCarriesTheCloseoutForm(t *testing.T) {
 	if err := s.putTriageSwitches(ctx, TriageSwitches{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	if p := start(edit); p != "修好登录" {
+	if p := start(edit); !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || strings.Contains(p, "收尾记录") {
 		t.Fatalf("the closeout switch is off, yet the prompt is %q", p)
 	}
 	if err := s.putTriageSwitches(ctx, TriageSwitches{Closeout: true}); err != nil {
 		t.Fatal(err)
 	}
-	if p := start(edit); p != "修好登录" {
+	if p := start(edit); !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || strings.Contains(p, "收尾记录") {
 		t.Fatalf("the triage is off, yet the prompt is %q", p)
 	}
 
 	closeoutOn(t, s)
 	p := start(edit)
-	if !strings.HasPrefix(p, "修好登录\n\n收尾记录") || !strings.Contains(p, `<closeout status="done|not_done|blocked"`) ||
+	if !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || !strings.Contains(p, "收尾记录") || !strings.Contains(p, `<closeout status="done|not_done|blocked"`) ||
 		strings.Contains(p, "交付：") {
 		t.Fatalf("closeout only:\n%s", p)
 	}
 
 	deliveryOn(t, s)
 	p = start(edit)
-	line, form := strings.Index(p, "交付：<已上线并实测"), strings.Index(p, `<closeout status=`)
-	if line < 0 || form < line || strings.Contains(p, "最后一行固定这样写") || !strings.Contains(p, "放在「交付：」那一行的后面") {
-		t.Fatalf("both asked for, the delivery line first:\n%s", p)
+	if strings.Contains(p, "交付：<已上线并实测") || strings.Count(p, "<closeout status=") != 1 || !strings.Contains(p, "delivery:") || !strings.Contains(p, "unblock:") || !strings.Contains(p, "不再另写") {
+		t.Fatalf("both switches must request one structured record:\n%s", p)
 	}
 	if p := start(read); strings.Contains(p, "交付：") || !strings.Contains(p, "收尾记录") || strings.Contains(p, "那一行的后面") {
 		t.Fatalf("a read-only task has no delivery line to put the block after:\n%s", p)

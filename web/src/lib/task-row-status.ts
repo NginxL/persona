@@ -4,7 +4,7 @@
 // Agent's own state and a to-do's state were drawn with different icon sets.
 import { t } from "../i18n";
 import { foldedState } from "./child-sessions";
-import { stateName } from "./state-labels";
+import { stateName, waitName, type WaitReason } from "./state-labels";
 import { reviewState, type Supervision } from "./supervision";
 import type { AgentState, Session } from "./types";
 
@@ -43,12 +43,13 @@ export function agentRowMark(key: AgentRowKey): AgentState {
   return MARK[key];
 }
 
-/** The status column's words for an Agent row key. */
-export function agentRowLabel(key: AgentRowKey): string {
+/** The status column's words for an Agent row key; a waiting one's say what it waits on (`wait`, lib/todo-wait-reason.ts
+ *  waitReason, #11090; none reads as Paused, nothing needed from you). */
+export function agentRowLabel(key: AgentRowKey, wait?: WaitReason): string {
   switch (key) {
     case "working": case "needs_you": case "unread": case "interrupted": case "failed":
       return stateName(key);
-    case "waiting": return stateName("task_waiting");
+    case "waiting": return waitName(wait ?? "unknown");
     case "usage_limit": return t("lib-usage-limit.short");
     case "idle": return t("assistant-tasks.agent_idle");
     case "stopped": return t("assistant-tasks.agent_stopped");
@@ -57,9 +58,10 @@ export function agentRowLabel(key: AgentRowKey): string {
   }
 }
 
-/** The colour of the status column's words: Needs you attention, a usage limit orange, a cut or failed one red. */
-export function agentRowTone(key: AgentRowKey): string {
-  if (key === "needs_you") return "text-attention";
+/** The colour of the status column's words: Needs you and a wait on the owner (Waiting on you, #11090) attention, a
+ *  usage limit orange, a cut or failed one red. */
+export function agentRowTone(key: AgentRowKey, wait?: WaitReason): string {
+  if (key === "needs_you" || (key === "waiting" && wait === "owner")) return "text-attention";
   if (key === "usage_limit") return "text-orange";
   if (key === "interrupted" || key === "failed") return "text-red";
   return "text-ink-2";

@@ -44,7 +44,7 @@ struct PersonaPicker: View {
             }
             // One question for the grid, about the avatar whose button asked (on the iPad and in iOS 26 a popover,
             // pointing at the cards); Delete deletes exactly that one.
-            .confirmationDialog(confirmingDelete.map { String(localized: "Delete “\($0.name)”?") } ?? "",
+            .accessibleConfirmationDialog(confirmingDelete.map { String(localized: "Delete “\($0.name)”?") } ?? "",
                                 isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }),
                                 titleVisibility: .visible, presenting: confirmingDelete) { p in
                 Button(String(localized: "Delete Avatar"), role: .destructive) {
@@ -172,8 +172,9 @@ struct PersonaPicker: View {
         let here = store.isOnPhone(p)
         return Button {
             guard !selected else { return }
+            let selection = store.tap(p, api: model.api)
             Task {
-                await store.choose(p, api: model.api)
+                await selection?.value
                 if store.current.id == p.id { Haptics.success() }
             }
         } label: {

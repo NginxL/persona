@@ -203,6 +203,10 @@ type Meta struct {
 	// turn_duration / an interrupt), no turn started after it. Unlike !TurnOpen it is false when the lines say nothing
 	// (a tail read from mid-turn).
 	TurnClosed bool
+	// The closing record, even when it produces no visible item (e.g. Codex without a duration).
+	turnEndedAt time.Time
+	turnEndSeq  int
+	turnEndLine string
 	// TurnError / TurnErrorKind: the latest turn failed on the model service, as the agent's own record says it
 	// (Codex: task_complete's error, #2185; Claude Code: the reply it writes itself for a failed request,
 	// isApiErrorMessage, #1710); empty when it ended well or the model answered since. Kind is
@@ -412,7 +416,7 @@ const APIRetrying = "（正在重试）"
 
 // OmpStoppedNotice is what a stopped omp session (listed from omp's own session files, node/ompdisk.go) shows in
 // place of its conversation. The hub puts it into the reader's language (hub/transcript_text.go noticeText).
-const OmpStoppedNotice = "这个 omp 会话已停止。现在只能在电脑上接着它（omp --resume），这里还不能给它发消息。"
+const OmpStoppedNotice = "这个 omp 会话已停止。发一条消息会在电脑上新开一个终端标签页，用 omp --resume 接着它。"
 
 // InterruptedNotice is the notice a turn stopped by the user becomes (Claude Code and Codex); APIErrorPrefix starts
 // the notice of a turn the model service failed. The channels read them as why a turn ended without words
@@ -430,18 +434,20 @@ const (
 // is tied to it (node/echo.go).
 const CompactNotice = "压缩上下文"
 
-// What the runtime bridges write themselves (integrations/paseo, opencode and pi lib/map.js), in Chinese as the node
+// What the runtime bridges write themselves (integrations/paseo, opencode, pi and antigravity), in Chinese as the node
 // writes its own lines: a failure's notice, and a runtime session's last words when its agent stopped on one
 // (RuntimeErrorLead, then the cause; RuntimeError alone when nothing was said of it); after a failed command's output,
 // its exit code (RuntimeExitHead, the code, RuntimeExitTail); a tool call cancelled before it gave anything back
-// (RuntimeCanceled). The hub rewrites them in the reader's language (hub/transcript_text.go, assistant/fleet_text.go).
+// (RuntimeCanceled); and agy's refused Auto mode falling back to Persona-side automatic approval. The hub rewrites them
+// in the reader's language (hub/transcript_text.go, assistant/fleet_text.go).
 // The bridges write them word for word: change both sides together.
 const (
-	RuntimeError     = "出错了"
-	RuntimeErrorLead = "出错了："
-	RuntimeExitHead  = "（退出码 "
-	RuntimeExitTail  = "）"
-	RuntimeCanceled  = "（已取消）"
+	RuntimeError                = "出错了"
+	RuntimeErrorLead            = "出错了："
+	RuntimeExitHead             = "（退出码 "
+	RuntimeExitTail             = "）"
+	RuntimeCanceled             = "（已取消）"
+	RuntimeAgyAutoRefusalNotice = "agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求"
 )
 
 // ParseLine converts one JSONL line (1-based seq) into items, updating meta.
@@ -495,6 +501,14 @@ func ParseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		}
 	}
 	return items
+}
+
+func (m *Meta) endTurn(seq int, at time.Time) {
+	m.TurnOpen, m.TurnClosed = false, true
+	m.turnEndedAt, m.turnEndSeq, m.turnEndLine = at, seq, m.tree.uuid
+	if m.tree.sidechain || m.Sidechain {
+		m.turnEndedAt = time.Time{}
+	}
 }
 
 // lineJSON is encoding/json's way of decoding without its check of the whole input before it decodes (its legacy
@@ -634,7 +648,10 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 			return nil
 		}
 		var text string
-		var images []proto.Item // a message with pictures, sent while the agent worked: its prompt is blocks
+		// A message with pictures, sent while the agent worked: its prompt is blocks. Newer Claude Code puts the
+		// pictures first: the text's items count from its first block, after them, so no two items share an id.
+		var before, images []proto.Item
+		at := 0
 		if json.Unmarshal(a.Prompt, &text) != nil {
 			var blocks []block
 			if json.Unmarshal(a.Prompt, &blocks) == nil {
@@ -642,12 +659,19 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 				for i, b := range blocks {
 					switch b.Type {
 					case "text":
+						if len(parts) == 0 {
+							at = i
+						}
 						parts = append(parts, b.Text)
 					case "image":
 						if img := imageOf(b); img != nil {
 							it := mk(i, "user", proto.KindImage)
 							it.Image, it.Queued = img, true
-							images = append(images, it)
+							if len(parts) == 0 {
+								before = append(before, it)
+							} else {
+								images = append(images, it)
+							}
 						}
 					}
 				}
@@ -661,9 +685,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if notification {
 			return nil // other harness notifications are not user input
 		}
-		items, paseo := paseoInput(mk, 0, text)
+		items, paseo := paseoInput(mk, at, text)
 		if !paseo {
-			items = userText(mk, text, meta)
+			items = userText(func(k int, role, kind string) proto.Item { return mk(at+k, role, kind) }, text, meta)
 		}
 		for i := range items {
 			if !paseo || items[i].Role == "user" { // a Paseo child's notice is a notice, as a background task's
@@ -673,7 +697,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if meta.FirstUser == "" && len(items) > 0 && items[0].Kind == proto.KindText {
 			meta.FirstUser = items[0].Text
 		}
-		return append(items, images...) // the pictures dropped here once: the phone showed the message without them
+		return append(append(before, items...), images...) // the pictures dropped here once: the phone showed the message without them
 	case "system":
 		if strings.HasPrefix(e.Subtype, "model_refusal_") {
 			return meta.claudeModelRefusal(e.Subtype, line, mk(0, "system", proto.KindNotice))
@@ -681,7 +705,7 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		var text string
 		switch e.Subtype {
 		case "turn_duration":
-			meta.TurnOpen, meta.TurnClosed = false, true
+			meta.endTurn(seq, e.Timestamp)
 			meta.turnSucceeded = meta.turnWorked && meta.TurnError == ""
 			meta.turnWorked = false // the turn's work is done: Claude Code's own continuation after a limit opens with no prompt
 			ms, ok := recordedMilliseconds(e.DurationMS)

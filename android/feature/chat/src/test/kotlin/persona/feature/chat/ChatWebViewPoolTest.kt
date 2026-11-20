@@ -1,13 +1,17 @@
 package persona.feature.chat
 
 import android.content.Context
+import android.view.View
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
+import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -15,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -294,8 +299,194 @@ class ChatWebViewPoolTest {
         assertTrue(fresh.settings.domStorageEnabled)
         assertFalse(fresh.settings.allowFileAccess)
         assertFalse(fresh.settings.allowContentAccess)
-        assertEquals(WebSettings.LOAD_CACHE_ELSE_NETWORK, fresh.settings.cacheMode)
+        assertEquals(WebSettings.LOAD_DEFAULT, fresh.settings.cacheMode)
         // Robolectric always answers false here and does not record the setter; the device scene checks real cookies.
         assertEquals("session=kept", CookieManager.getInstance().getCookie(link))
+    }
+
+    @Test fun defaultCacheModeFollowsHttpHeadersWhileForgetKeepsNoCache() {
+        val fresh = pool.acquire(link) as RecordingWebView
+        assertEquals(WebSettings.LOAD_DEFAULT, fresh.settings.cacheMode)
+        simulatePageFinished(fresh, link)
+        assertEquals(WebSettings.LOAD_DEFAULT, fresh.settings.cacheMode)
+
+        val other = "https://example.invalid/articles/no-store"
+        pool.preload(other)
+        val preloaded = pool.existing(other) as RecordingWebView
+        assertEquals(WebSettings.LOAD_DEFAULT, preloaded.settings.cacheMode)
+
+        pool.forget(dev)
+        val forwarded = pool.acquire(dev) as RecordingWebView
+        assertEquals(WebSettings.LOAD_NO_CACHE, forwarded.settings.cacheMode)
+        simulatePageFinished(forwarded, dev)
+        assertEquals(WebSettings.LOAD_NO_CACHE, forwarded.settings.cacheMode)
+    }
+
+    @Test fun preloadSkipsDirectMediaUrlsAndReleaseDoesNotPreloadThem() {
+        val mediaUrls = listOf(
+            "https://example.invalid/clips/demo.mp4",
+            "https://example.invalid/clips/demo.WEBM?token=1",
+            "https://example.invalid/streams/live.m3u8",
+            "https://example.invalid/audio/voice.mp3",
+        )
+        mediaUrls.forEach { pool.preload(it) }
+        assertTrue(created.isEmpty())
+
+        val directVideo = mediaUrls.first()
+        val shown = pool.acquire(directVideo) as RecordingWebView
+        assertEquals(0, shown.pauseCalls)
+        assertEquals(WebSettings.LOAD_DEFAULT, shown.settings.cacheMode)
+        val count = created.size
+
+        pool.release(shown)
+        assertEquals(1, shown.destroyCalls)
+        assertNull(pool.existing(directVideo))
+        assertEquals(count, created.size)
+    }
+
+    @Test fun activateResumesPreloadedViewOnceAndRecoversStalledVideoWhenLoadedAndAttached() {
+        pool.preload(link)
+        val preloaded = created.single()
+        assertEquals(1, preloaded.pauseCalls)
+        assertEquals(0, preloaded.resumeCalls)
+        assertTrue(preloaded.paused)
+
+        // Finishing while still paused in the background does not run media recovery yet.
+        simulatePageFinished(preloaded, link)
+        assertTrue(preloaded.evaluatedScripts.isEmpty())
+
+        pool.acquire(link)
+        pool.activate(preloaded)
+        assertEquals(1, preloaded.resumeCalls)
+        assertFalse(preloaded.paused)
+        // Repeated SideEffect activations must not spam onResume().
+        pool.activate(preloaded)
+        pool.activate(preloaded)
+        assertEquals(1, preloaded.resumeCalls)
+        // Still detached: wait until the view attaches to a live window.
+        assertTrue(preloaded.evaluatedScripts.isEmpty())
+
+        preloaded.simulateAttachToWindow()
+        assertEquals(listOf(RESUME_STALLED_MEDIA_JS), preloaded.evaluatedScripts)
+
+        // Subsequent attach or finish does not re-trigger recovery.
+        preloaded.simulateAttachToWindow()
+        simulatePageFinished(preloaded, next)
+        assertEquals(1, preloaded.evaluatedScripts.size)
+    }
+
+    @Test fun preloadedViewActivatedAndAttachedBeforeLoadFinishRecoversOnPageFinished() {
+        pool.preload(link)
+        val preloaded = created.single()
+        pool.acquire(link)
+        pool.activate(preloaded)
+        preloaded.simulateAttachToWindow()
+        assertTrue(preloaded.evaluatedScripts.isEmpty())
+
+        simulatePageFinished(preloaded, link)
+        assertEquals(listOf(RESUME_STALLED_MEDIA_JS), preloaded.evaluatedScripts)
+    }
+
+    @Test fun nonPreloadedViewDoesNotRunSpuriousPauseResumeOrMediaRecovery() {
+        val fresh = pool.acquire(link) as RecordingWebView
+        pool.activate(fresh)
+        fresh.simulateAttachToWindow()
+        simulatePageFinished(fresh, link)
+
+        assertEquals(0, fresh.pauseCalls)
+        assertEquals(0, fresh.resumeCalls)
+        assertTrue(fresh.evaluatedScripts.isEmpty())
+
+        // Pausing and resuming the pool (ON_STOP / ON_START) still pauses and resumes the active view cleanly.
+        pool.pause()
+        assertEquals(1, fresh.pauseCalls)
+        pool.resume()
+        assertEquals(1, fresh.resumeCalls)
+    }
+
+    @Test fun customViewLifecycleRejectsInactiveViewsHandlesHideReplaceAndCleansUpOnReleaseAndDestroy() {
+        // Inactive/preloaded view cannot hijack the screen with a custom view.
+        pool.preload(link)
+        val preloaded = pool.existing(link) as RecordingWebView
+        var rejectedHidden = 0
+        simulateShowCustomView(preloaded, View(context), WebChromeClient.CustomViewCallback { rejectedHidden++ })
+        assertNull(preloaded.customView)
+        assertEquals(1, rejectedHidden)
+
+        // Default video poster is a transparent 1x1 bitmap rather than null/default broken icon.
+        val poster = shadowOf(preloaded).webChromeClient.defaultVideoPoster
+        assertNotNull(poster)
+        assertEquals(1, poster!!.width)
+        assertEquals(1, poster.height)
+
+        // Active view shows custom view and handles re-entrant hide cleanly (callback invoked once).
+        pool.acquire(link)
+        pool.activate(preloaded)
+        val firstCustom = View(context)
+        val container = FrameLayout(context)
+        container.addView(firstCustom)
+        var firstHidden = 0
+        val reentrantCallback = WebChromeClient.CustomViewCallback {
+            firstHidden++
+            simulateHideCustomView(preloaded)
+        }
+        simulateShowCustomView(preloaded, firstCustom, reentrantCallback)
+        assertSame(firstCustom, preloaded.customView)
+
+        simulateHideCustomView(preloaded)
+        assertNull(preloaded.customView)
+        assertNull(firstCustom.parent)
+        assertEquals(1, firstHidden)
+
+        // Replacing an active custom view dismisses the previous one and invokes its callback once.
+        val secondCustom = View(context)
+        val thirdCustom = View(context)
+        var secondHidden = 0
+        var thirdHidden = 0
+        simulateShowCustomView(preloaded, secondCustom, WebChromeClient.CustomViewCallback { secondHidden++ })
+        simulateShowCustomView(preloaded, thirdCustom, WebChromeClient.CustomViewCallback { thirdHidden++ })
+        assertEquals(1, secondHidden)
+        assertSame(thirdCustom, preloaded.customView)
+
+        // Main-frame navigation exits fullscreen cleanly.
+        simulatePageStarted(preloaded, next)
+        assertNull(preloaded.customView)
+        assertEquals(1, thirdHidden)
+
+        // Release cleans up any active custom view before destroying the WebView.
+        val fourthCustom = View(context)
+        var fourthHidden = 0
+        simulateShowCustomView(preloaded, fourthCustom, WebChromeClient.CustomViewCallback { fourthHidden++ })
+        pool.release(preloaded)
+        assertNull(preloaded.customView)
+        assertEquals(1, fourthHidden)
+
+        // Switching to another active view exits the previous view's custom view.
+        val reopened = pool.acquire(link) as RecordingWebView
+        pool.activate(reopened)
+        val switchedCustom = View(context)
+        var switchedHidden = 0
+        simulateShowCustomView(reopened, switchedCustom, WebChromeClient.CustomViewCallback { switchedHidden++ })
+        val otherView = pool.acquire(next) as RecordingWebView
+        pool.activate(otherView)
+        assertNull(reopened.customView)
+        assertEquals(1, switchedHidden)
+
+        // Renderer loss cleans up any active custom view before destroying the crashed WebView.
+        val goneCustom = View(context)
+        var goneHidden = 0
+        simulateShowCustomView(otherView, goneCustom, WebChromeClient.CustomViewCallback { goneHidden++ })
+        simulateChatRendererGone(otherView)
+        assertNull(otherView.customView)
+        assertEquals(1, goneHidden)
+
+        // Pool destroy also cleans up an active custom view on the live page.
+        pool.activate(reopened)
+        val fifthCustom = View(context)
+        var fifthHidden = 0
+        simulateShowCustomView(reopened, fifthCustom, WebChromeClient.CustomViewCallback { fifthHidden++ })
+        pool.destroy()
+        assertNull(reopened.customView)
+        assertEquals(1, fifthHidden)
     }
 }

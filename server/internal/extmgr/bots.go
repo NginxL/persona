@@ -102,9 +102,12 @@ type BotFeatures struct {
 	// the progress card is folded, instead of the answer being written into the progress card (#5396). Off by default,
 	// and for settings saved before it: they have no such key.
 	AnswerNewCard bool `json:"answer_new_card"`
+	// TopicCot: a topic run also shows its thinking and tools in a native agent message, beside the progress card.
+	// On by default, including settings saved before it; off keeps the card's folded process panel.
+	TopicCot bool `json:"topic_cot"`
 }
 
-var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true}
+var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true, TopicCot: true}
 
 // BotOwner is the paired user: the only one the bot answers, and where pushes go.
 type BotOwner struct {
@@ -145,6 +148,8 @@ type botHub struct {
 	// handedGroup are the group messages handed to the assistant lately: a recall in a group is only passed on for one
 	// of these (botRecalled), memory only.
 	handedGroup idRing
+	// answerFiles keeps prepared long replies across retries and hub restarts.
+	answerFiles botAnswerFiles
 	// line is closed once the last message taken has been handed to the assistant (botMessage): they go in the
 	// order they came.
 	line chan struct{}
@@ -380,7 +385,7 @@ func (h *Manager) botView(ctx context.Context) feishuBotView {
 		v.Pairing = &botPairView{Code: p.Code, ExpiresAt: p.Expires.Unix()}
 	}
 	for _, c := range s.TopicChats {
-		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat()})
+		v.TopicChats = append(v.TopicChats, botChatView{ChatID: c.ChatID, Name: c.Name, AddedAt: c.At.Unix(), Home: c.ChatID == s.homeChat(), RequireOwnerMention: c.RequireOwnerMention})
 	}
 	botAppID := appID
 	b.mu.Unlock()
@@ -438,9 +443,10 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			// An entry may carry home: true (the home topic group, "/topics home"); when no entry says anything about home,
 			// the one the list has stays.
 			TopicChats *[]struct {
-				ChatID string `json:"chat_id"`
-				Name   string `json:"name"`
-				Home   *bool  `json:"home"`
+				ChatID              string `json:"chat_id"`
+				Name                string `json:"name"`
+				Home                *bool  `json:"home"`
+				RequireOwnerMention *bool  `json:"require_owner_mention"`
 			} `json:"topic_chats"`
 			// NudgeAfter is minutes before the one nudge under an unanswered card; 0 turns nudges off, absent leaves it.
 			// Read as raw JSON so that anything but a whole number in range gets the same answer (nudgeAfterValue).
@@ -485,10 +491,14 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			fs = &f
 		}
 		var topics []BotChat
+		mentionEdits := map[string]bool{}
 		keepHome := true // no entry says anything about home: the list's own stays
 		if in.TopicChats != nil {
 			topics = []BotChat{}
 			for _, c := range *in.TopicChats {
+				if c.RequireOwnerMention != nil {
+					mentionEdits[strings.TrimSpace(c.ChatID)] = *c.RequireOwnerMention
+				}
 				if c.Home != nil {
 					keepHome = false
 				}
@@ -512,7 +522,7 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			return
 		}
 		if topics != nil {
-			if err := h.setTopicChats(r.Context(), topics, keepHome); err != nil {
+			if err := h.setTopicChats(r.Context(), topics, keepHome, mentionEdits); err != nil {
 				writeErr(w, http.StatusBadRequest, err)
 				return
 			}

@@ -20,6 +20,7 @@
   "err_tier_name": "层级名称无效：{tier}。",
   "err_tier_launcher": "层级 {tier} 必须指定启动器。",
   "err_effort": "{where} 的思考强度 {effort} 无效。可用值：{levels}。",
+  "err_tier_speed": "预设 {tier} 的速度 {speed} 无效。可用值：standard、fast、ultrafast。",
   "err_cannot_run": "{purpose} 无法运行：{error}",
   "err_profiles": "最多可创建 {max} 个模型档位。",
   "err_active": "档位 {name} 正在使用，请先切换到其他档位再删除。",

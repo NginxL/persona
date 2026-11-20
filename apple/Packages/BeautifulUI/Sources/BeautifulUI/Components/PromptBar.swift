@@ -38,14 +38,16 @@ public struct PromptSource: Identifiable, Sendable {
 
 /// A `/` command.
 public struct PromptCommand: Identifiable, Sendable {
-    public var id: String { name }
+    /// The name, unless one was given: a user's saved prompt may share a name with a command and stays a row of its own.
+    public var id: String
     /// Including the slash, e.g. "/compare".
     public var name: String
     public var detail: String
     /// What picking it types into the draft; `nil` types the name and a space.
     public var insert: String?
 
-    public init(_ name: String, detail: String, insert: String? = nil) {
+    public init(_ name: String, detail: String, insert: String? = nil, id: String? = nil) {
+        self.id = id ?? name
         self.name = name
         self.detail = detail
         self.insert = insert

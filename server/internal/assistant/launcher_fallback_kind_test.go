@@ -19,6 +19,9 @@ func kindFixture(t *testing.T) (*Service, *fakeHub) {
 	f.launcherList = []proto.Launcher{{Name: "wrap"}, {Name: "cx", Agent: "codex"}}
 	f.agentModels = map[string][]proto.AgentModel{"claude": {{ID: "claude-opus-5-5"}}}
 	s := newTestService(t, f)
+	// The last successful shell discovery establishes the missing wrapper's kind. Tests for a cold cache clear this.
+	s.models.zshrc = map[string][]proto.Launcher{"server": {{Name: "wrap", Source: "zshrc"}}}
+	s.models.zshrcSync = map[string]LauncherSync{}
 	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.wrap", Model: "claude-opus-5-5"})
 	setSettings(t, s, func(v *Settings) { v.Main = "main" })
 	f.setSessions("server", proto.Session{SessionID: "main", Assistant: true})
@@ -46,7 +49,9 @@ func TestMainChatFallbackKeepsTheAgentKind(t *testing.T) {
 		t.Fatalf("hidden: %v %v", p, err)
 	}
 
-	// Gone from the computer: plain claude, same kind, same model; the note says so.
+	// Gone from the computer: the explicitly approved plain claude is the same kind and keeps the model; the note says so.
+	fastLauncherRecovery(t)
+	f.hello.Models.LauncherRecovery = map[string]LauncherRecovery{"server": {WaitSeconds: 1, Fallbacks: map[string][]string{"wrap": {"claude"}}}}
 	f.launcherList = []proto.Launcher{{Name: "cx", Agent: "codex"}}
 	if p, err := sendMain(t, s); err != nil || p["launcher"] != "claude" || p["model"] != "claude-opus-5-5" {
 		t.Fatalf("gone: %v %v", p, err)
@@ -75,6 +80,8 @@ func TestMainChatFallbackKeepsTheAgentKind(t *testing.T) {
 func TestMainChatFallbackToAManagedLauncherDropsAModelItLacks(t *testing.T) {
 	ctx := context.Background()
 	s, f := kindFixture(t)
+	fastLauncherRecovery(t)
+	f.hello.Models.LauncherRecovery = map[string]LauncherRecovery{"server": {WaitSeconds: 1, Fallbacks: map[string][]string{"wrap": {"gw"}}}}
 	f.devices[0].ClaudeVersion = ""
 	f.launcherList = []proto.Launcher{{Name: "cx", Agent: "codex"}}
 	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", BaseURL: "https://gw.example", Model: "m1"}})

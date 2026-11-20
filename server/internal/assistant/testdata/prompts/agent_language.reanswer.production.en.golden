@@ -1,0 +1,4 @@
+The assistant answered your earlier questions for me. I am changing those answers now:
+- 用哪个分支？ → main (the assistant answered: feat/x)
+
+Continue according to my answers. If you already acted on the assistant's answers, first explain what needs to change, and revert what can be reverted directly.

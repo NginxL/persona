@@ -55,6 +55,8 @@ data class ChatAppBindings(
     val assistantManagement: AssistantManagement,
     val mainSender: MainConversationSender,
     val draftVersions: (SessionKey) -> Flow<DraftSessionVersion> = { emptyFlow() },
+    /** Resolve the main conversation only when a local handoff needs its upload machine; it never sends a message. */
+    val mainUploadTarget: (suspend () -> SessionKey?)? = null,
     /** Read-only access to the machines (the photos sent with messages load from them); null where there is none. */
     val files: SessionFiles? = null,
     /** The group's machines' ports on the phone (docs/operations/ports.md); null where there is no hub. */
@@ -66,6 +68,8 @@ data class ChatAppBindings(
     val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     /** This group's hub's subscription use (`GET /api/v1/usage/windows`), for ultracode's quota line (#582). */
     val usage: (suspend () -> List<persona.core.contracts.api.UsageAccount>)? = null,
+    /** Forward to's Recent for this group (#3901): on the phone, ids only, gone with the pairing; null where there is none. */
+    val forwardMemory: ForwardMemory? = null,
 )
 
 interface ChatWiringSource {
@@ -112,7 +116,8 @@ class ChatDraftEditor(
                 try {
                     Snapshot.withMutableSnapshot {
                         if (!touched && !state.hasContent) {
-                            if (read.attachments.isEmpty()) state.editMessage(read.text) else state.load(read.composerDraft())
+                            if (read.attachments.isEmpty() && !read.hasPickedSavedPrompt) state.editMessage(read.text)
+                            else state.load(read.composerDraft())
                             state.sessionVersion = read.sessionVersion
                         }
                     }
@@ -142,8 +147,10 @@ class ChatDraftEditor(
                 val text = if (repository.structured) draft.text
                     else ChatComposerState(draft).let { if (it.ready) it.message() else draft.text }
                 val version = draft.sessionVersion.takeIf { repository.structured && (text.isNotEmpty() || attachments.isNotEmpty()) }
-                if (text != previous.text || attachments != previous.attachments || version != previous.sessionVersion)
-                    saved = repository.save(key, text, previous.version, attachments, version)
+                val picked = repository.structured && draft.hasPickedSavedPrompt
+                if (text != previous.text || attachments != previous.attachments || version != previous.sessionVersion ||
+                    picked != previous.hasPickedSavedPrompt)
+                    saved = repository.save(key, text, previous.version, attachments, version, picked)
                 error.value = null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error.value = R.string.chat_draft_save_failed }
@@ -219,10 +226,10 @@ fun ChatDestination(
         wiring?.agentShares?.let { provider -> sharingManager?.let { owner -> { provider.forSession(session, owner) } } }
     }?.takeIf { style == ChatRenderStyle.Agent }
     val editor = rememberChatDraftEditor(if (historyReadOnly) null else wiring, session)
-    val handToPersona = rememberHandToPersona(wiring?.mainSender?.takeIf { style != ChatRenderStyle.Assistant }, navigator)
     val composer by (editor?.composer ?: remember { MutableStateFlow<ChatComposerState?>(null) }).collectAsStateWithLifecycle()
     val error by (editor?.error ?: remember { MutableStateFlow<Int?>(null) }).collectAsStateWithLifecycle()
     ComposerFocusAskEffect(session, composer)
+    if (editor != null && composer == null) return
     // The next card another chat waits on you with, after answering here (Persona's conversation in the Assistant tab).
     val elsewhere = LocalWaitingElsewhere.current.takeUnless { historyReadOnly }
     androidx.compose.runtime.CompositionLocalProvider(LocalUsageRead provides wiring?.usage) {
@@ -239,7 +246,7 @@ fun ChatDestination(
                     persona.core.navigation.ConversationKind.Agent, side = true)) }),
                 onOpenAssistant = { navigator.navigate(conversationRoute(it, assistant = true)) },
                 onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
-                files = wiring?.files, ports = wiring?.ports, onHandToPersona = handToPersona,
+                files = wiring?.files, ports = wiring?.ports,
                 tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
                 assistantManagement = assistantManagement,
                 mainConversation = assistantSnapshot.mainSession?.sessionId,

@@ -21,8 +21,8 @@ func (n *Node) closeoutStop(parent context.Context, req sockRequest, in hookInpu
 	if req.ReportOnly || in.HookEventName != "Stop" || in.AgentID != "" || in.StopHookActive || n.peer == nil {
 		return nil
 	}
-	reply := strings.TrimSpace(in.LastAssistantMessage)
-	if reply == "" || strings.HasPrefix(reply, "API Error") || closeout.Has(reply) || n.isAssistantSession(in.SessionID) {
+	reply := in.LastAssistantMessage
+	if trimmed := strings.TrimSpace(reply); trimmed == "" || strings.HasPrefix(trimmed, "API Error") || closeout.Has(reply) || n.isAssistantSession(in.SessionID) {
 		return nil
 	}
 	if !turnWorked(in.TranscriptPath) {

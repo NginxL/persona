@@ -63,26 +63,41 @@ func New(cfg Config) *Client {
 
 // NewWith is New sending its requests through transport (nil: this machine's network).
 func NewWith(cfg Config, transport http.RoundTripper) *Client {
-	return &Client{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: transport, CheckRedirect: checkRedirect}}
+	c := &Client{cfg: cfg}
+	c.http = &http.Client{Timeout: 60 * time.Second, Transport: transport, CheckRedirect: c.checkRedirect}
+	return c
 }
 
-// net/http copies headers from the first request on every redirect, so check the entire chain before retaining its
-// potentially private User-Agent or gateway session header. Once a chain leaves its original origin, all later hops
-// use Persona's identity and drop gateway-scoped session headers.
+// net/http copies headers from the first request on every redirect, so check the entire chain before retaining
+// provider-specific values. Once a chain leaves its original origin, all later hops use Persona's identity and omit
+// every custom provider header and gateway-scoped session header.
 func checkRedirect(req *http.Request, via []*http.Request) error {
+	return checkRedirectHeaders(req, via, nil)
+}
+
+func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
+	return checkRedirectHeaders(req, via, c.cfg.Headers)
+}
+
+func checkRedirectHeaders(req *http.Request, via []*http.Request, headers map[string]string) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
 	origin := via[0].URL
-	if !sameOrigin(origin, req.URL) {
+	clearPrivate := func() {
+		for name := range headers {
+			req.Header.Del(name)
+		}
 		req.Header.Set("User-Agent", modelhttp.UserAgent())
 		modelhttp.ClearOpenCodeSession(req.Header)
+	}
+	if !sameOrigin(origin, req.URL) {
+		clearPrivate()
 		return nil
 	}
 	for _, previous := range via[1:] {
 		if !sameOrigin(origin, previous.URL) {
-			req.Header.Set("User-Agent", modelhttp.UserAgent())
-			modelhttp.ClearOpenCodeSession(req.Header)
+			clearPrivate()
 			break
 		}
 	}
@@ -248,6 +263,7 @@ func (c *Client) chat(ctx context.Context, r Request) (Reply, error) {
 	default:
 		reply, answered, err = c.messages(ctx, hc, key, r)
 	}
+	err = c.redactError(err, key)
 	returned = true
 	if reply.Model == "" {
 		reply.Model = c.cfg.Model
@@ -317,6 +333,13 @@ func apiEndpoint(base, path string) string {
 	return base + "/" + path
 }
 
+// setCustomHeaders applies provider fields before the protocol's own credentials and metadata, which always win.
+func (c *Client) setCustomHeaders(req *http.Request) {
+	for name, value := range c.cfg.Headers {
+		req.Header.Set(name, value)
+	}
+}
+
 // setUserAgent gives an explicit connection value precedence over Persona's default.
 func (c *Client) setUserAgent(req *http.Request) {
 	if c.cfg.UserAgent != nil {
@@ -341,6 +364,7 @@ func (c *Client) messages(ctx context.Context, hc *http.Client, key string, r Re
 	if err != nil {
 		return reply, false, err
 	}
+	c.setCustomHeaders(req)
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("accept", "text/event-stream")
 	if c.cfg.Bearer {
@@ -357,7 +381,7 @@ func (c *Client) messages(ctx context.Context, hc *http.Client, key string, r Re
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return reply, false, newHTTPError(resp, raw)
+		return reply, false, c.newHTTPError(resp, raw, key)
 	}
 	in := bufio.NewReader(resp.Body)
 	if wholeMessage(in) {
@@ -662,6 +686,7 @@ func (c *Client) respond(ctx context.Context, hc *http.Client, key string, r Req
 	if err != nil {
 		return reply, false, err
 	}
+	c.setCustomHeaders(hreq)
 	hreq.Header.Set("content-type", "application/json")
 	hreq.Header.Set("accept", "text/event-stream")
 	hreq.Header.Set("authorization", "Bearer "+key)
@@ -673,7 +698,7 @@ func (c *Client) respond(ctx context.Context, hc *http.Client, key string, r Req
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return reply, false, newHTTPError(resp, raw)
+		return reply, false, c.newHTTPError(resp, raw, key)
 	}
 	var b strings.Builder
 	refused := false // a refusal content part came: the model declined, whatever else the stream says

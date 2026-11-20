@@ -1,4 +1,4 @@
-Search this assistant's saved repository references to resolve repository identity when a request is ambiguous. Search names, aliases, full repository paths and purposes; use repository_get for details only when useful. An explicit repository URL or path supplied by the user takes precedence. These bindings are references, not authorization or an allowlist; never infer a machine or local checkout path from a remote reference. Returns only saved metadata and verified_at, without remote checks, source fetching, cloning or permission checks. Non-repository tasks do not need a lookup. This guidance is not a mandatory dispatch preflight.
+Search this assistant's saved names, aliases, full paths and purposes to resolve repository identity; use repository_get for useful details. The user's explicit repository URL or path takes precedence. References are not authorization or an allowlist; never infer a machine or local checkout path. Returns saved metadata and verified_at only: no remote, source, clone or permission checks. Non-repository tasks need no lookup; this is not a mandatory dispatch preflight.
 
 ```json
 {

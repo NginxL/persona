@@ -6,8 +6,8 @@
 // Both ends run a Mux on their rpc.Peer: Open registers a stream (bytes for it are kept from then on), Start pumps
 // it to and from a connection. The side that dials (the node) opens and starts before answering; the side that
 // asked (the hub) opens before asking and starts once it has the answer, so no byte arrives for a stream nobody
-// holds. A stream ends when either connection does: the end that saw it sends stream.close and the other writes
-// what it already has, then closes its connection.
+// holds. By default an EOF ends the stream with stream.close. On a negotiated TCP stream, stream.eof carries one
+// direction's EOF and the stream lives until both directions have finished or either end closes it outright.
 //
 // The side that asked can give up before the answer (its caller went away, the call timed out): its stream.close
 // then reaches the dialing side before that side's Open. So a Mux remembers for goneFor the ids it heard closed
@@ -30,7 +30,14 @@ const (
 	EventData  = "stream.data"
 	EventAck   = "stream.ack"
 	EventClose = "stream.close"
+	EventEOF   = "stream.eof"
 )
+
+// HalfCloseConn is a stream endpoint that can deliver EOF to its reader while still accepting bytes to send.
+type HalfCloseConn interface {
+	io.ReadWriteCloser
+	CloseWrite() error
+}
 
 const (
 	chunk = 32 << 10
@@ -77,14 +84,29 @@ type stream struct {
 	peerDone bool // the peer sent close: write what is queued, then close conn
 	done     bool // finished: nothing more is read, written or sent
 	conn     io.ReadWriteCloser
+
+	halfConn     HalfCloseConn
+	peerEOF      bool // the peer sent its last byte
+	readDone     bool // local EOF sent to the peer
+	writeDone    bool // peer EOF delivered to conn
+	reportClosed bool // the dialing node reports completion to its manager
 }
 
 type dataMsg struct {
-	ID   string `json:"id"`
-	Data []byte `json:"data,omitempty"`
-	N    int    `json:"n,omitempty"`
-	Err  string `json:"error,omitempty"`
+	ID    string `json:"id"`
+	Data  []byte `json:"data,omitempty"`
+	N     int    `json:"n,omitempty"`
+	Err   string `json:"error,omitempty"`
+	Abort bool   `json:"abort,omitempty"`
 }
+
+type closeMode uint8
+
+const (
+	closeLocal closeMode = iota
+	closePeer
+	abortPeer
+)
 
 // Open registers stream id: bytes the peer sends for it are kept until Start. It refuses an id the peer closed in
 // the last goneFor before this: the peer gave up on it already.
@@ -140,8 +162,18 @@ func (m *Mux) markGoneLocked(id string, closed bool) bool {
 	return true
 }
 
-// Start pumps stream id to and from conn until either ends; conn is closed then. It returns at once.
+// Start pumps stream id to and from conn with legacy full-close semantics. It returns at once.
 func (m *Mux) Start(id string, conn io.ReadWriteCloser) {
+	m.start(id, conn, nil, false)
+}
+
+// StartHalfClose pumps a negotiated TCP stream until both directions reach EOF or the stream closes outright.
+// The dialing node sets reportClosed to retire the manager's tracking once its socket is closed.
+func (m *Mux) StartHalfClose(id string, conn HalfCloseConn, reportClosed bool) {
+	m.start(id, conn, conn, reportClosed)
+}
+
+func (m *Mux) start(id string, conn io.ReadWriteCloser, halfConn HalfCloseConn, reportClosed bool) {
 	m.mu.Lock()
 	s := m.streams[id]
 	m.mu.Unlock()
@@ -150,14 +182,14 @@ func (m *Mux) Start(id string, conn io.ReadWriteCloser) {
 		return
 	}
 	s.mu.Lock()
-	s.conn = conn
-	finished := s.done
-	s.cond.Broadcast()
-	s.mu.Unlock()
-	if finished {
+	if s.done || s.conn != nil {
+		s.mu.Unlock()
 		_ = conn.Close()
 		return
 	}
+	s.conn = conn
+	s.halfConn, s.reportClosed = halfConn, reportClosed
+	s.mu.Unlock()
 	go s.read()
 	go s.write()
 }
@@ -168,14 +200,14 @@ func (m *Mux) Abort(id string, why error) {
 	s := m.streams[id]
 	m.mu.Unlock()
 	if s != nil {
-		s.finish(why, true)
+		s.finish(why, abortPeer)
 	}
 }
 
 // Event takes the Mux's events off the RPC connection; it reports whether event was one. It never blocks.
 func (m *Mux) Event(event string, params json.RawMessage) bool {
 	switch event {
-	case EventData, EventAck, EventClose:
+	case EventData, EventAck, EventClose, EventEOF:
 	default:
 		return false
 	}
@@ -186,29 +218,31 @@ func (m *Mux) Event(event string, params json.RawMessage) bool {
 	m.mu.Lock()
 	s := m.streams[p.ID]
 	// Not one this side holds: a close before Open, or a stream that ended here (or before this side restarted). A
-	// closed id is remembered so a late Open refuses it, and the first data for an id gets a close back, so the peer
+	// closed id is remembered so a late Open refuses it, and the first data or EOF for an id gets a close back, so the peer
 	// ends its side too. The answer goes from its own goroutine: send may block, and Event never does.
 	tell := false
 	if s == nil && p.ID != "" && !m.closed && event != EventAck {
-		tell = m.markGoneLocked(p.ID, event == EventClose) && event == EventData
+		tell = m.markGoneLocked(p.ID, event == EventClose) && event != EventClose
 	}
 	m.mu.Unlock()
 	if s == nil {
 		if tell {
-			go func() { _ = m.send(EventClose, dataMsg{ID: p.ID, Err: "streams: no such stream"}) }()
+			go func() {
+				_ = m.send(EventClose, dataMsg{ID: p.ID, Err: "streams: no such stream", Abort: event == EventEOF})
+			}()
 		}
 		return true
 	}
 	switch event {
 	case EventData:
 		s.mu.Lock()
-		if s.done || s.peerDone {
+		if s.done || s.peerDone || s.peerEOF && s.halfConn != nil {
 			s.mu.Unlock()
 			return true
 		}
 		if s.queued+len(p.Data) > window { // the peer ignored the window: drop the stream rather than the memory
 			s.mu.Unlock()
-			s.finish(errors.New("streams: window exceeded"), true)
+			s.finish(errors.New("streams: window exceeded"), abortPeer)
 			return true
 		}
 		s.queue = append(s.queue, p.Data)
@@ -223,6 +257,15 @@ func (m *Mux) Event(event string, params json.RawMessage) bool {
 	case EventClose:
 		s.mu.Lock()
 		s.peerDone = true
+		abort := p.Abort || s.writeDone
+		s.cond.Broadcast()
+		s.mu.Unlock()
+		if abort {
+			go s.finish(nil, closeLocal)
+		}
+	case EventEOF:
+		s.mu.Lock()
+		s.peerEOF = true
 		s.cond.Broadcast()
 		s.mu.Unlock()
 	}
@@ -239,7 +282,7 @@ func (m *Mux) CloseAll() {
 	}
 	m.mu.Unlock()
 	for _, s := range all {
-		s.finish(nil, false)
+		s.finish(nil, closeLocal)
 	}
 }
 
@@ -267,35 +310,56 @@ func (s *stream) read() {
 			s.inflight += n
 			s.mu.Unlock()
 			if serr := s.m.send(EventData, dataMsg{ID: s.id, Data: append([]byte(nil), buf[:n]...)}); serr != nil {
-				s.finish(serr, false)
+				s.finish(serr, closeLocal)
 				return
 			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				err = nil
+				if s.halfConn != nil {
+					s.mu.Lock()
+					closed := s.done || s.peerDone
+					s.mu.Unlock()
+					if closed {
+						return
+					}
+					if err := s.m.send(EventEOF, dataMsg{ID: s.id}); err != nil {
+						s.finish(err, closeLocal)
+						return
+					}
+					s.halfDone(true)
+					return
+				}
+				s.finish(nil, closePeer) // legacy EOF closes the entire stream
+				return
 			}
-			s.finish(err, true)
+			s.finish(err, abortPeer)
 			return
 		}
 	}
 }
 
-// write writes what the peer sent to conn and acknowledges it; once the peer has closed and everything is written,
-// the stream is finished.
+// write delivers queued bytes and only then applies the peer's EOF or close.
 func (s *stream) write() {
 	for {
 		s.mu.Lock()
-		for len(s.queue) == 0 && !s.peerDone && !s.done {
+		for len(s.queue) == 0 && !s.peerDone && !s.done && !(s.peerEOF && s.halfConn != nil) {
 			s.cond.Wait()
 		}
 		if s.done {
 			s.mu.Unlock()
 			return
 		}
-		if len(s.queue) == 0 { // the peer closed and all it sent is written
+		if len(s.queue) == 0 {
+			half := !s.peerDone
 			s.mu.Unlock()
-			s.finish(nil, false)
+			if !half {
+				s.finish(nil, closeLocal)
+			} else if err := s.halfConn.CloseWrite(); err != nil {
+				s.finish(err, abortPeer)
+			} else {
+				s.halfDone(false)
+			}
 			return
 		}
 		b := s.queue[0]
@@ -305,15 +369,32 @@ func (s *stream) write() {
 		conn := s.conn
 		s.mu.Unlock()
 		if _, err := conn.Write(b); err != nil {
-			s.finish(err, true)
+			s.finish(err, abortPeer)
 			return
 		}
 		_ = s.m.send(EventAck, dataMsg{ID: s.id, N: len(b)})
 	}
 }
 
-// finish ends the stream once: conn is closed, and the peer told (tell) unless it ended it.
-func (s *stream) finish(why error, tell bool) {
+// halfDone keeps the stream open until the outgoing EOF is sent and the incoming EOF reaches the local socket.
+func (s *stream) halfDone(read bool) {
+	s.mu.Lock()
+	if read {
+		s.readDone = true
+	} else {
+		s.writeDone = true
+	}
+	closed, complete := s.peerDone && s.writeDone, s.readDone && s.writeDone
+	s.mu.Unlock()
+	if complete && s.reportClosed {
+		s.finish(nil, closePeer)
+	} else if closed || complete {
+		s.finish(nil, closeLocal)
+	}
+}
+
+// finish ends the stream once and reports the close if requested and the peer has not already closed.
+func (s *stream) finish(why error, mode closeMode) {
 	s.mu.Lock()
 	if s.done {
 		s.mu.Unlock()
@@ -322,6 +403,7 @@ func (s *stream) finish(why error, tell bool) {
 	s.done = true
 	peerDone := s.peerDone
 	conn := s.conn
+	abort := s.halfConn != nil && mode == abortPeer
 	s.queue, s.queued = nil, 0
 	s.cond.Broadcast()
 	s.mu.Unlock()
@@ -332,8 +414,8 @@ func (s *stream) finish(why error, tell bool) {
 	if conn != nil {
 		_ = conn.Close()
 	}
-	if tell && !peerDone {
-		msg := dataMsg{ID: s.id}
+	if mode != closeLocal && !peerDone {
+		msg := dataMsg{ID: s.id, Abort: abort}
 		if why != nil {
 			msg.Err = why.Error()
 		}

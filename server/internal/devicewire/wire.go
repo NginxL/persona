@@ -13,6 +13,10 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// LegacyTaskExecution is an internal assistant.send hint for unconfigured scheduled turns.
+// The devices manager consumes it against the connected node's handshake before dispatch.
+const LegacyTaskExecution = "task_execution_legacy"
+
 // Manager → hub.
 const (
 	// EventState {machines: [State], absorbed: {entry id: machine id}, entries: [Entry]}: every machine as the manager
@@ -212,6 +216,9 @@ type Config struct {
 	// PendingUnknown: the hub could not read which machines wait (its database did not answer); until a handover
 	// without it, the manager treats every machine as not confirmed yet.
 	PendingUnknown bool `json:"pending_unknown,omitempty"`
+	// LinkSwitch: this hub answers devices.link_switch.* (link_switch.go) and takes Persona Link now (its TLS port or
+	// an https public_url); an older hub, or one no Persona Link can reach, leaves it out and no switch is offered.
+	LinkSwitch bool `json:"link_switch,omitempty"`
 }
 
 // LinkEndpoint is one address Persona Link may use (internal/link.Endpoint).
@@ -337,6 +344,8 @@ type NodeCall struct {
 	MachineID  string          `json:"machine_id"`
 	Method     string          `json:"method"`
 	Params     json.RawMessage `json:"params,omitempty"`
+	// StreamVersion is an offer for port.dial. The manager passes it into the node's params.
+	StreamVersion int `json:"stream_version,omitempty"`
 	// TimeoutMS bounds the call on the manager's side too, a little before the caller gives up: the manager's
 	// CodeDeadline answer comes back in time.
 	TimeoutMS int64 `json:"timeout_ms,omitempty"`
@@ -348,16 +357,56 @@ type NodeCall struct {
 	// Actor says who asked for a session.modes call the manager keeps a record of (#10297): display only, never
 	// trusted for access (the hub checked the request already). Nil from an older hub and on every other call.
 	Actor *Actor `json:"actor,omitempty"`
+	// Hold (session.send only, #10661): the owner's message to an Agent may be held when it cannot go now. When the
+	// node is not connected, so nothing was written, or older held messages of the same session wait, the manager keeps
+	// this call as it came (caller and submission with it) and sends it once the node is back, answering CodeHeld
+	// instead of machine_offline. Nil from an older hub and on every other call; an older manager ignores it.
+	Hold *Hold `json:"hold,omitempty"`
+	// Ordered (session.send only, #10661): the owner's message to an Agent from a person's device, which must not go
+	// ahead of messages held for that Agent. Set whether or not Hold is: a message from an app that does not draw held
+	// messages (no Hold) is refused, nothing written, while older ones of its session are held, instead of overtaking
+	// them (codeHeldAhead, delivered none). Nil from an older hub; an older manager ignores it.
+	Ordered bool `json:"ordered,omitempty"`
 }
 
-// Actor is who asked the hub for a call (NodeCall.Actor): the kind of token ("device", "hub" for the hub's own
-// token, "extension") and, for a device, its id and name as the hub knows them; an extension's id. Display only.
-type Actor struct {
-	Kind       string `json:"kind"`
-	DeviceID   string `json:"device_id,omitempty"`
-	DeviceName string `json:"device_name,omitempty"`
-	Extension  string `json:"extension,omitempty"`
+const (
+	MethodPortDial = "port.dial"
+	// PortStreamHalfCloseV1 supports directional EOF on forwarded TCP streams.
+	PortStreamHalfCloseV1 = 1
+)
+
+// PortDial opens a stream to a port on the node. The hub offers StreamVersion only for an endpoint with CloseWrite.
+type PortDial struct {
+	ID            string `json:"id"`
+	Port          int    `json:"port"`
+	KeepAwake     bool   `json:"keep_awake,omitempty"` // keep a watched screen awake
+	Pair          string `json:"pair,omitempty"`       // ties a screen stream to screen.dial
+	Link          bool   `json:"link,omitempty"`       // use screen session framing
+	Attach        bool   `json:"attach,omitempty"`     // rejoin a live screen session
+	StreamVersion int    `json:"stream_version,omitempty"`
 }
+
+// PortDialReply confirms the stream version or the use of screen session framing.
+type PortDialReply struct {
+	Link          int `json:"link,omitempty"`
+	StreamVersion int `json:"stream_version,omitempty"`
+}
+
+// Hold is NodeCall.Hold.
+type Hold struct {
+	// Lang is the language of the words in CodeHeld's answer (the request's).
+	Lang string `json:"lang,omitempty"`
+}
+
+// HeldAnswer is CodeHeld's data: the held message as the session's row shows it.
+type HeldAnswer struct {
+	Delivered   string                    `json:"delivered"` // "later"
+	Undelivered *proto.UndeliveredMessage `json:"undelivered,omitempty"`
+}
+
+// Actor is display-only provenance for NodeCall and plan decisions: a device, hub token, extension, or internal
+// assistant. It is shared with the node contract so a plan reports the actor supplied by its manager.
+type Actor = proto.ModeActor
 
 // RequestEnd is devices.request_end's params.
 type RequestEnd struct {
@@ -402,6 +451,11 @@ var Routes = []string{
 	"GET /api/v1/sessions/{mid}/{sid}/mode-changes",
 	// The answer to a start's startup question, from a full device (#10365, internal/devices start_continue.go).
 	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
+	// Retry and Delete on a message held for an Agent while its computer was away (#10661, internal/devices held.go),
+	// from a full device.
+	HeldOutboxRoute,
+	"POST /api/v1/sessions/{mid}/{sid}/held/{msg}/retry",
+	"DELETE /api/v1/sessions/{mid}/{sid}/held/{msg}",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",
@@ -414,11 +468,17 @@ var Routes = []string{
 	"GET /api/v1/machines/{mid}/health/reports",
 	"DELETE /api/v1/machines/{mid}/health/reports/{name}",
 	"POST /api/v1/machines/{mid}/deploy",
+	// Switching an ssh computer to Persona Link (#10662, internal/devices link_switch.go); the admin page's twin is
+	// the hub's POST /api/v1/admin/machines/{mid}/link-switch, relayed to the same handler.
+	"POST /api/v1/machines/{mid}/link-switch",
 	// A computer's diagnosis and cache cleanup (#8037, internal/devices diagnosis.go).
 	"GET /api/v1/machines/{mid}/diagnosis",
 	"POST /api/v1/machines/{mid}/cleanup",
 	"GET /api/v1/machines/{mid}/claude-dirs",
 	"PUT /api/v1/machines/{mid}/claude-dirs/blocked",
+	// Hidden Agent folders, beside the blocked Claude config folders (internal/devices agentdirs.go).
+	"GET /api/v1/machines/{mid}/agent-dirs/hidden",
+	"PUT /api/v1/machines/{mid}/agent-dirs/hidden",
 	"GET /api/v1/machines/{mid}/claude-live-replies",
 	"PUT /api/v1/machines/{mid}/claude-live-replies",
 	// Sharing the machine's clipboard with the phone (#3064, internal/devices clipboard.go).
@@ -480,4 +540,7 @@ const (
 	// CodeHandoffRefused: secret.stage, or a session.start with a secret_ticket, asked by the hub or another manager:
 	// only the manager that connects the computer makes a hand-off, after its own card (docs/extensions/secret-providers.md).
 	CodeHandoffRefused = "handoff_refused"
+	// CodeHeld: a session.send with Hold was not sent now but held to be sent when the node is back (#10661); its data
+	// is a HeldAnswer. Nothing was written to the node.
+	CodeHeld = "held"
 )

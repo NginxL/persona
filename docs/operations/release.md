@@ -416,11 +416,11 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
   `deploy.sh` does the same when installing `personad` on each computer (`scripts/deploy/ensure-herdr.sh`; keep the two sets of steps aligned).
 
 - `release.sh` runs this after uploading TestFlight. The version is `<commit>-<build number>`, matching that TestFlight release; `NO_PUBLISH=1` only releases TestFlight,
-  and no publish happens without `publish.site_url` in config. Standalone: `./scripts/release/publish.sh`; `NO_DEPLOY=1` only builds and checks (outputs in `build-publish/`).
+  and no publish happens without `publish.site_url` in config. Standalone: `./scripts/release/publish.sh`; `NO_DEPLOY=1` only builds and checks (outputs in `build-publish/`). When the tag coordinator supplies `PERSONA_RELEASE_VERSION`, `publish.sh` instead uses that exact tag version, and the coordinator rejects a different manifest version before uploading assets.
 - Website-only changes (`site/`): `SITE_ONLY=1 ./scripts/release/publish.sh` skips a new build, fetches the small files of the currently published version (`VERSION`, `SHA256SUMS`, `latest.json`, `SLOT`, `install.sh`) and deploys them with the committed `site/`, leaving archives in R2 unchanged. Afterwards it checks the live small files are unchanged and every archive still exists (`HEAD` size). It refuses if there's no live `dl/SLOT` yet (a release from before R2); do one full publish first. **Don't run `wrangler deploy` directly in `site/`**: it makes `/dl/` and `install.sh` return 404 (`docs/lessons/server.md`).
 - Web dependencies always install from the official npm registry (`npm ci --registry=https://registry.npmjs.org/`, overridable with `PERSONA_NPM_REGISTRY`), ignoring local npm config. `package-lock.json` already points to the official registry; a locally configured mirror may lack packages (on 2026-11-06 it lacked `elkjs`, stopping release before web bundling).
 - Build four platforms (linux / darwin × amd64 / arm64), with `-tags "$(cat server/build-tags.txt)" -trimpath -s -w`, embedding `channel=release`, build number (UTC `YYYYMMDDHHMM`) and `updateURL`
-  (the config's `publish.update_url` as written, e.g. a GitHub repository's `releases/latest/download`, else `<publish.site_url>/dl`; the script notes when the binaries look somewhere other than the site it publishes to; a hub's `hub.json` `update.url` replaces it at run time, `docs/operations/hub-update.md` ("Update source")):
+  (a non-empty environment `PERSONA_UPDATE_URL`, then the config's `publish.update_url` as written, e.g. a GitHub repository's `releases/latest/download`, else `<publish.site_url>/dl`; the script notes when the binaries look somewhere other than the site it publishes to; a hub's `hub.json` `update.url` replaces it at run time, `docs/operations/hub-update.md` ("Update source")). `install.sh` is rendered from that same update base, so its downloads and the binaries' update checks cannot silently select different feeds. For GitHub's moving Latest base, the installer reads `latest.json` once and pins `SHA256SUMS` and every archive to that version's immutable tag:
   - **Web bundled into the binary** (`server/internal/hub/webdist`, `go:embed`): the hub uses it when the hub machine has no `~/.persona/web`; otherwise it still uses the directory.
     The plain copy is privacy-scanned first, then its hashed assets and `third-party-licenses.txt` are kept gzipped (`go run ./internal/webasset/precompress`); the script stops if none are, or if a compressible asset of 1 KB or more is left plain. The first screen's brotli copies (`name.br`) come from `npm run build` and stay as they are (`docs/web/web.md` "Precompressed assets").
   - **No skills included**: the skill connecting to the Lark gateway was copied from a private upstream repository (GPL-3.0) and cannot be redistributed. Skills live in `~/.persona/skills/` on each machine,
@@ -462,6 +462,26 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
 - Not yet available (others can install, but it's still awkward; see `docs/operations/config.md`):
   Developer ID notarization of the macOS binary (browser downloads get blocked by Gatekeeper; `curl` doesn't).
 
+## Release PRs and GitHub Actions publication
+
+**Every new formal or beta release is an explicit release PR.** The PR title is `release: vX.Y.Z` for a formal release or `release: vX.Y.Z-beta.N` for a beta. It targets `main`, originates in this repository, and is authored by administrator `chyroc`; an ordinary feature PR, fork PR or branch is not a release request. Do not create a local version tag to start a new release.
+
+1. `release-schedule.yml` runs stable selection at 12:00 in the operator's configured UTC+08:00 zone (04:00 UTC) and beta selection every two hours (never every two minutes). It skips an unchanged source and opens a release PR with an unused immutable version. After any protected-environment approval, it fetches and detaches the then-current `origin/main` before selecting the source, so the pre-approval checkout cannot become a stale release. A feature since the previous stable tag increments minor; a fix-only history increments patch. It uses `RELEASE_PR_TOKEN` in the protected `persona-release` environment so the PR has the administrator's identity. Do not replace it with the workflow's ordinary `GITHUB_TOKEN` or run a second local release scheduler.
+2. `release-pr.yml` first checks out the PR's proposed merge result, not an arbitrary branch or an earlier PR head. CLI/Web, Android, iPhone/Watch and Windows produce one exact-source verification plan. If a required build or check fails, repair the release PR and run it again; do not merge a failing release PR or substitute an older artifact. The aggregate runs with `always()` for every non-empty release plan: a failed or skipped platform makes both the aggregate and the exact merge-result check fail, rather than leaving the check pending forever.
+3. Only after every required platform check passes does the protected merge job squash-merge that release PR with the administrator's `RELEASE_PR_TOKEN`. The ordinary PR watcher never merges a `release:` PR, and the main ruleset requires `All available release-PR checks passed`; an unrelated or direct merge cannot bypass the platform gate. The merge gate also requires the exact successful check and unexpired verification artifact; the merge job is restricted to an administrator-authored, same-repository release PR and verifies its unchanged head again. A different merger is a hard publication failure, not an identity to whitelist. Squash creates a new main SHA: the `push` run of `release-pr.yml` then resolves the merged PR and **rebuilds and reverifies that actual main commit on every platform**. A successful PR head is never treated as proof for the squash result.
+4. Only after the post-merge run succeeds does `release-publish.yml` start through `workflow_run`. It rereads the merged PR, requires its verified merge commit to remain an ancestor of the current `main`, and verifies the new plan and every artifact digest. Ordinary PRs may merge during that build: they do not replace the release source, and the tag remains bound to the verified merge commit, never to a later `main` tip. It then creates the immutable annotated tag once at that exact commit. An existing tag for another source is a hard failure, never moved. The existing tag-triggered `release.yml` builds the container and creates the stable/prerelease GitHub Release. The publication job uploads the verified artifacts, compares remote SHA-256, independently downloads and compares every artifact, and only then advances the beta pointer. Stable `releases/latest` and stable metadata never come from a beta PR.
+5. TestFlight and release attachments are separate results. A completed release PR does not deploy the production Hub/site, submit an App Store production version or install on a phone. Repeating a failed publication is an administrator-only `release-publish` dispatch for the same merged release PR and its verified merge commit, which must remain an ancestor of current main; it never selects another source.
+
+### Protected environment
+
+`persona-release` holds the release-PR token and the signing/build values used by these jobs. `RELEASE_PR_TOKEN` creates release PRs as `chyroc`; after all checks pass, the same protected identity performs the release merge, creates the immutable tag and marks its Release as owned by that PR. The last two operations are required so the tag-triggered `release.yml` can verify its administrator actor and the signing jobs can recognize the verified release-PR artifacts. Prefer a GitHub App installation token for that account, restricted to this repository with only **Contents: read and write** and **Pull requests: read and write**; a short-lived fine-grained token with exactly the same repository and permissions is the alternative. It needs no administration, packages, signing, Actions or organization access. The scheduler exchanges it only through the protected environment and never writes it to the repository or logs. Do not reuse the current interactive `gh` credential as a permanent release token. Android uses `PERSONA_ANDROID_APPLICATION_ID`, `PERSONA_ANDROID_CERTIFICATE_SHA256`, `PERSONA_ANDROID_KEYSTORE_BASE64`, `PERSONA_ANDROID_KEY_ALIAS`, `PERSONA_ANDROID_KEYSTORE_PASSWORD` and `PERSONA_ANDROID_KEY_PASSWORD`; the private `ci_release_config.py` writes a temporary mode-0600 signer configuration and keystore only inside the runner. Apple uses `PERSONA_APPLE_API_KEY`, `PERSONA_APPLE_API_KEY_ID`, `PERSONA_APPLE_API_ISSUER`, `PERSONA_APPLE_APP_ID`, `PERSONA_APPLE_TEAM_ID`, `PERSONA_APP_BUNDLE_ID`, `PERSONA_TESTFLIGHT_FEEDBACK_EMAIL`, `PERSONA_TESTFLIGHT_EXTERNAL_JSON`, and optional `PERSONA_APP_GROUP`, `PERSONA_WATCH_APP_GROUP`, `PERSONA_WATCH_WIDGET_BUNDLE_ID`. Windows desktop uses the existing `PERSONA_DESKTOP_APP_ID`, `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` prerequisites. Never commit these values, put them in PR text, or include the temporary configuration in an artifact.
+
+An unconfigured required signing platform blocks the release PR; it is not a successful skip. Windows amd64 native verification runs on `windows-latest`; Windows arm64 requires a matching native ARM64 runner or approved self-hosted signer and is otherwise reported blocked. HarmonyOS production HAP still requires DevEco and production signing (#6734). No debug IPA/APK, unsigned HAP, development Electron installer or ad-hoc signature is an acceptable replacement. Release-PR jobs use only their required protected credentials; the unprivileged CLI/Web job has no signing secrets.
+
+### Historical local tag consumers
+
+The local tag-consumer section below documents the pre-release-PR pipeline and existing private recovery tools. It is not a second scheduler to run alongside release PR publication. Existing tags and Releases remain immutable historical records.
+
 ## Publishing a release (`.github/workflows/release.yml`)
 
 A `v*` tag publishes the hub container image and creates a GitHub Release. **Only `chyroc` may create, update or delete a `v*` tag, dispatch an image release or rerun its jobs.** The repository's `Release tags: administrators only` ruleset permits only the administrator role to bypass its create/update/delete restrictions; other collaborators cannot publish a version tag. The workflow independently requires both the run's actor and its triggering actor to be `chyroc` before any checkout, build or upload, including manual dispatches and reruns. The Release's `github-actions[bot]` author identifies the workflow that created it, not the person who pushed the tag; the Actions run records that triggering actor.
@@ -476,13 +496,21 @@ git tag v1.2.0 && git push origin v1.2.0
 # -> GitHub Release v1.2.0 with generated notes
 ```
 
-- Smoke-test first (amd64 + compose), then build and push both architectures only after it passes. Once image publication succeeds, the same job creates a GitHub Release named for the full tag with automatically generated notes. Prerelease tags containing `-` (`v1.3.0-rc1`) only push the version image, without touching `latest`, and mark the GitHub Release as a prerelease. Creating the Release does not push another tag.
+- Smoke-test first (amd64 + compose), then build and push both architectures only after it passes. Once image publication succeeds, the same job creates a GitHub Release named for the full tag with automatically generated notes. Stable Releases are created with `--latest=false`: the complete verified hub consumer marks one Latest only after its assets and immutable tag manifest pass publication. Prerelease tags containing `-` (`v1.3.0-rc1`) only push the version image, without touching `latest`, and mark the GitHub Release as a prerelease. Creating the Release does not push another tag.
 - To get an image of the current branch without a tag or GitHub Release, `chyroc` can manually run release in Actions (`edge`, `sha-<commit>`).
 - Image smoke tests run through an explicit workflow dispatch; only the documented `v*` release-tag event starts image and GitHub Release publication automatically (`packages: write` and `contents: write` are granted only to the publish job). This exception supplies the version and `latest` images used by Docker installations; no branch push or PR starts it. A manual dispatch never creates a GitHub Release.
 - If Release creation fails after the images were pushed, rerun the failed job for the same tag. Rebuilding and pushing the same immutable image tags does not advance `latest` to another source revision; fix any reported tag or Release conflict rather than creating a replacement tag.
 - The image's personad uses the tag minus `v` as its version (`personad version`); when node differs, the App prompts to redeploy, using the image's own builds or the release's (`docs/operations/docker.md` ("Node builds")).
 - The image's personad is on the `docker` channel: no skills (like all binaries), no self-update; a new image prompts you to pull it (`docs/operations/hub-update.md`).
 - When the repository is private, the package is private too; NAS installs need `docker login ghcr.io` (`docs/operations/docker.md` ("Image")).
+
+### Darwin command-line programs on version tags
+
+The `darwin-cli-sign` job signs `personad`, `persona-node`, `persona-link`, `persona-hub` and `persona-manager` for both darwin architectures on stable and prerelease version tags. Its `darwin_cli` availability check needs only `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` in the protected `persona-desktop-release` environment; it is independent of the desktop package version gate and does not require the desktop notarization credentials.
+
+The job builds the tag's programs, signs them under fixed identifiers, verifies each Developer ID signature, recompresses the signed binaries, rebuilds `SHA256SUMS` and `latest.json` from those downloads, verifies that manifest, and attaches the darwin archives and metadata to the same Release. If either certificate secret is missing, the gate reports `Darwin CLI signing blocked` with the missing secret names and the job does not build or upload; there is no ad-hoc fallback. A missing Developer ID identity also stops the job before upload.
+
+Prerelease CLI artifacts do not change the desktop package channel policy or GitHub's `releases/latest` selection. The `latest.json` attached to a prerelease is that Release's version manifest, not a move of the stable Release pointer.
 
 ### Desktop packages on version tags
 
@@ -491,7 +519,7 @@ The same workflow attaches the Electron desktop packages to the Release (`docs/d
 - Nothing extra to run: push the stable tag as above. After the `authorize` job, `desktop-gate` checks which signing secrets are configured, `desktop-mac` and `desktop-win` build and verify signed packages on native runners with the tag's version, and `desktop-publish` attaches them after the Release exists: packages and block maps first, `latest-mac.yml` and `latest.yml` last.
 - **Without the signing secrets the release still succeeds and has no desktop packages.** The run's summary says which platform was skipped and which secrets are missing. This is the state today: no Developer ID or Windows code-signing certificate has been supplied (`docs/desktop/desktop.md`, "What the owner must provide", lists the eight secrets and what each must contain).
 - Each platform stands alone: with only the macOS secrets configured, the Release gets the macOS packages and the summary says Windows was skipped.
-- Prerelease tags (`v1.3.0-rc1`) and manual dispatches publish no desktop packages.
+- Prerelease `vX.Y.Z-beta.N` tags publish signed desktop packages when the same signing prerequisites exist. electron-updater reads the prerelease channel (`beta.yml` / `beta-mac.yml`); stable packages continue to read `latest.yml` / `latest-mac.yml` and never opt into prereleases. The prerelease's own immutable Release owns its metadata. Other prerelease spellings and manual dispatches publish no desktop packages.
 - If a desktop job fails after the Release was created, rerun the failed jobs for the same tag; uploads replace assets of the same name. The hub image and the Release itself are not affected by a desktop failure.
 - After the first signed release, check on a real Mac and a real Windows PC that an installed older version offers "Restart to update" and reopens as the new one. That path is not covered by any automated test (the update test uses an unsigned build and a local feed).
 
@@ -564,27 +592,49 @@ A private configuration has only these fields, with no secrets:
   is uploaded. It must list only files in the receipt, at their sizes and
   sha256s. Every binary must be its build, and this machine's `personad
   version -v` must say its version and build. Otherwise the platform fails
-  (#4522: v0.2.1's manifest named another build than its binaries). The
-  downloads go up first; `VERSION`, `SHA256SUMS`, `android.json` and then
-  `latest.json` go last, each on its own, so a hub reading
-  `releases/latest/download` never sees a manifest whose files are not there yet.
+  (#4522: v0.2.1's manifest named another build than its binaries). Every
+  `personad` must contain the exact GitHub update base used by the Release's
+  `install.sh`, and the installer's own `DL` default is checked too;
+  `publish.sh` renders that installer from the same base it compiles into the
+  binaries. Tagged builds use the Release's UTC `createdAt` minute through
+  `PERSONA_RELEASE_BUILD`, so CI and local verification share one build identity
+  even for backfills and retries. When Darwin signing is enabled in CI, the coordinator waits for that job, downloads its staging
+  `ci-latest.json` and `ci-SHA256SUMS` with digest checks, and non-Windows artifacts, and merges them with the locally
+  verified Windows archives and reports into the final manifest and checksums;
+  a skipped job keeps the private build, and a failed job stops publication. The downloads go up first; `VERSION`, `SHA256SUMS`, `android.json`
+  and then `latest.json` go last, each on its own, so a hub reading
+  `releases/latest/download` never sees a manifest whose files are not there
+  yet. After remote digest verification, stable hub publication fetches the
+  immutable tag's `latest.json`, requires the tag's version and build, and only
+  then marks the Release Latest. A backfill of an older stable tag does not
+  move Latest backward. Prereleases and non-hub receipts do not move the
+  Latest pointer. The uploaded checkpoint retains the exact receipt and asset
+  digests, so a feed or promotion retry reuses it and reruns only remote
+  verification and promotion instead of rebuilding conflicting assets. Every
+  resume repeats the same deterministic receipt validation before upload. The
+  primary release-PR pipeline calls `scripts/operations/stable_release.py` after
+  independently downloading every uploaded artifact: it verifies the immutable
+  tag manifest, refuses to move Latest to an older stable tag, and requires the
+  final `isLatest` readback before declaring publication complete.
 - A receipt that carries `android.json` (the Android platform's) must ship the
   APK it names, at its size and sha256, for the tag's version.
-- Windows CLI bundles (`Persona-<version>-windows-<arch>.zip`) also require a
-  native verification report before upload (#8338). On Windows of that
-  architecture, run `python scripts/operations/windows_release.py --archive
-  <archive.zip> --version <version> --build <build>`. It runs the bundled
-  `persona-link version`, `personad version -v`, and `personad node-update-check`
-  with time limits, without installing or starting services. Success writes
-  `<archive-stem>.verification.json` beside the ZIP; failure removes a previous
-  report. Include the ZIP, report and `BUILD.json` or `latest.json` in the
-  private artifact receipt. The coordinator checks the requested version,
-  build, command results, ZIP digest and executable digests before any upload.
-  This report is output from the trusted release pipeline, preventing stale or
-  mismatched verification; it is not a signed attestation against a malicious
-  publisher. Cross-compilation or a matching build number alone does not prove
-  the Windows programs report the intended version. A missing Windows runner
-  is an explicit publication prerequisite, not a passed or skipped check.
+- Windows CLI bundles (`Persona-<version>-windows-<arch>.zip`) and each current
+  `persona-link-windows-<arch>.exe.gz`, `personad-windows-<arch>.exe.gz` and
+  `persona-node-windows-<arch>.exe.gz` require native verification before upload (#8338).
+  On Windows of that architecture, run `python scripts/operations/windows_release.py --archive
+  <archive.zip-or.exe.gz> --version <version> --build <build>` for each artifact. It runs the actual
+  `version`, `version -v`, and for `personad` / `persona-node` `node-update-check` with time limits,
+  without installing or starting services. Link's native report cannot stand in for a node's.
+  Success writes `<artifact-stem>.verification.json` beside the artifact; failure removes a previous
+  report. Include the artifact, report and `BUILD.json` or `latest.json` in the private artifact
+  receipt. Node programs also require the receipt's `latest.json` to list their exact platform, name
+  and compressed and unpacked hashes. The coordinator checks the requested version, build, command
+  results, PE architecture, archive digest and executable digests before any upload.
+  This report is output from the trusted release pipeline, preventing stale or mismatched verification;
+  it is not a signed attestation against a malicious publisher, nor an Authenticode signature.
+  Cross-compilation or a matching build number alone does not prove the Windows programs report the
+  intended version. A missing Windows runner is an explicit publication prerequisite, not a passed
+  or skipped check.
 
 For the first release, merge this consumer's PR before pushing `v0.1.0` from
 the merged `main` commit. The public workflow creates the Release and image;

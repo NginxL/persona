@@ -123,7 +123,7 @@ struct RecordingsSection: View {
                         }
                         .accessibilityAction(named: Text("Rename")) { renaming = entry.id }
                         // Only the swiped row's dialog shows, so its popover points at that row.
-                        .confirmationDialog("Delete This Recording?", isPresented: Binding(get: { pendingDelete == entry.id }, set: { if !$0, pendingDelete == entry.id { pendingDelete = nil } }),
+                        .accessibleConfirmationDialog("Delete This Recording?", isPresented: Binding(get: { pendingDelete == entry.id }, set: { if !$0, pendingDelete == entry.id { pendingDelete = nil } }),
                                             titleVisibility: .visible) {
                             Button("Delete", role: .destructive) { failure = RecordingDeletion.run(entry.id) }
                         } message: { Text("The audio on this device will be deleted now. Its text in Knowledge is removed after sync succeeds; if Knowledge is off or read-only, that deletion stays pending.") }
@@ -992,12 +992,12 @@ struct RecordingDetailView: View {
             if hasText != next { hasText = next }
         }
         #endif
-        .confirmationDialog("Delete This Recording?", isPresented: $deleting, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete This Recording?", isPresented: $deleting, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 if let message = RecordingDeletion.run(id) { failure = message } else { dismiss() }
             }
         } message: { Text("The audio on this device will be deleted now. Its text in Knowledge is removed after sync succeeds; if Knowledge is off or read-only, that deletion stays pending.") }
-        .confirmationDialog("Erase the last 10 minutes?", isPresented: $erasing, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Erase the last 10 minutes?", isPresented: $erasing, titleVisibility: .visible) {
             Button("Erase", role: .destructive) {
                 let now = Date.now
                 library.erase(id, from: now.addingTimeInterval(-RecordingRolling.eraseMinutes * 60), to: now)

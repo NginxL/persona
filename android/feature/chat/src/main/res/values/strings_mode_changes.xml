@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_mode_change_changed_from">%1$s changed the permission mode from “%2$s” to “%3$s”</string>
+    <string name="chat_mode_change_changed_to">%1$s changed the permission mode to “%2$s”</string>
+    <string name="chat_mode_change_restart_queued">%1$s picked “%2$s”: the session restarts in it once this turn ends</string>
+    <string name="chat_mode_change_restart_done">Restarted in “%1$s”</string>
+    <string name="chat_mode_change_restart_already">Already in “%1$s”, no restart needed</string>
+    <string name="chat_mode_change_restart_failed">Couldn\'t restart in “%1$s”</string>
+    <string name="chat_mode_change_restart_failed_why">Couldn\'t restart in “%1$s”: %2$s</string>
+    <string name="chat_mode_change_restart_dropped">Called off, won\'t restart in “%1$s”</string>
+    <string name="chat_mode_change_restart_dropped_why">Called off, won\'t restart in “%1$s”: %2$s</string>
+    <string name="chat_mode_change_why_cancelled">the session stays in its current mode</string>
+    <string name="chat_mode_change_why_replaced">another switch took its place</string>
+    <string name="chat_mode_change_why_process_exited">the process it was picked for has exited</string>
+    <string name="chat_mode_change_why_process_replaced">the session runs in another process now</string>
+    <string name="chat_mode_change_why_process_unknown">it couldn\'t tell which process to restart</string>
+    <string name="chat_mode_change_why_expired">it waited over two hours</string>
+    <string name="chat_mode_change_why_not_stopped">the agent didn\'t quit</string>
+    <string name="chat_mode_change_why_start_failed">the new process didn\'t start, so the session carries on as before</string>
+    <string name="chat_mode_change_why_stopped">the new process didn\'t start, and the session has stopped</string>
+    <string name="chat_mode_change_by_hub">The hub</string>
+    <string name="chat_mode_change_by_unknown">A device</string>
+</resources>

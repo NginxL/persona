@@ -1,8 +1,18 @@
-Plan Agent work (code, repo research, or more than a few tool calls) instead of starting agents yourself: one task per independent piece. Check machines_list before choosing resources. Fill every field from the knowledge base, agents_list and user preferences; each choice is an editable chip with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Returns immediately: carry on. Each queued task becomes a todo in your context snapshot; use agent_send to reach its Agent. Things a tool does for you (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not an Agent start; check the task outcome. From a leader conversation (assistant.leaders) or any other side conversation you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. What the main conversation hands out to no leader is followed up by the background supervisor by default (a built-in conversation that gets the 督办 messages and reviews with task_review; the main conversation may too), and by the main conversation itself, as a leader would, when assistant.main_supervises_own_tasks is on. A conversation that cannot be sent a 督办 message leaves what it hands out to that same follow-up, and gets a one-line notice with the task's link when each one ends. The answer says who follows up. The answer lists running work that looks like the same task: check it before letting both go on. A todo this conversation opened with no agent yet (a Lark topic's, named in the message that handed it over, a todo_create part_of piece, or a failed start) is the task's own: give it as todo_id and no new todo is made. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders), which supervises and reviews its tasks as if it had handed them out; leave it out for work of no direction. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one checkable result) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. For rework, replacement or a retry on another computer, give continues and continues_why (see continues); a start that did not come up is retried with task_retry, also on another launcher. Apply owner-authorized scope changes with task_scope before planning and pass its scope_revision to reject staleness. Supply goal, authorization bounds, and new information; the manager appends effective criteria. A task that changes files sets readonly false with explicitly authorized writable permission (for example, Codex bypassPermissions), which also lets a replacement Agent on the same todo implement fixes. A read-only Codex sandbox cannot be changed in place: use a fresh writable process; with no permission change, a plain agent_send follow-up to the live Agent is fine. A task that only reads sets readonly true; its first message includes the read-only constraint. Claude-family launchers use bypassPermissions for both read-only and writable tasks; Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions, not a security boundary). pi, cursor and agy have no read-only mode and are refused in either setting. role "leader" makes the task's agent a task leader: it hands direct workers to its own task through its own restricted task_plan and task_review and gets their supervision messages; only for a task that splits into several agents' work. Its workers cannot hand tasks on.
+Use task_plan for code, repository research and work beyond a few tool calls. Make one task per independent piece. Check machines_list, then use the knowledge base, agents_list and user preferences to fill the editable choices and their one-line reasons. Read-only, user_requested and preapproved kinds start at once; other tasks wait for the owner's 开始. A queued receipt is dispatch, so check the to-do outcome and reach its Agent via agent_send. Tool-owned reminders and events are separate.
 
-When repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight.
+Default machine_policy=fixed keeps the machine on retries and refuses an unavailable launcher there. Use flexible only for portable work: a failed health check can move it and the reply explains why. A side conversation supervises its work, receives 督办 and closes with task_review. Main delegates a whole plan with supervisor (one of assistant.leaders) or leaves it out. With no leader, the background supervisor handles 督办 and task_review unless assistant.main_supervises_own_tasks puts main in charge. If the caller cannot receive 督办, the same follow-up handles it and sends the caller a short notice and link at the end. Check the returned supervisor and similar running work. Pass todo_id for the caller's existing unassigned to-do, including a Lark topic, task split or failed start.
+
+Every started task keeps its brief: the hub records the owner's request or started_why and drops any supplied brief. Give goal, done_when and out_of_bounds. Writable work needs done_when; read-only needs goal. Omit expect_minutes for the hub's 60-minute system_default; a positive value is an override. Manual Agent work has no estimate_due. Continue with continues+continues_why; use task_retry for failed starts and task_scope+scope_revision for owner-approved changes. The card confirms the brief.
+
+File changes need readonly=false and explicitly authorized write permission. Replace a read-only Codex process with a writable one for fixes. Use agent_send for live follow-up when permissions stay the same. readonly=true adds the read-only constraint to the assignment. Claude-family uses bypassPermissions for both. Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions). pi, cursor and agy refuse readonly in either setting. Set role=leader only for a task that splits into direct workers, which it starts and reviews through restricted task_plan/task_review. Workers cannot delegate.
+
+When repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's Start choice; this tool cannot set it.
+
+For an existing todo with a saved workspace naming plan, explicitly select {"backend":{"operation_id":"<saved operation ID>"}}. Its selected repositories must all be ready before the session starts at the saved root on its owning computer. An optional backend.host selects a supported engine on that computer.
 
 Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-change"}} names its branch; {"existing":"<cwd or workspace_id>"} selects one; "none" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/<todo id>. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.
+
+`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.
 
 ```json
 {
@@ -11,9 +21,14 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
     "tasks"
   ],
   "properties": {
+    "wait_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0/omitted: normal receipt"
+    },
     "supervisor": {
       "type": "string",
-      "description": "optional, main conversation only: the id of the leader conversation (assistant.leaders) whose direction this work belongs to; it supervises the tasks. Leave it out for work of no direction or of your own"
+      "description": "main only: leader conversation id (assistant.leaders); it supervises; omit for no direction or your own work"
     },
     "tasks": {
       "type": "array",
@@ -25,48 +40,54 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           "title",
           "prompt",
           "machine",
-          "cwd",
           "readonly",
           "user_requested",
           "why"
         ],
+        "anyOf": [
+          {"required": ["cwd"]},
+          {"type": "object", "required": ["workspace", "todo_id"], "properties": {"workspace": {"type": "object", "required": ["backend"]}}}
+        ],
         "properties": {
           "title": {
             "type": "string",
-            "description": "the task in a short line the user reads on the card (Chinese, under 20 characters)"
+            "description": "Card title in Chinese, under 20 characters."
           },
+          "context": {"type": "string", "description": "facts the manager cannot resolve; omit project background"},
           "prompt": {
             "type": "string",
-            "description": "the agent's first message: everything it needs to do the task without asking you"
+            "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
           },
           "machine": {
             "type": "string",
-            "description": "machine id; fixed target by default"
+            "description": "Machine id; fixed by default."
           },
           "machine_policy": {
             "type": "string",
             "enum": ["fixed", "flexible"],
-            "description": "fixed (default): keep this machine through preview, dispatch and retries; fail there if unavailable. flexible: explicitly permit health-based placement on another computer, only for work that is portable"
+            "description": "fixed (default): keep this machine; flexible: permit health-based moves only for portable work"
           },
           "cwd": {
             "type": "string",
-            "description": "the project directory: absolute path or ~/…"
+            "description": "Absolute or ~/ project directory, unless workspace.backend supplies it."
           },
           "workspace": {
-            "description": "Task workspace policy. Omit to use the assistant preference and readonly/busy exceptions. new uses the machine engine and default branch task/<todo id>; existing accepts an absolute/~/ path or a workspace id on that machine; none creates nothing. To choose a branch use {new:{branch:...}}. No custom worktree root.",
+            "type": ["string", "object"],
+            "description": "workspace policy; omit for default; existing: absolute/~/path or workspace id on that machine; no custom root",
             "oneOf": [
               { "type": "string", "enum": ["new", "none"] },
+              { "type": "object", "required": ["backend"], "additionalProperties": false, "properties": { "backend": { "type": "object", "required": ["operation_id"], "additionalProperties": false, "properties": { "operation_id": { "type": "string", "minLength": 1 }, "host": { "type": "string" } } } } },
               { "type": "object", "required": ["existing"], "additionalProperties": false, "properties": { "existing": { "type": "string", "minLength": 1 } } },
               { "type": "object", "required": ["new"], "additionalProperties": false, "properties": { "new": { "type": "object", "additionalProperties": false, "properties": { "branch": { "type": "string" } } } } }
             ]
           },
           "launcher": {
             "type": "string",
-            "description": "launcher name, one that machine has (a name it lacks is refused, listing the ones it has): a Claude Code launcher, or pi, cursor or agy to start that agent in herdr; empty: the default, or one the machine has when it lacks the default (claude first; the why says so)"
+            "description": "listed launcher (Claude Code, pi, cursor or agy in herdr); unknown names refused with choices; empty: default/fallback, claude first, why says which"
           },
           "model": {
             "type": "string",
-            "description": "model id the agent takes (an alias such as opus, a gateway's own id, or a provider/model such as ag-chat/cursor/grok-4.7 for pi; letters, digits and . _ - / : @ [ ] only, or a leading ~ as in ~vendor/model-latest); empty: the launcher's default"
+            "description": "model id or alias the agent takes; empty: the launcher's default"
           },
           "permission": {
             "type": "string",
@@ -77,28 +98,28 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
               "auto",
               "bypassPermissions"
             ],
-            "description": "permission mode; empty: the default for writable tasks. Set an explicit writable mode (for example bypassPermissions) with readonly=false when a replacement Agent must implement fixes on the same todo. Read-only modes: see the description. traex and omp take none"
+            "description": "mode; empty: writable default; readonly/replacement/Codex rules: see description; traex and omp take none"
           },
           "role": {
             "type": "string",
             "enum": ["leader"],
-            "description": "optional: leader makes this task's agent a task leader that may hand direct workers to its own task (any conversation may give it); leave it out for an ordinary worker task"
+            "description": "leader (any conversation): may hand direct workers to its own task; omit for an ordinary worker"
           },
           "ultracode": {
             "type": "boolean",
-            "description": "true for a large task (many files, checks from several angles): Claude Code runs every substantial step as a multi-agent workflow, slower and costlier; false for small or quick work. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it. Never put the word in the prompt or title instead"
+            "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows for substantial steps, slower/costlier; small tasks: false; Claude Code 2.1.284+ only, otherwise starts without it; never put it in prompt/title"
           },
           "readonly": {
             "type": "boolean",
-            "description": "true only for a task that must remain read-only; false for authorized file changes. A replacement on a Codex plan/read-only sandbox needs a fresh writable process: use readonly=false and explicit writable permission rather than mutating the running sandbox. The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
+            "description": "true only for a task that must remain read-only; false for explicitly authorized file changes (a Codex read-only sandbox: see the description). The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
           },
           "user_requested": {
             "type": "boolean",
-            "description": "true when the user asked for this very task in their latest message (told you to do it, to have an agent do it, to go ahead and start); false when it is your own idea or inferred from something they did not ask for"
+            "description": "True only for this task/start requested in the user's latest message; false for inferred work/your own idea."
           },
           "why": {
             "type": "string",
-            "description": "one line (Chinese) on why this machine, directory and model"
+            "description": "Chinese one-line reason for machine, directory and model."
           },
           "done_when": {
             "type": "array",
@@ -106,11 +127,11 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "items": {
               "type": "string"
             },
-            "description": "what done means: results you will check before you accept it (Chinese, one each), e.g. 「PR 合并到 master」「浅色 / 深色截图贴进 PR」「线上 hub 已部署并验证」; the agent is told them. Required for a writable task (at least one); with continues the effective criteria from the original to-do apply and this is ignored"
+            "description": "Chinese checkable acceptance results told to Agent, one per entry. Nonempty for writable tasks; ignored with continues."
           },
           "goal": {
             "type": "string",
-            "description": "the work in one sentence, as the owner would say what they get from it (Chinese); required for a read-only task, the title when left out of a writable one"
+            "description": "Owner's one-line Chinese outcome. Required read-only; writable defaults to title."
           },
           "out_of_bounds": {
             "type": "array",
@@ -118,23 +139,23 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "items": {
               "type": "string"
             },
-            "description": "optional: what the agent must not do or touch (Chinese, one each), e.g. 「不合并」「不动线上」"
+            "description": "Optional forbidden actions/areas, in Chinese, one per entry."
           },
           "continues": {
             "type": "string",
-            "description": "optional: the original todo id this task continues. Continuations always reuse this same todo and its original brief and effective criteria; never split work to a new todo. At Start, stop/release still-active prior Agents and reopen this todo if closed. Refuse unauthorized takeovers, an unreachable prior Agent that cannot be stopped, and legacy open successor duplicates. Failed starts keep this todo. Needs continues_why; if no permission change is wanted, agent_send can follow up the same live Agent"
+            "description": "Original todo id. Reuse todo, original brief and effective criteria even on failed Start; never split. Start stops/releases active prior Agents and reopens if closed. Refuse unauthorized takeover, unreachable Agents that cannot be stopped, or open legacy successors."
           },
           "scope_revision": {
             "type": "string",
-            "description": "with continues after a scope change: the exact scope_revision returned by task_scope; refuse planning if it is stale"
+            "description": "With continues after a scope change: exact task_scope scope_revision; refuse stale plans."
           },
           "continues_why": {
             "type": "string",
-            "description": "with continues: one line on why the earlier task stopped or needs a replacement; kept on this continuation's plan"
+            "description": "With continues: one-line stop/replacement reason saved on this plan."
           },
           "started_why": {
             "type": "string",
-            "description": "when the owner did not just ask for this (your own idea, something a 督办 message or a routine led to): one line on why you start it; kept on the brief"
+            "description": "If not just owner-requested (own idea, 督办 or routine): one-line start reason saved in brief."
           },
           "attachments": {
             "type": "array",
@@ -142,31 +163,31 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "items": {
               "type": "string"
             },
-            "description": "pictures and files the user gave you for it, by their absolute paths on your computer: a picture they sent (the path Claude Code gives it), a file the app put in their message. They are copied to the agent's computer and listed at the end of its message, and the text's mentions of them name the copies. Only those the user gave you in this conversation are accepted"
+            "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
           },
           "expect_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "about how long the task should take, in minutes; required (above 0) unless continues is given. A task with no progress for 1.5× that (at least 20 minutes) counts as stuck, and one with no end after 3× that (at least a day) is raised to you as overdue"
+            "description": "Optional minutes override. Omit/0: 60 (system_default); positive: override. Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)."
           },
           "project": {
             "type": "string",
-            "description": "optional: its knowledge-base project, an existing one's slug or name (kb_list projects), set when the area of work is clear; never a near-duplicate"
+            "description": "Existing kb_list projects slug/name for a clear long-term area; no near-duplicates."
           },
           "part_of": {
             "type": "string",
-            "description": "optional: the request to-do this is a piece of"
+            "description": "Optional request todo this is a piece of."
           },
           "after": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "with part_of: the pieces it waits for"
+            "description": "With part_of: prerequisite pieces."
           },
           "todo_id": {
             "type": "string",
-            "description": "optional: an open or failed-start todo this conversation opened or supervises, with no live Agent (stopped ones are released at Start). To stop a live Agent or reopen a done one use continues; given both, they name the same todo"
+            "description": "Open or failed-start todo this chat opened/supervises; no live Agent. Release stopped Agents at Start. Equals continues if both are given."
           },
           "inbox_item": {
             "type": "string",
@@ -174,11 +195,16 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           },
           "tier": {
             "type": "string",
-            "description": "An Agent preset: one of the tiers the snapshot's 模型档位 line lists for the profile in use, each with what it is for; pick the one whose description fits the work. Resolved when the task actually starts, with the profile in use then. Explicit launcher/model/effort override its values."
+            "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved at task start with its profile; explicit launcher/model/effort/speed overrides"
+          },
+          "speed": {
+            "type": "string",
+            "enum": ["standard", "fast", "ultrafast"],
+            "description": "new-start speed; standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
           },
           "effort": {
             "type": "string",
-            "description": "Explicit effort override; omit to use the tier or purpose default."
+            "description": "Explicit effort; omit for tier/purpose default."
           }
         }
       }

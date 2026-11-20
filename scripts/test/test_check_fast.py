@@ -1,12 +1,14 @@
 """check-fast.sh runs the scripts/ unittests a change needs (#3968), and the scripts/test suites that guard docs,
-markdown, apple/ and deploy/docker/.
+markdown, apple/ and deploy/docker/; Ctrl-C, SIGTERM and SIGHUP stop the checks it started; the per-path table it reads
+its plan from (scripts/ci/check_fast_map.py, #11535) answers one line per path and names only checks it knows. The
+server and web checks' inputs are tested in test_check_fast_inputs.py, split off so each file stays well under the
+per-suite limit of scripts/ci/python-tests.py on a loaded machine (#11017).
 
-Each test builds a throwaway repository with check-fast.sh and stubs for the repository-wide checks it always picks
-for a scripts/ change (the privacy scan, the extension schema test, the PR workflow test), commits a base, makes a
-change on top and runs check-fast.sh --base against the base. The default-base tests run it without --base, against
-refs/remotes/origin/* refs they write themselves.
+Each test builds a throwaway repository with check-fast.sh, its table and stubs for the repository-wide checks it
+always picks for a scripts/ change (the privacy scan, the extension schema test, the PR workflow test), commits a base,
+makes a change on top and runs check-fast.sh --base against the base. The default-base tests run it without --base,
+against refs/remotes/origin/* refs they write themselves.
 """
-import fnmatch
 import importlib.util
 import os
 from pathlib import Path
@@ -27,6 +29,15 @@ GUARD_SUITES = ("test_doc_paths.py", "test_doc_go_paths.py", "test_doc_sections.
                 "test_apple_l10n.py", "test_docker_entrypoint.py")
 # A python3 that records each call ("<cwd>|<args>") instead of running anything.
 FAKE_PYTHON = '#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$*" >> "$FAKE_PYTHON_LOG"\n'
+# check-fast.sh and the per-path table it reads its plan from (#11535): what a throwaway repository needs to plan.
+CHECK_FAST_FILES = ("scripts/test/check-fast.sh", "scripts/ci/check_fast_map.py")
+
+
+def copy_check_fast(repo):
+    """Copy check-fast.sh and its table into the throwaway repository at repo."""
+    for name in CHECK_FAST_FILES:
+        (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / name, Path(repo) / name)
 
 
 def ci_is_suite():
@@ -41,25 +52,16 @@ def ci_is_suite():
     return module.is_suite
 
 
-def section_check_dirs():
-    """The directories test_doc_sections.py scans besides the Markdown files."""
-    saved = list(sys.path)  # the module puts scripts/test on sys.path to import test_doc_paths
-    try:
-        spec = importlib.util.spec_from_file_location("doc_sections", ROOT / "scripts/test/test_doc_sections.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    finally:
-        sys.path[:] = saved
-    return [name for name in module.SOURCE_DIRS if not name.endswith(".md")]
-
-
 @unittest.skipUnless(shutil.which("timeout") or shutil.which("gtimeout"), "check-fast.sh needs GNU timeout")
-class CheckFastScriptsTests(unittest.TestCase):
+class ScriptsRepoTestCase(unittest.TestCase):
+    """The throwaway repository the scripts/ tests run check-fast.sh in, and its helpers; no tests of its own.
+    test_check_fast_guards.py's tests use it too."""
+
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp(prefix="check-fast-test-"))
         self.addCleanup(shutil.rmtree, self.repo)
         (self.repo / "scripts/test").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        copy_check_fast(self.repo)
         self.write("scripts/privacy_check.py", "print('clean')\n")
         self.write("scripts/test/test_extension_schema.py", "")
         self.write("scripts/test/pr_needs_issue_test.mjs", "")
@@ -101,6 +103,25 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.git("add", path)
         self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", tag)
         self.git("tag", "-f", tag)
+
+    def toolchain_without_node_and_go(self):
+        # A PATH with only the tools check-fast.sh itself needs, so node and go are missing on any machine. It lives
+        # outside the repository, so a diff-mode run does not count it as a change.
+        if getattr(self, "bin_dir", None):
+            return str(self.bin_dir)
+        self.bin_dir = Path(tempfile.mkdtemp(prefix="check-fast-bin-"))
+        self.addCleanup(shutil.rmtree, self.bin_dir)
+        bin_dir = self.bin_dir
+        for tool in ("bash", "python3", "timeout", "gtimeout", "git", "mktemp", "rm", "dirname", "basename", "find",
+                     "sort", "tee", "tail", "grep", "sed", "awk", "tr", "wc", "cut", "cat", "env"):
+            found = shutil.which(tool)
+            if found:
+                (bin_dir / tool).symlink_to(found)
+        return str(bin_dir)
+
+
+class CheckFastScriptsTests(ScriptsRepoTestCase):
+    """The base a run diffs against, the scripts/ suites a change names, and --all."""
 
     def test_without_base_it_diffs_against_origin_head(self):
         # The default branch's tip carries a failing test; a stale origin/master left at the first commit would
@@ -224,177 +245,6 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertEqual(0, code, out)
         self.assertNotIn("test_gone.py", out)
 
-    def test_a_doc_change_runs_the_doc_path_suites(self):
-        self.break_suite("test_doc_paths.py")
-        self.write("docs/x.md", "see `scripts/missing.py`\n")
-        code, out = self.check_fast()
-        self.assertEqual(1, code, out)
-        self.assertIn("FAIL     scripts/test/test_doc_paths.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_go_paths.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_sections.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_wire.py", out)
-        self.assertNotIn("test_apple_l10n.py", out)
-        self.assertNotIn("test_docker_entrypoint.py", out)
-
-    def test_a_top_level_markdown_change_runs_the_doc_path_suites(self):
-        self.write("CLAUDE.md", "index\n")
-        code, out = self.check_fast()
-        self.assertEqual(0, code, out)
-        self.assertIn("PASS     scripts/test/test_doc_paths.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_go_paths.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_sections.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_wire.py", out)
-        self.assertNotIn("no fast check maps to", out)
-
-    def test_a_change_to_the_wire_lists_runs_the_doc_wire_suite(self):
-        # test_doc_wire.py reads these sources: a new message type, flag, point or field breaks it from the code side.
-        self.break_suite("test_doc_wire.py")
-        for path in ("server/internal/proto/proto.go", "server/internal/hub/extensions_link.go",
-                     "server/internal/extension/points.go", "schema/extension/manifest.schema.json"):
-            with self.subTest(path=path):
-                self.write(path, "changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/test/test_doc_wire.py", out)
-                self.assertNotIn("test_doc_paths.py", out)
-
-    def test_wire_schema_inputs_run_the_wire_sample_suite(self):
-        # test_wire_schema.py holds the samples the shared fixtures keep for each wire schema to it, runs the generator's
-        # --check and imports the extension test's validator.
-        self.break_suite("test_wire_schema.py")
-        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")  # a schema/ change runs it too
-        self.commit_on_top("scripts/gen/extension_schema.py", "", "base")
-        for path in ("schema/wire/x.schema.json", "spec/fixtures/todo-view/x.json", "scripts/gen/extension_schema.py",
-                     "scripts/test/test_extension_schema.py"):
-            with self.subTest(path=path):
-                self.write(path, "# changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("checkout", "-q", "base", "--", "scripts")
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/test/test_wire_schema.py", out)
-
-    def test_todo_fixture_inputs_run_the_todo_fixture_suite(self):
-        # test_todo_fixtures.py reads the to-do page and window fixtures, the view schema, the todo-view line keys, the
-        # agent names and the hub's row fields, and imports the wire and extension schema tests.
-        self.break_suite("test_todo_fixtures.py")
-        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")  # a schema/ change runs it too
-        for path in ("spec/fixtures/todo-detail/x.json", "spec/fixtures/todo-layout/README.md",
-                     "spec/fixtures/todo-view/README.md", "spec/fixtures/agent-names/names.json",
-                     "schema/wire/todo-view.schema.json", "server/internal/assistant/todos.go",
-                     "server/internal/assistant/todo_ask.go", "scripts/test/test_wire_schema.py",
-                     "scripts/test/test_extension_schema.py"):
-            with self.subTest(path=path):
-                self.write(path, "# changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("checkout", "-q", "base", "--", "scripts")
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/test/test_todo_fixtures.py", out)
-
-    def test_other_todo_files_do_not_run_the_todo_fixture_suite(self):
-        self.break_suite("test_todo_fixtures.py")
-        for path in ("spec/fixtures/todo-view/todo_view.json", "spec/fixtures/todo-counts/x.json",
-                     "server/internal/assistant/todo_plan.go"):
-            with self.subTest(path=path):
-                self.write(path, "{}\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertNotIn("test_todo_fixtures.py", out)
-
-    def test_other_schema_and_spec_files_do_not_run_the_wire_sample_suite(self):
-        self.break_suite("test_wire_schema.py")
-        self.commit_on_top("scripts/test/test_sdk_bundle.py", PASSING, "base")
-        for path in ("schema/extension/x.schema.json", "spec/tokens/x.json"):
-            with self.subTest(path=path):
-                self.write(path, "{}\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertNotIn("test_wire_schema.py", out)
-
-    def test_a_change_where_the_section_check_reads_runs_it(self):
-        # Most names test_doc_sections.py checks are in code comments, so a change under any of its SOURCE_DIRS runs it.
-        self.break_suite("test_doc_sections.py")
-        for directory in section_check_dirs():
-            path = f"{directory}/sample.txt"
-            with self.subTest(path=path):
-                self.write(path, "changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                (self.repo / path).unlink()
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/test/test_doc_sections.py", out)
-                self.assertNotIn("test_doc_paths.py", out)
-
-    def test_an_apple_change_runs_the_l10n_suite(self):
-        self.break_suite("test_apple_l10n.py")
-        self.commit_on_top("scripts/test/test_apple_no_callkit.py", PASSING, "base")
-        self.write("apple/Persona/Views/Settings/Options.swift", 'let s = "中文"\n')
-        code, out = self.check_fast()
-        self.assertEqual(1, code, out)
-        self.assertIn("FAIL     scripts/test/test_apple_l10n.py", out)
-        self.assertIn("PASS     scripts/test/test_apple_no_callkit.py", out)
-        self.assertIn("SKIP  apple/** builds and tests", out)  # the Mac-only checks are still reported
-        self.assertNotIn("test_doc_paths.py", out)
-
-    def test_an_apple_or_xcconfig_change_runs_the_callkit_guard(self):
-        # It reads every Apple source and build file, and the xcconfig scripts/persona_config.py writes (#9290).
-        self.break_suite("test_apple_no_callkit.py")
-        for path in ("apple/Persona/Calls/Call.swift", "scripts/persona_config.py"):
-            with self.subTest(path=path):
-                self.write(path, "changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/test/test_apple_no_callkit.py", out)
-
-    def test_token_inputs_run_the_token_suite(self):
-        self.commit_on_top("scripts/assets/test_gen_tokens.py", FAILING, "base")
-        for path in ("spec/tokens/dimension.json", "apple/Shared/Design/Theme.swift",
-                     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"):
-            with self.subTest(path=path):
-                self.write(path, "changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/assets/test_gen_tokens.py", out)
-
-    def test_icon_inputs_run_the_icon_suite(self):
-        self.commit_on_top("scripts/assets/test_gen_icon_meanings.py", FAILING, "base")
-        for path in ("spec/icons/meanings.json", "apple/Shared/Design/Icons.swift",
-                     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/PersonaIcons.kt"):
-            with self.subTest(path=path):
-                self.write(path, "changed\n")
-                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
-                self.assertEqual(1, code, out)
-                self.assertIn("FAIL     scripts/assets/test_gen_icon_meanings.py", out)
-
-    def test_a_docker_change_runs_the_entrypoint_suite(self):
-        self.break_suite("test_docker_entrypoint.py")
-        self.write("deploy/docker/entrypoint.sh", "echo changed\n")
-        code, out = self.check_fast()
-        self.assertEqual(1, code, out)
-        self.assertIn("FAIL     scripts/test/test_docker_entrypoint.py", out)
-        self.assertNotIn("no fast check maps to", out)
-        self.assertNotIn("test_doc_paths.py", out)
-
-    def test_a_root_dockerfile_change_runs_the_entrypoint_suite(self):
-        # test_docker_entrypoint.py asserts the EXPOSE line of the repo-root Dockerfile.
-        self.break_suite("test_docker_entrypoint.py")
-        self.write("Dockerfile", "EXPOSE 18660\n")
-        code, out = self.check_fast()
-        self.assertEqual(1, code, out)
-        self.assertIn("FAIL     scripts/test/test_docker_entrypoint.py", out)
-        self.assertNotIn("no fast check maps to", out)
-
-    def test_the_docker_doc_runs_both_the_doc_and_the_entrypoint_suites(self):
-        self.write("docs/operations/docker.md", "changed\n")
-        code, out = self.check_fast()
-        self.assertEqual(0, code, out)
-        self.assertIn("PASS     scripts/test/test_docker_entrypoint.py", out)
-        self.assertIn("PASS     scripts/test/test_doc_paths.py", out)
-
     def test_all_runs_every_scripts_suite_in_one_job(self):
         # Mirror CI's Scripts tests job: --all runs every scripts/**/test_*.py, changed or not, except the ones a
         # dedicated job already runs. That stub fails under unittest, so the suite job must not pick it up. The count
@@ -433,8 +283,9 @@ class CheckFastScriptsTests(unittest.TestCase):
         found = {str(p.relative_to(self.repo)): is_suite(p) for p in self.repo.joinpath("scripts").rglob("test_*.py")}
         dedicated = {"scripts/test/test_external_service_refs.py", "scripts/test/test_sdk_bundle.py",
                      "scripts/test/test_extension_schema.py"}
-        expected = sorted(p for p, suite in found.items()
-                          if suite and p not in dedicated and not p.startswith("scripts/app/test_android_"))
+        dedicated.update("scripts/app/test_android_%s.py" % name  # job_i18n runs these four
+                         for name in ("i18n_check", "token_baseline", "motion_baseline", "slot_order"))
+        expected = sorted(p for p, suite in found.items() if suite and p not in dedicated)
         bin_dir = Path(self.toolchain_without_node_and_go())
         (bin_dir / "python3").unlink()
         (bin_dir / "python3").write_text(FAKE_PYTHON)
@@ -499,18 +350,107 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertIn("FAIL     scripts/ci/test_changed_ratchets.py", out)
                 self.assertIn("FAIL     scripts/test/test_merge_pr_sh.py", out)
 
+    def test_a_changed_module_runs_the_suites_that_import_it(self):
+        # From the suite's own directory, or from one it names (it puts scripts/<dir> on sys.path to import from it).
+        # A suite that imports a module of that name without naming its directory imports another one (#11026).
+        self.commit_on_top("scripts/tools/helper.py", "VALUE = 1\n", "base")
+        self.commit_on_top("scripts/tools/test_uses_helper.py", "import helper\n" + FAILING, "base")
+        self.commit_on_top("scripts/ci/test_named.py", 'import sys\nsys.path.insert(0, "scripts/tools")\n'
+                           "from helper import VALUE\n" + FAILING, "base")
+        self.commit_on_top("scripts/release/test_unrelated.py", "import os, helper\n" + FAILING, "base")
+        self.write("scripts/tools/helper.py", "VALUE = 2\n")
+        code, out = self.check_fast()
+        self.assertEqual(1, code, out)
+        self.assertIn("FAIL     scripts/tools/test_uses_helper.py", out)
+        self.assertIn("FAIL     scripts/ci/test_named.py", out)
+        self.assertNotIn("test_unrelated.py", out)
+        self.assertNotIn("scripts/tools/test_other.py", out)
+
+    def test_a_suite_a_dedicated_check_runs_schedules_that_check(self):
+        # test_external_service_refs.py imports compatibility_identifiers.py and runs as its own check; four of the
+        # scripts/app/test_android_* suites run in the android check, the others as suites.
+        self.commit_on_top("scripts/test/compatibility_identifiers.py", "NAMES = []\n", "base")
+        self.commit_on_top("scripts/test/test_external_service_refs.py",
+                           "from compatibility_identifiers import NAMES\n" + PASSING, "base")
+        self.commit_on_top("scripts/app/test_android_new_tool.py", PASSING, "base")
+        self.write("scripts/test/compatibility_identifiers.py", "NAMES = ['x']\n")
+        self.write("scripts/app/android_new_tool.py", "# changed\n")
+        code, out = self.check_fast("--dry-run", "--base", "base")
+        self.assertEqual(0, code, out)
+        self.assertIn("queued: external service refs", out)
+        self.assertNotIn("queued: scripts/test/test_external_service_refs.py", out)
+        self.assertIn("queued: scripts/app/test_android_new_tool.py", out)
+        self.assertIn("queued: android i18n", out)
+
+    def test_a_ci_lane_or_watcher_file_runs_the_slot_callers_test(self):
+        # test_heavy_slot.py reads these: a CI lane or a watcher step that names a script taking a slot must set
+        # PERSONA_HEAVY_SLOTS=0. A new lane script once broke it with nothing local running it (#11026).
+        self.commit_on_top("scripts/test/test_heavy_slot.py", PASSING, "base")
+        readers = (".github/workflows/scripts.yml", "scripts/ci/lane.sh", "scripts/ci/lane.py",
+                   "scripts/operations/watch.py", "scripts/operations/pr-watch.example.json",
+                   "scripts/operations/persona-pr-watch.service", ".claude/skills/pr-review-merge-loop/scripts/run.py",
+                   ".claude/skills/main-verify-fix-loop/SKILL.md")
+        others = ("scripts/tools/other.py", ".github/CODEOWNERS", "scripts/operations/notes.txt", ".claude/settings.json",
+                  "scripts/ci/test_lane.py")  # test_heavy_slot.py skips test_* files
+        self.write("listed.txt", "".join(p + "\n" for p in readers + others))
+        code, out = self.check_fast("--dry-run", "--changed-from", "listed.txt", "--each")
+        self.assertEqual(0, code, out)
+        plans, current = {}, None
+        for line in out.splitlines():
+            if line.startswith("== "):
+                current = plans.setdefault(line[3:], [])
+            elif current is not None:
+                current.append(line.strip())
+        self.assertEqual(sorted(readers + others), sorted(plans), out)
+        for path, lines in plans.items():
+            with self.subTest(path=path):
+                self.assertEqual(path in readers, "queued: scripts/test/test_heavy_slot.py" in lines, out)
+
     def test_a_go_trimpath_change_also_runs_the_suites_of_its_callers(self):
-        # server.sh and check-fast.sh compose GOFLAGS with the helper (#10614); test_ci.py and this suite run them.
+        # server.sh and check-fast.sh compose GOFLAGS with the helper (#10614); test_ci.py and test_check_fast_inputs.py
+        # run them.
         helper = "scripts/test/go_trimpath.sh"
         self.commit_on_top(helper, "#!/bin/sh\nprintf '%s\\n' -trimpath\n", "base")
-        for suite in ("scripts/test/test_go_trimpath.py", "scripts/ci/test_ci.py", "scripts/test/test_check_fast.py"):
+        for suite in ("scripts/test/test_go_trimpath.py", "scripts/ci/test_ci.py",
+                      "scripts/test/test_check_fast_inputs.py"):
             self.commit_on_top(suite, FAILING, "base")
         self.write(helper, "#!/bin/sh\n# changed\nprintf '%s\\n' -trimpath\n")
         code, out = self.check_fast()
         self.assertEqual(1, code, out)
         self.assertIn("FAIL     scripts/test/test_go_trimpath.py", out)
         self.assertIn("FAIL     scripts/ci/test_ci.py", out)
-        self.assertIn("FAIL     scripts/test/test_check_fast.py", out)
+        self.assertIn("FAIL     scripts/test/test_check_fast_inputs.py", out)
+
+    def test_check_fast_and_the_slot_helper_run_every_file_of_its_tests(self):
+        # check-fast.sh's tests are three files (#11017); the other two import test_check_fast.py's fixtures, and
+        # test_check_fast_inputs.py runs check-fast.sh with heavy_slot.py, so a change to any of them, or to the table
+        # check-fast.sh plans from, runs them.
+        # android.sh's own suite does not run for check-fast.sh.
+        everything = ("test_check_fast.py", "test_check_fast_guards.py", "test_check_fast_inputs.py")
+        for suite in (*everything, "test_heavy_slot.py", "test_android_sh.py"):
+            self.commit_on_top(f"scripts/test/{suite}", FAILING, "base")
+        self.commit_on_top("scripts/heavy_slot.py", "", "base")
+        self.commit_on_top("scripts/check-fast.sh", "#!/bin/bash\n", "base")
+        cases = {
+            "scripts/test/check-fast.sh": everything,
+            "scripts/check-fast.sh": everything,
+            "scripts/test/test_check_fast.py": everything,
+            "scripts/ci/check_fast_map.py": everything,  # the table check-fast plans from (#11535)
+            # test_android_sh.py runs android.sh with it (#11250).
+            "scripts/heavy_slot.py": ("test_heavy_slot.py", "test_check_fast_inputs.py", "test_android_sh.py"),
+        }
+        for path, suites in cases.items():
+            with self.subTest(path=path):
+                with (self.repo / path).open("a") as f:
+                    f.write("# changed\n")
+                code, out = self.check_fast()
+                self.git("checkout", "-q", "--", path)
+                self.assertEqual(1, code, out)
+                for suite in suites:
+                    self.assertIn(f"FAIL     scripts/test/{suite}", out)
+                if "test_android_sh.py" not in suites:
+                    self.assertNotIn("test_android_sh.py", out)
+                self.assertNotIn("scripts/tools/test_other.py", out)
 
     def test_the_debug_switch_list_and_its_checker_run_the_suites_that_read_them(self):
         # debug_switches.txt matches no script name, yet a union merge can leave it out of order (#10616) and a new
@@ -530,48 +470,35 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertIn("FAIL     scripts/test/test_apple_release_switch_names.py", out)
                 self.assertNotIn("scripts/tools/test_other.py", out)
 
-    def test_a_migration_edit_runs_the_freeze_check(self):
-        self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
-        self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id int);\n")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "migrations")
-        self.git("tag", "-f", "base")
-        self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id text);\n")
-        code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-        self.assertEqual(0, code, out)
-        self.assertIn("PASS     frozen migrations", out)
-        self.assertIn("server go tests (internal/db)", out)  # no Go module here; the freeze check still ran
+    def run_raw(self, *command, env=None):
+        """check-fast's exit code and output (stdout and stderr), with bytes that are not UTF-8 replaced."""
+        run = subprocess.run(command, cwd=self.repo, env=dict(os.environ, TMPDIR=str(self.repo), **(env or {})),
+                             capture_output=True, timeout=300)
+        return run.returncode, (run.stdout + run.stderr).decode("utf-8", "replace")
 
-    def test_an_unrelated_change_does_not_run_the_freeze_check(self):
-        self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "checker")
-        self.git("tag", "-f", "base")
-        self.write("docs/guide.md", "changed\n")
-        code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+    def test_output_that_is_not_utf8_keeps_its_log_tail(self):
+        # In a UTF-8 locale macOS sed stops at the first byte that is not UTF-8 ("illegal byte sequence"), so the
+        # summary lost a failed check's log tail (#11250).
+        self.write("scripts/tools/test_bytes.py",
+                   "import sys, unittest\n\nclass T(unittest.TestCase):\n    def test_bytes(self):\n"
+                   "        sys.stdout.buffer.write(b'\\xff\\xfe not UTF-8\\n')\n"
+                   "        sys.stdout.flush()\n        self.fail('the line after the bytes')\n")
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        code, out = self.run_raw("bash", "scripts/test/check-fast.sh", "--base", "base", env={"LC_ALL": utf8})
+        self.assertEqual(1, code, out)
+        self.assertIn("FAIL     scripts/tools/test_bytes.py", out)
+        self.assertIn("AssertionError: the line after the bytes", out)  # the log's tail, under the summary line
+        self.assertNotIn("illegal byte sequence", out)
+
+    def test_with_stderr_closed_the_checks_still_report(self):
+        # The job subshells copy stderr for the live slot lines (4>&2); with it closed every job failed with "no
+        # status" (#11250). check-fast opens it on /dev/null instead and runs without the live lines. A doc change:
+        # the plan of a changed scripts module once opened a pipe that took the free fd 2 and hid the failure.
+        self.write("docs/x.md", "changed\n")
+        code, out = self.run_raw("bash", "-c", 'exec 2>&-; exec bash scripts/test/check-fast.sh --base base')
         self.assertEqual(0, code, out)
-        self.assertNotIn("frozen migrations", out)
         self.assertIn("PASS     scripts/test/test_doc_paths.py", out)
-
-    def test_renaming_a_migration_out_of_its_directory_runs_the_freeze_check(self):
-        self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
-        self.write("server/internal/db/migrations/hub/0001_init.sql", "CREATE TABLE t (id int);\n")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "migrations")
-        self.git("tag", "-f", "base")
-        (self.repo / "notes").mkdir()
-        self.git("mv", "server/internal/db/migrations/hub/0001_init.sql", "notes/moved.sql")
-        code, out = self.check_fast(path=self.toolchain_without_node_and_go())
-        self.assertEqual(0, code, out)
-        self.assertIn("PASS     frozen migrations", out)
-        self.assertIn("SKIP  server go tests (internal/db): go not found", out)  # --no-renames retains the source path
-
-    def test_all_runs_the_freeze_check_when_the_script_exists(self):
-        self.write("scripts/ci/migration_freeze.py", "print('freeze-ran')\n")
-        code, out = self.check_fast("--all", path=self.toolchain_without_node_and_go())
-        self.assertEqual(1, code, out)  # the stubbed scripts/tools/test_other.py fails, and node/go are missing
-        self.assertIn("PASS     frozen migrations", out)
-        self.assertIn("queued: scripts unittest suites (8)", out)
+        self.assertNotIn("no status", out)
 
     def test_all_reports_a_slow_suite_as_timeout_and_runs_the_rest(self):
         self.write("scripts/tools/test_other.py", PASSING)
@@ -589,229 +516,119 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertIn("TIMEOUT  scripts unittest suites (10)", out)
         self.assertIn("1 suite(s) timed out: scripts/tools/test_slow.py", out)
 
-    def toolchain_without_node_and_go(self):
-        # A PATH with only the tools check-fast.sh itself needs, so node and go are missing on any machine. It lives
-        # outside the repository, so a diff-mode run does not count it as a change.
-        if getattr(self, "bin_dir", None):
-            return str(self.bin_dir)
-        self.bin_dir = Path(tempfile.mkdtemp(prefix="check-fast-bin-"))
-        self.addCleanup(shutil.rmtree, self.bin_dir)
-        bin_dir = self.bin_dir
-        for tool in ("bash", "python3", "timeout", "gtimeout", "git", "mktemp", "rm", "dirname", "basename", "find",
-                     "sort", "tee", "tail", "grep", "sed", "awk", "tr", "wc", "cut", "cat", "env"):
-            found = shutil.which(tool)
-            if found:
-                (bin_dir / tool).symlink_to(found)
-        return str(bin_dir)
+    def test_a_diff_without_the_table_stops_before_planning(self):
+        # Without the table nothing says what a path selects; --all does not read it.
+        (self.repo / "scripts/ci/check_fast_map.py").unlink()
+        self.write("scripts/tools/test_new.py", PASSING)
+        code, out = self.check_fast()
+        self.assertEqual(2, code, out)
+        self.assertIn("check-fast: picking the checks for a change needs python3 and scripts/ci/check_fast_map.py; "
+                      "no plan made", out)
+        self.assertNotIn("queued:", out)
+        code, out = self.check_fast("--all", "--dry-run")
+        self.assertEqual(0, code, out)
+        self.assertIn("queued: scripts unittest suites", out)
+
+    def test_a_diff_without_python3_stops_before_planning(self):
+        # The toolchain_without_node_and_go tools, python3 left out too.
+        bin_dir = Path(self.toolchain_without_node_and_go())
+        (bin_dir / "python3").unlink(missing_ok=True)
+        self.write("scripts/tools/test_new.py", PASSING)
+        code, out = self.check_fast(path=str(bin_dir))
+        self.assertEqual(2, code, out)
+        self.assertIn("check-fast: picking the checks for a change needs python3 and scripts/ci/check_fast_map.py; "
+                      "no plan made", out)
+
+    def test_a_table_that_fails_or_answers_wrong_stops_before_planning(self):
+        cases = {
+            "raise SystemExit('broken on purpose')\n":
+                "python3 scripts/ci/check_fast_map.py failed (broken on purpose)",
+            "": "python3 scripts/ci/check_fast_map.py listed fewer lines than paths",
+            "import sys\nfor line in sys.stdin:\n    print('web\\tbogus')\n":
+                "python3 scripts/ci/check_fast_map.py named a check this script does not know: bogus",
+        }
+        for table, message in cases.items():
+            with self.subTest(message=message):
+                self.write("scripts/ci/check_fast_map.py", table)
+                code, out = self.check_fast()
+                self.assertEqual(2, code, out)
+                self.assertIn(f"check-fast: {message}; no plan made", out)
+                self.assertNotIn("queued:", out)
 
 
-FAKE_GO = '#!/bin/sh\nprintf "%s|%s\\n" "${PWD##*/}" "$*" >> "$FAKE_GO_LOG"\n'
-# The package lists of check-fast's two repo-wide guard calls: whole packages, and the named guard tests (-run) of two
-# packages whose other tests are slow or need Postgres.
-GUARD_PACKAGES = "./internal/lazyre ./internal/archguard ./internal/tzguard ./plugins"
-GUARD_RUN_PACKAGES = "./internal/hub ./internal/assistant"
+class CheckFastTableTests(unittest.TestCase):
+    """The per-path table check-fast plans from (scripts/ci/check_fast_map.py, #11535): its command line, the order its
+    rules are tried in, and that check-fast.sh and the table name the same checks."""
 
+    TABLE = ROOT / "scripts/ci/check_fast_map.py"
 
-@unittest.skipUnless(shutil.which("timeout") or shutil.which("gtimeout"), "check-fast.sh needs GNU timeout")
-class CheckFastServerInputsTests(unittest.TestCase):
-    """Repository inputs outside server/ that server tests read run go test on the packages that read them."""
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("check_fast_map", cls.TABLE)
+        cls.table = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.table)
 
-    def setUp(self):
-        self.repo = Path(tempfile.mkdtemp(prefix="check-fast-test-"))
-        self.addCleanup(shutil.rmtree, self.repo)
-        (self.repo / "scripts/test").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
-        self.write("scripts/privacy_check.py", "print('clean')\n")
-        self.write("scripts/test/test_extension_schema.py", "")
-        self.write("scripts/test/pr_needs_issue_test.mjs", "")
-        self.write("scripts/test/server_test_env.py", "")
-        self.write("scripts/test/test_sdk_bundle.py", "")  # a schema/ change also runs the sdk bundle and sdk/go jobs
-        self.write("sdk/go/go.mod", "module example.com/sdk\n")
-        self.write("spec/fixtures/x.json", "{}\n")
-        self.write("spec/tokens/colors.json", "{}\n")
-        self.write("docs/example-guide.md", "guide\n")
-        self.write("docs/other.md", "other\n")
-        self.write("schema/extension/examples/Manifest.x.json", "{}\n")
-        self.write("web/package.json", "{}\n")  # a schema/extension change also runs the web check (stubbed npm)
-        self.write("server/go.mod", "module example.com/server\n")
-        self.write("server/internal/foo/foo_test.go", 'package foo\n\nconst dir = "../../../spec/fixtures/x"\n')
-        self.write("server/internal/joined/joined_test.go",
-                   'package joined\n\nvar dir = filepath.Join("..", "..", "..", "spec", "fixtures", "wire")\n')
-        self.write("server/internal/noted/noted_test.go", 'package noted\n\n// Same as spec/fixtures/x.json.\n')
-        self.write("server/internal/bar/bar_test.go", "package bar\n")
-        self.write("server/internal/guide/conformance/guide_test.go",
-                   'package conformance\n\nconst guide = "docs/example-guide.md"\n')
-        self.write("server/internal/ext/ext_test.go",
-                   'package ext\n\nvar d = filepath.Join("..", "schema", "extension", "examples")\n')
-        self.write("server/internal/db/dbtest/env_test.go",
-                   'package dbtest\n\nconst launcher = "../../../../scripts/test/server_test_env.py"\n')
-        self.git("init", "-q")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
-        self.git("tag", "base")
-        # A fake go outside the repository records each call ("<cwd basename>|<args>") instead of building anything.
-        bin_dir = Path(tempfile.mkdtemp(prefix="check-fast-go-"))
-        self.addCleanup(shutil.rmtree, bin_dir)
-        (bin_dir / "go").write_text(FAKE_GO)
-        (bin_dir / "go").chmod(0o755)
-        (bin_dir / "npm").write_text("#!/bin/sh\n")  # passes npm ci, typecheck and vitest without running them
-        (bin_dir / "npm").chmod(0o755)
-        self.go_log = bin_dir / "calls.log"
-        self.env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                    "FAKE_GO_LOG": str(self.go_log)}
+    def run_table(self, data, *args):
+        return subprocess.run([sys.executable, str(self.TABLE), *args], input=data, capture_output=True, timeout=60)
 
-    def write(self, path, text):
-        file = self.repo / path
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(text)
+    def test_it_prints_the_checks_of_each_path_on_its_own_line(self):
+        paths = ["web/src/App.tsx", "notes/todo.txt", "server/cmd/personad/main.go", "integrations/pi/a b.js",
+                 "web/src/App.tsx"]
+        run = self.run_table("".join(path + "\n" for path in paths).encode())
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertEqual(["web\tsuite:scripts/test/test_doc_sections.py", "unmapped",
+                          "go-package:cmd/personad\tgo-guards\tsuite:scripts/test/test_doc_sections.py",
+                          "integration:pi\tsuite:scripts/test/test_doc_sections.py",
+                          "web\tsuite:scripts/test/test_doc_sections.py", ""], run.stdout.decode().split("\n"))
+        self.assertEqual(b"", self.run_table(b"").stdout)
 
-    def git(self, *args):
-        subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
+    def test_a_path_that_is_not_utf8_keeps_its_bytes_and_its_line(self):
+        run = self.run_table(b"integrations/\xff/x.js\nnotes/\xfe\n")
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertEqual(b"integration:\xff\tsuite:scripts/test/test_doc_sections.py\nunmapped\n", run.stdout)
 
-    def check_fast(self):
-        run = subprocess.run(["bash", "scripts/test/check-fast.sh", "--base", "base"], cwd=self.repo, env=self.env,
-                             capture_output=True, text=True, timeout=300)
-        out = run.stdout + run.stderr
-        self.assertEqual(0, run.returncode, out)
-        calls = self.go_log.read_text().splitlines() if self.go_log.exists() else []
-        # The package pattern is the last argument of each recorded "go test ... ./internal/<pkg>/..." call.
-        return out, sorted(call.split()[-1] for call in calls if call.startswith("server|test "))
+    def test_help_prints_the_usage_and_anything_else_is_refused(self):
+        run = self.run_table(b"", "--help")
+        self.assertEqual(0, run.returncode)
+        self.assertIn(b"check-fast's per-path table", run.stdout)
+        self.assertEqual(2, self.run_table(b"", "--each").returncode)
 
-    def go_calls(self):
-        """Every recorded go call ("<cwd basename>|<args>") without the -timeout value check-fast derives from its budget."""
-        calls = self.go_log.read_text().splitlines() if self.go_log.exists() else []
-        return [re.sub(r" -timeout \S+", "", call) for call in calls]
+    def test_the_first_rule_of_a_group_that_matches_wins(self):
+        checks = self.table.checks
+        # A dedicated script's own rule, not the scripts/* one after it.
+        self.assertEqual(["external-refs", "suite:scripts/test/test_doc_sections.py"],
+                         checks("scripts/test/test_external_service_refs.py"))
+        # server/: a package group, a file directly in plugins/ (the guards run it), anything else a build.
+        self.assertEqual(["go-package:internal/hub", "go-guards", "suite:scripts/test/test_doc_wire.py",
+                          "suite:scripts/test/test_doc_sections.py"], checks("server/internal/hub/hub.go"))
+        self.assertEqual(["go-guards", "suite:scripts/test/test_doc_sections.py"], checks("server/plugins/plugins.go"))
+        self.assertEqual(["server-build", "go-guards"], checks("server/internal/README.md")[:2])
+        # A markdown file in a wire-list package is a doc first: the four doc suites, not the wire list alone.
+        self.assertIn("suite:scripts/test/test_doc_paths.py", checks("server/internal/proto/README.md"))
+        # name:test_* matches the file name only: a test file is not a slot caller, a file in a test_ directory is.
+        heavy = "suite:scripts/test/test_heavy_slot.py"
+        self.assertNotIn(heavy, checks("scripts/operations/test_pr_watch.py"))
+        self.assertIn(heavy, checks("scripts/operations/test_tools/watch.py"))
+        self.assertIn(heavy, checks("scripts/operations/pr_watch.py"))
 
-    def guard_calls(self):
-        return [call for call in self.go_calls() if call.endswith((" " + GUARD_PACKAGES, " " + GUARD_RUN_PACKAGES))]
+    def test_check_fast_and_the_table_name_the_same_checks(self):
+        text = (ROOT / "scripts/test/check-fast.sh").read_text()
+        block = text[text.index('case "$_c" in'):]
+        block = block[:block.index("esac")]
+        handled = set(re.findall(r"^\s+([a-z-]+)(?::\*)?\)", block, re.M))
+        self.assertEqual(set(self.table.CHECKS) | {"suite"}, handled)
+        named = {check for group in self.table.TABLE for _, listed in group for check in listed}
+        self.assertEqual(set(self.table.CHECKS), {check for check in named if "/" not in check})
 
-    def test_a_spec_fixture_runs_the_packages_that_read_it(self):
-        self.write("spec/fixtures/x.json", '{"changed": true}\n')
-        out, packages = self.check_fast()
-        self.assertIn("queued: server go test ./internal/foo/...", out)
-        # filepath.Join elements name the fixtures too; a // comment that mentions them is not a reader.
-        self.assertEqual(["./internal/foo/...", "./internal/joined/..."], packages, out)
-        self.assertNotIn("no fast check maps to", out)
-
-    def test_other_spec_files_stay_unmapped(self):
-        self.write("spec/other/x.json", '{"changed": true}\n')
-        out, packages = self.check_fast()
-        self.assertEqual([], packages, out)
-        self.assertIn("no fast check maps to: spec/other/x.json", out)
-
-    def test_a_token_source_runs_no_server_package(self):
-        self.write("spec/tokens/colors.json", '{"changed": true}\n')
-        out, packages = self.check_fast()
-        self.assertEqual([], packages, out)
-        self.assertNotIn("no fast check maps to", out)
-
-    def test_a_doc_runs_only_the_package_that_reads_it(self):
-        self.write("docs/example-guide.md", "guide changed\n")
-        self.write("docs/other.md", "other changed\n")
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/guide/conformance/..."], packages, out)
-
-    def test_a_schema_example_runs_its_readers(self):
-        self.write("schema/extension/examples/Manifest.x.json", '{"changed": true}\n')
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/ext/..."], packages, out)
-
-    def test_a_wire_schema_runs_its_readers(self):
-        self.write("server/internal/wirereader/wire_test.go",
-                   'package wirereader\n\nvar s = filepath.Join("..", "..", "..", "schema", "wire", "x.schema.json")\n')
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "reader")
-        self.git("tag", "-f", "base")
-        self.write("schema/wire/x.schema.json", '{"changed": true}\n')
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/wirereader/..."], packages, out)
-
-    def test_the_server_test_launcher_runs_its_reader(self):
-        self.write("scripts/test/server_test_env.py", "# changed\n")
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/db/dbtest/..."], packages, out)
-
-    def test_an_sdk_ts_source_runs_the_trusted_adapter_check(self):
-        # The trusted Deno adapter bundles sdk/ts/src (#4221): a change there runs denohost's tests, where
-        # TestTrustedAdapterMatchesOfficialSDK catches a stale adapter. The rest of sdk/ts is not bundled.
-        bun = self.go_log.parent / "bun"  # a fake bun next to the fake go: bun test passes
-        bun.write_text("#!/bin/sh\n")
-        bun.chmod(0o755)
-        self.write("sdk/ts/README.md", "changed\n")
-        out, packages = self.check_fast()
-        self.assertEqual([], packages, out)
-        self.write("sdk/ts/src/wire.ts", "export {}\n")
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/extension/denohost/..."], packages, out)
-
-    def test_without_bun_the_trusted_adapter_check_says_it_skipped(self):
-        self.env = {**self.env, "PATH": os.pathsep.join(
-            d for d in self.env["PATH"].split(os.pathsep) if not (Path(d) / "bun").exists())}
-        self.write("sdk/ts/src/wire.ts", "export {}\n")
-        out, packages = self.check_fast()
-        self.assertEqual([], packages, out)
-        self.assertIn("SKIP  trusted Deno adapter", out)
-
-    def test_a_server_go_change_also_runs_the_repo_wide_guards(self):
-        # The guards fail on code outside their own package (#1936 broke the lazyre guard on main that way), so a change
-        # in any package runs them next to that package's own tests.
-        self.write("server/internal/foo/x.go", "package foo\n")
-        out, packages = self.check_fast()
-        self.assertIn("queued: server repo-wide guards", out)
-        self.assertIn("./internal/foo/...", packages)
-        calls = self.guard_calls()
-        self.assertEqual(2, len(calls), out)
-        self.assertEqual("server|test -count=1 " + GUARD_PACKAGES, calls[0])
-        match = re.fullmatch(r"server\|test -count=1 -run \^\(([\w|]+)\)\$ " + re.escape(GUARD_RUN_PACKAGES), calls[1])
-        self.assertIsNotNone(match, calls[1])
-        # go test -run passes when a name matches nothing: every named guard must exist, and every package directory.
-        sources = "".join(path.read_text() for package in GUARD_RUN_PACKAGES.split()
-                          for path in (ROOT / "server" / package).glob("*_test.go"))
-        defined = set(re.findall(r"^func (Test\w+)\(t \*testing\.T\)", sources, re.M))
-        self.assertEqual(set(), set(match.group(1).split("|")) - defined)
-        for package in (GUARD_PACKAGES + " " + GUARD_RUN_PACKAGES).split():
-            self.assertTrue((ROOT / "server" / package).is_dir(), package)
-
-    def test_a_plugin_change_runs_its_own_tests_and_the_guards_not_a_build(self):
-        self.write("server/plugins/wechat/x.go", "package wechat\n")
-        out, packages = self.check_fast()
-        self.assertIn("./plugins/wechat/...", packages)
-        self.assertEqual(2, len(self.guard_calls()), out)
-        self.assertNotIn("server|build ./...", self.go_calls(), out)
-
-    def test_an_sdk_go_change_runs_the_guards(self):
-        # The plugins guard reads sdk/go: a plugin uses only the SDK, and the SDK stands alone.
-        self.write("sdk/go/x.go", "package sdk\n")
-        out, _ = self.check_fast()
-        self.assertEqual(2, len(self.guard_calls()), out)
-
-    def test_a_docs_or_web_change_runs_no_guard(self):
-        self.write("docs/example-guide.md", "guide changed\n")  # a server test reads it: that package still runs
-        self.write("web/src/x.ts", "export {}\n")
-        out, packages = self.check_fast()
-        self.assertEqual(["./internal/guide/conformance/..."], packages, out)
-        self.assertEqual([], self.guard_calls(), out)
-        self.assertNotIn("repo-wide guards", out)
-
-    def test_go_runs_with_trimpath_and_the_callers_flags(self):
-        # Worktrees share compiled packages only under -trimpath (#10614): check-fast adds it with
-        # scripts/test/go_trimpath.sh, which keeps a user-set GOFLAGS.
-        shutil.copy(ROOT / "scripts/test/go_trimpath.sh", self.repo / "scripts/test/go_trimpath.sh")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "helper")
-        self.git("tag", "-f", "base")
-        # This go answers go env GOFLAGS as the real one does and records the GOFLAGS of every other call.
-        (self.go_log.parent / "go").write_text(
-            '#!/bin/sh\n[ "$*" = "env GOFLAGS" ] && { printf "%s\\n" "$GOFLAGS"; exit 0; }\n'
-            'printf "%s|%s|%s\\n" "${PWD##*/}" "$GOFLAGS" "$*" >> "$FAKE_GO_LOG"\n')
-        self.env["GOFLAGS"] = "-mod=readonly"
-        self.write("server/internal/foo/x.go", "package foo\n")
-        self.check_fast()
-        calls = [line.split("|", 2) for line in self.go_log.read_text().splitlines()]
-        tests = [call for call in calls if call[0] == "server" and call[2].startswith("test ")]
-        self.assertEqual(3, len(tests), calls)  # the package and the two guard calls
-        for _, goflags, _ in tests:
-            self.assertEqual("-mod=readonly -trimpath", goflags)
+    def test_every_suite_the_table_names_is_a_unittest_suite_ci_runs(self):
+        is_suite = ci_is_suite()
+        suites = self.table.suites()
+        self.assertGreater(len(suites), 20)
+        for suite in suites:
+            with self.subTest(suite=suite):
+                self.assertTrue(suite.startswith("scripts/") and Path(suite).name.startswith("test_"), suite)
+                self.assertTrue((ROOT / suite).is_file(), suite)
+                self.assertTrue(is_suite(ROOT / suite), suite)
 
 
 # A privacy-scan stub that never finishes on its own: it records its own pid, its parent's (the GNU timeout that runs
@@ -825,6 +642,19 @@ time.sleep(60)
 """
 
 
+# The signals the tests send. A child inherits an ignored signal, and a shell can never trap one that was ignored when
+# it started, so check-fast.sh starts with them at their defaults whatever this runner got: check-fast runs each suite
+# as a background job, which bash starts with SIGINT ignored, and nohup or a detached shell ignores SIGHUP
+# (docs/lessons/testing.md, "Signal tests").
+SIGNALS = (signal.SIGINT, signal.SIGHUP, signal.SIGTERM)
+
+
+def default_signals():
+    """preexec_fn: SIGINT, SIGHUP and SIGTERM at their defaults in the child, as a terminal starts check-fast.sh."""
+    for sig in SIGNALS:
+        signal.signal(sig, signal.SIG_DFL)
+
+
 @unittest.skipUnless(shutil.which("ps"), "the signal tests list processes with ps")
 @unittest.skipUnless(shutil.which("timeout") or shutil.which("gtimeout"), "check-fast.sh needs GNU timeout")
 class CheckFastSignalTests(unittest.TestCase):
@@ -834,7 +664,7 @@ class CheckFastSignalTests(unittest.TestCase):
         self.repo = Path(tempfile.mkdtemp(prefix="check-fast-signal-"))
         self.addCleanup(shutil.rmtree, self.repo, True)
         (self.repo / "scripts/test").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        copy_check_fast(self.repo)
         (self.repo / "scripts/privacy_check.py").write_text(HANGING_CHECK)
         (self.repo / "scripts/test/test_extension_schema.py").write_text("")
         (self.repo / "scripts/test/pr_needs_issue_test.mjs").write_text("")
@@ -860,11 +690,13 @@ class CheckFastSignalTests(unittest.TestCase):
 
     def interrupt(self, sig, code, group=False):
         pid_file = self.repo / "scripts/privacy_check.py.pids"
+        pid_file.unlink(missing_ok=True)  # a test that interrupts twice waits for the second run's check
         # An absolute script path puts the repo into the job subshells' command lines; TMPDIR puts it into tee's.
-        # start_new_session keeps a stray signal off the test runner.
+        # start_new_session keeps a stray signal off the test runner; default_signals undoes what the runner ignores.
         proc = subprocess.Popen(["bash", str(self.repo / "scripts/test/check-fast.sh"), "--base", "base"],
                                 cwd=self.repo, env=dict(os.environ, TMPDIR=str(self.repo)), stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, start_new_session=True)
+                                stderr=subprocess.STDOUT, text=True, start_new_session=True,
+                                preexec_fn=default_signals)
         pids = set()
         try:
             deadline = time.monotonic() + 30
@@ -920,127 +752,16 @@ class CheckFastSignalTests(unittest.TestCase):
         # Closing a terminal or a tmux pane sends SIGHUP to the whole foreground process group.
         self.interrupt(signal.SIGHUP, 129, group=True)
 
-
-def web_lane_inputs():
-    """The paths outside web/ that select CI's web lane in scripts/ci/paths.py, minus CI's own runner files.
-
-    scripts/ci/web.sh and the workflow decide how CI runs the web checks, not what typecheck and vitest read, so a change
-    to one of them does not need the local web check.
-    """
-    spec = importlib.util.spec_from_file_location("ci_paths", ROOT / "scripts/ci/paths.py")
-    paths = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(paths)
-    return [p for p in paths.FILTERS["web"] if not p.startswith(("web/", "scripts/ci/", ".github/"))]
-
-
-# A fake node that reports major version 22 (check-fast.sh's gate) and passes anything else, and a fake npm that
-# records each call ("<cwd basename>|<args>") instead of installing or testing anything.
-FAKE_NODE = '#!/bin/sh\nif [ "$1" = -e ]; then echo 22; fi\n'
-FAKE_NPM = '#!/bin/sh\nprintf "%s|%s\\n" "${PWD##*/}" "$*" >> "$FAKE_NPM_LOG"\n'
-
-
-@unittest.skipUnless(shutil.which("timeout") or shutil.which("gtimeout"), "check-fast.sh needs GNU timeout")
-class CheckFastWebInputsTests(unittest.TestCase):
-    """Repository files outside web/ that web/src and its vitest suite read run the web check when they change."""
-
-    def setUp(self):
-        self.repo = Path(tempfile.mkdtemp(prefix="check-fast-test-"))
-        self.addCleanup(shutil.rmtree, self.repo)
-        (self.repo / "scripts/test").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
-        self.write("scripts/privacy_check.py", "print('clean')\n")
-        self.write("scripts/test/test_extension_schema.py", "")
-        self.write("scripts/test/test_sdk_bundle.py", "")
-        self.write("scripts/test/pr_needs_issue_test.mjs", "")
-        for name in GUARD_SUITES:
-            self.write(f"scripts/test/{name}", PASSING)
-        self.write("sdk/go/go.mod", "module example.com/sdk\n")
-        self.write("web/package.json", "{}\n")
-        self.write("schema/other.json", "{}\n")
-        self.write("docs/guide.md", "guide\n")
-        self.git("init", "-q")
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
-        self.git("tag", "base")
-        # An installed (untracked, ignored) node_modules, so the web check skips npm ci as on a set-up checkout.
-        (self.repo / "web/node_modules").mkdir()
-        self.write(".git/info/exclude", "web/node_modules/\n")
-        bin_dir = Path(tempfile.mkdtemp(prefix="check-fast-bin-"))
-        self.addCleanup(shutil.rmtree, bin_dir)
-        for name, text in (("node", FAKE_NODE), ("npm", FAKE_NPM), ("go", FAKE_GO)):
-            (bin_dir / name).write_text(text)
-            (bin_dir / name).chmod(0o755)
-        self.npm_log = bin_dir / "npm.log"
-        self.env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                    "FAKE_NPM_LOG": str(self.npm_log), "FAKE_GO_LOG": str(bin_dir / "go.log")}
-
-    def write(self, path, text):
-        file = self.repo / path
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(text)
-
-    def git(self, *args):
-        subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
-
-    def check_fast(self):
-        self.npm_log.unlink(missing_ok=True)
-        run = subprocess.run(["bash", "scripts/test/check-fast.sh", "--base", "base"], cwd=self.repo, env=self.env,
-                             capture_output=True, text=True, timeout=300)
-        out = run.stdout + run.stderr
-        self.assertEqual(0, run.returncode, out)
-        return out, self.npm_log.read_text().splitlines() if self.npm_log.exists() else []
-
-    def test_every_web_lane_input_runs_web(self):
-        inputs = web_lane_inputs()
-        self.assertIn("scripts/mock/inbox_events.json", inputs)  # paths.py still has the shape this test reads
-        for pattern in inputs:
-            with self.subTest(pattern=pattern):
-                sample = pattern.replace("**", "sample.json").replace("*", "sample")
-                self.assertTrue(fnmatch.fnmatchcase(sample, pattern), sample)
-                self.write(sample, '{"changed": true}\n')
-                try:
-                    out, npm_calls = self.check_fast()
-                finally:
-                    (self.repo / sample).unlink()
-                self.assertIn("queued: web\n", out)
-                self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
-                self.assertNotIn("no fast check maps to", out)
-
-    def test_web_inputs_keep_their_other_checks(self):
-        self.write("schema/extension/examples/x.json", "{}\n")
-        out, _ = self.check_fast()
-        self.assertIn("queued: web\n", out)
-        self.assertIn("queued: extension schema", out)  # the schema/ mapping still applies
-        (self.repo / "schema/extension/examples/x.json").unlink()
-        self.write("scripts/mock/inbox_events.json", "{}\n")
-        out, _ = self.check_fast()
-        self.assertIn("queued: web\n", out)
-        self.assertIn("queued: pr-needs-issue workflow test", out)  # the scripts/ mapping still applies
-
-    def test_other_schema_files_do_not_run_web(self):
-        self.write("schema/other.json", '{"changed": true}\n')
-        out, npm_calls = self.check_fast()
-        self.assertNotIn("queued: web\n", out)
-        self.assertEqual([], npm_calls, out)
-
-    def test_rename_out_of_web_still_queues_web(self):
-        self.write("web/src/old.ts", "export const old = 1;\n")
-        self.write("web/src/consumer.ts", "import { old } from './old';\nconsole.log(old);\n")
-        self.git("add", "web/src/old.ts", "web/src/consumer.ts")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "web source base")
-        self.git("tag", "-f", "base")
-        self.git("config", "diff.renames", "true")
-        self.git("mv", "web/src/old.ts", "docs/old.ts")
-
-        out, npm_calls = self.check_fast()
-        self.assertIn("queued: web\n", out)
-        self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
-
-    def test_a_doc_change_does_not_run_web(self):
-        self.write("docs/guide.md", "guide changed\n")
-        out, npm_calls = self.check_fast()
-        self.assertNotIn("queued: web\n", out)
-        self.assertEqual([], npm_calls, out)
+    def test_a_runner_that_ignores_the_signals_does_not_pass_that_on(self):
+        # As check-fast runs this suite: a background job with SIGINT ignored, here SIGHUP and SIGTERM too (#11250).
+        saved = {sig: signal.signal(sig, signal.SIG_IGN) for sig in SIGNALS}
+        try:
+            for sig, code in ((signal.SIGINT, 130), (signal.SIGHUP, 129)):
+                with self.subTest(signal=sig.name):
+                    self.interrupt(sig, code)
+        finally:
+            for sig, handler in saved.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

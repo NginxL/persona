@@ -87,6 +87,30 @@ class ExtensionUiContractTest {
         assertNull(section.columns)
     }
 
+    // UI versions 9 and 10 (#9337, #9727): gauges and graphs also read through the handwritten ordinary-view DTOs.
+    @Test fun theSchemasVersionNineAndTenExamplesRead() {
+        val strict = Json { ignoreUnknownKeys = false }
+        val items = listOf(
+            "View.v9-gauge-percent.json", "View.v9-quota.json",
+            "View.v10-plan-layered.json", "View.v10-work-tree.json",
+        ).flatMap { name ->
+            val raw = JsonCodec.parseToJsonElement(
+                java.io.File(System.getProperty("persona.repo.root"), "schema/extension/examples/$name").readText(),
+            )
+            raw.jsonObject.getValue("sections").jsonArray.flatMap { section ->
+                strict.decodeFromJsonElement(persona.core.contracts.api.ExtensionViewSection.serializer(), section).items
+            }
+        }
+        val gauges = items.flatMap { it.tiles.orEmpty() }.mapNotNull { it.gauge }
+        assertEquals(5, gauges.size)
+        assertEquals(1.0, gauges.maxOf { it.ratio }, 0.0)
+        val graphs = items.filter { it.type == "graph" }
+        assertEquals(setOf("plan", "work"), graphs.map { it.key }.toSet())
+        assertEquals(listOf("layered", null), graphs.map { it.layout })
+        assertEquals(listOf(6, 12), graphs.map { it.nodes.orEmpty().size })
+        assertEquals(listOf("docs"), graphs.single { it.key == "work" }.folded)
+    }
+
     // The new routes answer extension / extension_name / extensions, the old ones plugin / plugin_name / plugins.
     @Test fun bothKeysDecode() {
         val json = Json(JsonCodec) {}

@@ -76,6 +76,9 @@ func (n *Node) inspectHerdrDeletion(ctx context.Context, id string, closeOnly bo
 	if !filepath.IsAbs(path) {
 		return nil, 0, composerError(ctx, "identity_unavailable")
 	}
+	if err := n.guardBackendDeletion(path); err != nil {
+		return nil, 0, err
+	}
 	top, err := git(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil || realPath(strings.TrimSpace(top)) != realPath(path) {
 		return nil, 0, composerError(ctx, "main_checkout")

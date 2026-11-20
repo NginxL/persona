@@ -33,6 +33,7 @@ data class AssistantHostBindings(
     val coroutineScope: CoroutineScope,
     val phoneToolsAvailable: Boolean?,
     val machines: List<persona.core.contracts.Machine>,
+    val conversations: persona.core.contracts.api.AssistantRepository,
     val mainSender: MainConversationSender,
     val chatContent: @Composable (SessionKey, AssistantChatOptions) -> Unit,
 )

@@ -40,8 +40,12 @@ func TestLauncherUserAgent(t *testing.T) {
 				if got := r.Header.Get("User-Agent"); got != want {
 					t.Errorf("User-Agent = %q, want %q", got, want)
 				}
-				if r.Header.Get("X-Secret") != "" {
-					t.Error("unrelated header was sent")
+				wantSecret := ""
+				if strings.Contains(tc.headers, "X-Secret:") {
+					wantSecret = "synthetic-private-header"
+				}
+				if got := r.Header.Get("X-Secret"); got != wantSecret {
+					t.Errorf("X-Secret = %q, want %q", got, wantSecret)
 				}
 				_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
 			}))
@@ -96,7 +100,7 @@ func TestLauncherUserAgentUnreadableHeaders(t *testing.T) {
 
 func TestDirectAPITransportSave(t *testing.T) {
 	for _, api := range []string{"", "messages", "responses"} {
-		for _, field := range []string{"headers", "proxy", "no_proxy"} {
+		for _, field := range []string{"proxy", "no_proxy"} {
 			t.Run(api+"/"+field, func(t *testing.T) {
 				s, _, st := modelService(t)
 				value := map[string]string{"headers": "X-Example: synthetic-header", "proxy": "http://proxy.example.com", "no_proxy": "example.com"}[field]
@@ -173,7 +177,7 @@ func TestDirectAPITransportPresetAndLocalization(t *testing.T) {
 		s, hub, _ := modelService(t)
 		hub.presets = []LauncherPreset{{ID: "team/direct", Kind: "api", API: api, BaseURL: "https://api.example.com", Model: "m"}}
 		for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
-			result, err := serveHTTP(context.Background(), s, assistantwire.HTTPRequest{Method: "POST", Path: "/api/v1/launchers", Body: []byte(`{"name":"preset","preset":"team/direct","headers":"X-Example: synthetic-header"}`), Header: map[string][]string{"Accept-Language": {string(lang)}}}, nil)
+			result, err := serveHTTP(context.Background(), s, assistantwire.HTTPRequest{Method: "POST", Path: "/api/v1/launchers", Body: []byte(`{"name":"preset","preset":"team/direct","proxy":"http://proxy.example.com"}`), Header: map[string][]string{"Accept-Language": {string(lang)}}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,15 +200,8 @@ func TestDirectAPITransportProbe(t *testing.T) {
 			name, kind, api, field, override  string
 			preset, anonymous, allowed, clear bool
 		}{
-			{name: "stored messages headers", kind: "api", api: "messages", field: "headers"},
 			{name: "stored default messages proxy", kind: "api", field: "proxy"},
 			{name: "stored responses no_proxy", kind: "api", api: "responses", field: "no_proxy"},
-			{name: "stored responses headers", kind: "api", api: "responses", field: "headers"},
-			{name: "override to messages", kind: "api", api: "responses", field: "headers", override: "messages"},
-			{name: "preset messages headers", kind: "api", api: "messages", field: "headers", preset: true},
-			{name: "preset default messages headers", kind: "api", field: "headers", preset: true},
-			{name: "preset responses headers", kind: "api", api: "responses", field: "headers", preset: true},
-			{name: "anonymous responses headers", api: "responses", field: "headers", anonymous: true},
 			{name: "anonymous messages headers", api: "messages", field: "headers", anonymous: true, allowed: true},
 			{name: "stored legacy launcher headers", api: "messages", field: "headers", allowed: true},
 			{name: "stored launcher proxy", kind: "launcher", api: "messages", field: "proxy", allowed: true},
@@ -277,7 +274,7 @@ func TestDirectAPITransportProbe(t *testing.T) {
 
 func TestDirectAPITransportRuntime(t *testing.T) {
 	for _, api := range []string{"", "messages", "responses"} {
-		for _, field := range []string{"headers", "proxy", "no_proxy"} {
+		for _, field := range []string{"proxy", "no_proxy"} {
 			t.Run(api+"/"+field, func(t *testing.T) {
 				var calls atomic.Int32
 				gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusBadRequest) }))

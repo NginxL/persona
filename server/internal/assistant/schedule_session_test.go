@@ -82,6 +82,7 @@ func TestAFreshRecurringTaskStartsNewChatsWithARetainedOrigin(t *testing.T) {
 	h := newStorelessService(t, node)
 	setSettings(t, h, func(s *Settings) { s.Main, s.MachineID = "main", "server" })
 	const origin = "old-followup-chat"
+	node.known[origin] = true
 	setTasks(h, Task{ID: "followup", Title: "Patrol", Prompt: "Check the changes.",
 		Repeat: repeatOnce, At: time.Now().Add(time.Hour), Enabled: true, MachineID: "server", SessionID: origin})
 
@@ -141,6 +142,7 @@ func TestFreshEachRunOnRescheduleUsesFinalRepeat(t *testing.T) {
 			node.settings = &Settings{Main: "main", Timezone: "UTC"}
 			s := newStorelessService(t, node)
 			const origin = "origin-chat"
+			node.known[origin] = true
 			const prompt = "Check the renewal"
 			setTasks(s, Task{ID: "followup", Title: "Renewal", Prompt: prompt, Repeat: repeatOnce,
 				At: time.Now().Add(-time.Minute), MachineID: "server", SessionID: origin})
@@ -193,6 +195,7 @@ func TestATaskStartsANewConversationWhenItsOwnCannotGoOn(t *testing.T) {
 	}
 
 	// Model configuration › Main chat now runs on another launcher (a task's conversations follow it, #1570).
+	n.zshrc = map[string][]proto.Launcher{"server": {{Name: "codex", Agent: "codex"}}}
 	setModel(t, h, "assistant", ModelBinding{Provider: "launcher.codex"})
 	switched, _ := runNow(t, h, "p")
 	if switched.SessionID == gone.SessionID {
@@ -701,6 +704,7 @@ func TestSilentRunInAReusedChat(t *testing.T) {
 func TestTaskTurnEndingInSessionTurnErrorFailsAndRetriesOnce(t *testing.T) {
 	n := newFakeHub().withMachine()
 	h := newStorelessService(t, n)
+	h.work.switches = &TriageSwitches{TransientRetry: new(false)}
 	h.runRetry = 50 * time.Millisecond
 	h.turnPoll = 200 * time.Millisecond
 	setTasks(h, Task{ID: "p", Title: "值守", Prompt: "go", Repeat: repeatInterval, EveryMinutes: 30, At: time.Now().Add(-time.Minute), Enabled: true, MachineID: "server", CreatedBy: "assistant"})

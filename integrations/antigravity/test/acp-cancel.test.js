@@ -3,7 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { AgyAcpClient } from '../lib/acp.js'
 import { toPersonaId } from '../lib/map.js'
@@ -67,8 +69,47 @@ test('cancel with no agy running starts none and resolves', async (t) => {
   assert.deepEqual(received(record), [], 'no agy process was started')
 })
 
+test('prompt inactivity resets only on updates for the active session', async (t) => {
+  const { record } = scratch(t)
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 350 })
+  t.after(() => acp.stop())
+  assert.deepEqual(await acp.prompt(SESSION, [{ type: 'text', text: 'updates' }]), { stopReason: 'end_turn' })
+  await assert.rejects(acp.prompt(SESSION, [{ type: 'text', text: 'unrelated-updates' }]), /prompt inactive for 350ms/)
+  await until('watchdog cancels the session', () => received(record).some((m) => m.method === 'session/cancel' &&
+    m.id === undefined && m.params.sessionId === SESSION), SLOW)
+  assert.equal(acp.pending.size, 0)
+})
+
+test('prompt inactivity pauses for permission and resumes after the answer', async (t) => {
+  const { record } = scratch(t)
+  let answerPermission
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 350,
+    onPermissionRequest: () => new Promise((resolve) => { answerPermission = resolve }) })
+  t.after(() => acp.stop())
+  const prompt = acp.prompt(SESSION, [{ type: 'text', text: 'ask' }])
+  const rejected = assert.rejects(prompt, /prompt inactive for 350ms/)
+  await until('permission request received', () => answerPermission, SLOW)
+  await delay(500)
+  assert.equal(acp.pending.size, 1)
+  assert.equal(received(record).some((m) => m.method === 'session/cancel'), false)
+  answerPermission(cancelled)
+  await rejected
+  assert.equal(acp.pending.size, 0)
+})
+
+test('a disabled prompt watchdog leaves cancellation to the caller', async (t) => {
+  const { record } = scratch(t)
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 0 })
+  t.after(() => acp.stop())
+  const prompt = acp.prompt(SESSION, [{ type: 'text', text: 'hold' }])
+  await until('prompt reached the agent', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  assert.equal(acp.pending.size, 1)
+  await acp.cancel(SESSION)
+  assert.deepEqual(await prompt, { stopReason: 'cancelled' })
+})
+
 /** The agy runtime on a fake node, with an executable fake agy; nobody answers a card on the phone. */
-async function agyRuntime(t) {
+async function agyRuntime(t, options = {}) {
   const { dir, record } = scratch(t)
   const agyBin = join(dir, 'agy')
   writeFileSync(agyBin, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' --record '${record}' "$@"\n`)
@@ -78,18 +119,169 @@ async function agyRuntime(t) {
   mkdirSync(join(agyDir, 'brain', SESSION), { recursive: true })
   const n = await startFakeNode(t)
   n.resolve = () => new Promise(() => {})
-  const runtime = createAgyRuntime({ agyBin, agyDir, home: dir, socketPath: n.path, log: () => {} })
+  options.beforeStart?.(agyDir)
+  const runtime = createAgyRuntime({ agyBin, agyDir, home: dir, socketPath: n.path, log: () => {}, ...options.runtime })
   t.after(() => runtime.stop())
   runtime.start()
   await n.ready
-  const start = async (prompt) => {
-    const { session } = await n.peer.call('session.start', { cwd: dir, prompt })
+  const start = async (prompt, params) => {
+    const { session } = await n.peer.call('session.start', { cwd: dir, prompt, ...params })
     assert.equal(session.session_id, toPersonaId(SESSION))
     return session.session_id
   }
   const status = (pid) => n.last('runtime.sessions')?.sessions.find((s) => s.session_id === pid)?.status
-  return { n, record, start, status }
+  // A rename pushes the inventory again: the status as the list reads it now.
+  const refresh = async (pid) => {
+    const before = n.all('runtime.sessions').length
+    await n.peer.call('session.rename', { session_id: pid, title: 'Renamed' })
+    await until('inventory refreshed', () => n.all('runtime.sessions').length > before, SLOW)
+    return status(pid)
+  }
+  return { n, record, start, status, refresh, idle: () => runtime.idle() }
 }
+
+test('queue edits preserve photos and send-now cancels just the active prompt', async (t) => {
+  const { n, record, start, idle } = await agyRuntime(t)
+  assert.equal(n.hello.caps.queue_edit, true)
+  assert.equal(n.hello.caps.queue_send_now, true)
+  const session_id = await start('ask', { assistant: true })
+  await until('permission card is waiting', () => n.asked.length > 0, SLOW)
+  const row = () => n.last('runtime.sessions')?.sessions.find((session) => session.session_id === session_id)
+  const send = (text, images) => n.peer.call('session.send', { session_id, text, images, assistant: true })
+  const edit = (keep) => n.peer.call('session.queue.edit', { session_id, keep })
+  const steer = () => n.peer.call('session.queue.send_now', { session_id })
+  await assert.rejects(edit([]), { code: 'nothing_queued' })
+  await assert.rejects(steer(), { code: 'nothing_queued' })
+  const image = { mime: 'image/png', data: 'aW1hZ2U=' }
+  for (const [text, images] of [['drop'], ['', [image]], ['reply']]) {
+    assert.deepEqual(await send(text, images), { ok: true, queued: true })
+  }
+  await until('raw queue is visible', () => row()?.queued?.length === 3, SLOW)
+  assert.deepEqual(row().queued, ['drop', '', 'reply'])
+  for (const keep of [[3], [-1], [0, 0], [0.5]]) {
+    await assert.rejects(edit(keep), { code: 'queue_changed' })
+  }
+  assert.deepEqual(await edit([2, 1]), { queue: ['drop', '', 'reply'], images: [null, [image], null] })
+  await until('edited queue is visible', () => row()?.queued?.length === 2, SLOW)
+  assert.deepEqual(row().queued, ['reply', ''])
+  assert.deepEqual(await steer(), { sent: true })
+  const prompts = () => received(record).filter((message) => message.method === 'session/prompt')
+  await until('both follow-ups reach ACP', () => prompts().length === 3, SLOW)
+  assert.deepEqual(prompts()[1].params.prompt, [{ type: 'text', text: 'reply' }])
+  assert.deepEqual(prompts()[2].params.prompt, [{ type: 'image', mimeType: image.mime, data: image.data }])
+  assert.equal(received(record).filter((message) => message.method === 'session/cancel').length, 1)
+  assert.deepEqual(permissionAnswers(record)[0]?.result, cancelled)
+  await until('popped queue is no longer visible', () => row() && !row().queued, SLOW)
+  assert.equal(idle(), false)
+  assert.equal((await n.peer.call('session.interrupt', { session_id })).settled, true)
+})
+
+for (const failPreparation of [false, true]) {
+  test(`send-now skips a preparing turn and ${failPreparation ? 'reports a successor preparation error' : 'starts the queued prompt'}`, async (t) => {
+    const { n, record, start } = await agyRuntime(t)
+    const session_id = await start()
+    const gate = Promise.withResolvers()
+    const original = AgyAcpClient.prototype.ensureSessionLoaded
+    let loads = 0
+    t.mock.method(AgyAcpClient.prototype, 'ensureSessionLoaded', async function (...args) {
+      loads += 1
+      if (loads === 1) await gate.promise
+      else if (failPreparation) throw new Error('Queued turn could not load its session')
+      return original.apply(this, args)
+    })
+    const first = n.peer.call('session.send', { session_id, text: 'hold' })
+    try {
+      await until('first turn preparing', () => loads === 1, SLOW)
+      assert.deepEqual(await n.peer.call('session.send', { session_id, text: 'reply' }), { ok: true, queued: true })
+      assert.deepEqual(await n.peer.call('session.queue.send_now', { session_id }), { sent: true })
+      await until('preparing turn cancelled', () => received(record).some((call) => call.method === 'session/cancel'), SLOW)
+    } finally {
+      gate.resolve()
+      await first
+    }
+
+    const row = () => n.last('runtime.sessions')?.sessions.find((session) => session.session_id === session_id)
+    if (failPreparation) {
+      await until('successor preparation error published', () => row()?.turn_error === 'Queued turn could not load its session', SLOW)
+    } else {
+      await until('queued prompt completes', () => row()?.last_text === 'Finished.', SLOW)
+    }
+    assert.equal(loads, 2)
+    const prompts = received(record).filter((call) => call.method === 'session/prompt')
+    assert.deepEqual(prompts.map((call) => call.params.prompt), failPreparation ? [] : [[{ type: 'text', text: 'reply' }]])
+  })
+}
+
+test('start with empty image entries opens an idle session without prompting', async (t) => {
+  const { n, record, idle } = await agyRuntime(t)
+  const { session } = await n.peer.call('session.start', { images: [{ mime: 'image/png' }] })
+  assert.equal(session.status, 'idle')
+  assert.equal(idle(), true)
+  assert.equal(received(record).some((message) => message.method === 'session/prompt'), false)
+})
+
+test('a wedged prompt surfaces an error and the next send can recycle ACP', async (t) => {
+  const { n, record, start, idle } = await agyRuntime(t, { runtime: { promptInactivityMs: 350 } })
+  const pid = await start('ignore-cancel')
+  const row = () => n.last('runtime.sessions')?.sessions.find((session) => session.session_id === pid)
+  await until('timeout published', () => row()?.turn_error?.includes('prompt inactive'), SLOW)
+  assert.notEqual(row().status, 'working')
+  assert.equal(idle(), true)
+  await n.peer.call('session.send', { session_id: pid, text: 'reply' })
+  await until('next prompt completes', () => row()?.last_text === 'Finished.', SLOW)
+  assert.equal(row().turn_error, undefined)
+  assert.equal(received(record).filter((m) => m.started).length, 2)
+})
+
+/** agy's own conversation summary for SESSION in agyDir: what nativeWorking reads. */
+function nativeSummary(agyDir, status, stepCount) {
+  const db = new DatabaseSync(join(agyDir, 'conversation_summaries.db'))
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, status TEXT, not_fully_idle INTEGER, killed INTEGER, step_count INTEGER, title TEXT, workspace_uris TEXT, last_modified_time TEXT)')
+    db.prepare('INSERT OR REPLACE INTO conversation_summaries VALUES (?, ?, 0, 0, ?, ?, ?, ?)')
+      .run(SESSION, status, stepCount, '', '[]', new Date().toISOString())
+  } finally {
+    db.close()
+  }
+}
+
+// #11108: interrupt answers settled once the running turn has ended, so agent_interrupt need not poll for it.
+test('interrupt answers settled once agy ends the cancelled turn', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  await until('the row is working', () => status(pid) === 'working', SLOW)
+  const res = await n.peer.call('session.interrupt', { session_id: pid })
+  assert.equal(res?.settled, true)
+  assert.ok(received(record).some((m) => m.ended === SESSION), 'agy ended the prompt before settled was answered')
+  await until('the row is no longer working', () => status(pid) !== 'working', SLOW)
+})
+
+test('interrupt does not answer settled when agy never ends the cancelled turn', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t, { runtime: { interruptSettleMs: 300 } })
+  const pid = await start('ignore-cancel')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  const res = await n.peer.call('session.interrupt', { session_id: pid })
+  assert.notEqual(res?.settled, true)
+  assert.ok(received(record).some((m) => m.method === 'session/cancel'), 'the cancel was sent')
+  await until('the row is still working', () => status(pid) === 'working', SLOW)
+})
+
+// #11108: agy's summary can still say running right after a confirmed cancel; that alone is not work. A new native
+// step is.
+test('a summary still running after a confirmed cancel does not keep the row working until a new step', async (t) => {
+  let agyDir
+  const { n, record, start, status, refresh } = await agyRuntime(t, {
+    beforeStart: (dir) => { agyDir = dir; nativeSummary(dir, 'CASCADE_RUN_STATUS_RUNNING', 1) },
+  })
+  const pid = await start('hold')
+  await until('the prompt is running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  assert.equal((await n.peer.call('session.interrupt', { session_id: pid }))?.settled, true)
+  await until('the row is no longer working', () => status(pid) !== undefined && status(pid) !== 'working', SLOW)
+  assert.notEqual(await refresh(pid), 'working', 'the stale summary alone does not make it working again')
+  nativeSummary(agyDir, 'CASCADE_RUN_STATUS_RUNNING', 2)
+  assert.equal(await refresh(pid), 'working', 'a new native step is work again')
+})
 
 test('interrupt withdraws the permission card, answers agy cancelled and ends the turn', async (t) => {
   const { n, record, start, status } = await agyRuntime(t)
@@ -175,4 +367,104 @@ test('an answered card still selects the matching agy option', async (t) => {
   assert.equal(n.all('interaction.cancel').length, 0, 'an answered card is not withdrawn')
   await n.peer.call('session.interrupt', { session_id: pid })
   await until('the turn ends', () => status(pid) === 'done', SLOW)
+})
+
+test('interrupt cancels every queued follow-up without applying its options', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('first prompt running', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  await n.peer.call('session.send', { session_id: pid, text: 'Queued one', model: 'queued-model' })
+  await n.peer.call('session.send', { session_id: pid, text: 'Queued two' })
+  assert.deepEqual(await n.peer.call('session.interrupt', { session_id: pid }), { ok: true, settled: true })
+  await assert.rejects(n.peer.call('session.queue.send_now', { session_id: pid }), { code: 'nothing_queued' })
+  await until('queue no longer working', () => status(pid) !== 'working', SLOW)
+  assert.equal(received(record).filter((m) => m.method === 'session/prompt').length, 1)
+  assert.equal(received(record).some((m) => m.params?.modelId === 'queued-model'), false)
+})
+
+test('permission cards use the runtime, session, kind and tool call key', async (t) => {
+  const { n, start } = await agyRuntime(t)
+  const pid = await start('ask')
+  await until('permission card', () => n.asked.length > 0, SLOW)
+  const { interactionId } = await import('../../runtime-sdk/index.js')
+  assert.equal(n.asked[0].id, interactionId('agy', pid, 'permission', 'call-1'))
+})
+
+
+test('cancelling before a prompt starts does not poison the next permission request', async (t) => {
+  const { n, record, start } = await agyRuntime(t)
+  const pid = await start()
+  n.resolve = () => ({ allow: true })
+  const [, interrupted] = await Promise.all([
+    n.peer.call('session.send', { session_id: pid, text: 'hold' }),
+    n.peer.call('session.interrupt', { session_id: pid }),
+  ])
+  assert.equal(interrupted.settled, true)
+  assert.equal(received(record).some((call) => call.method === 'session/prompt'), false)
+  await n.peer.call('session.send', { session_id: pid, text: 'ask' })
+  await until('next permission answered', () => permissionAnswers(record).length > 0, SLOW)
+  assert.equal(n.asked.length, 1)
+  assert.deepEqual(permissionAnswers(record)[0].result, { outcome: { outcome: 'selected', optionId: 'allow' } })
+  await n.peer.call('session.interrupt', { session_id: pid })
+})
+
+test('interrupt does not report settled while a later send is running', async (t) => {
+  const { n, record, start, status } = await agyRuntime(t)
+  const pid = await start('hold')
+  await until('first prompt running', () => received(record).some((call) => call.method === 'session/prompt'), SLOW)
+  let release, entered = false
+  const gate = new Promise((resolve) => { release = resolve })
+  const original = AgyAcpClient.prototype.cancel
+  const mocked = t.mock.method(AgyAcpClient.prototype, 'cancel', async function (...args) {
+    await original.apply(this, args)
+    entered = true
+    await gate
+  })
+  const interrupted = n.peer.call('session.interrupt', { session_id: pid })
+  try {
+    await until('old turn ended during cancel', () => entered && received(record).some((call) => call.ended === SESSION) && status(pid) !== 'working', SLOW)
+    await n.peer.call('session.send', { session_id: pid, text: 'hold' })
+    await until('later prompt running', () => received(record).filter((call) => call.method === 'session/prompt').length === 2, SLOW)
+  } finally {
+    release()
+    mocked.mock.restore()
+  }
+  assert.notEqual((await interrupted).settled, true)
+  await n.peer.call('session.interrupt', { session_id: pid })
+})
+
+test('an uncancelled successor clears cancellation left by a preparing turn', async (t) => {
+  const { n, record, start } = await agyRuntime(t)
+  const pid = await start()
+  n.resolve = () => ({ allow: true })
+  let release, entered = false, hold = true
+  const gate = new Promise((resolve) => { release = resolve })
+  const original = AgyAcpClient.prototype.ensureSessionLoaded
+  const mocked = t.mock.method(AgyAcpClient.prototype, 'ensureSessionLoaded', async function (...args) {
+    if (hold) {
+      hold = false
+      entered = true
+      await gate
+    }
+    return original.apply(this, args)
+  })
+  const first = n.peer.call('session.send', { session_id: pid, text: 'hold' })
+  let interrupted
+  try {
+    await until('first turn preparing', () => entered, SLOW)
+    interrupted = n.peer.call('session.interrupt', { session_id: pid })
+    await until('preparing turn cancelled', () => received(record).some((call) => call.method === 'session/cancel'), SLOW)
+    assert.equal((await n.peer.call('session.send', { session_id: pid, text: 'ask' })).queued, true)
+    assert.equal(received(record).some((call) => call.method === 'session/prompt'), false)
+  } finally {
+    release()
+    mocked.mock.restore()
+    await first
+    await interrupted
+  }
+  await until('successor permission answered', () => permissionAnswers(record).length === 1, SLOW)
+  assert.equal(received(record).filter((call) => call.method === 'session/prompt').length, 1)
+  assert.equal(n.asked.length, 1)
+  assert.deepEqual(permissionAnswers(record)[0].result, { outcome: { outcome: 'selected', optionId: 'allow' } })
+  await n.peer.call('session.interrupt', { session_id: pid })
 })

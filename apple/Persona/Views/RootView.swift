@@ -212,6 +212,7 @@ struct RootView: View {
         }
         .onChange(of: showsShell) { swaps.rebuilt += 1 }
         .screenProbe("tree", swaps)
+        .confirmationDialogLabelProbe()
         // LookBlink drives UIWindowScene overrides, so it only exists on iOS and visionOS.
         #if os(iOS) || os(visionOS)
         .task { await LookBlink.run() }

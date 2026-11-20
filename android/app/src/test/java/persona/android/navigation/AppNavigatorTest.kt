@@ -6,6 +6,7 @@ import persona.core.navigation.*
 import persona.feature.inbox.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -128,6 +129,17 @@ class AppNavigatorTest {
         navigator.back()
         navigator.back()
         assertEquals(listOf(AgentsRoute), stacks.getValue(AppTab.Agents))
+    }
+
+    @Test fun agentFromPersonaKeepsItsSourceUntilADirectRootOpen() {
+        selected = AppTab.Persona
+        val chat = ChatRoute("machine", "agent", ConversationKind.Agent)
+        navigator.navigate(chat)
+        assertEquals(AppTab.Agents, selected)
+        assertEquals(AppTab.Persona, navigator.sourceTab(chat))
+
+        navigator.noteDirectOpen(chat)
+        assertNull(navigator.sourceTab(chat))
     }
 
     @Test fun knownAgentChatFromSettingsReturnsToThatSettingsPage() {

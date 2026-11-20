@@ -70,8 +70,9 @@ func (h *Manager) extensionAPIs(next http.Handler, mux *http.ServeMux) http.Hand
 		p := principalOf(r.Context())
 		r.Header.Set("X-Persona-Device", p.ID)
 		r.Header.Set("X-Persona-Role", p.Role)
-		// A send it declared a receipt for is kept by the hub, which relayed it (the report's APIs).
-		_ = item
+		if item.Prefix == "lark" && p.Role == roleFull && p.Extension == "" {
+			r = withLarkAvatars(r, hp)
+		}
 		hp.serveExtensionHTTP(w, r)
 	})
 }

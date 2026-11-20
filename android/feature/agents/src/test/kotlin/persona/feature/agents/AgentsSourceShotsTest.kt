@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,6 +17,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
@@ -22,9 +26,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.navigation3.runtime.NavKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
+import persona.core.domain.sort.AgentQuickFilter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -91,7 +97,7 @@ class AgentsSourceShotsTest {
         override fun selectTab(tab: AppTab) = Unit
     }
 
-    private fun preferences(): AgentsPreferences {
+    private fun preferences(display: AgentsDisplayHubs = AgentsDisplayHubs { flowOf(emptyList()) }): AgentsPreferences {
         val store = object : DataStore<Preferences> {
             override val data = MutableStateFlow<Preferences>(emptyPreferences())
             override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
@@ -104,7 +110,57 @@ class AgentsSourceShotsTest {
             override suspend fun toggleMute(path: String, space: Boolean) = Unit
             override suspend fun markSeen(session: SessionKey, version: String) = Unit
         }
-        return AgentsPreferences(store, hub)
+        return AgentsPreferences(store, hub, display)
+    }
+
+    @Test fun hubVisibilityRemovesTheChipAndRestoresTheFilterOnRefresh() {
+        var show = true
+        val api = object : AgentDisplayApi {
+            override suspend fun read() = AgentsDisplaySettings(show, configured = true)
+            override suspend fun migrateHidden(): AgentsDisplaySettings = error("Fresh phone never writes")
+        }
+        val hello = MutableStateFlow<SocketHello?>(SocketHello(1, Connection().lastHello))
+        val prefs = preferences(AgentsDisplayHubs { flowOf(listOf(AgentsDisplayHub("fixture", null, true, hello, api))) })
+        val model = AgentsViewModel(Repository(sessions, machines), Interactions(), Connection(), Sender(), prefs)
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, if (large) 2f else 1f)) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(1400.dp).background(PersonaTheme.palette.background)) {
+                        AgentsScreen(model, Nowhere, AgentsMetadata())
+                    }
+                }
+            }
+        }
+        fun shot(name: String) {
+            for (d in listOf(false, true)) {
+                rule.runOnIdle { dark = d }
+                rule.waitForIdle()
+                val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+                File(out(), "hub-${name}-${if (d) "dark" else "light"}.png").outputStream().use {
+                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+        }
+        rule.waitUntil(5_000) { model.page.value.list.counts[AgentQuickFilter.Feishu] == 1 }
+        assertTrue(rule.onAllNodesWithContentDescription("隐藏 botmux 会话").fetchSemanticsNodes().isEmpty())
+        shot("shown")
+        rule.runOnIdle { model.filter(AgentQuickFilter.Feishu) }
+        rule.waitUntil(5_000) { model.page.value.settings.quick == AgentQuickFilter.Feishu }
+        rule.runOnIdle { show = false; model.refresh() }
+        rule.waitUntil(5_000) { model.page.value.sessions.size == 2 && model.page.value.settings.quick == AgentQuickFilter.All }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("飞书群", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodesWithText("群里问的发布时间").fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodesWithContentDescription("显示 botmux 会话").fetchSemanticsNodes().isEmpty())
+        shot("hidden")
+        rule.runOnIdle { large = true }
+        shot("hidden-large")
+        rule.runOnIdle { show = true; hello.value = SocketHello(2, Connection().lastHello) }
+        rule.waitUntil(5_000) { model.page.value.sessions.size == 3 && model.page.value.list.counts[AgentQuickFilter.Feishu] == 1 }
+        assertEquals(AgentQuickFilter.All, model.page.value.settings.quick)
     }
 
     @Test fun sourceTagsUnderTheTime() {

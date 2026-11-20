@@ -29,12 +29,10 @@ func mentionEnv(t *testing.T) (*Service, *fakeHub) {
 		proto.Session{SessionID: "me", Title: "Assistant", Cwd: "/code/weather", Assistant: true, UpdatedAt: now})
 	s := newKBService(t, f)
 	e := kbEng(t, s)
-	if _, err := e.Apply(kb.KindProject, "Weather App", kb.Update{Dirs: []string{"box:/code/weather"}}); err != nil {
-		t.Fatal(err)
-	}
-	p, _ := e.Store.Project("weather-app")
-	p.OneLine = "The weather app for iOS and Android"
-	if err := e.Store.PutProject(p); err != nil {
+	if err := e.Store.PutProject(&kb.Project{
+		Slug: "weather-app", Name: "Weather App", Kind: "short", Status: "active",
+		Dirs: []string{"box:/code/weather"}, OneLine: "The weather app for iOS and Android",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return s, f

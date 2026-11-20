@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ChatActionsContext, liveValue, type ChatActions } from "./chat-actions";
 import { t } from "../../i18n";
-import { MessageActions, moreActions, rewindActions, savePromptActions } from "./MessageActions";
+import { MessageActions } from "./MessageActions";
+import { moreActions, rewindActions, savePromptActions } from "./ReplyBar";
 
 const base: ChatActions = { draftKey: "m/s", canCompose: true, speaker: "Persona", title: "Persona", images: () => [] };
 
@@ -29,6 +30,26 @@ describe("the reply bar", () => {
     expect(html).not.toContain("data-reply-bar");
     expect(html).not.toContain("aria-label");
     expect(html).toContain("<p>回复</p>");
+  });
+
+  it("does not show an empty More menu when the explicit rewind text is empty", () => {
+    const html = renderToStaticMarkup(
+      <ChatActionsContext.Provider value={{ ...base, canCompose: false, rewind: { block: liveValue(""), run: async () => {} } }}>
+        <MessageActions text="Visible reply" editText="" messageId="u1#0" isUser side><p>Visible reply</p></MessageActions>
+      </ChatActionsContext.Provider>,
+    );
+    expect(html).not.toContain(`aria-label="${t("chat-messageactions.more")}"`);
+  });
+
+  it("does not show an empty More menu for an unbranchable transcript line", () => {
+    for (const itemId of [undefined, "u1", "line12#0"]) {
+      const html = renderToStaticMarkup(
+        <ChatActionsContext.Provider value={{ ...base, canCompose: false, fork: () => {} }}>
+          <MessageActions text="Visible reply" itemId={itemId} isUser side><p>Visible reply</p></MessageActions>
+        </ChatActionsContext.Provider>,
+      );
+      expect(html).not.toContain(`aria-label="${t("chat-messageactions.more")}"`);
+    }
   });
 });
 

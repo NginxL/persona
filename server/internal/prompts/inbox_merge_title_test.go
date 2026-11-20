@@ -8,7 +8,7 @@ import (
 // The merge title prompt asks for one JSON title and shows every merged row, in the order given (#7229).
 func TestInboxMergeTitle(t *testing.T) {
 	sys := RenderInboxMergeTitle(InboxMergeTitle{Owner: "Alex", Language: "English"})
-	for _, want := range []string{"Alex", "用English写", `{"title": "…"}`} {
+	for _, want := range []string{"Alex", "in English", `{"title": "…"}`} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("the system prompt lacks %q:\n%s", want, sys)
 		}

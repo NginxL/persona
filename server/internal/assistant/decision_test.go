@@ -483,9 +483,9 @@ func TestDefaultRecommendationWithStoppedAgentKeepsReminder(t *testing.T) {
 	}
 }
 
-// A decision that cannot be undone has no default: nothing is ever taken, however long it waits. After a day it goes
-// back to its supervisor once to be confirmed, and from then on it is raised to the owner again once a day.
-func TestIrreversibleDecisionIsNeverTakenAndRaisedDaily(t *testing.T) {
+// A decision that cannot be undone has no default. After a day its old facts leave the owner queue; only a fresh
+// supervisor review raises a current, answerable round again.
+func TestIrreversibleDecisionWaitsForFreshReviewAfterRecheck(t *testing.T) {
 	for _, why := range []string{whyIrreversible, whyVisible} {
 		s, f, todo := newSupervisedService(t)
 		waitsForReview(t, s, f, todo.ID, "要删掉旧的生产库表吗？")
@@ -510,25 +510,40 @@ func TestIrreversibleDecisionIsNeverTakenAndRaisedDaily(t *testing.T) {
 		if len(pendingKinds(s, todo.ID)) != 0 || len(decidePushes(t, f)) != pushes {
 			t.Fatalf("%s: told before a day passed: %v", why, pendingKinds(s, todo.ID))
 		}
-		s.sweepDecisionDeadlines(now.Add(24*time.Hour + time.Minute)) // a day: back to its supervisor first
+		s.sweepDecisionDeadlines(now.Add(24*time.Hour + time.Minute))
 		if !signalled(s, f, todo.ID, sigRecheck, "已交回督办") || len(decidePushes(t, f)) != pushes {
 			t.Fatalf("%s: no recheck after a day, or the owner was raised it before the supervisor looked", why)
 		}
-		s.sweepDecisionDeadlines(now.Add(25*time.Hour + 2*time.Minute)) // the supervisor had its hour: raised again
-		if got := len(decidePushes(t, f)); got != pushes+1 {
-			t.Fatalf("%s: %d pushes after a day, want one more than %d", why, got, pushes)
+		if ask := listedAsk(t, s, todo.ID); ask != nil {
+			t.Fatalf("%s: the stale decision still waits for the owner: %v", why, ask)
 		}
-		s.sweepDecisionDeadlines(now.Add(40 * time.Hour)) // once a day
-		if got := len(decidePushes(t, f)); got != pushes+1 {
-			t.Fatalf("%s: raised twice in a day", why)
+		s.sweepDecisionDeadlines(now.Add(25*time.Hour + 2*time.Minute))
+		if got := len(decidePushes(t, f)); got != pushes {
+			t.Fatalf("%s: the unrefreshed decision was pushed again: %d, want %d", why, got, pushes)
 		}
-		s.sweepDecisionDeadlines(now.Add(50 * time.Hour))
-		if got := len(decidePushes(t, f)); got != pushes+2 {
-			t.Fatalf("%s: not raised again the next day: %d", why, got-pushes)
-		}
-		if a := askOf(s, todo.ID); len(sentToAgent(f)) != sent || !a.AcceptedAt.IsZero() || a.ByDefault ||
+		if a := askOf(s, todo.ID); len(sentToAgent(f)) != sent || !a.AcceptedAt.IsZero() || a.ByDefault || !a.RaisedAt.IsZero() ||
 			todoNow(s, todo.ID).Supervision.State != reviewNeedsUser {
-			t.Fatalf("%s: taken: %+v, to the agent %q", why, a, sentToAgent(f)[sent:])
+			t.Fatalf("%s: the stale round changed: %+v, to the agent %q", why, a, sentToAgent(f)[sent:])
+		}
+
+		// Re-issuing after checking the facts is what raises it to the owner again.
+		fresh := dropTableDecision()
+		fresh["why_owner"] = why
+		if _, err := reviewErr(s, todo.ID, fresh); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(decidePushes(t, f)); got != pushes+1 {
+			t.Fatalf("%s: the fresh review did not raise the decision: %d pushes", why, got)
+		}
+		if ask := listedAsk(t, s, todo.ID); ask == nil {
+			t.Fatalf("%s: the fresh review is not answerable", why)
+		}
+		s.sweepDecisionDeadlines(time.Now().Add(time.Hour))
+		if got := pendingKinds(s, todo.ID); len(got) != 0 {
+			t.Fatalf("%s: the fresh decision inherited the recheck: %v", why, got)
+		}
+		if rec := answerAsk(s, todo.ID, map[string]string{"option": "删掉旧表"}); rec.Code != 200 {
+			t.Fatalf("%s: answering the fresh decision: %d %s", why, rec.Code, rec.Body.String())
 		}
 	}
 }

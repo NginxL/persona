@@ -33,10 +33,10 @@ import persona.core.designsystem.icons.PhIcons
 /**
  * How much of the model pill the composer has room for (the web's container rules on the composer card, #5032): from 600
  * the whole pill; under it a narrower one whose model name gives way first; under 520 a step smaller; under 420 (a phone)
- * the provider's tile and the chevron alone. By the composer's own width in dp.
+ * the provider's tile and the chevron alone. [AgentComposer] is the compact Agent toolbar's model and effort in words.
  */
 enum class ModelPillWidth {
-    Wide, Narrow, Small, Compact;
+    Wide, Narrow, Small, Compact, AgentComposer;
 
     companion object {
         fun of(composerDp: Float): ModelPillWidth = when {
@@ -100,8 +100,13 @@ fun JModelPill(
     enabled: Boolean = true,
 ) {
     val palette = PersonaTheme.palette
+    val agentComposer = width == ModelPillWidth.AgentComposer
     val small = width == ModelPillWidth.Small || width == ModelPillWidth.Compact
-    val text = if (small) PersonaTheme.type.micro else PersonaTheme.type.caption
+    val text = when {
+        agentComposer -> PersonaTheme.type.callout
+        small -> PersonaTheme.type.micro
+        else -> PersonaTheme.type.caption
+    }
     val mark = if (small) Tokens.Size.markXS else Tokens.Size.markS
     val chevron = if (small) Tokens.Size.markXS else Tokens.Size.markS
     Row(
@@ -121,7 +126,7 @@ fun JModelPill(
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
         if (content.pending) JIcon(PhIcons.Clock, null, size = mark, tint = palette.ink3)
-        JProviderTile(content.provider, size = mark)
+        if (!agentComposer || content.model == null && content.loading == null) JProviderTile(content.provider, size = mark)
         when {
             width == ModelPillWidth.Compact -> {
                 // only the tile: a spinner or the warning stays inside the compact pill
@@ -139,14 +144,16 @@ fun JModelPill(
                 content.model?.let {
                     // the name gives way first: at most this much below the widest composer
                     Text(it, Modifier.weight(1f, fill = false).widthIn(max = if (width == ModelPillWidth.Wide) Tokens.Size.box150 * 2 else Tokens.Size.box120),
-                        style = text, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        style = if (agentComposer) text.copy(fontWeight = FontWeight.SemiBold) else text,
+                        color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                content.engine?.let { JAgentMark(it, size = Tokens.Size.markXS) }
-                content.effort?.let { Text(it, style = text, color = palette.ink, maxLines = 1, softWrap = false) }
+                if (!agentComposer) content.engine?.let { JAgentMark(it, size = Tokens.Size.markXS) }
+                content.effort?.let { Text(it, style = text, color = if (agentComposer) palette.ink2 else palette.ink, maxLines = 1, softWrap = false) }
                 if (content.ultracode) JIcon(PhIcons.Stack, null, size = Tokens.Size.markXS, tint = palette.ink2)
             }
         }
-        JIcon(PhIcons.CaretDown, null, size = chevron, tint = palette.ink2)
+        if (!agentComposer || content.model == null && content.loading == null)
+            JIcon(PhIcons.CaretDown, null, size = chevron, tint = palette.ink2)
     }
 }
 

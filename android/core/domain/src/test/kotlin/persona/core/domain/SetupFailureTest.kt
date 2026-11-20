@@ -12,7 +12,7 @@ class SetupFailureTest {
             "node_unreachable" to (FailureReason.ComputerOffline to FailureAction.WakeComputer),
             "claude_missing" to (FailureReason.ClaudeMissing to FailureAction.InstallClaude),
             "launcher_missing" to (FailureReason.LauncherMissing to FailureAction.ConnectModel),
-            "not_logged_in" to (FailureReason.NotLoggedIn to FailureAction.LoginClaude),
+            "not_logged_in" to (FailureReason.NotLoggedIn to FailureAction.ConnectModel),
             "auth_failed" to (FailureReason.AuthFailed to FailureAction.EditProvider),
             "assistant_offline" to (FailureReason.AssistantRestarting to FailureAction.Retry),
             "launcher_out_of_scope" to (FailureReason.ProviderOutOfScope to FailureAction.EditProvider),

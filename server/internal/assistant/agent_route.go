@@ -16,13 +16,12 @@ import (
 )
 
 // New agent goes under a leader (docs/design/proposals/owner-at-a-glance.md "New chat opens a direction; New agent goes
-// under one", #3608). The New agent sheet asks which leader a new agent belongs under (POST /api/v1/assistant/route/agent),
-// pre-fills its "Under" field with the answer, and once the agent started puts it there
-// (POST /api/v1/assistant/agents/{mid}/{sid}/supervisor): a supervised task of that leader, as agent_supervise makes one
-// for the main conversation, so the leader gets its supervision messages (digestTo) and reviews it. Which leader:
+// under one", #3608). POST /api/v1/assistant/route/agent suggests a leader for a new agent. Once the agent starts,
+// POST /api/v1/assistant/agents/{mid}/{sid}/supervisor makes it a supervised task of that leader. The leader gets
+// its supervision messages (digestTo) and reviews it. Which leader:
 //
 //  1. the knowledge-base project that owns the agent's directory, when a current leader is filed under it;
-//  2. else the prompt matched against the leaders' names and projects by assistant.route (routeTimeout, as for a New chat);
+//  2. else the prompt matched against the leaders' names and projects by assistant.route within routeTimeout;
 //  3. else Persona, the main conversation (no leaders, no match, the model slow or failing).
 
 // Why a leader was suggested.

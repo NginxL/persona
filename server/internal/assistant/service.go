@@ -18,6 +18,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/assistant/saved"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -41,6 +42,8 @@ type Options struct {
 	// Trust says which computers wait to be confirmed (machine_trust.go): the devices, from the hub's handover; nil
 	// (unit tests): none.
 	Trust MachineTrust
+	// AgentDirs keeps each computer's hidden Agent folders (hidden_agent_dirs.go): the devices; nil: nothing hidden.
+	AgentDirs AgentDirs
 	// SecretKey is the path of the key the model providers' keys are sealed with (the manager's own secret.key,
 	// models_launchers.go); "" makes one for this run only (tests).
 	SecretKey string
@@ -59,6 +62,8 @@ type Options struct {
 
 // Service is the assistant. It implements Handler.
 type Service struct {
+	// agentDirs keeps each computer's hidden Agent folders (hidden_agent_dirs.go); nil: none.
+	agentDirs AgentDirs
 	// remoteImages fetches the pictures replies name by address for the apps (remote_image.go).
 	remoteImages *remoteimage.Fetcher
 	// inboxExt is what the extensions wrote for the Inbox, read at most once a minute (extension_context.go).
@@ -109,6 +114,8 @@ type Service struct {
 	// trustSrc is Options.Trust.
 	trustSrc MachineTrust
 	logf     func(format string, args ...any)
+	// runWorkerOutcome overrides asynchronous outcome startup in tests; nil uses a goroutine.
+	runWorkerOutcome func(func())
 	// runRetry is how long after a failed run the retry goes (0: runRetryDelay; tests shorten it).
 	runRetry time.Duration
 	// turnPoll is how often a run's watcher reads its turn (0: turnPollInterval; tests shorten it).
@@ -125,6 +132,9 @@ type Service struct {
 	// superviseTimes are how supervision messages gather and space out (zero fields: the package's; tests shorten
 	// them, supervise_signals.go superviseTimings).
 	superviseTimes superviseTimings
+	// todoAskAfter is how long a linked to-do goes without progress before its recurring check asks the owner (0:
+	// scheduleAskAfter's floor; tests shorten it, schedule_todo_evidence.go).
+	todoAskAfter time.Duration
 	// retryNow is the clock a due retry checks the task's time against (retryStillDue; nil: time.Now, tests set it).
 	retryNow func() time.Time
 
@@ -141,8 +151,9 @@ type Service struct {
 
 	// prepared is what this hub last gave a machine's node for a directory (key: machine id NUL directory), the
 	// CLAUDE.md and the plugin skills, by prepareSpaceIf; refreshInstructions gives again what differs.
-	preparedMu sync.Mutex
-	prepared   map[string]preparedState
+	prepareLocks cardLocks
+	preparedMu   sync.Mutex
+	prepared     map[string]preparedState
 
 	epoch string
 	// born is when this manager started: a background supervisor started before it may be in a profile with no login
@@ -161,25 +172,30 @@ type Service struct {
 	// interrupts: the interrupted receipts re-sent when their tasks change (interruptions.go).
 	interrupts interruptBook
 
-	titles      titleBook            // titles.go
-	phoneKept   keptPhoneTools       // fleet_tools.go: the phone's tools as the hub last listed them
-	agentNames  agentNamingBook      // agent_naming.go
-	prefs       settingsBook         // profile.go
-	main        mainBook             // start.go
-	archived    archiveBook          // conversations.go
-	tags        conversationTagsBook // conversation_tags.go
-	origins     originBook           // origins.go
-	guests      guestBook            // guest.go
-	relays      relayBook            // conversations.go
-	undelivered undeliveredBook      // undelivered.go: the owner's messages that could not go in
-	quotes      quoteBook            // relay_quote.go: the owner's messages relays carried, verified
-	avail       availBook            // availability.go
-	quiet       quietBook            // quiet.go
-	supervise   superviseBook        // supervise_signals.go
-	progress    progressBook         // supervise_progress.go
-	preempt     preemptBook          // owner_preempt.go
-	tbriefs     taskBriefBook        // task_brief.go
-	search      searchIndex          // search_index.go
+	titles           titleBook             // titles.go
+	phoneKept        keptPhoneTools        // fleet_tools.go: the phone's tools as the hub last listed them
+	agentNames       agentNamingBook       // agent_naming.go
+	prefs            settingsBook          // profile.go
+	guard            dispatchGuardBook     // dispatch_guard.go
+	main             mainBook              // start.go
+	archived         archiveBook           // conversations.go
+	tags             conversationTagsBook  // conversation_tags.go
+	directionFilings directionSessionsBook // direction_sessions.go
+	origins          originBook            // origins.go
+	guests           guestBook             // guest.go
+	relays           relayBook             // conversations.go
+	chatReplies      chatReplyBook         // chat_reply.go: what conversations that wrote as the user were told of the chats
+	undelivered      undeliveredBook       // undelivered.go: the owner's messages that could not go in
+	quotes           quoteBook             // relay_quote.go: the owner's messages relays carried, verified
+	handovers        handoverBook          // relay_handover.go: the owner's words handed to and from a direction's lead
+	avail            availBook             // availability.go
+	quiet            quietBook             // quiet.go
+	taskFileBook     taskFileBook          // task_files.go: the files tasks handed over, by todo id
+	supervise        superviseBook         // supervise_signals.go
+	progress         progressBook          // supervise_progress.go
+	preempt          preemptBook           // owner_preempt.go
+	tbriefs          taskBriefBook         // task_brief.go
+	search           searchIndex           // search_index.go
 
 	deletedConversations conversationDeleteBook // conversation_delete.go
 	conversationWrites   sync.RWMutex
@@ -191,35 +207,42 @@ type Service struct {
 	// briefsOptional: task_plan takes a task without done_when / expect_minutes (briefRequired). Only the tests of
 	// what a plan does once it exists set it; the hub never does.
 	briefsOptional bool
-	background     backgroundBook // supervise_background.go
-	autoRuns       autoReviewBook // supervise_autoreview.go
-	reports        reportBook     // reports.go
-	upReports      reportRate     // agent_control.go: report_to_supervisor
-	noteRate       reportRate     // todo_decisions.go: todo_decision_add
-	dispatch       dispatchBook   // dispatch.go: dispatch_start, dispatch_read
-	admission      admissionBook  // admission.go: execution-agent resource and direction gate
-	adoptMu        sync.Mutex     // agent_control.go: one agent_supervise at a time
-	placeBook      placeBook      // places.go
-	accept         acceptBook     // acceptance.go
-	pushQuiet      quietSwitch    // push_quiet.go: the hub's low-distraction switch as last read
-	deploy         deployProbe    // deploy_check.go: is the work in the running hub
-	parkReplies    parkReplyBook  // park_reply.go: bounded source reads for explicitly bound person replies
+	background     backgroundBook    // supervise_background.go
+	autoRuns       autoReviewBook    // supervise_autoreview.go
+	sessionReviews sessionReviewBook // agents_session_review.go
+	reports        reportBook        // reports.go
+	upReports      reportRate        // agent_control.go: report_to_supervisor
+	noteRate       reportRate        // todo_decisions.go: todo_decision_add
+	dispatch       dispatchBook      // dispatch.go: dispatch_start, dispatch_read
+	admission      admissionBook     // admission.go: execution-agent resource and direction gate
+	adoptMu        sync.Mutex        // agent_control.go: one agent_supervise at a time
+	placeBook      placeBook         // places.go
+	accept         acceptBook        // acceptance.go
+	pushQuiet      quietSwitch       // push_quiet.go: the hub's low-distraction switch as last read
+	deploy         deployProbe       // deploy_check.go: is the work in the running hub
+	parkReplies    parkReplyBook     // park_reply.go: bounded source reads for explicitly bound person replies
 
 	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
 	repoRootsMu      sync.Mutex              // pr_number_ref.go: one write of the repository roots at a time
 	// ownerVerifiesAll: every deployed task asks the owner to verify, not only the big ones (ownerVerifies; tests).
-	ownerVerifiesAll bool
-	later            laterBook    // later.go: questions that can wait for a briefing
-	brief            briefBook    // briefing.go
-	reporters        reporterBook // reporters.go
-	sched            schedule     // schedule.go
-	tasks            tasksState   // tasks.go
-	questions        questions    // tools.go (ask_user)
+	ownerVerifiesAll         bool
+	later                    laterBook    // later.go: questions that can wait for a briefing
+	brief                    briefBook    // briefing.go
+	reporters                reporterBook // reporters.go
+	sched                    schedule     // schedule.go
+	delayedMu                sync.Mutex   // delayed_waits.go: one local writer to the durable wait backlog
+	delayedRecoveryMu        sync.Mutex   // one restore pass; tracks entries already armed by this incarnation
+	delayedReceiptsRecovered bool         // initial receipt-claim requeue has completed for this incarnation
+	delayedRestored          map[string]bool
+	tasks                    tasksState    // tasks.go
+	taskSpaces               taskSpaceBook // task_space.go: herdr leader-task placement and ownership
+	questions                questions     // tools.go (ask_user)
 	// deadlineSweeping: a sweep of the decisions past their deadline is running (decision_deadline.go).
 	deadlineSweeping atomic.Bool
-	askTodos         askTodoBook  // ask_todo.go: the questions nobody answered, now to-dos
-	askLaters        askLaterBook // ask_later.go: the questions asked without waiting, still out
-	approvals        approvalBook // approval_clarify.go: clarified prepared approvals and their result delivery
+	askTodos         askTodoBook       // ask_todo.go: the questions nobody answered, now to-dos
+	askLaters        askLaterBook      // ask_later.go: the questions asked without waiting, still out
+	approvals        approvalBook      // approval_clarify.go: clarified prepared approvals and their result delivery
+	detached         detachedGrantBook // approval_detached.go: one-time continuation grants for command gates
 	// minutesMu is held while confirmed action items of meeting minutes become to-dos (kb_minutes.go): one
 	// confirmation at a time reads and records what the others made.
 	minutesMu  sync.Mutex
@@ -283,6 +306,9 @@ type Service struct {
 	// sendsSettleHook, when set, runs in sendsSettle once the task is opened again, before the turn held for it is
 	// taken up (tests).
 	sendsSettleHook func()
+	// askRetryHook, when set, runs as the asks route's Retry has found the failed start its ask names, before the start
+	// reads the to-do again (tests: the to-do reopens or fails anew in between).
+	askRetryHook func(id string)
 	// sessionsSeen, when set, sees every machine's list SessionsChanged is handed (tests).
 	sessionsSeen func(DeviceSessions)
 
@@ -304,7 +330,7 @@ var _ Handler = (*Service)(nil)
 // New makes the assistant; nothing runs until the hub calls it.
 func New(o Options) *Service {
 	s := &Service{hub: o.Hub, store: o.Store, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(), born: time.Now(),
-		devs: o.Devices, trustSrc: o.Trust, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig, urgentWake: make(chan struct{}, 1)}
+		devs: o.Devices, trustSrc: o.Trust, agentDirs: o.AgentDirs, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig, urgentWake: make(chan struct{}, 1)}
 	s.inbox.lang = func() i18n.Lang { return s.lang(context.Background()) }
 	s.remoteImages = remoteimage.New(remoteimage.Options{CacheDir: o.RemoteImageCache, Logf: o.Logf, DoH: s.remoteImageDoH})
 	if s.store == nil {
@@ -330,9 +356,11 @@ func New(o Options) *Service {
 	s.reporterRoutes()
 	s.directionRoutes()
 	s.dispatchPolicyRoutes() // dispatch_policy_routes.go
+	s.dispatchGuardRoutes()  // dispatch_guard.go
 	s.startPresetRoutes()
 	s.startDefaultsRoutes() // start_defaults_routes.go
 	s.directionTreeRoutes()
+	s.directionSessionRoutes()
 	s.routeRoutes()
 	s.agentRouteRoutes()
 	s.directionNameRoutes()
@@ -356,6 +384,7 @@ func New(o Options) *Service {
 	s.briefRoutes()
 	s.todoRoutes()
 	s.agentRoutes()
+	s.sessionReviewRoutes()
 	s.workspaceBoardRoutes()
 	s.navigationRoutes() // navigation.go: the page the apps open on
 	s.channelRoutes()
@@ -446,23 +475,51 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	}
 	if method != DeviceSessionGet && method != "session.unwatch" {
 		if err := s.conversationParamsAvailable(ctx, device, params); err != nil {
-			return err
+			return beforeNodeWrite(method, err)
 		}
 	}
-	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceAssistantWarm || method == DeviceSessionSend) {
+	taken := false // the node took this send (or may have): a direction's notes block it carried counts as given
+	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceAssistantWarm || method == DeviceSessionSend ||
+		method == DeviceSessionSendOnce || method == assistantwire.DeviceAssistantAnswerAgain) {
 		id, _ := p["session_id"].(string)
-		if err := s.putSupervisionInstructions(ctx, device, id, p); err != nil {
-			return err
+		pctx, carry := withNotesCarry(ctx)
+		// Settled however this returns: a send refused before it left was not taken (direction_notes.go).
+		defer func() { s.notesSendOutcome(ctx, carry, taken) }()
+		if err := s.putSupervisionInstructions(pctx, device, id, p); err != nil {
+			return beforeNodeWrite(method, err)
 		}
-		if method == DeviceSessionSend {
-			cfg := s.settings(ctx)
-			if id != "" && id == cfg.Main && device == cfg.mainRouteMachine() {
-				p["is_main"] = true // internal sends must not restart main on ordinary-chat compaction settings
+		if method == DeviceAssistantSend || method == DeviceSessionSend || method == DeviceSessionSendOnce {
+			// Initial assistant.send starts do not pass through SendParams, and Inbox continuations use session.send.
+			// The hub forwards session.send_once to the same node entry, so attest it here before that forwarding too.
+			// Attest the explicit ordinary/unknown decision on every manager-owned node send.
+			newConversation := method == DeviceAssistantSend && id == ""
+			startOrigin := ""
+			if newConversation {
+				startOrigin, _ = p["origin"].(string)
+			} else {
+				delete(p, "origin") // an existing conversation trusts only the manager's origin book
+			}
+			origin, originKnown := s.managerOriginDecision(ctx, device, id, startOrigin, newConversation)
+			delete(p, "origin_known")
+			if originKnown {
+				p["origin_known"] = true
+			}
+			if origin != "" {
+				p["origin"] = origin
+			}
+			if !originKnown || (origin != "" && origin != OriginTask) || p["is_main"] == true {
+				delete(p, devicewire.LegacyTaskExecution)
+			}
+			if method == DeviceSessionSend || method == DeviceSessionSendOnce {
+				cfg := s.settings(ctx)
+				if id != "" && id == cfg.Main && device == cfg.mainRouteMachine() {
+					p["is_main"] = true // internal sends must not restart main on ordinary-chat compaction settings
+				}
 			}
 		}
 	}
 	roundKind := "" // the round the message starts, when it is one the owner did not start (owner_preempt.go)
-	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceSessionSend) {
+	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceSessionSend || method == DeviceSessionSendOnce) {
 		if text, ok := p["text"].(string); ok {
 			source, _ := p["message_source"].(*proto.MessageSource)
 			if id, _ := p["session_id"].(string); source != nil && method == DeviceAssistantSend {
@@ -480,7 +537,7 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 			}
 		}
 	}
-	if p, ok := params.(map[string]any); ok && method == DeviceSessionSend {
+	if p, ok := params.(map[string]any); ok && (method == DeviceSessionSend || method == DeviceSessionSendOnce) {
 		if id, _ := p["session_id"].(string); id != "" {
 			s.workTold(device, id) // the turn it starts is this manager's doing, not the owner's hand (setup_suggest.go)
 		}
@@ -498,17 +555,22 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 			p["interject_background"] = true // what the node does with a message that comes while it answers
 		}
 	}
-	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceSessionSend) && p["is_main"] == true {
+	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceSessionSend || method == DeviceSessionSendOnce) && p["is_main"] == true {
 		p["idle_compaction"] = assistantwire.IdleCompaction{
 			Enabled: s.idleAutoCompact(ctx), IdleMinutes: s.idleAutoCompactMinutes(ctx), ContextTokens: s.idleAutoCompactTokens(ctx),
 		}
 	}
-	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceAssistantWarm || method == DeviceSessionSend) {
+	if p, ok := params.(map[string]any); ok && (method == DeviceAssistantSend || method == DeviceAssistantWarm || method == DeviceSessionSend || method == DeviceSessionSendOnce) {
 		// The window the main conversation is held to (main_compact_window.go), as sendModel puts it: a start, a relay,
 		// an internal message and the spare warmed for its next start carry it with is_main, or the node starts it again
 		// on its launcher's window (and never adopts the spare).
 		if _, set := p["main_compact_window"]; !set && p["is_main"] == true {
 			putMainCompactWindow(s.settings(ctx), p)
+		}
+		// Interactive Claude Code (#10058) is part of what a process runs: every send and warm carries it, or the node
+		// restarts a conversation between the two kinds as messages without it come.
+		if _, set := p["claude_interactive"]; !set && s.claudeInteractive(ctx) {
+			p["claude_interactive"] = true
 		}
 	}
 	if p, ok := params.(map[string]any); ok && startScopeMethods[method] {
@@ -518,7 +580,7 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 				if method == DeviceAssistantSend {
 					s.recordManagerSend(device, p, nil, err) // a failed start or resume all the same (north_star.go)
 				}
-				return err
+				return beforeNodeWrite(method, err)
 			}
 		}
 	}
@@ -532,17 +594,32 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	if p, ok := params.(map[string]any); ok && method == DeviceAssistantSend && !meetingSource(p) {
 		round = s.roundStarting(device, p, roundKind) // read before the send: its conversation is working right after
 	}
+	taskRoot, taskSpaceHeld := taskSpaceRootFromContext(ctx)
+	if taskRoot == "" && (method == DeviceSessionSend || method == deviceTaskStart) {
+		if p, ok := params.(map[string]any); ok && (method == DeviceSessionSend || p["resume_session_id"] != nil) {
+			taskRoot = s.attachTaskSpaceResume(ctx, device, method, p)
+		}
+	}
+	if taskRoot != "" && !taskSpaceHeld && (method == DeviceSessionSend || method == deviceTaskStart) {
+		unlock := s.lockTaskSpace(taskRoot)
+		defer unlock()
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
-		return err
+		return beforeNodeWrite(method, err)
 	}
-	p := DeviceCall{Device: device, Method: method, Params: raw}
+	p := DeviceCall{Device: device, Method: nodeMethod(method, params), Params: raw}
 	res, ok, err := s.localFleetDeviceCall(ctx, p) // what the hub answered before the nodes' events were the manager's
 	if !ok {
 		res, err = s.hub.DeviceCall(ctx, p)
 	}
+	// Not taken: refused before anything was typed, or it never reached the computer (relay_refusal.go).
+	taken = err == nil || !sendNotTaken(err)
+	if taskRoot != "" && (method == DeviceSessionSend || method == deviceTaskStart) {
+		s.noteTaskSpaceResult(ctx, taskRoot, device, res)
+	}
 	if err == nil && method != DeviceSessionGet && method != "session.unwatch" {
-		err = s.conversationParamsAvailable(ctx, device, params)
+		err = afterNodeWrite(method, s.conversationParamsAvailable(ctx, device, params))
 	}
 	if err == nil {
 		round.sent(s, res) // whose round it is, for the owner's next message (owner_preempt.go)
@@ -553,7 +630,7 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	if err != nil || out == nil || len(res) == 0 {
 		return err
 	}
-	return json.Unmarshal(res, out)
+	return afterNodeWrite(method, json.Unmarshal(res, out))
 }
 
 // appCall is an AppCall whose answer is read into out (nil: not read).
@@ -641,13 +718,18 @@ func (s *Service) device(ctx context.Context, id string) (Device, bool) {
 
 // startParams are what a new conversation starts with.
 type startParams struct {
-	Text           string               `json:"text"`
-	PermissionMode string               `json:"permission_mode,omitempty"`
-	Purpose        string               `json:"purpose,omitempty"` // the model configuration's purpose; "" is the assistant's
-	Space          string               `json:"space,omitempty"`   // "health" starts it in the health space (docs/assistant/health.md)
-	Origin         string               `json:"origin,omitempty"`  // where it comes from (origins.go); "" is the user's
-	OriginRef      string               `json:"origin_ref,omitempty"`
-	Source         *proto.MessageSource `json:"source,omitempty"`
+	TaskModel           *ModelBinding
+	MachineID           string
+	Cwd                 string
+	TaskExecution       bool
+	LegacyTaskExecution bool
+	Text                string               `json:"text"`
+	PermissionMode      string               `json:"permission_mode,omitempty"`
+	Purpose             string               `json:"purpose,omitempty"` // the model configuration's purpose; "" is the assistant's
+	Space               string               `json:"space,omitempty"`   // "health" starts it in the health space (docs/assistant/health.md)
+	Origin              string               `json:"origin,omitempty"`  // where it comes from (origins.go); "" is the user's
+	OriginRef           string               `json:"origin_ref,omitempty"`
+	Source              *proto.MessageSource `json:"source,omitempty"`
 	// NewSessionID starts the conversation under this id (a Claude Code one; another agent picks its own).
 	NewSessionID string `json:"new_session_id,omitempty"`
 }
@@ -804,6 +886,9 @@ func (s *Service) snapshot(ctx context.Context) Snapshot {
 	snap.Work = s.workReport(ctx) // before the cards: they are read back with it
 	snap.Partial = snap.Partial || snap.Work == nil
 	snap.Interactions = append(s.pendingQuestions(), s.workCards()...)
+	reviewInteractions, reviewOK := s.sessionReviewInteractions(ctx)
+	snap.Interactions = append(snap.Interactions, reviewInteractions...)
+	snap.Partial = snap.Partial || !reviewOK
 	snap.Sessions = make([]SessionView, 0, len(views))
 	for _, v := range views {
 		snap.Sessions = append(snap.Sessions, *v)
@@ -822,6 +907,9 @@ func (s *Service) UserSpoke(ctx context.Context, r SessionRef) {
 
 func (s *Service) userSpokeText(ctx context.Context, r SessionRef, text string) {
 	s.availOwnerSpoke(r, time.Now()) // before anything else: what the conversation is doing as the message comes (availability.go)
+	if exitText(text) {
+		s.retireTodoWork([2]string{r.MachineID, r.SessionID}) // /exit or /quit starts no turn that could cancel the wake
+	}
 	s.agentDecisionSpoke(ctx, r, time.Now(), text)
 	s.ownerHeard(r.SessionID)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopUserInput)
@@ -870,11 +958,13 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 	s.stopTurnEnded(r.MachineID, r.SessionID, time.Now()) // the turn a Stop interrupted, if one did (silent_turns.go)
 	s.clearToolLoop([2]string{r.MachineID, r.SessionID}, loopTurnChanged)
 	go s.registerInlineTurn(context.WithoutCancel(ctx), r)
+	s.afterSettle(context.WithoutCancel(ctx), s.registerInlineTurnSettled, r.MachineID, r.SessionID)
 	if !meeting {
 		s.availTurnEnded(ctx, r.MachineID, r.SessionID, time.Now()) // an assistant conversation's round (availability.go)
 		s.afterSettle(context.WithoutCancel(ctx), s.taskTurnSettled, r.MachineID, r.SessionID)
-		// A review's reviewer answered (supervise_autoreview.go).
+		// A review's reviewer answered (supervise_autoreview.go, agents_session_review.go).
 		go s.autoReviewTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)
+		go s.sessionReviewTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)
 		go s.workTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID)    // its triage (agents_work_turns.go)
 		go s.channelTurnEnded(context.WithoutCancel(ctx), r.MachineID, r.SessionID) // a channel's answer, the sync mirror
 	}
@@ -931,6 +1021,7 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 	s.undeliveredSeen(d)                      // kept owner messages go once their conversation runs again (undelivered.go)
 	s.originsChanged(d.MachineID, d.Sessions) // conversations from before origins were noted (origins.go)
 	s.todosSessionsChanged(ctx, d)
+	s.taskSpacesSessionsChanged(ctx, d)
 	s.todoRunsChanged(d.MachineID) // a to-do's view may file it elsewhere now (todo_view_push.go)
 	s.taskStageSessions(ctx, d)
 	s.nativeArchivesListed(d.MachineID) // agent_archive_native.go

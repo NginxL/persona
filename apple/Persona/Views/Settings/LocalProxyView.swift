@@ -153,7 +153,7 @@ struct LocalProxyForm<Status: View>: View {
         #endif
         .onAppear(perform: load)
         .onChange(of: always) { _, now in alwaysChanged(now) }
-        .confirmationDialog("Delete Local Proxy?", isPresented: $removing, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete Local Proxy?", isPresented: $removing, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { onSave(nil); dismiss() }
         } message: {
             Text("Persona stops using this proxy to reach the hub.")

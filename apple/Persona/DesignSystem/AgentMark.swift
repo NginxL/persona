@@ -34,7 +34,7 @@ nonisolated struct AgentKind: Equatable, Sendable {
             // A runtime's agent by the name the row gives it (Paseo's provider label, else its launcher, its provider's
             // id): one the app has a mark for draws it, any other its letter. Never the engine's own name.
             name = s.agentLabel
-            brand = Self.brand(named: s.agentLabelHint)
+            brand = Self.brand(named: s.agent) ?? Self.brand(named: s.agentLabelHint)
                 ?? (Session.providerEngines.contains((s.agent ?? "").lowercased()) ? Self.brand(named: s.launcher) : nil)
         }
     }
@@ -51,8 +51,8 @@ nonisolated struct AgentKind: Equatable, Sendable {
         case "trae": brand = Theme.Brand.trae; name = "TRAE"
         case "traex": brand = nil; name = "TRAEX"
         case "omp": brand = nil; name = "Oh My Pi"
-        case "gemini": brand = nil; name = "Gemini CLI"
-        case "cursor": brand = nil; name = "Cursor"
+        case "gemini": brand = Theme.Brand.gemini; name = "Gemini CLI"
+        case "cursor": brand = Theme.Brand.cursor; name = "Cursor"
         default: brand = Self.brand(named: agent); name = agent // pi, opencode (their own lower case), a runtime's own
         }
     }
@@ -62,11 +62,21 @@ nonisolated struct AgentKind: Equatable, Sendable {
     /// letter (its name is not TRAE's).
     static func brand(named name: String?) -> String? {
         guard let name else { return nil }
-        let key = name.lowercased().filter { !" -_".contains($0) }
+        let product = name.split(separator: "·", maxSplits: 1).first ?? ""
+        let key = product.lowercased().filter { !$0.isWhitespace && !".-_".contains($0) }
         switch key {
         case "claude", "claudecode": return Theme.Brand.claude
         case "codex", "codexcli": return Theme.Brand.openAI
         case "trae", "traecli", "traeagent": return Theme.Brand.trae
+        case "opencode": return Theme.Brand.opencode
+        case "pi", "piweb": return Theme.Brand.pi
+        case "gemini", "geminicli": return Theme.Brand.gemini
+        case "cursor", "cursoragent": return Theme.Brand.cursor
+        case "grok", "grokbuild", "grokchat", "grokcli": return Theme.Brand.grok
+        case "agy", "antigravity", "antigravitycli", "googleantigravity": return Theme.Brand.agy
+        case "dsh", "deepseekharness": return Theme.Brand.dsh
+        case "kimi", "kimicli": return Theme.Brand.kimi
+        case "copilot", "copilotcli", "githubcopilot", "githubcopilotcli": return Theme.Brand.copilot
         default: return nil
         }
     }

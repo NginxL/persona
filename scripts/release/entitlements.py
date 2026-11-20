@@ -41,6 +41,9 @@ APS = ("aps-environment", "com.apple.developer.aps-environment")  # iOS, macOS
 # cloud-signed export of an unsigned archive) silently drops it, and every push the hub marks time-sensitive then shows
 # as active (#1572).
 TIME_SENSITIVE = "com.apple.developer.usernotifications.time-sensitive"
+# CarPlay voice and HomeKit are also opt-ins whose target entitlements must reach the exported signature (#9526).
+CARPLAY_VOICE = "com.apple.developer.carplay-voice-based-conversation"
+HOMEKIT = "com.apple.developer.homekit"
 # The same for HealthKit background delivery (config.json app.health_background_delivery): without it a workout report
 # waits for Persona to open, while Settings says it comes right after the workout (#2526).
 HEALTH_BACKGROUND = "com.apple.developer.healthkit.background-delivery"
@@ -53,7 +56,7 @@ SIRI = "com.apple.developer.siri"
 def targets():
     """(bundle id, platform) → that target's build settings, Release."""
     out = subprocess.run(["xcodebuild", "-project", PROJECT, "-alltargets", "-configuration", "Release",
-                          "-showBuildSettings", "-json"], capture_output=True, text=True, check=True).stdout
+                          "-disableAutomaticPackageResolution", "-showBuildSettings", "-json"], capture_output=True, text=True, check=True).stdout
     found = {}
     for t in json.loads(out):
         s = t["buildSettings"]
@@ -188,6 +191,12 @@ def check(path):
             if ents.get(TIME_SENSITIVE) and not have.get(TIME_SENSITIVE):
                 problems.append("%s: %s missing (time-sensitive pushes show as active; rerun asc_signing.py)"
                                 % (name, TIME_SENSITIVE))
+            if ents.get(CARPLAY_VOICE) and not have.get(CARPLAY_VOICE):
+                problems.append("%s: %s missing (CarPlay voice conversations are unavailable; request Apple's approval "
+                                "and allow it on the App ID's profile)" % (name, CARPLAY_VOICE))
+            if ents.get(HOMEKIT) and not have.get(HOMEKIT):
+                problems.append("%s: %s missing (Home tools are unavailable; enable HomeKit on the App ID's profile)"
+                                % (name, HOMEKIT))
             if ents.get(HEALTH_BACKGROUND) and not have.get(HEALTH_BACKGROUND):
                 problems.append("%s: %s missing (workout reports wait for Persona to open; allow it on the App ID's profile)"
                                 % (name, HEALTH_BACKGROUND))

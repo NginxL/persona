@@ -4,10 +4,10 @@ import { bundleManager } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { writeResultUnknown } from '../core/TransportPolicy';
+import { AGENT_MESSAGE_HOLD, isAgentMessagePost, heldReceipt202, writeResultUnknown } from '../core/TransportPolicy';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { cert } from '@kit.DeviceCertificateKit';
-import { socket } from '@kit.NetworkKit';
+import { connection, socket } from '@kit.NetworkKit';
 import { rcp } from '@kit.RemoteCommunicationKit';
 import { url, util } from '@kit.ArkTS';
 
@@ -16,6 +16,7 @@ const MAX_BINARY_BYTES: number = 32 * 1024 * 1024;
 const MAX_FRAME_BYTES: number = 1024 * 1024;
 const MAX_HEADER_BYTES: number = 16 * 1024;
 const REQUEST_TIMEOUT_MS: number = 15000;
+const NEXT_ADDRESS_TIMEOUT_MS: number = 2500;
 const WS_GUID: string = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export interface TransportProxy {
@@ -73,6 +74,16 @@ interface ParsedEndpoint {
   hostHeader: string;
 }
 
+interface DirectSocket {
+  tcp: socket.TCPSocket;
+  family: number;
+}
+
+function numericFamily(address: string): number {
+  if (address.includes(':')) return 2;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(address) ? 1 : 0;
+}
+
 export interface BytesResponse {
   data: ArrayBuffer;
   contentType: string;
@@ -125,10 +136,14 @@ function routePath(base: ParsedEndpoint, path: string): string {
   const query = queryAt >= 0 ? path.slice(queryAt) : '';
   if (!pathname.startsWith('/api/v1/') && pathname !== '/api/v1/ws') throw new Error('invalid_path');
   const segments = pathname.split('/');
-  for (const segment of segments) {
+  // These IDs stay escaped within their individual route segments on the wire.
+  const agentMessageRoute = /^\/api\/v1\/sessions\/[^/]+\/[^/]+\/(?:messages|held\/[^/]+(?:\/retry)?)$/.test(pathname);
+  for (let i = 0; i < segments.length; i++) {
     let decoded: string;
-    try { decoded = decodeURIComponent(segment); } catch (_) { throw new Error('invalid_path'); }
-    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')) throw new Error('invalid_path');
+    try { decoded = decodeURIComponent(segments[i]); } catch (_) { throw new Error('invalid_path'); }
+    const opaqueId = agentMessageRoute && (i === 4 || i === 5 || i === 7);
+    if (decoded.includes('\\') || decoded.split('/').some((part: string) => part === '.' || part === '..') ||
+      (decoded.includes('/') && (!opaqueId || decoded.split('/').includes('')))) throw new Error('invalid_path');
   }
   const joined = base.basePath + pathname.slice(1);
   let target: url.URL;
@@ -287,7 +302,7 @@ export class HubTransport {
 
   hello(features: string[]): boolean {
     const identity = JSON.parse(JSON.stringify(this.clientMetadata())) as Record<string, Object>;
-    identity['type'] = 'client_hello'; identity['features'] = features; identity['locale'] = clientLocale(i18n.getSystemLanguage());
+    identity['type'] = 'client_hello'; identity['features'] = features.concat([AGENT_MESSAGE_HOLD]); identity['locale'] = clientLocale(i18n.getSystemLanguage());
     return this.send(JSON.stringify(identity));
   }
   private authHeaders(): Record<string, string> {
@@ -318,6 +333,8 @@ export class HubTransport {
     const verb = method.toUpperCase();
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(verb)) throw new Error('invalid_method');
     const target = this.endpoint.origin + routePath(this.endpoint, path), headers = this.authHeaders();
+    const messagePost = isAgentMessagePost(verb, path);
+    if (messagePost) headers['X-Persona-Features'] = AGENT_MESSAGE_HOLD;
     if (body !== undefined) headers['Content-Type'] = contentType;
     if (opId) {
       if (!/^[A-Za-z0-9._:-]{1,128}$/.test(opId)) throw new Error('invalid_operation_id');
@@ -339,9 +356,12 @@ export class HubTransport {
     try {
       this.assertLive(generation); dispatched = true; const response = await session.fetch(request); this.assertLive(generation);
       if (overLimit) throw new HttpFailure(0, 'response_too_large');
-      if (response.statusCode === 202 && !['GET', 'HEAD'].includes(verb) && !acceptTransfer) throw new HttpFailure(202, 'pending', true, true);
       if (response.statusCode >= 300 && response.statusCode < 400) throw new HttpFailure(response.statusCode, 'redirect_refused');
       const bytes = concatArrays(chunks), text = response.statusCode < 200 || response.statusCode >= 300 ? utf8String(bytes, false) : '';
+      if (response.statusCode === 202 && !['GET', 'HEAD'].includes(verb) && !acceptTransfer) {
+        const state = messagePost ? heldReceipt202(utf8String(bytes, false), opId) : 'pending';
+        if (state !== 'held') throw new HttpFailure(202, state === 'unknown' ? 'result_unknown' : 'pending', true, state === 'pending');
+      }
       if (response.statusCode < 200 || response.statusCode >= 300)
         throw new HttpFailure(response.statusCode, errorCode(text), !['GET', 'HEAD'].includes(verb) && writeResultUnknown(response.statusCode, text));
       const responseType = response.headers['content-type'] || response.headers['Content-Type'];
@@ -385,23 +405,25 @@ export class HubTransport {
   async connect(onMessage: (payload: string) => void, onState?: (state: string) => void,
     onBinary?: (payload: ArrayBuffer) => void): Promise<void> {
     this.assertLive(this.generation);
-    if (this.tlsSocket || this.tcpSocket) throw new Error('already_connecting');
+    if (this.connectionStage !== 'idle') throw new Error('already_connecting');
     if (!this.token) throw new Error('missing_credential');
     this.messageCallback = onMessage;
     this.binaryCallback = onBinary;
     this.stateCallback = onState;
     const generation = this.generation;
+    this.connectionStage = 'open_socket';
     try {
       const requestPath = routePath(this.endpoint, this.streamPath);
-      if (this.endpoint.scheme === 'https') await this.connectSecure(requestPath, generation);
-      else await this.connectPlain(requestPath, generation);
+      const cancelled = new Promise<void>((_, reject) => { this.openReject = reject; });
+      const open = this.endpoint.scheme === 'https' ? this.connectSecure(requestPath, generation) : this.connectPlain(requestPath, generation);
+      await Promise.race([open, cancelled]);
       this.assertLive(generation);
       this.stateCallback?.('ready');
     } catch (error) {
       const fields = error as Object as Record<string, Object>; const code = fields ? fields['code'] : undefined;
       this.failSocket(error instanceof Error ? error : new Error(typeof code === 'number' ? 'native_' + code : 'connect_failed'));
       throw error instanceof Error ? error : new Error('connect_failed');
-    }
+    } finally { this.openReject = undefined; }
   }
 
   private attachSocketHandlers(
@@ -423,27 +445,89 @@ export class HubTransport {
     }
   }
 
+  private async directPeers(): Promise<socket.NetAddress[]> {
+    const host = this.endpoint.hostname, port = this.endpoint.port, family = numericFamily(host);
+    if (family) return [{ address: host, port: port, family: family }];
+    this.connectionStage = 'resolve_address';
+    const answers = await this.withTimeout(connection.getAddressesByName(host), REQUEST_TIMEOUT_MS, 'dns_timeout');
+    const ipv4: socket.NetAddress[] = [], ipv6: socket.NetAddress[] = [], seen = new Set<string>();
+    for (const answer of answers) {
+      const kind = numericFamily(answer.address);
+      if (!kind || seen.has(answer.address)) continue;
+      seen.add(answer.address);
+      (kind === 2 ? ipv6 : ipv4).push({ address: answer.address, port: port, family: kind });
+    }
+    const peers: socket.NetAddress[] = [];
+    for (let index = 0; index < Math.max(ipv4.length, ipv6.length); index++) {
+      if (index < ipv6.length) peers.push(ipv6[index]);
+      if (index < ipv4.length) peers.push(ipv4[index]);
+    }
+    if (!peers.length) throw new Error('dns_no_addresses');
+    return peers;
+  }
+
+  private async openDirectSocket(generation: number, deadline: number): Promise<DirectSocket> {
+    const peers = await this.directPeers();
+    this.assertLive(generation);
+    this.connectionStage = 'connect_tcp';
+    for (let index = 0; index < peers.length; index++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('connect_timeout');
+      const count = peers.length - index;
+      const timeout = count === 1 ? remaining : Math.min(NEXT_ADDRESS_TIMEOUT_MS, Math.ceil(remaining / count));
+      const peer = peers[index], tcp = socket.constructTCPSocketInstance();
+      this.tcpSocket = tcp;
+      try {
+        await this.withTimeout(tcp.connect({ address: peer, timeout: timeout }), timeout, 'connect_timeout');
+        this.assertLive(generation);
+        return { tcp: tcp, family: peer.family || 1 };
+      } catch (error) {
+        if (this.tcpSocket === tcp) {
+          this.tcpSocket = undefined;
+          tcp.close().catch((): void => {});
+        }
+        this.assertLive(generation);
+        if (index === peers.length - 1) throw error as Error;
+      }
+    }
+    throw new Error('connect_timeout');
+  }
+
   private async connectSecure(requestPath: string, generation: number): Promise<void> {
-    const ws = socket.constructTLSSocketInstance();
-    this.tlsSocket = ws;
-    this.connectionStage = 'bind_tls';
-    const ipv6 = this.endpoint.hostname.includes(':');
-    await ws.bind({ address: ipv6 ? '::' : '0.0.0.0', port: 0, family: ipv6 ? 2 : 1 });
+    const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+    let ws: socket.TLSSocket, family: number;
+    if (this.proxy) {
+      family = numericFamily(this.endpoint.hostname) === 2 ? 2 : 1;
+      ws = socket.constructTLSSocketInstance();
+      this.tlsSocket = ws;
+      this.connectionStage = 'bind_tls';
+      await ws.bind({ address: family === 2 ? '::' : '0.0.0.0', port: 0, family: family });
+    } else {
+      const direct = await this.openDirectSocket(generation, deadline);
+      this.assertLive(generation);
+      // NetworkKit transfers the connected descriptor to TLS. Only TCP failures try another address.
+      ws = socket.constructTLSSocketInstance(direct.tcp);
+      this.tlsSocket = ws;
+      this.tcpSocket = undefined;
+      family = direct.family;
+    }
     this.assertLive(generation);
     this.attachSocketHandlers((info: socket.SocketMessageInfo) => this.receive(info.message),
       (error: Error) => this.failSocket(error), () => this.failSocket(new Error('socket_closed')));
     this.connectionStage = 'connect_tls';
+    const timeout = this.proxy ? REQUEST_TIMEOUT_MS : deadline - Date.now();
+    if (timeout <= 0) throw new Error('connect_timeout');
     const options: socket.TLSConnectOptions = {
-      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: ipv6 ? 2 : 1 },
+      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: family },
       secureOptions: { protocols: [socket.Protocol.TLSv13, socket.Protocol.TLSv12] },
       ALPNProtocols: ['http/1.1'],
       skipRemoteValidation: !!this.pin,
-      timeout: REQUEST_TIMEOUT_MS
+      timeout: timeout
     };
     if (this.proxy) options.proxy = { type: socket.ProxyTypes.SOCKS5, address: { address: this.proxy.host, port: this.proxy.port, family: 1 },
       username: this.proxy.username, password: this.proxy.password };
     this.assertLive(generation);
-    await this.withTimeout(ws.connect(options), REQUEST_TIMEOUT_MS, 'connect_timeout');
+    await this.withTimeout(ws.connect(options), timeout, 'connect_timeout');
     this.assertLive(generation);
     if (this.pin) {
       this.connectionStage = 'cert_pin';
@@ -458,14 +542,10 @@ export class HubTransport {
   }
 
   private async connectPlain(requestPath: string, generation: number): Promise<void> {
-    const tcp = socket.constructTCPSocketInstance();
-    this.tcpSocket = tcp;
+    await this.openDirectSocket(generation, Date.now() + REQUEST_TIMEOUT_MS);
+    this.assertLive(generation);
     this.attachSocketHandlers((info: socket.SocketMessageInfo) => this.receive(info.message),
       (error: Error) => this.failSocket(error), () => this.failSocket(new Error('socket_closed')));
-    await this.withTimeout(tcp.connect({
-      address: { address: this.endpoint.hostname, port: this.endpoint.port, family: this.endpoint.hostname.includes(':') ? 2 : 1 }, timeout: REQUEST_TIMEOUT_MS
-    }), REQUEST_TIMEOUT_MS, 'connect_timeout');
-    this.assertLive(generation);
     this.assertLive(generation); this.socketTrusted = true;
     this.connectionStage = 'upgrade_key';
     await this.sendUpgrade(requestPath);

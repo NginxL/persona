@@ -159,7 +159,7 @@ import PersonaWire
 
         // The context says which item, with the app's UI version and platform.
         let drawn = try #require(bodies.first)
-        #expect(drawn["context"]?["item"] == .string("lark:F1:1051") && drawn["context"]?["ui_version"] == .number(8))
+        #expect(drawn["context"]?["item"] == .string("lark:F1:1051") && drawn["context"]?["ui_version"] == .number(10))
         #expect(drawn["context"]?["platform"] == .string("ios") && drawn["action"] == nil)
 
         // A button: the same item, the plugin's state, the page's fields when it submits.

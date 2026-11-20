@@ -74,7 +74,8 @@ HUB_PROGRAMS = ('persona-hub', 'persona-manager')
 
 class PersonaInstallTests(unittest.TestCase):
     def run_install(self, home, initial='fresh', extra=None, corrupt=False, link=None,
-                    node=False, answers=None, legacy_artifacts=False, script=INSTALL, system=None, programs=(), release='1', args=()):
+                    node=False, answers=None, legacy_artifacts=False, script=INSTALL, system=None, programs=(), release='1', args=(),
+                    github_latest=False, no_python=False, release_tag=None):
         target = {'Darwin': 'darwin', 'Linux': 'linux'}[system or platform.system()] + '-' + {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'amd64'}[platform.machine()]
         name = (FORMER_NAME + 'd-' if legacy_artifacts else 'personad-') + target
         with tempfile.TemporaryDirectory() as directory:
@@ -100,6 +101,8 @@ class PersonaInstallTests(unittest.TestCase):
                 (downloads / (program + '-' + target + '.gz')).write_bytes(program_data)
                 sums += hashlib.sha256(program_data).hexdigest() + '  ' + program + '-' + target + '.gz\n'
             (downloads / 'SHA256SUMS').write_text(sums)
+            if github_latest:
+                (downloads / 'latest.json').write_text(json.dumps({'version': release}))
             class Handler(SimpleHTTPRequestHandler):
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, directory=str(downloads), **kwargs)
@@ -110,7 +113,9 @@ class PersonaInstallTests(unittest.TestCase):
             thread.start()
             try:
                 env = {key: value for key, value in os.environ.items() if not key.startswith(('PERSONA_', FORMER_PREFIX))}
-                env.update({'HOME': str(home), 'PERSONA_DL': f'http://127.0.0.1:{server.server_port}',
+                env.update({'HOME': str(home),
+                            'PERSONA_DL': ('https://github.com/example/project/releases/latest/download' if github_latest
+                                           else f'http://127.0.0.1:{server.server_port}'),
                             FORMER_PREFIX + 'DL': 'https://invalid.example.test', 'PERSONA_SKIP_HERDR': '1',
                             'PERSONA_ROLE': 'hub', 'PERSONA_ADMIN_ACCESS': 'lan'})
                 # The system's tools only besides the fixtures: nothing of the machine running the tests is run.
@@ -121,6 +126,31 @@ class PersonaInstallTests(unittest.TestCase):
                     uname.write_text(f'#!/bin/sh\ncase "$1" in -s) echo {system} ;; -m) echo {platform.machine()} ;; esac\n')
                     uname.chmod(0o755)
                     env['PATH'] = f'{uname.parent}:{env["PATH"]}'
+                if github_latest:
+                    commands = downloads / 'github-commands'
+                    commands.mkdir()
+                    pinned = 'https://github.com/example/project/releases/download/' + (release_tag or 'v' + release)
+                    curl = commands / 'curl'
+                    curl.write_text(f'''#!/bin/sh
+printf '%s\n' "$2" >> "$HOME/curl-calls"
+url="$2"
+case "$url" in
+  https://github.com/example/project/releases/latest/download/latest.json) path=latest.json ;;
+  https://github.com/example/project/releases/latest/download/*) exit 22 ;;
+  {pinned}/*) path=${{url#{pinned}/}} ;;
+  *) exit 22 ;;
+esac
+exec /usr/bin/curl -fsSL "http://127.0.0.1:{server.server_port}/$path" -o "$4"
+''')
+                    curl.chmod(0o755)
+                    env['PATH'] = f'{commands}:{env["PATH"]}'
+                if no_python:
+                    blocked = downloads / 'no-python'
+                    blocked.mkdir()
+                    python = blocked / 'python3'
+                    python.write_text('#!/bin/sh\nexit 127\n')
+                    python.chmod(0o755)
+                    env['PATH'] = f'{blocked}:{env["PATH"]}'
                 for key in ('BASH_ENV', 'ENV', 'ZDOTDIR', 'XDG_CONFIG_HOME'):  # nothing of the machine's own setup
                     env.pop(key, None)
                 # Nor its language: install.sh answers in LC_ALL's, then LANG's, and the tests read English (#6938).
@@ -151,6 +181,52 @@ class PersonaInstallTests(unittest.TestCase):
                 self.assertEqual(os.readlink(binary.parent / (FORMER_NAME + 'd')), 'personad')
             # Hub setup is safe to repeat on upgrades.
             self.assertEqual((home / 'personad-calls').read_text().count('hub setup\n'), 2)
+
+    def test_github_latest_is_pinned_before_checksums_and_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self.run_install(home, release='1.2.3', github_latest=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = (home / 'curl-calls').read_text().splitlines()
+            self.assertEqual(calls[0], 'https://github.com/example/project/releases/latest/download/latest.json')
+            pinned = 'https://github.com/example/project/releases/download/v1.2.3/'
+            self.assertGreaterEqual(len(calls), 3)
+            for url in calls[1:]:
+                self.assertTrue(url.startswith(pinned), url)
+            self.assertTrue(any(url.endswith('/SHA256SUMS') for url in calls))
+            self.assertTrue(any('/personad-' in url for url in calls))
+
+    def test_github_latest_with_a_trailing_slash_is_also_pinned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self.run_install(home, release='1.2.3', github_latest=True,
+                                      extra={'PERSONA_DL': 'https://github.com/example/project/releases/latest/download/'})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = (home / 'curl-calls').read_text().splitlines()
+            self.assertEqual(calls[0], 'https://github.com/example/project/releases/latest/download/latest.json')
+            for url in calls[1:]:
+                self.assertTrue(url.startswith('https://github.com/example/project/releases/download/v1.2.3/'), url)
+
+    def test_github_latest_does_not_require_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script = home / 'install-no-python.sh'
+            script.write_text(INSTALL.read_text())
+            result = self.run_install(home, release='1.2.3', github_latest=True, no_python=True, script=script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = (home / 'curl-calls').read_text().splitlines()
+            self.assertEqual(calls[0], 'https://github.com/example/project/releases/latest/download/latest.json')
+            self.assertTrue(all('/releases/download/v1.2.3/' in url for url in calls[1:]))
+
+    def test_legacy_suffixed_manifest_is_pinned_to_its_immutable_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self.run_install(home, release='0.7.0-202611110749', github_latest=True, release_tag='v0.7.0')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = (home / 'curl-calls').read_text().splitlines()
+            self.assertEqual(calls[0], 'https://github.com/example/project/releases/latest/download/latest.json')
+            for url in calls[1:]:
+                self.assertTrue(url.startswith('https://github.com/example/project/releases/download/v0.7.0/'), url)
 
     def test_installer_text_catalog_has_every_language(self):
         text = INSTALL.read_text(encoding='utf-8')
@@ -330,6 +406,56 @@ printf 'catalog placeholders preserved in all languages\n'
                 if terminal:
                     self.assertEqual(os.readlink(state / 'bin' / (FORMER_NAME + 'd')), 'personad')
 
+    def test_publish_installer_downloads_from_the_compiled_update_base(self):
+        publisher = (ROOT / 'scripts/release/publish.sh').read_text()
+        self.assertIn('-X main.updateURL=$UPDATE_URL', publisher)
+        render = next(line for line in publisher.splitlines() if '--render-installer' in line)
+        update_url = 'https://releases.example.test/owner/project/releases/latest/download'
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(['bash', '-c', render], cwd=ROOT,
+                                    env=dict(os.environ, OUT=directory,
+                                             PERSONA_PUBLISH_URL='https://site.example.test', UPDATE_URL=update_url),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            installer = (Path(directory) / 'install.sh').read_text()
+        download = next(line for line in installer.splitlines() if line.startswith('DL='))
+        self.assertEqual(download, 'DL="${PERSONA_DL:-' + update_url + '}"')
+
+    def test_tag_publication_sets_publish_version_from_the_tag(self):
+        publisher = (ROOT / 'scripts/release/publish.sh').read_text()
+        assignment = next(line for line in publisher.splitlines() if line.startswith('VERSION='))
+        result = subprocess.run(['bash', '-c', assignment + '\nprintf "%s" "$VERSION"'],
+                                env={'PATH': '/usr/bin:/bin', 'VERSION': 'wrong-version',
+                                     'PERSONA_RELEASE_VERSION': '1.2.3'},
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '1.2.3')
+
+    def test_identical_release_retry_verifies_served_manifest(self):
+        publisher = (ROOT / 'scripts/release/publish.sh').read_text()
+        start = publisher.index('curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json"')
+        end = publisher.index('# Only current product names', start)
+        block = publisher[start:end].replace('curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json" -o "$OUT/served.json" 2>/dev/null || : > "$OUT/served.json"', ':')
+        self.assertLess(publisher.index('for bin in "$OUT/bin"/personad-*'), publisher.index('if [ "$RETRY_SAME_BUILD" = 1 ]'))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            host = root / 'host-bin'
+            host.write_text('#!/bin/sh\ncase "$1 $2" in "release check-next") exit 1 ;; "release verify") echo "$*" >> "$CALLS"; exit 0 ;; esac\n')
+            host.chmod(0o755)
+            served = root / 'out/served.json'
+            served.parent.mkdir()
+            served.write_text(json.dumps({'build': 202611110749, 'commit': 'fixture-commit'}))
+            env = {'PATH': '/usr/bin:/bin', 'OUT': str(root / 'out'), 'BUILD': '202611110749',
+                   'COMMIT': 'fixture-commit', 'host_bin': str(host), 'CALLS': str(root / 'calls')}
+            result = subprocess.run(['bash', '-c', block], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('release verify', (root / 'calls').read_text())
+            (root / 'calls').unlink()
+            env['COMMIT'] = 'different-commit'
+            result = subprocess.run(['bash', '-c', block], env=env, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / 'calls').exists())
+
     def test_publish_fixture_indexes_only_current_product_artifacts(self):
         import shutil
         publisher = (ROOT / 'scripts/release/publish.sh').read_text()
@@ -346,7 +472,7 @@ printf 'catalog placeholders preserved in all languages\n'
                          'persona-link-windows-amd64.exe', 'persona-link-windows-arm64.exe',
                          'persona-hub-linux-amd64', 'persona-manager-linux-amd64'):
                 (binaries / name).write_bytes(('fixture ' + name).encode())
-            command = 'set -eu\nOUT=release-fixture\nVERSION=fixture\n' + publisher[start:end]
+            command = 'set -eu\nOUT=release-fixture\nVERSION=fixture\nRETRY_SAME_BUILD=0\n' + publisher[start:end]
             result = subprocess.run(['bash', '-c', command], cwd=root,
                                     env={'HOME': str(root), 'PATH': '/usr/bin:/bin'},
                                     capture_output=True, text=True, timeout=10)
@@ -359,8 +485,12 @@ printf 'catalog placeholders preserved in all languages\n'
                 self.assertIn(current + '-linux-amd64.gz', names)
             for arch in ('amd64', 'arm64'):
                 self.assertIn(f'persona-link-windows-{arch}.exe.gz', names)
-            self.assertIn('for t in windows/amd64 windows/arm64; do', publisher)
-            self.assertIn('persona-link-${t%/*}-${t#*/}.exe', publisher)
+            # Persona Link is still built for both Windows architectures, by the loop over the Windows programs.
+            windows = publisher[publisher.index('for t in windows/amd64 windows/arm64; do'):]
+            windows = windows[:windows.index('\n  done\ndone\n')]
+            programs = windows.splitlines()[1].strip()
+            self.assertTrue(programs.startswith('for p in ') and 'persona-link' in programs.split(), programs)
+            self.assertIn('-o "../$OUT/bin/$p-${t%/*}-${t#*/}.exe" "./cmd/$p"', windows)
             for digest, name in sums:
                 self.assertEqual(hashlib.sha256((binaries / name).read_bytes()).hexdigest(), digest)
 

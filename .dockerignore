@@ -19,6 +19,8 @@
 !spec/desktop-bridge.d.ts
 # the extension schema and its examples: the web app builds them in and its tests import them (Dockerfile)
 !schema/extension/
+# the configuration form's schema and validation cases, which the web tests import (Dockerfile)
+!schema/configuration/
 integrations/**/node_modules/
 server/bin/
 server/internal/hub/webdist/*

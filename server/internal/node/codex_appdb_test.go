@@ -14,6 +14,100 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+func TestCodexHistoryAsksAfterUserReply(test *testing.T) {
+	const question = "Where should updates go?"
+	turnEvent := func(second int, kind string) string {
+		return fmt.Sprintf(`{"timestamp":"2026-01-01T00:00:%02dZ","type":"event_msg","payload":{"type":%q}}`, second, kind)
+	}
+	const ask = `{"timestamp":"2026-01-01T00:00:02Z","type":"history_mutation","payload":{"display_completions":[{"item":{"type":"AgentMessage","id":"ask-1","delivery":"async","content":[{"type":"Text","text":"` + question + `"}],"questions":[{"title":"` + question + `","options":["Dashboard","Inbox"]}]}}]}}`
+	const asyncReply = `{"timestamp":"2026-01-01T00:00:05Z","type":"history_mutation","payload":{"display_completions":[{"item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"<send_user_message_question_reply>[{\"questionItemId\":\"ask-1\",\"question\":\"` + question + `\",\"answer\":\"Dashboard\"}]</send_user_message_question_reply>"}]}}]}}`
+	const ordinaryReply = `{"timestamp":"2026-01-01T00:00:05Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"Use the dashboard."}]}}}`
+	toolResult := func(second, size int) string {
+		return fmt.Sprintf(`{"timestamp":"2026-01-01T00:00:%02dZ","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"tool-%d","command":["ls"],"status":"completed","aggregated_output":%q,"exit_code":0}}}`, second, second, strings.Repeat("x", size))
+	}
+	for _, scenario := range []struct {
+		name, reply string
+		long        bool
+	}{
+		{name: "async reply", reply: asyncReply},
+		{name: "async reply outside quick tail", reply: asyncReply, long: true},
+		{name: "later ordinary prompt outside quick tail", reply: ordinaryReply, long: true},
+	} {
+		test.Run(scenario.name, func(test *testing.T) {
+			node := remoteTestNode(test)
+			home := node.codexHome()
+			path := realPath(writeAppRollout(test, home, appChat, test.TempDir(), time.Now()))
+			appendEvents := func(lines ...string) {
+				test.Helper()
+				file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+				if err != nil {
+					test.Fatal(err)
+				}
+				_, writeErr := file.WriteString(strings.Join(lines, "\n") + "\n")
+				if err := file.Close(); err != nil || writeErr != nil {
+					test.Fatalf("append rollout: write %v, close %v", writeErr, err)
+				}
+				node.mu.Lock()
+				if meta, ok := node.metas[path]; ok {
+					meta.readAt = time.Time{}
+					node.metas[path] = meta
+				}
+				node.mu.Unlock()
+			}
+			check := func(stage string, node *Node, want string) {
+				test.Helper()
+				row := rowsByThread(cachedSessions(node))[appChat]
+				if row.SourceKind != "codex_history" || row.LastText != question {
+					test.Fatalf("%s: source = %q, last text = %q; want history row with the original question", stage, row.SourceKind, row.LastText)
+				}
+				if !row.AsksRead || row.Asks != want {
+					test.Errorf("%s: AsksRead = %t, Asks = %q; want true, %q", stage, row.AsksRead, row.Asks, want)
+				}
+			}
+			appendEvents(turnEvent(1, "task_started"), ask)
+			if scenario.long {
+				appendEvents(toolResult(3, quickTail+1))
+			}
+			if scenario.reply == ordinaryReply {
+				appendEvents(turnEvent(3, "task_complete"))
+			}
+			check("initial discovery, unanswered", node, question)
+			if scenario.reply == ordinaryReply {
+				appendEvents(turnEvent(4, "task_started"))
+			}
+			appendEvents(scenario.reply, toolResult(6, 16))
+			check("reread while the agent continues", node, "")
+			if scenario.long {
+				appendEvents(toolResult(7, quickTail+1))
+			}
+			appendEvents(turnEvent(8, "task_complete"))
+			check("reread after completion", node, "")
+			restarted := remoteTestNode(test)
+			restarted.configureCodex(proto.CodexConfig{Homes: []string{home}, LegacyHome: home})
+			check("rediscovery after restart", restarted, "")
+		})
+	}
+}
+
+func TestCodexHistoryAsksUnknownWithoutReadableMetadata(test *testing.T) {
+	node := remoteTestNode(test)
+	path := realPath(writeAppRollout(test, node.codexHome(), appChat, test.TempDir(), time.Now()))
+	if err := os.WriteFile(path, []byte("not a rollout\n"), 0o600); err != nil {
+		test.Fatal(err)
+	}
+	check := func(stage string, rows []proto.Session) {
+		test.Helper()
+		row := rowsByThread(rows)[appChat]
+		if row.SourceKind != "codex_history" || row.AsksRead || row.Asks != "" {
+			test.Errorf("%s: source = %q, AsksRead = %t, Asks = %q; want history row with unknown asks", stage, row.SourceKind, row.AsksRead, row.Asks)
+		}
+	}
+	check("unparseable rollout", cachedSessions(node))
+	pass := newCodexListPass()
+	pass.stats[path] = codexStat{err: os.ErrPermission}
+	check("failed stat", node.sessionListIn(context.Background(), false, pass))
+}
+
 const (
 	appChat     = "019a0000-0000-7000-8000-000000000001" // in a project; its rollout is gone
 	appOld      = "019a0000-0000-7000-8000-000000000002" // without a project; its rollout is older than two weeks
@@ -110,6 +204,9 @@ func TestCodexAppChatsAreListedLikeTheSidebar(t *testing.T) {
 	}
 	if chat.Title != "Alpha chat" || chat.Cwd != filepath.Join(project, "sub") || !chat.UpdatedAt.Equal(updated) || chat.Status != proto.StatusOffline {
 		t.Fatalf("chat = %+v", chat)
+	}
+	if chat.AsksRead || chat.Asks != "" {
+		t.Fatalf("chat without a rollout: AsksRead = %t, Asks = %q; want unknown asks", chat.AsksRead, chat.Asks)
 	}
 	if chat.AgentName != "Codex App" || chat.SpaceKind != "codex_app" || chat.SpaceID != "codex-project:"+realPath(project) {
 		t.Fatalf("chat placed as %q %q %q, want in its project", chat.AgentName, chat.SpaceKind, chat.SpaceID)

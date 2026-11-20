@@ -20,6 +20,7 @@
   "err_tier_name": "Invalid tier name: {tier}.",
   "err_tier_launcher": "Tier {tier} must name a launcher.",
   "err_effort": "Invalid effort {effort} in {where}. Levels: {levels}.",
+  "err_tier_speed": "Invalid speed {speed} in tier {tier}. Speeds: standard, fast, ultrafast.",
   "err_cannot_run": "Cannot run {purpose}: {error}",
   "err_profiles": "At most {max} model profiles are allowed.",
   "err_active": "Profile {name} is in use. Switch to another profile before deleting it.",

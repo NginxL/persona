@@ -259,9 +259,9 @@ struct MarketExtensionDetailView: View {
         .overlay { if page.item == nil && page.error == nil { ProgressView() } }
         .detailTitle(page.item?.name ?? String(localized: "Extensions"))
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Turn Off Dependent Extensions and Uninstall?", isPresented: Binding(
+        .accessibleConfirmationDialog("Turn Off Dependent Extensions and Uninstall?", isPresented: Binding(
             get: { page.uninstallConfirmation != nil }, set: { if !$0 { page.uninstallConfirmation = nil } }),
-            titleVisibility: .visible) {
+            titleVisibility: .visible, hasCancel: true) {
             Button(role: .destructive) {
                 Task {
                     if await page.uninstall(cascade: true, members: page.removingMembers) { done(.uninstall) }
@@ -372,7 +372,7 @@ struct MarketExtensionDetailView: View {
                 .tint(Theme.danger) // a Mac form draws a button in the accent whatever its role (#1512)
                 .disabled(page.working)
                 .accessibilityIdentifier("market-uninstall")
-                .confirmationDialog("Uninstall “\(p.name)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
+                .accessibleConfirmationDialog("Uninstall “\(p.name)”?", isPresented: $confirmRemove, titleVisibility: .visible, hasCancel: true) {
                     Button(role: .destructive) {
                         Task { if await page.uninstall() { done(.uninstall) } }
                     } label: { Text(page.isPack ? String(localized: "Pack Only") : String(localized: "Uninstall")).lineLimit(1) }
@@ -744,7 +744,7 @@ private struct MarketRow: View {
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.danger) // a Mac borderless button draws its role in the accent
             .accessibilityIdentifier("market-remove-\(market.id)")
-            .confirmationDialog("Delete market “\(market.title)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            .accessibleConfirmationDialog("Delete market “\(market.title)”?", isPresented: $confirmRemove, titleVisibility: .visible, hasCancel: true) {
                 Button(role: .destructive) { act(.remove) } label: { Text("Delete").lineLimit(1) }
                     .accessibilityIdentifier("market-remove-confirm")
                 Button("Cancel", role: .cancel) {}

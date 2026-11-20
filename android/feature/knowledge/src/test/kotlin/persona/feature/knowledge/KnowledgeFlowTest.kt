@@ -86,6 +86,27 @@ class KnowledgeFlowTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test fun aLinkedKindIsTheInitialListFilter() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val repository = FakeKnowledge()
+            val connection = object : KnowledgeConnection { override val current = MutableStateFlow<KnowledgeRepository?>(repository) }
+            val list = KnowledgeViewModel(connection, StandardTestDispatcher(testScheduler), initialKind = KnowledgeKind.People)
+            store.put("list", list)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { list.page.collect() }
+            runCurrent()
+            assertEquals(KnowledgeKind.People, list.page.value.filter.kind)
+            assertTrue(list.page.value.loaded)
+            assertTrue(list.page.value.entries.isEmpty())
+        } finally {
+            backgroundScope.cancel()
+            store.clear()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
 }
 
 class KnowledgeTaggingFlowTest {

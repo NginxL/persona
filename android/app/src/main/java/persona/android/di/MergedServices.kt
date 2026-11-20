@@ -55,6 +55,7 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
         combine(stack.repositories.sessions.listStatus, listNamespaces) { status, namespaces ->
             if (namespaces?.contains(stack.names.namespace) == false) SessionListStatus(loaded = true)
             else status.copy(
+                filter = status.filter.copy(hiddenBotmuxHubs = if (null in status.filter.hiddenBotmuxHubs) setOf(stack.namespace) else emptySet()),
                 counts = status.counts.copy(machine = status.counts.machine.mapKeys { (id, _) -> stack.names.machineId(id) }),
                 machineCounts = status.machineCounts.copy(machine = status.machineCounts.machine.mapKeys { (id, _) -> stack.names.machineId(id) }),
             )
@@ -69,22 +70,24 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
             total = statuses.sumOf { it.total },
             counts = SessionListCounts(total = statuses.sumOf { it.counts.total }, machine = totals({ it.machine }),
                 project = totals({ it.project }), group = totals({ it.group }), state = totals({ it.state }),
-                revision = statuses.joinToString("|") { it.counts.revision }, backgroundWaiting = statuses.sumOf { it.counts.backgroundWaiting }),
+                revision = statuses.joinToString("|") { it.counts.revision }, backgroundWaiting = statuses.sumOf { it.counts.backgroundWaiting },
+                paneSource = totals({ it.paneSource })),
             machineCounts = SessionListCounts(total = statuses.sumOf { it.machineCounts.total }, machine = totals({ it.machine }, true),
                 project = totals({ it.project }, true), group = totals({ it.group }, true), state = totals({ it.state }, true)),
+            filter = SessionListFilter(hiddenBotmuxHubs = statuses.flatMapTo(mutableSetOf()) { it.filter.hiddenBotmuxHubs }),
         )
     }
     override suspend fun setListFilter(filter: SessionListFilter) = stacks.forEach { stack ->
         if (!selected(stack)) return@forEach
         val machine = filter.machineId?.let { id -> if (stack.names.owns(id)) GroupKeys.raw(id) else id }
-        stack.repositories.sessions.setListFilter(filter.copy(machineId = machine))
+        stack.repositories.sessions.setListFilter(filter.forHub(stack.namespace).copy(machineId = machine))
     }
     override suspend fun loadMore() = stacks.forEach { if (selected(it)) it.repositories.sessions.loadMore() }
     override suspend fun loadPrevious() = stacks.forEach { if (selected(it)) it.repositories.sessions.loadPrevious() }
     override suspend fun listCounts(filter: SessionListFilter): SessionListCounts {
         val machine = requireNotNull(filter.machineId)
         return stacks.use(GroupKeys.namespaceOf(machine)) { stack ->
-            val counts = stack.repositories.sessions.listCounts(filter.copy(machineId = GroupKeys.raw(machine)))
+            val counts = stack.repositories.sessions.listCounts(filter.forHub(stack.namespace).copy(machineId = GroupKeys.raw(machine)))
             counts.copy(machine = counts.machine.mapKeys { (id, _) -> stack.names.machineId(id) })
         }
     }
@@ -159,6 +162,8 @@ internal fun mergedChats(stacks: GroupStacks, storage: ChatLocalStorage): ChatRe
                     ?: flowOf(ChatSnapshot(loading = false, verified = false))
             }
         override suspend fun loadOlder(session: SessionKey) = stacks.use(session) { it.repositories.chats.loadOlder(it.names.raw(session)) }
+        override suspend fun modeChanges(session: SessionKey): List<ModeChange> =
+            stacks.use(session) { it.repositories.chats.modeChanges(it.names.raw(session)) }
         override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int) =
             stacks.use(session) { it.repositories.chats.expandFold(it.names.raw(session), fromSeq, toSeq) }
         override suspend fun loadRange(session: SessionKey, fromSeq: Int, throughSeq: Int) =
@@ -320,6 +325,8 @@ internal class MergedShellServices(private val stacks: GroupStacks) {
         override suspend fun verify(session: Session, action: ChatAction) = of(session).verify(session, action)
         override suspend fun editQueue(session: Session, keep: List<Int>) = of(session).editQueue(session, keep)
         override suspend fun sendQueuedNow(session: Session) = of(session).sendQueuedNow(session)
+        override suspend fun retryUndelivered(session: Session, messageId: String) = of(session).retryUndelivered(session, messageId)
+        override suspend fun deleteUndelivered(session: Session, messageId: String) = of(session).deleteUndelivered(session, messageId)
         override suspend fun info(session: Session) = of(session).info(session)
         override suspend fun completeRow(session: Session) = of(session).completeRow(session)
         override suspend fun childRows(session: Session) = of(session).childRows(session)
@@ -372,6 +379,8 @@ internal fun routedFiles(lookup: (machineId: String) -> SessionFiles?): SessionF
     override suspend fun convertToPdf(machineId: String, cwd: String, path: String) = of(machineId).convertToPdf(machineId, cwd, path)
     override fun editsFiles(machineId: String) = lookup(machineId)?.editsFiles(machineId) == true
     override suspend fun rename(machineId: String, cwd: String, path: String, name: String) = of(machineId).rename(machineId, cwd, path, name)
+    override suspend fun move(machineId: String, cwd: String, path: String, directory: String, conflict: SessionMoveConflictPolicy?) =
+        of(machineId).move(machineId, cwd, path, directory, conflict)
     override suspend fun trash(machineId: String, cwd: String, paths: List<String>) = of(machineId).trash(machineId, cwd, paths)
     override suspend fun restore(machineId: String, trashIds: List<String>) = of(machineId).restore(machineId, trashIds)
 }

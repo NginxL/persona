@@ -152,6 +152,21 @@ class PublishDownloadVerificationTests(unittest.TestCase):
         result = self.check("versioned", fail_get="dl/1.2.3/persona-node-linux-amd64.gz")
         self.assertNotEqual(result.returncode, 0, "a failed versioned archive GET passed")
 
+    def test_versioned_serves_windows_node_programs_and_the_connector(self):
+        # A Windows resident node is downloaded from the hub's immutable version directory, like Linux and macOS.
+        for name in ("persona-link-windows-amd64.exe.gz", "personad-windows-amd64.exe.gz", "persona-node-windows-amd64.exe.gz"):
+            self.archive(name, b"new-artifact-bytes", b"new-artifact-bytes", True)
+        result = self.check("versioned")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("persona-link-windows-amd64.exe.gz", "personad-windows-amd64.exe.gz", "persona-node-windows-amd64.exe.gz"):
+            self.assertIn("GET dl/1.2.3/" + name, self.requests())
+
+    def test_versioned_rejects_a_stale_connector(self):
+        self.archive("persona-link-linux-amd64.gz", b"new-artifact-bytes", b"old-artifact-bytez", True)
+        result = self.check("versioned")
+        self.assertNotEqual(result.returncode, 0, "a stale versioned connector passed")
+        self.assertIn("served dl/1.2.3/persona-link-linux-amd64.gz has sha256", result.stderr)
+
     def test_versioned_still_requires_the_exact_manifest(self):
         self.archive("persona-node-linux-amd64.gz", b"new-artifact-bytes", b"new-artifact-bytes", True)
         (self.served / "dl" / self.version / "manifest.json").write_bytes(self.manifest + b"\n")

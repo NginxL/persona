@@ -22,7 +22,7 @@ export interface CompareStart {
   /** The branch the runs share as a stem ("" or what New agent shows as its placeholder). */
   branch: string;
   count: number;
-  spec: RunSpec;
+  spec: RunSpec & { nameHint?: string };
   /** The start goes into the workspace Paseo makes for each worktree (New agent's picked Paseo workspace, #8856). */
   paseo: boolean;
   text: string;
@@ -30,6 +30,7 @@ export interface CompareStart {
 }
 
 interface Held {
+  sessionNameHint?: string;
   text: string;
   attachments: LocalAttachment[];
   nameHint: string;
@@ -52,16 +53,17 @@ function changed() {
 /** Starts the runs in the background and returns the group's id at once (its page opens before any request returns). */
 export function startCompare(input: CompareStart): string {
   const id = uuid();
+  const { nameHint: sessionNameHint, ...spec } = input.spec;
   addGroup({
     id,
     at: Date.now(),
     mid: input.mid,
     cwd: input.cwd,
-    spec: input.spec,
+    spec,
     attachments: input.attachments.length > 0,
     runs: runBranches(input.branch, input.count).map((branch, i) => ({ n: i + 1, branch, phase: "waiting" })),
   });
-  held.set(id, { text: input.text, attachments: input.attachments, nameHint: input.nameHint, paseo: input.paseo, token: getToken(), owner: credentialOwner() });
+  held.set(id, { sessionNameHint, text: input.text, attachments: input.attachments, nameHint: input.nameHint, paseo: input.paseo, token: getToken(), owner: credentialOwner() });
   void work(id);
   return id;
 }
@@ -109,7 +111,7 @@ async function runOne(id: string, n: number) {
   }
   // The launch owns its previews, as New agent's own start does.
   const attachments = h.attachments.map((a) => ({ ...a, url: a.url ? URL.createObjectURL(a.file) : undefined }));
-  const launch = launchAgent({ machineId: g.mid, cwd: path, workspaceId, ...g.spec, text: h.text, attachments }, { open: false });
+  const launch = launchAgent({ machineId: g.mid, cwd: path, workspaceId, ...g.spec, nameHint: h.sessionNameHint, text: h.text, attachments }, { open: false });
   updateRun(id, n, { phase: "launched", launch, error: undefined });
   whenStarted(launch, (s) => updateRun(id, n, { sid: s.session_id }));
 }

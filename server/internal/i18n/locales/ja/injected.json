@@ -12,5 +12,7 @@
   "limit_continue": "利用上限がリセットされたので、Personaが続きを頼みました",
   "ask_answered": "回答しました：{title}",
   "ask_expired": "質問は回答がないまま期限切れになりました",
-  "ask_closed": "質問は回答されずに閉じられました"
+  "ask_closed": "質問は回答されずに閉じられました",
+  "answer_again": "Personaが再回答を求めています",
+  "answer_again_failed": "アシスタントから回答がありませんでした。メッセージをもう一度送ってください。"
 }

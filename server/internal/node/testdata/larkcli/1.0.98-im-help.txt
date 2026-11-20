@@ -1,0 +1,59 @@
+Message and group chat management
+
+Prefer a +-prefixed shortcut when one matches your task; otherwise use the raw API resource below.
+
+Risk levels (read | write | high-risk-write) appear in each command's --help; high-risk-write requires --yes, only after the user confirms.
+
+Domain guide (concepts, command choice, conventions): lark-cli skills read lark-im
+
+Usage:
+  lark-cli im [flags]
+  lark-cli im [command]
+
+Available Commands:
+  +chat-create                 Create a group chat or topic chat; user/bot; --chat-mode group|topic; private/public; invites users/bots; optionally sets bot manager
+  +chat-list                   List chats the current user/bot is a member of; defaults to groups; pass --types=p2p,group to include p2p single chats (user-only); user/bot; supports sorting, auto-pagination, --exclude-muted (user-only)
+  +chat-members-list           List members of a chat; returns separate users[] / bots[] buckets; callable as user or bot; --member-types filters which kinds to return; --page-all pagination; surfaces truncations[] when the server caps a bucket
+  +chat-messages-list          List messages in a chat or P2P conversation; user/bot; accepts --chat-id or --user-id, resolves P2P chat_id, supports time range, --order asc/desc sorting, auto-pagination
+  +chat-search                 Search visible group chats by --query keyword and/or --member-ids; user/bot; e.g. look up chat_id by group name; supports type filters, sorting, auto-pagination, and --exclude-muted (user identity only)
+  +chat-update                 Update group chat name or description; user/bot; updates a chat's name or description
+  +feed-group-list             List the caller's feed groups (tags); user-only; supports `--page-all` auto-pagination
+  +feed-group-list-item        List feed cards in a feed group (tag); user-only; enriches each item with chat_name resolved from feed_id; supports --page-all auto-pagination
+  +feed-group-query-item       Look up specific feed cards in a feed group (tag) by ID; user-only; enriches each item with chat_name resolved from feed_id
+  +feed-shortcut-create        Add chats to the user's feed shortcuts; user-only; batch up to 10 chat IDs per call; --head/--tail controls insertion order
+  +feed-shortcut-list          List one page of the user's feed shortcuts; user-only; first call omits --page-token, subsequent calls pass the previous response's page_token; each entry is auto-enriched with the full per-type info object attached as `detail` (pass --no-detail to skip)
+  +feed-shortcut-remove        Remove chats from the user's feed shortcuts; user-only; batch up to 10 chat IDs per call; per-item failures return ok:false with failed_shortcuts
+  +flag-cancel                 Cancel (remove) a bookmark. When no --flag-type is given, best-effort double-cancel: removes message layer and (when chat_type is determinable) feed layer
+  +flag-create                 Create a bookmark on a message; user-only; defaults to message-layer flag; use --flag-type feed for feed-layer flag (item_type auto-detected from chat mode)
+  +flag-list                   List bookmarks; user-only; auto-enriches feed-type thread entries with message content; supports `--page-all` auto-pagination
+  +message-read-users          List users who have read one message; the caller must still be in the chat; supports user and bot identities with optional automatic pagination
+  +messages-edit               Edit a sent text or rich-text message, optionally updating its attachment zone; bot only (the edit API does not accept user tokens)
+  +messages-mget               Batch get messages by IDs; user/bot; fetches up to 50 om_ message IDs, formats sender names, expands thread replies
+  +messages-read-status        Batch query whether the current user has read up to 50 messages; returns readable items and invalid message IDs
+  +messages-reply              Reply to a message (supports thread replies); user/bot; supports text/markdown/post/media replies, reply-in-thread, idempotency key
+  +messages-resources-download Download images/files from a message; user/bot; downloads image/file resources by message-id and file-key to a safe relative output path
+  +messages-search             Search messages across chats (supports keyword, sender, time range filters) with user or bot identity; filters by chat/sender/attachment/time, enriches results via mget and chats batch_query
+  +messages-send               Send a message to a chat or direct message; user/bot; sends to chat-id or user-id with text/markdown/post/media, supports idempotency key
+  +threads-messages-list       List messages in a thread; user/bot; accepts om_/omt_ input, resolves message IDs to thread_id, supports --order asc/desc sorting, auto-pagination
+  chat.join_requests           handle, list
+  chat.managers                add_managers, delete_managers
+  chat.members                 bots, create, delete, get
+  chat.moderation              get, update
+  chat.nickname                delete, get, update
+  chat.user_setting            batch_query, batch_update
+  chats                        create, get, link, update
+  feed.groups                  batch_add_item, batch_query, batch_remove_item, create, delete, update
+  files                        create, folder
+  images                       create
+  messages                     delete, forward, merge_forward, patch, read_status, read_users, urgent_app, urgent_phone, urgent_sms
+  pins                         create, delete, list
+  reactions                    batch_query, create, delete, list
+  threads                      forward
+
+Flags:
+  -h, --help   help for im
+
+Global Flags:
+      --profile string   use a specific profile
+
+Use "lark-cli im [command] --help" for more information about a command.

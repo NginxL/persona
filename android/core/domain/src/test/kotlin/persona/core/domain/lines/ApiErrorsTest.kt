@@ -10,6 +10,17 @@ import org.junit.Test
 
 /** API error cards (iOS APIErrorInfo / ChatLines.foldAPIErrors): the same wording and folding rules. */
 class ApiErrorsTest {
+    @Test fun sealedCompactionCannotBeRetried() {
+        val sealed = "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now"
+        for (text in listOf(sealed, "API Error: 503 upstream: $sealed", sealed.uppercase())) {
+            val error = ApiErrorInfo.parse(text)!!
+            assertEquals(false, error.transient)
+            assertTrue(error.needsAction)
+        }
+        assertEquals(true, ApiErrorInfo.parse("API Error: 503 encrypted connection failed")?.transient)
+        assertNull(ApiErrorInfo.parse("A reply explaining: $sealed"))
+    }
+
     @Test fun readsClaudeCodesAndTheHubsErrors() {
         val a = ApiErrorInfo.parse("API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}} request_id: req_011CUxyzABCD1234")!!
         assertEquals(529, a.status); assertEquals("模型服务太忙，过载了", (a.reason).zhAny()); assertEquals(true, a.transient)

@@ -6,7 +6,8 @@ import { openAgent, openTask } from "../../lib/handoff";
 import { defaultManager } from "../../lib/manager-choice";
 import { refreshTodos, useStore } from "../../lib/store";
 import { reviewState, reportText } from "../../lib/supervision";
-import { mostUrgentAgent, todoStatusLabel, type SessionLookup, type Todo } from "../../lib/todos";
+import { mostUrgentAgent, type SessionLookup, type Todo } from "../../lib/todos";
+import { todoLook, waitOf } from "../../lib/todo-wait-reason";
 import { Button, Loading } from "../../ui/atoms";
 import { PanelHeader } from "../../ui/PanelHeader";
 import { Empty } from "../assistant/parts";
@@ -51,7 +52,7 @@ export function ConversationTasksPanel({ sid, manager, onClose }: { sid: string;
             const status = statusOf(todo, lookup, plans);
             const session = mostUrgentAgent(todo, lookup)?.session;
             const summary = reportText(todo.supervision) || progressOf(session)?.text || todo.start_error;
-            const label = reviewState(todo) === "parked" ? t("assistant-tasks.review_parked") : todoStatusLabel(todo, status);
+            const label = reviewState(todo) === "parked" ? t("assistant-tasks.review_parked") : todoLook(todo, status, waitOf(todo, status, lookup)).label;
             return <li key={todo.id} className="rounded-control bg-field p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <button type="button" className="touch-hit min-w-0 truncate text-left text-sm font-semibold hover:underline" title={todo.title} onClick={() => openTask(todo.id)}>{todo.title}</button>

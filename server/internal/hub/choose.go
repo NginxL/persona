@@ -47,6 +47,10 @@ func (h *Hub) serveChoose(w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusConflict, codeNotPending)
 		return
 	}
+	if principalOf(r.Context()).Role == roleScoped && !h.scopedQuestion(ix) {
+		scopedPermissionDenied(w, "")
+		return
+	}
 	q, ok := askQuestion(ix)
 	if !ok || ix.ToolName == proto.SecretHandoffTool { // a hand-off card is approved on the card only (secret_handoff.go)
 		refuse(http.StatusBadRequest, "not_choosable")

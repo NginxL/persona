@@ -352,12 +352,13 @@ func TestRunAnswersGoBackIntoTheTopic(t *testing.T) {
 	if inTopic < 2 || inPrivate < 2 { // the progress card and the answer
 		t.Fatalf("posts for the topic %d, for the private chat %d: %v", inTopic, inPrivate, posts)
 	}
-	// What a topic's run does not do: an agent message (the hub would make it in the private chat). The private run, loaded the same way, may.
+	// Loading either run permits an existing agent message; creation for a new topic run is gated by topic_cot and
+	// the first process item (covered in feishu_topic_cot_test.go).
 	var tp, pp cotProgress
 	e.s.loadCot(&tp, &topicRun)
 	e.s.loadCot(&pp, &privateRun)
-	if !tp.off || pp.off {
-		t.Fatalf("agent messages: off for the topic's run %v (want true), for the private run %v (want false)", tp.off, pp.off)
+	if tp.off || pp.off {
+		t.Fatalf("agent messages: off for the topic's run %v, for the private run %v; want both usable", tp.off, pp.off)
 	}
 	e.s.fbot.mu.Lock()
 	_, remembered := e.s.fbot.st.Threads["om_post"]

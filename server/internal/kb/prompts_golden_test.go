@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -42,9 +43,10 @@ func golden(t *testing.T, name, got string) {
 }
 
 type captureModel struct {
-	mu    sync.Mutex // the knowledge points steps call it topicWorkers at a time
-	reply string
-	calls [][2]string // system, user
+	mu     sync.Mutex // the knowledge points steps call it topicWorkers at a time
+	reply  string
+	suffix string
+	calls  [][2]string // system, user
 }
 
 func (m *captureModel) JSONMax(ctx context.Context, system, user string, maxTokens int, out any) error {
@@ -59,8 +61,8 @@ func (m *captureModel) golden(t *testing.T, name string) {
 	if len(m.calls) != 1 {
 		t.Fatalf("%s: %d model calls, want 1", name, len(m.calls))
 	}
-	golden(t, name+".system", m.calls[0][0])
-	golden(t, name+".user", m.calls[0][1])
+	golden(t, name+m.suffix+".system", m.calls[0][0])
+	golden(t, name+m.suffix+".user", m.calls[0][1])
 	m.calls = nil
 }
 
@@ -95,7 +97,9 @@ func TestGoldenReadme(t *testing.T) {
 	golden(t, "readme", string(raw))
 }
 
-func TestGoldenCompress(t *testing.T) {
+func TestGoldenCompress(t *testing.T) { goldenCompress(t, "") }
+
+func goldenCompress(t *testing.T, language string) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 30, 10, 0, 0, 0, goldenZone)
 	for _, c := range []struct {
@@ -110,6 +114,7 @@ func TestGoldenCompress(t *testing.T) {
 	} {
 		m := &captureModel{reply: `{}`}
 		e := goldenEngine(t, m)
+		setKnowledgeLanguage(e, m, language)
 		ch := c.chat
 		ch.Created, ch.LastAt, ch.Pending = at, at, 2
 		if c.kb {
@@ -133,7 +138,9 @@ func TestGoldenCompress(t *testing.T) {
 	}
 }
 
-func TestGoldenProject(t *testing.T) {
+func TestGoldenProject(t *testing.T) { goldenProject(t, "") }
+
+func goldenProject(t *testing.T, language string) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 30, 10, 0, 0, 0, goldenZone)
 	for _, c := range []struct {
@@ -142,6 +149,7 @@ func TestGoldenProject(t *testing.T) {
 	}{{"empty", false}, {"full", true}} {
 		m := &captureModel{reply: `{}`}
 		e := goldenEngine(t, m)
+		setKnowledgeLanguage(e, m, language)
 		p := &Project{Slug: "demo-release", Name: "示例发布", Kind: "short", Status: "active", Dirty: true}
 		if c.full {
 			p.Aliases = []string{"发布", "灰度"}
@@ -156,7 +164,14 @@ func TestGoldenProject(t *testing.T) {
 				if i == 1 {
 					sum = long
 				}
-				_ = e.Store.PutChat(&Chat{ID: id})
+				c := &Chat{ID: id}
+				switch i { // a state the source reported (#9427): with its day, and without one
+				case 0:
+					c.State, c.StateAt = "merged", at
+				case 2:
+					c.State = "open"
+				}
+				_ = e.Store.PutChat(c)
 				_ = e.Store.PutSummary(KindChat, id, sum)
 			}
 			p.Chats = append(p.Chats, "lark-none")
@@ -180,9 +195,12 @@ func TestGoldenProject(t *testing.T) {
 	}
 }
 
-func TestGoldenItems(t *testing.T) {
+func TestGoldenItems(t *testing.T) { goldenItems(t, "") }
+
+func goldenItems(t *testing.T, language string) {
 	m := &captureModel{reply: `{"items":[]}`}
 	e := goldenEngine(t, m)
+	setKnowledgeLanguage(e, m, language)
 	_ = e.Store.PutProject(&Project{Slug: "demo-release", Name: "示例发布", Status: "active", Tagging: Tagging{Tags: []string{"发布"}}})
 	_ = e.Store.PutChat(&Chat{ID: "lark-f1", Source: "lark", SourceID: "f1", Kind: "group", Name: "发布群"})
 	at := time.Date(2026, 10, 30, 10, 0, 0, 0, goldenZone)
@@ -199,9 +217,12 @@ func TestGoldenItems(t *testing.T) {
 	m.golden(t, "items")
 }
 
-func TestGoldenDigest(t *testing.T) {
+func TestGoldenDigest(t *testing.T) { goldenDigest(t, "") }
+
+func goldenDigest(t *testing.T, language string) {
 	e := goldenEngine(t, nil)
-	golden(t, "digest.empty", e.Prompt(6, 8))
+	setKnowledgeLanguage(e, nil, language)
+	golden(t, knowledgeGolden("digest.empty", language), e.Prompt(6, 8))
 	for i, p := range []*Project{
 		{Slug: "a", Name: "示例发布", Status: "active", Kind: "short", Tagging: Tagging{Importance: "P0", Relevance: 95}, OneLine: "周五灰度"},
 		{Slug: "b", Name: "没打标的", Status: "active", Kind: "long"},
@@ -212,7 +233,7 @@ func TestGoldenDigest(t *testing.T) {
 		p.Updated = time.Date(2026, 10, 30, 10, i, 0, 0, time.UTC)
 		_ = e.Store.PutProject(p)
 	}
-	golden(t, "digest.projects", e.Prompt(1, 8))
+	golden(t, knowledgeGolden("digest.projects", language), e.Prompt(1, 8))
 	for _, c := range []*Chat{
 		{ID: "lark-f1", Kind: "group", Name: "发布群", OneLine: "在推发布", Tagging: Tagging{Importance: "P1", Relevance: 70}},
 		{ID: "lark-f2", Kind: "dm", Name: "张三", Tagging: Tagging{Importance: "P3", Relevance: 90}},
@@ -220,13 +241,16 @@ func TestGoldenDigest(t *testing.T) {
 	} {
 		_ = e.Store.PutChat(c)
 	}
-	golden(t, "digest.full", e.Prompt(6, 8))
-	golden(t, "digest.chats_only", e.Prompt(0, 8))
+	golden(t, knowledgeGolden("digest.full", language), e.Prompt(6, 8))
+	golden(t, knowledgeGolden("digest.chats_only", language), e.Prompt(0, 8))
 }
 
-func TestGoldenDedupe(t *testing.T) {
+func TestGoldenDedupe(t *testing.T) { goldenDedupe(t, "") }
+
+func goldenDedupe(t *testing.T, language string) {
 	m := &captureModel{reply: `{"same":false}`}
 	e := goldenEngine(t, m)
+	setKnowledgeLanguage(e, m, language)
 	_ = e.Store.PutChat(&Chat{ID: "lark-f1", Kind: "group", Name: "示例需求群"})
 	_ = e.Store.PutChat(&Chat{ID: "lark-f2", Kind: "group", Name: "示例内部群"})
 	people := []string{"lark-u1", "lark-u2", "lark-u3", "lark-u4"}
@@ -239,9 +263,12 @@ func TestGoldenDedupe(t *testing.T) {
 	m.golden(t, "dedupe")
 }
 
-func TestGoldenMomentsLink(t *testing.T) {
+func TestGoldenMomentsLink(t *testing.T) { goldenMomentsLink(t, "") }
+
+func goldenMomentsLink(t *testing.T, language string) {
 	m := &captureModel{reply: `{"posts":[]}`}
 	e := goldenEngine(t, m)
+	setKnowledgeLanguage(e, m, language)
 	at := time.Now().Add(-48 * time.Hour).Truncate(24 * time.Hour)
 	_ = e.Store.PutProject(&Project{Slug: "a", Name: "示例发布", Aliases: []string{"发布"}, Keywords: []string{"示例App", "灰度"}, Status: "active", OneLine: "周五灰度"})
 	_ = e.Store.PutSummary(KindProject, "a", "# 示例发布\n\n## 目标\n周五灰度")
@@ -281,4 +308,35 @@ func TestGoldenDayRecapMerge(t *testing.T) {
 	golden(t, "day_recap_merge.user", prompts.RenderKBDayRecapMergeInput(in))
 	in.Meetings, in.Partial, in.Day = nil, false, prompts.KBDayRecapDay{Day: "2026-11-11", Weekday: "周三", Zone: "Asia/Shanghai"}
 	golden(t, "day_recap_merge.no_meetings.user", prompts.RenderKBDayRecapMergeInput(in))
+}
+
+func knowledgeGolden(name, language string) string {
+	if language == "" {
+		return name
+	}
+	return name + "." + language
+}
+
+func setKnowledgeLanguage(e *Engine, m *captureModel, language string) {
+	if language == "" {
+		return
+	}
+	e.OwnerLanguage = func() i18n.Lang { return i18n.Lang(language) }
+	if m != nil {
+		m.suffix = "." + language
+	}
+}
+
+func TestGoldenKnowledgeLanguages(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans", "ja"} {
+		t.Run(language, func(t *testing.T) {
+			for name, fixture := range map[string]func(*testing.T, string){
+				"compress": goldenCompress, "project": goldenProject, "items": goldenItems,
+				"digest": goldenDigest, "dedupe": goldenDedupe, "moments": goldenMomentsLink,
+				"topics": goldenTopics,
+			} {
+				t.Run(name, func(t *testing.T) { fixture(t, language) })
+			}
+		})
+	}
 }

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.fn();
 vi.mock("../lib/api", () => ({
   api: (...a: unknown[]) => api(...a),
-  enc: encodeURIComponent,
+  enc: encodeURIComponent, onCredentialChange: () => () => {}, credentialOwner: () => "test-owner",
   getToken: () => "tok",
   fileDownloadURL: (mid: string, path: string) => `/dl/${mid}?path=${encodeURIComponent(path)}`,
   ApiError: class extends Error {},

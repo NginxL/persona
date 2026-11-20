@@ -6,7 +6,7 @@ import { loadPages } from "../../lib/lazy-page";
 import { getContexts, removeContext } from "../../lib/links";
 import { sendDraft } from "../../lib/drafts";
 import { parseQueued } from "../../lib/queue";
-import { restoreQueued } from "./QueueStrip";
+import { restoreQueued } from "./queue-restore";
 import { t } from "../../i18n";
 import { skillContext, skillDraft } from "../../lib/skill-mentions";
 import { onModelPicker } from "../../lib/model-switch";
@@ -74,14 +74,17 @@ it("searches name/description locally, disambiguates equal names, selects with k
   render();
   await type("@");
   await waitForOptions(3); // two skills and the existing Add files action
-  expect(options().map((o) => o.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("project · ."), expect.stringContaining("user")]));
+  expect(options()[1].textContent).not.toContain("project · .");
+  key("ArrowDown");
+  expect(host.querySelector("[data-picker-detail]")?.textContent).toContain("project · .");
   await type("@security");
   expect(options()).toHaveLength(1);
   expect(api).toHaveBeenCalledTimes(1);
   expect(api.mock.calls[0][1]).toMatchObject({ headers: { "X-Persona-Manager": "helper-a" } });
   key("Enter");
   expect(box().value).toBe("");
-  expect(host.textContent).toContain("review · project · .");
+  expect(host.textContent).toContain("review · project");
+  expect(host.textContent).not.toContain("project · .");
   await type("Check this");
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
   expect(onSend.mock.calls[0][0].text).toContain('kind="skill" title="review" url="" ref="a"');
@@ -121,13 +124,15 @@ it("supports touch/click removal, restores edit/queue references and persists th
   expect(getContexts("skill-test")).toHaveLength(0);
 });
 
-it.each(["manager", "directory"])("never offers stale rows across %s switches, ignores late responses, and allows ordinary chat on failure", async (change) => {
+it.each(["manager", "directory", "machine", "session", "launcher", "environment"])("never offers stale rows across %s switches, ignores late responses, and allows ordinary chat on failure", async (change) => {
   let resolve!: (value: unknown) => void;
   api.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
   render();
   await type("@review");
   await vi.waitFor(() => expect(resolve).toBeTypeOf("function"));
-  render(change === "directory" ? { ...source, cwd: "/example/changed" } : { ...source, skills: { ...source.skills!, manager: "helper-b", environment: "profile-b" } });
+  const next = change === "directory" ? { ...source, cwd: "/example/changed" } :
+    { ...source, skills: { ...source.skills!, [change]: "changed" } };
+  render(next, undefined, change === "machine" ? "computer-b" : "computer");
   await waitForOptions(2);
   await act(async () => resolve({ catalog_version: 1, complete: true, skills: [{ ...skills[0], name: "stale" }] }));
   expect(host.textContent).not.toContain("stale");
@@ -174,9 +179,9 @@ it("keeps existing file rows reachable beside a large skill catalog and searches
   }));
   render({ ...source, files: () => ["/example/report.ts"] });
   await type("@");
-  await waitForOptions(5); // three skill previews, the existing file, and Add files
+  await waitForOptions(52); // all 50 skills plus the file and Add files
   expect(options().some((o) => o.textContent?.includes("report.ts"))).toBe(true);
-  expect(options().filter((o) => o.textContent?.includes("review-"))).toHaveLength(3);
+  expect(options().filter((o) => o.textContent?.includes("review-"))).toHaveLength(50);
   await type("@review-49");
   expect(options()).toHaveLength(1);
   expect(options()[0].textContent).toContain("review-49");
@@ -197,9 +202,10 @@ it("lists matching skills after commands in the slash palette and reads the cata
   expect(api).toHaveBeenCalledTimes(1);
   expect(options().slice(0, 2).map((o) => o.textContent)).toEqual(["alpha", "beta"]);
   expect(options()[2].textContent).toContain("Inspect security boundaries");
-  expect(options()[2].textContent).toContain("project · .");
+  expect(options()[2].textContent).not.toContain("project · .");
   expect(options()[3].textContent).toContain("Check wording");
-  expect(options()[3].textContent).toContain("user");
+  act(() => options()[3].dispatchEvent(new MouseEvent("mousemove", { bubbles: true })));
+  expect(host.querySelector("[data-picker-detail]")?.textContent).toContain("user");
 });
 
 it("keeps commands usable without a machine or a skill source and never invents a catalog request", async () => {
@@ -431,11 +437,11 @@ it("waits for the first skill answer before announcing an empty skills-only pale
   expect(host.textContent).not.toContain(t("chat-slashpalette.no_match_skills"));
 });
 
-it("never lets a large skill catalog push commands out of the shared slash row cap", async () => {
+it("keeps 25 ranked commands and the full skill inventory in separate groups", async () => {
   render(source, Array.from({ length: 30 }, (_, i) => ({ word: `/command-${i}`, desc: "", text: `/command-${i}` })));
   await type("/");
-  await waitForOptions(25);
-  expect(options().map((o) => o.textContent)).toEqual(Array.from({ length: 25 }, (_, i) => `command-${i}`));
+  await waitForOptions(27);
+  expect(options().slice(0, 25).map((o) => o.textContent)).toEqual(Array.from({ length: 25 }, (_, i) => `command-${i}`));
   expect(api).toHaveBeenCalledTimes(1);
 });
 
@@ -485,4 +491,38 @@ it.each((["Enter", "Tab", "ArrowDown", "ArrowUp"] as const).flatMap((pressed) =>
   expect(focused()?.textContent).toBe(selected);
   expect(box().value).toBe("/");
   expect(getContexts("skill-test").filter((row) => row.kind === "skill")).toHaveLength(0);
+});
+
+it("renders warm results across triggers, preserves a selected identity on reorder and rechecks removed skills", async () => {
+  render(source, COMMANDS);
+  await type("@review");
+  await waitForOptions(2);
+  key("Escape");
+  let resolve!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  await type("/review");
+  await waitForOptions(2);
+  key("ArrowDown");
+  expect(focused()?.textContent).toContain("Check wording");
+  await act(async () => resolve({ catalog_version: 1, complete: true, skills: [skills[1]] }));
+  await waitForOptions(1);
+  expect(focused()?.textContent).toContain("Check wording");
+  key("Tab");
+  expect(getContexts("skill-test")[0].attrs?.ref).toBe("b");
+});
+
+it("keeps the selected local file when skills arrive after several @ edits", async () => {
+  let resolve!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+  render({ ...source, files: () => ["review.md", "review.txt"] });
+  await type("@");
+  await type("@re");
+  await type("@review");
+  await waitForOptions(2);
+  key("ArrowDown");
+  await act(async () => resolve({ catalog_version: 1, complete: true, skills }));
+  await waitForOptions(4);
+  expect(focused()?.textContent).toContain("review.txt");
+  key("Enter");
+  expect(box().value).toBe("@review.txt ");
 });

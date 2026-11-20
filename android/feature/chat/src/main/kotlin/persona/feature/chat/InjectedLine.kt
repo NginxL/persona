@@ -28,7 +28,6 @@ import persona.core.domain.taskOfInjected
 import persona.core.contracts.Item
 import persona.core.contracts.MessageSource
 import persona.core.designsystem.ContentTokens
-import persona.core.designsystem.MessageContextGroup
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.Tokens
 import persona.core.domain.injectedOf
@@ -69,16 +68,19 @@ internal fun SourceMessage(item: Item, source: MessageSource, showLabel: Boolean
     var clipped by remember(item.id, body) { mutableStateOf(false) }
     val long = body.length > 320 || body.lineSequence().count() > ContentTokens.sourcePreviewLines
     val title = sourceTitle(source)
-    Column(Modifier.fillMaxWidth().testTag("source-${item.id}"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+    val picking = LocalChatRowActions.current?.menu?.forwardPick?.selected != null
+    val pickTarget = if (picking && !prompt) MessageTarget(item.id, body, user = false, raw = text,
+        from = title, time = item.ts, cut = item.id.takeIf { item.fullSize != null && whole == null && update == null }) else null
+    PickableMessageColumn(pickTarget, Modifier.fillMaxWidth().testTag("source-${item.id}"), Arrangement.spacedBy(Tokens.Space.xs)) {
         if (showLabel) Text(if (source.kind == "scheduled_task") title else stringResource(R.string.chat_source_label, title), Modifier.testTag("source-label-${item.id}"),
             style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        MessageContextGroup(contexts, "source/${item.id}/contexts", uri::openUri, alignEnd = false)
+        MessageForwardContexts(contexts, "source/${item.id}/contexts", uri::openUri, alignEnd = false)
         images?.invoke()
         if (model.images.isNotEmpty()) AttachedPhotoRow(model.images)
         AttachedFileCards(model.attached, alignEnd = false)
         // A task's run without its one line: the label alone says which task ran.
         if (!prompt || body.isNotBlank()) {
-            if (expanded) ChatMarkdown(keepLineBreaks(body), "source/${item.id}")
+            if (expanded) ReplyMarkdown(keepLineBreaks(body), "source/${item.id}", ownReply = false, selectable = true)
             else Text(messageLinkAnnotations(body), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2,
                 maxLines = ContentTokens.sourcePreviewLines, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { clipped = it.hasVisualOverflow })

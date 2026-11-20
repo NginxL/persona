@@ -16,7 +16,7 @@ describe("service worker routes", () => {
   });
 
   it("never touches the API, the admin page or itself", () => {
-    for (const p of ["/api/v1/ws", "/api/v1/sessions", "/api/v1/files/x.png?token=x", "/api", "/admin", "/admin/assets/a-1.js", "/sw.js"]) {
+    for (const p of ["/api/v1/ws", "/api/v1/sessions", "/v1/projects", "/v1/projects/checkout/documents/refund/approved", "/api/v1/files/x.png?token=x", "/api", "/admin", "/admin/assets/a-1.js", "/sw.js"]) {
       expect(at(p)).toBe("pass");
       expect(at(p, "navigate")).toBe("pass");
     }

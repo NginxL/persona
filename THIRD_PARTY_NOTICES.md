@@ -32,14 +32,45 @@ redrawn.
 | `ios-app-*` | Apple 通讯录、日历、提醒事项、健康、照片、地图 app icons | App Store artwork of each app (iTunes lookup `artworkUrl512`, fetched at 240×240), shown next to the data Persona reads from that app | Apple trademarks; Apple's terms for its marks |
 | `web/src/ui/brands/claude.svg` | Claude (Anthropic), agent mark in the web client | Same file as `brand-claude` | Anthropic's brand guidelines |
 | `web/src/ui/brands/codex.svg` | OpenAI Blossom, the Codex agent mark in the web client | Same file as `brand-openai` | openai.com/brand |
-| `web/src/ui/brands/opencode.svg` | OpenCode, agent mark in the web client | Simple Icons 16.36.0 `opencode.svg` (CC0 for the file; viewBox cropped to the mark); upstream github.com/anomalyco/opencode `packages/identity/mark.svg` (the project is MIT) | OpenCode's trademark |
-| `web/src/ui/brands/cursor.svg` | Cursor, agent mark in the web client | Simple Icons 16.36.0 `cursor.svg` (CC0 for the file; viewBox cropped to the mark); upstream cursor.com/brand | Cursor's brand page |
-| `web/src/ui/brands/gemini.svg` | Google Gemini, agent mark in the web client | Simple Icons 16.36.0 `googlegemini.svg` (CC0 for the file); upstream gemini.google.com, no brand kit found | Google brand terms |
-| `web/src/ui/brands/pi.svg` | Pi, agent mark in the web client | Simple Icons 16.36.0 `pi.svg` (CC0 for the file); upstream pi.dev/favicon.svg, no licence text found | Pi's trademark |
+| `web/src/ui/brands/opencode.svg`, `brand-opencode` | OpenCode, agent mark | Simple Icons 16.36.0 `opencode.svg` (CC0 for the file; viewBox cropped to the mark); upstream github.com/anomalyco/opencode `packages/identity/mark.svg` (the project is MIT) | OpenCode's trademark |
+| `web/src/ui/brands/cursor.svg`, `brand-cursor` | Cursor, agent mark | Simple Icons 16.36.0 `cursor.svg` (CC0 for the file; viewBox cropped to the mark); upstream cursor.com/brand | Cursor's brand page |
+| `web/src/ui/brands/gemini.svg`, `brand-gemini` | Google Gemini, agent mark | Simple Icons 16.36.0 `googlegemini.svg` (CC0 for the file); upstream gemini.google.com, no brand kit found | Google brand terms |
+| `web/src/ui/brands/pi.svg`, `brand-pi` | Pi, agent mark | Simple Icons 16.36.0 `pi.svg` (CC0 for the file); upstream pi.dev/favicon.svg, no licence text found | Pi's trademark |
+| `grok.svg` and `brand-grok` | Grok, agent mark | Lobe Icons 1.104.0 `grok.svg` (MIT license below) | xAI's trademark |
+| `agy.svg` and `brand-agy` | Antigravity CLI, agent mark | Lobe Icons 1.104.0 `antigravity.svg` (MIT license below) | Google brand terms |
+| `dsh.svg` and `brand-dsh` | DeepSeek Harness, agent mark | Simple Icons 16.36.0 `deepseek.svg` (CC0 for the file) | DeepSeek's trademark |
+| `kimi.svg` and `brand-kimi` | Kimi CLI, agent mark | Simple Icons 16.36.0 `kimi.svg` (CC0 for the file) | Moonshot AI's trademark |
+| `copilot.svg` and `brand-copilot` | GitHub Copilot, agent mark | Simple Icons 16.36.0 `githubcopilot.svg` (CC0 for the file) | GitHub's logo usage terms |
 | `web/src/ui/brands/trae.svg` | TRAE, agent mark in the web client | Same file as `brand-trae` | TRAE's trademark |
 | `web/src/ui/brands/github.svg` | GitHub mark in the web client | Same file as `brand-github` | GitHub's logo usage terms |
 | `web/src/ui/brands/telegram.svg` | Telegram in the web client | Same file as `brand-telegram` | Telegram's trademark |
 | `os-*` | Ubuntu, Debian, Fedora, Red Hat, CentOS, Rocky Linux, AlmaLinux, Arch Linux, Alpine Linux, openSUSE, NixOS, Linux (Tux) | Simple Icons (CC0 for the files) | Debian CC-BY-SA-3.0, NixOS CC-BY-4.0, Rocky Linux CC-BY-SA-4.0; the others under each project's trademark policy |
+
+## Lobe Icons
+
+https://github.com/lobehub/lobe-icons
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## Web client
 

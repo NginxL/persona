@@ -15,10 +15,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A transient model failure after assistant.send returned must not end the conversation without the one bounded
-// same-model retry the owner asked for (#3204); a Claude safeguards refusal skips it (#4283,
-// TestAssistantClaudeRefusalSwitchesAtOnce). The fake CLI is the real node process/stream-json seam, not a model call.
-func TestAssistantTransientErrorRetriesOnceOnTheSameModel(t *testing.T) {
+// A transient failure is published to the manager's durable retry scheduler.
+// The node must not replay the original request or start an immediate retry.
+func TestAssistantTransientErrorWaitsForManager(t *testing.T) {
 	f := cliTest(t)
 	script := `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 echo '{"type":"system","subtype":"init"}'
@@ -44,15 +43,9 @@ done
 	if err != nil {
 		t.Fatal(err)
 	}
-	cliWait(t, "the same conversation to retry after its refusal", func() bool {
-		return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 2
-	})
-	if got := f.file("user.jsonl"); strings.Count(got, "original request") != 1 {
-		t.Fatalf("the original user message was repeated instead of resumed: %s", got)
-	}
 	f.idle(t, id)
-	if p := f.proc(id); p == nil || p.replyModel != "primary-model" {
-		t.Fatalf("the answering model was not retained: %+v", p)
+	if got := f.file("user.jsonl"); strings.Count(got, `"type":"user"`) != 1 || strings.Count(got, "original request") != 1 {
+		t.Fatalf("node started a retry instead of waiting for the manager: %s", got)
 	}
 }
 
@@ -127,7 +120,7 @@ done
 	}
 }
 
-func TestAssistantFailureThenUsesTheNextLauncherModel(t *testing.T) {
+func TestAssistantServiceFailureDoesNotSwitchLauncher(t *testing.T) {
 	f := cliTest(t)
 	script := `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 echo '{"type":"system","subtype":"init"}'
@@ -167,21 +160,12 @@ done
 	f.n.mu.Lock()
 	f.n.paths[id] = filepath.Join(f.dir, "transcript.jsonl")
 	f.n.mu.Unlock()
-	cliWait(t, "the second refusal to resume on the next launcher model", func() bool {
-		return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 3
-	})
 	f.idle(t, id)
-	if p := f.proc(id); p == nil || p.model.Model != "fallback-model" || p.replyModel != "fallback-model" {
-		t.Fatalf("the next model did not answer: %+v", p)
+	if got := f.file("user.jsonl"); strings.Count(got, `"type":"user"`) != 1 {
+		t.Fatalf("node replayed an outage instead of awaiting scheduled recovery: %s", got)
 	}
-	if sess := f.session(t, id); sess.Model != "fallback-model" || sess.LastText != "answered by fallback" {
-		t.Fatalf("the public session did not record the actual answering model: %+v", sess)
-	}
-	if got := f.file("cli-argv"); !strings.Contains(got, "--model fallback-model") {
-		t.Fatalf("the replacement process did not select the fallback model: %s", got)
-	}
-	if got := f.file("user.jsonl"); strings.Count(got, "original request") != 1 {
-		t.Fatalf("the original user message was repeated: %s", got)
+	if got := f.file("cli-argv"); strings.Contains(got, "--model fallback-model") {
+		t.Fatalf("temporary outage switched models before manager recovery: %s", got)
 	}
 }
 
@@ -211,11 +195,12 @@ while IFS= read -r line; do
       count=$((count+1))
       echo "$count" > "$CLI_FAKE_DIR/attempts"
       if [ "$count" -eq 1 ]; then
-        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream account is currently available"}'
+        echo '{"type":"stream_event","event":{"type":"message_start","message":{"model":"primary-model","usage":{"input_tokens":5}}},"parent_tool_use_id":null}'
+        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"There is an issue with the selected model (primary-model). It may not exist or you may not have access to it."}'
       elif [ "$count" -eq 2 ]; then
         # The same-model retry fails a moment later: any control the node writes after it is in reaches this process.
         echo '{"type":"stream_event","event":{"type":"message_start","message":{"model":"primary-model","usage":{"input_tokens":5}}},"parent_tool_use_id":null}'
-        (sleep 0.5; echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream account is currently available"}') &
+        (sleep 0.5; echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"There is an issue with the selected model (primary-model). It may not exist or you may not have access to it."}') &
       else
         printf '{"type":"stream_event","event":{"type":"message_start","message":{"model":"%s","usage":{"input_tokens":5}}},"parent_tool_use_id":null}\n' "$model"
         echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"answered by fallback"}},"parent_tool_use_id":null}'
@@ -308,18 +293,16 @@ func TestAssistantCodexStructuredRecoveryClasses(t *testing.T) {
 				t.Fatal(err)
 			}
 			c.notification("turn/completed", params)
-			if !tc.want {
-				select {
-				case <-called:
-					t.Fatal("a transient error outside #3204 entered model recovery")
-				case <-time.After(50 * time.Millisecond):
-				}
-				return
-			}
 			select {
 			case <-called:
-			case <-time.After(2 * time.Second):
-				t.Fatal("the structured 5xx did not start a same-model recovery")
+				t.Fatal("model service error bypassed the durable scheduler")
+			default:
+			}
+			p.mu.Lock()
+			busy := p.busy
+			p.mu.Unlock()
+			if busy {
+				t.Fatal("failed turn held the execution process busy")
 			}
 		})
 	}
@@ -431,7 +414,7 @@ func TestAssistantFallbackDoesNotRepeatTheResolvedAlias(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
-	if !n.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream") {
+	if !n.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the failed turn did not enter recovery")
 	}
 	select {
@@ -474,7 +457,7 @@ while IFS= read -r line; do
     *'"type":"user"'*)
       printf '%s\n' "$line" >> "$CLI_FAKE_DIR/user.jsonl"
       printf '{"type":"stream_event","event":{"type":"message_start","message":{"model":"%s","usage":{"input_tokens":5}}},"parent_tool_use_id":null}\n' "$model"
-      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream"}' ;;
+      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: safeguards flagged"}' ;;
   esac
 done
 `
@@ -486,8 +469,8 @@ done
 		t.Fatal(err)
 	}
 	f.idle(t, id)
-	if got := strings.Count(f.file("user.jsonl"), `"type":"user"`); got != 4 {
-		t.Fatalf("two models with one same-model retry each made %d requests, want 4", got)
+	if got := strings.Count(f.file("user.jsonl"), `"type":"user"`); got != 2 {
+		t.Fatalf("two safeguarded models made %d requests, want 2", got)
 	}
 	if p := f.proc(id); p == nil || p.model.Model != "fallback-model" || p.replyModel != "fallback-model" || p.busy {
 		t.Fatalf("the exhausted recovery did not retain the final model and error state: %+v", p)
@@ -573,6 +556,8 @@ func TestAssistantProcessExitClearsItsRecovery(t *testing.T) {
 	f := cliTest(t)
 	script := `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 echo '{"type":"system","subtype":"init"}'
+echo '{"type":"control_response","response":{"subtype":"success","request_id":"persona-models","response":{"models":[{"value":"default"},{"value":"fallback-model"}]}}}'
+echo '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
 while IFS= read -r line; do
   case "$line" in *'"type":"user"'*)
     printf '%s\n' "$line" >> "$CLI_FAKE_DIR/user.jsonl"
@@ -580,7 +565,7 @@ while IFS= read -r line; do
     count=$((count+1))
     echo "$count" > "$CLI_FAKE_DIR/attempts"
     if [ "$count" -eq 1 ]; then
-      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 no eligible upstream account is currently available"}'
+      echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 unavailable"}'
     else
       exit 0 # the recovered turn ends without any result event
     fi ;;
@@ -594,14 +579,16 @@ done
 	if err != nil {
 		t.Fatal(err)
 	}
-	cliWait(t, "the exited recovery process to publish its final state", func() bool {
+	f.idle(t, id)
+	if got := strings.Count(f.file("user.jsonl"), `"type":"user"`); got != 1 {
+		t.Fatalf("temporary failure was immediately replayed: %d sends", got)
+	}
+	f.n.stopAssistant(id)
+	cliWait(t, "the exited process to publish its final state", func() bool {
 		f.n.mu.Lock()
 		defer f.n.mu.Unlock()
-		return f.n.procs[id] == nil && f.n.recoveries[id] == nil && strings.Count(f.file("user.jsonl"), `"type":"user"`) >= 2
+		return f.n.procs[id] == nil && f.n.recoveries[id] == nil
 	})
-	if sessions := f.n.assistantSessions(); len(sessions) != 0 {
-		t.Fatalf("an exited process left a working recovery placeholder: %+v", sessions)
-	}
 }
 
 func TestAssistantRecoveryKeepsSessionWorkingBetweenProcesses(t *testing.T) {
@@ -628,7 +615,7 @@ func TestAssistantRecoveryKeepsSessionWorkingBetweenProcesses(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
-	if !n.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available") {
+	if !n.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the failed turn did not enter recovery")
 	}
 	select {
@@ -788,7 +775,7 @@ func TestAssistantHandoverResumesPendingFailureWithTheSameBudget(t *testing.T) {
 	r := &assistantTurnRecovery{retried: map[string]bool{"primary-model": true}, used: map[string]bool{"primary-model": true}}
 	a.recoveries = map[string]*assistantTurnRecovery{id: r}
 	a.handOverAssistants()
-	if !a.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available") {
+	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("a result in the handover gap was published instead of queued")
 	}
 
@@ -894,7 +881,7 @@ func TestAssistantResultOnTheOldNodeForwardsAfterAdoption(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
-	if !a.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available") {
+	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("a result that read the old owner was not forwarded after adoption")
 	}
 	select {
@@ -933,7 +920,7 @@ func TestAssistantRecoveryCannotRestartOnTheOldNodeAfterHandover(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { assistantRecoverySend = send })
-	if !a.recoverAssistantResult(p, true, "API Error: 503 no eligible upstream account is currently available") {
+	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the failed turn did not enter recovery")
 	}
 	select {
@@ -982,7 +969,7 @@ func TestAssistantPendingFailureUsesTheReplacementProcess(t *testing.T) {
 
 	models := assistantRecoveryModels
 	assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
-		return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}, {ID: "fallback-model"}}}, nil
+		return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}, {ID: "fallback-model"}, {ID: "second-fallback"}}}, nil
 	}
 	send := assistantRecoverySend
 	var calls atomic.Int32
@@ -994,14 +981,94 @@ func TestAssistantPendingFailureUsesTheReplacementProcess(t *testing.T) {
 			n.procs[p.id] = replacement
 			n.mu.Unlock()
 			// The replacement's first result arrives before its recovery send has returned.
-			n.recoverAssistantResult(replacement, true, "API Error: 503 no eligible upstream account is currently available")
+			n.recoverAssistantResult(replacement, true, "API Error: safeguards flagged")
 		}
 		return nil
 	}
-	t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
+	t.Cleanup(func() {
+		waitWithin(t, 2*time.Second, "recovery workers finish", func() bool { n.mu.Lock(); defer n.mu.Unlock(); r := n.recoveries[id]; return r == nil || !r.running })
+		assistantRecoveryModels, assistantRecoverySend = models, send
+	})
 	n.runAssistantRecovery(old, r, "claude", old.cwd, old.model, "primary-model", false)
 	waitWithin(t, 2*time.Second, "the replacement's recovery send", func() bool { return calls.Load() >= 2 })
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("the replacement's pending failure was dropped: %d recovery send(s), want 2", got)
+	}
+}
+
+// A task's explicit execution choice keeps the same-model retry, then surfaces the error without a model switch.
+func TestTaskExecutionEachTurnCanRetryWithoutModelFallback(t *testing.T) {
+	f := cliTest(t)
+	retryResult := filepath.Join(f.dir, "retry-result")
+	t.Setenv("CLI_FAKE_RETRY_RESULT_GATE", retryResult)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+claudeLikeCLI), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	execution := modelExecution{Strict: true}
+	var id string
+	var process *assistantProc
+	for turn := 1; turn <= 3; turn++ {
+		// Every turn and its retry receive the same transient failure from the fake process.
+		if err := os.WriteFile(filepath.Join(f.dir, "attempts"), []byte("0\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		next, err := f.n.assistantSend(t.Context(), id, cwd, "claude", "task request", nil, "", "", execution)
+		if err != nil || (id != "" && next != id) {
+			t.Fatalf("send turn %d: previous=%q next=%q error=%v", turn, id, next, err)
+		}
+		id = next
+		cliWait(t, "the same-model retry", func() bool {
+			return strings.Count(f.file("user.jsonl"), `"type":"user"`) >= 2*turn
+		})
+		// Exercise result handling after the recovery send returns. Early results take the pending-failure path.
+		cliWait(t, "the recovery send to return", func() bool {
+			f.n.mu.Lock()
+			defer f.n.mu.Unlock()
+			recovery := f.n.recoveries[id]
+			return recovery != nil && !recovery.running
+		})
+		if err := os.WriteFile(retryResult, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.idle(t, id)
+		if err := os.Remove(retryResult); err != nil {
+			t.Fatal(err)
+		}
+		if count := strings.Count(f.file("user.jsonl"), `"type":"user"`); count != 2*turn {
+			t.Fatalf("turn %d ended after %d total attempts, want %d", turn, count, 2*turn)
+		}
+		p := f.proc(id)
+		if p == nil {
+			t.Fatalf("turn %d lost its process", turn)
+		}
+		if turn == 1 {
+			process = p
+		} else if p != process {
+			t.Fatalf("turn %d replaced the process", turn)
+		}
+		p.mu.Lock()
+		model, failure, recovery := p.model, p.turnError, p.turnRecovery
+		p.mu.Unlock()
+		if !model.Strict || model.Model == "fallback-model" || !strings.Contains(failure, "503") {
+			t.Errorf("turn %d ended with model %+v and error %q", turn, model, failure)
+		}
+		if recovery != nil {
+			t.Errorf("turn %d left its exhausted recovery on the idle process", turn)
+		}
+		rows := f.n.assistantSessions()
+		if len(rows) != 1 || rows[0].SessionID != id || rows[0].TurnErrorKind != proto.TurnErrorUser || !strings.Contains(rows[0].TurnError, "503") {
+			t.Fatalf("turn %d exposed a failure for generic continuation: %+v", turn, rows)
+		}
+	}
+	if strings.Contains(f.file("cli-argv"), "--model fallback-model") {
+		t.Fatal("task silently changed models")
+	}
+	ctx := withClientMsgID(t.Context(), "model-retry:"+id+":1:1")
+	if _, err := f.n.assistantSend(ctx, id, "", "", "Continue", nil, "", ""); !errors.Is(err, errAssistantRecoveryCancelled) {
+		t.Fatalf("stale manager continuation was not refused: %v", err)
+	}
+	if count := strings.Count(f.file("user.jsonl"), `"type":"user"`); count != 6 {
+		t.Fatalf("stale manager continuation reached the conversation: %d total sends", count)
 	}
 }

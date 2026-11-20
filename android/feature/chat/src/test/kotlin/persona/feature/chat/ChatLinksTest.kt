@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.Item
+import persona.core.navigation.*
 import java.time.Instant
 import org.junit.Assert.*
 import org.junit.Test
@@ -98,6 +99,11 @@ class ChatLinksTest {
         assertTrue(ChatLinks.toPreload(listOf(item("u", "2026-10-30T09:59:00Z", role = "user")), now).isEmpty())
         assertTrue(ChatLinks.toPreload(listOf(item("t", "2026-10-30T09:59:00Z", kind = "tool_result")), now).isEmpty())
         assertTrue(ChatLinks.toPreload(listOf(item("o", "2026-10-30T09:40:00Z")), now).isEmpty())
+        for (text in listOf("![map](https://images.example/a)", "![map](https://images.example/a",
+            "![map][cover]\n\n[cover]: https://images.example/a")) {
+            assertTrue(ChatLinks.toPreload(listOf(item("picture", "2026-10-30T09:59:00Z", text = text)), now).isEmpty())
+        }
+        assertTrue(ChatLinks.toPreload(listOf(item("outside", "2026-10-30T09:59:00Z").copy(from = "A channel")), now).isEmpty())
         // A hub in a local zone writes offsets.
         assertEquals(2, ChatLinks.toPreload(listOf(item("z", "2026-10-30T17:59:00+08:00")), now).size)
         val many = (1..5).map { item("m$it", "2026-10-30T09:59:00Z", text = "https://example.com/m$it") }
@@ -130,6 +136,88 @@ class ChatLinksTest {
         assertNull(ChatLinks.appLink("persona://session/m"))
         assertNull(ChatLinks.appLink("persona://tab/settings"))
         assertNull(ChatLinks.appLink("https://example.com/session/m/s"))
+    }
+
+    @Test fun routeTableAppLinksInMessagesNameTheirNativePage() {
+        val session = mapOf("page" to "session", "machine" to "m", "session" to "s 1", "at" to "item#2")
+        val todo = mapOf("page" to "todo", "id" to "t-19")
+        val knowledge = mapOf("page" to "knowledge-entry", "kind" to "docs", "id" to "notes/plan.md")
+        val extensionSettings = mapOf("page" to "settings", "tab" to "extensions", "item" to "github")
+        val extension = mapOf("page" to "extension", "extension" to "weather", "ui" to "today", "state" to "{\"d\":1}")
+        val cases = listOf(
+            "persona://open/s/m/s%201?at=item%232&token=abc" to session,
+            "persona://session/m/s%201?at=item%232" to session,
+            "persona://open/todos/t-19" to todo,
+            "persona://open?route=%2Ftodos%2Ft-19" to todo,
+            "persona://task/t-19" to todo,
+            "persona://open/kb/docs/notes%2Fplan.md" to knowledge,
+            "persona://kb/docs/notes/plan.md" to knowledge,
+            "persona://open/settings?tab=extensions&extension=github&add=1" to extensionSettings,
+            "persona://settings/extensions/github" to extensionSettings,
+            "persona://open/extension/weather/today?state=%7B%22d%22%3A1%7D" to extension,
+            "persona://extension/weather/today?state=%7B%22d%22%3A1%7D" to extension,
+        )
+        val failures = cases.mapNotNull { (link, expected) ->
+            val actual = messagePage(ChatLinks.appLink(link))
+            if (actual == expected) null else "$link: expected $expected, got $actual"
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    private fun messageFields(vararg fields: Pair<String, String>?): Map<String, String> = fields.filterNotNull().toMap()
+
+    private fun messagePage(link: ChatAppLink?): Map<String, String>? = when (link) {
+        null -> null
+        is ChatAppLink.Session -> messageFields("page" to "session", "machine" to link.machineId, "session" to link.sessionId,
+            link.itemId?.let { "at" to it })
+        is ChatAppLink.Page -> when (val page = link.page) {
+            is HubPage.Agent -> messageFields("page" to "session", "machine" to page.machineId, "session" to page.sessionId,
+                page.itemId?.let { "at" to it }, page.view?.let { "view" to it })
+            is HubPage.Conversation -> {
+                val id = page.sessionId
+                if (id == null) mapOf("page" to "persona") else messageFields(
+                    "page" to "conversation", "id" to id, page.machineId?.let { "machine" to it },
+                    page.managerId?.let { "manager" to it }, page.itemId?.let { "at" to it })
+            }
+            HubPage.NewConversation -> mapOf("page" to "persona-new")
+            is HubPage.Knowledge -> messageFields("page" to "knowledge", page.kind?.let { "kind" to it })
+            is HubPage.KnowledgeEntry -> mapOf("page" to "knowledge-entry", "kind" to page.kind, "id" to page.id)
+            is HubPage.Screen -> when (val key = page.key) {
+                AssistantRoute -> mapOf("page" to "persona")
+                AgentsRoute -> mapOf("page" to "agents")
+                InboxRoute -> mapOf("page" to "inbox")
+                is InboxItemRoute -> messageFields("page" to "inbox-item", "id" to key.itemId,
+                    key.manager?.let { "manager" to it })
+                TodosRoute -> mapOf("page" to "todos")
+                is TodoDetailRoute -> mapOf("page" to "todo", "id" to key.todoId)
+                MachinesRoute -> mapOf("page" to "machines")
+                is MachineDetailRoute -> messageFields("page" to "machine", "id" to key.machineId,
+                    key.range?.let { "range" to it })
+                SettingsRoute -> mapOf("page" to "settings")
+                is ModelPurposeRoute -> messageFields("page" to "settings", "tab" to "models", "item" to key.purposeId,
+                    key.manager?.let { "manager" to it })
+                is ExtensionRoute -> messageFields("page" to "settings", "tab" to "extensions", "item" to key.extensionId,
+                    key.manager?.let { "manager" to it })
+                is ExtensionUiRoute -> messageFields("page" to "extension", "extension" to key.extensionId, "ui" to key.uiId,
+                    key.state?.let { "state" to it })
+                is SettingsPageRoute -> when (key.page) {
+                    SettingsPage.Sent -> mapOf("page" to "settings", "tab" to "connectors", "item" to "-sent")
+                    SettingsPage.Connectors -> mapOf("page" to "settings", "tab" to "connectors")
+                    SettingsPage.Hubs -> mapOf("page" to "settings", "tab" to "hub")
+                    SettingsPage.ModelConfig -> mapOf("page" to "settings", "tab" to "models")
+                    else -> error("No shared message-link fields for $key")
+                }
+                else -> error("No shared message-link fields for $key")
+            }
+        }
+        is ChatAppLink.Tab -> mapOf("page" to link.tab)
+    }
+
+    @Test fun aPageKeepsItsOriginalLinkForDeferredHubSelection() {
+        val url = "persona://open/todos/t-19?hub=hub-b"
+        val link = ChatLinks.appLink(url)
+        assertTrue(link is ChatAppLink.Page)
+        assertEquals(url, (link as ChatAppLink.Page).source)
     }
 
     @Test fun externalLinksAskFirstAndNeverComeBackIn() {

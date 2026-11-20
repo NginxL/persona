@@ -140,6 +140,8 @@
   "unread_messages_count_other": "{count} unread messages",
   "inbox_badge_title_one": "Inbox: {count} unread item; agents waiting on you are under Overview",
   "inbox_badge_title_other": "Inbox: {count} unread items; agents waiting on you are under Overview",
+  "todos_badge_title_one": "{count} to-do needs you",
+  "todos_badge_title_other": "{count} to-dos need you",
   "list_menu": "Agent list options",
   "list_menu_sorted": "Agent list options: {sort}",
   "not_connected_yet": "Not connected yet",

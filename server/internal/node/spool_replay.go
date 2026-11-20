@@ -324,6 +324,9 @@ func (n *Node) replayHook(e spoolEntry) error {
 	if json.Unmarshal(req.Input, &in) != nil {
 		return nil
 	}
+	if n.sessionBlocked(in.SessionID, in.Cwd) {
+		return nil // a blocked Agent folder (agentdirs.go): kept while the hub was away, never sent
+	}
 	if req.ReportOnly && !n.takesReport(in) {
 		return nil
 	}

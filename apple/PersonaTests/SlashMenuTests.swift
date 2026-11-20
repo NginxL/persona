@@ -1,3 +1,4 @@
+import BeautifulUI
 import Testing
 @testable import Persona
 
@@ -53,5 +54,27 @@ struct SlashMenuTests {
         #expect(rows.first { $0.word == "/提交" }?.preview == "把当前改动按规范提交并推送")
         #expect(rows.first { $0.word == "/compact" }?.preview == nil)
         #expect(SlashMenuRow.model.preview == nil)
+    }
+
+    /// The prompt bar runs Persona's own commands by id (#11410): a saved prompt named like one types its text, and
+    /// `/permissions` opens the mode list only where it is offered.
+    @Test func theBarRunsOnlyPersonasOwnCommands() throws {
+        let own = PromptItems.commands(clear: true, loop: true, permissions: true)
+        func row(_ name: String) throws -> PromptCommand { try #require(own.first { $0.name == name }) }
+        #expect(PromptItems.ownCommand(try row("/loop"), permissions: true) == .loop)
+        #expect(PromptItems.ownCommand(try row("/permissions"), permissions: true) == .permissions)
+        #expect(PromptItems.ownCommand(try row("/permissions"), permissions: false) == nil)
+        #expect(PromptItems.ownCommand(try row("/clear"), permissions: true) == .clear)
+        #expect(PromptItems.ownCommand(PromptCommand(MainClearCommand.word, detail: ""), permissions: true) == .clear)
+        #expect(PromptItems.ownCommand(try row("/compact"), permissions: true) == nil) // a quick message types its text
+        let saved = PromptItems.saved([SavedPrompt(id: "p1", name: "permissions", text: "Mine."),
+                                       SavedPrompt(id: "p2", name: "loop", text: "Mine."),
+                                       SavedPrompt(id: "p3", name: "clear", text: "Mine.")])
+        #expect(saved.map(\.name) == ["/permissions", "/loop", "/clear"])
+        #expect(saved.allSatisfy { $0.insert == "Mine." })
+        for command in saved {
+            #expect(PromptItems.ownCommand(command, permissions: true) == nil)
+            #expect(PromptItems.ownCommand(command, permissions: false) == nil)
+        }
     }
 }

@@ -77,9 +77,9 @@ struct MeetingTapesPage: View {
         .alert(problem ?? "", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
             Button(String(localized: "OK"), role: .cancel) {}
         }
-        .confirmationDialog(String(localized: "Delete “\(deleting?.summary.title ?? "")”?"),
-                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-                            titleVisibility: .visible, presenting: deleting) { tape in
+        .accessibleConfirmationDialog(String(localized: "Delete “\(deleting?.summary.title ?? "")”?"),
+                                      isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                      titleVisibility: .visible, hasCancel: true, presenting: deleting) { tape in
             Button(String(localized: "Delete"), role: .destructive) { Task { await library.delete(tape) } }
             Button(String(localized: "Cancel"), role: .cancel) {}
         }

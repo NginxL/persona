@@ -1,8 +1,8 @@
 // The queued messages (Session.queued) at the top of the composer's card, as cindy's pending queue (#5327; the owner
 // asked this part of the chat to follow cindy): rows in send order, the top one next, no numbers (the labels carry
 // them). A row is one line, the marks of what it carries before its words; on hover or focus it shows a drag handle
-// and round buttons: Send now (where the agent takes queued messages now; it hands over the whole queue at one press,
-// its tooltip saying so and what happens), Edit (pulled back into the box below) and Delete. Dragging the handle, or
+// and round buttons: Send now (the tooltip explains whether it sends the next message or the whole queue), Edit
+// (pulled back into the box below) and Delete. Dragging the handle, or
 // ↑ ↓ Home End on it, re-queues them all in the new order. Four rows or fewer show in full; five or more show three
 // and "N more".
 // Messages from other conversations come last and are only shown; since #6394 they collapse into one line
@@ -12,8 +12,9 @@
 // Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next push; a
 // reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
 // (QueueStrip.tsx loads it).
+import { COMPOSER_INPUT } from "../../lib/dock-focus";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, errorText, sessionPath } from "../../lib/api";
+import { api, errorText, fileDownloadURL, fileThumbURL, sessionPath } from "../../lib/api";
 import { agentLabel } from "../../lib/mentions";
 import { keepAllBut, moved, movedTo, parseQueued, queuedMarks } from "../../lib/queue";
 import { relayedFrom } from "../../lib/queue-relayed";
@@ -22,7 +23,7 @@ import { hasFinePointer } from "../../lib/viewport";
 import { Collapse, cx, Spinner, toast } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
-import { restoreQueued, type QueuedImage } from "./QueueStrip";
+import { restoreQueued, type QueuedImage } from "./queue-restore";
 
 export interface QueuePanelProps {
   session: Session;
@@ -31,9 +32,11 @@ export interface QueuePanelProps {
   /** The persona's name in a Persona chat (#4342). */
   persona?: string;
   /** Hears a message taken out of the queue, so its sending bubble goes too. */
-  onWithdrawn?: (text: string) => void;
+  onWithdrawn?: (text: string, index: number) => void;
   /** How many photos a queued message went with when this browser sent it (a Persona chat's queue holds only words). */
-  photosOf?: (raw: string) => number;
+  photosOf?: (raw: string, index: number) => number;
+  /** Local preview URLs (data URLs) for photos freshly queued from this browser (#10871). */
+  photoPreviewsOf?: (raw: string, index: number) => string[];
   /** A phone on its side: one line, "N queued", in the line of the run's status (outside the composer), that opens the
    *  same rows under it. */
   compact?: boolean;
@@ -42,6 +45,10 @@ export interface QueuePanelProps {
 /** cindy's: four rows or fewer show in full; past that the first three and "N more". */
 const FOLD_OVER = 4;
 const FOLDED_ROWS = 3;
+/** Maximum inline photo thumbnails rendered per queued row before collapsing extras into a +N badge (#10871). */
+const MAX_PHOTO_THUMBS = 3;
+/** Thumbnail request size in px (crisp on 2x-3x displays for a 28 px tile). */
+const PHOTO_THUMB_SIZE = 96;
 /** How long a reorder keeps its order on screen after the hub said yes, waiting for the push that shows it. */
 const HOLD_MS = 1500;
 /** How long a keyboard reorder's handle takes the focus back when its row is drawn again (the agent re-queues them). */
@@ -63,17 +70,16 @@ interface Drag {
   to: number;
 }
 
-export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, photosOf, compact }: QueuePanelProps) {
+export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, photosOf, photoPreviewsOf, compact }: QueuePanelProps) {
   const queued = useMemo(() => session.queued ?? [], [session.queued]);
   // the user's own come first; the rest came from other conversations and are only shown (#4342)
   const own = queued.length - Math.min(Math.max(session.queued_relayed ?? 0, 0), queued.length);
   const agent = persona ?? agentLabel(session);
-  // A runtime's Agent (Paseo's) keeps its queue to itself: the node refuses to edit, reorder or send it now, so its
-  // rows are only shown, as the other conversations' are (#8142).
-  const runtime = persona === undefined && session.source_kind === "runtime";
-  const editable = canEdit && !runtime;
+  const runtimeSource = session.source_kind === "runtime";
+  const runtime = persona === undefined && runtimeSource;
+  const editable = canEdit && (session.capabilities?.queue_edit ?? !runtime);
   // a Claude takes queued messages at its next step, and can be given them now (#6088); so does a Persona chat's (#4342)
-  const takesNow = !runtime && (session.agent === "claude" || (persona !== undefined && own > 0));
+  const takesNow = canEdit && (session.capabilities?.queue_send_now ?? (!runtime && (session.agent === "claude" || (persona !== undefined && own > 0))));
   const path = sessionPath(session.machine_id, session.session_id);
   const listId = useId();
   const explainId = useId();
@@ -152,14 +158,14 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
   const toBox = (always: boolean) => {
     const at = document.activeElement;
     if (!hasFinePointer() || !(always || !at || at === document.body || region.current?.contains(at))) return;
-    region.current?.closest("[data-composer-top]")?.parentElement?.querySelector("textarea")?.focus({ preventScroll: true });
+    region.current?.closest("[data-composer-top]")?.parentElement?.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT)?.focus({ preventScroll: true });
   };
   const act = (row: Row, del: boolean) =>
     void run(row.id, async () => {
       const r = await api<{ queue?: string[]; images?: QueuedImage[][] }>(`${path}/queue`, { method: "POST", json: { keep: keepAllBut(own, row.i) } });
       const pulled = r.queue ?? [];
       toast(del ? t("chat-queuepanel.deleted") : t("chat-queuepanel.pulled_back"), "ok");
-      if (pulled[row.i] !== undefined) onWithdrawn?.(pulled[row.i]);
+      if (pulled[row.i] !== undefined) onWithdrawn?.(pulled[row.i], row.i);
       const images = r.images?.[row.i] ?? [];
       if (!del && pulled[row.i] !== undefined) await restoreQueued(draftKey, session, parseQueued(pulled[row.i], images.length), images);
     }).then((ok) => ok && toBox(!del));
@@ -180,7 +186,9 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
       toast(t("chat-queuepanel.sent_now", { agent }), "ok");
     }).then((ok) => ok && toBox(false));
   // what the dialog used to say, now the button's tooltip and description
-  const explain = t(persona !== undefined ? "chat-queuepanel.send_now_body_persona" : "chat-queuepanel.send_now_body", { agent });
+  const sendNowTip = t(runtimeSource ? "chat-queuepanel.send_now_tip_runtime" : "chat-queuepanel.send_now_tip", { agent });
+  const explain = t(runtimeSource ? "chat-queuepanel.send_now_body_runtime" :
+    persona !== undefined ? "chat-queuepanel.send_now_body_persona" : "chat-queuepanel.send_now_body", { agent });
 
   const keyMove = (e: React.KeyboardEvent, row: Row) => {
     const to = e.key === "ArrowUp" ? row.i - 1 : e.key === "ArrowDown" ? row.i + 1 : e.key === "Home" ? 0 : e.key === "End" ? own - 1 : null;
@@ -238,11 +246,14 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
       key={row.id}
       row={row}
       n={pos + 1}
-      photos={photosOf?.(row.raw) ?? 0}
+      photos={photosOf?.(row.raw, row.i) ?? 0}
+      photoPreviews={photoPreviewsOf?.(row.raw, row.i)}
+      mid={session.machine_id}
+      cwd={session.cwd}
       editable={editable}
       movable={editable && own > 1}
       takesNow={takesNow}
-      agent={agent}
+      sendNowTip={sendNowTip}
       explain={explain}
       explainId={explainId}
       busy={busy === row.id}
@@ -288,7 +299,7 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
       {relayedOpen && (
         <div role="list" data-queue-relayed-list className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pb-1">
           {relayedRows.map((row, pos) => (
-            <RelayedRow key={row.id} row={row} n={own + pos + 1} />
+            <RelayedRow key={row.id} row={row} n={own + pos + 1} mid={session.machine_id} cwd={session.cwd} />
           ))}
         </div>
       )}
@@ -296,8 +307,14 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
   );
   const rowsAndFold = (
     <>
+      {!compact && shown.length > 0 && (
+        <div data-queue-header className="flex items-center gap-1.5 px-3 pt-2 pb-0.5 text-submeta leading-none text-ink-2">
+          <Icon name="clock" size={12} stroke={2} className="shrink-0 text-ink-3" />
+          <span className="font-medium">{t("chat-queuepanel.status")}</span>
+        </div>
+      )}
       {shown.length > 0 && (
-        <div ref={list} id={listId} role="list" className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pt-1.5 pb-0.5">
+        <div ref={list} id={listId} role="list" className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pt-1.5 pb-1">
           {visible.map((row, pos) => rowFor(row, pos))}
         </div>
       )}
@@ -368,21 +385,92 @@ const markWords = (kind: MarkKind, count: number) =>
         ? t("chat-queuepanel.mark_file", { count })
         : t("chat-queuepanel.mark_context", { count });
 
-// cindy's row buttons: 20 px, round, a hairline ring on the card's own fill
-const ROUND = "touch-hit flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-2 transition-colors enabled:hover:text-ink disabled:opacity-50";
+// cindy's row buttons: 24 px, round, a hairline ring on the card's own fill
+const ROUND = "touch-hit flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-2 transition-colors enabled:hover:border-line-strong enabled:hover:bg-hover-2 enabled:hover:text-ink disabled:opacity-50";
+// always-visible Send now pill on the first row: single line at every width (DESIGN_SYSTEM.md 1.2 rule 3)
+const SEND_NOW_PILL = "touch-hit inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-line-strong bg-surface px-2 text-submeta font-medium leading-none whitespace-nowrap text-ink transition-colors enabled:hover:bg-hover-2 disabled:opacity-50";
 // shown while the row is hovered or has the focus; always on a screen without hover
 const ON_ACTIVE = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 
+/** Small 28 px thumbnails for photos attached to a queued message (#10871). Uses local preview data URLs when freshly
+ *  queued from this page, otherwise loads from the session's machine (file/thumb -> inline file/download -> icon fallback). */
+function QueuedPhotoThumbs({ paths, previews, count, mid, cwd }: {
+  paths: string[];
+  previews?: string[];
+  count: number;
+  mid: string;
+  cwd?: string;
+}) {
+  const [stage, setStage] = useState<Record<string, number>>({});
+  if (count <= 0) return null;
+  const shownCount = Math.min(count, MAX_PHOTO_THUMBS);
+  const extra = count - shownCount;
+  return (
+    <span data-queue-mark="photo" aria-hidden className="inline-flex shrink-0 items-center gap-1">
+      {Array.from({ length: shownCount }, (_, i) => {
+        const local = previews?.[i];
+        const path = paths[i];
+        const key = path || `preview-${i}`;
+        const candidates: string[] = [];
+        if (local) candidates.push(local);
+        if (path && mid) {
+          try {
+            candidates.push(fileThumbURL(mid, path, cwd, PHOTO_THUMB_SIZE));
+            candidates.push(fileDownloadURL(mid, path, cwd, { inline: true }));
+          } catch {
+            // environments without storage (e.g. Node static markup) fall back to the icon tile
+          }
+        }
+        const cur = stage[key] ?? 0;
+        const src = candidates[cur];
+        return (
+          <span
+            key={key}
+            className="relative inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-[6px] border border-line bg-field text-ink-3"
+          >
+            {src ? (
+              <img
+                src={src}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                data-queue-photo-thumb
+                onError={() => setStage((s) => ({ ...s, [key]: (s[key] ?? 0) + 1 }))}
+                className="size-full object-cover"
+              />
+            ) : (
+              <span data-queue-photo-fallback className="flex size-full items-center justify-center text-ink-3">
+                <Icon name="image" size={13} />
+              </span>
+            )}
+          </span>
+        );
+      })}
+      {extra > 0 && (
+        <span
+          data-queue-photo-overflow
+          className="inline-flex h-7 shrink-0 items-center justify-center rounded-[6px] border border-line bg-field px-1.5 text-submeta font-medium tabular-nums text-ink-2"
+        >
+          +{extra}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** One of the owner's queued messages. `photos`: ones it went with beside its words (a Persona chat's, when this browser
  *  sent it). */
-function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain, explainId, busy, locked, dragging, rowRef, handleRef, onKey, onPointerDown, onSendNow, onEdit, onDelete }: {
+function QueueRow({ row, n, photos, photoPreviews, mid, cwd, editable, movable, takesNow, sendNowTip, explain, explainId, busy, locked, dragging, rowRef, handleRef, onKey, onPointerDown, onSendNow, onEdit, onDelete }: {
   row: Row;
   n: number;
   photos: number;
+  photoPreviews?: string[];
+  mid: string;
+  cwd?: string;
   editable: boolean;
   movable: boolean;
   takesNow: boolean;
-  agent: string;
+  sendNowTip: string;
   /** What sending now does, as Send now's tooltip and description. */
   explain: string;
   explainId: string;
@@ -399,6 +487,8 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
 }) {
   const parts = useMemo(() => parseQueued(row.raw, photos), [row.raw, photos]);
   const marks = queuedMarks(parts, photos);
+  const photoCount = Math.max(parts.photos.length + photos, photoPreviews?.length ?? 0);
+  const nonPhotoMarks = marks.filter((m) => m.kind !== "photo");
   // the words, then what came with them in words (for the label and the tooltip: "2 photos, 1 context")
   const carried = marks.map((m) => markWords(m.kind, m.count)).join(t("chat-queuepanel.mark_join"));
   const words = parts.text;
@@ -410,8 +500,18 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
     if (el.scrollWidth > el.clientWidth) el.title = said;
     else el.removeAttribute("title");
   };
-  const buttons = editable ? (takesNow ? 3 : 2) : 0;
-  const tip = t("chat-queuepanel.send_now_tip", { agent });
+  const buttons = (editable ? 2 : 0) + (takesNow ? 1 : 0);
+  const alwaysShowSendNow = n === 1 && takesNow;
+  const editButtons = editable && (
+    <>
+      <button type="button" data-queue-edit disabled={locked} onClick={onEdit} aria-label={t("chat-queuepanel.edit_label", { n })} title={t("chat-queuepanel.edit")} className={ROUND}>
+        <Icon name="pencil" size={11} stroke={2.25} />
+      </button>
+      <button type="button" data-queue-delete disabled={locked} onClick={onDelete} aria-label={t("chat-queuepanel.delete_label", { n })} title={t("chat-queuepanel.delete")} className={ROUND}>
+        <Icon name="trash" size={11} stroke={2.25} />
+      </button>
+    </>
+  );
   return (
     <div
       ref={rowRef}
@@ -419,7 +519,7 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
       aria-label={label}
       data-queue-row
       className={cx(
-        "group flex items-center gap-1.5 rounded-[8px] border border-transparent px-2 py-0.5 transition-colors hover:bg-hover focus-within:bg-hover",
+        "group flex items-center gap-1.5 rounded-[8px] border border-transparent px-2 py-1 transition-colors hover:bg-hover focus-within:bg-hover",
         dragging && "relative z-10 bg-hover",
       )}
     >
@@ -443,12 +543,15 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
       ) : (
         <span aria-hidden className="size-5 shrink-0" />
       )}
+      {photoCount > 0 && (
+        <QueuedPhotoThumbs paths={parts.photos} previews={photoPreviews} count={photoCount} mid={mid} cwd={cwd} />
+      )}
       <p
         data-queue-row-body
         onPointerEnter={fit}
         className="relative top-px min-w-0 flex-1 truncate text-[13px] leading-[1.25] text-ink-2 transition-colors group-hover:text-ink group-focus-within:text-ink"
       >
-        {marks.map((m) => (
+        {nonPhotoMarks.map((m) => (
           <span key={m.kind} data-queue-mark={m.kind} aria-hidden className="mr-1.5 inline-flex items-center gap-0.5 align-[-2px] text-ink-3">
             <Icon name={MARK_ICON[m.kind]} size={13} />
             {m.count > 1 && <span className="text-[11px] font-medium tabular-nums">{m.count}</span>}
@@ -459,9 +562,26 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
       </p>
       {buttons > 0 &&
         (busy ? (
-          <span className={cx("flex h-5 shrink-0 items-center justify-end", buttons === 3 ? "w-[68px]" : "w-[44px]")}>
+          <span className={cx("flex h-6 shrink-0 items-center justify-end", alwaysShowSendNow ? "w-[120px]" : buttons === 3 ? "w-[80px]" : "w-[52px]")}>
             <Spinner size={12} />
           </span>
+        ) : alwaysShowSendNow ? (
+          <div data-queue-actions className="flex shrink-0 items-center gap-1">
+            {editable && <div className={cx("flex shrink-0 items-center gap-1", ON_ACTIVE)}>{editButtons}</div>}
+            <button
+              type="button"
+              data-send-now
+              disabled={locked}
+              onClick={onSendNow}
+              aria-label={sendNowTip}
+              aria-describedby={explainId}
+              title={`${sendNowTip}\n${explain}`}
+              className={SEND_NOW_PILL}
+            >
+              <Icon name="arrowUp" size={11} stroke={2.25} />
+              <span>{t("chat-queuepanel.send_now")}</span>
+            </button>
+          </div>
         ) : (
           <div data-queue-actions className={cx("flex shrink-0 items-center gap-1", ON_ACTIVE)}>
             {takesNow && (
@@ -470,20 +590,15 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
                 data-send-now
                 disabled={locked}
                 onClick={onSendNow}
-                aria-label={tip}
+                aria-label={sendNowTip}
                 aria-describedby={explainId}
-                title={`${tip}\n${explain}`}
+                title={`${sendNowTip}\n${explain}`}
                 className={ROUND}
               >
                 <Icon name="arrowUp" size={12} stroke={2.25} />
               </button>
             )}
-            <button type="button" data-queue-edit disabled={locked} onClick={onEdit} aria-label={t("chat-queuepanel.edit_label", { n })} title={t("chat-queuepanel.edit")} className={ROUND}>
-              <Icon name="pencil" size={11} stroke={2.25} />
-            </button>
-            <button type="button" data-queue-delete disabled={locked} onClick={onDelete} aria-label={t("chat-queuepanel.delete_label", { n })} title={t("chat-queuepanel.delete")} className={ROUND}>
-              <Icon name="trash" size={11} stroke={2.25} />
-            </button>
+            {editButtons}
           </div>
         ))}
     </div>
@@ -493,10 +608,11 @@ function QueueRow({ row, n, photos, editable, movable, takesNow, agent, explain,
 /** One message another conversation (or the system) sent in: only shown. It names the chat it came from once, then its
  *  words on one line; a line cut short opens in place to its whole text (the chevron, or a click on the row that selects
  *  nothing), so nothing it says is left to a hover tooltip, and the opened text can be selected and copied. */
-function RelayedRow({ row, n }: { row: Row; n: number }) {
+function RelayedRow({ row, n, mid, cwd }: { row: Row; n: number; mid: string; cwd?: string }) {
   const source = useMemo(() => relayedFrom(row.raw), [row.raw]);
   const parts = useMemo(() => parseQueued(source ? source.text : row.raw), [source, row.raw]);
   const marks = queuedMarks(parts);
+  const nonPhotoMarks = marks.filter((m) => m.kind !== "photo");
   const carried = marks.map((m) => markWords(m.kind, m.count)).join(t("chat-queuepanel.mark_join"));
   const words = parts.text || carried || t("chat-queuepanel.no_text");
   const from = source?.from;
@@ -540,6 +656,9 @@ function RelayedRow({ row, n }: { row: Row; n: number }) {
             {from}
           </span>
         )}
+        {parts.photos.length > 0 && (
+          <QueuedPhotoThumbs paths={parts.photos} count={parts.photos.length} mid={mid} cwd={cwd} />
+        )}
         <span
           ref={body}
           data-queue-row-body
@@ -549,7 +668,7 @@ function RelayedRow({ row, n }: { row: Row; n: number }) {
             open ? "max-h-[132px] cursor-text overflow-y-auto overscroll-contain break-words whitespace-pre-wrap" : "truncate",
           )}
         >
-          {marks.map((m) => (
+          {nonPhotoMarks.map((m) => (
             <span key={m.kind} data-queue-mark={m.kind} aria-hidden className="mr-1.5 inline-flex items-center gap-0.5 align-[-2px] text-ink-3">
               <Icon name={MARK_ICON[m.kind]} size={13} />
               {m.count > 1 && <span className="text-submeta font-medium tabular-nums">{m.count}</span>}

@@ -1,3 +1,4 @@
+import { refreshAgentsDisplay, resetAgentsDisplay } from "./agents-display";
 import { forgetSentHistory } from "./send-history";
 import { availableConversation, clearConversationDeletions, conversationDeleted, conversationKeyDeleted, deletedConversation, hasDeletedConversations, rememberConversationDeleted } from "./conversation-deleted";
 import { compatibleEnvelope, setCompatibilityFeatures } from "./compatibility";
@@ -35,7 +36,7 @@ import { NO_LINK, RESTARTING_MS, type ConnLink } from "./connection";
 import { unreachable } from "./shell";
 import { setOfflineProbe } from "./feedback";
 import { readDirectionTree } from "./direction-names";
-import { unnamedTaskConversations } from "./background-supervisor";
+import { unlistedConversations } from "./conversation-origins";
 import { directionTreeAwaitsHello } from "./direction-tree";
 import { configureMessageFeedback, resetMessageFeedback } from "./message-send";
 import { afterEvent, afterHello, graceUntil, isResumed, NO_CURSOR, RESTART_FAST_MS, retryDelay, shownConn, wsQuery, type Drop, type EventCursor } from "./reconnect";
@@ -233,6 +234,7 @@ onRuntimeChanges((upsert, remove) => {
   applyCompleteSessions(updates, remove);
   followConversations(upsert);
   keepTaskRows(upsert, remove.map(runtimeRemoval));
+  cardRowsChanged(upsert, remove.map(runtimeRemoval));
 });
 
 /** What a summary row (`waiting` present) says by leaving a field out: none (docs/protocol/protocol.md "Summary rows"). */
@@ -252,13 +254,15 @@ function listedOver(row: Session, listed: Session): Session {
  *  hints, never `sessions` / `sessions_delta`, so nothing else moves them: the Persona sidebar and All chats kept the
  *  state of the last /assistant read, and a conversation read mid-turn kept spinning after its turn had ended until a
  *  reload, a send or opening it. Its row in the conversations and the detail kept of it (which those lists lay over
- *  them) both take the change; no other row is made or kept. */
+ *  them) both take the change; no other row is made or kept from them. A conversation the held answer does not list
+ *  (one another client made) has the answer read again instead (askAboutUnlisted, #10190). */
 function followConversations(upsert: Session[]) {
   const a = state.assistant;
   if (!a || !upsert.length) return;
   const changed = new Map<string, Session>();
   for (const row of upsert) if (row.machine_id === a.machine_id) changed.set(row.session_id, row);
   if (!changed.size) return;
+  askAboutUnlisted([...changed.values()]);
   const ids = new Set(a.conversations.map((c) => c.session_id));
   let moved = false;
   const conversations = a.conversations.map((c) => {
@@ -355,29 +359,130 @@ async function lookUpTaskAgents() {
   }
 }
 
-const cardRowsAsked = new Set<string>();
-let cardRowsFor: Interaction[] | null = null;
-/** A pending card whose session no list holds: a paging hub can leave both child and off-page root sessions out of
- *  the Agents list's pages. One exact lookup for its row (`sessions_lookup`) puts it among the row hints, so the
- *  card can be answered wherever it shows (the main chat's Needs you, the Inbox), not only on its parent's open page. */
-async function lookUpCardSessions() {
-  if (state.interactions === cardRowsFor || !state.features.includes(SESSIONS_LOOKUP_FEATURE)) return;
-  cardRowsFor = state.interactions;
-  const missing = new Set(state.interactions.filter((ix) => ix.session_id && !getSession(ix.machine_id, ix.session_id))
-    .map((ix) => runtimeIdentity({ machine_id: ix.machine_id, session_id: ix.session_id } as Session)));
-  for (const id of [...missing].filter((x) => !cardRowsAsked.has(x)).slice(0, 20)) {
-    cardRowsAsked.add(id);
-    const [mid, sid] = JSON.parse(id) as [string, string];
-    const params = new URLSearchParams({ summary: "1", limit: "1", machine_id: mid, session_id: sid });
-    try {
-      const page = await api<{ sessions?: Session[] }>(`/sessions?${params}`);
-      const row = page?.sessions?.[0];
-      if (row && runtimeIdentity(row) === id) {
-        rememberSessionRow(row);
-        notify(); // what reads getSession for the card (can it be answered) reads it again
-      }
-    } catch {
-      cardRowsAsked.delete(id); // asked again with the next change of the cards or connection
+/** The exact lookups of pending cards' sessions (#8584): the row the hub returned (none: it has no such session) and
+ *  whether a later list change has made it stale. The newest trusted visibility after the list's own rows. */
+const cardRows = new Map<string, { row?: Session; fresh: boolean }>();
+/** Failed lookups: tries so far and when the next may go (backoff); after CARD_LOOKUP_TRIES a card stays as it is. */
+const cardRetries = new Map<string, { tries: number; at: number }>();
+const cardInFlight = new Set<string>();
+/** How many list changes each card's session has had (upserts and removals): a lookup asked before the latest one
+ *  answers for an older row, so its answer is dropped (#8584). */
+const cardRowVersions = new Map<string, number>();
+const CARD_LOOKUPS_AT_ONCE = 4;
+const CARD_LOOKUP_TRIES = 4;
+const CARD_RETRY_MS = 1_000;
+let cardGeneration = 0;
+let cardRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let cardRowsFor: [Interaction[], Session[]] | null = null;
+let listedFor: Session[] | null = null;
+let listedIndex = new Map<string, Session>();
+const cardIdentity = (mid: string, sid: string) => runtimeIdentity({ machine_id: mid, session_id: sid } as Session);
+function listedRows(): Map<string, Session> {
+  if (listedFor !== state.sessionSummaries) {
+    listedFor = state.sessionSummaries;
+    listedIndex = new Map(state.sessionSummaries.map((row) => [runtimeIdentity(row), row]));
+  }
+  return listedIndex;
+}
+
+/** The row that says whether a card's session is hidden (#8584). On a paging hub a chat detail kept from an opened chat
+ *  is not refreshed by summary deltas: the list's row decides, else the card's exact lookup, and only then any row. */
+export function cardSessionRow(mid: string, sid: string): Session | undefined {
+  if (state.features.includes(SESSIONS_LIST_FEATURE)) {
+    const id = cardIdentity(mid, sid);
+    const row = listedRows().get(id) ?? cardRows.get(id)?.row;
+    if (row) return row;
+  }
+  return getSession(mid, sid);
+}
+
+/** List changes say which off-page rows changed: a changed row is that session's newest word, a removed one (hidden,
+ *  ended or filtered out) is asked about again. A lookup still out for either answers for the row before the change:
+ *  its version moves, so that answer is dropped. A dropped answer is asked again only while the row is not fresh (a
+ *  removal), so each list change costs at most one more lookup. */
+function cardRowsChanged(upsert: Session[], remove: string[]) {
+  let changed = false;
+  const moved = (id: string) => { cardRowVersions.set(id, (cardRowVersions.get(id) ?? 0) + 1); cardRetries.delete(id); changed = true; };
+  for (const row of upsert) {
+    const id = runtimeIdentity(row);
+    if (cardRows.has(id) || cardInFlight.has(id)) { cardRows.set(id, { row, fresh: true }); moved(id); }
+  }
+  for (const id of remove) {
+    const known = cardRows.get(id);
+    if (known?.fresh) cardRows.set(id, { ...known, fresh: false });
+    if (known?.fresh || cardInFlight.has(id)) moved(id);
+  }
+  if (changed) lookUpCardSessions(true);
+}
+
+function forgetCardRows(stale: boolean) {
+  cardGeneration++;
+  cardInFlight.clear();
+  cardRetries.clear();
+  cardRowVersions.clear(); // the lookups out are dropped by cardGeneration already
+  clearTimeout(cardRetryTimer);
+  cardRetryTimer = undefined;
+  cardRowsFor = null;
+  if (!stale) cardRows.clear();
+  else for (const [id, known] of cardRows) cardRows.set(id, { ...known, fresh: false });
+}
+
+/** A pending card whose session no list holds: a paging hub can leave child, off-page and directory-hidden sessions out
+ *  of the Agents list's pages. An exact lookup for its row (`sessions_lookup`) puts it among the row hints, so the card
+ *  can be answered wherever it shows (the main chat's Needs you, the Inbox), and says whether its folder is hidden. Keeps
+ *  going, a few at a time, until every card's session is known; failures back off and stop after a few tries. */
+function lookUpCardSessions(force = false) {
+  if (!state.features.includes(SESSIONS_LOOKUP_FEATURE)) return;
+  if (!force && cardRowsFor?.[0] === state.interactions && cardRowsFor[1] === state.sessionSummaries) return;
+  cardRowsFor = [state.interactions, state.sessionSummaries];
+  const bounded = state.features.includes(SESSIONS_LIST_FEATURE);
+  const listed = listedRows();
+  const cards = new Map<string, [string, string]>();
+  for (const ix of state.interactions) if (ix.session_id) cards.set(cardIdentity(ix.machine_id, ix.session_id), [ix.machine_id, ix.session_id]);
+  // the answers for cards that are gone go with them
+  for (const id of cardRows.keys()) if (!cards.has(id)) cardRows.delete(id);
+  for (const id of cardRetries.keys()) if (!cards.has(id)) cardRetries.delete(id);
+  for (const id of cardRowVersions.keys()) if (!cards.has(id) && !cardInFlight.has(id)) cardRowVersions.delete(id);
+  const now = Date.now();
+  let nextRetry = Infinity;
+  for (const [id, [mid, sid]] of cards) {
+    if (cardInFlight.size >= CARD_LOOKUPS_AT_ONCE) break;
+    if (listed.has(id) || cardRows.get(id)?.fresh || cardInFlight.has(id)) continue;
+    if (!bounded && !cardRows.has(id) && getSession(mid, sid)) continue;
+    const retry = cardRetries.get(id);
+    if (retry && retry.tries >= CARD_LOOKUP_TRIES) continue;
+    if (retry && retry.at > now) { nextRetry = Math.min(nextRetry, retry.at); continue; }
+    void lookUpCardSession(id, mid, sid);
+  }
+  clearTimeout(cardRetryTimer);
+  cardRetryTimer = nextRetry === Infinity ? undefined : setTimeout(() => { cardRetryTimer = undefined; lookUpCardSessions(true); }, nextRetry - now);
+}
+
+async function lookUpCardSession(id: string, mid: string, sid: string) {
+  const generation = cardGeneration;
+  const version = cardRowVersions.get(id) ?? 0;
+  const current = () => generation === cardGeneration && version === (cardRowVersions.get(id) ?? 0);
+  cardInFlight.add(id);
+  const params = new URLSearchParams({ summary: "1", limit: "1", machine_id: mid, session_id: sid });
+  try {
+    const page = await api<{ sessions?: Session[] }>(`/sessions?${params}`);
+    if (!current()) return;
+    const found = page?.sessions?.[0];
+    const row = found && runtimeIdentity(found) === id ? found : undefined;
+    cardRows.set(id, { row, fresh: true });
+    cardRetries.delete(id);
+    if (row) {
+      rememberSessionRow(row);
+      notify(); // what reads the card's row (can it be answered, is its folder hidden) reads it again
+    }
+  } catch {
+    if (!current()) return;
+    const tries = (cardRetries.get(id)?.tries ?? 0) + 1;
+    cardRetries.set(id, { tries, at: Date.now() + CARD_RETRY_MS * 2 ** (tries - 1) });
+  } finally {
+    if (generation === cardGeneration) {
+      cardInFlight.delete(id);
+      lookUpCardSessions(true);
     }
   }
 }
@@ -466,7 +571,7 @@ export const subscribe = (l: () => void) => {
   };
 };
 // a child session's card may need its row looked up (lookUpCardSessions): checked as the cards change
-subscribe(() => void lookUpCardSessions());
+subscribe(() => lookUpCardSessions());
 
 export function useStore<T>(select: (s: State) => T): T {
   const last = useRef<{ v: T } | null>(null);
@@ -564,6 +669,8 @@ type SessionListener = {
   /** The hub's `revs` event: the transcript grew to this rev; the list's row keeps the rev it had (lib/stale-page.ts). */
   rev?: (rev: number) => void;
   reconnected?: () => void;
+  /** Contiguous cursor of a transcript that has already opened its socket watch. */
+  watchCursor?: () => number | undefined;
 };
 const sessionListeners = new Map<string, Set<SessionListener>>();
 const key = (mid: string, sid: string) => `${mid}/${sid}`;
@@ -867,6 +974,7 @@ function onMessage(msg: Record<string, unknown>) {
       // notifications off never got a live update after loading. Also: a hub that came back may serve a new web build
       // (lib/new-version.ts).
       helloHooks.forEach((f) => f());
+      void refreshAgentsDisplay();
       back();
       const summaryMode = state.features.includes(SESSIONS_LOOKUP_FEATURE);
       const rootsMode = state.features.includes(SESSIONS_HIERARCHY_FEATURE);
@@ -887,8 +995,7 @@ function onMessage(msg: Record<string, unknown>) {
       setPersonalPageCounts(state.features.includes(AGENTS_PAGE_COUNTS_FEATURE));
       setAgentListMode(state.features.includes(SESSIONS_LIST_FEATURE));
       taskRowsAsked.clear();
-      cardRowsAsked.clear();
-      cardRowsFor = null;
+      forgetCardRows(true); // asked again on this connection; the answers stand until then
       void lookUpTaskAgents();
       // subscriptions are per connection: chats resubscribe from what they have either way
       sessionListeners.forEach((ls) => ls.forEach((l) => l.reconnected?.()));
@@ -932,6 +1039,7 @@ function onMessage(msg: Record<string, unknown>) {
       }
       break;
     case "sessions": {
+      void refreshAgentsDisplay();
       const mid = msg.machine_id as string;
       sessionsChanged(mid);
       // A delta hub's list has no Codex history (the page has that from GET /sessions): keep what it already has.
@@ -953,7 +1061,7 @@ function onMessage(msg: Record<string, unknown>) {
     case "session": {
       const s = msg.session as Session;
       sessionsChanged(s.machine_id);
-      upsertSession(s);
+      upsertSession(s, { undelivered: true }); // the hub's whole row
       break;
     }
     case "interaction": {
@@ -1126,7 +1234,11 @@ export function dropSession(mid: string, sid: string) {
   set({ sessions: { ...state.sessions, [mid]: list.filter((x) => x.session_id !== sid) } });
 }
 
-export function upsertSession(s: Session) {
+/** `opts.undelivered`: `s.undelivered` is the list (the hub's whole row, which leaves it out once none is left, or a
+ *  change of the list itself: lib/undelivered.ts and its actions). Without it an Agent's row keeps the messages held for
+ *  it (#10661): a change made from an earlier copy of the row, or a node's row, which never carries them, must not drop
+ *  them. A Persona chat's row is merged as before (#10194). */
+export function upsertSession(s: Session, opts: { undelivered?: boolean } = {}) {
   if (s.deleted) { markConversationDeleted(s.machine_id, s.session_id); return; }
   if (!availableConversation(s)) return;
   const list = state.sessions[s.machine_id] ?? [];
@@ -1136,6 +1248,7 @@ export function upsertSession(s: Session) {
     const merged = { ...x, ...s };
     // A Persona chat's row leaves the kept messages out once none is left (#10194): not kept from the old row then.
     if (s.assistant) merged.undelivered = s.undelivered;
+    else if (!x.assistant) merged.undelivered = opts.undelivered ? s.undelivered : x.undelivered; // an Agent's (#10661)
     merged.background_working = s.background_working;
     merged.background_waiting = s.background_waiting;
     // An optimistic action can start from getSession's summary fallback. A later complete info response must
@@ -1164,20 +1277,59 @@ export function upsertSession(s: Session) {
   set({ sessions: { ...state.sessions, [s.machine_id]: next }, ...syncAssistant(s.machine_id, [s]) });
 }
 
-/** The conversations the assistant was read again for (unnamedTaskConversations): once each, whatever it answered. */
-const askedForUnnamed = new Set<string>();
+/** What became of each conversation the assistant was read again for (unlistedConversations), by the page it was read
+ *  for (pageOf: another manager's page reads its own answer): the reads so far, at most UNLISTED_TRIES; whether one is
+ *  on its way; and whether a row of it came meanwhile (archived, renamed: a state newer than that read's), in which case
+ *  another read follows it. A read that failed, was not taken or did not list it leaves it to be asked about again at
+ *  its next row (review of #10199: the hub can list a new conversation a moment after its row comes). */
+const askedForUnlisted = new Map<string, { tries: number; reading: boolean; changed: boolean }>();
+const UNLISTED_TRIES = 3;
+
+/** `rows` (of the assistant's machine) bring conversations the held answer does not list (#10190): one another client
+ *  made, or a background supervisor the hub made since (#5082). The answer is read again for them, so the conversation
+ *  comes in with everything it gives one (its manager noted for its requests, its title, its details), not as a list row
+ *  laid in by this page. */
+function askAboutUnlisted(rows: readonly Session[]) {
+  const a = state.assistant;
+  if (!a) return;
+  const page = pageOf();
+  const key = (id: string) => `${page}\u0000${id}`;
+  for (const r of rows) {
+    const e = askedForUnlisted.get(key(r.session_id));
+    if (e?.reading) e.changed = true;
+  }
+  readUnlisted(unlistedConversations(a, rows).map(key).filter((k) => {
+    const e = askedForUnlisted.get(k);
+    return !e || (!e.reading && e.tries < UNLISTED_TRIES);
+  }));
+}
+
+function readUnlisted(keys: string[]) {
+  if (!keys.length) return;
+  for (const k of keys) {
+    const e = askedForUnlisted.get(k) ?? { tries: 0, reading: false, changed: false };
+    askedForUnlisted.set(k, { tries: e.tries + 1, reading: true, changed: false });
+  }
+  // Once listed, its rows are no longer unlisted ones: only a row that came while this read was on its way reads again.
+  const settle = () => {
+    const again: string[] = [];
+    for (const k of keys) {
+      const e = askedForUnlisted.get(k);
+      if (!e) continue; // signed out meanwhile (reset)
+      e.reading = false;
+      if (e.changed && e.tries < UNLISTED_TRIES) again.push(k);
+    }
+    readUnlisted(again);
+  };
+  void refreshAssistant().then(settle, settle);
+}
 
 // The assistant's conversations are sessions on its machine too: the change that keeps the copy in `assistant`
 // current, to go with the sessions' own (one update, not two).
 function syncAssistant(mid: string, list: Session[]): Partial<State> {
   const a = state.assistant;
   if (!a || a.machine_id !== mid) return {};
-  // a background supervisor the hub made since the assistant was read (#5082): read again, so it is the built-in one
-  const unnamed = unnamedTaskConversations(a, list).filter((id) => !askedForUnnamed.has(id));
-  if (unnamed.length) {
-    unnamed.forEach((id) => askedForUnnamed.add(id));
-    void refreshAssistant().catch(() => {});
-  }
+  askAboutUnlisted(list);
   let changed = false;
   const convs = a.conversations.map((c) => {
     const s = list.find((x) => x.session_id === c.session_id);
@@ -1360,6 +1512,7 @@ function sessionsChanged(mid: string) {
 }
 
 export async function refresh() {
+  void refreshAgentsDisplay();
   const gen = ++refreshes.asked;
   const machinesAt = machinesRev;
   const sessionsAt = sessionsRev;
@@ -1490,12 +1643,14 @@ export function patchAssistant(patch: Partial<Omit<AssistantInfo, "conversations
   if (a) set({ assistant: { ...a, ...patch } });
 }
 
-export async function refreshAssistant() {
+/** Reads the page's assistant again; true when its answer is the one in place now (not one a later answer, or another
+ *  manager's page, made old meanwhile). */
+export async function refreshAssistant(): Promise<boolean> {
   const asked = assistantAsked.ask();
   const from = pageOf();
   try {
     const a = await asked.answer;
-    if (!asked.fresh() || from !== pageOf()) return;
+    if (!asked.fresh() || from !== pageOf()) return false;
     const assistant = { ...a, conversations: (a.conversations ?? []).filter(availableConversation) };
     const scope = feedCacheScope();
     const cached = readFeedCache(scope);
@@ -1507,6 +1662,7 @@ export async function refreshAssistant() {
     for (const c of assistant.conversations) noteConversation(c.session_id, owner);
     if (assistant.main) noteConversation(assistant.main, owner);
     set({ assistant, assistantError: null });
+    return true;
   } catch (err) {
     if (asked.fresh() && from === pageOf()) {
       set({ assistantError: errorText(err) });
@@ -1660,6 +1816,7 @@ function resendSeen() {
 }
 
 export function reset() {
+  resetAgentsDisplay();
   disconnect();
   clearConversationDeletions();
   resetMessageFeedback();
@@ -1679,11 +1836,10 @@ export function reset() {
   // a refresh() still on its way belongs to the old login too
   refreshes.applied = ++refreshes.asked;
   sessionsPushed.clear();
+  askedForUnlisted.clear(); // the conversations asked about were the old login's
   resetAgents();
   rowHints.clear();
   taskRowsAsked.clear();
-  cardRowsAsked.clear();
-  cardRowsFor = null;
   listedFull.clear();
   runtimeSessions.reset();
   runtimeAgents.reset();
@@ -1717,6 +1873,16 @@ export function reset() {
     conn: "connecting",
     link: { ...NO_LINK, networkUp: networkUp() },
   });
+  // last: the list resets above tell subscribers while the old cards are still there, and a lookup started then
+  // belongs to the old login
+  forgetCardRows(false);
 }
 
-configureMessageFeedback({ getSession, send, onHubEvent, subscribe, receiptsAllowed: () => appSocketReady() && receiptOwner === credentialOwner() });
+configureMessageFeedback({ getSession, send, onHubEvent, subscribe,
+  watchCursor: (mid, sid) => {
+    if (appSocketReady()) for (const listener of sessionListeners.get(key(mid, sid)) ?? []) {
+      const cursor = listener.watchCursor?.();
+      if (cursor !== undefined) return cursor;
+    }
+  },
+  receiptsAllowed: () => appSocketReady() && receiptOwner === credentialOwner() });

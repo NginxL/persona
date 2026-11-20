@@ -51,5 +51,6 @@
   "relay_why_expired": "\n（链接已经过期，让它重新生成一个）",
   "relay_why_not_in_session": "\n（这个链接不是它自己的命令打印出来的，Persona 不替你授权）",
   "relay_why_failed": "\n（Persona 试着替你授权，没有成功）",
-  "relay_why_done": "\n（Persona 已经替你授权了，但没能告诉它：点「已授权，继续」）"
+  "relay_why_done": "\n（Persona 已经替你授权了，但没能告诉它：点「已授权，继续」）",
+  "conversation_invalid": "此会话已失效：压缩上下文属于另一个账号。请换新会话接着做。"
 }

@@ -20,6 +20,7 @@ import persona.core.contracts.Machine
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantConfig
 import persona.core.contracts.api.AssistantManagement
+import persona.core.contracts.api.AssistantRepository
 import persona.core.contracts.api.BackgroundSupervisor
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
@@ -27,6 +28,7 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.feature.assistant.LocalAssistantHost
 import persona.feature.assistant.R
+import persona.feature.assistant.assistantAttempt
 import persona.feature.assistant.conversationTime
 import persona.feature.assistant.proactive.AssistantProactiveScreen
 import kotlinx.coroutines.launch
@@ -36,7 +38,7 @@ object AssistantSettingsPreview {
     @Volatile var open: String? = null
 }
 
-private enum class SettingsPart { Home, Notes, Memory, MemoryFile, Places, PlaceEditor, Proactive, Skills }
+private enum class SettingsPart { Home, Notes, Memory, MemoryFile, Places, PlaceEditor, Proactive, Skills, Prompts }
 private enum class SettingsSheet { Machine, Zone }
 
 /**
@@ -49,6 +51,8 @@ internal fun AssistantSettingsScreen(
     machines: List<Machine>,
     onBack: () -> Unit,
     onMoved: suspend () -> Unit = {},
+    /** The shared conversation snapshot, when this page can update Recent directly and refresh it on resume. */
+    conversations: AssistantRepository? = null,
     /** Shown in place of another page (the Persona tab) rather than as a navigation destination: back closes it here. */
     inPlace: Boolean = false,
     /** Opens an assistant conversation (one a run of "Proactive" started, or a follow-up continues). */
@@ -63,7 +67,8 @@ internal fun AssistantSettingsScreen(
     val owner = initialManager?.takeIf(String::isNotBlank) ?: persona.core.designsystem.currentAssistant().id
     key(management, owner) {
         val scoped = remember(management, owner) { management.forManager(owner) }
-        AssistantSettingsDetails(scoped, machines, onBack, onMoved, inPlace, onOpenConversation, onModelConfiguration, onStandingAuthorizations, owner)
+        AssistantSettingsDetails(scoped, machines, onBack, onMoved, inPlace, onOpenConversation, onModelConfiguration,
+            onStandingAuthorizations, owner, conversations)
     }
 }
 
@@ -72,18 +77,20 @@ private fun AssistantSettingsDetails(
     management: AssistantManagement, machines: List<Machine>, onBack: () -> Unit, onMoved: suspend () -> Unit,
     inPlace: Boolean, onOpenConversation: (SessionKey) -> Unit, onModelConfiguration: ((String, String) -> Unit)?,
     onStandingAuthorizations: (() -> Unit)?,
-    owner: String,
+    owner: String, conversations: AssistantRepository?,
 ) {
     val context = LocalContext.current
     val moved by rememberUpdatedState(onMoved)
     // The outbox that binds the main conversation: told when a move clears it.
     val sender by rememberUpdatedState(LocalAssistantHost.current?.mainSender)
-    val controller = remember(management) {
-        AssistantSettingsState(management.settingsApi(), StoredTimezoneChoice(context), mainChanged = { sender?.mainChanged() }) { moved() }
+    val controller = remember(management, conversations) {
+        AssistantSettingsState(management.settingsApi(), StoredTimezoneChoice(context), mainChanged = { sender?.mainChanged() },
+            recentTaskChatsChanged = { conversations?.recentTaskChatsUpdater() ?: { _ -> } }) { moved() }
     }
     val state by controller.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
+    val savedPrompts = LocalSavedPromptsStore.current
     val preview = remember { AssistantSettingsPreview.open.also { AssistantSettingsPreview.open = null } }
     var part by rememberSaveable { mutableStateOf(when (preview) {
         "notes" -> SettingsPart.Notes
@@ -92,6 +99,7 @@ private fun AssistantSettingsDetails(
         "new-place" -> SettingsPart.PlaceEditor
         "proactive" -> SettingsPart.Proactive
         "skills" -> SettingsPart.Skills
+        "prompts" -> SettingsPart.Prompts
         else -> SettingsPart.Home
     }) }
     var memoryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -102,9 +110,12 @@ private fun AssistantSettingsDetails(
         else -> null
     }) }
     LaunchedEffect(controller) {
-        controller.load()
         controller.loadMemory()
         controller.loadPlaces()
+    }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        scope.launch { controller.load() }
+        scope.launch { conversations?.let { assistantAttempt { it.refresh() } } }
     }
     // Read each time the page opens, like iOS: a skill put on the machine shows up without a refresh.
     LaunchedEffect(part == SettingsPart.Skills) {
@@ -163,12 +174,20 @@ private fun AssistantSettingsDetails(
             open = { part = it }, sheet = { sheet = it }, follow = { scope.launch { controller.setFollowPhone(it) } },
             quietTasks = { scope.launch { controller.setMainTasksQuiet(it) } },
             foldBackground = { scope.launch { controller.setMainBackgroundFolded(it) } },
+            recentTaskChats = { scope.launch { controller.setRecentTaskChats(it) } },
             nextSuggestions = { scope.launch { controller.setNextSuggestions(it) } },
             superviseOwn = { scope.launch { controller.setMainSupervisesOwnTasks(it) } },
             closeEndedTerminals = { scope.launch { controller.setCloseEndedTerminals(it) } },
             supervisorModel = onModelConfiguration?.let { open -> { open(BackgroundSupervisor.PURPOSE, owner) } },
             onStandingAuthorizations = onStandingAuthorizations, standingCount = standingCount,
-            owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } })
+            owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } },
+            showSavedPrompts = savedPrompts != null)
+        SettingsPart.Prompts -> {
+            if (savedPrompts != null) key(savedPrompts) { SavedPromptsPage(savedPrompts) { part = SettingsPart.Home } }
+            else JListPage(title = stringResource(R.string.assistant_saved_prompts_title), onBack = { part = SettingsPart.Home }) {
+                item { JLoading(text = stringResource(R.string.assistant_settings_loading)) }
+            }
+        }
         SettingsPart.Notes -> NotesPart(shown, onBack = { part = SettingsPart.Home }) { text -> controller.saveNotes(text) }
         SettingsPart.Memory -> MemoryPart(shown, machine, machineName, onBack = { part = SettingsPart.Home },
             onRefresh = { scope.launch { controller.loadMemory() } },
@@ -253,6 +272,7 @@ private fun SettingsHome(
     follow: (Boolean) -> Unit,
     quietTasks: (Boolean) -> Unit = {},
     foldBackground: (Boolean) -> Unit = {},
+    recentTaskChats: (Boolean) -> Unit = {},
     nextSuggestions: (Boolean) -> Unit = {},
     superviseOwn: (Boolean) -> Unit = {},
     closeEndedTerminals: (Boolean) -> Unit = {},
@@ -263,6 +283,7 @@ private fun SettingsHome(
     standingCount: Int = 0,
     owner: String = persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER,
     permission: (String) -> Unit = {},
+    showSavedPrompts: Boolean = false,
 ) {
     val config = state.config
     val ready = config != null && !state.busy
@@ -277,6 +298,13 @@ private fun SettingsHome(
         }
         if (config == null && state.loading) item("loading") { JLoading(text = stringResource(R.string.assistant_settings_loading)) }
         state.notice?.let { notice -> item("notice") { JNotice(notice.text.resolve(resources), status = if (notice.error) Status.NeedsYou else Status.Unknown) } }
+        if (showSavedPrompts) {
+            item("in-chats") { JSectionHeader(stringResource(R.string.assistant_saved_prompts_in_chats)) }
+            rows("in-chats", listOf({
+                JRow(stringResource(R.string.assistant_saved_prompts_title), subtitle = stringResource(R.string.assistant_saved_prompts_entry),
+                    leadingIcon = PersonaIcons.document, onClick = { open(SettingsPart.Prompts) })
+            }))
+        }
         if (config != null) {
             item("default-permission") {
                 AssistantDefaultPermission(config.defaultPermissionMode ?: "default", ready,
@@ -365,6 +393,15 @@ private fun SettingsHome(
                         leadingIcon = PhIcons.Stack, enabled = !state.busy) },
                 ))
                 item("background-caption") { Caption(stringResource(R.string.assistant_settings_background_folded_caption)) }
+            }
+
+            config.recentTaskChats?.let { recent ->
+                item("recent-chats-header") { JSectionHeader(stringResource(R.string.assistant_settings_recent_task_chats_title)) }
+                rows("recent-chats", listOf(
+                    { JSwitchRow(stringResource(R.string.assistant_settings_recent_task_chats), recent, recentTaskChats,
+                        leadingIcon = PersonaIcons.message, enabled = !state.busy) },
+                ))
+                item("recent-chats-caption") { Caption(stringResource(R.string.assistant_settings_recent_task_chats_caption)) }
             }
 
             config.nextSuggestions?.let { suggestions ->

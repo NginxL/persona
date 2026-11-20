@@ -189,7 +189,7 @@ func triageStatus(t Todo, look triageLookup, now time.Time) string {
 		}
 	}
 	switch {
-	case interrupted:
+	case interrupted && !working && !waiting && (t.Supervision == nil || t.Supervision.State != "parked"):
 		return "interrupted"
 	case limited:
 		return "usage_limit"
@@ -222,6 +222,9 @@ func acceptanceStands(t Todo) bool {
 // again; an accepted one stays accepted while its acceptance stands.
 func triageReviewState(t Todo) string {
 	if t.Supervision == nil {
+		return ""
+	}
+	if ownerDecisionReturned(t.Supervision) {
 		return ""
 	}
 	st := t.Supervision.State
@@ -395,7 +398,8 @@ func triageTodo(t listedTodo, look triageLookup, now, restoredAt time.Time, loc 
 		return at(triageDone, ruleFailedStart)
 	case status == "needs_you" || status == "interrupted":
 		return at(triageWaiting, ruleAgentAsks)
-	case t.DoneAt == nil && !dismissed && (review == reviewNeedsUser || ask != nil && (ask.Outcome == outcomeDecide || ask.Outcome == outcomeCannot)):
+	case t.DoneAt == nil && (t.Delivery.waitsForOwner() ||
+		!dismissed && (review == reviewNeedsUser || ask != nil && (ask.Outcome == outcomeDecide || ask.Outcome == outcomeCannot))):
 		return at(triageWaiting, ruleOwnerDecides)
 	case !settled && !(finished && !seen(last) && review != reviewParked) && triageWaitingForMerge(t, status, now):
 		// rule 9 after rule 8: a turn or review nobody has looked at stays Just finished even with its PR open. A parked

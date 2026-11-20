@@ -285,7 +285,8 @@ fun List<InboxRecord>.inboxRecord(id: String?): InboxRecord? =
 
 /**
  * An item's `connector` block (docs/protocol/protocol.md "Inbox"): the [thread] its connector reads it as, the [label] the
- * connector gave it (the row's tag, its words: "Direct message", "@me", "Transfer"…), and whether and where a reply goes.
+ * connector gave it (the row's tag, its words: "Direct message", "@me", "Transfer"…), whether and where a reply goes, and
+ * the hub's [avatarUrl] for the thread's picture.
  */
 @Serializable
 data class InboxConnectorRef(
@@ -295,6 +296,7 @@ data class InboxConnectorRef(
     val replyTo: String? = null,
     /** The source page; for the assistant's own row, its conversation in the web app. */
     val url: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
 )
 
 /** A Moments post reference on an inbox item. */

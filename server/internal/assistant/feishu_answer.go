@@ -1,6 +1,8 @@
 package assistant
 
 import (
+	"net/url"
+
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -21,13 +23,14 @@ type botAnswerCard struct {
 // process panel on the first when steps is not nil, foot under the last, a note when cut short. The panel is
 // outside RenderAnswer's body budget: the first card is measured whole, panel steps halved to fit, dropped at
 // zero (endHeader added at send fits the 2 KB margin). None for quiet.
-func answerCards(l i18n.Lang, answer string, quiet bool, steps []string, foot string) []botAnswerCard {
+// name names the button of a bare address in the answer (linkNamer; nil: by its host).
+func answerCards(l i18n.Lang, name func(*url.URL) string, answer string, quiet bool, steps []string, foot string) []botAnswerCard {
 	if quiet {
 		return nil
 	}
 	// Charts (persona-card) become numbers over the whole answer before it is cut into cards: cut first, a chart
 	// longer than one card would read as nothing and leave an empty card.
-	a := feishubot.RenderAnswer(feishubot.PersonaCards(answer), botAnswerPiece, botAnswerCards)
+	a := feishubot.RenderAnswerWith(feishubot.PersonaCards(answer), botAnswerPiece, botAnswerCards, name)
 	out := make([]botAnswerCard, len(a.Parts))
 	for i, p := range a.Parts {
 		build := func(panelSteps int) *feishubot.Card {

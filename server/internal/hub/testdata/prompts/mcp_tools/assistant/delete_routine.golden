@@ -1,0 +1,15 @@
+{
+  "name": "delete_routine",
+  "description": "Delete a scheduled task (routine or follow-up) by id (from list_followups). Confirm with the user first unless they asked for it.",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      }
+    }
+  }
+}

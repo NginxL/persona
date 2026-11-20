@@ -77,6 +77,11 @@ export function screensFromEnd(el: { scrollTop: number; clientHeight: number; sc
   return Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop) / el.clientHeight;
 }
 
+/** The list shows its newest message: within a twentieth of a screen of its end (iOS larkFollowsEnd). */
+export function atNewest(el: { scrollTop: number; clientHeight: number; scrollHeight: number }): boolean {
+  return screensFromEnd(el) < 0.05;
+}
+
 /** "Back to latest" shows when the window is not at the newest messages, or the list is more than a screen up from them. */
 export function showsJumpToLatest(hasNewer: boolean | undefined, el: { scrollTop: number; clientHeight: number; scrollHeight: number }): boolean {
   return Boolean(hasNewer) || screensFromEnd(el) > 1;

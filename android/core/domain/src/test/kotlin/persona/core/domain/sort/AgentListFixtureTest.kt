@@ -6,6 +6,7 @@ import persona.core.contracts.Session
 import persona.core.contracts.parseTime
 import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -14,7 +15,7 @@ import org.junit.runners.Parameterized
 class AgentListFixtureTest internal constructor(private val fixture: ListFixture) {
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun cases(): List<Array<Any>> = listFixtures("sort")
+        fun cases(): List<Array<Any>> = listFixtures("spec/fixtures/sort")
     }
 
     @Test fun matchesExpected() {
@@ -30,8 +31,13 @@ class AgentListFixtureTest internal constructor(private val fixture: ListFixture
             ).wire)
             "agents_list" -> {
                 val settings = input.obj("settings")
+                assumeTrue("iOS-only search settings: ${iosOnlySettings(settings)}", iosOnlySettings(settings).isEmpty())
                 val grouping = AgentGrouping.entries.single { it.name.equals(settings.string("grouping"), ignoreCase = true) }
-                val result = buildAgentList(input.sessions(), input.objects("machines").map {
+                // The raw root and descendants where a case has them: this list hangs subtasks under their parent and
+                // keeps a parent a search finds through them itself (codexTaskForest), as iOS's CodexTasks does before
+                // its core gets the prepared `search_subtasks`.
+                val sessions = if ("native_sessions" in input) input.objects("native_sessions").map(AgentSession::fromJson) else input.sessions()
+                val result = buildAgentList(sessions, input.objects("machines").map {
                     JsonCodec.decodeFromJsonElement(Machine.serializer(), it)
                 }, input.obj("pins").preferences(), input.obj("mutes").preferences(), AgentListSettings(
                     grouping = grouping,
@@ -60,5 +66,18 @@ class AgentListFixtureTest internal constructor(private val fixture: ListFixture
             else -> error("Unknown operation: ${fixture.operation}")
         }
         assertEquals(fixture.name, fixture.expected, actual)
+    }
+
+    /**
+     * The settings of iOS's Agents search this list has no counterpart for, as a case sets them (spec/fixtures/sort/README.md):
+     * a search scope other than All, Search as Code, and the dedicated machine, harness, project, model and pinned settings.
+     * Their cases are skipped here, not failed.
+     */
+    private fun iosOnlySettings(settings: JsonObject): List<String> = buildList {
+        settings.optional("search_scope")?.takeIf { it != "all" }?.let { add("search_scope=$it") }
+        if (settings.optional("search_as_code") == "true") add("search_as_code")
+        for (key in listOf("machine_title_filter", "harness_filter", "project_filter", "model_filter"))
+            if (!settings.optional(key).isNullOrEmpty()) add(key)
+        if (settings.optional("pinned_only") == "true") add("pinned_only")
     }
 }

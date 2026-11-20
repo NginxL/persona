@@ -7,7 +7,7 @@ vi.mock("./api", () => {
     constructor(readonly status: number, message: string, readonly body: Record<string, unknown> = {}) { super(message); }
     get code() { return typeof this.body.code === "string" ? this.body.code : undefined; }
   }
-  return { api, ApiError, errorText: (e: unknown) => String(e) };
+  return { api, onCredentialChange: () => () => {}, credentialOwner: () => "test-owner", ApiError, errorText: (e: unknown) => String(e) };
 });
 import { ApiError } from "./api";
 import { CompleteSessions } from "./complete-sessions";

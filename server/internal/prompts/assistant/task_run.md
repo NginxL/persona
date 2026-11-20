@@ -6,7 +6,9 @@
 （这个任务设了「有值得看的才放进收件箱」：只有发现用户需要看的事（高价值的信息、变化、要他处理的）才用 inbox_post 放一行进收件箱，没有就简短说一句；普通结果不要调用。）{{else if .InboxEvery}}
 （这个任务设了「每次都放进收件箱」：运行结束后 Persona 会自己放一行进收件箱，你不用调用 inbox_post，把结果写清楚就行。）{{end}}{{.State}}{{if .Facts}}
 
-{{.Facts}}{{end}}
+{{.Facts}}{{end}}{{if .TodoID}}
+
+Linked to-do: {{.TodoID}}. Advance this to-do within its approved scope. Report new output and evidence accurately; if no work could be advanced, say why. Persona checks observable progress after this run; repeating a status summary does not count as progress.{{end}}
 
 {{.Prompt}}{{if and .KBHint (not .Continued)}}
 

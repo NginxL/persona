@@ -166,7 +166,7 @@ struct GitHubThreadHeader: View {
                     .accessibilityLabel("Status: \(GitHubThread.stateTitle(chat.state))") // not the symbol's name
                     .accessibilityIdentifier("github.state")
                 if let a = chat.author {
-                    ThreadAvatar(connector: connector, name: a.name, ref: a.avatar, size: Theme.Size.iconS)
+                    ThreadAvatar(connector: connector, person: a, size: Theme.Size.iconS)
                     Text("Opened by \(a.name)").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
@@ -263,7 +263,7 @@ struct GitHubByline: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.sm) {
-            ThreadAvatar(connector: connector, name: person.name, ref: person.avatar, size: Theme.Size.iconS)
+            ThreadAvatar(connector: connector, person: person, size: Theme.Size.iconS)
             Text(person.name).font(Theme.Font.captionStrong).lineLimit(1)
             if let detail {
                 Label {

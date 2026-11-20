@@ -14,7 +14,7 @@ import (
 )
 
 // The record of permission mode changes (#10297, docs/protocol/protocol.md「Session mode changes」). A mode picked
-// through the hub's /modes route reaches the node as session.modes with the hub's NodeCall.Actor: the manager keeps who
+// through the hub's /modes route or by the assistant reaches the node as session.modes with a trusted actor: the manager keeps who
 // asked, from which mode to which, and whether it took effect at once or by a restart into Full access that waits for
 // the turn to end (the node's restart_queued). What became of such a restart comes as the node's session.mode_restart
 // event (node/mode_restart.go). The apps read one session's rows to draw a line in its chat.
@@ -51,7 +51,9 @@ func (m *Machine) modeSetFrom(p devicewire.NodeCall, params json.RawMessage) (si
 }
 
 // recordModeSet keeps a session.modes call the node took: who asked, from and to, and how it took effect (its answer's
-// applied: "now" or "restart"; an older node says neither, kept as "").
+// applied: "now" or "restart"; an older node says neither, kept as ""). A pick of the mode the session runs in already
+// changed nothing and is not kept: with a restart into Full access waiting, it called that off, and the node's
+// session.mode_restart event (cancelled) is the record of it (#11089).
 func (m *Machine) recordModeSet(actor *devicewire.Actor, sid, from, to string, out json.RawMessage) {
 	st, ok := m.d.opts.Store.(modeChangeStore)
 	if !ok || actor == nil {
@@ -64,6 +66,9 @@ func (m *Machine) recordModeSet(actor *devicewire.Actor, sid, from, to string, o
 	applied := ""
 	if answer.Applied == db.ModeAppliedNow || answer.Applied == db.ModeAppliedRestart {
 		applied = answer.Applied
+	}
+	if from != "" && from == to && applied != db.ModeAppliedRestart {
+		return
 	}
 	c := db.SessionModeChange{MachineID: m.cfg.ID, SessionID: sid, Kind: db.ModeChangeSet, From: from, To: to, Applied: applied,
 		ActorKind: actor.Kind, DeviceID: actor.DeviceID, DeviceName: actor.DeviceName}
@@ -124,4 +129,13 @@ func (d *Devices) getModeChanges(w http.ResponseWriter, r *http.Request, m *Mach
 		changes = append(changes, list...)
 	}
 	writeJSON(w, map[string]any{"changes": changes})
+}
+
+// onModeSet keeps a plan hook's returned setMode, using the node's actual plan-then choice.
+func (m *Machine) onModeSet(params json.RawMessage) {
+	var e proto.ModeSetEvent
+	if json.Unmarshal(params, &e) != nil || e.SessionID == "" || strings.TrimSpace(e.To) == "" || e.Actor == nil {
+		return
+	}
+	m.recordModeSet(e.Actor, e.SessionID, e.From, e.To, nil)
 }

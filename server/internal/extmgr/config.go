@@ -50,6 +50,9 @@ type Config struct {
 	// SentRecallHours is how many hours after a send it can be taken back (sent_recall.go): 0 or absent is 24, below 0
 	// is no limit; a connector may allow less.
 	SentRecallHours int `json:"sent_recall_hours,omitempty"`
+	// RemoteImages is manager.json's remote_images, read here for the avatars route's fetches (avatars.go) as the
+	// assistant reads it for /remote-image: its doh.
+	RemoteImages RemoteImagesConfig `json:"remote_images,omitempty"`
 
 	dir      string
 	warnings []string // said once when the manager starts (loadConfig)
@@ -61,6 +64,12 @@ type Config struct {
 type ExtensionMarketConfig struct {
 	// Proxy is an http:// or socks5:// URL used for catalog reads, package downloads and HTTPS git clones.
 	Proxy string `json:"proxy,omitempty"`
+}
+
+// RemoteImagesConfig is manager.json's remote_images: DoH is the DNS-over-HTTPS JSON API asked for a host's real
+// addresses behind a fake-IP proxy (nil: remoteimage.DefaultDoH; "": none, and such pictures are refused).
+type RemoteImagesConfig struct {
+	DoH *string `json:"doh,omitempty"`
 }
 
 // GoogleConfig is the iOS OAuth client behind Gmail's "Sign in with Google" (docs/extensions/mail.md).

@@ -258,7 +258,7 @@ struct ExtensionDetailView: View {
                                   }, done: { focusedNumber = nil })
         }
         #endif
-        .confirmationDialog(disableDialogTitle, isPresented: disableDialogPresented, titleVisibility: .visible) {
+        .accessibleConfirmationDialog(disableDialogTitle, isPresented: disableDialogPresented, titleVisibility: .visible, hasCancel: true) {
             switch page.disableDialog {
             case .some(.dependents):
                 Button(role: .destructive) { Task { await page.confirmDisable() } } label: { Text("Turn Off All").lineLimit(1) }
@@ -1161,9 +1161,9 @@ private struct SecretProviderSections: View {
                         }
                     }
                     .accessibilityAction(named: Text("Remove [Handoff Rule]")) { if editable { confirming = r.id } }
-                    .confirmationDialog(String(localized: "Remove this rule?"),
+                    .accessibleConfirmationDialog(String(localized: "Remove this rule?"),
                                         isPresented: Binding(get: { confirming == r.id }, set: { if !$0 { confirming = nil } }),
-                                        titleVisibility: .visible) {
+                                        titleVisibility: .visible, hasCancel: true) {
                         Button(role: .destructive) { Task { await remove(r) } } label: { Text("Remove [Handoff Rule]").lineLimit(1) }
                             .accessibilityIdentifier("handoff-rule-remove-confirm")
                         Button("Cancel", role: .cancel) {}

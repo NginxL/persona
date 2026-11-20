@@ -262,12 +262,11 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
       className="flex select-none items-center justify-between gap-3 px-2 py-1.5 text-[13px] font-medium"
     >
       <div
-        key={done ? "done" : breath.cycle}
         onAnimationEnd={done ? undefined : breath.ended}
         aria-hidden={hidden || undefined}
         className={`flex min-w-0 items-center gap-1.5 ${behind ? "text-ai" : "text-status-accent"} ${hidden ? "invisible" : done ? "status-done" : breath.cycle ? "status-breath" : ""}`}
         data-running-done={done || undefined}
-        style={fade}
+        style={breath.cycle && !done && !hidden && !(breath.cycle % 2) ? { ...fade, animationName: "status-breath-again" } : fade}
       >
         <Icon name={icon} size={14} stroke={done ? 2.5 : undefined} className={`shrink-0 ${done ? "" : "-translate-y-px"}`} />
         {offline && <Disconnected />}

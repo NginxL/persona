@@ -1,0 +1,11 @@
+{
+  "sections": [
+    {
+      "items": [
+        {"type": "graph", "nodes": [
+          {"id": "a", "title": "a", "started_at": 20, "ended_at": -5}
+        ]}
+      ]
+    }
+  ]
+}

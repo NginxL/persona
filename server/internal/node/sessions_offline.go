@@ -190,7 +190,9 @@ func (n *Node) scanOffline() []proto.Session {
 		if !n.sessionScopeAllows(cwd) {
 			continue
 		}
-		if cwd != "" && n.cwdBlocked(cwd) {
+		// A blocked Agent folder never takes the assistant's own conversations or the sessions the hub keeps out, at
+		// rest as in the live list (sessions.go); a blocked Claude config folder still does here.
+		if n.restBlocked(id, cwd, keep) {
 			continue
 		}
 		// Sessions that never produced output (hook probes): small files read whole with no title and no words. A bigger
@@ -210,7 +212,7 @@ func (n *Node) scanOffline() []proto.Session {
 		setContext(&s, m)
 		s.ModelFallback = m.modelFallback
 		n.setModelRestore(&s, c.path, m)
-		s.PermissionMode, s.Effort = n.currentModes(id, m)
+		n.terminalModesRow(&s, m)
 		untitled(&s, m)
 		out = append(out, s)
 		shown[id] = true

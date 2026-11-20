@@ -161,7 +161,7 @@ describe("UI 版本 2：上下文", () => {
     vi.stubGlobal("navigator", { language: "zh-CN" });
     const c = uiContext({ machine: "m1", size: "compact" });
     expect(c).toMatchObject({ platform: "web", ui_version: UI_VERSION, locale: "zh-CN", machine: "m1", size: "compact" });
-    expect(UI_VERSION).toBe(9);
+    expect(UI_VERSION).toBe(10);
     expect(c.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(uiContext()).not.toHaveProperty("launcher");
     expect(uiContext({ launcher: "work" }).launcher).toBe("work");
@@ -364,5 +364,13 @@ describe("单类目的 stacked bar 画横向分段条（#5386）", () => {
   });
   it("keeps a zero-value part aligned with the other shares", () => {
     expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", 0), onePoint("b", 100)] })?.map((p) => p.ratio)).toEqual([0, 1]);
+  });
+  it("keeps shares proportional when the sum of finite values overflows", () => {
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", Number.MAX_VALUE), onePoint("b", Number.MAX_VALUE)] })?.map((p) => p.ratio)).toEqual([0.5, 0.5]);
+  });
+  it("rejects non-finite values and empty points", () => {
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", Number.NaN), onePoint("b", 1)] })).toBeNull();
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", Number.POSITIVE_INFINITY), onePoint("b", 1)] })).toBeNull();
+    expect(stackedShare({ kind: "bar", stacked: true, series: [{ name: "a", points: [] }, onePoint("b", 1)] })).toBeNull();
   });
 });

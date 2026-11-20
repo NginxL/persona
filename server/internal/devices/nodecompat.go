@@ -49,13 +49,13 @@ func nodeHas(info proto.NodeInfo, cap string) bool {
 		return slices.Contains(info.Capabilities, cap)
 	}
 	switch cap {
-	case nodeproto.AssistantConfigDir, nodeproto.AssistantSupervisionInstructions, nodeproto.AssistantServiceTier, nodeproto.SessionSkills, nodeproto.OwnerControls:
+	case nodeproto.AssistantConfigDir, nodeproto.AssistantSupervisionInstructions, nodeproto.AssistantServiceTier, nodeproto.SessionStartSpeed, nodeproto.SessionSkills, nodeproto.TaskExecution, nodeproto.OwnerControls, nodeproto.NodeLanes, nodeproto.SessionEchoStatus, nodeproto.SourcePermissions:
 		return false // these contracts arrived after the handshake
 	case nodeproto.ModelConfiguration:
 		return info.Version == "" || info.ModelConfiguration // "": a test's or a dev node that said nothing
 	case nodeproto.NodeUpdate:
 		return info.NodeUpdate
-	case nodeproto.Ultracode, nodeproto.StartGoal, nodeproto.HealthSpaces, nodeproto.SecretRun, nodeproto.ModelHTTP, nodeproto.ModelRun, nodeproto.LauncherSwitchNow, nodeproto.LauncherSwitchIdle, nodeproto.NodeUpdateIdle, nodeproto.PaneNewSpace, nodeproto.MachineDiagnose: // came after the handshake: no node from before it has them
+	case nodeproto.Ultracode, nodeproto.StartGoal, nodeproto.HealthSpaces, nodeproto.SecretRun, nodeproto.ModelHTTP, nodeproto.ModelRun, nodeproto.LauncherSwitchNow, nodeproto.LauncherSwitchIdle, nodeproto.NodeUpdateIdle, nodeproto.PaneNewSpace, nodeproto.MachineDiagnose, nodeproto.AgentDirsBlocked: // came after the handshake: no node from before it has them
 		return info.Version == ""
 	}
 	return true

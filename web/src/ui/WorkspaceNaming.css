@@ -1,0 +1,5 @@
+@reference "../styles.css";
+
+.workspace-naming-toggle { @apply rounded-none; }
+.workspace-naming-actions { @apply sm:justify-end; }
+.workspace-naming-options { @apply sm:items-end; }

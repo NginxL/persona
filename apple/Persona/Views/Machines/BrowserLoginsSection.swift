@@ -223,7 +223,7 @@ extension View {
     func browserLoginsClearDialog(_ clearing: Binding<[String]?>, busy: Bool, run: @escaping ([String]) async -> Void) -> some View {
         let sites = clearing.wrappedValue ?? []
         let title = sites.count == 1 ? String(localized: "Clear Sign-in for \(sites[0])?") : String(localized: "Clear Sign-ins for \(sites.count) Sites?")
-        return confirmationDialog(title, isPresented: Binding(get: { clearing.wrappedValue != nil }, set: { if !$0 { clearing.wrappedValue = nil } }),
+        return accessibleConfirmationDialog(title, isPresented: Binding(get: { clearing.wrappedValue != nil }, set: { if !$0 { clearing.wrappedValue = nil } }),
                                   titleVisibility: .visible) {
             Button("Clear [Image Editor bce237]", role: .destructive) {
                 Task {

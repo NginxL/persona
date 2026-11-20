@@ -1,5 +1,6 @@
 // "Computers": every computer the hub drives and every way it reaches each one (paths), adding computers, persona-link pairing,
-// re-pairing a connector, reconnect, remove. New computers come through the node service (docs/archive/operations/plan-hub-center.md 0,
+// re-pairing a connector, reconnect, remove, switching an ssh computer to Persona Link (#10662, views/machines/LinkSwitch.tsx).
+// New computers come through the node service (docs/archive/operations/plan-hub-center.md 0,
 // 4): the computer dials the hub (kind link, a persona-link pairing link) or the hub dials the computer's connector
 // (kind service, the persona://connector link it prints). Both connect at once; removing waits for a restart.
 import { useEffect, useState } from "react";
@@ -9,6 +10,9 @@ import { ago } from "../../lib/format";
 import { Button, Collapse, cx, Dialog, IconButton, toast, useNow } from "../../ui/atoms";
 import { adminApi, AdminError, addLinkMachine, addServiceMachine, errorText, linkPair, repairConnector } from "../api";
 import { AdminIcon, type AdminIconName } from "../icons";
+import { linkSwitchRunning } from "../../lib/link-switch";
+import type { MachineLinkSwitch } from "../../lib/types";
+import { LinkSwitch } from "../../views/machines/LinkSwitch";
 import { canRemove, countdown, isLegacy, linuxInstallCommand, machineStatus, needsRepair, parseConnectorLink, pathRows, validHostPort, validMachineId, validProxy, viaLabel } from "../logic";
 import { devDialog, navigate } from "../router";
 import { share, useShared } from "../store";
@@ -45,8 +49,9 @@ export function Machines() {
     else setRepairing(data.machines.find(needsRepair) ?? null);
   }, [data, devOpened]);
 
-  // Online state and the paths' round trips move on their own.
-  useVisiblePoll(reload, 15_000, Boolean(data));
+  // Online state and the paths' round trips move on their own; a switch to Persona Link moves faster (#10662).
+  const switching = data?.machines.some((m) => linkSwitchRunning(m.link_switch)) ?? false;
+  useVisiblePoll(reload, switching ? 3_000 : 15_000, Boolean(data));
 
   const changed = (r?: Restart) => {
     if (r) share({ restart: r });
@@ -271,6 +276,16 @@ function MachineRow({
           )}
         </div>
       </div>
+      {active && (!m.hub_id || !selfId || m.hub_id === selfId) && (
+        <LinkSwitch
+          machineId={m.id}
+          name={m.name || m.id}
+          state={m.link_switch}
+          post={() => adminApi<{ link_switch?: MachineLinkSwitch }>(`/machines/${enc(m.id)}/link-switch`, "POST")}
+          refresh={() => onChanged()}
+          className="mt-2 ml-12 max-w-[560px]"
+        />
+      )}
       {paths.length > 1 && <Paths rows={paths} />}
     </div>
   );

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration form: the synthetic all-types document</title>
+<!-- web/e2e/configuration-form.mjs opens this page on the Vite dev server (never part of a build): the real generic
+     configuration form (src/views/settings/configuration/ConfigurationForm.tsx) over the shared synthetic all-types
+     document (schema/configuration/all-types.json, through src/lib/configuration/fixtures/shared.ts) with an in-memory
+     source. ?version=2 serves it as a newer schema version; ?fail=<code> rejects the next write with that code. -->
+<body class="bg-page">
+<!-- The wider showcase (configuration-showcase.html): several mock modules and scenarios, for people rather than the
+     single-document checks below. -->
+<p class="mx-auto max-w-[760px] px-5 pt-4 text-[12px] text-ink-3 sm:px-8"><a class="underline" href="/e2e/configuration-showcase.html">配置展示 / Configuration showcase</a></p>
+<div id="root" class="mx-auto max-w-[760px] px-5 py-6 sm:px-8"></div>
+<script type="module">
+  import "/src/styles.css";
+  import { initI18n } from "/src/i18n/index.ts";
+  import { applyLook } from "/src/ui/look.ts";
+  applyLook();
+  document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches);
+  await initI18n();
+  const [{ createElement }, { createRoot }, { ConfigurationForm }, { ConfigurationError }, { allTypes }] = await Promise.all([
+    import("react"),
+    import("react-dom/client"),
+    import("/src/views/settings/configuration/ConfigurationForm.tsx"),
+    import("/src/lib/configuration/contract.ts"),
+    import("/src/lib/configuration/fixtures/shared.ts"),
+  ]);
+  const q = new URLSearchParams(location.search);
+  let doc = structuredClone(allTypes);
+  if (q.get("version")) doc.schema_version = Number(q.get("version"));
+  let fail = q.get("fail");
+  window.updates = [];
+  const source = {
+    key: "fixture",
+    read: async () => structuredClone(doc),
+    update: async (u) => {
+      window.updates.push(u);
+      await new Promise((r) => setTimeout(r, 150));
+      if (fail) {
+        const code = fail;
+        fail = null;
+        // a request that never gets an answer, as a transport or a proxy can fail it
+        if (code === "network") throw new TypeError("Failed to fetch");
+        if (code === "timeout") throw new DOMException("timed out", "AbortError");
+        if (code === "malformed") return null;
+        throw new ConfigurationError(code);
+      }
+      if (u.revision !== doc.revision) throw new ConfigurationError("configuration_conflict");
+      const next = structuredClone(doc);
+      const fields = next.groups.flatMap((g) => g.fields);
+      Object.assign(next.values, u.changes ?? {});
+      for (const id of u.reset ?? []) next.values[id] = fields.find((f) => f.id === id).default;
+      next.revision = doc.revision + "+";
+      doc = next;
+      return structuredClone(doc);
+    },
+  };
+  createRoot(document.getElementById("root")).render(createElement(ConfigurationForm, { source }));
+</script>

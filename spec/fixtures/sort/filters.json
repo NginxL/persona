@@ -1072,6 +1072,596 @@
         "unread_shown": []
       },
       "derived": true
+    },
+    {
+      "name": "search_scope_title_matches_display_names",
+      "description": "Title scope searches the title, space name, and slot name.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:361-405 AgentListProjection.build"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"title-hit","title":"Needle title","cwd":"/code/plain","status":"idle","state":"working"},
+          {"machine_id":"m","session_id":"space-hit","title":"Space","cwd":"/code/plain","status":"idle","state":"working","space_name":"Needle project"},
+          {"machine_id":"m","session_id":"slot-hit","title":"Slot","cwd":"/code/plain","status":"idle","state":"working","slot_name":"Needle tab"},
+          {"machine_id":"m","session_id":"reply-only","title":"Reply","cwd":"/code/needle","status":"idle","state":"working","last_text":"Needle reply"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"title"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":3,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/slot-hit","m/space-hit","m/title-hit"],"visible_rows":["m/slot-hit","m/space-hit","m/title-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_scope_title_rejects_other_fields",
+      "description": "Title scope ignores paths, branches, replies, requests, and errors.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"out-of-scope","title":"Ordinary","cwd":"/code/needle","repo_root":"/code/needle","branch":"needle","status":"idle","state":"working","last_text":"Needle reply","asks":"Needle request","turn_error":"Needle error"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"title"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_scope_conversation_matches_prose_and_summaries",
+      "description": "Conversation scope searches requests, goals, prose replies, and work summaries.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:139-173 Session.proseOnlyLastText and matchesScope",
+        "apple/Shared/Models.swift:1147-1159 Session.goal and lastText",
+        "apple/Shared/Models.swift:1680-1723 WorkState"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"asks-hit","title":"Request","cwd":"/code/plain","status":"idle","state":"working","asks":"Needle request"},
+          {"machine_id":"m","session_id":"goal-hit","title":"Goal","cwd":"/code/plain","status":"idle","state":"working","goal":{"objective":"Needle objective","status":"active"}},
+          {"machine_id":"m","session_id":"prose-hit","title":"Reply","cwd":"/code/plain","status":"idle","state":"working","last_text":"Running tests\nA Needle answer"},
+          {"machine_id":"m","session_id":"title-hit","title":"Needle title","cwd":"/code/plain","status":"idle","state":"working"},
+          {"machine_id":"m","session_id":"work-hit","title":"Work","cwd":"/code/plain","status":"idle","state":"working","work":{"phase":"done","line":"Needle summary"}}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"conversation"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":5,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/asks-hit","m/goal-hit","m/prose-hit","m/title-hit","m/work-hit"],"visible_rows":["m/asks-hit","m/goal-hit","m/prose-hit","m/title-hit","m/work-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_scope_conversation_rejects_tool_noise",
+      "description": "Conversation scope excludes command and tool lines and user-only todo summaries.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:139-173 Session.proseOnlyLastText and matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"tool-only","title":"Ordinary","cwd":"/code/plain","status":"idle","state":"working","last_text":"Running Needle\nTool: Needle\n$ Needle\ntool_use Needle","todo":{"id":"t","title":"Needle todo"}}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"conversation"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_scope_user_matches_request_summaries",
+      "description": "User scope searches requests, goals, todos, and titles.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope",
+        "apple/Shared/Models.swift:854-857 SessionTodoRef",
+        "apple/Shared/Models.swift:1924-1963 GoalInfo"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"asks-hit","title":"Request","cwd":"/code/plain","status":"idle","state":"working","asks":"Needle request"},
+          {"machine_id":"m","session_id":"goal-hit","title":"Goal","cwd":"/code/plain","status":"idle","state":"working","goal":{"objective":"Needle objective","status":"active"}},
+          {"machine_id":"m","session_id":"todo-hit","title":"Todo","cwd":"/code/plain","status":"idle","state":"working","todo":{"id":"t","title":"Needle todo"}},
+          {"machine_id":"m","session_id":"title-hit","title":"Needle title","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"user"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":4,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/asks-hit","m/goal-hit","m/title-hit","m/todo-hit"],"visible_rows":["m/asks-hit","m/goal-hit","m/title-hit","m/todo-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_scope_user_rejects_assistant_fields",
+      "description": "User scope ignores assistant prose, work lines, and error reasons.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"assistant-only","title":"Ordinary","cwd":"/code/plain","status":"idle","state":"working","last_text":"Needle answer","work":{"phase":"done","line":"Needle summary"},"turn_error":"Needle error"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"user"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_scope_assistant_matches_prose_and_work",
+      "description": "Assistant scope searches prose replies and work summaries.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:139-173 Session.proseOnlyLastText and matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"prose-hit","title":"Reply","cwd":"/code/plain","status":"idle","state":"working","last_text":"Running tests\nA Needle answer"},
+          {"machine_id":"m","session_id":"work-hit","title":"Work","cwd":"/code/plain","status":"idle","state":"working","work":{"phase":"done","line":"Needle summary"}}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"assistant"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":2,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/prose-hit","m/work-hit"],"visible_rows":["m/prose-hit","m/work-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_scope_assistant_rejects_user_and_tool_fields",
+      "description": "Assistant scope ignores titles, user requests, and tool-only lines.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:139-173 Session.proseOnlyLastText and matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"user-only","title":"Needle title","cwd":"/code/plain","status":"idle","state":"working","asks":"Needle request","goal":{"objective":"Needle objective","status":"active"},"todo":{"id":"t","title":"Needle todo"},"last_text":"Running Needle\nTool: Needle"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"assistant"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_scope_errors_matches_reason_fields",
+      "description": "Errors scope searches start, turn, failure, attention, work, and title evidence on error rows.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:131-137 Session.hasErrorOrBlock",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope",
+        "apple/Shared/Models.swift:1189-1214 Session error fields"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"start-hit","title":"Start","cwd":"/code/plain","status":"idle","state":"working","start_error":"Needle start failure"},
+          {"machine_id":"m","session_id":"turn-hit","title":"Turn","cwd":"/code/plain","status":"idle","state":"working","turn_error":"Needle turn failure"},
+          {"machine_id":"m","session_id":"failure-hit","title":"Failure","cwd":"/code/plain","status":"idle","state":"working","failure_reason":"Needle host failure"},
+          {"machine_id":"m","session_id":"attention-hit","title":"Attention","cwd":"/code/plain","status":"idle","state":"working","attention_reason":"Needle attention"},
+          {"machine_id":"m","session_id":"work-hit","title":"Work","cwd":"/code/plain","status":"idle","state":"working","work":{"phase":"blocked","line":"Needle blocked"}},
+          {"machine_id":"m","session_id":"title-hit","title":"Needle title","cwd":"/code/plain","status":"idle","state":"needs_you"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"errors"}
+      },
+      "expected": {
+        "counts": {"needsYou":1,"unread":0,"working":5,"backgroundWaiting":0},
+        "groups": [
+          {"id":"state/needs","title":"需要你","rows":["m/title-hit"],"visible_rows":["m/title-hit"],"folded":false},
+          {"id":"state/working","title":"工作中","rows":["m/attention-hit","m/failure-hit","m/start-hit","m/turn-hit","m/work-hit"],"visible_rows":["m/attention-hit","m/failure-hit","m/start-hit","m/turn-hit","m/work-hit"],"folded":false}
+        ],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_scope_errors_rejects_non_error_evidence",
+      "description": "Errors scope requires an error row and ignores non-error source fields.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:131-173 Session.hasErrorOrBlock and matchesScope"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"clean-title","title":"Needle title","cwd":"/code/plain","status":"idle","state":"working","last_text":"Needle reply"},
+          {"machine_id":"m","session_id":"wrong-error-field","title":"Ordinary","cwd":"/code/plain","status":"idle","state":"working","asks":"Needle request","turn_error":"Different failure"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"errors"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_scope_errors_without_terms_lists_only_error_rows",
+      "description": "An empty Errors search keeps only rows with error or blocking evidence.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:361-405 AgentListProjection.build"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"failed","title":"Failed","cwd":"/code/plain","status":"idle","state":"working","start_error":"Start failed"},
+          {"machine_id":"m","session_id":"clean","title":"Clean","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"errors"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/failed"],"visible_rows":["m/failed"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "machine_qualifier_matches_registry_title",
+      "description": "The machine qualifier searches the registry title, not only its identifier.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:361-372 AgentListProjection.build machine matching"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m-build","session_id":"build-hit","title":"Ordinary","cwd":"/code/plain","status":"idle","state":"working"},
+          {"machine_id":"m-office","session_id":"title-decoy","title":"Build","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m-build","name":"Build Mac"},{"id":"m-office","name":"Office Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"machine:build","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m-build/build-hit"],"visible_rows":["m-build/build-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "machine_qualifier_rejects_session_title_match",
+      "description": "A session title cannot satisfy a machine qualifier on another machine.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:361-372 AgentListProjection.build machine matching"],
+      "input": {
+        "sessions": [{"machine_id":"m-office","session_id":"title-decoy","title":"Build","cwd":"/code/plain","status":"idle","state":"working"}],
+        "machines": [{"id":"m-office","name":"Office Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"machine:build","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "composable_qualifiers_match_with_plain_term",
+      "description": "Machine, harness, project, model, pin, and plain-term predicates are conjunctive.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:29-61 AgentParsedQuery.parse",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:361-395 AgentListProjection.build predicate composition",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:108-129 Session harness, project, and model names"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m-build","session_id":"full-hit","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"},
+          {"machine_id":"m-build","session_id":"wrong-harness","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"codex","model":"claude-opus-5"},
+          {"machine_id":"m-build","session_id":"wrong-project","title":"Needle release","cwd":"/code/other","repo_root":"/code/other","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"},
+          {"machine_id":"m-build","session_id":"wrong-model","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"gpt-5"},
+          {"machine_id":"m-build","session_id":"wrong-term","title":"Other","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"},
+          {"machine_id":"m-office","session_id":"wrong-machine","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"}
+        ],
+        "machines": [{"id":"m-build","name":"Build Mac"},{"id":"m-office","name":"Office Mac"}],
+        "pins": {"spaces":[],"sessions":["m-build/full-hit","m-build/wrong-harness","m-build/wrong-project","m-build/wrong-model","m-build/wrong-term","m-office/wrong-machine"]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"machine:build harness:claude project:persona model:opus is:pinned needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"pinned","title":"置顶","rows":["m-build/full-hit"],"visible_rows":["m-build/full-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "composable_qualifiers_reject_one_wrong_dimension",
+      "description": "One mismatched harness rejects an otherwise complete qualifier match.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:361-395 AgentListProjection.build predicate composition"],
+      "input": {
+        "sessions": [{"machine_id":"m-build","session_id":"wrong-harness","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"codex","model":"claude-opus-5"}],
+        "machines": [{"id":"m-build","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":["m-build/wrong-harness"]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"machine:build harness:claude project:persona model:opus is:pinned needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "dimension_settings_compose_with_plain_term",
+      "description": "Dedicated harness, project, model, and pin settings compose with query text.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile settings merge",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:211-222 AgentListProjection.Settings",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:361-395 AgentListProjection.build predicate composition"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"full-hit","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"},
+          {"machine_id":"m","session_id":"wrong-harness","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"codex","model":"claude-opus-5"},
+          {"machine_id":"m","session_id":"wrong-project","title":"Needle release","cwd":"/code/other","repo_root":"/code/other","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"},
+          {"machine_id":"m","session_id":"wrong-model","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"gpt-5"},
+          {"machine_id":"m","session_id":"unpinned-hit","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"claude-opus-5"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":["m/full-hit","m/wrong-harness","m/wrong-project","m/wrong-model"]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"m","machine_title_filter":"m","harness_filter":"claude","project_filter":"persona","model_filter":"opus","pinned_only":true,"kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"pinned","title":"置顶","rows":["m/full-hit"],"visible_rows":["m/full-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "dimension_settings_reject_wrong_model",
+      "description": "The dedicated model setting rejects a nonmatching model despite matching text.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile and 361-395 AgentListProjection.build"],
+      "input": {
+        "sessions": [{"machine_id":"m","session_id":"wrong-model","title":"Needle release","cwd":"/code/persona","repo_root":"/code/persona","status":"idle","state":"working","agent":"claude","model":"gpt-5"}],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":["m/wrong-model"]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"m","machine_title_filter":"m","harness_filter":"claude","project_filter":"persona","model_filter":"opus","pinned_only":true,"kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "search_as_code_error_keyword_filters_plain_text",
+      "description": "Search as Code makes an error keyword both text and an error predicate.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile Search as Code",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:361-395 AgentListProjection.build"
+      ],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"error-hit","title":"Failure","cwd":"/code/plain","status":"idle","state":"working","turn_error":"Failed upstream"},
+          {"machine_id":"m","session_id":"clean-title","title":"Failed clean run","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"failed","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":true}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/error-hit"],"visible_rows":["m/error-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_as_code_disabled_keeps_plain_text_matches",
+      "description": "Without Search as Code the same error keyword remains ordinary full text.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile Search as Code gate"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"error-hit","title":"Failure","cwd":"/code/plain","status":"idle","state":"working","turn_error":"Failed upstream"},
+          {"machine_id":"m","session_id":"clean-title","title":"Failed clean run","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"failed","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":false}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":2,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/clean-title","m/error-hit"],"visible_rows":["m/clean-title","m/error-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_as_code_pinned_keyword_composes_with_terms",
+      "description": "Search as Code makes a pinned keyword a pin predicate without discarding text terms.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:68-105 AgentSearchPlan.compile pinned inference"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"pin-hit","title":"Pinned needle","cwd":"/code/plain","status":"idle","state":"working"},
+          {"machine_id":"m","session_id":"unpinned-hit","title":"Pinned needle","cwd":"/code/plain","status":"idle","state":"working"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":["m/pin-hit"]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"pinned needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":true}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"pinned","title":"置顶","rows":["m/pin-hit"],"visible_rows":["m/pin-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_as_code_day_keyword_uses_ios_window",
+      "description": "The current day-keyword rule applies a 48-hour window while retaining its text term.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:79-104 AgentSearchPlan.compile and 390-395 AgentListProjection.build"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"fresh","title":"24h needle","cwd":"/code/plain","status":"idle","state":"working","updated_at":"2026-01-02T00:00:00Z"},
+          {"machine_id":"m","session_id":"stale","title":"24h needle","cwd":"/code/plain","status":"idle","state":"working","updated_at":"2026-01-01T10:00:00Z"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"24h needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":true,"now":"2026-01-03T12:00:00Z"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/fresh"],"visible_rows":["m/fresh"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_as_code_week_keyword_uses_ios_window",
+      "description": "The week-keyword rule applies a seven-day window and excludes older rows.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:79-104 AgentSearchPlan.compile and 390-395 AgentListProjection.build"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"week-hit","title":"7d needle","cwd":"/code/plain","status":"idle","state":"working","updated_at":"2025-12-31T12:00:00Z"},
+          {"machine_id":"m","session_id":"old","title":"7d needle","cwd":"/code/plain","status":"idle","state":"working","updated_at":"2025-12-25T11:00:00Z"}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"7d needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":true,"now":"2026-01-03T12:00:00Z"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/week-hit"],"visible_rows":["m/week-hit"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "search_as_code_preserves_explicit_longer_window",
+      "description": "Keyword inference does not overwrite an explicit longer since window.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:29-61 AgentParsedQuery.parse and 79-89 AgentSearchPlan.compile nil coalescing"],
+      "input": {
+        "sessions": [{"machine_id":"m","session_id":"long-window","title":"24h needle","cwd":"/code/plain","status":"idle","state":"working","updated_at":"2025-12-31T12:00:00Z"}],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"24h since:7d needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_as_code":true,"now":"2026-01-03T12:00:00Z"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/long-window"],"visible_rows":["m/long-window"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "session_summary_fields_do_not_leak_into_all_scope",
+      "description": "Goal, todo, and work summaries are scoped evidence rather than ordinary full-text fields.",
+      "source": ["apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope scope-specific field lists"],
+      "input": {
+        "sessions": [
+          {"machine_id":"m","session_id":"goal-only","title":"Goal","cwd":"/code/plain","status":"idle","state":"working","goal":{"objective":"Needle objective","status":"active"}},
+          {"machine_id":"m","session_id":"todo-only","title":"Todo","cwd":"/code/plain","status":"idle","state":"working","todo":{"id":"t","title":"Needle todo"}},
+          {"machine_id":"m","session_id":"work-only","title":"Work","cwd":"/code/plain","status":"idle","state":"working","work":{"phase":"done","line":"Needle summary"}}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"all"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "subtask_summary_evidence_retains_parent_in_user_scope",
+      "description": "A matching subtask goal retains its parent under User scope without adding a child row.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:354-405 AgentListProjection.build subtask search retention",
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope user fields",
+        "apple/Shared/Subtasks.swift:24-34 Session.isNestedSubtask and 63-77 CodexTasks.build",
+        "apple/PersonaTests/CodexTasksTests.swift:72-80 filtersGoByTheChatAndASearchKeepsTheChatOfAMatchingSubagent"
+      ],
+      "input": {
+        "native_sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent"},
+          {"machine_id":"m","session_id":"child","title":"Child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent","goal":{"objective":"Needle objective","status":"active"}}
+        ],
+        "sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent","search_subtasks":[
+            {"machine_id":"m","session_id":"child","title":"Child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent","goal":{"objective":"Needle objective","status":"active"}}
+          ]}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"user"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/parent"],"visible_rows":["m/parent"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
+    },
+    {
+      "name": "subtask_summary_evidence_does_not_leak_into_all_scope",
+      "description": "A subtask goal alone does not retain its parent under ordinary full-text search.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:151-173 Session.matchesScope and 397-405 AgentListProjection.build",
+        "apple/Shared/Subtasks.swift:63-77 CodexTasks.build"
+      ],
+      "input": {
+        "native_sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent"},
+          {"machine_id":"m","session_id":"child","title":"Child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent","goal":{"objective":"Needle objective","status":"active"}}
+        ],
+        "sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent","search_subtasks":[
+            {"machine_id":"m","session_id":"child","title":"Child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent","goal":{"objective":"Needle objective","status":"active"}}
+          ]}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"all"}
+      },
+      "expected": {"counts":{"needsYou":0,"unread":0,"working":0,"backgroundWaiting":0},"groups":[],"unread_shown":[]},
+      "derived": true
+    },
+    {
+      "name": "subtask_title_evidence_retains_parent_in_all_scope",
+      "description": "Ordinary full-text search retains the parent of a title-matching nested subtask.",
+      "source": [
+        "apple/Persona/Views/Chats/AgentListProjection.swift:397-405 AgentListProjection.build subtask search retention",
+        "apple/Shared/Subtasks.swift:63-77 CodexTasks.build",
+        "apple/PersonaTests/CodexTasksTests.swift:72-80 filtersGoByTheChatAndASearchKeepsTheChatOfAMatchingSubagent"
+      ],
+      "input": {
+        "native_sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent"},
+          {"machine_id":"m","session_id":"child","title":"Needle child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent"}
+        ],
+        "sessions": [
+          {"machine_id":"m","session_id":"parent","title":"Parent","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"parent","search_subtasks":[
+            {"machine_id":"m","session_id":"child","title":"Needle child","cwd":"/code/plain","status":"idle","state":"working","agent":"codex","source_kind":"codex_history","source_thread_id":"child","is_subagent":true,"parent_session_id":"parent"}
+          ]}
+        ],
+        "machines": [{"id":"m","name":"Build Mac"}],
+        "pins": {"spaces":[],"sessions":[]},
+        "mutes": {"spaces":[],"sessions":[],"allowed":[]},
+        "settings": {"grouping":"state","quick":"all","query":"needle","machine_filter":"","kept":[],"folded":[],"expanded_idle":[],"expanded_quiet":[],"compact":false,"search_scope":"all"}
+      },
+      "expected": {
+        "counts": {"needsYou":0,"unread":0,"working":1,"backgroundWaiting":0},
+        "groups": [{"id":"state/working","title":"工作中","rows":["m/parent"],"visible_rows":["m/parent"],"folded":false}],
+        "unread_shown": []
+      },
+      "derived": true
     }
   ]
 }

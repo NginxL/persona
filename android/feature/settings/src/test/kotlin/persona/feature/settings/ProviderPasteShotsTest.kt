@@ -1,6 +1,7 @@
 package persona.feature.settings
 
 import android.graphics.Bitmap
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -17,9 +18,10 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -27,6 +29,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,7 +48,7 @@ import java.io.File
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "en-w400dp-h1500dp-xhdpi")
 class ProviderPasteShotsTest {
-    @get:Rule val rule = createComposeRule()
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
     private val machines = listOf(Machine("mac", "Work Mac", online = false), Machine("linux", "Build box", online = true))
     private val existing = HubLauncher("work", displayName = "Work", source = "persona", baseUrl = "https://work.example.com",
@@ -57,6 +60,8 @@ class ProviderPasteShotsTest {
         val previews = mutableListOf<Pair<String, String?>>()
         val imports = mutableListOf<Triple<String, List<String>, String?>>()
         val added = mutableListOf<NewProvider>()
+        val parsed = mutableListOf<String>()
+        var parseGate: CompletableDeferred<Unit>? = null
         override suspend fun presets() = emptyList<ProviderPreset>()
         override suspend fun add(provider: NewProvider) { added += provider }
         override suspend fun launchers() = listOf(
@@ -68,15 +73,19 @@ class ProviderPasteShotsTest {
             HubLauncher("old", source = "persona", origin = "zshrc:cc_imported@mac"),
         )
         override suspend fun launcher(name: String) = launchers().first { it.name == name }
-        override suspend fun parse(text: String) = ProviderPasteResult(format = "shell", drafts = listOf(ProviderPasteDraft(
-            label = "cc_work",
-            provider = PastedProvider(name = "cc_work", displayName = "Work gateway", baseUrl = "https://work.example.com", apiKey = "eg-secret", auth = "bearer",
-                model = "new-model", models = parsedModels, env = "MAX_OUTPUT=8000", headers = "X-Team: synthetic"),
-            envNames = listOf("MAX_OUTPUT"), skippedEnv = listOf(ProviderPasteSkipped("OTHER_TOKEN", "credential")),
-            skippedHeaders = listOf(ProviderPasteSkipped("X-Api-Key", "credential")),
-            matches = listOf(ProviderPasteMatch("work", "Work", sameKey = true)),
-            notes = listOf(ProviderPasteNote("args_left_out", line = 2)),
-        )), notes = listOf(ProviderPasteNote("not_claude", name = "other")))
+        override suspend fun parse(text: String): ProviderPasteResult {
+            parsed += text
+            parseGate?.await()
+            return ProviderPasteResult(format = if (text.startsWith("persona://provider/import")) "link" else "shell", drafts = listOf(ProviderPasteDraft(
+                label = "cc_work",
+                provider = PastedProvider(name = "cc_work", displayName = "Work gateway", baseUrl = "https://work.example.com", apiKey = "eg-secret", auth = "bearer",
+                    model = "new-model", models = parsedModels, env = "MAX_OUTPUT=8000", headers = "X-Team: synthetic"),
+                envNames = listOf("MAX_OUTPUT"), skippedEnv = listOf(ProviderPasteSkipped("OTHER_TOKEN", "credential")),
+                skippedHeaders = listOf(ProviderPasteSkipped("X-Api-Key", "credential")),
+                matches = listOf(ProviderPasteMatch("work", "Work", sameKey = true)),
+                notes = listOf(ProviderPasteNote("args_left_out", line = 2)),
+            )), notes = listOf(ProviderPasteNote("not_claude", name = "other")))
+        }
         override suspend fun importPreview(machine: String, alias: String?): List<ImportedProvider> {
             previews += machine to alias
             return listOf(ImportedProvider("cc-work", "https://work.example.com", "new-model", hasKey = true, aliases = listOf("cc_work")))
@@ -111,6 +120,24 @@ class ProviderPasteShotsTest {
         rule.onNodeWithText("Found on your computers").assertDoesNotExist()
     }
 
+    @Test fun connectionHintsDescribeTheChosenProviderOnTheManualForm() {
+        val providers = Providers()
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                NewProviderPage(providers, onBack = {}, onSaved = {}, machines = machines)
+            }
+        }
+        rule.onNodeWithText("Custom compatible gateway").performClick()
+        rule.onNodeWithText("Without an available Direct API provider", substring = true).assertExists()
+        rule.onNodeWithText("Claude Code on your computer", substring = true).assertExists()
+        rule.onNodeWithText("Direct API").performClick()
+        rule.onNodeWithText("The hub calls this API directly", substring = true).assertExists()
+        rule.onNodeWithText("without starting an Agent", substring = true).assertExists()
+        rule.onNodeWithText("Claude Code launcher").performClick()
+        rule.onNodeWithText("Without an available Direct API provider", substring = true).assertExists()
+        assertTrue(providers.added.isEmpty())
+    }
+
     @Test fun oneModelUsesSingular() {
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
@@ -123,6 +150,114 @@ class ProviderPasteShotsTest {
         rule.waitForIdle()
         rule.onNodeWithText("1 model", substring = true).assertExists()
         rule.onNodeWithText("1 models", substring = true).assertDoesNotExist()
+    }
+
+    @Test fun anImportLinkLightOpensReviewAndPrefillWithoutSaving() = importLinkOpensReviewAndPrefill(false)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h1500dp-night-xhdpi")
+    @Test fun anImportLinkDarkOpensReviewAndPrefillWithoutSaving() = importLinkOpensReviewAndPrefill(true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h1500dp-xhdpi", fontScale = 2.0f)
+    @Test fun anImportLinkLargestTextLightOpensReviewAndPrefill() = importLinkOpensReviewAndPrefill(false, largest = true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h1500dp-night-xhdpi", fontScale = 2.0f)
+    @Test fun anImportLinkLargestTextDarkOpensReviewAndPrefill() = importLinkOpensReviewAndPrefill(true, largest = true)
+
+    private fun importLinkOpensReviewAndPrefill(dark: Boolean, largest: Boolean = false) {
+        val api = Providers()
+        val firstLink = "persona://provider/import?v=1&data=FAKE-EXAMPLE-KEY"
+        var link by mutableStateOf(firstLink)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true) {
+                Box(Modifier.testTag("shot").width(400.dp).height(1450.dp).background(PersonaTheme.palette.background)) {
+                    NewProviderPage(api, onBack = {}, onSaved = {}, machines = machines, importLink = link)
+                }
+            }
+        }
+        rule.waitForIdle()
+        val suffix = (if (dark) "dark" else "light") + (if (largest) "-ax" else "")
+        rule.onNodeWithText("Opened from a link", substring = true).assertExists()
+        rule.onNodeWithText("A provider import link").assertExists()
+        rule.onNodeWithText("Work gateway").assertExists()
+        rule.onNodeWithText(link, substring = true).assertDoesNotExist()
+        assertTrue("nothing is added before Save", api.added.isEmpty())
+        capture("provider-import-link-review-$suffix")
+
+        val secondLink = "persona://provider/import?v=1&data=ANOTHER-FAKE-KEY"
+        link = secondLink
+        rule.waitForIdle()
+        assertEquals("a newer external link replaces the old review", listOf(firstLink, secondLink), api.parsed)
+        rule.onNodeWithText(secondLink, substring = true).assertDoesNotExist()
+
+        rule.onNodeWithText("Add as a new provider").performClick()
+        rule.onNodeWithText("Continue").performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithText("cc_work").onFirst().assertExists()
+        rule.onNodeWithText("https://work.example.com").assertExists()
+        rule.onNodeWithText("Save").assertExists()
+        assertTrue("the prefilled form still has not saved", api.added.isEmpty())
+        capture("provider-import-link-prefill-$suffix")
+    }
+
+    @Test fun anImportLinkParsesOnlyOnceWhileItsAnswerIsPending() {
+        val api = Providers().apply { parseGate = CompletableDeferred() }
+        val link = "persona://provider/import?v=1&data=FAKE-EXAMPLE-KEY"
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                NewProviderPage(api, onBack = {}, onSaved = {}, machines = machines, importLink = link)
+            }
+        }
+        rule.waitUntil(5_000) { api.parsed.isNotEmpty() }
+        rule.mainClock.advanceTimeBy(1_000)
+        assertEquals("the delayed answer must not trigger a second request", listOf(link), api.parsed)
+        api.parseGate?.complete(Unit)
+        rule.waitForIdle()
+        assertEquals(listOf(link), api.parsed)
+        rule.onNodeWithText("Work gateway").assertExists()
+    }
+
+    @Test fun reopeningTheSameImportLinkWhileWizardIsActiveParsesAgain() {
+        val api = Providers()
+        val link = "persona://provider/import?v=1&data=FAKE-EXAMPLE-KEY"
+        val services = demoSettingsServices(rule.activity.resources).copy(demo = false, providers = api)
+        ProviderImportRequests.pending.value = link
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                SettingsScreen(services, initialPage = "providers")
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("Opened from a link", substring = true).assertExists()
+        assertEquals(listOf(link), api.parsed)
+
+        rule.onNodeWithText("Paste something else").performClick()
+        rule.waitForIdle()
+        ProviderImportRequests.pending.value = link
+        rule.waitForIdle()
+        assertEquals("the second external open must restart the active wizard's import", listOf(link, link), api.parsed)
+        rule.onNodeWithText("Opened from a link", substring = true).assertExists()
+    }
+
+    @Test fun systemBackCancelsAnExternalImportReview() = externalImportBackCancels(toolbar = false)
+
+    @Test fun toolbarBackCancelsAnExternalImportReview() = externalImportBackCancels(toolbar = true)
+
+    private fun externalImportBackCancels(toolbar: Boolean) {
+        val api = Providers()
+        var closed = false
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                NewProviderPage(api, onBack = { closed = true }, onSaved = {}, machines = machines,
+                    importLink = "persona://provider/import?v=1&data=FAKE-EXAMPLE-KEY")
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("Opened from a link", substring = true).assertExists()
+        if (toolbar) rule.onNodeWithContentDescription("Back").performClick()
+        else rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitForIdle()
+        assertTrue("the first Back leaves the import-owned wizard", closed)
+        assertTrue("Back never saves the imported draft", api.added.isEmpty())
     }
 
     @Config(sdk = [35], qualifiers = "en-w400dp-h1500dp-night-xhdpi")

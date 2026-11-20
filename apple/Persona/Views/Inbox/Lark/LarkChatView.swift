@@ -531,7 +531,7 @@ struct LarkChatView: View {
                 composer
             }
         }
-        .confirmationDialog("Start Over?", isPresented: $confirmDraftRecovery, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Start Over?", isPresented: $confirmDraftRecovery, titleVisibility: .visible, hasCancel: true) {
             Button("Clear Draft and Start Over", role: .destructive) {
                 Task {
                     do {
@@ -544,7 +544,7 @@ struct LarkChatView: View {
         } message: {
             Text("This clears this chat's draft, pending messages and attachments on this device. Messages already sent in Lark aren't affected.")
         }
-        .confirmationDialog("Restore to Current Lark Account?", isPresented: $confirmLegacyDraft, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Restore to Current Lark Account?", isPresented: $confirmLegacyDraft, titleVisibility: .visible, hasCancel: true) {
             Button("It's This Account, Restore") { restoreLegacyDraft() }.lineLimit(1)
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -1644,10 +1644,11 @@ struct LarkMessageRow: View {
                 // Mine have no avatar; the empty slot keeps them as far from the left edge as others' are from the right.
                 Group {
                     if avatar {
-                        LarkAvatarImage(name: m.senderName, url: m.senderAvatar, size: Theme.Size.wellM)
-                            .onTapGesture { showProfile() }
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityLabel("\(m.senderName)'s profile")
+                        Button(action: showProfile) {
+                            LarkAvatarImage(name: m.senderName, url: m.senderPicture, size: Theme.Size.wellM)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(m.senderName)'s profile")
                     } else { Color.clear }
                 }
                 .scaledFrame(width: Theme.Size.wellM, height: avatar ? Theme.Size.wellM : Theme.Size.line)
@@ -1693,7 +1694,7 @@ struct LarkMessageRow: View {
 
     private func showProfile() {
         guard let id = message.senderID, !id.isEmpty else { return }
-        openProfile?(LarkPersonRef(id: id, name: message.senderName, avatar: message.senderAvatar, feedID: feedID))
+        openProfile?(LarkPersonRef(id: id, name: message.senderName, avatar: message.senderPicture, feedID: feedID))
     }
 
     private var recallNotice: String { message.recallNotice }

@@ -28,7 +28,7 @@ import persona.core.designsystem.FeedbackStyle
 import persona.core.designsystem.JToastState
 import persona.core.designsystem.operationFeedback
 
-/** Compact, replace and clear operations on the manager's main conversation. */
+/** Compact the selected Assistant conversation; replace and clear only the manager's main conversation. */
 @Stable
 internal class MainConversationController(
     private val management: AssistantManagement?,
@@ -47,6 +47,7 @@ internal class MainConversationController(
     var clearBusy by mutableStateOf(false)
     var compacting by mutableStateOf(false)
     var compaction by mutableStateOf(CompactionStatus())
+    private var compactionKey: SessionKey? = null
     val clearedMain = mutableStateOf<SessionKey?>(null)
 
     private fun snapshot() = repository.assistant.value.takeIf { it.managerId == owner }
@@ -73,11 +74,20 @@ internal class MainConversationController(
         compaction = compaction.dismissed()
     }
 
+    fun observeCompaction(key: SessionKey?, run: SessionCompaction?) {
+        if (compactionKey != key) {
+            compactionKey = key
+            compaction = CompactionStatus()
+        }
+        compaction = compaction.observe(run)
+    }
+
     fun compact(active: SessionKey?, snapshot: AssistantSnapshot, shownCompaction: SessionCompaction?) {
         val key = active ?: return
         val api = management ?: return
         if (compacting) return
         compacting = true
+        observeCompaction(key, shownCompaction)
         compaction = compaction.asked(shownCompaction)
         scope.launch {
             try {
@@ -85,7 +95,9 @@ internal class MainConversationController(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                compaction = compaction.refused(snapshot.conversations.firstOrNull { it.key == key }?.compaction)
+                if (this@MainConversationController.active.value == key) {
+                    compaction = compaction.refused(snapshot.conversations.firstOrNull { it.key == key }?.compaction)
+                }
                 notify(refusal(error))
             } finally {
                 compacting = false
@@ -172,9 +184,7 @@ internal fun rememberMainConversationController(
     val controller = remember(management, repository, sender, resources, feedback, toast, owner, active) {
         MainConversationController(management, repository, sender, scope, resources, feedback, toast, owner, active)
     }
-    val shownMain = mainState.value?.let { active.value == it }
-    val compaction = shownCompaction.takeIf { shownMain == true }
-    LaunchedEffect(active.value, compaction) { controller.compaction = controller.compaction.observe(compaction) }
+    LaunchedEffect(active.value, shownCompaction) { controller.observeCompaction(active.value, shownCompaction) }
     LaunchedEffect(controller.compaction.line) {
         if (controller.compaction.line == CompactionLine.Done) {
             delay(CompactionDoneMillis)

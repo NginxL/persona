@@ -60,15 +60,38 @@ func systemTLSConfig() *tls.Config {
 	return &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}, RootCAs: systemRoots.Load()}
 }
 
-// tlsClient is an HTTP/1.1 client whose connections come from dial and whose TLS the transport runs with cfg, after
+// tlsClient is an HTTP/1.1 client whose connections come from dial and whose TLS runs with cfg, after
 // whatever dial did (a CONNECT through a proxy): the hub's check is the same on every route. An empty ServerName
 // becomes the host dialed.
 func tlsClient(cfg *tls.Config, dial func(context.Context, string, string) (net.Conn, error)) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			Proxy:                 nil, // an outbound proxy is dial's (proxyDial), never one the transport picks itself
-			DialContext:           dial,
-			TLSClientConfig:       cfg,
+			Proxy: nil, // an outbound proxy is dial's (proxyDial), never one the transport picks itself
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				raw, err := dial(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				host, _, _ := net.SplitHostPort(addr)
+				tlsCfg := cfg.Clone()
+				if tlsCfg.ServerName == "" {
+					tlsCfg.ServerName = host
+				}
+				c := tls.Client(raw, tlsCfg)
+				hctx, cancel := context.WithTimeout(ctx, dialTimeout)
+				defer cancel()
+				stop := context.AfterFunc(hctx, func() { _ = raw.Close() })
+				err = tracedHandshake(hctx, c)
+				if !stop() {
+					raw.Close()
+					return nil, hctx.Err()
+				}
+				if err != nil {
+					raw.Close()
+					return nil, err
+				}
+				return c, nil
+			},
 			TLSHandshakeTimeout:   dialTimeout, // the transport dials under a context a given-up request does not end
 			ResponseHeaderTimeout: dialTimeout,
 			MaxIdleConns:          1,

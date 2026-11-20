@@ -145,7 +145,7 @@ struct HubSettingsPage: View {
         .onChange(of: app.hubUpdate) { _, s in
             if let s, s != model.status { model.apply(s) }
         }
-        .confirmationDialog("Update Now?", isPresented: $confirmNow, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Update Now?", isPresented: $confirmNow, titleVisibility: .visible) {
             Button("Update Now", role: .destructive) { Task { await model.update(now: true) } }
         } message: {
             Text("This won't wait for them to finish: anything waiting on the hub is interrupted (the assistant's current turn, uploads in progress, terminal connections). Agents in herdr aren't affected and reconnect once the hub is back.")

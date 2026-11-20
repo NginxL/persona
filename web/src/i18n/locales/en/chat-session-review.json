@@ -1,0 +1,10 @@
+{
+  "this_work": "Review this work",
+  "busy": "The Agent is busy, starting, or waiting on another answer",
+  "running": "A review is already running",
+  "no_change": "There are no changes to review",
+  "checking": "Checking review availability…",
+  "starting": "Starting review…",
+  "requested": "Review requested",
+  "failed": "Couldn't start the review: {error}"
+}

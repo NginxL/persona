@@ -31,18 +31,7 @@ export function agentFilter(value: string | null): AgentFilter {
   return AGENT_FILTERS.find((f) => f.key === value)?.key ?? "all";
 }
 
-// "botmux" beside the filters (#2786): a show / hide switch for botmux sessions, kept in this browser. It only hides
-// them from this list; the hub's per-machine switch (machine page › "Engine") still decides whether they are listed at all.
-export const BOTMUX_HIDDEN_KEY = "persona.agentHideBotmux";
-
 export const isBotmux = (s: Session) => sessionHost(s) === "botmux";
-
-/** "Lark group" only matches botmux sessions, so it and a hidden botmux cannot both hold: hiding botmux under it goes back to
- * "All", and choosing "Lark group" shows botmux again. Returns the filter and the switch after `change`. */
-export function botmuxAndFilter(filter: AgentFilter, hidden: boolean, change: "filter" | "botmux"): { filter: AgentFilter; hidden: boolean } {
-  if (filter !== "feishu" || !hidden) return { filter, hidden };
-  return change === "botmux" ? { filter: "all", hidden } : { filter, hidden: false };
-}
 
 /** The sessions the list shows: all of them, or all but botmux's while it is hidden. */
 export function withoutBotmux(sessions: Session[], hidden: boolean): Session[] {
@@ -73,7 +62,7 @@ export function filterCounts(sessions: Session[], mutes: AgentMutes): FilterCoun
 
 /** "All", and the states that have agents right now; the chosen one stays while it empties, so it can be left. */
 export function shownFilters(selection: AgentFilter, counts: FilterCounts): AgentFilter[] {
-  return AGENT_FILTERS.map((f) => f.key).filter((k) => k === "all" || k === selection || counts[k] > 0);
+  return AGENT_FILTERS.map((f) => f.key).filter((k) => k === "all" || (k === selection && k !== "feishu") || counts[k] > 0);
 }
 
 /** The agents a filter shows: what matches now, and what it showed when it was chosen (`kept`). */

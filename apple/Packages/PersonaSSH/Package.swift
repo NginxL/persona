@@ -6,7 +6,7 @@ import PackageDescription
 // one direct-tcpip channel. Shared by the iOS and Vision apps; the watch does not link it.
 let package = Package(
     name: "PersonaSSH",
-    platforms: [.iOS(.v18), .macOS(.v26), .visionOS(.v26)],
+    platforms: [.iOS(.v18), .macOS(.v15), .visionOS(.v26)],
     products: [
         .library(name: "PersonaSSH", targets: ["PersonaSSH"]),
     ],

@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"golang.org/x/net/http/httpguts"
 )
 
 // ---- the app's API ----
@@ -120,6 +121,14 @@ func checkGateway(raw string) error {
 	return nil
 }
 
+// reservedHeaders are credentials or protocol fields owned by the request builders. User-Agent remains intentionally
+// configurable; all other arbitrary HTTP field names follow the standard token and value rules.
+var reservedHeaders = map[string]bool{
+	"host": true, "content-length": true, "content-type": true, "authorization": true, "x-api-key": true,
+	"anthropic-version": true, "accept": true, "accept-encoding": true, "connection": true, "transfer-encoding": true,
+	"proxy-authorization": true, "trailer": true, "upgrade": true,
+}
+
 // checkHeaders: one "Name: value" a line (ANTHROPIC_CUSTOM_HEADERS); the error never quotes a value.
 func checkHeaders(raw string) error {
 	for i, line := range strings.Split(raw, "\n") {
@@ -127,9 +136,13 @@ func checkHeaders(raw string) error {
 		if line == "" {
 			continue
 		}
-		name, _, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(name) == "" || strings.ContainsAny(strings.TrimSpace(name), " \t") {
+		name, value, ok := strings.Cut(line, ":")
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !ok || !httpguts.ValidHeaderFieldName(name) || !httpguts.ValidHeaderFieldValue(value) {
 			return i18n.Err("assistant-models_launchers.err_header_line", i18n.Args{"line": i + 1})
+		}
+		if reservedHeaders[strings.ToLower(name)] {
+			return i18n.Err("assistant-models_launchers.err_header_reserved", i18n.Args{"name": name})
 		}
 	}
 	return nil
@@ -374,12 +387,13 @@ var (
 	errAPITransport       = i18n.Err("assistant-models_launchers.err_api_transport")
 	errChatTransport      = i18n.Err("assistant-models_launchers.err_chat_transport")
 	errChatLaunchSettings = i18n.Err("assistant-models_launchers.err_chat_launch_settings")
+	errRuntimeHeaders     = i18n.Err("assistant-models_launchers.err_runtime_headers")
 )
 
-// checkAPITransport rejects settings the manager's direct calls cannot honor. Launcher
-// transport settings remain available to the node; an empty kind is a legacy launcher.
-func checkAPITransport(kind, api, proxy, noProxy string, hasHeaders bool) error {
-	if !hasHeaders && strings.TrimSpace(proxy) == "" && strings.TrimSpace(noProxy) == "" {
+// checkAPITransport rejects proxy settings the manager's direct calls cannot honor. Custom headers are carried by the
+// same direct client on test, discovery and inference. Launcher transport settings remain available to the node.
+func checkAPITransport(kind, api, proxy, noProxy string, _ bool) error {
+	if strings.TrimSpace(proxy) == "" && strings.TrimSpace(noProxy) == "" {
 		return nil
 	}
 	if api == "chat" {
@@ -420,7 +434,12 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 		return storedLauncher{}, i18n.Err("external-adapter.purpose_unsupported")
 	}
 	s.models.mu.Lock()
-	defer s.models.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.models.mu.Unlock()
+		}
+	}()
 	list, err := s.readStoredLaunchers(ctx)
 	if err != nil {
 		return storedLauncher{}, err
@@ -524,6 +543,9 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 			l.HeadersSealed = sealed
 		}
 	}
+	if l.Kind != "api" && l.HeadersSealed != "" && !l.CustomHeadersSupported() {
+		return storedLauncher{}, errRuntimeHeaders
+	}
 	if in.Env != nil { // left out keeps it, "" clears it
 		l.EnvSealed = ""
 		if env := strings.TrimSpace(*in.Env); env != "" {
@@ -551,13 +573,33 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 	}
 	l.APIKey, l.Headers, l.HasHeaders, l.Env, l.HasEnv = "", "", false, "", false // only ever stored sealed
 	l.Withheld, l.Rev = false, ""
+	var migrated migratedTierAliases
+	if old != nil && l.API == "chat" {
+		// This save can change the fallback provider. Clone so old still points at the pre-save list.
+		candidate := slices.Clone(list)
+		if i := slices.IndexFunc(candidate, func(x storedLauncher) bool { return x.Name == l.Name }); i >= 0 {
+			candidate[i] = l
+		} else {
+			candidate = append(candidate, l)
+		}
+		migrated, err = s.migrateTierAliases(withManagedSnapshot(ctx, candidate), *old, &l)
+		if err != nil {
+			return storedLauncher{}, err
+		}
+	}
 	if i := slices.IndexFunc(list, func(x storedLauncher) bool { return x.Name == l.Name }); i >= 0 {
 		list[i] = l
 	} else {
 		list = append(list, l)
 	}
-	if err := s.storeManagedWithKeys(ctx, list, keys, newKeys, nil); err != nil {
+	if err := s.storeManagedWithKeys(ctx, list, keys, newKeys, migrated.settings); err != nil {
 		return l, err
+	}
+	if migrated.profileChanged {
+		s.models.mu.Unlock()
+		locked = false
+		s.ProfileChanged(ctx)
+		s.profileEvent(ctx, migrated.active)
 	}
 	return l, nil
 }

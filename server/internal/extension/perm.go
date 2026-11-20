@@ -86,7 +86,7 @@ func (p Permissions) normalized() Permissions {
 func (p Permissions) FullHub() bool { return p.HubAPI && len(p.Hub) == 0 }
 
 // Covers says whether p grants everything q asks (an upgrade asking for no more needs no new consent). The full token
-// covers every scope but agents.permission_mode, which only a grant naming it covers; scopes never cover the full token.
+// covers only the scopes InEveryScope includes; named-only scopes need a grant naming them. Scopes never cover the full token.
 func (p Permissions) Covers(q Permissions) bool {
 	if q.FullHub() && !p.FullHub() || q.LauncherKeys && !p.LauncherKeys || q.GhLogin && !p.GhLogin ||
 		q.UsageGateways && !p.UsageGateways || q.AgentRuntimes && !p.AgentRuntimes || q.ErrorReports && !p.ErrorReports ||

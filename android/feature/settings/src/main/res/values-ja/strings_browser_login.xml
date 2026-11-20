@@ -5,8 +5,32 @@
     <string name="settings_browser_login_title">このブラウザへのログインを許可しますか？</string>
     <string name="settings_browser_login_loading">ログイン要求を確認しています…</string>
     <string name="settings_browser_login_failed">コードが期限切れか、別の Persona のものです。パソコンで更新してください。</string>
-    <string name="settings_browser_login_details">%1$s に Persona へのアクセスを許可しますか？自分が使っているブラウザだけを承認してください。デバイスから取り消せます。</string>
+    <string name="settings_browser_login_only_yours">いま自分でログインしようとしているブラウザだけを許可してください。</string>
+    <string name="settings_browser_login_browser">ブラウザ</string>
+    <string name="settings_browser_login_browser_note">ブラウザ自身が名乗った名前です</string>
+    <string name="settings_browser_login_from">送信元</string>
+    <string name="settings_browser_login_network_lan">ローカルネットワーク</string>
+    <string name="settings_browser_login_network_internet">インターネット</string>
+    <string name="settings_browser_login_network_unknown">判別できません</string>
+    <string name="settings_browser_login_network_unknown_note">リクエストが転送されたため、本当の送信元はわかりません</string>
+    <string name="settings_browser_login_requested">リクエスト</string>
+    <string name="settings_browser_login_gets">付与される権限</string>
+    <string name="settings_browser_login_full_access">このスマートフォンと同じフルアクセス</string>
+    <string name="settings_browser_login_revoke">設定 › デバイス でいつでも取り消せます</string>
+    <string name="settings_browser_login_internet_warning">このリクエストはインターネットから届きました。いま自分でログインしようとしているブラウザだけを許可してください。</string>
     <string name="settings_browser_login_allow">ログインを許可</string>
     <string name="settings_browser_login_cancel">キャンセル</string>
-    <string name="settings_browser_login_source">接続元 %1$s · %2$d 秒前の要求</string>
+
+    <string name="settings_browser_login_number_title">この数字をブラウザに入力</string>
+    <string name="settings_browser_login_number_secret">この数字を誰にも教えないでください。</string>
+    <string name="settings_browser_login_number_one_try">入力は1回だけで、間違えるとこのログインは取り消されます。</string>
+    <string name="settings_browser_login_number_waiting">ブラウザでの入力を待っています…</string>
+    <string name="settings_browser_login_decided">このログインはすでに処理されています</string>
+    <string name="settings_browser_login_signed_in">ブラウザがログインしました</string>
+    <string name="settings_browser_login_signed_in_detail">「%1$s」が設定 › デバイスに追加されました。</string>
+    <string name="settings_browser_login_voided">数字が一致しなかったため、このログインは取り消されました</string>
+    <string name="settings_browser_login_voided_detail">ブラウザでコードを更新してもう一度お試しください。</string>
+    <string name="settings_browser_login_denied">このログインは拒否されました</string>
+    <string name="settings_browser_login_expired">このコードは期限切れです</string>
+    <string name="settings_browser_login_expired_detail">ブラウザでコードを更新してもう一度お試しください。</string>
 </resources>

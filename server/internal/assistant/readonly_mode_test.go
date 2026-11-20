@@ -189,7 +189,7 @@ func TestReadonlyModeTaskPlan(t *testing.T) {
 							t.Fatalf("plan=%+v starts=%v, want mode %s", p.Tasks, f.starts, want)
 						}
 						prompt, _ := f.starts[0]["prompt"].(string)
-						if strings.Count(prompt, prompts.RenderReadonlyTaskConstraint()) != 1 {
+						if strings.Count(prompt, prompts.RenderReadonlyTaskConstraint("")) != 1 {
 							t.Fatalf("missing or repeated read-only instruction: %q", prompt)
 						}
 					})
@@ -271,7 +271,7 @@ func TestReadonlyModeStartAndRetryRecheckSetting(t *testing.T) {
 						t.Fatalf("starts=%v, want mode %s", f.starts, want)
 					}
 					prompt, _ := f.starts[0]["prompt"].(string)
-					if strings.Count(prompt, prompts.RenderReadonlyTaskConstraint()) != 1 {
+					if strings.Count(prompt, prompts.RenderReadonlyTaskConstraint("")) != 1 {
 						t.Fatalf("retry lost the instruction: %q", prompt)
 					}
 				})

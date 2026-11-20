@@ -70,6 +70,19 @@ function todos() {
       background: "Started by the assistant on Nov 6 · the export script is written and tested on a copy",
       default: "never",
     }),
+    task("demo-custom", "Example custom decision", {
+      verdict: "Needs your decision: resume the report now, or change its reminder",
+      recommend: "Resume now",
+      question: "Resume the report now, or change its reminder?",
+      why_owner: "priority",
+      options: [
+        { label: "Resume now", leads_to: "the report starts immediately" },
+        { label: "Change reminder", leads_to: "the owner chooses a new day" },
+      ],
+      cost_of_waiting: "the report stays paused",
+      background: "From the main conversation on Nov 10 · the owner wants to add a condition in words",
+      default: "never",
+    }),
     { ...task("demo-legacy", "Example extension rollout", {}), ask: undefined },
   ];
 }
@@ -107,6 +120,14 @@ async function run(browser, size, theme, language) {
         if (dismissal[2] === "undo-dismiss") assert.equal(body.dismissal_id, "demo-dismissal");
         todo.decision_review = { review_at: AT, ...(dismissal[2] === "dismiss" ? { dismissal_id: "demo-dismissal" } : {}) };
         await route.fulfill({ contentType: "application/json", body: JSON.stringify(todo.decision_review) });
+        return;
+      }
+      if (path === `/assistant/conversations/${sid}/route`) {
+        assert.equal(body.todo_id, "demo-custom");
+        assert.equal(body.text, "先 Resume，但把提醒改到周四");
+        assert.equal(body.asked_at, AT);
+        list = list.map((t) => t.id === "demo-custom" ? { ...t, ask: undefined, supervision: { ...t.supervision, state: "" } } : t);
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ item: { id: "custom-answer", conversation: sid, at: AT, kind: "routed", ref: "demo-custom", body: { text: body.text } } }) });
         return;
       }
       const m = /^\/todos\/([^/]+)\/accept$/.exec(path);
@@ -149,9 +170,10 @@ async function run(browser, size, theme, language) {
     await openFolded(page);
     const rows = page.locator("[data-decision-row]");
     await rows.first().waitFor();
-    assert.equal(await rows.count(), 2);
+    assert.equal(await rows.count(), 3);
     const rollout = page.locator('[data-needs-row="task:demo-rollout"]');
     const cleanup = page.locator('[data-needs-row="task:demo-cleanup"]');
+    const custom = page.locator('[data-needs-row="task:demo-custom"]');
     assert.equal(await rollout.locator('[data-decision-default="taken"]').count(), 1, "the reversible decision says when its default is taken");
     assert.match(await rollout.locator('[data-decision-default="taken"]').innerText(), /23:30/);
     assert.equal(await cleanup.locator('[data-decision-default="never"]').count(), 1, "the irreversible one says it is never taken by default");
@@ -175,6 +197,23 @@ async function run(browser, size, theme, language) {
     await rollout.scrollIntoViewIfNeeded(); // keep this decision's whole action group in the evidence capture
     await page.waitForTimeout(300); // the entry has turned to its selected colors
     await page.screenshot({ path: name("tray") });
+    // Other… opens the originating conversation with this decision routed to its composer, so the owner can add a
+    // condition in words instead of choosing an unchanged suggestion (#10760).
+    await custom.locator("span[data-decision-tail] button").first().click();
+    await page.locator("textarea").last().waitFor();
+    assert.equal(new URL(page.url()).pathname, `/persona/${sid}`);
+    await page.getByText("Example custom decision", { exact: false }).first().waitFor();
+    await page.locator("textarea").last().fill("先 Resume，但把提醒改到周四");
+    await page.screenshot({ path: name("custom-answer") });
+    const customAnswer = page.waitForResponse((res) => new URL(res.url()).pathname === `/api/v1/assistant/conversations/${sid}/route`);
+    await page.getByTestId("composer-send").click();
+    await customAnswer;
+    await page.goto(`${base}/`);
+    await page.locator('[data-tray-entry="needs"]').click();
+    await openFolded(page);
+    assert.equal(await page.locator('[data-needs-row="task:demo-custom"]').count(), 0, "the written owner answer settles its decision");
+    assert.deepEqual(writes, [{ path: `/assistant/conversations/${sid}/route`, method: "POST", body: { todo_id: "demo-custom", text: "先 Resume，但把提醒改到周四", asked_at: AT } }]);
+    writes.length = 0;
     // the menu: the options that did not fit, then the three answers that are no option
     const shownOptions = await rollout.locator("[data-decision-option]").count();
     await rollout.locator("span[data-decision-tail] button[aria-label]").last().click();

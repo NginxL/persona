@@ -1075,6 +1075,11 @@ data class ExtensionUIItem(
      */
     val icon: String? = null,
     /**
+     * nav_page only: the icon's named color in the sidebar, the same colors as a row's icon_color, drawn only while
+     * the owner chose Colored sidebar icons (#10822); without it the icon stays the sidebar's neutral ink.
+     */
+    @SerialName("icon_color") val iconColor: String? = null,
+    /**
      * overview_card, capsule_card and widget only: a nav_page or extension_page of the same extension.
      */
     val opens: String? = null,
@@ -1585,6 +1590,10 @@ data class ExtensionUIPlace(
      * A nav_page's sidebar group, its title in the request's language (#9071).
      */
     val group: ExtensionUIGroup? = null,
+    /**
+     * A nav_page's icon color as its manifest names it, drawn only with Colored sidebar icons (#10822).
+     */
+    @SerialName("icon_color") val iconColor: String? = null,
 )
 
 @Serializable
@@ -2302,8 +2311,8 @@ sealed interface ExtensionComponent {
     data class Unknown(override val type: String, val raw: JsonObject = JsonObject(emptyMap())) : ExtensionComponent
 
     companion object {
-        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel")
-        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6)
+        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph")
+        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6, "graph" to 10)
     }
 }
 
@@ -2343,6 +2352,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
                 "image" -> input.json.decodeFromJsonElement(ExtensionImageComponent.serializer(), obj)
                 "grid" -> input.json.decodeFromJsonElement(ExtensionGridComponent.serializer(), obj)
                 "carousel" -> input.json.decodeFromJsonElement(ExtensionCarouselComponent.serializer(), obj)
+                "graph" -> input.json.decodeFromJsonElement(ExtensionGraphComponent.serializer(), obj)
                 else -> ExtensionComponent.Unknown(tag, obj)
             }
         } catch (_: SerializationException) {
@@ -2381,6 +2391,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
             is ExtensionImageComponent -> output.json.encodeToJsonElement(ExtensionImageComponent.serializer(), value) as JsonObject
             is ExtensionGridComponent -> output.json.encodeToJsonElement(ExtensionGridComponent.serializer(), value) as JsonObject
             is ExtensionCarouselComponent -> output.json.encodeToJsonElement(ExtensionCarouselComponent.serializer(), value) as JsonObject
+            is ExtensionGraphComponent -> output.json.encodeToJsonElement(ExtensionGraphComponent.serializer(), value) as JsonObject
             is ExtensionComponent.Unknown -> value.raw
         }
         output.encodeJsonElement(JsonObject(obj + ("type" to JsonPrimitive(value.type))))
@@ -2830,6 +2841,121 @@ data class ExtensionCarouselComponent(
     val tiles: List<ExtensionTile> = emptyList(),
     val width: String? = null,
 ) : ExtensionComponent
+
+/**
+ * Nodes joined by edges, drawn as a canvas the person can pan, zoom, fit and open full screen (UI version 10): work
+ * split into parts, a plan's steps, a family of things. The app lays it out (layout, direction) and draws each node
+ * with its own design system; tapping a node does its action, as a row's (or opens its in-place inspector first on
+ * the web when the node carries facts, detail or links, with the action inside); a node with children folds them.
+ * Each node counts as a component of the page. The hub refuses ids that repeat, an edge naming an unknown node or
+ * itself, a repeated edge, a cycle, a second parent in a tree, and selected or folded naming an unknown node. In a
+ * card it is a still preview that opens full screen. An older app gets a row per node in reading order, indented.
+ */
+@Serializable
+data class ExtensionGraphComponent(
+    override val type: String = "graph",
+    /**
+     * Keeps the person's pan, zoom and folding across redraws of the page.
+     */
+    val key: String? = null,
+    val nodes: List<ExtensionGraphNode> = emptyList(),
+    val edges: List<ExtensionGraphEdge>? = null,
+    val layout: String? = null,
+    val direction: String? = null,
+    /**
+     * A node's id: drawn as selected, and the canvas opens centred on it.
+     */
+    val selected: String? = null,
+    /**
+     * Ids of nodes whose children start folded. Once the person folds or unfolds one, the app keeps their choice for
+     * this key.
+     */
+    val folded: List<String>? = null,
+) : ExtensionComponent
+
+/**
+ * One node of a graph (UI version 10): a box with a title, a state line, a badge, an icon and a progress bar, in
+ * tone's role color or color's named color (never both), with optional timing and inspector details.
+ */
+@Serializable
+data class ExtensionGraphNode(
+    val id: String = "",
+    val title: String = "",
+    val subtitle: String? = null,
+    val badge: ExtensionBadge? = null,
+    val tone: String? = null,
+    val color: String? = null,
+    val icon: String? = null,
+    /**
+     * A thin bar along the node's foot, 0 to 1.
+     */
+    val progress: Double? = null,
+    /**
+     * Nodes with the same parents and the same group sit next to each other inside one frame titled with it (the same
+     * task tried several ways).
+     */
+    val group: String? = null,
+    val action: ExtensionAction? = null,
+    /**
+     * Unix timestamp in seconds when this node started.
+     */
+    @SerialName("started_at") val startedAt: Double? = null,
+    /**
+     * Unix timestamp in seconds when this node ended; omitted while still running.
+     */
+    @SerialName("ended_at") val endedAt: Double? = null,
+    /**
+     * Short label/value readings shown in the node inspector.
+     */
+    val facts: List<ExtensionFact>? = null,
+    /**
+     * Plain-text summary, verifier feedback or error shown in the node inspector.
+     */
+    val detail: String? = null,
+    /**
+     * HTTPS links shown in the node inspector (for example work and verifier sessions across attempts).
+     */
+    val links: List<ExtensionGraphNodeLink>? = null,
+)
+
+/**
+ * An https link shown in a graph node's inspector (UI version 10).
+ */
+@Serializable
+data class ExtensionGraphNodeLink(
+    val title: String = "",
+    val url: String = "",
+)
+
+/**
+ * An edge from one node to another (UI version 10): from is the parent, to the child.
+ */
+@Serializable
+data class ExtensionGraphEdge(
+    val from: String = "",
+    val to: String = "",
+)
+
+/**
+ * tree (the default): every node has at most one parent, children under it, a parent centred over its children.
+ * layered: a node may have several parents; each node sits one layer past its furthest parent (a plan whose steps
+ * wait for several others).
+ */
+object ExtensionGraphLayout {
+    const val TREE = "tree"
+    const val LAYERED = "layered"
+    val ALL = listOf("tree", "layered")
+}
+
+/**
+ * right (the default): roots at the start, children after them, so a wide fan-out reads down the screen like an
+ * outline. down: roots at the top, children below.
+ */
+object ExtensionGraphDirection {
+    const val RIGHT = "right"
+    const val DOWN = "down"
+    val ALL = listOf("right", "down")
+}
 
 /**
  * Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension
@@ -3787,6 +3913,10 @@ data class ExtensionMessagingAccount(
     val id: String = "",
     val name: String? = null,
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val tenant: String? = null,
     @SerialName("signed_in") val signedIn: Boolean = false,
     val unread: Int? = null,
@@ -3814,6 +3944,10 @@ data class ExtensionMessagingConversation(
     val id: String = "",
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val kind: String = "",
     val unread: Int = 0,
     @SerialName("marked_unread") val markedUnread: Boolean? = null,
@@ -3840,6 +3974,10 @@ data class ExtensionMessagingPerson(
     val id: String? = null,
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val kind: String? = null,
 )
 
@@ -4392,6 +4530,10 @@ data class ExtensionMessagingProfile(
     val id: String = "",
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val cover: String? = null,
     val kind: String? = null,
     val subtitle: String? = null,

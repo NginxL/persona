@@ -21,7 +21,7 @@ type TriagePreview struct {
 // subscribed yet (its label and recipe filled in).
 func (s *Service) PreviewThings(sub Subscription, items []Preview) TriagePreview {
 	d := s.deliverer(sub, time.Now())
-	out := TriagePreview{Source: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label), Things: []connector.InboxThing{}}
+	out := TriagePreview{Source: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label, s.o.Lang()), Things: []connector.InboxThing{}}
 	for i, it := range items {
 		h := Held{Seq: int64(i), Stored: d.now, Item: Item{UID: it.UID, Thread: it.Thread, Title: it.Title, Sender: it.Sender,
 			Body: it.Body, Link: it.Link, Kind: sub.Recipe.Kind, Time: previewTime(it.Time), DueDate: previewTime(it.DueDate)}}

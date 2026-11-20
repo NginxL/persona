@@ -15,6 +15,8 @@ struct ShellHome: View {
     /// Clear context (#5100): the same composer, an empty middle. Not the centered new-chat page.
     var cleared = false
     @Binding var launcher: String?
+    /// The model picked under `launcher` (#11472).
+    @Binding var launcherModel: String?
     @Binding var mode: String
     @Binding var effort: String
     var openInbox: (InboxItem) -> Void
@@ -82,15 +84,18 @@ struct ShellHome: View {
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.error = $0 }
                     }
-                    ReadinessHomeCard(route: $route)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.card = $0 }
-                        .onDisappear { room.card = 0 }
+                    VStack(spacing: Theme.Space.m) {
+                        PushHealthNotice(group: model.hub?.group ?? "")
+                        ReadinessHomeCard(route: $route)
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.card = $0 }
+                    .onDisappear { room.card = 0 }
                 }
                 if pending == nil, !mentionOpen, !cleared {
                     ShellNeedsYou(maxHeight: room.needs(withError: shownError != nil, top: AssistantTopBar.room(railEdge)), openInbox: openInbox).shellScaled()
                 }
                 if let m = model.assistantManagerOffline { ManagerOfflineNote(manager: m) }
-                StarterComposer(disabled: pending != nil || model.assistantManagerOffline != nil, shell: StarterComposer.ShellModes(launcher: $launcher, mode: $mode, effort: $effort),
+                StarterComposer(disabled: pending != nil || model.assistantManagerOffline != nil, shell: StarterComposer.ShellModes(launcher: $launcher, launcherModel: $launcherModel, mode: $mode, effort: $effort),
                                 gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room.composerAtRest($0, typeSize: typeSize) }
                     .onPreferenceChange(MentionMenuOpen.self) { open in withAnimation(Theme.Motion.standard) { mentionOpen = open } }
@@ -516,7 +521,12 @@ struct ShellDestinations: ViewModifier {
     @ViewBuilder static func place(_ route: ShellRoute, path: Binding<NavigationPath>, accounts: InboxAccountState) -> some View {
         switch route {
         case .inbox: InboxPage(path: path, accountState: accounts, embedded: true)
-        case .todos: TodosView()
+        case .todos:
+            #if os(iOS)
+            TodosPlacePage() // the V1 list where the hub sends the view (#10465), else TodosView
+            #else
+            TodosView()
+            #endif
         case .machines: MachinesView()
         case .extensionPage(let r): ExtensionNavPage(route: r)
         case .profile: AssistantProfileView()

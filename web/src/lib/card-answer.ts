@@ -10,6 +10,7 @@ import { interactionCanAnswer } from "./format";
 import { apiOp } from "./ops";
 import { endInteraction, getSession, keepDelegated, useStore } from "./store";
 import { isSecretHandoff, isSecretRun } from "./tool-detail";
+import { isSessionReview } from "./types";
 import type { Interaction } from "./types";
 
 /** Sent (`already`: it had been answered, here or elsewhere), or why not, as a sentence to show. */
@@ -43,6 +44,17 @@ export function workCardLocalResolution(ix: Interaction, body: Resolution): bool
   return Object.keys(body).length === 1 && entries.length > 0 && entries.every(([question, answer]) => {
     const q = ix.questions?.find((candidate) => candidate.question === question);
     return q && !q.multi_select && q.options?.some((o) => o.label === answer.trim() && o.action === "defer");
+  });
+}
+
+/** A review answer is manager-owned too. In particular, Send may explicitly resume a stopped source on the server;
+ *  the browser still sends only one of the card's existing option labels, never the report or a reviewer message. */
+function sessionReviewResolution(ix: Interaction, body: Resolution): boolean {
+  if (!isSessionReview(ix) || Object.keys(body).length !== 1) return false;
+  const entries = Object.entries(body.answers ?? {});
+  return entries.length === 1 && entries.every(([question, answer]) => {
+    const q = ix.questions?.find((candidate) => candidate.question === question);
+    return Boolean(q && !q.multi_select && q.options?.some((option) => option.label === answer));
   });
 }
 
@@ -92,7 +104,7 @@ function sameAnswer(a: unknown, b: unknown): boolean {
  * the hub already. Once it ends (delivered, refused, or out of time) the card can be answered again.
  */
 export function answerCard(ix: Interaction, body: Resolution, from: AnswerFrom = {}): Promise<CardAnswer> {
-  if (!interactionCanAnswer(ix, getSession(ix.machine_id, ix.session_id)) && !workCardLocalResolution(ix, body)) {
+  if (!interactionCanAnswer(ix, getSession(ix.machine_id, ix.session_id)) && !workCardLocalResolution(ix, body) && !sessionReviewResolution(ix, body)) {
     return Promise.resolve({ ok: false, error: t("chat-interactions.approve_not_allowed") });
   }
   if (isSecretRun(ix) && !isSecretRunAnswer(body)) return Promise.resolve({ ok: false, error: t("chat-interactions.secret_run_card_only") });

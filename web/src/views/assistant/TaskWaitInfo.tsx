@@ -2,7 +2,8 @@ import { useId, useState } from "react";
 import { formatDate, t } from "../../i18n";
 import { taskWait } from "../../lib/task-wait-info";
 import { waitSource } from "../../lib/task-wait";
-import { prBlockers } from "../../lib/todo-triage";
+import { normalizedPR, prBlockers } from "../../lib/todo-triage";
+import { href, onLinkClick } from "../../lib/router";
 import type { PRFacts, Todo } from "../../lib/todos";
 import { Button, copyText, cx, Dialog, useNow } from "../../ui/atoms";
 
@@ -12,6 +13,24 @@ function elapsed(since: number | undefined, now: number, request: boolean): stri
   const age = minutes < 1 ? t("task-wait.just_now") : minutes < 60 ? t("task-wait.minutes", { count: minutes }) :
     minutes < 1440 ? t("task-wait.hours", { count: Math.floor(minutes / 60) }) : t("task-wait.days", { count: Math.floor(minutes / 1440) });
   return t(request ? "task-wait.waiting_age" : "task-wait.parked_age", { age });
+}
+
+function sourceLabel(source: string, todo: Todo): string {
+  const url = new URL(source);
+  const github = url.hostname === "github.com" && url.pathname.match(/^\/[^/]+\/[^/]+\/(pull|issues)\/([1-9]\d*)(?:\/files)?\/?$/);
+  if (github) {
+    const comment = /^#(?:issuecomment-|discussion_r|pullrequestreview-|r)\d+$/.test(url.hash);
+    return t(`task-wait.source_${comment ? "comment" : github[1] === "pull" ? "pr" : "issue"}`, { number: github[2] });
+  }
+  if (url.hostname === "applink.feishu.cn" || url.hostname === "applink.larksuite.com") {
+    const thread = todo.thread;
+    if (url.pathname === "/client/thread/open" && thread?.channel === "feishu" && thread.title.trim() &&
+      url.searchParams.get("open_chat_id") === thread.chat_id && url.searchParams.get("open_thread_id") === thread.thread_id) return thread.title.trim();
+    const contact = todo.supervision?.parked?.evidence?.contact;
+    if (waitSource(contact?.url) === source && contact?.channel.trim()) return contact.channel.trim();
+    return t("task-wait.source_lark");
+  }
+  return url.host + url.pathname;
 }
 
 /** One projection for rows and task details. This reads recorded evidence; it does not watch events or send messages. */
@@ -24,9 +43,25 @@ export function TaskWaitInfo({ todo, merges = [], expanded = false }: { todo: To
   const contact = info.contact;
   const contactTime = contact && formatDate(contact.sent_at, { dateStyle: "medium", timeStyle: "short" });
   const age = elapsed(info.since, now, info.sinceRequest);
+  if (info.handoff) {
+    const handoff = info.handoff;
+    const target = { name: "todos", id: handoff.todo_id } as const;
+    return <div data-task-wait-info={todo.id} data-wait-kind={info.kind} data-wait-overdue={info.overdue ? "true" : "false"}
+      className="min-w-0 space-y-1 break-words text-xs text-ink-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span>{t("task-wait.kind_todo_handoff")}</span>
+        <a data-wait-target href={href(target)} className="inline-flex items-center text-accent-ink hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+          onClick={(event) => { event.stopPropagation(); onLinkClick(event, target); }}>{handoff.title}</a>
+        <span data-wait-age className="tabular-nums">{age}</span>
+        {info.overdue && <span data-wait-due className="font-medium text-red">{t("task-wait.follow_up_due")}</span>}
+      </div>
+      <p data-wait-wake>{handoff.check}</p>
+      {info.until && <p>{t("task-wait.handoff_deadline", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
+    </div>;
+  }
   const target = info.target ?? t("task-wait.target_unknown");
   const contactURL = waitSource(contact?.url);
-  const sourceLinks = info.sources.filter((url) => url !== contactURL || merges.some((pr) => waitSource(pr.url) === url));
+  const sourceLinks = info.sources.filter((url) => url !== contactURL || merges.some((pr) => normalizedPR(waitSource(pr.url)) === normalizedPR(url)));
   const extra = <>
     {info.reason && <p data-wait-reason>{info.reason}</p>}
     {contact && <p className="whitespace-pre-wrap" data-wait-request>{t("task-wait.request", { request: contact.request })}</p>}
@@ -48,10 +83,10 @@ export function TaskWaitInfo({ todo, merges = [], expanded = false }: { todo: To
       {t("task-wait.last_contact", { sender: contact.sender, time: contactTime ?? contact.sent_at, channel: contact.channel })}
     </a> : info.contactExpected && <p data-wait-contact-missing className="text-ink-3">{t("task-wait.contact_unknown")}</p>}
     <p data-wait-wake className="break-words">{info.wake ? t("task-wait.wake", { wake: info.wake }) : t("task-wait.wake_unknown")}</p>
-    {sourceLinks.length > 0 && <div className="space-y-1">{sourceLinks.map((url, i) => {
-      const pr = merges.find((facts) => waitSource(facts.url) === url);
+    {sourceLinks.length > 0 && <div className="space-y-1">{sourceLinks.map((url) => {
+      const pr = merges.find((facts) => normalizedPR(waitSource(facts.url)) === normalizedPR(url));
       return <div key={url} data-pr-waiting-url={pr ? url : undefined}>
-        {url !== contactURL && <a data-wait-source href={url} target="_blank" rel="noreferrer noopener" title={url} className="block break-all text-accent-ink hover:underline pointer-coarse:min-h-11">{pr ? url : t("task-wait.source", { number: i + 1 })}</a>}
+        {url !== contactURL && <a data-wait-source href={url} target="_blank" rel="noreferrer noopener" title={url} className="block break-all text-accent-ink hover:underline pointer-coarse:min-h-11">{sourceLabel(url, todo)}</a>}
         {pr && <p>{prBlockers(todo, pr).map((key) => t(`assistant-tasks.pr_blocker_${key}`)).join(" · ")}</p>}
       </div>;
     })}</div>}

@@ -115,16 +115,17 @@ func TestRegistrySnapshotKeepsProcessState(t *testing.T) {
 	}
 }
 
-// A token of every scope has every scope but agents.permission_mode and assistant.start_defaults, which the install
-// screen still lists: an extension gets them only by name.
+// A token of every scope leaves out scopes whose authority the owner must approve by name (agents.permission_mode,
+// assistant.start_defaults, dispatch.guard and market.refresh_own); the install screen still lists each of them.
 func TestEveryScopeLeavesOutThePermissionMode(t *testing.T) {
 	every := EveryScope()
-	for _, named := range []string{ScopeAgentsPermissionMode, ScopeAssistantStartDefaults} {
+	excluded := []string{ScopeAgentsPermissionMode, ScopeAssistantStartDefaults, ScopeDispatchGuard, ScopeMarketRefreshOwn}
+	for _, named := range excluded {
 		if slices.Contains(every, named) || !slices.Contains(HubScopes, named) || InEveryScope(named) {
 			t.Fatalf("every scope has %s: %v", named, every)
 		}
 	}
-	if len(every) != len(HubScopes)-2 || !InEveryScope(ScopeAgentsControl) || !InEveryScope(ScopeAssistantDispatchPolicy) {
+	if len(every) != len(HubScopes)-len(excluded) || !InEveryScope(ScopeAgentsControl) || !InEveryScope(ScopeAssistantDispatchPolicy) {
 		t.Fatalf("every scope: %v", every)
 	}
 	every[0] = "x"
@@ -137,8 +138,9 @@ func TestEveryScopeLeavesOutThePermissionMode(t *testing.T) {
 func TestFullHubGrantLeavesOutThePermissionMode(t *testing.T) {
 	r := NewRegistry(t.TempDir(), nil, nil, 1)
 	for id, grant := range map[string]Permissions{
-		"legacy": {HubAPI: true},
-		"named":  {Hub: []string{ScopeAgentsPermissionMode}},
+		"legacy":  {HubAPI: true},
+		"named":   {Hub: []string{ScopeAgentsPermissionMode}},
+		"refresh": {Hub: []string{ScopeMarketRefreshOwn}},
 	} {
 		m := &Manifest{ID: id, Version: "1.0.0", Permissions: grant,
 			Contributes: map[string]json.RawMessage{"events": json.RawMessage(`[{"id":"example","subscribe":["agent.finished"]}]`)}}
@@ -152,6 +154,9 @@ func TestFullHubGrantLeavesOutThePermissionMode(t *testing.T) {
 	if r.HubScopeAllowed("legacy", ScopeAgentsPermissionMode) || !r.HubScopeAllowed("legacy", ScopeAgentsControl) ||
 		!r.HubScopeAllowed("named", ScopeAgentsPermissionMode) {
 		t.Fatal("the full-hub grant and the permission mode")
+	}
+	if r.HubScopeAllowed("legacy", ScopeMarketRefreshOwn) || !r.HubScopeAllowed("refresh", ScopeMarketRefreshOwn) {
+		t.Fatal("the full-hub grant and own-market refresh")
 	}
 	if ids := r.EventSubscribers("agent.finished", ScopeAgentsPermissionMode); !reflect.DeepEqual(ids, []string{"named"}) {
 		t.Fatalf("permission mode subscribers: %v", ids)
@@ -192,5 +197,27 @@ func TestUpgradeAddingThePermissionModeNeedsConsent(t *testing.T) {
 		if listed != c.more {
 			t.Errorf("%s: the permission mode listed as added = %v: %+v", c.what, listed, Added(c.from, to))
 		}
+	}
+}
+
+// A legacy full-hub install does not silently gain the new market quota authority: its upgrade asks by name and the
+// owner sees the new permission. Once named, keeping it needs no further consent.
+func TestUpgradeAddingMarketRefreshOwnNeedsConsent(t *testing.T) {
+	legacy := &Manifest{ID: "example", Version: "1.0.0", Permissions: Permissions{HubAPI: true}}
+	installed := &Extension{Record: Record{Granted: legacy.Permissions, GrantedDigest: Digest(legacy)}, Manifest: legacy, Full: legacy}
+	upgrade := &Manifest{ID: "example", Version: "1.1.0", Permissions: Permissions{Hub: []string{ScopeMarketRefreshOwn}}}
+	if !MorePermissions(installed, upgrade) {
+		t.Fatal("adding own-market refresh to a legacy full-hub grant needs consent")
+	}
+	title, _ := ScopeTitleIn(i18n.Default, ScopeMarketRefreshOwn)
+	if !slices.ContainsFunc(Added(legacy, upgrade), func(l PermissionLine) bool {
+		return l.Key == "hub" && strings.Contains(l.Detail, title)
+	}) {
+		t.Fatalf("own-market refresh is not listed as added: %+v", Added(legacy, upgrade))
+	}
+	current := &Manifest{ID: "example", Version: "1.0.0", Permissions: upgrade.Permissions}
+	installed = &Extension{Record: Record{Granted: current.Permissions, GrantedDigest: Digest(current)}, Manifest: current, Full: current}
+	if MorePermissions(installed, upgrade) {
+		t.Fatal("keeping an explicitly granted own-market refresh needs no new consent")
 	}
 }

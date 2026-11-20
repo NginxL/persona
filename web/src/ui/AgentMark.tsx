@@ -14,17 +14,24 @@
 //   gemini    SI `googlegemini.svg`; source gemini.google.com (no brand kit found)
 //   pi        SI `pi.svg`; source pi.dev/favicon.svg (no licence text found)
 //   trae      SI `trae.svg`; source trae.ai (TRAE, ByteDance's coding agent; not TRAEX, which keeps its letter)
+//   grok, agy  Lobe Icons 1.104.0 Grok and Antigravity monochrome marks
+//   dsh, kimi, copilot  SI 16.36.0 DeepSeek, Kimi and GitHub Copilot marks
 // viewBoxes of opencode, cursor and trae are cropped to the glyph (CLAUDE.md: assets carry no padding); nothing else is changed.
 import { t } from "../i18n";
 import { agentLetter, agentName, isMarked, markId, sessionAgent, type AgentSurface, type MarkedAgent } from "../lib/agent-kind";
 import { cx } from "./atoms";
 import claudeMark from "./brands/claude.svg";
 import codexMark from "./brands/codex.svg";
-import cursorMark from "./brands/cursor.svg";
+import cursorMark from "./brands/cursor.svg?no-inline";
 import geminiMark from "./brands/gemini.svg";
 import opencodeMark from "./brands/opencode.svg";
 import piMark from "./brands/pi.svg";
 import traeMark from "./brands/trae.svg";
+import grokMark from "./brands/grok.svg?no-inline";
+import agyMark from "./brands/agy.svg?no-inline";
+import dshMark from "./brands/dsh.svg?no-inline";
+import kimiMark from "./brands/kimi.svg?no-inline";
+import copilotMark from "./brands/copilot.svg?no-inline";
 
 // `fit`: the share of the box the mark is drawn at. Round and full-bleed shapes fill it; a square or a tall one is
 // pulled in so it does not look bigger than its neighbours (iOS: `Theme.Brand.optical`).
@@ -36,6 +43,11 @@ const MARKS: Record<MarkedAgent, { src: string; template?: boolean; fit: number 
   gemini: { src: geminiMark, template: true, fit: 1 },
   cursor: { src: cursorMark, template: true, fit: 0.92 },
   trae: { src: traeMark, template: true, fit: 0.92 },
+  grok: { src: grokMark, template: true, fit: 1 },
+  agy: { src: agyMark, template: true, fit: 1 },
+  dsh: { src: dshMark, template: true, fit: 1 },
+  kimi: { src: kimiMark, template: true, fit: 0.88 },
+  copilot: { src: copilotMark, template: true, fit: 1 },
 };
 
 /**
@@ -48,7 +60,7 @@ const MARKS: Record<MarkedAgent, { src: string; template?: boolean; fit: number 
 export function AgentMark({ agent, label, surface, size = 14, decorative, className, remote }: { agent?: string; label?: string; surface?: AgentSurface; size?: number; decorative?: boolean; className?: string; /** It runs on another computer: a signal arc at the mark's upper right (RemoteSignal). */ remote?: boolean }) {
   const id = markId(agent, label);
   const agentNamed = agentName(agent, label);
-  const name = markName(agent, label, surface);
+  const name = markName(id, agent, label, surface);
   const a11y = decorative ? { "aria-hidden": true as const } : { role: "img" as const, "aria-label": name };
   const box = cx("relative inline-flex shrink-0 items-center justify-center", className ?? "text-ink-2");
   const badge = (
@@ -137,15 +149,16 @@ function RemoteSignal({ size }: { size: number }) {
 }
 
 /** What a mark says it is: the agent's name, with the client it runs in ("Codex, command line"). */
-function markName(agent?: string, label?: string, surface?: AgentSurface): string {
-  const named = agentName(agent, label);
+function markName(id: string, agent?: string, label?: string, surface?: AgentSurface): string {
+  const fallback = isMarked(id) ? t(`agent-mark.${id}`) : undefined;
+  const named = agentName(agent, label?.trim() || fallback);
   return surface ? t("agent-mark.with_surface", { agent: named, surface: t(`agent-mark.surface_${surface}`) }) : named;
 }
 
 /** What a session's mark says it is (SessionMark's accessible name), for a place that names it along with more. */
 export function sessionMarkName(s: Parameters<typeof sessionAgent>[0]): string {
   const { agent, label, surface } = sessionAgent(s);
-  return markName(agent, label, surface);
+  return markName(markId(agent, label), agent, label, surface);
 }
 
 /** The mark of a session's agent. */

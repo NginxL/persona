@@ -7,6 +7,9 @@ import { Icon } from "../../ui/icons";
 import { useNow } from "../../ui/atoms";
 import { TaskWaitInfo } from "./TaskWaitInfo";
 
+// The Finished tray's rows (#10922) load in this chunk too: one lazy entry for the trays drawn on intent, not one each.
+export { FinishedTaskRows } from "./FinishedTaskRows";
+
 /** The tray already loads waiting rows on demand; keep their ordering on that same lazy boundary. */
 export function ParkedTaskRows({ items }: { items: readonly RunningItem[] }) {
   const now = useNow(60_000);

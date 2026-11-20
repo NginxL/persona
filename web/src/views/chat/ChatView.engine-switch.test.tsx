@@ -16,7 +16,11 @@ vi.hoisted(() => {
   (g.CSS as { escape?: (s: string) => string }).escape ??= (s: string) => s;
 });
 
-const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "", loadingEarlier: false, loadEarlier: async () => {}, expandFold: async () => {}, reload: () => {} }));
+const transcript = vi.hoisted(() => ({
+  items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "", loadingEarlier: false,
+  earlierPage: undefined as symbol | undefined, loadEarlier: async (): Promise<symbol | undefined> => undefined,
+  expandFold: async () => {}, reload: () => {},
+}));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 vi.mock("../../lib/panel", async (importOriginal) => ({ ...await importOriginal<typeof import("../../lib/panel")>(), usePanel: () => null }));
 
@@ -68,7 +72,8 @@ beforeEach(() => {
   transcript.items = [];
   transcript.loading = false;
   transcript.hasMore = false;
-  transcript.loadEarlier = async () => {};
+  transcript.loadEarlier = async () => undefined;
+  transcript.earlierPage = undefined;
   Object.assign(getState(), { loaded: true });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -88,6 +93,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   reset();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -97,7 +103,7 @@ describe("a conversation across engines", () => {
     pages.a = [user("a", 1, 1, "Build a login page."), said("a", 2, 2, "The login page is in.")];
     let older = 0;
     transcript.hasMore = true;
-    transcript.loadEarlier = async () => void older++;
+    transcript.loadEarlier = async () => { older++; return undefined; };
     await open("b", [user("b", 1, 11, `${block("claude", "codex")}Now add the tests.`), said("b", 2, 12, "Tests added.")]);
     // B still has older pages: they come first, and nothing of A is asked for
     expect(older).toBeGreaterThan(0);
@@ -126,6 +132,46 @@ describe("a conversation across engines", () => {
     expect(asked).toEqual(["b"]);
     expect(reading()).toEqual(["Build a login page.", "The login page is in.", "⇄ summary", "Now add the tests.", "Tests added.", "⇄ resumed", "Review the tests.", "They look right."]);
     expect([...host.querySelectorAll("[data-engine-stretch]")].map((el) => el.getAttribute("data-engine-stretch"))).toEqual(["a", "b"]);
+  });
+
+  it("anchors an older A page when it renders above B without changing the live A front", async () => {
+    upsertSession(row("a", { agent: "claude", engine_history: [
+      { session_id: "a", agent: "claude", until: at(10) }, { session_id: "b", agent: "codex", until: at(20) },
+    ] }));
+    pages.b = [user("b", 1, 11, "Now add the tests."), said("b", 2, 12, "Tests added.")];
+    let baseHeight = 800;
+    const height = () => baseHeight + (host.querySelector("[data-engine-stretch='a'] [data-line*='au1']") ? 550 : 0);
+    const firstPage = [user("a", 3, 3, "Build a login page."), user("a", 10, 21, "Review the tests.")];
+    await open("a", firstPage);
+    await until(() => host.querySelector("[data-engine-stretch='a']") !== null);
+    expect(reading()).toContain("Build a login page.");
+    const scroller = host.querySelector<HTMLElement>("[data-chat-scroll]")!;
+    baseHeight = 1300;
+    Object.defineProperties(scroller, {
+      scrollHeight: { get: height },
+      clientHeight: { value: 800 },
+      scrollTop: { value: 250, writable: true },
+    });
+    // Leave following before the old page starts, like a reader scrolling away from the newest messages.
+    act(() => scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true })));
+    scroller.scrollTop = 250;
+
+    let release!: (page: symbol) => void;
+    const pending = new Promise<symbol>((resolve) => { release = resolve; });
+    const loadEarlier = vi.fn(() => pending);
+    Object.assign(transcript, { hasMore: true, loadEarlier });
+    act(() => root.render(<ChatView mid="m" sid="a" onToggleSidebar={() => {}} />));
+    await flush();
+    act(() => scroller.dispatchEvent(new Event("scroll")));
+    expect(loadEarlier).toHaveBeenCalled();
+
+    const page = Symbol();
+    await act(async () => { release(page); });
+    // These older rows belong to A's first stretch, not the live stretch.
+    Object.assign(transcript, { items: [user("a", 1, 1, "Start with the login form."), ...firstPage], earlierPage: page, hasMore: false });
+    act(() => root.render(<ChatView mid="m" sid="a" onToggleSidebar={() => {}} />));
+    expect(reading()).toContain("Start with the login form.");
+    expect(scroller.scrollTop).toBe(800);
   });
 
   it("keeps A's early stretch back until B's is in, so nothing moves in between what is on screen", async () => {

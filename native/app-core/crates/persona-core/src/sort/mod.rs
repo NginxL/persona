@@ -159,7 +159,28 @@ pub struct Settings {
     #[serde(default)]
     pub query: String,
     #[serde(default)]
+    pub search_scope: SearchScope,
+    #[serde(default)]
+    pub search_as_code: bool,
+    #[serde(default)]
     pub machine_filter: String,
+    /// The selected machine also participates in iOS's title-capable `machine:` predicate.
+    #[serde(default)]
+    pub machine_title_filter: String,
+    #[serde(default)]
+    pub harness_filter: String,
+    #[serde(default)]
+    pub project_filter: String,
+    #[serde(default)]
+    pub model_filter: String,
+    #[serde(default)]
+    pub pinned_only: bool,
+    /// iOS's merged-list hub selection is active only in multi-hub mode. An empty filter selects every group;
+    /// `=<group>` selects one group, with `=` selecting the default empty group.
+    #[serde(default)]
+    pub multi_hub: bool,
+    #[serde(default)]
+    pub hub_filter: String,
     /// Archived history may include offline rows, without making ordinary offline live sessions visible.
     #[serde(default)]
     pub history: bool,
@@ -177,6 +198,9 @@ pub struct Settings {
     /// Opt into the real By Project tab rows. Legacy fixtures omit it and keep flat session rows.
     #[serde(default)]
     pub presentation_rows: bool,
+    /// Include filtered/unpinned inventory even when no renderable group can contain a row.
+    #[serde(default)]
+    pub inventory: bool,
     /// Paged spaces whose hub totals may not have arrived yet. Missing totals are zero, not local-window counts.
     #[serde(default)]
     pub bounded_spaces: BTreeSet<String>,
@@ -191,6 +215,18 @@ pub struct Settings {
     /// The projection itself never reads a clock; without this field `since:` matches nothing.
     #[serde(default)]
     pub now: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchScope {
+    #[default]
+    All,
+    Title,
+    Conversation,
+    User,
+    Assistant,
+    Errors,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
@@ -223,6 +259,12 @@ pub struct Projection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rows: Option<Vec<Entry>>,
     pub unread_shown: Vec<String>,
+    /// Quick-filtered roots, independent of whether the selected grouping can render them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filtered: Option<Vec<String>>,
+    /// The same inventory without pinned roots; present with `filtered`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpinned: Option<Vec<String>>,
     /// By Project always carries this field; other groupings omit it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quiet_title: Option<Option<String>>,
@@ -308,6 +350,7 @@ struct Row {
     held: bool,
     muted: bool,
     awaits_reply: bool,
+    just_finished: bool,
     space_id: String,
     space_name: String,
     slot_index: Option<i64>,
@@ -376,6 +419,7 @@ impl Row {
             held,
             muted,
             awaits_reply: session.awaits_reply,
+            just_finished: session.work.as_ref().is_some_and(|work| work.just_finished),
             space_id: session.space_id.clone().unwrap_or_else(|| "-".to_owned()),
             space_name,
             slot_index: session.slot_index,
@@ -384,11 +428,21 @@ impl Row {
     }
 
     fn stays(&self) -> bool {
-        !self.state.is_quiet() || self.pinned || self.held || self.is_waiting || self.awaits_reply() || self.archived
+        !self.state.is_quiet()
+            || self.pinned
+            || self.held
+            || self.is_waiting
+            || self.awaits_reply()
+            || self.just_finished()
+            || self.archived
     }
 
     fn awaits_reply(&self) -> bool {
         self.state == AgentState::Idle && self.awaits_reply && !self.muted
+    }
+
+    fn just_finished(&self) -> bool {
+        self.state == AgentState::Idle && self.just_finished && !self.muted
     }
 
     fn counted_state(&self) -> AgentState {
@@ -399,7 +453,7 @@ impl Row {
         }
     }
 
-    /// The index into the eight By Status sections. Needs You never drops because of a mute.
+    /// The index into the nine By Status sections. Needs You never drops because of a mute.
     /// A held agent that has become quiet keeps its Unread rank, as iOS's `rank` does (#2213).
     fn rank(&self) -> usize {
         if self.state == AgentState::NeedsYou {
@@ -408,7 +462,7 @@ impl Row {
         let unread = self.state == AgentState::Unread || (self.held && self.state.is_quiet());
         let live = self.state == AgentState::Working || unread || self.is_waiting;
         if live && self.muted {
-            return 6;
+            return 7;
         }
         if unread {
             return 1;
@@ -419,8 +473,9 @@ impl Row {
         match self.state {
             AgentState::Working if self.background_waiting => 4,
             AgentState::Working => 3,
-            _ if self.is_waiting => 5,
-            _ => 7,
+            _ if self.is_waiting => 6,
+            _ if self.just_finished() => 5,
+            _ => 8,
         }
     }
 }
@@ -480,7 +535,58 @@ impl Query {
         query
     }
 
+    fn compile(settings: &Settings) -> Self {
+        let mut query = Self::parse(&settings.query);
+        if !settings.machine_title_filter.is_empty() {
+            query.machines.push(settings.machine_title_filter.to_lowercase());
+        }
+        if !settings.project_filter.is_empty() {
+            query.projects.push(settings.project_filter.to_lowercase());
+        }
+        if !settings.harness_filter.is_empty() {
+            query.harnesses.push(settings.harness_filter.to_lowercase());
+        }
+        if !settings.model_filter.is_empty() {
+            query.models.push(settings.model_filter.to_lowercase());
+        }
+        query.pinned_only |= settings.pinned_only;
+        query.errors_only |= settings.search_scope == SearchScope::Errors;
+        if settings.search_as_code {
+            let raw = settings.query.to_lowercase();
+            // i18n-ignore: raw query words matched by iOS's Search as Code heuristics.
+            if ["报错", "错误", "失败", "阻塞", "error", "failed"]
+                .into_iter()
+                .any(|word| raw.contains(word))
+            {
+                query.errors_only = true;
+            }
+            // i18n-ignore: raw query words matched by iOS's Search as Code heuristics.
+            if raw.contains("置顶") || raw.contains("pinned") {
+                query.pinned_only = true;
+            }
+            // i18n-ignore: raw query words matched by iOS's Search as Code heuristics.
+            if query.since_hours.is_none() && (raw.contains("最近两天") || raw.contains("今天") || raw.contains("24h"))
+            {
+                query.since_hours = Some(48.0);
+            }
+            // i18n-ignore: raw query words matched by iOS's Search as Code heuristics.
+            if query.since_hours.is_none() && (raw.contains("最近一周") || raw.contains("本周") || raw.contains("7d"))
+            {
+                query.since_hours = Some(168.0);
+            }
+        }
+        query
+    }
+
     fn matches(&self, session: &Session, input: &Input) -> bool {
+        self.matches_one(session, input)
+            || session
+                .search_subtasks
+                .iter()
+                .any(|subtask| self.matches(subtask, input))
+    }
+
+    fn matches_one(&self, session: &Session, input: &Input) -> bool {
         if session.assistant {
             return false;
         }
@@ -509,6 +615,17 @@ impl Query {
             if legacy != input.settings.machine_filter {
                 return false;
             }
+        }
+        if input.settings.multi_hub
+            && !input.settings.hub_filter.is_empty()
+            && input.settings.hub_filter.strip_prefix('=') != Some(session.app_hub_group.as_deref().unwrap_or(""))
+        {
+            return false;
+        }
+        if session.nested_match {
+            // A child admitted the query for this prepared root. Query predicates belong to that child; the ordinary
+            // parent still had to pass the assistant and selected-machine/hub scopes above.
+            return true;
         }
         let machine_path = machine_path.to_lowercase();
         if !self
@@ -576,22 +693,75 @@ impl Query {
                 return false;
             }
         }
+        if self.words.is_empty() {
+            return true;
+        }
         let agent_label = session.agent_label();
-        let fields = [
-            session.title.as_str(),
-            session.cwd.as_str(),
-            session.repo_root.as_deref().unwrap_or(""),
-            session.branch.as_deref().unwrap_or(""),
-            session.last_text.as_deref().unwrap_or(""),
-            session.asks.as_deref().unwrap_or(""),
-            session.space_name.as_deref().unwrap_or(""),
-            session.slot_name.as_deref().unwrap_or(""),
-            agent_label.as_str(),
-            session.model.as_deref().unwrap_or(""),
-            session.launcher.as_deref().unwrap_or(""),
-            session.start_error.as_deref().unwrap_or(""),
-            session.turn_error.as_deref().unwrap_or(""),
-        ];
+        let prose = session
+            .last_text
+            .as_deref()
+            .unwrap_or("")
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                !trimmed.starts_with("$ ")
+                    && !trimmed.starts_with("Running ")
+                    && !trimmed.starts_with("Tool:")
+                    && !trimmed.starts_with("tool_use")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let work_line = session
+            .work
+            .as_ref()
+            .and_then(|work| work.line.as_deref())
+            .unwrap_or("");
+        let goal = session.goal.as_ref().map_or("", |goal| goal.objective.as_str());
+        let todo = session.todo.as_ref().map_or("", |todo| todo.title.as_str());
+        let fields: Vec<&str> = match input.settings.search_scope {
+            SearchScope::All => vec![
+                session.title.as_str(),
+                session.cwd.as_str(),
+                session.repo_root.as_deref().unwrap_or(""),
+                session.branch.as_deref().unwrap_or(""),
+                session.last_text.as_deref().unwrap_or(""),
+                session.asks.as_deref().unwrap_or(""),
+                session.space_name.as_deref().unwrap_or(""),
+                session.slot_name.as_deref().unwrap_or(""),
+                agent_label.as_str(),
+                session.model.as_deref().unwrap_or(""),
+                session.launcher.as_deref().unwrap_or(""),
+                session.start_error.as_deref().unwrap_or(""),
+                session.turn_error.as_deref().unwrap_or(""),
+            ],
+            SearchScope::Title => vec![
+                session.title.as_str(),
+                session.space_name.as_deref().unwrap_or(""),
+                session.slot_name.as_deref().unwrap_or(""),
+            ],
+            SearchScope::Conversation => vec![
+                session.title.as_str(),
+                session.asks.as_deref().unwrap_or(""),
+                goal,
+                prose.as_str(),
+                work_line,
+            ],
+            SearchScope::User => vec![
+                session.asks.as_deref().unwrap_or(""),
+                goal,
+                todo,
+                session.title.as_str(),
+            ],
+            SearchScope::Assistant => vec![prose.as_str(), work_line],
+            SearchScope::Errors => vec![
+                session.start_error.as_deref().unwrap_or(""),
+                session.turn_error.as_deref().unwrap_or(""),
+                session.failure_reason.as_deref().unwrap_or(""),
+                session.attention_reason.as_deref().unwrap_or(""),
+                work_line,
+                session.title.as_str(),
+            ],
+        };
         self.words
             .iter()
             .all(|word| fields.iter().any(|field| field.to_lowercase().contains(word)))
@@ -618,7 +788,7 @@ pub fn project(input: &Input) -> Projection {
 }
 
 fn project_impl(input: &Input, oldest_first: bool) -> Projection {
-    let query = Query::parse(&input.settings.query);
+    let query = Query::compile(&input.settings);
     let base: Vec<Row> = input
         .sessions
         .iter()
@@ -641,6 +811,10 @@ fn project_impl(input: &Input, oldest_first: bool) -> Projection {
         .iter()
         .filter(|row| quick == Quick::All || matching.contains(row.id.as_str()) || kept.contains(row.id.as_str()))
         .collect();
+    let filtered_ids = input
+        .settings
+        .inventory
+        .then(|| filtered.iter().map(|row| row.id.clone()).collect());
     let unread_shown = filtered
         .iter()
         .filter(|row| row.state == AgentState::Unread)
@@ -662,6 +836,10 @@ fn project_impl(input: &Input, oldest_first: bool) -> Projection {
         });
     }
     let unpinned: Vec<&Row> = filtered.into_iter().filter(|row| !row.pinned).collect();
+    let unpinned_ids = input
+        .settings
+        .inventory
+        .then(|| unpinned.iter().map(|row| row.id.clone()).collect());
     match input.settings.grouping {
         Grouping::State => groups.extend(state_groups(
             &unpinned,
@@ -691,6 +869,8 @@ fn project_impl(input: &Input, oldest_first: bool) -> Projection {
         groups,
         rows,
         unread_shown,
+        filtered: filtered_ids,
+        unpinned: unpinned_ids,
         quiet_title: (input.settings.grouping == Grouping::Space).then_some(quiet_title),
     }
 }
@@ -766,15 +946,16 @@ fn pinned_sessions<'a>(rows: &[&'a Row], input: &Input) -> Vec<&'a Row> {
     pinned
 }
 
-const STATE_SECTIONS: [(&str, &str); 8] = [
-    ("needs", "需要你"),          // i18n-ignore
-    ("unread", "完成未看"),       // i18n-ignore
-    ("awaiting", "待你回复"),     // i18n-ignore
-    ("working", "工作中"),        // i18n-ignore
-    ("background", "后台等待中"), // i18n-ignore
-    ("waiting", "待唤醒"),        // i18n-ignore
-    ("muted", "已屏蔽"),          // i18n-ignore
-    ("idle", "已看"),             // i18n-ignore
+const STATE_SECTIONS: [(&str, &str); 9] = [
+    ("needs", "需要你"),             // i18n-ignore
+    ("unread", "完成未看"),          // i18n-ignore
+    ("awaiting", "待你回复"),        // i18n-ignore
+    ("working", "工作中"),           // i18n-ignore
+    ("background", "后台等待中"),    // i18n-ignore
+    ("just_finished", "刚做完待看"), // i18n-ignore
+    ("waiting", "待唤醒"),           // i18n-ignore
+    ("muted", "已屏蔽"),             // i18n-ignore
+    ("idle", "已看"),                // i18n-ignore
 ];
 
 fn state_groups(rows: &[&Row], quick: Quick, settings: &Settings, by_rank: bool, oldest_first: bool) -> Vec<Group> {
@@ -917,7 +1098,8 @@ fn space_groups(rows: &[&Row], input: &Input, quick: Quick, recent_sort: bool) -
             });
         space.priority = space.priority.min(priority(row.counted_state()));
         space.sort_date = space.sort_date.max(row.sort_date);
-        space.quiet &= row.state.is_quiet() && !row.is_waiting && !row.awaits_reply() && !row.held;
+        space.quiet &=
+            row.state.is_quiet() && !row.is_waiting && !row.awaits_reply() && !row.just_finished() && !row.held;
         space.members.push(row);
     }
     let mut spaces: Vec<Space> = spaces.into_values().collect();

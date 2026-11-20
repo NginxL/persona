@@ -44,7 +44,8 @@ different scripts, weights or fonts then sits in rows of the same size.
   ```
 
 - **Web**: `--sidebar-row` and `--sidebar-row-pad` (`web/src/styles.css`) through the `sidebar-row` utility
-  (min-height, padding and a fixed 18 px line). A row adds no `py-*` of its own.
+  (min-height, padding and a fixed 18 px line). A row adds no `py-*` of its own. The top-level headings take
+  `--sidebar-heading` through the `sidebar-heading` utility (below, "The Sidebar layout's headings").
 
 ## Type
 
@@ -80,6 +81,11 @@ The Sidebar layout (#6332, `docs/apple/ios.md` "Sidebar layout (#6332)") heads i
 `captionStrong`, a chevron, what the folded section still counts, and the section's own buttons (Persona Chats' ✎). The
 button is a sidebar row by size (`Theme.Sidebar.rowPadding`, `Theme.Sidebar.row`), so a finger always finds it and the
 words sit as the rows' do; the fold is remembered on the device (`sidebar.fold.places`, `sidebar.fold.chats`).
+
+On the web the top-level headings (Pages, Persona chats, Personal Agents, Agents) share one box too (#10637): the
+`sidebar-heading` utility sets their title row's content height to `--sidebar-heading`, 24 px (the Agents title row's
+fold-all button, its tallest control) and 44 px on a touch screen, and centres the controls beside the title in it, so
+they never set its height and the headings stand evenly apart, folded or not.
 
 ## Pinned directions
 
@@ -122,4 +128,5 @@ Pinned group at all.
 | `apple/PersonaTests/SidebarMetricsTests.swift` | Rows' `minHeight` is only `Theme.Sidebar.row` (headings: `HeadingMenu.minHeight`); each has `Theme.Sidebar.rowPadding`; no literal heights, vertical paddings or point sizes; the iOS row is 44 pt; a line of body text in SF and PingFang fits the row |
 | Retired native Mac sidebar tests | Historical only: the Mac row was 24 / 28 / 32 pt for the system's small / medium / large Sidebar icon size; the target and its tests were removed |
 | `web/src/views/SidebarRowTokens.test.ts` | `--sidebar-row` is 32 px; every sidebar row uses `sidebar-row` with no `py-*`; no heading is uppercased or letter-spaced |
+| `web/src/views/SidebarHeadingBox.test.tsx`, `web/e2e/sidebar-heading-spacing.mjs` | Every top-level heading's row takes `sidebar-heading` (24 px, 44 on touch, the fold-all button's size), folded and unfolded, with both Agents lists; in Chrome, equal heights and gaps within 0.5 px |
 | `apple/PersonaTests/TokenRatchetTests.swift` | Literal paddings, frames and radii in views only go down |

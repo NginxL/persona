@@ -420,8 +420,8 @@ private func split(_ items: [Item]) -> [Seg] {
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out[k].answerID = it.id }
     }
     for i in out.indices {
-        let at = out[i].items.filter { !isInterrupt($0) }.map(\.seq).max() ?? Int.min
-        out[i].cut = out[i].items.contains { isInterrupt($0) && $0.seq > at }
+        let at = out[i].items.filter { !isTurnInterrupt($0) }.map(\.seq).max() ?? Int.min
+        out[i].cut = out[i].items.contains { isTurnInterrupt($0) && $0.seq > at }
     }
     return out
 }
@@ -467,7 +467,7 @@ private func placeReports(_ segs: inout [Seg], _ items: [Item]) {
         for id in seg.userIDs { own(id, k) }
         let leadingWake = seg.userIDs.isEmpty && seg.items.first.map(isWake) == true
         for it in seg.items {
-            if isInterrupt(it) || it.kind == .turnDuration || it.kind == .toolResult { continue }
+            if isTurnInterrupt(it) || it.kind == .turnDuration || it.kind == .toolResult { continue }
             if leadingWake, it.id == seg.items.first?.id { continue }
             if it.kind == .text, (it.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
             own(it.id, k)
@@ -533,7 +533,7 @@ private func isWake(_ it: Item) -> Bool {
 }
 
 /// The transcript's "Interrupted" notice. Its tokens belong to the exchange it stopped.
-private func isInterrupt(_ it: Item) -> Bool {
+nonisolated func isTurnInterrupt(_ it: Item) -> Bool {
     it.kind == .notice && it.task == nil && (it.text ?? "").contains("中断") // i18n-ignore: the transcript's interrupt notice
 }
 

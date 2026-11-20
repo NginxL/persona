@@ -119,10 +119,11 @@ export function defaultLabel(d: LauncherDefault | null | undefined, fallback = "
 const MODELS_HUB_MS = 70_000;
 
 /** The list for `launcher` on `mid` (seconds when the node has to start the CLI); null from an older hub (no picker). */
-export async function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
+export async function launcherModels(mid: string, launcher: string, opts: { refresh?: boolean; purpose?: "assistant"; host?: string; manager?: string; signal?: AbortSignal } = {}): Promise<LauncherModels | null> {
   const query = new URLSearchParams();
   if (opts.refresh) query.set("refresh", "1");
   if (opts.purpose) query.set("purpose", opts.purpose);
+  if (opts.host) query.set("host", opts.host);
   try {
     const r = await api<LauncherModels>(`/machines/${enc(mid)}/launchers/${enc(launcher)}/models${query.size ? `?${query}` : ""}`, { signal: opts.signal, timeout: pastHub(MODELS_HUB_MS), headers: opts.manager ? { [MANAGER_HEADER]: opts.manager } : undefined });
     return { ...r, models: r.models ?? [] };

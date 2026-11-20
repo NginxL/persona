@@ -31,6 +31,14 @@ var Routes = []string{
 	"/api/v1/imessage/",
 	"/api/v1/agents",
 	"/api/v1/agents/",
+	// The concrete Agents patterns also let scoped devices authorize against the hub's real relay mux.
+	"GET /api/v1/agents",
+	"GET /api/v1/agents/sessions",
+	"GET /api/v1/agents/sessions/{id}",
+	"GET /api/v1/agents/sessions/{id}/messages",
+	"GET /api/v1/agents/sessions/{id}/avatar",
+	"POST /api/v1/agents/sessions/{id}/messages",
+	"POST /api/v1/agents/sessions/{id}/read",
 	"/api/v1/messaging",
 	"/api/v1/messaging/",
 	"/api/v1/devices/{id}/widgets",
@@ -45,6 +53,7 @@ var Routes = []string{
 	"/api/v1/error-reports",
 	"/api/v1/subscriptions",
 	"/api/v1/subscriptions/",
+	"/api/v1/avatars/", // AvatarsRoute
 }
 
 // KeptRoutes are GET routes whose last answer the hub keeps and gives while the manager is away, so the apps keep
@@ -221,6 +230,9 @@ const (
 	// HubSettingsTool: {machine_id, session_id, arguments} → {text}: persona_settings on one of them (the card is the
 	// hub's: the manager asks HubWaitInteraction).
 	HubSettingsTool = "settings.tool"
+	// HubClarificationTake: {proof} → ClarificationProof: consume a one-time,
+	// card/text/conversation-bound channel clarification proof before session.send_once.
+	HubClarificationTake = "approval_clarification.take"
 	// HubKBArchives, … see the routes.
 	// HubAudit: Audit → {}: a request of an extension's token the hub refused, for that extension's audit in its manager
 	// (plugin_audit). The manager takes the actions below only.

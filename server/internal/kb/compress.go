@@ -183,13 +183,14 @@ func (e *Engine) Compress(ctx context.Context, c *Chat) error {
 		_, err := e.putCompressed(c, func(cur *Chat) { cur.Pending = 0 })
 		return err
 	}
-	in := prompts.RenderKBCompressInput(prompts.KBCompressInput{Name: c.Name, Kind: c.Kind, Automated: c.Kind == "mail" && !HasPeople(c),
+	owner := e.knowledgeOwner()
+	in := prompts.RenderKBCompressInput(prompts.KBCompressInput{Language: owner.Language, Name: c.Name, Kind: c.Kind, Automated: c.Kind == "mail" && !HasPeople(c),
 		Pinned: c.Pinned, People: e.pinnedPeople(c.People), Projects: e.knownProjects(), Tags: e.TopTags(40), Summary: e.Store.Summary(KindChat, c.ID), News: news})
 
 	var d chatDigest
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.compress").JSONMax(cctx, prompts.RenderKBCompress(prompts.KBOwner{Owner: e.ownerName()}), in, 4000, &d); err != nil {
+	if err := e.modelFor("kb.compress").JSONMax(cctx, prompts.RenderKBCompress(owner), in, 4000, &d); err != nil {
 		return e.compressFailed(ctx, c, err)
 	}
 	if _, ok := e.Store.Chat(c.ID); !ok { // forgotten while the model wrote (ForgetSource): not written back

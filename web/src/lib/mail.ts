@@ -4,7 +4,6 @@
 import { t } from "../i18n";
 import { useEffect, useState } from "react";
 import { api, enc } from "./api";
-import type { MailAccount } from "./inbox";
 import { itemHeaders, useItemManager } from "./manager-choice";
 
 export interface MailAddress {
@@ -151,6 +150,12 @@ export function markMailSeen(accountID: string, uid: number, mailbox: string, ma
 }
 
 // ── accounts ─────────────────────────────────────────────
+
+export interface MailAccount {
+  id: string;
+  name?: string;
+  email: string;
+}
 
 // by manager ("": the default's): each manager keeps its own mail accounts
 const known = new Map<string, MailAccount[]>();

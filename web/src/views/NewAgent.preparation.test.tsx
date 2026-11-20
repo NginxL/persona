@@ -291,6 +291,7 @@ describe("New Agent preparation ownership", () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="start-host"] button')!.click());
     // a model picked in the panel after admission changes the form, not the start on its way
     await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=new-agent-model] [data-model-pill]")!.click());
+    await act(async () => vi.dynamicImportSettled());
     await flush();
     await act(async () => [...document.querySelectorAll<HTMLElement>("[data-panel-row]")].find((r) => r.dataset.panelRow === "model:claude\nsynthetic-model")!.click());
     await flush();

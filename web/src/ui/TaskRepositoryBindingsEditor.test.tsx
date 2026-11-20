@@ -31,6 +31,17 @@ const titledSet: TaskRepositorySet = { ...twoLinks, repositories: [{ ...twoLinks
   { kind: "pull_request", number: "7", canonical_url: identity.canonical_url + "/pull/7", title: `Fix "quoted" <b>redirect</b> for the login flow across every provider` },
   { kind: "issue", number: "8", canonical_url: identity.canonical_url + "/issues/8", title: "Reported crash on the first screen" },
 ] }] };
+const twoCatalog: RepositoryCatalog = { ...catalog, repositories: [
+  ...catalog.repositories,
+  { ...other, id: "docs", name: "Docs", verified_at: "2026-01-01T00:00:00Z" },
+] };
+const twoSet: TaskRepositorySet = { ...set, revision: 2, repositories: [
+  set.repositories[0],
+  { repo_id: "docs", requested_ref: { kind: "default" },
+    source_snapshot: { identity: other, clone_url: other.canonical_url, catalog_revision: 4, transport_origin: "canonical_default" },
+    links: [], catalog_state: "current" },
+] };
+const typedSet: TaskRepositorySet = { ...set, repositories: [{ ...set.repositories[0], requested_ref: { kind: "tag", value: "v1.0" } }] };
 
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label)!;
 const click = async (label: string) => act(async () => { expect(button(label), label).toBeTruthy(); button(label).click(); });
@@ -49,6 +60,10 @@ const linkInput = () => document.querySelector<HTMLInputElement>('input[type="ur
 const typeInto = async (node: HTMLInputElement, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(node, value);
   node.dispatchEvent(new Event("input", { bubbles: true }));
+});
+const choose = async (node: HTMLSelectElement, value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(node, value);
+  node.dispatchEvent(new Event("change", { bubbles: true }));
 });
 const press = async (node: Element, key: string) => act(async () => {
   (node as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
@@ -488,7 +503,7 @@ it("keeps an empty alias, default ref and a controlled creation draft without re
 
 it("creates the Todo and association draft in one request, preserving old defaults", async () => {
   const context = repositoryRequestContext("assistant", credentialOwner(), () => true);
-  const pending = createTodoWithRepositories(context, " New work ", " Details ", undefined, { catalog_revision: 4, repositories: [{ repo_id: "web", requested_ref: { kind: "default" }, links: [{ url: identity.canonical_url + "/pull/7" }, { url: identity.canonical_url + "/pull/8" }, { url: "" }] }] });
+  const pending = createTodoWithRepositories(context, " New work ", " Details ", undefined, { catalog_revision: 4, repositories: [{ repo_id: "web", requested_ref: { kind: "default" }, links: [{ url: identity.canonical_url + "/pull/7" }, { url: identity.canonical_url + "/pull/8" }, { url: "" }] }] }, new Map([["web", identity]]));
   expect(calls).toHaveLength(1);
   expect(calls[0].path).toBe("/todos");
   const body = JSON.parse(calls[0].init.body as string);
@@ -507,6 +522,63 @@ it("offers no empty-state sentence that promises an editor nobody can open", asy
   await answer(calls[0], { ...catalog, repositories: [] });
   await act(async () => { button("Add repository").click(); });
   expect(document.querySelector("[data-repository-picker]")!.textContent).toContain("No saved repositories to add, or all of them are linked already.");
+});
+
+it("disables the editor save on an invalid source ref and recovers when it is corrected", async () => {
+  await render();
+  await answer(calls[0], set);
+  await click("Manage links");
+  await answerEditor(catalog, set);
+  await settle();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  await choose(dialog.querySelector("select")!, "branch");
+  const refInput = [...dialog.querySelectorAll<HTMLInputElement>("details input")].find((input) => input.maxLength !== 64)!;
+  expect(refInput).toBeTruthy();
+  expect(dialog.textContent).toContain("Use a valid branch, tag, commit or Git ref.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
+  await typeInto(refInput, "main");
+  await settle();
+  expect(dialog.textContent).not.toContain("Use a valid branch, tag, commit or Git ref.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(false);
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(JSON.parse(save.init.body as string).repositories[0].requested_ref).toEqual({ kind: "branch", value: "main" });
+  await answer(save, { ...set, revision: 2 });
+});
+
+it("rejects duplicate directory names case-insensitively before saving", async () => {
+  await render();
+  await answer(calls[0], twoSet);
+  await click("Manage links");
+  await answerEditor(twoCatalog, twoSet);
+  await settle();
+  const aliases = [...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[maxlength="64"]')];
+  expect(aliases).toHaveLength(2);
+  await typeInto(aliases[0], "Web");
+  await typeInto(aliases[1], "web");
+  await settle();
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Directory names must be unique, ignoring case.");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
+  await typeInto(aliases[1], "docs");
+  await settle();
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(false);
+  await click("Save");
+  const save = calls.at(-1)!;
+  expect(JSON.parse(save.init.body as string).repositories.map((row: { directory_alias?: string }) => row.directory_alias)).toEqual(["Web", "docs"]);
+  await answer(save, { ...twoSet, revision: 3 });
+});
+
+it("shows and preserves a saved tag ref instead of resetting it", async () => {
+  await render();
+  await answer(calls[0], typedSet);
+  await click("Manage links");
+  await answerEditor(catalog, typedSet);
+  await settle();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector<HTMLSelectElement>("select")!.value).toBe("tag");
+  const refInput = [...dialog.querySelectorAll<HTMLInputElement>("details input")].find((input) => input.maxLength !== 64)!;
+  expect(refInput.value).toBe("v1.0");
+  expect((button("Save") as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("renders the picker as a searchable list, and Escape goes back to its button", async () => {

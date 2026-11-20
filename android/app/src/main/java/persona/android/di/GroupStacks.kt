@@ -3,6 +3,8 @@ package persona.android.di
 import persona.android.AppText
 import persona.android.R
 import android.app.Application
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import persona.android.PersonaApp
@@ -84,12 +86,27 @@ class GroupStacks @Inject constructor(application: Application, private val runt
     private suspend fun build(group: GroupRuntime, data: ScopedHubData): GroupStack {
         val connection = group.connection
         fun current() = group.data === data && group.active
+        val retryKey = stringSetPreferencesKey("held_agent_retry_receipts")
+        val receipts = HeldAgentRetryReceipts(data.heldRetryPreferences.data.map { it[retryKey].orEmpty() }) { update ->
+            data.heldRetryPreferences.edit { prefs ->
+                val before = prefs[retryKey].orEmpty()
+                val after = update(before)
+                if (after != before) prefs[retryKey] = after
+            }
+        }
         val repositories = withContext(Dispatchers.IO) {
             ChatDataRepositories(data, HubChatTransport(connection), connection, foreground,
-                HttpHubPreferencesTransport(connection) { current() }, continuityFactory = app.continuityFactory)
+                HttpHubPreferencesTransport(connection) { current() }, reconcileHeldRetries = receipts::reconcile,
+                continuityFactory = app.continuityFactory)
         }
         val names = GroupNames(group.namespace)
         group.adoptSession = { previous, session -> if (current()) repositories.sessions.adoptThread(previous, session) }
+        group.heldActions = { session ->
+            HttpHeldAgentActions(session, connection.serverFeatures, receipts, data.coroutineScope, { path, method, body ->
+                if (!current()) throw CancellationException("Pairing changed")
+                connection.request(path, method, body)
+            }, { id, retry -> if (current()) repositories.sessions.heldActionCompleted(session, id, retry) })
+        }
         val view = object : HubConnection {
             override val state = group.state
             override val resumed get() = connection.resumed

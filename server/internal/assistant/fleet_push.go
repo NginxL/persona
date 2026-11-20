@@ -327,6 +327,9 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 	if s.supervising(id) && assistantwire.SupervisedFinish(sess, true) {
 		return
 	}
+	if s.quietBackgroundReply(machine, sess) {
+		return
+	}
 	if s.finishedDuplicate(machine, sess) {
 		return
 	}
@@ -357,6 +360,26 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 	go s.feishuAgentDone(machine, sess, head, text, place)
 	// And the topic of the todo this agent works on, if it has one (the same decision again, not a second one).
 	s.threadAgentDone(machine, sess)
+}
+
+func (s *Service) quietBackgroundReply(machine string, sess proto.Session) bool {
+	if !sess.Assistant || !assistantwire.SupervisedFinish(sess, true) || sess.AwaitsReply {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var page struct {
+		Items []proto.Item `json:"items"`
+	}
+	if err := s.call(ctx, machine, DeviceSessionItems, map[string]any{
+		"session_id": sess.SessionID, "turns": 1, "lazy_images": true,
+	}, &page); err != nil {
+		return false
+	}
+	if transcript.BackgroundReplyMissing(page.Items) {
+		return true
+	}
+	return s.mainBackgroundFolded(ctx) && s.isMain(ctx, sess.SessionID) && transcript.RoutineConversationReply(page.Items)
 }
 
 // reportSlack is how long before its turn started a scheduled run or notice may have been sent (the node starts the

@@ -1,0 +1,8 @@
+# HealthKit background delivery (#9526): select the generated opt-in file and retain its property when XcodeGen writes
+# the merged entitlements. Included after app-entitlements.yml; siri-calls.yml can select its own generated file later.
+targets:
+  Persona:
+    entitlements:
+      path: PersonaOptIn.entitlements
+      properties:
+        com.apple.developer.healthkit.background-delivery: true

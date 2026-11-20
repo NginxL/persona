@@ -160,7 +160,7 @@ func TestSubagentSeedsSkipLargeRequestBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	_, seeds, _, _, _, _, err := scanLines(f, int64(len(data)))
+	_, seeds, _, _, _, _, _, err := scanLines(f, int64(len(data)))
 	if err != nil || len(seeds) != 0 {
 		t.Fatalf("request blob should not become expensive agent state seed: %+v %v", seeds, err)
 	}
@@ -241,4 +241,55 @@ func TestSubagentResultsWindowLiveAndFullText(t *testing.T) {
 		return
 	}
 	t.Fatal("large report not retained")
+}
+
+// A window that names a subagent only by its messages (senderTaskId), with the agent's failure notification before
+// it, keeps the failure when a later message of the agent arrives: the later lines used to read the launch again
+// (back to running) while the failure was dropped as a notification already shown.
+func TestSubagentStatusFromMessagesBeforeWindowSurvivesLiveMessage(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("queued=%t", queued), func(t *testing.T) {
+			old := windowBytes
+			defer func() { windowBytes = old }()
+			windowBytes = 4 << 10
+			lines := append(subagentLaunch(), subagentNoteLine("failed", "failed", "Synthetic failure.", queued))
+			for i := range 10 {
+				lines = append(lines, subagentJSON(map[string]any{"type": "file-history-snapshot", "uuid": fmt.Sprintf("padding-%d", i), "padding": strings.Repeat("x", 3000)}))
+			}
+			lines = append(lines, subagentPeerLine("resumed", "agent-review", "Resumed and still working.", queued, false))
+			path := filepath.Join(t.TempDir(), "synthetic.jsonl")
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			windowed := NewFile(path)
+			fresh, _, err := windowed.RefreshSpan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if windowed.base == 0 || len(fresh) != 1 || fresh[0].Task == nil || fresh[0].Task.Status != "failed" {
+				t.Fatalf("the window's message (base %d): %+v", windowed.base, fresh)
+			}
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = f.WriteString(subagentPeerLine("later", "agent-review", "A later message.", queued, false) + "\n")
+			f.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, _, err := windowed.RefreshSpan()
+			if err != nil || len(live) != 1 || live[0].Task == nil || live[0].Task.Status != "failed" || !live[0].IsError {
+				t.Fatalf("the later message: %+v %v", live, err)
+			}
+			windowBytes = 1 << 40
+			whole := NewFile(path)
+			if _, _, err := whole.RefreshSpan(); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := allItems(windowed), allItems(whole); !reflect.DeepEqual(got, want) {
+				t.Fatalf("window/live and whole read differ:\nwindow %+v\nwhole %+v", got, want)
+			}
+		})
+	}
 }

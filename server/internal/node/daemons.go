@@ -83,12 +83,13 @@ const daemonMaxMessage = 64 << 20
 
 // daemonCaps are the capabilities a daemon may declare; anything a later protocol adds is off for daemons until it is
 // allowed here on purpose.
-var daemonCaps = []string{"start", "send", "interrupt", "rename", "close", "execution"}
+var daemonCaps = []string{"start", "send", "interrupt", "rename", "close", "execution", "history"}
 
 // daemonMethods are the node → runtime calls a link forwards to its daemon.
-var daemonMethods = map[string]bool{"session.items": true, "session.image": true, "session.item": true, "session.watch": true,
+var daemonMethods = map[string]bool{"session.items": true, "session.image": true, "session.item": true, "session.visualization": true,
+	"session.watch":   true,
 	"session.unwatch": true, "session.send": true, "session.interrupt": true, "session.rename": true, "session.close": true,
-	"session.start": true, "session.execution": true}
+	"session.start": true, "session.execution": true, "sessions.history": true}
 
 // daemonConfig is one daemon in daemons.json.
 type daemonConfig struct {
@@ -747,6 +748,9 @@ func (l *daemonLink) toDaemon(ctx context.Context, method string, params json.Ra
 			return nil, fmt.Errorf("bad %s: %w", method, err)
 		}
 	}
+	if method == "sessions.history" {
+		return l.historyFromDaemon(ctx, p)
+	}
 	if method != "session.start" {
 		var id string
 		_ = json.Unmarshal(p["session_id"], &id)
@@ -784,6 +788,32 @@ func (l *daemonLink) toDaemon(ctx context.Context, method string, params json.Ra
 	}
 	res["session"] = rawJSON(r)
 	return res, nil
+}
+
+// historyFromDaemon forwards sessions.history (docs/protocol/protocol.md "Session history"): a window, not a session, so
+// it carries no session id to translate. Its rows come back as runtime.sessions' do (row): namespaced by the daemon's
+// id, and a row without a valid id left out.
+func (l *daemonLink) historyFromDaemon(ctx context.Context, p map[string]json.RawMessage) (any, error) {
+	cctx, cancel := context.WithTimeout(ctx, daemonCallTimeout)
+	defer cancel()
+	var res struct {
+		Rows       []map[string]json.RawMessage `json:"rows"`
+		NextCursor string                       `json:"next_cursor"`
+		Complete   bool                         `json:"complete"`
+	}
+	if err := l.dp.Call(cctx, "sessions.history", p, &res); err != nil {
+		return nil, err
+	}
+	rows := make([]map[string]json.RawMessage, 0, len(res.Rows))
+	for _, s := range res.Rows {
+		if s == nil {
+			continue
+		}
+		if r, ok := l.row(s); ok {
+			rows = append(rows, r)
+		}
+	}
+	return map[string]any{"rows": rows, "next_cursor": res.NextCursor, "complete": res.Complete}, nil
 }
 
 // toDaemonEvent passes on what the node tells every runtime (whether a hub is connected).

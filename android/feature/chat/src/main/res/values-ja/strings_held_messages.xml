@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_held_composer">%1$s はオフラインです。接続が戻ると送信します。</string>
+    <string name="chat_held_computer_offline">%1$s はオフラインです。</string>
+    <string name="chat_held_waiting">%1$s の接続が戻ると送信します</string>
+    <string name="chat_held_unconfirmed">配信を確認できませんでした</string>
+    <string name="chat_held_remove_title">このメッセージを送信待ちから削除しますか？</string>
+    <string name="chat_held_remove_detail">すべてのデバイスの送信待ちから削除します。すでに届いたメッセージはチャットに残ります。</string>
+    <plurals name="chat_held_images">
+        <item quantity="other">画像 %1$d 枚</item>
+    </plurals>
+</resources>

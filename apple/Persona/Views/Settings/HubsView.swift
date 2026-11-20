@@ -53,13 +53,13 @@ struct HubsView: View {
         } message: {
             Text("Only changes the name on this device. Leave empty to use the hub's own name.")
         }
-        .confirmationDialog(removingGroupTitle, isPresented: removingGroupShown, titleVisibility: .visible, presenting: removingGroup) { g in
+        .accessibleConfirmationDialog(removingGroupTitle, isPresented: removingGroupShown, titleVisibility: .visible, presenting: removingGroup) { g in
             Button("Disconnect This Group", role: .destructive) { removingGroup = nil; Task { await model.disconnectGroup(g) } }
         } message: { g in
             Text(model.groupIDs.count > 1 ? String(localized: "This group's machines, agents, and cached chats are removed from this device; other groups aren't affected. To use it again, pair again.")
                                          : String(localized: "After disconnecting, you'll need to scan the code to pair again."))
         }
-        .confirmationDialog(removingHubTitle, isPresented: removingHubShown, titleVisibility: .visible, presenting: removingHub) { h in
+        .accessibleConfirmationDialog(removingHubTitle, isPresented: removingHubShown, titleVisibility: .visible, presenting: removingHub) { h in
             Button("Disconnect This Hub", role: .destructive) { removingHub = nil; Task { await model.disconnectHub(h.id) } }
         } message: { _ in
             Text("Only this hub is disconnected; the group stays connected through its other hubs.")

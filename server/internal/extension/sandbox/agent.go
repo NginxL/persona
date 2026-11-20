@@ -27,6 +27,9 @@ import (
 // launch`) is in it already and must not wrap itself again (nested sandbox-exec and user namespaces can fail).
 const AgentEnv = "PERSONA_AGENT_SANDBOXED"
 
+// AgentExecCommand is the node binary's internal entry point for finishing a Linux agent sandbox before exec.
+const AgentExecCommand = "agent-sandbox-exec"
+
 // AgentOnFile in the data directory turns the agent sandbox on for this machine (docs/server/agent-sandbox.md "Turning it
 // on"). An agent in the sandbox cannot remove it.
 const AgentOnFile = "agent-sandbox.on"
@@ -108,6 +111,9 @@ func AgentSupport(sup Support) AgentStatus {
 	return AgentStatus{State: AgentActive}
 }
 
+// RunAgentExec finishes the Linux alias mounts and execs the command after "--". Other platforms return an error.
+func RunAgentExec(args []string) error { return runAgentExec(args) }
+
 // WrapAgent runs argv (argv[0] the program, a path or a name on PATH) in the agent sandbox when it can: the new
 // command line starts with sandbox-exec or bwrap, and env gains AgentEnv. When it cannot, argv and env come back as
 // they are and the status says why, so the agent starts all the same. Neither platform creates a pid namespace: macOS
@@ -137,12 +143,13 @@ func WrapAgent(plan AgentPlan, argv, env []string) ([]string, []string, AgentSta
 
 	var profile string
 	var prefix []string
+	var wrapped []string
 	var err error
 	check := plan.Check
 	if sup.OS == "linux" {
 		prefix, err = LinuxAgent(sup.Bwrap, plan)
 		if err == nil {
-			err = linuxAgentCheckArgs(len(prefix) + 1 + len(argv))
+			wrapped, err = linuxAgentCommand(prefix, argv)
 		}
 		profile = strings.Join(prefix, "\x00")
 		if check == nil {
@@ -151,6 +158,7 @@ func WrapAgent(plan AgentPlan, argv, env []string) ([]string, []string, AgentSta
 	} else {
 		profile, err = DarwinAgent(plan)
 		prefix = []string{"/usr/bin/sandbox-exec", "-p", profile}
+		wrapped = append(prefix, argv...)
 		if check == nil {
 			check = checkAgentProfile
 		}
@@ -170,10 +178,6 @@ func WrapAgent(plan AgentPlan, argv, env []string) ([]string, []string, AgentSta
 		}
 		return argv, env, agentStatusReason(AgentUnavailable, key, i18n.Args{"err": err.Error()})
 	}
-	if sup.OS == "linux" {
-		prefix = append(prefix, "--")
-	}
-	wrapped := append(prefix, argv...)
 	return wrapped, append(withoutKey(env, AgentEnv), AgentEnv+"=1"), AgentStatus{State: AgentActive}
 }
 

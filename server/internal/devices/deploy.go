@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -63,7 +64,24 @@ func remoteTarget(cfg MachineConfig, info proto.NodeInfo, bin string) string {
 	if cfg.RemoteBin != "" {
 		return cfg.RemoteBin
 	}
-	return "~/.persona/bin/personad"
+	return defaultRemoteBin
+}
+
+// gzipPipe is r gzipped as it is read, for an ssh's stdin. The caller closes it once ssh is done: exec copies a
+// non-*os.File Stdin in its own goroutine and never closes it, so once ssh exits early (auth failure, connect timeout,
+// the remote script failing, ctx done) nothing reads it, and the gzip writer would block for good (#2377). Closing it
+// makes that Write fail with io.ErrClosedPipe so it returns.
+func gzipPipe(r io.Reader) *io.PipeReader {
+	pr, pw := io.Pipe()
+	go func() {
+		zw, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
+		_, err := io.Copy(zw, r)
+		if err == nil {
+			err = zw.Close()
+		}
+		pw.CloseWithError(err)
+	}()
+	return pr
 }
 
 // errFallbackOnRedeploy: an update the manager makes by itself found a fallback build (the newest release, another
@@ -72,29 +90,96 @@ var errFallbackOnRedeploy = errors.New("a fallback build is sent only on Redeplo
 
 var errAutoNodeUpdatesDisabled = errors.New("automatic node upgrades are disabled")
 
+// deployRun is one deployment's private completion signal. Its error is written before done closes and never
+// overwritten by a later deployment.
+type deployRun struct {
+	done chan struct{}
+	err  error
+}
+
+// Redeploy starts the same explicit deployment as the app's Redeploy route and waits for its outcome. Canceling the
+// caller stops only the wait: the deployment keeps its own manager context and machine-card state.
+func (d *Devices) Redeploy(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m := d.machineByID(id)
+	if m == nil {
+		return errUnknownMachine
+	}
+	run, err := m.startDeployOf(false)
+	if err != nil {
+		return err
+	}
+	return m.waitDeploy(ctx, run)
+}
+
+func (m *Machine) waitDeploy(ctx context.Context, run *deployRun) error {
+	if run == nil {
+		return errors.New("redeploy is running but its result cannot be awaited")
+	}
+	select {
+	case <-run.done:
+		return run.err
+	case <-ctx.Done():
+		select {
+		case <-run.done:
+			return run.err
+		default:
+		}
+		return fmt.Errorf("redeploy is still running; its result is not confirmed: %w", ctx.Err())
+	}
+}
+
+// beginDeployLocked starts one outcome wait for every caller that joins this deployment.
+func (m *Machine) beginDeployLocked(phase string) *deployRun {
+	m.deploying, m.deployErr, m.deployPhase = true, "", phase
+	m.deployRun = &deployRun{done: make(chan struct{})}
+	return m.deployRun
+}
+
+func (m *Machine) endDeployLocked(err error) {
+	m.deploying, m.deployPhase = false, ""
+	if m.deployRun != nil {
+		m.deployRun.err = err
+		close(m.deployRun.done)
+		m.deployRun = nil
+	}
+}
+
 // startDeploy checks a deploy can start and runs it in the background; the machine list shows its progress. It is the
 // explicit Redeploy: any build the node's platform resolves to goes, a fallback too.
-func (m *Machine) startDeploy() error { return m.startDeployOf(false) }
+func (m *Machine) startDeploy() error {
+	_, err := m.startDeployOf(false)
+	return err
+}
 
 // startAutoDeploy is startDeploy for the updates the manager makes by itself (a machine back on another build, the
 // update after the hub's): only a build of the hub's own version goes, the hub's or its release's; a fallback build
 // is left to Redeploy (errFallbackOnRedeploy), as nobody chose to run another version than the hub's.
-func (m *Machine) startAutoDeploy() error { return m.startDeployOf(true) }
+func (m *Machine) startAutoDeploy() error {
+	_, err := m.startDeployOf(true)
+	return err
+}
 
-func (m *Machine) startDeployOf(auto bool) error {
+func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	if auto && !m.d.config().AutoUpdateNodes {
-		return errAutoNodeUpdatesDisabled
+		return nil, errAutoNodeUpdatesDisabled
+	}
+	if m.d.linkSwitchUnfinished(m.cfg.ID) { // the switch replaces the node's connection and may install its service
+		return nil, errLinkSwitchDeploy
 	}
 	m.mu.Lock()
 	if m.deploying {
+		run := m.deployRun
 		m.mu.Unlock()
-		return nil
+		return run, nil
 	}
 	blocked := m.canDeployLocked()
 	info, linked := m.info, m.rpcDeploymentLocked()
 	m.mu.Unlock()
 	if blocked != nil {
-		return blocked
+		return nil, blocked
 	}
 	// The build for its platform and kind of program (packages.go): looked up afresh, a release's manifest at most.
 	lookup, cancel := context.WithTimeout(m.d.deployContext(), packageLookup)
@@ -102,20 +187,21 @@ func (m *Machine) startDeployOf(auto bool) error {
 	cancel()
 	m.d.changed() // what the machine should run may be another build now
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if auto && pkg.Fallback {
-		return errFallbackOnRedeploy
+		return nil, errFallbackOnRedeploy
 	}
 	if linked {
-		return m.startRPCDeployment(pkg, nil)
+		return m.startRPCDeploymentRun(pkg, nil)
 	}
 	m.mu.Lock()
 	if m.deploying {
+		run := m.deployRun
 		m.mu.Unlock()
-		return nil
+		return run, nil
 	}
-	m.deploying, m.deployErr, m.deployPhase = true, "", "transferring"
+	run := m.beginDeployLocked("transferring")
 	m.mu.Unlock()
 	m.d.changed()
 	target := pkg.Version
@@ -126,7 +212,7 @@ func (m *Machine) startDeployOf(auto bool) error {
 			err = m.deploy(ctx, bin, target)
 		}
 		m.mu.Lock()
-		m.deploying, m.deployPhase = false, ""
+		m.endDeployLocked(err)
 		if err != nil {
 			m.deployErr = err.Error()
 		}
@@ -139,7 +225,7 @@ func (m *Machine) startDeployOf(auto bool) error {
 		m.saveDeployOutcome(ctx, target, err)
 		m.d.changed()
 	}()
-	return nil
+	return run, nil
 }
 
 // deployExitWrapper is the deploy script's exit status when bin is a script (remote_bin a wrapper that sets the node's
@@ -231,20 +317,9 @@ func (m *Machine) deploy(ctx context.Context, bin, target string) error {
 	// what it runs); the device's file takes either program.
 	guard := isPersonaNodeBuild(bin) && !update.IsDeviceFile(remote)
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, deployScript(remote, guard))
-	pr, pw := io.Pipe()
-	// exec copies a non-*os.File Stdin in its own goroutine and never closes it: once ssh exits early (auth failure,
-	// connect timeout, the remote script failing, ctx done) nothing reads pr, and the gzip writer below would block on
-	// pw for good (#2377). Closing pr makes its Write fail with io.ErrClosedPipe so it returns.
+	pr := gzipPipe(f)
 	defer pr.Close()
 	cmd.Stdin = pr
-	go func() {
-		zw, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
-		_, err := io.Copy(zw, f)
-		if err == nil {
-			err = zw.Close()
-		}
-		pw.CloseWithError(err)
-	}()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == deployExitWrapper {
@@ -380,6 +455,9 @@ func (m *Machine) updateOnConnect(ctx context.Context) {
 	online, deploying, info := m.online, m.deploying, m.info
 	m.mu.Unlock()
 	if m.cfg.Kind == "local" || m.d.hubVersion() == "" || !online || deploying {
+		return
+	}
+	if m.d.linkSwitchUnfinished(m.cfg.ID) { // nothing recorded: the next connection after the switch looks again
 		return
 	}
 	// The hub's build, or the release's its platform resolves to. Not known while the release site is away: nothing is

@@ -397,6 +397,9 @@ func (p *pages) builtinConfirm(dest string, b Builtin) string {
 // builtinStatus is how a built-in source is doing: its connection, its latest read, and each account's.
 func (p *pages) builtinStatus(b Builtin) wire.Section {
 	sec := wire.Section{Key: "status", Title: p.t("source.status"), Footer: p.t("builtin.status_footer")}
+	if b.Via != nil && b.Via.On {
+		sec.Footer = "" // its reads are its subscription's runs, which a restart keeps (#11762)
+	}
 	conn := row("st.conn", p.t("builtin.connection"))
 	conn.Value = p.t("builtin.status." + statusKey(b.Status))
 	sec.Items = append(sec.Items, conn)

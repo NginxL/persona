@@ -3,6 +3,7 @@
   "url_scheme": "地址要是 http(s):// 开头",
   "url_extras": "地址不能带账号、凭据、查询参数或片段",
   "header_line": "请求头第 {line} 行要写成「名字: 值」",
+  "header_reserved": "请求头 {name} 由 Persona 或 HTTP 管理。请移除它并改用对应字段，或换一个名称。",
   "env_line": "环境变量第 {line} 行要写成「名字=值」，名字只用字母、数字和下划线",
   "env_limit": "环境变量最多 50 个",
   "proxy_scheme": "代理要是 http(s):// 或 socks5:// 开头",

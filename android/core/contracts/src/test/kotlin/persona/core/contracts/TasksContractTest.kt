@@ -1,6 +1,6 @@
 package persona.core.contracts
 
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,6 +18,36 @@ class TasksContractTest {
         val plan = ServerEvent.decode("""{"type":"task_plan","plan":{"id":"p1","conversation":"c1","state":"open",
             "tasks":[{"title":"t","prompt":"p","machine":"box","cwd":"/code/app","readonly":true}]}}""")
         assertEquals("app", ((plan as TaskPlanEvent).plan.tasks.single().project).zhAny())
+    }
+
+    /** A to-do's stage kind and the end of its stage bar (#3380, #11590), and their absence on an older hub. */
+    @Test fun todoStageKindAndDoneDecode() {
+        val done = JsonCodec.decodeFromString(Todo.serializer(),
+            """{"id":"t1","title":"t","done_at":"2026-11-20T03:00:00Z","stage":"develop","stage_kind":"code","stage_done":true}""")
+        assertEquals("code", done.stageKind)
+        assertTrue(done.stageDone)
+        val general = JsonCodec.decodeFromString(Todo.serializer(), """{"id":"t2","title":"t","stage":"develop","stage_kind":"general"}""")
+        assertEquals("general", general.stageKind)
+        assertFalse(general.stageDone)
+        val older = JsonCodec.decodeFromString(Todo.serializer(), """{"id":"t3","title":"t","stage":"develop"}""")
+        assertEquals(null, older.stageKind)
+        assertFalse(older.stageDone)
+    }
+
+    /** Agent presets on planned tasks (#2225), including their absence on an older hub. */
+    @Test fun planTaskTiersDecodeAndAnOlderHubHasNone() {
+        val event = ServerEvent.decode("""{"type":"task_plan","plan":{"id":"p1","conversation":"c1","state":"open",
+            "tasks":[{"title":"Review","prompt":"p","machine":"box","cwd":"/code/app","launcher":"fast","tier":"review"}]}}""")
+            as TaskPlanEvent
+        // Assert the wire shape too: this is a runtime failure, not a compile-only reference to a future property.
+        val encoded = Json(JsonCodec) { encodeDefaults = true }.encodeToJsonElement(TaskPlan.serializer(), event.plan).jsonObject
+        val task = encoded["tasks"]!!.jsonArray.single().jsonObject
+        assertEquals("review", task["tier"]?.jsonPrimitive?.content)
+        assertEquals("fast", task["launcher"]?.jsonPrimitive?.content)
+
+        val older = JsonCodec.decodeFromString(PlanTask.serializer(), """{"title":"Default","prompt":"p"}""")
+        val olderEncoded = Json(JsonCodec) { encodeDefaults = true }.encodeToJsonElement(PlanTask.serializer(), older).jsonObject
+        assertFalse("tier" in olderEncoded)
     }
 
     // The cards' snapshot (docs/assistant/assistant-views.md): every live card, answer and registered block, each read on its own.

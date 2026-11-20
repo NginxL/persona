@@ -144,4 +144,8 @@ func TestAssistantDefaultPermissionsThroughManagerRouting(t *testing.T) {
 type permissionTestHub struct{ assistantLink }
 
 func (permissionTestHub) InboxChanged(context.Context, assistantwire.InboxChanged) {}
-func (permissionTestHub) Tell(string, any) error                                   { return nil }
+
+func (permissionTestHub) CredentialRevoked(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (permissionTestHub) Tell(string, any) error { return nil }

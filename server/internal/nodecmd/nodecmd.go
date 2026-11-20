@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/iphone"
 	"github.com/nwverse/persona/server/internal/mcpserver"
 	"github.com/nwverse/persona/server/internal/node"
@@ -69,6 +70,9 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 	}
 	rest := args[1:]
 	switch args[0] {
+	case sandbox.AgentExecCommand:
+		stop()
+		return true, sandbox.RunAgentExec(rest)
 	case "node":
 		return true, runNode(ctx, rest, b)
 	case "hook":
@@ -80,6 +84,8 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 				CommandName() + " launch --ticket <ticket> -- claude [claude args…]")
 		}
 		return true, runLaunch(stop, ticket, rest[0], rest[1:]) // launch.go: bounded wait for the node, Ctrl-C ends it
+	case "assistant-tui": // an assistant conversation's interactive Claude Code, as claude -p to the node (node/assistant_tui.go)
+		os.Exit(node.AssistantTUI(rest, os.Stdin, os.Stdout, os.Stderr))
 	case "codex-start": // a Codex launcher with the phone's first message, read from a file (node/codex_start.go)
 		return true, node.CodexStart(rest)
 	case "tab-start": // a command a runtime gave to resume its session in a new tab (`pi --session …`, node/pi.go)

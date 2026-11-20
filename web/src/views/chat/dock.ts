@@ -85,11 +85,15 @@ export function awaitingTurn(
   now: number,
   /** The session's failure, if it has one: when its state last changed (the turn the host stopped, botmux). */
   failure?: { since?: string },
+  stateSince?: string,
 ): boolean {
-  if (!last?.user || last.steps.length || last.answer) return false;
+  if (!last?.user || last.answer) return false;
+  // Opening a completed exchange must not revive it. An unanswered tool/thought can precede the hub's working state.
+  if (last.steps.length && !last.steps.some(s => s.kind === "thinking" || (s.kind === "tool" && !s.result))) return false;
   if (state !== "idle" && state !== "unread" && state !== "unknown") return false;
   const at = last.user.ts ? Date.parse(last.user.ts) : NaN;
   if (Number.isNaN(at) || now - at >= AWAIT_MS) return false;
+  if (last.steps.length && stateSince && Date.parse(stateSince) >= at) return false;
   // the turn failed before writing anything: its FailureNote says so, nothing is worked on (#3935). A failure
   // without a time, or from before the message (the hub clears it once a message goes in), is taken as this one's
   // only when it is not older.

@@ -10,8 +10,15 @@
 <body>
   <main>
     <div class="mark" aria-hidden="true">P</div>
-    <h1 data-i18n="welcome"></h1>
-    <section aria-labelledby="hub-heading">
+    <h1 id="setup-title" data-i18n="welcome"></h1>
+    <section id="connection-recovery" aria-labelledby="setup-title" hidden>
+      <p data-i18n="hub_connection_failed"></p>
+      <div class="actions">
+        <button id="retry" type="button" data-i18n="retry"></button>
+        <button id="local-settings" class="secondary" type="button" data-i18n="local_settings"></button>
+      </div>
+    </section>
+    <section id="hub-settings" aria-labelledby="hub-heading">
       <h2 id="hub-heading" data-i18n="your_hub"></h2>
       <p data-i18n="hub_help"></p>
       <form id="connect">
@@ -21,12 +28,12 @@
         <button type="submit" data-i18n="continue"></button>
       </form>
     </section>
-    <section aria-labelledby="desktop-heading">
+    <section id="desktop-settings" aria-labelledby="desktop-heading">
       <h2 id="desktop-heading" data-i18n="desktop_options"></h2>
       <label class="choice" for="launch-at-login"><input id="launch-at-login" type="checkbox"> <span data-i18n="launch_at_login"></span></label>
       <p id="launch-at-login-status" class="hint" role="status"></p>
     </section>
-    <details>
+    <details id="link-settings">
       <summary data-i18n="link_section"></summary>
       <p data-i18n="link_intro"></p>
       <div id="link-state" role="status" data-i18n="link_checking"></div>

@@ -12,8 +12,9 @@ import (
 // ---- the brief of a task_plan task (#3822) ----
 
 // briefRequired refuses a plan's task that does not say what done is: a writable task needs done_when (one criterion
-// that can be checked, at least) and expect_minutes, a read-only one a goal and expect_minutes. A task that continues
-// another (continues) takes that task's brief instead and says why it takes over. The refusal names what is missing.
+// that can be checked, at least), a read-only one a goal. The hub supplies an automatic estimate for every task_plan
+// task; expect_minutes is only an optional override. A continuation takes its brief instead and says why.
+// The refusal names what is missing.
 func briefRequired(t *PlanTask) error {
 	if t.Continues != "" {
 		if t.ContinuesWhy == "" {
@@ -28,9 +29,6 @@ func briefRequired(t *PlanTask) error {
 		}
 	} else if len(t.DoneWhen) == 0 {
 		missing = append(missing, "done_when (at least one result that can be checked)")
-	}
-	if t.ExpectMinutes <= 0 {
-		missing = append(missing, "expect_minutes (about how long it should take)")
 	}
 	if len(missing) == 0 {
 		return nil
@@ -121,7 +119,19 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 				return fmt.Errorf("task %d: the scope of %s changed; read its brief and plan the continuation again", i+1, prev.ID)
 			}
 			// Its own prompt stays its own; what done means is the brief's, as its scope changes left it.
-			t.DoneWhen, t.ExpectMinutes = brief.Criteria, brief.ExpectNow
+			// A continuation of an automatic brief keeps its current estimate. A manual or legacy brief becomes
+			// automatic only now, through this task_plan dispatch, with the system default unless explicitly overridden.
+			if t.EstimateSource == "" {
+				if brief.EstimateSourceNow != "" {
+					t.ExpectMinutes, t.EstimateSource = automaticEstimate(brief.ExpectNow, brief.EstimateSourceNow)
+				} else {
+					t.ExpectMinutes, t.EstimateSource = automaticEstimate(0, "")
+				}
+			} else {
+				t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
+			}
+			t.DoneWhen = brief.Criteria
+			brief.ExpectNow, brief.EstimateSourceNow = t.ExpectMinutes, t.EstimateSource
 			t.Brief = &brief
 			continue
 		}
@@ -130,8 +140,9 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 			origin = &o
 		}
 		rec := *origin
+		t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
 		rec.ID, rec.CreatedAt = "brief_"+randomHex(8), time.Now().UTC()
-		rec.Goal, rec.DoneWhen, rec.ExpectMinutes, rec.OutOfBounds = firstNonEmpty(t.Goal, t.Title), t.DoneWhen, t.ExpectMinutes, t.OutOfBounds
+		rec.Goal, rec.DoneWhen, rec.ExpectMinutes, rec.EstimateSource, rec.OutOfBounds = firstNonEmpty(t.Goal, t.Title), t.DoneWhen, t.ExpectMinutes, t.EstimateSource, t.OutOfBounds
 		if rec.StartedBy != briefByOwner {
 			rec.Reason = t.StartedWhy
 		}
@@ -155,32 +166,56 @@ func (s *Service) checkContinuationScope(t *PlanTask) error {
 	return nil
 }
 
-// briefStarted keeps the brief of plan p's task t now that it is to-do todo: the one its card showed, dated from the
-// start, or the brief of the task it continues. A plan saved before briefs has none on its tasks: it gets one from
-// what the task says, with nobody named as having asked.
+// briefStarted keeps the brief of plan p's task t and appends one dispatch round: the card's brief, dated from the
+// start for new work, or the brief it continues. Every task_plan dispatch, including reuse of a manual/legacy to-do,
+// gets an explicit round id and estimate source. A plan saved before briefs gets a reconstructed brief.
 func (s *Service) briefStarted(ctx context.Context, p *TaskPlan, t *PlanTask, todo Todo) {
-	if _, ok := s.briefOfTodo(todo.ID); ok {
-		return // a to-do the task runs on (reuse_todo) that has its brief already
-	}
-	if t.Continues != "" {
+	startedAt := time.Now().UTC()
+	t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
+	briefID := ""
+	if current, ok := s.briefOfTodo(todo.ID); ok {
+		briefID = current.ID // a reused to-do keeps its brief and gains a new dispatch round below
+	} else if t.Continues != "" {
 		prev, ok := s.todoNow(t.Continues)
 		if ok {
 			if brief, err := s.ensureTaskBrief(ctx, prev); err == nil {
 				if err := s.linkTaskBrief(ctx, brief.ID, todo.ID, prev.ID, t.ContinuesWhy); err != nil {
 					s.logf("task %s: brief of %s: %v", todo.ID, prev.ID, err)
+					return
 				}
-				return
+				briefID = brief.ID
 			}
 		}
-		s.logf("task %s: the task it continues (%s) is gone: it gets a brief of its own", todo.ID, t.Continues)
+		if briefID == "" {
+			s.logf("task %s: the task it continues (%s) is gone: it gets a brief of its own", todo.ID, t.Continues)
+		}
 	}
-	rec := briefRecord{StartedBy: briefByUnknown, Conversation: p.Conversation, Goal: firstNonEmpty(t.Goal, t.Title),
-		DoneWhen: t.DoneWhen, ExpectMinutes: t.ExpectMinutes, OutOfBounds: t.OutOfBounds}
-	if t.Brief != nil && !t.Brief.Reconstructed && t.Continues == "" {
-		rec = t.Brief.briefRecord
+	if briefID == "" {
+		rec := briefRecord{StartedBy: briefByUnknown, Conversation: p.Conversation, Goal: firstNonEmpty(t.Goal, t.Title),
+			DoneWhen: t.DoneWhen, ExpectMinutes: t.ExpectMinutes, EstimateSource: t.EstimateSource, OutOfBounds: t.OutOfBounds}
+		if t.Brief != nil && !t.Brief.Reconstructed && t.Continues == "" {
+			rec = t.Brief.briefRecord
+		}
+		rec.CreatedAt = startedAt // the clock starts when the work is handed out, not when it was proposed
+		v, err := s.putTaskBrief(ctx, rec, todo.ID)
+		if err != nil {
+			s.logf("task %s: brief: %v", todo.ID, err)
+			return
+		}
+		briefID = v.ID
 	}
-	rec.CreatedAt = time.Now().UTC() // the clock starts when the work is handed out, not when it was proposed
-	if _, err := s.putTaskBrief(ctx, rec, todo.ID); err != nil {
-		s.logf("task %s: brief: %v", todo.ID, err)
+	roundID := p.ID + "/" + todo.ID + "@" + startedAt.Format(time.RFC3339Nano)
+	_, _, err := s.changeBrief(ctx, briefID, func(tb *taskBrief) bool {
+		for _, e := range tb.st.Log {
+			if e.Kind == briefEventDispatch && e.RoundID == roundID {
+				return false
+			}
+		}
+		tb.st.Log = append(tb.st.Log, BriefEvent{At: startedAt, Kind: briefEventDispatch, Todo: todo.ID,
+			Source: "task_plan", PlanID: p.ID, RoundID: roundID, ExpectMinutes: t.ExpectMinutes, EstimateSource: t.EstimateSource})
+		return true
+	})
+	if err != nil {
+		s.logf("task %s: dispatch record: %v", todo.ID, err)
 	}
 }

@@ -21,10 +21,10 @@ final class SidebarRootsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    @MainActor private func launch() {
+    @MainActor private func launch(_ extra: [String] = []) {
         app = XCUIApplication()
         app.launchArguments = ["-demo.on", "YES", "-newAssistant", "YES", "-tab", "assistant", "-dev.openChat", "",
-                               "-app.navigation", "sidebar", "-probes", "YES"]
+                               "-app.navigation", "sidebar", "-probes", "YES"] + extra
         app.launchPinned(navigation: false)
     }
 
@@ -595,5 +595,100 @@ final class SidebarRootsUITests: XCTestCase {
         XCTAssertTrue(fold.waitForExistence(timeout: 5) && fold.isHittable, "the column did not come back:\n\(app.debugDescription)")
         let shown = settled("agent", "the column brought back")
         XCTAssertEqual(shown.transitions, second.transitions, "bringing the column back moved the page: \(second) → \(shown)")
+    }
+
+    /// Exactly one row of the sidebar is selected, `id` (whose label holds `text`), with the column brought out first.
+    @MainActor private func assertOneSelected(_ id: String, containing text: String? = nil, _ step: String) {
+        bringOut()
+        app.assertOneSelectedSidebarRow(id, containing: text, step)
+    }
+
+    /// The column brought out after a pick or a launch: a pick slides a column laid over the page (or a drawer) away, and
+    /// the conversation's sidebar button can read as not hittable under the page's top for a moment, so it is tapped at
+    /// its frame once that has passed.
+    @MainActor private func bringOut() {
+        let main = element("sidebar-main")
+        if !(main.exists && main.isHittable) || app.windows.firstMatch.frame.width < 900 { Thread.sleep(forTimeInterval: 1.0) }
+        let button = element("assistant-sidebar-button")
+        if !(main.exists && main.isHittable), button.exists, let frame = (try? button.snapshot())?.frame, !frame.isEmpty {
+            app.windows.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            _ = main.waitForExistence(timeout: 3)
+        }
+        reveal(main)
+    }
+
+    /// One row of the whole sidebar is selected at a time, and it is the page's root (#11032): Main Chat picked; an Agent
+    /// picked in the Agents list (its row, no longer Main Chat's), also after the column is folded and brought back; a
+    /// place (Recordings); a Persona chat; Main Chat again. The column beside the page, laid over it (the open Duo
+    /// upright) and a phone's drawer; By State, then an Agent By Repository. An Agent pushed from inside the main
+    /// conversation: `SecondaryPageBackTests.testAnAgentPushedFromTheMainConversationLeavesItSelected`.
+    @MainActor func testOneRowIsSelectedAndItFollowsTheRoot() {
+        // By State, as the owner's list: before #11032 only By Repository shaded the open Agent (checked below).
+        launch(["-dev.grouping", "state"])
+        _ = settled("conversation", "launch")
+        // The app can come up on a new chat's page, which no row stands for: Main Chat picked first.
+        pick("sidebar-main", "Main Chat")
+        _ = settled("conversation", "Main Chat")
+        assertOneSelected("sidebar-main", "Main Chat picked")
+        shot("11032-0-main")
+
+        _ = pickAgent("an Agent")
+        let title = chatTitle()
+        let name = title.components(separatedBy: CharacterSet(charactersIn: ",，")).first ?? title
+        XCTAssertFalse(name.isEmpty, "the Agent's chat has no title")
+        assertOneSelected("agents.row", containing: name, "an Agent picked in the sidebar")
+        shot("11032-1-agent")
+
+        // Folded beside the page and brought back: the same row.
+        let fold = element("sidebar-fold-column")
+        if fold.exists && fold.isHittable {
+            fold.tap()
+            let main = element("sidebar-main")
+            let deadline = Date.now.addingTimeInterval(5)
+            while Date.now < deadline, main.exists && main.isHittable { Thread.sleep(forTimeInterval: 0.2) }
+            Thread.sleep(forTimeInterval: 0.8) // the column's slide
+            let openers = app.buttons.matching(NSPredicate(format: "identifier IN %@ OR label IN %@",
+                                                           ["chat-sidebar-button", "ToggleSidebar", "sidebar-show-button", "assistant-sidebar-button"],
+                                                           ["Show Sidebar", "显示边栏", "显示侧边栏"]))
+            if openers.allElementsBoundByIndex.contains(where: { $0.exists && $0.isHittable }) {
+                assertOneSelected("agents.row", containing: name, "the column folded and brought back over the Agent")
+            } else {
+                // The open Duo on its side: no button brings a folded column back over an Agent's chat, on main too
+                // (testFoldingTheSidebarKeepsTheChatsTop fails there the same way); the rest from a fresh launch.
+                XCTContext.runActivity(named: "no button brings the folded column back here; relaunched") { _ in }
+                app.terminate()
+                launch(["-dev.grouping", "state"])
+                _ = settled("conversation", "relaunch after the fold")
+                bringOut()
+            }
+        }
+
+        pick("sidebar-meeting-recording", "Recordings")
+        _ = settled("recordings", "Recordings from the Agent")
+        assertOneSelected("sidebar-meeting-recording", "a place picked")
+        shot("11032-2-place")
+
+        // A Persona chat: the conversation is the root again, its row (not Main Chat's) the selected one.
+        pick("sidebar-conversation", "a Persona chat")
+        _ = settled("conversation", "a Persona chat from Recordings")
+        assertOneSelected("sidebar-conversation", "a Persona chat picked")
+        shot("11032-3-persona-chat")
+
+        pick("sidebar-main", "the main conversation")
+        _ = settled("conversation", "the main conversation from a Persona chat")
+        assertOneSelected("sidebar-main", "the main conversation picked again")
+        shot("11032-4-main-again")
+        // An Agent pushed from inside the main conversation keeps it selected: SecondaryPageBackTests (a task's card).
+
+        // By Repository: the same one row, in the same shade as the others (no longer the tree's own wash).
+        app.terminate()
+        launch(["-dev.grouping", "repo"])
+        _ = settled("conversation", "launch By Repository")
+        bringOut()
+        _ = pickAgent("an Agent By Repository")
+        let repoTitle = chatTitle()
+        let repoName = repoTitle.components(separatedBy: CharacterSet(charactersIn: ",，")).first ?? repoTitle
+        assertOneSelected("agents.row", containing: repoName, "an Agent picked By Repository")
+        shot("11032-5-agent-by-repository")
     }
 }

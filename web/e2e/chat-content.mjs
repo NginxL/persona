@@ -120,27 +120,48 @@ try {
         await ((await group.count()) ? group : where).screenshot({ path: join(shots, `item80-settings-390-${theme}.png`) });
         await context.close();
       }
-      // 50: the model pill takes the width its name needs under a 600 px composer; on a phone the tile and chevron (64 px)
+      // 50: the model pill takes the width its name needs under a 600 px composer.
       for (const width of [600, 480]) {
         const p = await page({ path: WIDGET, width, height: 800, theme });
         const pill = p.locator("[data-model-pill]").first();
-        await pill.waitFor({ timeout: 20_000 });
-        await p.waitForTimeout(800);
+        await pill.locator('span[title="Opus 5.5"]:visible').waitFor({ timeout: 20_000 });
         const m = await pill.evaluate((el) => {
-          const name = [...el.querySelectorAll("span[title]")].find((s) => getComputedStyle(s).display !== "none");
-          return { composer: el.closest('[class*="@container/composer"]').clientWidth, cut: name ? name.scrollWidth > name.clientWidth : null, name: name?.textContent, overflow: el.parentElement.scrollWidth > el.parentElement.clientWidth };
+          const labels = [...el.querySelectorAll("span[title]")].filter((s) => s.getClientRects().length);
+          const name = labels.find((label) => label.title === "Opus 5.5");
+          const clippedBelow = labels.filter((label) => {
+            const text = document.createRange();
+            text.selectNodeContents(label);
+            return text.getBoundingClientRect().bottom > label.getBoundingClientRect().bottom + 0.5;
+          }).map((label) => label.textContent);
+          return { composer: el.closest('[class*="@container/composer"]').clientWidth, cut: name ? name.scrollWidth > name.clientWidth : null, name: name?.textContent, overflow: el.parentElement.scrollWidth > el.parentElement.clientWidth, clippedBelow };
         });
-        check(`50 ${theme} ${width}: the model's name is not cut beside free room`, m.composer < 600 && m.cut === false && !m.overflow, m);
+        check(`50 ${theme} ${width}: the model's name is not cut beside free room`, m.composer < 600 && m.name === "Opus 5.5" && m.cut === false && !m.overflow, m);
+        check(`11160 ${theme} ${width}: the pill labels leave room for descenders`, m.name && !m.clippedBelow.length, m.clippedBelow);
         await p.locator('[class*="@container/composer"]').first().screenshot({ path: join(shots, `item50-pill-${width}-${theme}.png`) });
         await p.context().close();
       }
-      {
-        const p = await page({ path: WIDGET, width: 390, height: 844, theme, touch: true });
-        const pill = p.locator("[data-model-pill]").first();
+      // A new chat has no Agent launcher. WIDGET explicitly runs claude and keeps its launcher and model on the phone.
+      for (const path of ["/persona/new", WIDGET]) {
+        const p = await page({ path, width: 390, height: 844, theme, touch: true });
+        const pill = p.locator('button[data-model-pill="ready"]').first();
         await pill.waitFor({ timeout: 20_000 });
-        await p.waitForTimeout(500);
-        const w = Math.round((await pill.boundingBox()).width);
-        check(`50 ${theme} 390: the phone keeps the tile and chevron`, w === 64, w);
+        if (path === WIDGET) {
+          await pill.locator('span[title="Opus 5.5"]:visible').waitFor({ timeout: 20_000 });
+          const label = await pill.locator("[data-pill-target]:visible").innerText();
+          const model = await pill.locator('span[title="Opus 5.5"]:visible').innerText();
+          const fits = await pill.evaluate((el) => {
+            const button = el.getBoundingClientRect();
+            const composer = el.closest('[class*="@container/composer"]').getBoundingClientRect();
+            return button.left >= composer.left && button.right <= composer.right;
+          });
+          check(`50 ${theme} 390: the phone shows the explicit launcher and model inside the composer`, label === "claude" && model === "Opus 5.5" && fits, { label, model, fits });
+        } else {
+          const width = (await pill.boundingBox()).width;
+          const engine = await pill.locator("[data-pill-engine]:visible").count();
+          const chevron = await pill.locator(":scope > span > svg:last-child:visible").count();
+          const words = await pill.locator("span[title]:visible").count();
+          check(`50 ${theme} 390: the phone keeps the tile and chevron without an explicit launcher`, width === 64 && engine === 1 && chevron === 1 && words === 0, { width, engine, chevron, words });
+        }
         await p.context().close();
       }
       // 73: a narrow window with a pointer: Tab reaches your bubble's buttons where they can be seen

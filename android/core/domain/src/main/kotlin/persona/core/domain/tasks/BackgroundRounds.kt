@@ -10,6 +10,7 @@ import persona.core.contracts.canonicalMcpToolName
 import persona.core.domain.injectedOf
 import persona.core.domain.isPersonaTool
 import persona.core.domain.lines.ChatLine
+import persona.core.domain.lines.isTurnInterrupt
 
 /**
  * Folding the main conversation's background rounds (#4314, docs/assistant/assistant.md "Background rounds"): a round
@@ -82,14 +83,15 @@ fun supervisionTool(rawName: String?): String? {
  * Whether a round must stay shown (web `supervisionVisible`, #1988): it told or asked the user something (a successful
  * `ask_user` / `notify_user`, or an `ask_user` still waiting while the round runs), ended in a task review verdict card
  * (`accepted` / `needs_user`), finished its supervision with user visibility, the hub's fold says so, or the round's
- * injected supervision is marked `level="user"` (the same two marks the web and iOS read). Arguments alone never prove
- * success: a call counts by its result. [results] maps a tool call's id to its result.
+ * injected supervision is marked `level="user"`. A finished round with a final reply also stays shown unless it
+ * successfully finished silent. Arguments alone never prove success. [results] maps a tool call's id to its result.
  */
 fun supervisionVisible(ordered: List<Item>, results: Map<String, Item>, live: Boolean): Boolean {
     if (ordered.any {
-            it.fold?.supervisionUser == true ||
+            it.supervisionUser == true || it.fold?.supervisionUser == true ||
                 injectedOf(it)?.let { injected -> injected.state == "supervise" && injected.level == "user" } == true
         }) return true
+    var silent = false
     for (use in ordered) {
         if (use.kind != "tool_use") continue
         val name = supervisionTool(use.toolName) ?: continue
@@ -103,15 +105,29 @@ fun supervisionVisible(ordered: List<Item>, results: Map<String, Item>, live: Bo
         when (name) {
             "task_review" -> if (stringField(use.toolInput as? JsonObject, "verdict") in setOf("accepted", "needs_user")) return true
             "supervision_finish" -> {
-                // A failed or malformed receipt cannot promote the round from its requested visibility.
+                // A failed or malformed receipt does not decide visibility.
                 val receipt = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull()
-                if (stringField(receipt, "visibility") == "user") return true
+                when (stringField(receipt, "visibility")) {
+                    "user" -> return true
+                    "silent" -> silent = true
+                }
             }
             else -> return true
         }
     }
-    return false
+    return !live && !silent && hasBackgroundReply(ordered)
 }
+
+private fun hasBackgroundReply(ordered: List<Item>): Boolean {
+    val last = ordered.lastOrNull {
+        isAnswerText(it) || it.kind == "tool_use" || it.kind == "thinking" || it.kind == "fold" ||
+            it.wake == true || it.modelRefusal != null || isTurnInterrupt(it)
+    } ?: return false
+    return isAnswerText(last) && last.narration != true && last.codexHeartbeatQuiet != true
+}
+
+private fun isAnswerText(item: Item): Boolean =
+    item.role == "assistant" && item.kind == "text" && !item.text.isNullOrBlank()
 
 private fun stringField(obj: JsonObject?, key: String): String? =
     (obj?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull

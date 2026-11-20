@@ -312,62 +312,115 @@ func TestClaudeUsageSeedHugeLines(t *testing.T) {
 	}
 }
 
+// gatewayReplyLine is claudeReplyLine as a gateway can write it: the message's keys in alphabetical order, its content
+// before its id and role.
+func gatewayReplyLine(uuid, msg, model, block, usage string) string {
+	return `{"parentUuid":null,"isSidechain":false,"message":{"content":[` + block + `],"id":"` + msg + `","model":"` + model +
+		`","role":"assistant","stop_reason":null,"type":"message","usage":` + usage + `},"type":"assistant","uuid":"` + uuid +
+		`","timestamp":"2026-11-12T08:00:00Z"}`
+}
+
+// A huge reply whose head does not say its request (a gateway writes the message's content before its id and role) is
+// read whole: a window after it goes on from its request, where looking past it would count the request twice. A huge
+// line whose head does not say either is looked past when it is over what the seed reads whole.
+func TestClaudeUsageSeedContentFirstLines(t *testing.T) {
+	small := claudeReplyLine("a1", "msg_1", "claude-opus-5-5", textBlock, `{"input_tokens":2,"output_tokens":9}`)
+	huge := gatewayReplyLine("h", "msg_2", "claude-opus-5-5", `{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"/w/a.txt","content":"`+
+		strings.Repeat("x", seedUsageLine)+`"}}`, `{"input_tokens":1000,"output_tokens":9000}`)
+	result := func(n int) string {
+		return `{"parentUuid":"h","isSidechain":false,"message":{"content":[{"content":"` + strings.Repeat("y", n) +
+			`","tool_use_id":"toolu_w","type":"tool_result"}],"role":"user"},"type":"user","uuid":"r","timestamp":"2026-11-12T08:00:00Z"}`
+	}
+	for _, c := range []struct {
+		name  string
+		lines []string
+		id    string
+		got   tokenuse.Tokens
+		whole bool
+	}{
+		{"huge reply", []string{small, huge}, "msg_2", tokenuse.Tokens{Input: 1000, Output: 9000}, true},
+		{"huge tool result", []string{small, result(seedUsageLine)}, "msg_1", tokenuse.Tokens{Input: 2, Output: 9}, true},
+		{"tool result over what is read whole", []string{small, result(seedUsageUnsaid)}, "msg_1", tokenuse.Tokens{Input: 2, Output: 9}, false},
+	} {
+		s := newSeedFixture(c.lines...)
+		req, _ := (&File{}).seedUsage(s.reader(), 3, false)
+		if req.ID() != c.id || req.Got() != c.got {
+			t.Errorf("%s: seed %q %+v, want %q %+v", c.name, req.ID(), req.Got(), c.id, c.got)
+		}
+		if slices.Contains(s.whole, 2) != c.whole {
+			t.Errorf("%s: line 2 read whole: %v, want %v", c.name, slices.Contains(s.whole, 2), c.whole)
+		}
+	}
+}
+
 // A big file whose window starts right after a request's huge first line gives the usage a full read does: the
-// request counted once (#5426 review: 2030/18030 for 1030/9030).
+// request counted once (#5426 review: 2030/18030 for 1030/9030), whether the reply's lines say their request before
+// their content (Claude Code) or after it (a gateway).
 func TestClaudeUsageWindowAfterHugeReply(t *testing.T) {
 	defer func(w int64) { windowBytes = w }(windowBytes)
 	u := func(in, out int) string { return fmt.Sprintf(`{"input_tokens":%d,"output_tokens":%d}`, in, out) }
-	huge := `{"type":"assistant","uuid":"h1","timestamp":"2026-11-12T08:00:00Z","message":{"model":"claude-opus-5-5","id":"msg_r","type":"message","role":"assistant","content":[` +
-		`{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"/w/a.txt","content":"` + strings.Repeat("x", 3*seedUsageLine) +
-		`"}}],"usage":` + u(1000, 9000) + `}}`
-	head := []string{
-		`{"type":"user","uuid":"p1","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":"write it"}}`,
-		claudeReplyLine("s1", "msg_s", "claude-opus-5-5", textBlock, u(30, 30)),
-		huge,
+	write := `{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"/w/a.txt","content":"` + strings.Repeat("x", 3*seedUsageLine) + `"}}`
+	claudeCode := func(uuid, msg, model, block, usage string) string {
+		return claudeReplyLine(uuid, msg, model, block, usage)
 	}
-	tail := []string{
-		claudeReplyLine("h2", "msg_r", "claude-opus-5-5", toolBlock("toolu_2"), u(1000, 9000)),
-		claudeToolResultLine("t2", "toolu_2"),
-		`{"type":"user","uuid":"p2","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":"and then"}}`,
-		claudeReplyLine("z1", "msg_z", "claude-opus-5-5", textBlock, u(1, 1)),
-	}
-	data := []byte(strings.Join(append(head, tail...), "\n") + "\n")
-	p := filepath.Join(t.TempDir(), "session.jsonl")
-	if err := os.WriteFile(p, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	sum := func(items []proto.Item) (total proto.TokenUsage) {
-		for _, it := range items {
-			for _, x := range it.Usage {
-				total.Input += x.Input
-				total.Output += x.Output
+	for _, c := range []struct {
+		name  string
+		reply func(uuid, msg, model, block, usage string) string
+	}{
+		{"Claude Code", claudeCode},
+		{"gateway", gatewayReplyLine},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			head := []string{
+				`{"type":"user","uuid":"p1","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":"write it"}}`,
+				c.reply("s1", "msg_s", "claude-opus-5-5", textBlock, u(30, 30)),
+				c.reply("h1", "msg_r", "claude-opus-5-5", write, u(1000, 9000)),
 			}
-		}
-		return total
-	}
-	windowBytes = 1 << 40
-	full := NewFile(p)
-	if _, err := full.Refresh(); err != nil {
-		t.Fatal(err)
-	}
-	all, _, _ := full.Page(0, 1<<30)
-	if got := sum(all); got.Input != 1031 || got.Output != 9031 {
-		t.Fatalf("a full read sums %+v", got)
-	}
-	windowBytes = int64(len(strings.Join(tail[1:], "\n")) + 1) // the window starts at the request's second line
-	f := NewFile(p)
-	if _, err := f.Refresh(); err != nil {
-		t.Fatal(err)
-	}
-	if f.base != len(head) {
-		t.Fatalf("the window starts after line %d, not after the huge line: the test checks nothing", f.base)
-	}
-	window, _, _ := f.After(len(head), 1<<30) // the window's own lines, before any older one is read
-	if got := sum(window); got.Input != 1 || got.Output != 1 {
-		t.Fatalf("the window's lines sum %+v: the request whose huge line is before it counted again", got)
-	}
-	if whole, _ := f.Range(1, f.LastSeq(), 1<<30); !reflect.DeepEqual(usageOf(whole), usageOf(all)) {
-		t.Fatal("read back to the start, other usage than a full read")
+			tail := []string{
+				c.reply("h2", "msg_r", "claude-opus-5-5", toolBlock("toolu_2"), u(1000, 9000)),
+				claudeToolResultLine("t2", "toolu_2"),
+				`{"type":"user","uuid":"p2","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":"and then"}}`,
+				c.reply("z1", "msg_z", "claude-opus-5-5", textBlock, u(1, 1)),
+			}
+			data := []byte(strings.Join(append(head, tail...), "\n") + "\n")
+			p := filepath.Join(t.TempDir(), "session.jsonl")
+			if err := os.WriteFile(p, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sum := func(items []proto.Item) (total proto.TokenUsage) {
+				for _, it := range items {
+					for _, x := range it.Usage {
+						total.Input += x.Input
+						total.Output += x.Output
+					}
+				}
+				return total
+			}
+			windowBytes = 1 << 40
+			full := NewFile(p)
+			if _, err := full.Refresh(); err != nil {
+				t.Fatal(err)
+			}
+			all, _, _ := full.Page(0, 1<<30)
+			if got := sum(all); got.Input != 1031 || got.Output != 9031 {
+				t.Fatalf("a full read sums %+v", got)
+			}
+			windowBytes = int64(len(strings.Join(tail[1:], "\n")) + 1) // the window starts at the request's second line
+			f := NewFile(p)
+			if _, err := f.Refresh(); err != nil {
+				t.Fatal(err)
+			}
+			if f.base != len(head) {
+				t.Fatalf("the window starts after line %d, not after the huge line: the test checks nothing", f.base)
+			}
+			window, _, _ := f.After(len(head), 1<<30) // the window's own lines, before any older one is read
+			if got := sum(window); got.Input != 1 || got.Output != 1 {
+				t.Fatalf("the window's lines sum %+v: the request whose huge line is before it counted again", got)
+			}
+			if whole, _ := f.Range(1, f.LastSeq(), 1<<30); !reflect.DeepEqual(usageOf(whole), usageOf(all)) {
+				t.Fatal("read back to the start, other usage than a full read")
+			}
+		})
 	}
 }
 
@@ -689,6 +742,71 @@ func TestSubagentChatUsageFullEqualsWindowed(t *testing.T) {
 		if !reflect.DeepEqual(usageOf(whole), usageOf(all)) {
 			t.Fatalf("windows of 1/%d: other usage than a full read", div)
 		}
+	}
+}
+
+// A subagent's chat paged back through a window that starts at its second line carries the usage a full read does:
+// past the prompt on the first line, its replies count; a fork's copied context there still counts for nothing.
+func TestSubagentUsageWindowAtSecondLine(t *testing.T) {
+	defer func(w int64) { windowBytes = w }(windowBytes)
+	u := func(in, out int) string { return fmt.Sprintf(`{"input_tokens":%d,"output_tokens":%d}`, in, out) }
+	var own []string
+	for i := range 40 {
+		call := fmt.Sprintf("toolu_%d", i)
+		own = append(own, claudeReplyLine(fmt.Sprintf("o%d", i), fmt.Sprintf("msg_%d", i), "claude-opus-5-5", toolBlock(call), u(4, 8+i)),
+			claudeToolResultLine(fmt.Sprintf("r%d", i), call))
+	}
+	prompt := `{"type":"user","uuid":"p1","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":"` + strings.Repeat("look ", 800) + `"}}`
+	fork := []string{
+		`{"type":"fork-context-ref","agentId":"f1","parentSessionId":"s","parentLastUuid":"x","contextLength":394}`,
+		claudeReplyLine("c1", "msg_launch", "claude-opus-5-5", toolBlock("toolu_fork"), u(2, 300)),
+		`{"type":"user","uuid":"p2","timestamp":"2026-11-12T08:00:00Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fork","content":"forked"},{"type":"text","text":"Your task: look"}]}}`,
+	}
+	for _, c := range []struct {
+		name  string
+		lines []string
+	}{
+		{"prompt first", append([]string{prompt}, own...)},
+		{"fork context first", append(fork, own...)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var lines []string
+			for _, l := range c.lines {
+				lines = append(lines, strings.Replace(l, `{"type":`, `{"isSidechain":true,"type":`, 1))
+			}
+			data := []byte(strings.Join(lines, "\n") + "\n")
+			p := filepath.Join(t.TempDir(), "agent-a1.jsonl")
+			if err := os.WriteFile(p, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			windowBytes = 1 << 40
+			full := NewSubagentFile(p)
+			if _, err := full.Refresh(); err != nil {
+				t.Fatal(err)
+			}
+			all, _, _ := full.Page(0, 1<<30)
+			second := false
+			for k := int64(1); k < 30; k++ {
+				windowBytes = int64(len(data)) * k / 60
+				f := NewSubagentFile(p)
+				if _, err := f.Refresh(); err != nil {
+					t.Fatal(err)
+				}
+				for f.base > 0 {
+					if f.loadOlder() == 0 {
+						t.Fatal("paging back stopped")
+					}
+					second = second || f.base == 1
+				}
+				whole, _ := f.Range(1, f.LastSeq(), 1<<30)
+				if got, want := usageOf(whole), usageOf(all); !reflect.DeepEqual(got, want) {
+					t.Fatalf("windows of %d bytes: other usage than a full read:\n%+v\nwant\n%+v", windowBytes, got, want)
+				}
+			}
+			if !second {
+				t.Fatal("no window started at the second line: the test checks nothing")
+			}
+		})
 	}
 }
 

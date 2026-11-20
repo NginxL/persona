@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -22,10 +23,16 @@ const superviseTool = "supervise"
 // sendDigest puts the due signals into their supervisors' conversations, one supervision message each: now, or queued
 // behind its turn (a message still queued takes these in too). A signal goes to its task's leader, to the background
 // supervisor for a task no leader supervises (made here on first use, supervise_background.go), or to the main
-// conversation (digestTo, supervise_leader.go). A signal that no longer holds (answered, done, reviewed meanwhile) is
+// conversation (digestTo, supervise_leader.go); while no main conversation is set, what would go to it goes to the
+// conversation that dispatched its task (routeTo). A signal that no longer holds (answered, done, reviewed meanwhile) is
 // dropped.
 func (s *Service) sendDigest(ctx context.Context) {
+	if err := s.restoreFailedStartBatches(ctx); err != nil {
+		s.logf("supervise: could not restore deferred failed starts: %v", err)
+	}
+	s.revalidateFailedStartDeferrals(ctx)
 	b := &s.supervise
+	batch := s.supervisionBatchInterval(ctx)
 	b.dedupMu.Lock()
 	defer b.dedupMu.Unlock()
 	b.mu.Lock()
@@ -35,10 +42,18 @@ func (s *Service) sendDigest(ctx context.Context) {
 		list = append(list, g)
 	}
 	now := time.Now()
-	if wait, ok := digestWait(now, b.last, list, s.superviseTimings()); !ok || wait > time.Second {
+	if wait, ok := digestWaitWithBatch(now, b.last, list, s.superviseTimings(), batch); !ok || wait > time.Second {
 		if ok {
 			s.scheduleDigestLocked(now)
 		}
+		b.mu.Unlock()
+		return
+	}
+	list = slices.DeleteFunc(list, func(g superviseSignal) bool {
+		return g.NotBefore.After(now.Add(time.Second)) || batch > 0 && supervisionBatchDeferred(g, now)
+	})
+	if len(list) == 0 {
+		s.scheduleDigestLocked(now)
 		b.mu.Unlock()
 		return
 	}
@@ -47,11 +62,33 @@ func (s *Service) sendDigest(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	here := s.settings(ctx)
-	if here.Main == "" || here.MachineID == "" {
-		// Nowhere to tell them now (no main conversation yet, or no machine: the hub's hello while the bus is down).
-		// They stay pending and untold, and go out on a later try (#5420).
+	gone := map[string]bool{} // conversations other than the main one that cannot be told now, as this digest found them
+	there := func(to string) bool {
+		if _, seen := gone[to]; !seen {
+			if to == here.BackgroundSupervisor {
+				// One just started, or whose machine has not listed yet, is there: its message queues (backgroundThere).
+				gone[to] = !s.backgroundThere(ctx, here, to)
+			} else {
+				c, ok := s.session(ctx, here.MachineID, to)
+				gone[to] = !ok || !c.Assistant
+			}
+		}
+		return !gone[to]
+	}
+	// What waits for a main conversation: everything while there is no machine (the hub's hello while the bus is down);
+	// while no main conversation is set, only what the conversation that dispatched its task cannot be told either
+	// (#10126): the rest goes there now.
+	waits := map[string]bool{}
+	for _, g := range list {
+		if here.MachineID == "" || here.Main == "" && !s.toldWithoutMain(ctx, here, g, there) {
+			waits[g.id()] = true
+		}
+	}
+	if len(waits) > 0 {
+		// Nowhere to tell them now. They stay pending and untold, and go out on a later try (#5420).
 		// Said once when it starts and then hourly: the watch's next pass tries again, and logging each try filled
-		// the hub's log with a line every 30 seconds while the main conversation was away.
+		// the hub's log with a line every 30 seconds while the main conversation was away. What went out meanwhile
+		// is not counted: only what still waits keeps this going.
 		b.mu.Lock()
 		first := b.noMainSince.IsZero()
 		if first {
@@ -61,7 +98,7 @@ func (s *Service) sendDigest(ctx context.Context) {
 		if logIt {
 			b.noMainLogged = now
 		}
-		since, waiting := now.Sub(b.noMainSince), len(b.pending)
+		since, waiting := now.Sub(b.noMainSince), len(waits)
 		s.retryDigestLocked(s.superviseTimings().urgent)
 		b.mu.Unlock()
 		switch {
@@ -70,28 +107,46 @@ func (s *Service) sendDigest(ctx context.Context) {
 		case logIt:
 			s.logf("supervise: still no main conversation after %s; %d signal(s) waiting", since.Round(time.Second), waiting)
 		}
-		return
-	}
-	b.mu.Lock()
-	away := b.noMainSince
-	b.noMainSince, b.noMainLogged = time.Time{}, time.Time{}
-	b.mu.Unlock()
-	if !away.IsZero() {
-		s.logf("supervise: main conversation found after %s; telling what waited", now.Sub(away).Round(time.Second))
+		if len(waits) == len(list) {
+			return
+		}
+	} else {
+		b.mu.Lock()
+		away := b.noMainSince
+		b.noMainSince, b.noMainLogged = time.Time{}, time.Time{}
+		b.mu.Unlock()
+		switch {
+		case away.IsZero():
+		case here.Main != "":
+			s.logf("supervise: main conversation found after %s; telling what waited", now.Sub(away).Round(time.Second))
+		default:
+			s.logf("supervise: what waited %s goes to the conversations that dispatched it", now.Sub(away).Round(time.Second))
+		}
 	}
 	b.mu.Lock()
 	list = list[:0]
-	for _, g := range b.pending { // as they are now: one may have come or gone meanwhile
+	held := map[string]superviseSignal{}
+	for id, g := range b.pending { // as they are now: one may have come or gone meanwhile
+		if waits[id] || g.NotBefore.After(now.Add(time.Second)) || batch > 0 && supervisionBatchDeferred(g, now) {
+			held[id] = g
+			continue
+		}
 		list = append(list, g)
 	}
 	if len(list) == 0 {
+		if len(held) > 0 {
+			s.scheduleDigestLocked(now)
+		}
 		b.mu.Unlock()
 		return
 	}
-	b.pending = map[string]superviseSignal{}
+	b.pending = held
 	prev := b.last
 	b.last = now
 	b.mu.Unlock()
+	if batch > 0 {
+		defer s.rescheduleSupervision() // an early screening return must not strand another recipient's deferred batch
+	}
 
 	list = s.screenMechanicalSignals(ctx, list, now, prev)
 	if len(list) == 0 {
@@ -102,9 +157,9 @@ func (s *Service) sendDigest(ctx context.Context) {
 	var order []string
 	leaders := map[[2]string][]superviseSignal{} // leader agent (machine, session) → the signals of its workers (task_leader.go)
 	var leaderOrder []TodoAgent
-	gone := map[string]bool{}      // leaders whose conversation is not there: their signals go to the main one
+	var wait []superviseSignal     // with no main conversation, what nobody else can be told either (routeTo)
 	s.rehomeLeaderlessWorkers(ctx) // a worker whose leader's task closed gets a supervisor that can act, before routing
-	if s.backgroundNeeded(here, list) {
+	if s.backgroundNeeded(ctx, here, list) {
 		// The background supervisor is made the first time a signal is for it, and again when it is gone. One that
 		// cannot start leaves here as it was: the gone check below sends its signals to the main conversation.
 		id, was := s.ensureBackground(ctx)
@@ -141,30 +196,30 @@ func (s *Service) sendDigest(ctx context.Context) {
 			}
 			// Unreachable, not dropped: it becomes a decision for the conversation above the leader (escalateLeaderSignal),
 			// which has its own delivery target below.
+			worker := g
 			g = s.escalateLeaderSignal(ctx, g)
 			if g.Todo == "" { // nobody above it: it is told again next time
+				if _, open := s.todoNow(worker.Todo); open && here.Main == "" {
+					wait = append(wait, worker) // nobody above it since the check (toldWithoutMain): it waits as that one would
+				}
 				continue
 			}
 		}
-		to := s.digestTo(here, g)
-		if to != here.Main {
-			if _, seen := gone[to]; !seen {
-				if to == here.BackgroundSupervisor {
-					// One just started, or whose machine has not listed yet, is there: its message queues (backgroundThere).
-					gone[to] = !s.backgroundThere(ctx, here, to)
-				} else {
-					c, ok := s.session(ctx, here.MachineID, to)
-					gone[to] = !ok || !c.Assistant
-				}
-			}
-			if gone[to] {
-				to = here.Main
-			}
+		to := s.routeTo(ctx, here, g, there)
+		if to == "" { // no main conversation, and the one that dispatched it cannot be told either: it waits (#10126)
+			wait = append(wait, g)
+			continue
 		}
 		if _, ok := groups[to]; !ok {
 			order = append(order, to)
 		}
 		groups[to] = append(groups[to], g)
+	}
+	if batch > 0 {
+		order = s.gateDigestBatches(order, groups, now, batch)
+		b.mu.Lock()
+		s.scheduleDigestLocked(now)
+		b.mu.Unlock()
 	}
 	delivered := false
 	for _, lead := range leaderOrder {
@@ -173,14 +228,83 @@ func (s *Service) sendDigest(ctx context.Context) {
 	for _, to := range order {
 		delivered = s.deliverDigest(ctx, here, to, groups[to], web, now, prev) || delivered
 	}
-	if delivered && len(order) > 1 {
+	if delivered && (len(order) > 1 || batch > 0) {
 		// One message went out: what another left undone (put the last message back to prev) does not undo it.
 		b.mu.Lock()
 		if b.last.Before(now) {
 			b.last = now
 		}
 		b.mu.Unlock()
+	} else if batch > 0 && !delivered {
+		// A held or moot batch sent nothing. Do not invent a legacy last-message time in case batching is switched off.
+		b.mu.Lock()
+		if b.last.Equal(now) {
+			b.last = prev
+		}
+		b.mu.Unlock()
 	}
+	if len(wait) > 0 {
+		at := now // nothing went out: the last message is prev again
+		if delivered {
+			at = time.Time{} // what went out to the others stays the last message
+		}
+		s.restoreDigest(wait, at, prev)
+	}
+}
+
+// routeTo is the conversation signal g goes to: where digestTo sends it, the main conversation instead of one that
+// cannot be told now (there), and while no main conversation is set, the conversation that dispatched its task
+// (dispatcherOf, #10126). "" when none of them can be told: it waits for a main conversation (#5420). With a main
+// conversation set it is never "", and nothing goes anywhere else than before.
+func (s *Service) routeTo(ctx context.Context, here Settings, g superviseSignal, there func(string) bool) string {
+	to := s.digestTarget(ctx, here, g)
+	if to != here.Main && !there(to) {
+		to = here.Main
+	}
+	if to == "" {
+		to = s.dispatcherOf(g.Todo, there)
+	}
+	return to
+}
+
+// toldWithoutMain: signal g can be told now while no main conversation is set: its task leader's agent takes it
+// (leaderRoute: never the main conversation's); with that agent unreachable, the conversation above the leader does
+// (supervisorAboveTask, the decision escalateLeaderSignal makes, routed as sendDigest routes it); or a conversation does
+// (routeTo). A leader's signal with nobody above the leader to tell waits, as every signal did before (#5420).
+func (s *Service) toldWithoutMain(ctx context.Context, here Settings, g superviseSignal, there func(string) bool) bool {
+	if _, handled, reachable := s.leaderRoute(g); handled {
+		if reachable {
+			return true
+		}
+		t, ok := s.todoNow(g.Todo)
+		if !ok {
+			return true // its task went meanwhile: nothing is told of it
+		}
+		up, _ := s.supervisorAboveTask(ctx, t)
+		return up != "" && s.routeTo(ctx, here, superviseSignal{Todo: g.Todo, Kind: sigDecide, To: up}, there) != ""
+	}
+	return s.routeTo(ctx, here, g, there) != ""
+}
+
+// dispatcherOf is the conversation that dispatched task id, while it can be told now (there): the one its ledger names
+// as its supervisor (the side conversation or leader that handed it out with task_plan), else the one it was planned
+// in (Todo.Origin). "" when neither can, and for a ledger that names a task leader's agent (leaderRef), which is no
+// conversation.
+func (s *Service) dispatcherOf(id string, there func(string) bool) string {
+	t, ok := s.todoNow(id)
+	if !ok {
+		return ""
+	}
+	var sup string
+	if t.Supervision != nil {
+		sup = t.Supervision.Supervisor
+	}
+	for _, c := range []string{sup, t.Origin} {
+		if _, _, ref := parseLeaderRef(c); c != "" && !ref && there(c) {
+			return c
+		}
+	}
+	return ""
 }
 
 // deliverDigest puts the signals list into conversation to (the main conversation, a leader or the background
@@ -188,6 +312,10 @@ func (s *Service) sendDigest(ctx context.Context) {
 // message before. True when it went in or was queued.
 func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, list []superviseSignal, web string, now, prev time.Time) bool {
 	b := &s.supervise
+	list = s.gateFailedStartBatches(ctx, to, list, now, prev)
+	if len(list) == 0 {
+		return false
+	}
 	var entries []prompts.SuperviseEntry
 	var kept, moot []superviseSignal
 	s.remedyGoesTo(to, list) // a failed start is ended by this conversation's turn, no other's (start_remedy.go)
@@ -200,6 +328,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 	}
 	s.turnsTold(ctx, moot) // what no longer holds is not told after a restart either (task_turns.go)
+	s.discardFailedStartBatches(ctx, moot, now)
 	if len(entries) == 0 {
 		return false
 	}
@@ -207,12 +336,15 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	entries, kept, rollback, err := s.reserveSupervision(ctx, entries, kept, now)
 	if err != nil {
 		s.logf("supervise: deduplication unavailable; retrying: %v", err)
+		s.releaseFailedStartBatches(ctx, kept)
 		s.restoreDigest(kept, now, prev)
 		return false
 	}
 	if len(entries) == 0 {
 		s.agentDecisionRepliesTold(ctx, holds)
+		s.handoffResultsTold(ctx, holds)
 		s.turnsTold(ctx, holds) // said the same within the window: told
+		s.finishFailedStartBatches(ctx, to, nil, holds, now)
 		b.mu.Lock()
 		if b.last.Equal(now) {
 			b.last = prev
@@ -221,38 +353,37 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		return false
 	}
 	accepted := false
+	acceptedIDs := map[[2]string]bool{}
+	for _, g := range kept {
+		acceptedIDs[[2]string{g.id(), g.Key}] = true
+	}
+	var settled []superviseSignal
+	for _, g := range holds {
+		if !acceptedIDs[[2]string{g.id(), g.Key}] {
+			settled = append(settled, g)
+		}
+	}
 	defer func() {
 		if !accepted {
 			rollback()
+			s.releaseFailedStartBatches(ctx, kept)
 			return
 		}
 		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
+		s.estimateDueTold(ctx, kept)
 		s.parkDecidedTold(ctx, kept)
 		s.agentDecisionRepliesTold(ctx, kept)
+		s.handoffResultsTold(ctx, kept)
 		s.turnsTold(ctx, holds) // and how a turn ended: kept went, the rest of them was said the same within the window
+		s.finishFailedStartBatches(ctx, to, kept, settled, now)
 	}()
 	background := to != here.Main && to == here.BackgroundSupervisor // the leader's message, told that the tasks are not its own (supervise_background.go)
-	leader := background || to != here.Main && s.isLeader(ctx, to)
-	fresh := background && !backgroundKeepsContext(here) // a round that starts from the first turn (supervise_round.go)
-	render := func(list []prompts.SuperviseEntry) string {
-		return prompts.RenderSupervise(prompts.Supervise{Entries: sortEntries(list), Leader: leader, Background: background, Fresh: fresh, Side: to != here.Main && !leader, Escalated: escalatedIn(list),
-			BackgroundEscalated: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigEscalated && e.Background }),
-			LeaderStuck:         slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigLeaderStuck }),
-			Overdue:             slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigOverdue }),
-			ParkedDue:           slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigParkedDue }),
-			ParkDecided:         slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigParkDecided }),
-			Decisions: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool {
-				return e.Kind == sigRecheck || e.Kind == sigUndecidable || e.Kind == sigOwnerCannot
-			}),
-			Inbox: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigInbox }),
-			Asked: askedIn(list), AskMinutes: int(askHoldFor.Minutes()), LowDistraction: askedIn(list) && s.quietModeOn(ctx)})
-	}
-	b.mu.Lock()
-	queued := b.queued[to]
-	b.mu.Unlock()
+	render := func(list []prompts.SuperviseEntry) string { return s.renderQueuedDigest(ctx, to, list) }
+	queued := s.queuedDigestSignals(to)
 	msg := relayMsg{From: superviseTool, FromTitle: "督办", Tool: superviseTool, At: now.UTC()}
 	if len(queued) > 0 && !slices.ContainsFunc(kept, func(g superviseSignal) bool {
-		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply
+		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply ||
+			g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled"
 	}) {
 		// The last message may still wait in the queue: this one takes its place with both.
 		all := mergeSignals(queued, kept)
@@ -263,6 +394,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 			}
 		}
 		msg.Text, msg.Urgent = render(allEntries), anyDecision(all)
+		msg.Signals = encodeDigestSignals(all)
 		if s.replaceQueuedSupervise(to, msg) {
 			accepted = true
 			b.mu.Lock()
@@ -273,6 +405,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 	}
 	msg.Text, msg.Urgent = render(entries), anyDecision(kept)
+	msg.Signals = encodeDigestSignals(kept)
 	msg.Interject = slices.ContainsFunc(kept, func(g superviseSignal) bool { return g.Kind == sigDecisionReply })
 	if background {
 		s.logf("supervise: %d signal(s) to the background supervisor %s", len(entries), short(to))
@@ -293,8 +426,11 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 		return true
 	}
-	tried := time.Now()
-	if err := s.deliverRelay(ctx, here.MachineID, to, msg); err != nil && !s.relaySettled(here.MachineID, to, msg, tried, err) {
+	if err := s.tryDirectRelay(ctx, here.MachineID, to, &msg); err != nil {
+		if s.refusedDirect(ctx, here.MachineID, to, msg, err) {
+			accepted = true // retire this delivery while keeping the task available for review
+			return true
+		}
 		s.logf("supervise: %v; queued", err)
 		if s.queueDigest(to, msg, kept, now, prev) {
 			accepted = true
@@ -331,15 +467,16 @@ func (b *superviseBook) setQueuedLocked(to string, list []superviseSignal) {
 // out), and the digest is tried again in the urgent gap, or later when the gap after prev has not passed yet.
 func (s *Service) queueDigest(to string, msg relayMsg, kept []superviseSignal, at, prev time.Time) bool {
 	if slices.ContainsFunc(kept, func(g superviseSignal) bool {
-		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply
+		return g.Kind == sigPRConflict || g.Kind == sigDraftPR || g.Kind == sigDecisionReply ||
+			g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled"
 	}) {
-		// Rendered relays cannot recheck PR facts or a decision round when drained. Keep these signals pending, so the next
+		// Rendered relays cannot recheck PR facts, a source acknowledgment or a decision round. Keep these signals pending, so the next
 		// dispatch revalidates them; deliverDigest releases the unaccepted dedup reservation.
 		s.restoreDigest(kept, at, prev)
 		return false
 	}
 	b := &s.supervise
-	if s.queueRelay(to, msg) > 0 {
+	if n, err := s.queueRelayDurable(to, msg); err == nil && n > 0 {
 		b.mu.Lock()
 		b.setQueuedLocked(to, kept)
 		b.mu.Unlock()
@@ -398,11 +535,17 @@ func (s *Service) replaceQueuedSupervise(to string, msg relayMsg) bool {
 	if !s.relayLocked(context.Background()) {
 		return false
 	}
-	q := b.st.Queue[to]
+	previous := b.st.Queue
+	q := slices.Clone(previous[to])
 	for i := range q {
 		if q[i].Tool == superviseTool && (i > 0 || !b.draining[to]) {
 			q[i] = msg.replacing(q[i], time.Now()) // it waited since then (relay_presence.go)
-			s.saveRelayLocked()
+			b.st.Queue = maps.Clone(previous)
+			b.st.Queue[to] = q
+			if err := s.saveRelayLocked(); err != nil {
+				b.st.Queue = previous
+				return false
+			}
 			return true
 		}
 	}
@@ -419,7 +562,30 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	st := v.state(t)
 	var replyAsk acceptAsk
 	var draft *TodoPRStatus
+	var estimateBrief *TaskBrief
 	switch g.Kind {
+	case sigHandoffResult:
+		h := v.handoffResult()
+		if h == nil || h.ID != g.Key {
+			return prompts.SuperviseEntry{}, false
+		}
+		// Render through the existing review entry, with this receipt as the evidence.
+		return prompts.SuperviseEntry{ID: t.ID, Title: t.Title, Kind: sigReview, Detail: handoffResultDetail(h),
+			DoneWhen: v.DoneWhen, Round: v.Round, Link: todoLink(web, t.ID), Quiet: t.Quiet}, true
+	case sigFailed:
+		if g.Remedying {
+			// Notification batching never holds the remedy itself. If that remedy already succeeded or became a
+			// final failure while this signal waited, its old remediable notification is moot; the final attempt,
+			// when there is one, has its own generation and must not be discarded here.
+			if t.DoneAt != nil || t.StartError != "" {
+				return prompts.SuperviseEntry{}, false
+			}
+			if _, p, i, err := s.remedyOf(ctx, t.ID); err == nil {
+				if r := p.Tasks[i].Start; r == nil || r.State != remedying {
+					return prompts.SuperviseEntry{}, false
+				}
+			}
+		}
 	case sigDraftPR:
 		if t.PRURL != g.PRURL && !slices.Contains(t.PRs, g.PRURL) {
 			return prompts.SuperviseEntry{}, false
@@ -434,8 +600,14 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		}
 	case sigDecisionReply:
 		a, ok := s.askCopy(t.ID)
-		if st != reviewNeedsUser || !ok || !a.AcceptedAt.IsZero() || a.AgentReply == nil ||
-			!a.AgentReply.ToldAt.IsZero() || agentDecisionReplyKey(a) != g.Key || acceptAskStale(&a, t) || acceptAskEnded(&a, t) {
+		if !ok || a.AgentReply == nil || !a.AgentReply.ToldAt.IsZero() || agentDecisionReplyKey(a) != g.Key || acceptAskStale(&a, t) {
+			return prompts.SuperviseEntry{}, false
+		}
+		if a.AgentReply.Handled {
+			if r := triageLatestReview(v); st != reviewPending || r == nil || r.At.After(a.AskedAt) {
+				return prompts.SuperviseEntry{}, false
+			}
+		} else if !a.AcceptedAt.IsZero() || acceptAskEnded(&a, t) {
 			return prompts.SuperviseEntry{}, false
 		}
 		replyAsk = a
@@ -446,8 +618,15 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			return prompts.SuperviseEntry{}, false // resolved, closed, or replaced while the signal waited
 		}
 	case sigReview:
-		if st != reviewPending {
+		if st != reviewPending || v.handoffResult() != nil {
 			return prompts.SuperviseEntry{}, false
+		}
+		if g.externalPRReview() {
+			r := v.externalPRWake()
+			if r == nil || g.Key != reviewKey(v) {
+				return prompts.SuperviseEntry{}, false
+			}
+			g.Detail = strings.TrimSpace(g.Detail + " " + r.ExternalPR.detail())
 		}
 	case sigNeedsYou:
 		if !s.taskWaits(ctx, t) {
@@ -467,6 +646,12 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		if b, ok := s.briefOfTodo(t.ID); !ok || b.Overdue == nil || st == reviewNeedsUser || st == reviewParked {
 			return prompts.SuperviseEntry{}, false // re-scoped, with the owner, or parked meanwhile
 		}
+	case sigEstimateDue:
+		b, ok := s.briefOfTodo(t.ID)
+		if !ok || !s.estimateDueCurrent(t, b, g.Key) {
+			return prompts.SuperviseEntry{}, false // completed, reviewed, re-scoped or already told meanwhile
+		}
+		estimateBrief = &b
 	case sigAllStopped:
 		fresh, holds := s.checkedAllStopped(ctx, t, g)
 		if !holds {
@@ -478,7 +663,11 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			return prompts.SuperviseEntry{}, false // progress came, or it was parked or reviewed, meanwhile
 		}
 	case sigIdle, sigUnjudged, sigStalled:
-		if st == reviewParked {
+		if st == reviewParked || v.handoffResult() != nil {
+			return prompts.SuperviseEntry{}, false // a hold or its handoff result superseded the old stop
+		}
+	case sigCheck:
+		if g.Report == checkNoProgressReport && st == reviewParked {
 			return prompts.SuperviseEntry{}, false // parked meanwhile: it waits on purpose (parked.go)
 		}
 	case sigParkedDue:
@@ -490,6 +679,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			return prompts.SuperviseEntry{}, false // told by another message meanwhile (a later decision's)
 		}
 	case sigOrphaned:
+		if p := v.parking(); p != nil && p.Handoff != nil || v.handoffResult() != nil {
+			return prompts.SuperviseEntry{}, false // an acknowledged handoff already explains the stop
+		}
 		if o, ok := s.orphanOf(t.ID); !ok || o.key != g.Key {
 			return prompts.SuperviseEntry{}, false // an agent is back at it, or it is another stretch by now
 		}
@@ -506,6 +698,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		if g.Inbox == nil || !s.inboxSignalHolds(t) || !s.inboxSignalsOn(ctx) {
 			return prompts.SuperviseEntry{}, false // waits for the owner's decision, or the switch went off, meanwhile
 		}
+		if g.Inbox.ToAgent == "unhandled" && !s.taskInboxUnhandled(ctx, g.Key) {
+			return prompts.SuperviseEntry{}, false // the source event was answered while its notice waited
+		}
 	}
 	var asks []prompts.SuperviseAsk
 	if g.Kind == sigAsk {
@@ -519,12 +714,17 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		e.Detail = prompts.RenderDraftPR(prompts.DraftPR{Language: answerLanguage(string(s.botLang(ctx))),
 			URL: draft.URL, Head: draft.HeadOID})
 	}
+	if estimateBrief != nil {
+		e.Detail = prompts.RenderEstimateDue(prompts.EstimateDue{Language: answerLanguage(string(s.botLang(ctx))),
+			Expected: estimateBrief.ExpectNow, Elapsed: g.Minutes})
+	}
 	// The last review, shown only in a Fresh message (supervise_round.go): a decision reply's round confirms the decision
 	// that review put to the owner.
 	e.LastReview = s.lastReviewEntry(ctx, v)
 	if g.Kind == sigDecisionReply {
 		e.AgentReply = &prompts.DecisionAgentReply{Language: answerLanguage(string(s.botLang(ctx))),
-			Machine: replyAsk.AgentReply.MachineID, Session: replyAsk.AgentReply.SessionID}
+			Machine: replyAsk.AgentReply.MachineID, Session: replyAsk.AgentReply.SessionID, Handled: replyAsk.AgentReply.Handled,
+			Text: replyAsk.AgentReply.Text, Closeout: replyAsk.AgentReply.Closeout}
 		return e, true // the reply's exact session is in AgentReply; no arbitrary last Agent is evidence
 	}
 	if a := v.AutoReview; g.Kind == sigReview && a != nil && a.Round == v.Round && (a.State == autoClean || a.State == autoBlocking || a.State == autoFailed) {
@@ -576,6 +776,12 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	if g.Kind == sigOwnerCannot { // the owner's answer is the signal, not a reason in brackets
 		e.Detail, e.Response = "", g.Detail
 	}
+	if g.Kind == sigCheck {
+		e.Report = g.Report
+		if g.Report == checkDecidedReport { // the option the owner took, and the decision as it was asked
+			e.Detail, e.Response, e.Decision = "", g.Detail, g.Decision
+		}
+	}
 	if g.Kind == sigFailed {
 		s.remedyEntry(ctx, t, &e) // its kept tab, and the turn that hears of it (start_remedy.go)
 	}
@@ -592,6 +798,14 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	if g.Kind == sigAllStopped {
 		return e, true // Detail covers every participant; no arbitrary last agent in the fingerprint
+	}
+	if g.Kind == sigInbox && g.Inbox.ToAgent == "unhandled" {
+		// This failure belongs to the delivered turn, not a successor's current reply.
+		e.AgentID, e.Session, e.Machine = g.Session, short(g.Session), g.Machine
+		if m, ok := s.device(ctx, g.Machine); ok {
+			e.Machine = m.Name
+		}
+		return e, true
 	}
 	// Where its agent is and what it said last: the whole last answer when it stopped, a line while it works.
 	agents := s.taskAgents(ctx, t)
@@ -611,15 +825,20 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		if g.Kind == sigReport {
 			text = "" // it said what it had to in the report
 		} else if g.Kind == sigReview || g.Kind == sigIdle || g.Kind == sigUnjudged {
-			if _, answer := s.lastTurn(ctx, last.MachineID, last.SessionID); answer != "" {
+			if answer := s.lastTurnAnswer(ctx, last.MachineID, last.SessionID); answer != "" {
 				text = answer
 			}
 		}
+		// The files it handed over, copied to this conversation's computer (task_files.go, #10511); the receipt path
+		// usually did it already, and a copy here only fills in after a restart.
+		s.deliverTaskFiles(ctx, t, last.MachineID, s.conversationMachine(ctx, s.taskReceiver(ctx, t), ""), text)
+		e.Files = taskFilePrompts(s.taskFilesNow(t.ID))
 		if c, arts, ok := closeout.Parse(text); ok {
 			e.Closeout = &prompts.SuperviseCloseout{Status: c.Status, Waiting: c.Waiting, Merged: c.Merged, Deployed: c.Deployed,
 				Did: c.Did, Verified: c.Verified, Missing: c.Missing}
 			if s.checkCloseout(ctx, &c, arts); c.Checked != nil {
 				e.Closeout.CheckedMerged, e.Closeout.CheckedDeployed = c.Checked.Merged, c.Checked.Deployed
+				e.Closeout.LocalDeployment = c.Checked.LocalDeployment
 			}
 			for _, a := range arts {
 				e.Closeout.Artifacts = append(e.Closeout.Artifacts, a.Kind+" "+a.Ref)
@@ -635,9 +854,13 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 
 // sortEntries puts what waits on a decision first.
 func sortEntries(list []prompts.SuperviseEntry) []prompts.SuperviseEntry {
-	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigParkedDue: 2, sigParkDecided: 2, sigIdle: 2, sigUnjudged: 2, sigAllStopped: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigNoProgress: 6, sigLeaderStuck: 6, sigOverdue: 6, sigInbox: 6, sigReport: 7}
+	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigEstimateDue: 2, sigParkedDue: 2, sigParkDecided: 2, sigIdle: 2, sigUnjudged: 2, sigAllStopped: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigNoProgress: 6, sigLeaderStuck: 6, sigOverdue: 6, sigInbox: 6, sigReport: 7}
 	at := func(e prompts.SuperviseEntry) int {
 		switch {
+		case e.Kind == sigCheck && e.Report == checkDecidedReport: // the owner's answer
+			return rank[sigOwnerCannot]
+		case e.Kind == sigCheck:
+			return rank[sigStalled]
 		case e.Kind != sigReport:
 		case e.Report == upReportQuestion || e.Report == upReportBlocked: // waits on a decision too
 			return 1

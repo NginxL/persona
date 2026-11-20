@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,9 +10,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeclient"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
@@ -22,21 +25,51 @@ type noTranscript struct{ id string }
 
 func (e noTranscript) Error() string { return fmt.Sprintf("transcript for session %s not found", e.id) }
 
-// readErr is the error a read of a session's history (session.items, session.item, session.image) answers: no
-// transcript is codeNotFound, which the hub serves as 404 not_found (apierr.Call), not a 502 internal error (#9551).
-// Sends, rewinds and the other callers of file keep the plain error: the manager takes a not_found send as "the
-// session is gone" and withdraws its card (assistant sessionNotFound), which a missing file alone must not do.
-func readErr(err error) error {
+// readErr is the error a read of session id's history (session.items, session.item, session.image,
+// session.visualization) answers: no transcript is codeNotFound, which the hub serves as 404 not_found (apierr.Call),
+// not a 502 internal error (#9551), with why in data.reason (readReason), which the hub words (#11388). The message
+// stays the one the node has always given. Sends, rewinds and the other callers of file keep the plain error: the
+// manager takes a not_found send as "the session is gone" and withdraws its card (assistant sessionNotFound), which a
+// missing file alone must not do.
+func (n *Node) readErr(id string, err error) error {
 	var nt noTranscript
-	if errors.As(err, &nt) {
-		return &rpc.Error{Code: codeNotFound, Message: nt.Error()}
+	if !errors.As(err, &nt) {
+		return err
 	}
-	return err
+	re := &rpc.Error{Code: codeNotFound, Message: nt.Error()}
+	if reason := n.readReason(id, nt.id); reason != "" {
+		re.Data, _ = json.Marshal(map[string]string{"reason": reason})
+	}
+	return re
 }
 
-// startingSession reports whether a session without a transcript is one that exists but has not written its first
-// line yet (a headless conversation, or an agent that is live or that Persona started), rather than an unknown id.
-func (n *Node) startingSession(id string) bool {
+// readReason is why the node has no transcript of session id to read (missing: the session whose transcript it looked
+// for): proto.NotFoundNoTranscript for a session it knows (knownSession), proto.NotFoundUnknownSession for one it has
+// no record of. A subagent ("<session>@<agent>") goes by its session. None until the node's records have come from the
+// hub on this connection (recordsLoaded: a session missing from them may still be Persona's), nor for a session an
+// Agent runtime runs: registered ownership, a transcript the runtime names, or a runtime assistant conversation. The
+// runtime-shaped id test is only a fallback for an unrecorded id: the node's own record can use that shape too (#11470).
+func (n *Node) readReason(id, missing string) string {
+	if parent, _, ok := splitSubagent(id); ok && parent == missing {
+		id = parent
+	}
+	session, _, _ := strings.Cut(id, subagentSep)
+	_, _, runtimeOwned := n.runtimes.belongs(session)
+	if id != missing || runtimeOwned || n.runtimeAssistant(session) || n.runtimes.transcriptOf(id) != "" {
+		return ""
+	}
+	if n.knownSession(id) {
+		return proto.NotFoundNoTranscript
+	}
+	if runtimeSessionID(session) || !n.recordsLoaded() {
+		return ""
+	}
+	return proto.NotFoundUnknownSession
+}
+
+// knownSession reports whether the node knows session id, which may have no transcript: a headless conversation, an
+// agent that is live, a Codex thread it registered, or a session Persona started (its record, kept 60 days).
+func (n *Node) knownSession(id string) bool {
 	if n.isAssistantSession(id) {
 		return true
 	}
@@ -48,6 +81,101 @@ func (n *Node) startingSession(id string) bool {
 	}
 	_, known := n.state.get(id)
 	return known
+}
+
+// startingSession reports whether a session without a transcript may not have written its first line yet, so a read
+// of its history answers an empty page rather than not_found: it runs (a live agent, an assistant process, an external
+// start under way, a thread a Codex app-server has loaded: a new one has no rollout before its first message), waits
+// for its first message (a Codex waiting row too: its record names its pane until a thread takes it, also before a
+// host refresh lists it again after a reconnect), has a start in progress or one that failed within the time a failed
+// start stays listed (startFailedFor), or was started less than the start bound (startWait) ago: by its record, or by
+// a start that began since (startsBegun: a synchronous one, which a Resume always is, keeps the record's first time).
+// A read of any other session without one is not_found (readErr): what it had to read is gone, or it never got a
+// message (#11388, #11450).
+func (n *Node) startingSession(id string) bool {
+	n.mu.Lock()
+	_, proc := n.procs[id]
+	n.mu.Unlock()
+	if proc || n.externalStarts.has(id) || n.codexLoaded(id) {
+		return true
+	}
+	if _, live := n.agent(id); live {
+		return true
+	}
+	if n.starts.get(id) != nil || n.startsBegun.within(id, n.startWait()) {
+		return true
+	}
+	st, ok := n.state.get(id)
+	return ok && (st.AwaitingFirstMessage || isCodexWaitID(id) && st.Pane != "" ||
+		!st.StartedAt.IsZero() && time.Since(st.StartedAt) < n.startWait())
+}
+
+// startsBegun is when the latest start of each session that startLog does not hold began: a synchronous start, and a
+// conversation started again once healClaudeRefusalTranscript removed its only, refused, turn with its file. Until its
+// process is listed it has no transcript, and the record's start time can be long past (startingSession).
+type startsBegun struct {
+	mu sync.Mutex
+	m  map[string]time.Time
+}
+
+// begin notes a start of id now; the func it returns takes the note back (a start that failed) unless another start
+// of id began since. Notes older than keep go.
+func (b *startsBegun) begin(id string, keep time.Duration) (drop func()) {
+	now := time.Now()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.m == nil {
+		b.m = map[string]time.Time{}
+	}
+	for k, at := range b.m {
+		if now.Sub(at) > keep {
+			delete(b.m, k)
+		}
+	}
+	b.m[id] = now
+	return func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.m[id].Equal(now) {
+			delete(b.m, id)
+		}
+	}
+}
+
+// within: a start of id began less than d ago.
+func (b *startsBegun) within(id string, d time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	at, ok := b.m[id]
+	return ok && time.Since(at) < d
+}
+
+// codexLoaded: a ready Codex app-server of this machine has session id's thread loaded (codexOwner), with or without
+// a rollout yet.
+func (n *Node) codexLoaded(id string) bool {
+	if n.codices == nil {
+		return false
+	}
+	_, _, err := n.codexOwner(id)
+	return err == nil
+}
+
+// recordsLoaded: this connection has the hub's copy of the node's records (stateReady): not while it loads, nor after
+// a load that failed and is tried again (reloadState) with none of them. A node outside Serve (a test, a command) has
+// them once it is not loading.
+func (n *Node) recordsLoaded() bool {
+	if n.state.isLoading() {
+		return false
+	}
+	if n.stateReady == nil {
+		return true
+	}
+	select {
+	case <-n.stateReady:
+		return true
+	default:
+		return false
+	}
 }
 
 // transcriptPath finds <config dir>/projects/*/<id>.jsonl. One session can have a file in two config directories
@@ -104,6 +232,14 @@ func (n *Node) findOwnTranscriptPath(id string, pass *codexListPass) string {
 	}
 	if strings.HasPrefix(id, "c0de-") {
 		return n.oldCodexTranscript(id)
+	}
+	// A migrated compatible-CLI conversation may retain its old rollout. Its paginated history is authoritative,
+	// even when a reader cached the rollout before migration; followCopy will relocate that reader too.
+	if _, ok := n.traexThread(id); ok {
+		if p := n.traexPath(id); p != "" {
+			n.setPath(id, p)
+			return p
+		}
 	}
 	n.mu.Lock()
 	p := n.paths[id]

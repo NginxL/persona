@@ -102,7 +102,7 @@ struct SettingsPairingPage: View {
         }
         .themedGroupedPage()
         .detailTitle(String(localized: "Devices & Pairing"))
-        .confirmationDialog("After disconnecting, you'll need to scan the code to pair again.", isPresented: $confirmUnpair, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("After disconnecting, you'll need to scan the code to pair again.", isPresented: $confirmUnpair, titleVisibility: .visible, hasCancel: true) {
             Button("Disconnect", role: .destructive) { Task { await model.disconnectAll() } }
             Button("Cancel", role: .cancel) {}
         }

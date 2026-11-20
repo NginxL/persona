@@ -48,7 +48,7 @@
   "zshrc_title": "来自 {file} {count}",
   "zshrc_footer": "各台电脑登录 shell 的配置文件（~/.zshrc、~/.bashrc）里调用 claude / codex 的函数和别名，每次打开这页时同步；新加的会自动出现。",
   "path_title": "来自 PATH {count}",
-  "path_footer": "各台电脑 PATH 上启动 claude 的包装脚本，以及运行时自带的启动器，每次打开这页时同步。",
+  "path_footer": "各台电脑 PATH 上的 Agent 包装脚本和运行时提供的启动器，每次打开这页时同步。",
   "hidden_title": "已隐藏 {count}",
   "hidden_footer": "只是在 Persona 里不显示，配置文件没有改。点进去可以恢复。",
   "deleted": "已删除 {name}",
@@ -107,6 +107,7 @@
   "kind_cli": "其他（网页 / 命令行）",
   "kind_web": "网页",
   "role_answer": "只能回答",
+  "role_scoped": "受限访问",
   "revoked_ago": "{time}撤销",
   "used_ago": "{time}用过",
   "added_ago": "{time}添加",
@@ -177,5 +178,13 @@
   "search_key_words": "API Key、密钥",
   "device_tokens": "设备 token",
   "pi_too": "pi 也能用",
-  "pi_too_title": "范围内电脑上的 pi 也能用这个供应商，不需要 models.json"
+  "pi_too_title": "范围内电脑上的 pi 也能用这个供应商，不需要 models.json",
+  "show_botmux": "在 Agents 中显示 botmux 会话",
+  "show_botmux_hint": "在此 Hub 的设备间同步。仅隐藏列表，不影响任务使用这些会话。",
+  "use_herdr_tab_name": "使用 herdr 标签名作为会话名",
+  "use_herdr_tab_name_hint": "优先显示标签名。此设置会在连接同一 Hub 的设备间同步。",
+  "herdr_tab_name_saving": "正在保存会话命名设置…",
+  "show_botmux_inventory": "电脑上的“同时显示 botmux 会话”开关决定哪些会话会传到 Hub。",
+  "show_botmux_computers": "打开电脑",
+  "botmux_saving": "保存中…"
 }

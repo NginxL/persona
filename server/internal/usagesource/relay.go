@@ -99,6 +99,9 @@ func fetchRelay(ctx context.Context, c *client, now time.Time) (Result, error) {
 	for _, a := range list {
 		a.ID = strings.TrimSpace(a.ID)
 		if a.ID == "" {
+			// The sidebar can use the other rows. A scheduler cannot use this
+			// roster as proof that it has seen every available account.
+			res.Complete = false
 			continue
 		}
 		if _, dup := byID[a.ID]; dup {

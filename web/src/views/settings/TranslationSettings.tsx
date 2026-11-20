@@ -13,7 +13,7 @@ import { useLarkOn } from "../../lib/store";
 import { LANGUAGES, larkChatChoices, setTranslatePrefs, useTranslatePrefs, type TranslateChat } from "../../lib/translate";
 import { Button, cx, Dialog, IconButton, Loading } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
-import { Monogram } from "../inbox/InboxParts";
+import { LarkAvatar } from "../inbox/InboxParts";
 import { Group, Row, Switch } from "./SettingsParts";
 
 const controlClass = "h-8 rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none focus:shadow-[inset_0_0_0_1px_var(--accent)]";
@@ -84,7 +84,7 @@ export function TranslationSettings({ onConfigure }: { onConfigure: () => void }
  * the pinned and recent ones, searchable by name. */
 function ChatPicker({ selected, onClose, onSave }: { selected: TranslateChat[]; onClose: () => void; onSave: (chats: TranslateChat[]) => void }) {
   const [picked, setPicked] = useState(selected);
-  const [choices, setChoices] = useState<{ id: string; name: string; avatar?: string; is_group?: boolean }[] | null>(null);
+  const [choices, setChoices] = useState<Awaited<ReturnType<typeof larkChatChoices>> | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
 
@@ -155,7 +155,7 @@ function ChatPicker({ selected, onClose, onSave }: { selected: TranslateChat[]; 
                 onClick={() => toggle(c)}
                 className="flex w-full items-center gap-3 rounded-[8px] px-2 py-1.5 text-left transition-colors hover:bg-hover"
               >
-                <Monogram name={c.name} size={28} square={conv?.is_group ?? true} src={conv?.avatar} />
+                <LarkAvatar name={c.name} size={28} square={conv?.is_group ?? true} avatarURL={conv?.avatar_url} avatar={conv?.avatar} />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{c.name}</span>
                 <span className={cx("flex size-[18px] shrink-0 items-center justify-center rounded-full", on ? "bg-accent text-white" : "shadow-[inset_0_0_0_1.5px_var(--line-strong)]")}>
                   {on && <Icon name="check" size={11} stroke={3} />}

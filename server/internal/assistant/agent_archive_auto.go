@@ -18,9 +18,10 @@ import (
 // Never archived (autoArchivable): a session still in a host (a pane or an engine host, whatever state the host
 // reads), or working, starting or with background work; one
 // with a card waiting or queued input; one the manager is to wake or continue (session_work); one linked to an open
-// to-do; an assistant conversation; a review's reviewer; a subagent's row; a session another tool owns (its archive
-// would also move it in that tool); a desktop app's session, which that app's sidebar keeps whatever its age (only an
-// archive there or the user's here takes it off, #3304); with no to-do, one whose last words ask the user something.
+// to-do; one the owner filed under a current direction (direction_sessions_keep.go, #11515); an assistant
+// conversation; a review's reviewer; a subagent's row; a session another tool owns (its archive would also move it in
+// that tool); a desktop app's session, which that app's sidebar keeps whatever its age (only an archive there or the
+// user's here takes it off, #3304); with no to-do, one whose last words ask the user something.
 
 const (
 	// defaultArchiveClosedDays is archive_closed_days when unset; 0 turns the pass off.
@@ -115,10 +116,10 @@ func wakePending(c proto.Session) bool {
 
 // autoArchivable says whether c may be archived by itself now: closed, idle for `idle` since its last step, since its
 // latest to-do was done (lastDone) and since its archive state last changed (a session the user restored is not taken
-// straight back), and none of the cases above.
-func autoArchivable(c proto.Session, now time.Time, idle time.Duration, onOpenTodo, onTodo, reviewer bool, lastDone time.Time) bool {
+// straight back), and none of the cases above (filed: the owner filed it under a current direction).
+func autoArchivable(c proto.Session, now time.Time, idle time.Duration, onOpenTodo, filed, onTodo, reviewer bool, lastDone time.Time) bool {
 	switch {
-	case idle <= 0 || c.Archived || onOpenTodo || reviewer:
+	case idle <= 0 || c.Archived || onOpenTodo || filed || reviewer:
 		return false
 	case c.Assistant || c.IsSubagent || c.SourceKind != "":
 		return false
@@ -153,6 +154,11 @@ func (s *Service) autoArchiveCandidates(ctx context.Context, now time.Time) [][2
 		return nil
 	}
 	links := s.sessionLinks()
+	filed, err := s.directionFiledSessions(ctx, s.settings(ctx))
+	if err != nil { // nor without the filing book which ones a direction holds
+		s.logf("auto archive: %v", err)
+		return nil
+	}
 	var out [][2]string
 	for _, d := range s.devices(ctx) {
 		if !d.Reachable {
@@ -164,7 +170,7 @@ func (s *Service) autoArchiveCandidates(ctx context.Context, now time.Time) [][2
 		}
 		for _, c := range list {
 			open, onTodo, reviewer, lastDone := links.link(d.ID, c.SessionID)
-			if autoArchivable(c, now, idle, open, onTodo, reviewer, lastDone) {
+			if autoArchivable(c, now, idle, open, filed[[2]string{s.canonical(d.ID), c.SessionID}], onTodo, reviewer, lastDone) {
 				out = append(out, [2]string{d.ID, c.SessionID})
 			}
 		}
@@ -173,8 +179,8 @@ func (s *Service) autoArchiveCandidates(ctx context.Context, now time.Time) [][2
 }
 
 // archiveClosedSessions archives the closed sessions that are due, at most autoArchiveBatch of them, and answers how
-// many it took. Each is looked at again as the archive sees it just before, with the to-dos read anew: a message, a
-// card or a to-do that came meanwhile keeps it.
+// many it took. Each is looked at again as the archive sees it just before, with the to-dos and the filing book read
+// anew: a message, a card, a to-do or a filing that came meanwhile keeps it.
 func (s *Service) archiveClosedSessions(ctx context.Context, now time.Time) int {
 	idle := s.archiveClosedAfter(ctx)
 	took := 0
@@ -188,7 +194,11 @@ func (s *Service) archiveClosedSessions(ctx context.Context, now time.Time) int 
 			continue // gone, or an assistant conversation after all
 		}
 		open, onTodo, reviewer, lastDone := s.sessionLinks().link(key[0], key[1])
-		if !autoArchivable(row, now, idle, open, onTodo, reviewer, lastDone) {
+		filed, err := s.directionFiledSessions(ctx, s.settings(ctx))
+		if err != nil {
+			break // the book could not be read: the next pass tries again
+		}
+		if !autoArchivable(row, now, idle, open, filed[[2]string{s.canonical(key[0]), key[1]}], onTodo, reviewer, lastDone) {
 			continue
 		}
 		if err := s.noteAgentArchive(ctx, row, true); err != nil {

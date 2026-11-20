@@ -27,5 +27,5 @@ and "Checkable rules"). These cases pin the fold the manager computes and what a
   input order, each with its folded `state`. `expected.cards` gives each card's `home` and `chat` as
   `<machine id>/<session id>`.
 - All data is made up.
-- Run: `TestSideFoldFollowsTheSharedFixtures` in `server/internal/assistant/fleet_fold_test.go`. Each client adds a test
-  reading these cases (#7944).
+- Run: `TestSideFoldFollowsTheSharedFixtures` in `server/internal/assistant/fleet_side_fold_test.go`. Each client adds a
+  test reading these cases (#7944).

@@ -71,29 +71,3 @@ export function closeoutLine(c: Closeout): string | undefined {
   if (c.status === "done") return t("lib-work.closeout_done");
   return undefined;
 }
-
-const BLOCK = /<closeout\b[^>]*>[\s\S]*?<\/closeout>/g;
-
-/**
- * `text` without its last closeout block, the one the hub read (server/internal/closeout takes the last): the card
- * above the transcript says it, so the reply does not say it again as raw text. Only the block goes, with the blank
- * lines it leaves and a code fence that held nothing else; text without a block comes back as it is.
- */
-export function stripCloseout(text: string): string {
-  let last: RegExpExecArray | undefined;
-  BLOCK.lastIndex = 0;
-  for (let m = BLOCK.exec(text); m; m = BLOCK.exec(text)) last = m;
-  if (!last) return text;
-  let before = text.slice(0, last.index);
-  let after = text.slice(last.index + last[0].length);
-  // a fence around the block alone goes with it: an empty code box says nothing
-  const open = /(^|\n)[ \t]*(`{3,}|~{3,})[^\n`]*\n[ \t]*$/.exec(before);
-  const close = /^[ \t]*\n[ \t]*(`{3,}|~{3,})[ \t]*(?=\n|$)/.exec(after);
-  if (open && close && open[2] === close[1]) {
-    before = before.slice(0, open.index);
-    after = after.slice(close[0].length);
-  }
-  before = before.replace(/\s+$/, "");
-  after = after.replace(/^\s+/, "");
-  return before && after ? `${before}\n\n${after}` : before || after;
-}

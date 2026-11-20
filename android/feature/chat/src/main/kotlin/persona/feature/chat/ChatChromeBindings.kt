@@ -49,8 +49,6 @@ data class ChatChromeBindings(
      * it names one; null: paths are not offered.
      */
     val onOpenPath: ((path: String, line: Int?) -> Unit)? = null,
-    /** "Hand to Persona" on a message: hands the given text to the main Persona conversation; null: not offered. */
-    val onHandToPersona: ((String) -> Unit)? = null,
     /** The assistant conversation's tasks (docs/assistant/unified-entry.md); null for an agent's chat. */
     val tasks: persona.core.domain.tasks.TasksStore? = null,
     val onOpenTodo: ((String) -> Unit)? = null,

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -30,31 +29,6 @@ func failAgain(t *testing.T, s *Service, f *fakeHub, i int, errText string) {
 	c.UpdatedAt = turnEnd.Add(time.Duration(i) * time.Minute)
 	f.setSessions("box", c)
 	triage(t, s, "s1")
-}
-
-func TestRetryBackoffSchedule(t *testing.T) {
-	var cfg assistantwire.TriageConfig
-	for attempt, want := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute} {
-		if got := retryBackoff(cfg, attempt, false); got != want {
-			t.Errorf("attempt %d: %v, want %v", attempt, got, want)
-		}
-		if got := retryBackoff(cfg, attempt, true); got != 4*want {
-			t.Errorf("rate limited, attempt %d: %v, want %v", attempt, got, 4*want)
-		}
-	}
-	cfg.RetryBaseSeconds = 10
-	if got := retryBackoff(cfg, 2, false); got != 40*time.Second {
-		t.Errorf("base 10 s, attempt 2: %v", got)
-	}
-	if got := retryBackoff(cfg, 60, true); got != retryBackoffMost {
-		t.Errorf("a very late attempt: %v, want the ceiling %v", got, retryBackoffMost)
-	}
-	if got := retryBackoff(cfg, -1, false); got != 10*time.Second {
-		t.Errorf("a negative attempt: %v", got)
-	}
-	if maxRetries(assistantwire.TriageConfig{}) != 5 || maxRetries(assistantwire.TriageConfig{MaxRetries: 2}) != 2 {
-		t.Error("max_retries defaults to 5 and can be set")
-	}
 }
 
 func TestRateLimitError(t *testing.T) {
@@ -129,10 +103,10 @@ func TestTransientContinuedWithTriageOff(t *testing.T) {
 		}
 	}
 	e := entryOf(t, s, "s1")
-	if e.WakeAt == nil || e.Work.On != proto.WaitTransient || e.Work.By != "rule" || e.Work.Max != 5 {
+	if e.WakeAt == nil || e.Work.On != proto.WaitTransient || e.Work.By != "rule" || e.Work.Max != 0 {
 		t.Fatalf("entry %+v", e)
 	}
-	if d := time.Until(*e.WakeAt); d < 10*time.Second || d > 20*time.Second {
+	if d := time.Until(*e.WakeAt); d < 7*time.Second || d > 16*time.Second {
 		t.Fatalf("first continue in %v, want about 15 s", d)
 	}
 	r := s.workReport(ctx)
@@ -160,38 +134,22 @@ func TestTransientCapAndReset(t *testing.T) {
 	const errText = "API Error: 529 {\"type\":\"overloaded_error\"}"
 	f.setSessions("box", apiErrorTurn("s1", errText))
 	triage(t, s, "s1")
-	var waits []time.Duration
-	for i := 1; ; i++ {
+	for i := 1; i <= 20; i++ {
 		e := entryOf(t, s, "s1")
-		if e.WakeAt == nil {
-			break
+		if e.WakeAt == nil || e.Work.On != proto.WaitTransient || e.Work.Max != 0 {
+			t.Fatalf("attempt %d stopped: %+v", i, e)
 		}
-		waits = append(waits, e.WakeAt.Sub(e.Work.At).Round(time.Second))
-		s.workTick(ctx, time.Now().Add(time.Hour))
-		if i > 7 {
-			t.Fatal("never stopped continuing")
+		d := e.WakeAt.Sub(e.Work.At)
+		if d <= 0 || d > 30*time.Minute {
+			t.Fatalf("backoff out of bounds: %v", d)
 		}
+		s.workTick(ctx, *e.WakeAt)
 		failAgain(t, s, f, i, errText)
 	}
-	want := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute}
-	if len(waits) != len(want) {
-		t.Fatalf("waits %v, want %v", waits, want)
-	}
-	for i := range want {
-		if d := waits[i] - want[i]; d < -time.Second || d > time.Second {
-			t.Fatalf("waits %v, want %v", waits, want)
-		}
-	}
-	if got := f.sentToAgents(); len(got) != 5 {
-		t.Fatalf("继续 sent %d times: %v", len(got), got)
+	if len(f.sentToAgents()) != 20 || len(s.workCards()) != 0 {
+		t.Fatalf("sent %v, cards %+v", f.sentToAgents(), s.workCards())
 	}
 	e := entryOf(t, s, "s1")
-	if e.Work.On != proto.WaitUser || e.InteractionID != "" || len(s.workCards()) != 0 {
-		t.Fatalf("after the cap: %+v", e)
-	}
-	if r := s.workReport(ctx); r == nil || len(r.Sessions) != 0 {
-		t.Fatalf("after the cap the apps show the error as before: %+v", r)
-	}
 
 	// The user tapped Retry and the turn ended normally: the next transient error counts from the start again.
 	s.workStarted(ctx, "box", "s1", time.Now())
@@ -240,7 +198,7 @@ func TestRateLimitWaitsLonger(t *testing.T) {
 	if e.WakeAt == nil {
 		t.Fatalf("not scheduled: %+v", e)
 	}
-	if d := e.WakeAt.Sub(e.Work.At); d < 55*time.Second || d > 65*time.Second {
-		t.Fatalf("first continue after a rate limit in %v, want about 60 s", d)
+	if d := e.WakeAt.Sub(e.Work.At); d < 30*time.Second || d > 61*time.Second {
+		t.Fatalf("first continue after a rate limit in %v, want equal jitter between 30 and 60 s", d)
 	}
 }

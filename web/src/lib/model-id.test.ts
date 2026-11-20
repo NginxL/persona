@@ -1,7 +1,8 @@
 // A model ID typed by hand (#1644): the same cases as the hub's TestValidModelID (server/internal/proto/modelid_test.go)
 // and the apps' ModelIDTests, so the three say the same thing about every ID.
 import { describe, expect, it } from "vitest";
-import { cleanModelId, MAX_MODEL_ID_LEN, modelIdProblem, modelIdProblemText, modelIdRule, typedModelProblem, validModelId } from "./model-id";
+import { cleanModelId, MAX_MODEL_ID_LEN, modelIdProblem, validModelId } from "./model-id";
+import { modelIdProblemText, modelIdRule, typedModelProblem } from "./model-id-input";
 
 const VALID = [
   "opus", "glm-5", "vendor/model-x", "opus[1m]", "claude-opus-4-6[1m]", "qwen3:32b", "claude-x@20250101",

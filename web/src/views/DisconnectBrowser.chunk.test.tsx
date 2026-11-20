@@ -47,8 +47,12 @@ function Probe() {
   );
 }
 
-const settle = async () => {
-  for (let i = 0; i < 20; i++) await act(() => new Promise((done) => setTimeout(done, 5)));
+const settleUntil = async (assertReady: () => void) => {
+  // The chunk and React's suspended retry settle separately; wait for the visible outcome within the test's deadline.
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+    assertReady();
+  }, { timeout: 3000 });
 };
 const confirmButton = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.includes(t("disconnect-confirm.confirm")));
 
@@ -72,7 +76,7 @@ describe("useDisconnect when the question's chunk won't load", () => {
   it("keeps the page, revokes nothing, says why, and tries again on the next Disconnect", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await act(async () => document.querySelector<HTMLButtonElement>("button[data-start]")!.click());
-    await settle();
+    await settleUntil(() => expect(fake.toast).toHaveBeenCalledWith(t("pageboundary.chunk_body"), "error"));
     // the page that asked is still drawn: no blank app
     expect(host.querySelector("[data-host]")).not.toBeNull();
     expect(host.querySelector("button[data-start]")).not.toBeNull();
@@ -85,7 +89,7 @@ describe("useDisconnect when the question's chunk won't load", () => {
     // the chunk is back: the next Disconnect asks, and still nothing is revoked until it is confirmed
     fake.chunkFails = false;
     await act(async () => document.querySelector<HTMLButtonElement>("button[data-start]")!.click());
-    await settle();
+    await settleUntil(() => expect(confirmButton()).toBeDefined());
     expect(confirmButton()).toBeDefined();
     expect(fake.revoke).not.toHaveBeenCalled();
   });

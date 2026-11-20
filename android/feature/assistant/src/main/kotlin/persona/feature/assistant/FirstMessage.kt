@@ -71,8 +71,9 @@ internal fun FirstMessagePending(message: FirstMessage, contentPadding: PaddingV
             if (PersonaTheme.style == AppStyle.Glass) DayLine(remember(message.at) { Instant.ofEpochMilli(message.at).atZone(ZoneId.systemDefault()).toLocalDate() },
                 Modifier.testTag("assistant-first-day"))
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                // Sessions picked with @ go in front of the words as tags; the bubble shows the words.
-                UserBubble(remember(message.text) { persona.feature.chat.messageWords(message.text) })
+                // Sessions picked with @ go in front of the words as tags; a forward keeps its card while it waits.
+                if (persona.feature.chat.carriesForward(message.text)) persona.feature.chat.PendingForwardBubble(message.text, "assistant-first")
+                else UserBubble(remember(message.text) { persona.feature.chat.messageWords(message.text) })
                 if (message.failed) {
                     PendingBadge(PendingStatus.Refused, reason = message.reason)
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

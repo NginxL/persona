@@ -10,7 +10,7 @@ D=".cache/persona-test-$(basename "$PWD")"
 # Resolve the hub's state directory, never prepare it: a test run must not create it or its old-name alias (#1424). The
 # resolver exports _PERSONA_STATE_DIR, so db.sh uses that one too.
 python3 scripts/persona_identity.py --service hub --prefix scripts/deploy/db.sh | ssh "$H" 'bash -s' >/dev/null
-ssh "$H" "mkdir -p ~/$D/sdk ~/$D/schema ~/$D/scripts/mock ~/$D/scripts/deploy ~/$D/web/src/i18n"
+ssh "$H" "mkdir -p ~/$D/sdk ~/$D/schema ~/$D/scripts/mock ~/$D/scripts/deploy ~/$D/web/src/i18n ~/$D/integrations/antigravity/test"
 rsync -a --delete --exclude bin server/ "$H":"$D/server/"
 # Go's local SDK replacement must keep the same sibling path as in this checkout, including embedded schemas.
 rsync -a --delete sdk/go/ "$H":"$D/sdk/go/"
@@ -23,9 +23,14 @@ rsync -a --delete --exclude node_modules sdk/ts/ "$H":"$D/sdk/ts/"
 rsync -a --delete schema/extension/ "$H":"$D/schema/extension/"
 # The wire type tests (assistantwire, todo projection) read the generated wire schemas from ../../../schema/wire (#10307).
 rsync -a --delete schema/wire/ "$H":"$D/schema/wire/"
+# The configuration form tests read the portable definitions from ../../../schema/configuration (#10028).
+rsync -a --delete schema/configuration/ "$H":"$D/schema/configuration/"
 # Wire, continuity and resolution tests read the shared fixtures next to server/ (../../../spec from a package),
 # and the resolution ones check the apps' Swift sources against them.
 rsync -a --delete spec/ "$H":"$D/spec/"
+# The Antigravity pane tests (internal/node agypane_test.go) replay the integration's recorded wake fixtures from
+# ../../../integrations/antigravity/test/fixtures (#11841).
+rsync -a --delete integrations/antigravity/test/fixtures/ "$H":"$D/integrations/antigravity/test/fixtures/"
 # Hub inbox list tests read this shared mock fixture from ../../../scripts/mock.
 rsync -a scripts/mock/inbox_events.json "$H":"$D/scripts/mock/inbox_events.json"
 # pgdocker's server-args test compares the container with this deployment script next to the Go module (#3575).

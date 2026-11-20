@@ -240,6 +240,33 @@ func TestConversationTagsToolAndListFilter(t *testing.T) {
 	}
 }
 
+// A publication keeps the records it read while later writes replace or add tags.
+func TestConversationTagsRecordsStayStableAcrossWrites(t *testing.T) {
+	ctx := context.Background()
+	ft := tagsFleet(t)
+	set := func(id, tag string) {
+		t.Helper()
+		if _, err := ft.s.setConversationTags(ctx, "mac", id, []string{tag}, titleByUser); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("conv-a-0001", "first")
+	records, ok := ft.s.conversationTagsRecords()
+	if !ok || len(records) != 1 {
+		t.Fatalf("initial records: %v, loaded %v", records, ok)
+	}
+	set("conv-a-0001", "second")
+	set("conv-b-0002", "other")
+	if len(records) != 1 || strings.Join(records["conv-a-0001"].Tags, ",") != "first" {
+		t.Fatalf("a later write changed the published snapshot: %v", records)
+	}
+	delete(records, "conv-a-0001")
+	current, ok := ft.s.conversationTagsRecords()
+	if !ok || len(current) != 2 || strings.Join(current["conv-a-0001"].Tags, ",") != "second" {
+		t.Fatalf("editing a returned map changed the book: %v, loaded %v", current, ok)
+	}
+}
+
 // The health space and the assistant's own space cannot tag each other's conversations; within one space it works.
 func TestConversationTagsToolSpaceIsolation(t *testing.T) {
 	f := healthHub()

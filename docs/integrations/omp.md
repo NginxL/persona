@@ -70,7 +70,8 @@ The node takes an omp session's id from the first source that has it:
    `HERDR_PANE_ID`). The node joins that runtime row and herdr's pane into one session row.
 3. **A fallback id**, `omp-<pane>` (for example `omp-w1-p2`), when neither has answered 8 seconds after herdr reports the pane.
    The row is usable at once. When the real id arrives, the node aliases the fallback id to it, so an open chat keeps working
-   and the list keeps one row. Closing the pane drops the alias.
+   and the list keeps one row. The pane, its saved state and the launch herdr restores move to the real id with it, so a
+   later id that goes missing again leaves the row under the session it runs. Closing the pane drops the alias.
 
 Without the extension a running omp is still listed, with its terminal only. The chat explains that the extension is missing
 (`omp install <Persona>/integrations/omp`), and a send is refused with `omp_no_extension`.
@@ -94,9 +95,33 @@ When an omp exits, its extension's row goes with it. The node lists omp's recent
   Directories are compared as physical paths, so a pane opened through a symlink counts. A pi pane never hides them: pi writes
   its own agent directory, not omp's.
 
-A stopped row shows a notice in place of its chat. A send to it is refused with `omp_resume_unknown` and nothing is typed; resume
-it on the computer with `omp --resume`. The hub puts both into the reader's language (`hub-transcript_text.omp_stopped`,
-`rpc-errors.omp_resume_unknown`).
+A stopped row shows a notice in place of its chat (`hub-transcript_text.omp_stopped`).
+
+## Resuming a stopped session
+
+A message to a stopped row resumes it (`server/internal/node/ompresume.go`). The node opens a new herdr tab in the session's
+directory, runs `omp --resume <session file>` there, waits until the extension lists the session again, and sends the message
+to it. A `session.start` with `resume_session_id` does the same, with its prompt as the message, sent with the start's
+images and `client_msg_id` (so the same message sent again under that id is not delivered twice). A session whose
+extension listed it and then left with the omp is resumed the same way: a runtime that is gone does not keep it.
+
+- **Which file.** Only one the node found itself: from the scan of omp's session files, or the one herdr's omp integration
+  reported while the session ran. The client never names it. The file must be a `.jsonl` file under `<agent dir>/sessions`,
+  still exist and hold the session's id; one with an apostrophe in its path is refused, because herdr's resume command could
+  not say it. Without a usable file the send is refused with `omp_resume_unknown` and no tab opens.
+- **Refused before a tab.** A directory that is gone (`not_running`), an Orca default engine (`orca_resume`), no terminal engine
+  running, and a `session.start` for a session a connected runtime or another tool owns (`runtime_session`,
+  `open_elsewhere`).
+- **One resume at a time.** Two sends or starts at once, or a send racing a start, start one omp: each takes the session's
+  recovery lock, so the second waits for the first resume and goes to the omp it started.
+- **Never a second omp.** A session whose file a live pane may still be writing is not a stopped one (see "Live rows win"), so
+  it is never resumed.
+- **Other calls.** A stopped session has no terminal: rename, interrupt, modes, queue edits and close are refused with
+  `omp_stopped`.
+- **herdr's restore.** When herdr restores a pane Persona started, an omp gets `omp --resume <file>` from its session's own file,
+  and no command at all when the node knows none (never `omp resume <pane>`).
+
+The hub puts the refusals into the reader's language (`rpc-errors.omp_resume_unknown`, `rpc-errors.omp_stopped`).
 
 ## Differences from pi
 
@@ -119,7 +144,7 @@ entries (calls outside the conversation), orchestration tokens included, under t
 ## Known limitations
 
 - Only omp's default agent directory is read. Sessions started with `omp --profile <name>` live elsewhere.
-- A stopped session cannot be resumed from the phone yet.
+- A stopped session is resumed only in herdr: an Orca default engine refuses it.
 - Only the launcher named exactly `omp` starts omp. A wrapper script or alias around omp is refused as an omp start.
 - A start with a model, permission mode, thinking effort or ultracode is refused with `omp_options` before anything runs.
 - `omp -p`, `--print` and `--mode json` do not register with Persona: a one-shot run has nothing to drive from the phone.
@@ -133,4 +158,8 @@ entries (calls outside the conversation), orchestration tokens included, under t
   and the fallback row; `server/internal/node/omp_alias_test.go` covers the wait for a session id and the alias;
   `server/internal/node/ompdisk_test.go` covers the stopped sessions: the scan and its cache, bad lines, the cap, the offline row
   and its refused send, a slow scan going on where it stopped, and a live omp pane hiding its directory (also through a symlink,
-  and after its session id went missing again) while a pi pane does not.
+  and after its session id went missing again) while a pi pane does not; `server/internal/node/ompresume_test.go` covers the
+  resume from disk, two sends or two starts at once, a start racing a send, a send or start after the extension left, a
+  start's images and `client_msg_id`, the refusals, a resume that never comes up and herdr's restore command; `server/internal/node/omp_guards_test.go`
+  covers a live pane's file, a start for a runtime's session, the fallback row moving to its session, and the calls a stopped
+  session refuses.

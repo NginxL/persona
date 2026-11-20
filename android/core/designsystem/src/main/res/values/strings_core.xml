@@ -429,6 +429,7 @@
     <string name="designsystem_core_knowledge_meetings">Meetings</string>
     <string name="designsystem_core_knowledge_events">Events</string>
     <string name="designsystem_core_knowledge_recordings">Recordings</string>
+    <string name="designsystem_core_knowledge_topics">Topics</string>
     <string name="designsystem_core_mail_error">Error</string>
     <string name="designsystem_core_mail_outlook">Outlook · Microsoft account</string>
     <string name="designsystem_core_mail_gmail">Gmail · Google account</string>
@@ -582,4 +583,6 @@
     <string name="designsystem_core_always_scope_edit_directory">All file edits in this directory in this conversation</string>
     <string name="designsystem_core_always_scope_tool">All %1$s calls in this conversation</string>
     <string name="designsystem_core_always_scope_approved">The approved scope remains allowed in this conversation</string>
+    <string name="designsystem_core_api_conversation_invalid">Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue.</string>
+    <string name="designsystem_core_api_conversation_invalid_label">Invalid conversation</string>
 </resources>

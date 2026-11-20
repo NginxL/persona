@@ -346,7 +346,7 @@ func TestProfileEditTellsTheApps(t *testing.T) {
 func TestGoldenAssistantSnapshotTiers(t *testing.T) {
 	golden(t, "assistant_snapshot.tiers", prompts.RenderSnapshot(prompts.Snapshot{Now: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC), Zone: "UTC",
 		ModelProfile: &prompts.SnapshotProfile{ID: "performance", Name: "Performance", Tiers: []prompts.SnapshotTier{
-			{Name: "review", Launcher: "gw", Model: "gw/model-x", Effort: "high", Description: "Code review and design"},
+			{Name: "review", Launcher: "gw", Model: "gw/model-x", Effort: "high", Speed: "fast", Description: "Code review and design"},
 			{Name: "standard", Launcher: "claude"},
 		}}}))
 }

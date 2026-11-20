@@ -51,6 +51,7 @@ struct InteractiveAssistantViewCard: View {
             }
             if supported {
                 ExtensionViewStack(view: model.view, model: model, cards: false, titles: true, link: link)
+                    .environment(\.pluginUICompact, true)
                     .environment(\.assistantHTMLRendering, AssistantHTMLRenderingContext(version: model.version, fallback: model.root.fallback,
                         answered: model.record != nil || model.attempt != nil,
                         enabled: AssistantHTMLSafety.executionVerified && app.features(location.scope.group).contains("assistant_html_bridge"),

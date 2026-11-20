@@ -94,6 +94,12 @@
     <string name="settings_pairing_scan_title">ペアリングQRコードをスキャン</string>
     <string name="settings_pairing_scan_hint">ハブのインストール時に表示された QR コード、\nまたはログイン済みデバイスの「新しいデバイスを接続」のコードを\n枠に合わせてください</string>
     <string name="settings_pairing_scan_manual">スキャンできない場合は手動で入力</string>
+    <string name="settings_pairing_scan_photo">写真から選択</string>
+    <string name="settings_pairing_scan_camera_unavailable">カメラを利用できません。QRコードの写真を選んでください。</string>
+    <string name="settings_pairing_scan_photo_reading">QRコードを読み込んでいます…</string>
+    <string name="settings_pairing_scan_photo_unreadable">この写真のQRコードを読み込めませんでした。別の写真を試してください。</string>
+    <string name="settings_pairing_scan_photo_none">この写真にはQRコードが見つかりませんでした。別の写真を試してください。</string>
+    <string name="settings_pairing_scan_photo_multiple">この写真には複数のQRコードがあります。QRコードが1つだけ写った写真を選んでください。</string>
 
     <!-- Hubs -->
     <string name="settings_hubs_title">ハブ</string>

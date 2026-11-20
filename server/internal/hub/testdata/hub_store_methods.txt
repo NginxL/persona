@@ -46,6 +46,9 @@ TouchDeviceToken
 CreatePairToken
 PairTokenByHash
 RedeemPairToken
+# Switching an ssh computer to Persona Link: its pairing code and credential only.
+MachineLinkInUse
+RevokeLinkPair
 
 # Durable delivery receipts for confirmed phone writes; phone data stays on the phone.
 EnqueuePhoneWrite

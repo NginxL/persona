@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { backgroundSupervisorTitle, isBackgroundSupervisor, reviewedInBackground, REVIEW_BY_BACKGROUND, unnamedTaskConversations } from "./background-supervisor";
-import { autoConversations, autoOrigin, matchesOrigin, recentConversations } from "./conversation-origins";
+import { backgroundSupervisorTitle, isBackgroundSupervisor, reviewedInBackground, REVIEW_BY_BACKGROUND } from "./background-supervisor";
+import { autoConversations, autoOrigin, matchesOrigin, recentConversations, unlistedConversations } from "./conversation-origins";
 import type { FeedItem } from "./feed";
 import type { Session } from "./types";
 
@@ -55,18 +55,16 @@ describe("the background supervisor (#5082)", () => {
     expect(reviewedInBackground(review({ by: REVIEW_BY_BACKGROUND }, "report"))).toBe(false);
   });
 
-  it("a task conversation with no task behind it that the held answer does not name has the assistant read again", () => {
+  it("one the held answer does not name yet has the assistant read again, as any conversation it does not list (#10190)", () => {
     const held = { background_supervisor: "bg", conversations: [conv("listed", { assistant: true, origin: "task" })] };
     const pushed = [
       conv("bg", { assistant: true, origin: "task" }), // the one named
       conv("listed", { assistant: true, origin: "task" }), // already in the answer
-      conv("scheduled", { assistant: true, origin: "task", origin_ref: "task_1" }), // a scheduled task's
-      conv("mine", { assistant: true, origin: "user" }),
       conv("agent", { origin: "task" }), // not the assistant's
       conv("new", { assistant: true, origin: "task" }), // made since, or the replacement of one that is gone
     ];
-    expect(unnamedTaskConversations(held, pushed)).toEqual(["new"]);
-    expect(unnamedTaskConversations({ conversations: [] }, [conv("first", { assistant: true, origin: "task" })])).toEqual(["first"]);
-    expect(unnamedTaskConversations({ background_supervisor: "new", conversations: [] }, pushed.slice(5))).toEqual([]);
+    expect(unlistedConversations(held, pushed)).toEqual(["new"]);
+    expect(unlistedConversations({ conversations: [] }, [conv("first", { assistant: true, origin: "task" })])).toEqual(["first"]);
+    expect(unlistedConversations({ background_supervisor: "new", conversations: [] }, pushed.slice(3))).toEqual([]);
   });
 });

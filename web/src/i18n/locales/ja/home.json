@@ -37,6 +37,7 @@
   "permission_detail": "{tool}：{what}",
   "tasks": "進行中のタスク",
   "tasks_all": "すべて表示 ›",
+  "task_agents_more": "+{count}",
   "continue": "続ける",
   "continue_placeholder": "次に何をしてもらいますか？",
   "continue_send": "送信",
@@ -44,5 +45,6 @@
   "continue_failed": "送信できませんでした：{why}",
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "次に {agent} に何をしてもらいますか？",
-  "continue_failed_plain": "送信できませんでした。チャットを開いて理由を確認してください。"
+  "continue_failed_plain": "送信できませんでした。チャットを開いて理由を確認してください。",
+  "arrange": "概要を整理"
 }

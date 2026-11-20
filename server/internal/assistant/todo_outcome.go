@@ -203,12 +203,13 @@ func (s *Service) outcomeAgents(ctx context.Context, t Todo) []outcomeAgent {
 
 // pullOutcome asks the model what the task came to (the kb.project purpose: it writes the projects' timelines).
 func (s *Service) pullOutcome(ctx context.Context, t Todo, agents []outcomeAgent) (taskOutcome, error) {
-	in := prompts.TodoOutcomeInput{Title: t.Title, Prompt: clipMiddle(strings.TrimSpace(t.Notes), 1500)}
+	language := answerLanguage(s.hello(ctx).Locale)
+	in := prompts.TodoOutcomeInput{Language: language, Title: t.Title, Prompt: clipMiddle(strings.TrimSpace(t.Notes), 1500)}
 	for _, a := range agents {
 		in.Replies = append(in.Replies, prompts.TodoOutcomeReply{Machine: a.Machine, Cwd: a.Cwd, Text: clipMiddle(a.Text, outcomeReplyMax)})
 	}
 	var out taskOutcome
-	err := s.purposeModel("kb.project").JSONMax(ctx, prompts.RenderTodoOutcome(prompts.TodoOutcome{Owner: s.owner(ctx)}),
+	err := s.purposeModel("kb.project").JSONMax(ctx, prompts.RenderTodoOutcome(prompts.TodoOutcome{Language: language, Owner: s.owner(ctx)}),
 		prompts.RenderTodoOutcomeInput(in), 2048, &out)
 	return out, err
 }
@@ -369,11 +370,15 @@ func outcomeLogLine(o taskOutcome) string {
 	return prefix + text + " " + strings.Join(links, " ")
 }
 
-// projectOutcomesMost is how many finished todos' outcomes a new agent for a project is handed; projectContextMost
-// how many projects' backgrounds.
+// projectOutcomesMost is how many finished outcomes a new agent for a project is handed; projectDecisionsMost and
+// projectPitfallsMost bound its effective decisions and pitfalls. projectContextMost bounds the projects in one prompt.
 const (
-	projectOutcomesMost = 5
-	projectContextMost  = 2
+	projectOutcomesMost      = 5
+	projectDecisionsMost     = 5
+	projectPitfallsMost      = 3
+	projectContextMost       = 2
+	projectSummaryShortRunes = 1500
+	projectSummaryLongRunes  = 2500
 )
 
 // projectContext is the <persona-context> a new agent working in dir on machine gets before its first prompt: each of
@@ -394,44 +399,164 @@ func (s *Service) projectContextSlugs(ctx context.Context, machine, dir string) 
 		return "", nil
 	}
 	projects := e.ProjectsForWork(machine, dir)
-	// What extensions wrote for these projects (extension_context.go): asked once for all of them.
+	return s.renderProjectContexts(ctx, e, projects)
+}
+
+// projectContextForTodoSlugs applies task ownership before directory inference. It is the read counterpart of the
+// worker-memory writer, so a spawned worker whose cwd belongs to another project still sees its explicit direction.
+func (s *Service) projectContextForTodoSlugs(ctx context.Context, machine, dir string, t Todo) (string, []string) {
+	if s.isWorkMachine(machine) {
+		return "", nil
+	}
+	e, err := s.kbGet(ctx)
+	if err != nil || e == nil {
+		return "", nil
+	}
+	projects := s.projectsForTask(ctx, e, t, machine, dir)
+	return s.renderProjectContexts(ctx, e, projects)
+}
+
+func (s *Service) renderProjectContexts(ctx context.Context, e *kb.Engine, projects []*kb.Project) (string, []string) {
+	if len(projects) == 0 {
+		return "", nil
+	}
 	var slugs []string
 	for _, p := range projects {
 		slugs = append(slugs, p.Slug)
 	}
 	fromExtensions := s.projectExtensionContext(ctx, slugs)
+	language := answerLanguage(s.hello(ctx).Locale)
 	var blocks []string
 	for _, p := range projects {
-		d := prompts.TodoProject{Name: contextText(oneLine(p.Name)), OneLine: contextText(oneLine(p.OneLine)), Extensions: fromExtensions[p.Slug]}
-		for _, o := range e.Store.TodoOutcomes(p.Slug, projectOutcomesMost) {
-			d.Outcomes = append(d.Outcomes, prompts.TodoProjectOutcome{When: o.When, Title: contextText(o.Title), Text: contextText(o.Text)})
+		block := s.renderProjectMemory(ctx, e, p, language, fromExtensions[p.Slug])
+		if block == "" {
+			block = s.renderLegacyProject(e, p, language, fromExtensions[p.Slug])
 		}
-		if b := prompts.RenderTodoProject(d); b != "" {
-			blocks = append(blocks, b)
+		if block != "" {
+			blocks = append(blocks, block)
 		}
-		if len(blocks) == projectContextMost { // a directory in more projects than that: the first two (slug order) are enough
+		if len(blocks) == projectContextMost {
 			break
 		}
 	}
 	return strings.Join(blocks, "\n\n"), slugs
 }
 
+func (s *Service) renderLegacyProject(e *kb.Engine, p *kb.Project, language string, extensions []prompts.ExtensionContext) string {
+	d := prompts.TodoProject{Language: language, Name: contextText(oneLine(p.Name)),
+		OneLine: contextText(oneLine(p.OneLine)), Extensions: extensions}
+	for _, o := range e.Store.TodoOutcomes(p.Slug, projectOutcomesMost) {
+		d.Outcomes = append(d.Outcomes, prompts.TodoProjectOutcome{When: o.When, Title: contextText(o.Title), Text: contextText(o.Text)})
+	}
+	return prompts.RenderTodoProject(d)
+}
+
+func (s *Service) renderProjectMemory(ctx context.Context, e *kb.Engine, p *kb.Project, language string, extensions []prompts.ExtensionContext) string {
+	memory, ok := e.ProjectMemoryForDispatch(p.Slug, projectOutcomesMost, projectDecisionsMost, projectPitfallsMost)
+	if !ok {
+		return ""
+	}
+	d := prompts.TodoProjectMemory{Language: language, Name: contextText(oneLine(p.Name)),
+		Summary: e.Store.ProjectSummary(p.Slug, projectSummaryRunes(p)), Extensions: extensions}
+	if strings.TrimSpace(d.Summary) == "" {
+		d.Summary = contextText(oneLine(p.OneLine))
+	}
+	for _, r := range memory.Outcomes {
+		verification, unaccepted := memoryVerification(r)
+		d.Outcomes = append(d.Outcomes, prompts.TodoProjectMemoryOutcome{
+			Text: contextText(r.Conclusion), Links: r.Links, When: contextText(r.RecordedAt),
+			Verification: contextText(verification), Unaccepted: unaccepted,
+		})
+	}
+	for _, r := range memory.Decisions {
+		verification, unaccepted := memoryVerification(r)
+		d.Decisions = append(d.Decisions, prompts.TodoProjectMemoryDecision{
+			ID: contextText(r.ID), Question: contextText(r.Question), Choice: contextText(r.Decision),
+			Reason: contextText(r.Reason), When: contextText(r.RecordedAt),
+			Verification: contextText(verification), Unaccepted: unaccepted,
+		})
+	}
+	for _, r := range memory.Pitfalls {
+		verification, unaccepted := memoryVerification(r)
+		d.Pitfalls = append(d.Pitfalls, prompts.TodoProjectMemoryPitfall{
+			Text: contextText(r.Conclusion), When: contextText(r.RecordedAt),
+			Verification: contextText(verification), Unaccepted: unaccepted,
+		})
+	}
+	return prompts.RenderTodoProjectMemory(d)
+}
+
+func projectSummaryRunes(p *kb.Project) int {
+	if p != nil && p.Kind == "long" {
+		return projectSummaryLongRunes
+	}
+	return projectSummaryShortRunes
+}
+
+func memoryVerification(r kb.ProjectMemoryRecord) (string, bool) {
+	verification := r.Verification
+	if verification == "" {
+		verification = kb.ProjectMemoryAgentReported
+	}
+	return verification, verification == kb.ProjectMemoryAgentReported
+}
+
 // withProjectContext puts the project background of dir on machine before a new agent's first prompt, and the notes
 // of the directions the work belongs to (lead: the leader conversation supervising or starting it, "" none;
 // direction_notes.go) before that; the prompt as it is without any (or when it is empty: nothing to put it before).
 func (s *Service) withProjectContext(ctx context.Context, machine, dir, lead, prompt string) string {
+	return s.withProjectContextForTodo(ctx, machine, dir, lead, Todo{}, prompt)
+}
+
+func (s *Service) withProjectContextForTodo(ctx context.Context, machine, dir, lead string, t Todo, prompt string) string {
 	if strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	var parts []string
-	c, slugs := s.projectContextSlugs(ctx, machine, dir)
+	if background := s.projectHandoffContextForTodo(ctx, machine, dir, lead, t); background != "" {
+		return background + "\n\n" + prompt
+	}
+	return prompt
+}
+
+func (s *Service) projectHandoffContext(ctx context.Context, machine, dir, lead string) string {
+	return s.projectHandoffContextForTodo(ctx, machine, dir, lead, Todo{})
+}
+
+func (s *Service) projectHandoffContextForTodo(ctx context.Context, machine, dir, lead string, t Todo) string {
 	if s.isWorkMachine(machine) {
-		lead = "" // a work machine's agent is told nothing of the owner's own directions either
-	} else if d := s.directionContext(ctx, lead, slugs); d != "" {
+		return ""
+	}
+	if id, _, ok := s.directionForTodo(ctx, t); ok {
+		lead = id
+	}
+	var parts []string
+	var block string
+	var slugs []string
+	if t.ID != "" || t.Project != "" || t.Supervision != nil {
+		block, slugs = s.projectContextForTodoSlugs(ctx, machine, dir, t)
+	} else {
+		block, slugs = s.projectContextSlugs(ctx, machine, dir)
+	}
+	if d := s.directionContext(ctx, lead, slugs); d != "" {
 		parts = append(parts, d)
 	}
-	if c != "" {
-		parts = append(parts, c)
+	if block != "" {
+		parts = append(parts, block)
 	}
-	return strings.Join(append(parts, prompt), "\n\n")
+	return strings.Join(parts, "\n\n")
+}
+
+// todoForPlanContext carries an explicit project and supervision even before the PlanTask's todo lookup refreshes.
+func (s *Service) todoForPlanContext(t *PlanTask) Todo {
+	if t.TodoID != "" {
+		if current, ok := s.todoNow(t.TodoID); ok {
+			current.Project = firstNonEmpty(current.Project, t.Project)
+			return current
+		}
+	}
+	out := Todo{ID: t.TodoID, Project: t.Project}
+	if supervisor := s.taskSupervisorOf(t); supervisor != "" {
+		out.Supervision = &Supervision{Supervisor: supervisor}
+	}
+	return out
 }

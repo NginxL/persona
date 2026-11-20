@@ -129,7 +129,7 @@ func TestTaskPromptCarriesTheDeliveryStandard(t *testing.T) {
 	if _, _, err := s.startTaskAgent(ctx, &PlanTask{Title: "修", Prompt: "修好登录", Machine: "box", Cwd: "/code/app"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := f.starts[0]["prompt"].(string); p != "修好登录" {
+	if p, _ := f.starts[0]["prompt"].(string); !strings.HasPrefix(p, "修好登录") || !strings.Contains(p, "file: <这台电脑上的绝对路径>") || strings.Contains(p, "交付：") {
 		t.Fatalf("off by default, yet the prompt is %q", p)
 	}
 	f.starts = nil
@@ -145,7 +145,7 @@ func TestTaskPromptCarriesTheDeliveryStandard(t *testing.T) {
 	}
 	edit, _ := f.starts[0]["prompt"].(string)
 	read, _ := f.starts[1]["prompt"].(string)
-	if !strings.HasPrefix(edit, "修好登录\n\n") || !strings.Contains(edit, "交付：<已上线并实测") || read != "查一下\n\n本任务只读：不改项目文件、不提交、不对外写入" {
+	if !strings.HasPrefix(edit, "修好登录") || !strings.Contains(edit, "交付：<已上线并实测") || !strings.HasPrefix(read, "查一下\n\n本任务只读：不改项目文件、不提交、不对外写入") {
 		t.Fatalf("prompts:\n%s\n---\n%s", edit, read)
 	}
 }

@@ -105,16 +105,18 @@ class ModelPillTest {
         assertEquals("Switching from My Grok to Claude Code needs a new conversation",
             words.reason(persona.core.domain.models.PanelReason.OtherEngine("grok", "claude")))
         assertEquals("My Grok", words.engine("grok"))
-        assertEquals(persona.core.designsystem.AgentMarkSpec(null, "My Grok", null), words.mark("grok"))
+        assertEquals(persona.core.designsystem.AgentMarkSpec(persona.core.designsystem.AgentMarkKind.Grok, "My Grok", null), words.mark("grok"))
         // A provider whose name is a mark the design system has draws it.
         assertEquals(persona.core.designsystem.AgentMarkKind.Trae, words.mark("traecli")?.kind)
         assertEquals("Claude Code", words.engine("claude"))
         val (content, spoken) = pillContent(persona.core.domain.models.PillView(persona.core.domain.models.PillSetup("grok", "grok", "Grok 5", null)),
             null, ultracode = false, res, names)
-        assertEquals(persona.core.designsystem.AgentMarkSpec(null, "My Grok", null), content.engine)
+        assertEquals(persona.core.designsystem.AgentMarkSpec(persona.core.designsystem.AgentMarkKind.Grok, "My Grok", null), content.engine)
         assertEquals("Select model. Current: Grok 5", spoken)
         // Without names (a Persona chat's pill): the engine's id, as before.
         assertEquals("paseo", panelWords(res).engine("paseo"))
+        assertEquals(persona.core.designsystem.AgentMarkSpec(null, "custom-provider", null),
+            panelWords(res).mark("custom-provider"))
     }
 
     /** Records what the pill asks the hub. */

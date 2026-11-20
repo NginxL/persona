@@ -299,6 +299,13 @@ func TestATaskOnACodexLauncherTheHubCannotTellStarts(t *testing.T) {
 			if task, _ := taskByID(s, "weekly"); sess.SessionID == "" || task.RunSessionID != sess.SessionID {
 				t.Fatalf("the task keeps %q, started %q", task.RunSessionID, sess.SessionID)
 			}
+			wantAgent := "codex"
+			if tc.attempts == 2 {
+				wantAgent = "" // an unreadable catalog does not identify the backend
+			}
+			if runs := waitRuns(t, s, 1); runs[0].Execution.Agent != wantAgent {
+				t.Fatalf("unobserved execution backend: %+v", runs[0].Execution)
+			}
 
 			// Its last turn ended "Not logged in" and the node lists it with no agent: the hub asks to resume it in the
 			// signed-in profile, which the node refuses for Codex, and the run goes on in it without one.

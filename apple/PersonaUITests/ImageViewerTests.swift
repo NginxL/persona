@@ -49,7 +49,10 @@ final class ImageViewerTests: XCTestCase {
 
     @MainActor func testTapHidesTheBarsAndPullDownCloses() throws {
         let app = open()
+        HomeScreen.dismissIconNote()
         let close = app.buttons["viewer-close"]
+        XCTAssertTrue(app.descendants(matching: .any)["viewer-page-1"].waitForExistence(timeout: 20), "the current picture did not load:\n\(app.debugDescription)")
+        XCTAssertTrue(waitUntil { close.isHittable }, "Close was not hittable before the first tap")
         let middle = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         middle.tap()
         XCTAssertTrue(waitUntil { !close.isHittable }, "the bars stayed after a tap")

@@ -44,7 +44,10 @@ type TaskQueue struct {
 	// Retry: the start this record holds was itself a retry (the owner's Retry of a failed start, or task_retry), so
 	// its first failure was told already. The queue loop starts it again as the same kind of start; a first start
 	// that waited here and then fails is told as a first start's failure would be.
-	Retry bool `json:"retry,omitempty"`
+	Retry    bool             `json:"retry,omitempty"`
+	Claimed  bool             `json:"claimed,omitempty"`
+	Blockers []string         `json:"blockers,omitempty"`
+	Gateway  *taskGatewayWait `json:"gateway_wait,omitempty"`
 }
 
 // queueAdmissionRefusal parks a task the admission gate refused instead of failing it. The claim held by the start
@@ -62,25 +65,36 @@ func (s *Service) queueAdmissionRefusal(planID string, i int, t PlanTask, err er
 	if denied.reason != nil {
 		key = denied.reason.Key
 	}
-	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
-		q := &TaskQueue{Reason: reason, Key: key, Attempt: 1, QueuedAt: now, NextAt: now.Add(admissionQueueInterval), Retry: retry}
-		if pt.Queue != nil { // refused again after a queued retry: keep the first QueuedAt and count on
-			q.QueuedAt = pt.Queue.QueuedAt
-			q.Attempt = pt.Queue.Attempt + 1
-			q.Retry = pt.Queue.Retry
-			// The wait for a full launcher group is not on the clock: when another line takes over, its bounds start now
-			// rather than from a QueuedAt hours back, which would fail the task on its first refusal.
-			if pt.Queue.Key == admissionGroupFullKey && key != admissionGroupFullKey {
-				q.QueuedAt, q.Attempt = now, 1
-			}
+	if t.claimedGatewayStart() {
+		// A peer can finish the task and clear this claim during the start's
+		// preflight. Only the exact claim may become an ordinary resource wait.
+		q := admissionQueueEntry(now, reason, key, retry, t.Queue)
+		if s.replaceTaskQueue(ctx, t, &q, queueQuotaStart) {
+			s.logf("task %s: admission queued (attempt %d): %s", t.TodoID, q.Attempt, reason)
 		}
-		pt.Queue = q
+		return
+	}
+	if perr := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
+		q := admissionQueueEntry(now, reason, key, retry, pt.Queue)
+		pt.Queue = &q
 		pt.Error = ""
 		pt.ErrorCode, pt.ErrorArgs = "", nil
 	}); perr != nil {
 		s.logf("task %s: admission queue: persist: %v", t.TodoID, perr)
 	}
 	s.logf("task %s: admission queued (attempt %d): %s", t.TodoID, queueAttempt(t), reason)
+}
+
+func admissionQueueEntry(now time.Time, reason, key string, retry bool, before *TaskQueue) TaskQueue {
+	q := TaskQueue{Reason: reason, Key: key, Attempt: 1, QueuedAt: now, NextAt: now.Add(admissionQueueInterval), Retry: retry}
+	if before != nil && before.Key != requestGateKey {
+		q.QueuedAt, q.Attempt, q.Retry, q.Gateway = before.QueuedAt, before.Attempt+1, before.Retry, before.Gateway
+		// Group and quota waits have separate budgets. A new resource refusal starts a new stretch.
+		if before.Key == gatewayQuotaWaitKey || before.Key == admissionGroupFullKey && key != admissionGroupFullKey {
+			q.QueuedAt, q.Attempt = now, 1
+		}
+	}
+	return q
 }
 
 func queueAttempt(t PlanTask) int {
@@ -121,17 +135,28 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 		for i := range p.Tasks {
 			pt := p.Tasks[i]
 			q := pt.Queue
-			if q == nil || q.NextAt.After(now) {
+			if q == nil {
+				continue
+			}
+			if q.Gateway != nil {
+				s.retryGatewayWait(cctx, p, i, pt, now)
+				continue
+			}
+			if q.Claimed || q.NextAt.After(now) {
 				continue
 			}
 			todo, ok := s.todoNow(pt.TodoID)
-			if !ok || todo.DoneAt != nil || todo.Cancelled() {
+			if !ok || todo.DoneAt != nil || todo.Cancelled() || pt.RequestGate != "" && todo.ReopenedAt != nil && todo.ReopenedAt.After(q.QueuedAt) {
 				if err := s.patchPlanTask(cctx, p.ID, i, func(t *PlanTask) { t.Queue = nil }); err != nil {
 					s.logf("task %s: admission queue: clear ended task: %v", pt.TodoID, err)
 				}
 				continue
 			}
-			if queueBounded(q) && (q.Attempt >= admissionQueueMaxAttempts || now.Sub(q.QueuedAt) >= admissionQueueMaxWait) {
+			if pt.RequestGate != "" {
+				s.startPlanTaskAsync(p.ID, p.Conversation, i, pt, q.Retry, nil)
+				continue
+			}
+			if queueExpired(q, now) {
 				s.failQueuedStart(cctx, p, i, pt, q)
 				continue
 			}
@@ -140,8 +165,14 @@ func (s *Service) sweepAdmissionQueue(ctx context.Context) {
 	}
 }
 
-// queueBounded says the queue's attempt and time bounds apply to q: every gate line but a full launcher group.
-func queueBounded(q *TaskQueue) bool { return q.Key != admissionGroupFullKey }
+// queueBounded says the generic attempt and time bounds apply. Group, prerequisite and quota waits manage their own.
+func queueBounded(q *TaskQueue) bool {
+	return q.Key != admissionGroupFullKey && q.Key != requestGateKey && q.Key != gatewayQuotaWaitKey
+}
+
+func queueExpired(q *TaskQueue, now time.Time) bool {
+	return queueBounded(q) && (q.Attempt >= admissionQueueMaxAttempts || now.Sub(q.QueuedAt) >= admissionQueueMaxWait)
+}
 
 // retryQueuedStart starts the task again through the ordinary async start path, which re-runs the gate and either
 // links the agent or parks the task again. The queue record is kept (not cleared) with NextAt pushed past the max wait

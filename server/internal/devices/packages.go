@@ -57,7 +57,7 @@ const (
 type nodePackage struct {
 	// Version is what a node running it reports: the hub's version for its own builds, the release's otherwise.
 	Version string
-	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode: what it is
+	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode, or programConnector (connector_package.go): what it is
 	// Fallback: not of the hub's version (the newest release this manager drives).
 	Fallback   bool
 	goos, arch string
@@ -295,8 +295,11 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 	return nil
 }
 
-// lookupPackage finds k's build (see the order above).
+// lookupPackage finds k's build (see the order above; the connector's: lookupConnector).
 func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage, error) {
+	if k.program == programConnector {
+		return d.lookupConnector(ctx, k)
+	}
 	if k.goos == "" || k.arch == "" {
 		return nodePackage{}, i18n.Err("devices-deploy.os_unknown")
 	}
@@ -322,12 +325,12 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		if k.program == nodeproto.ProgramPersonaNode {
 			// Only deploy.sh puts persona-node there, with the version it is in <name>.version: the hub's own updates
 			// replace personad-* alone, so one left from an earlier deploy is another build than the hub's.
-			node := filepath.Join(dir, nodeproto.ProgramPersonaNode+"-"+plat)
+			node := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonaNode, plat))
 			if b, err := os.ReadFile(node + ".version"); err == nil && k.hub != "" && strings.TrimSpace(string(b)) == k.hub && fileExists(node) && localBuildOK(node, nodeproto.ProgramPersonaNode) {
 				return local(node, nodeproto.ProgramPersonaNode), nil
 			}
 		}
-		if p := filepath.Join(dir, "personad-"+plat); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
+		if p := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonad, plat)); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
 			personad = p
 		}
 	}
@@ -421,16 +424,32 @@ func releaseNodeIncompatible(m *update.Manifest) string {
 	}
 }
 
-// fileFor: f is named as a release names a node build for plat (personad-<plat>.gz, persona-node-<plat>.gz): its name
-// goes into a URL and the cache's paths, so nothing else is taken.
+// nodeBinaryName is a cached or bundled personad for plat. A Windows executable keeps .exe; it must be looked up
+// with the same suffix that the release download and hub update retain.
+func nodeBinaryName(program, plat string) string {
+	if strings.HasPrefix(plat, "windows-") {
+		return program + "-" + plat + ".exe"
+	}
+	return program + "-" + plat
+}
+
+// fileFor: f is named as a release names a node build for plat (personad-<plat>[.exe].gz,
+// persona-node-<plat>[.exe].gz). Its name goes into a URL and the cache's paths, so nothing else is taken.
 func fileFor(f update.File, plat string) bool {
-	return f.Name == "personad-"+plat+".gz" || f.Name == nodeproto.ProgramPersonaNode+"-"+plat+".gz"
+	suffix := ""
+	if strings.HasPrefix(plat, "windows-") {
+		suffix = ".exe"
+	}
+	return f.Name == "personad-"+plat+suffix+".gz" || f.Name == nodeproto.ProgramPersonaNode+"-"+plat+suffix+".gz"
 }
 
 // fileProgram is the kind of program a release download is, by its name.
 func fileProgram(f update.File) string {
-	if strings.HasPrefix(f.Name, nodeproto.ProgramPersonaNode+"-") {
+	switch {
+	case strings.HasPrefix(f.Name, nodeproto.ProgramPersonaNode+"-"):
 		return nodeproto.ProgramPersonaNode
+	case strings.HasPrefix(f.Name, programConnector+"-"):
+		return programConnector
 	}
 	return nodeproto.ProgramPersonad
 }
@@ -523,9 +542,12 @@ type packageCacheEntry struct {
 }
 
 // cacheNames are the cache's file names for k's builds, the ones of its own kind first: personad runs a persona-node
-// device's file too.
+// device's file too. The connector is its own build only.
 func cacheNames(k packageKey) []string {
 	plat := k.goos + "-" + k.arch
+	if k.program == programConnector {
+		return []string{programConnector + "-" + plat}
+	}
 	names := []string{"personad-" + plat}
 	if k.program == nodeproto.ProgramPersonaNode {
 		names = append([]string{nodeproto.ProgramPersonaNode + "-" + plat}, names...)
@@ -710,11 +732,18 @@ func (d *Devices) downloadPackage(ctx context.Context, p nodePackage, bin, entry
 	}
 	ctx, cancel := context.WithTimeout(ctx, packageDownload)
 	defer cancel()
-	got, err := update.Download(ctx, client, p.base+"/"+url.PathEscape(p.dir), p.file, stage) // size, sha256, binary_sha256
-	if p.flat && update.IsNotFound(err) {
-		// No dl/<version>/ there (a GitHub release base): the release's own tag on GitHub, else the file beside
-		// latest.json, checked against the same manifest; a release published since the lookup is said as such (#9263).
+	var got string
+	if p.flat && update.ReleaseBase(p.base, p.Version) != "" {
+		// GitHub's moving base would redirect the legacy <version>/<file> path to a duplicate-version URL.
+		// Go straight to the release's own tag, retaining DownloadRelease's missing-tag fallback.
 		got, err = update.DownloadRelease(ctx, client, p.base, &update.Manifest{Version: p.Version, Build: p.build}, p.file, stage)
+	} else {
+		got, err = update.Download(ctx, client, p.base+"/"+url.PathEscape(p.dir), p.file, stage) // size, sha256, binary_sha256
+		if p.flat && update.IsNotFound(err) {
+			// No dl/<version>/ there: the file beside latest.json, checked against the same manifest; a release
+			// published since the lookup is said as such (#9263).
+			got, err = update.DownloadRelease(ctx, client, p.base, &update.Manifest{Version: p.Version, Build: p.build}, p.file, stage)
+		}
 	}
 	if err != nil {
 		var local *fs.PathError
@@ -765,7 +794,7 @@ func checkPackagePlatform(path, goos, goarch, program string) error {
 	if builtOS != goos || builtArch != goarch {
 		return fmt.Errorf("built for %s/%s, not %s/%s", builtOS, builtArch, goos, goarch)
 	}
-	if !strings.HasSuffix(info.Path, "/cmd/"+program) { // the main package: server/cmd/personad or cmd/persona-node
+	if !strings.HasSuffix(info.Path, "/cmd/"+program) { // the main package: server/cmd/personad, persona-node or persona-link
 		return fmt.Errorf("it is %s, not %s", info.Path, program)
 	}
 	return nil

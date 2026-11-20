@@ -1,11 +1,12 @@
 // The composer's model pill (#5032, after Cindy's model selector, which the user asked this part of the chat to match;
 // docs/web/web.md "Model pill and model panel", docs/design/DESIGN_SYSTEM.md 3.1): at the right of the composer's bottom
-// row, before voice / Stop / Send, `[provider][model][engine][effort][Fast][⌄]`. It opens the unified model panel above
+// row, before voice / Stop / Send, `[engine][model][effort][Fast][⌄]`. It opens the unified model panel above
 // it (ui/model-panel/ModelPanel.tsx), and so does `/model` Enter in the composer. The composer card is a container: under
 // 600 px the pill takes the width its words need (the name at most 108 px, a bracketed qualifier left out but for a
 // context size, `pillShortName`) and gives way
 // only when the row is short, under 520 px its text and marks are a step smaller, under 420 px it keeps only the
-// provider's tile and the chevron (64 px), except an explicit Agent launcher label (#10248).
+// engine's mark and the chevron (64 px), except an explicit Agent launcher label (#10248). The Agent's mark comes first
+// and only once (#5497).
 // An agent that can switch neither its model nor its effort gets the same
 // words as a label, except Codex: its panel explains why. A Persona chat (and the new-chat page) has `AssistantModelPill`
 // (#5033): the same pill over what the assistant's computer can run Persona chats on, its panel saying whether the chat
@@ -21,13 +22,12 @@ import { isBackgroundSupervisor } from "../../lib/background-supervisor";
 import { launcherTitle } from "../../lib/provider-names";
 import { ASSISTANT_MODEL_PICK_FEATURE, ASSISTANT_START_SERVICE_TIER_FEATURE, assistantPickKey, assistantPillView, assistantSetup, type AssistantChat } from "../../lib/assistant-models";
 import {
-  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
+  agentCatalogScope, assistantCatalogScope, assistantLaunchers, machineLauncherList, modelList, pendingView, pillView, readAgentLauncherNames, readAssistantLaunchers, readForPanel, readModels, readSuperviseDefault, sessionModelHost, sessionSwitches, superviseDefault, useModelLists, currentModelRow, type PillSetup,
 } from "../../lib/session-models";
 import { turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { getSession, hubHas, useStore } from "../../lib/store";
 import { CODEX_ULTRA, ultracodeOn } from "../../lib/ultracode";
 import type { AssistantInfo, Session } from "../../lib/types";
-import { AgentMark } from "../../ui/AgentMark";
 import { cx, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { ProviderMark } from "../../ui/model-panel/ProviderMark";
@@ -111,7 +111,9 @@ export function ModelPill({
       {pending && <Icon name="clock" stroke={2} className="size-[12px] shrink-0 text-ink-3 @max-[520px]/composer:size-[11px]" />}
       {unknown && loading && <Spinner size={13} />}
       {unknown && failed && !loading && <Icon name="warning" stroke={2} className="size-[13px] shrink-0 text-red @max-[520px]/composer:size-[12px]" />}
-      <ProviderMark name={shown.provider} className={cx("mr-1.5", failed && !unknown ? "text-red" : "text-ink-2")} />
+      <span aria-hidden data-pill-engine={shown.engine} className="mr-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.933]">
+        <ProviderMark engine={shown.engine} label={shown.engineLabel} className={failed && !unknown ? "text-red" : "text-ink-2"} />
+      </span>
       {(launcher || pending) && (
         <>
           <span data-pill-target title={target} className={cx("max-w-[96px] truncate text-ink-3", launcher ? "min-w-[3ch] shrink" : "shrink-0 @max-[600px]/composer:hidden")}>{target}</span>
@@ -126,12 +128,8 @@ export function ModelPill({
       {short !== name && (
         <span title={name} data-pill-short className={cx("hidden shrink-[1000] truncate text-ink @max-[600px]/composer:block @max-[600px]/composer:max-w-[108px]", launcher ? "min-w-[3ch]" : "min-w-0", !launcher && ULTRA_HIDDEN)}>{short}</span>
       )}
-      {/* the engine's mark is the separator before the effort: no "·" */}
-      <span aria-hidden data-pill-engine={shown.engine} className={cx("ml-1 flex shrink-0 items-center @max-[520px]/composer:scale-[0.917]", !launcher && ULTRA_HIDDEN)}>
-        <AgentMark agent={shown.engine} label={shown.engineLabel} size={12} decorative className="text-ink-2" />
-      </span>
       {shown.effort && (
-        <span title={effort} data-pill-effort className={cx("shrink-0 whitespace-nowrap text-ink @max-[600px]/composer:min-w-0 @max-[600px]/composer:shrink @max-[600px]/composer:truncate", ULTRA_HIDDEN)}>
+        <span title={effort} data-pill-effort className={cx("ml-1 shrink-0 whitespace-nowrap text-ink @max-[600px]/composer:min-w-0 @max-[600px]/composer:shrink @max-[600px]/composer:truncate", ULTRA_HIDDEN)}>
           {pillEffort(shown.effort)}
         </span>
       )}
@@ -144,11 +142,11 @@ export function ModelPill({
   );
   const shell = cx(
     // Cindy's bare toolbar pill: no frame at rest, the capsule shows on hover and while its panel is open
-    "flex h-[30px] max-w-[min(320px,100%)] min-w-[72px] shrink items-center rounded-full border border-transparent px-2.5 text-[13px] leading-none whitespace-nowrap transition-colors duration-150",
+    "flex h-[30px] max-w-[min(320px,100%)] min-w-[72px] shrink items-center rounded-full border border-transparent px-2.5 text-[13px] leading-normal whitespace-nowrap transition-colors duration-150",
     // narrow, it still takes the width its words need (a fixed width cut "Opus 5.5" to "Opus …" beside free room) and
     // shrinks, the name first, only when the row is short of room
-    "@max-[520px]/composer:text-[12px] @max-[520px]/composer:[--provider-mark:14.2px] @max-[420px]/composer:min-w-[64px]",
-    // Under 420 px an explicit launcher keeps its model label; other pills retain their compact fallback.
+    "@max-[520px]/composer:text-[12px] @max-[420px]/composer:min-w-[64px]",
+    // Under 420 px an explicit launcher keeps its model label; other pills keep only the mark and the chevron (64 px).
     (pending || launcher) ? "@max-[420px]/composer:w-auto" : "@max-[420px]/composer:w-[64px]",
   );
   // the clip is inside, so the touch target (touch-hit) can reach past the pill's 30 px
@@ -193,12 +191,13 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   const scope = agentCatalogScope();
   const mid = session.machine_id;
   const own = sessionLauncher(session);
+  const ownHost = sessionModelHost(session);
   const switches = sessionSwitches(session);
-  const view = pillView(session, modelList(mid, own));
+  const view = pillView(session, modelList(mid, own, undefined, ownHost));
   const opens = switches.model || switches.effort || view.engine === "codex";
   useEffect(() => {
-    if (opens) void readModels(mid, own, { first: true });
-  }, [opens, mid, own, scope]);
+    if (opens) void readModels(mid, own, { first: true, host: ownHost });
+  }, [opens, mid, own, ownHost, scope]);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const key = `${mid}/${session.session_id}`;
@@ -212,8 +211,8 @@ export const AgentModelPill = memo(function AgentModelPill({ session }: { sessio
   const shown = Boolean(anchor) && opens;
   // every list again behind the one shown, once per opening (while the panel's code loads, the first time)
   useEffect(() => {
-    if (shown) readForPanel(mid, own);
-  }, [shown, mid, own, scope]);
+    if (shown) readForPanel(mid, own, ownHost);
+  }, [shown, mid, own, ownHost, scope]);
 
   // a switch to another launcher that the next message carries out (#5035): its list names the model picked
   const target = session.pending_switch?.launcher;

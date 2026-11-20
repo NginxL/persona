@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRuntime, interactionId, light, PAGE_TEXT, RpcError } from '../index.js'
+import { createRuntime, interactionId, light, PAGE_TEXT, Peer, RpcError } from '../index.js'
 import { startFakeNode, until } from '../testing/fake-node.js'
 import { createEchoRuntime } from '../examples/echo-runtime.mjs'
 
@@ -15,13 +15,125 @@ test('hello names the runtime and declares only the caps whose driver methods ex
   assert.equal(n.hello.runtime, 'toy')
   assert.equal(n.hello.name, 'Toy')
   assert.equal(n.hello.agent, 'claude')
-  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false })
+  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false,
+    queue_edit: false, queue_send_now: false })
   assert.equal(n.hello.launcher, undefined, 'no launcher without start')
   await until('list', () => n.last('runtime.sessions'))
   await n.peer.call('session.send', { session_id: 's1', text: 'x' })
   await assert.rejects(n.peer.call('session.interrupt', { session_id: 's1' }), /unsupported/)
+  for (const method of ['session.queue.edit', 'session.queue.send_now']) {
+    await assert.rejects(n.peer.call(method, { session_id: 's1' }), { code: 'unsupported' })
+  }
+  await assert.rejects(n.peer.call('session.fork', { session_id: 's1' }), (error) => error.code === 'unsupported')
   assert.throws(() => createRuntime(minimal(), {}), /runtime id/)
 })
+
+test('queue capabilities forward edits and steering, and publish both changes', async (t) => {
+  const node = await startFakeNode(t)
+  const session_id = 's1'
+  let queued = ['first', 'second']
+  const rt = createRuntime(minimal({
+    listSessions: async () => [{ session_id, status: 'working', queued }],
+    editQueue: async (params) => {
+      assert.deepEqual(params, { session_id, keep: [1] })
+      const queue = queued
+      queued = params.keep.map((index) => queue[index])
+      return { queue }
+    },
+    sendNow: async (params) => {
+      assert.deepEqual(params, { session_id })
+      queued = []
+    },
+  }), { runtime: 'toy', socketPath: node.path, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  await rt.start()
+  await until('initial queue published', () => node.last('runtime.sessions')?.sessions[0]?.queued?.length === 2)
+  assert.equal(node.hello.caps.queue_edit, true)
+  assert.equal(node.hello.caps.queue_send_now, true)
+  assert.deepEqual(await node.peer.call('session.queue.edit', { session_id, keep: [1] }), { queue: ['first', 'second'] })
+  await until('edit published', () => node.last('runtime.sessions').sessions[0].queued?.length === 1)
+  assert.deepEqual(await node.peer.call('session.queue.send_now', { session_id }), { sent: true })
+  await until('send-now published', () => node.last('runtime.sessions').sessions[0].queued?.length === 0)
+})
+
+test('fork advertises native support and returns the driver response', async (t) => {
+  const node = await startFakeNode(t)
+  const params = { session_id: 's1', at_item_id: '12#0' }
+  const rt = createRuntime(minimal({ fork: async (input) => {
+    assert.deepEqual(input, params)
+    return { session_id: 's2' }
+  } }), { runtime: 'toy', socketPath: node.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.fork, true)
+  assert.deepEqual(await node.peer.call('session.fork', params), { session_id: 's2' })
+})
+
+test('assistant worker PID snapshots report updates and replay only live workers after reconnect', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  assert.equal(rt.assistantPid('s1', 110), false)
+  assert.throws(() => rt.assistantPid('s1', -1), TypeError)
+  await rt.start()
+  await until('first PID report', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  rt.assistantPid('s2', 220)
+  rt.assistantPid('s1', 0)
+  await until('s1 removed', () => node.last('runtime.assistant_pids')?.pids.s2 === 220 && !node.last('runtime.assistant_pids').pids.s1)
+  const peer = node.peer
+  const reports = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('replayed on new connection', () => node.peer !== peer && node.all('runtime.assistant_pids').length > reports)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: { s2: 220 } })
+  rt.assistantPid('s2', 0)
+  await until('empty snapshot', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+})
+
+test('the last assistant worker exiting while the hub is down replays an empty snapshot when it returns', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  await rt.start()
+  await until('connected and listed', () => rt.hubConnected && node.last('runtime.sessions'))
+  rt.assistantPid('s1', 110)
+  await until('worker reported', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  node.setHub(false)
+  await until('hub gone', () => !rt.hubConnected)
+  rt.assistantPid('s1', 0)
+  await until('worker removed', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+  const reports = node.all('runtime.assistant_pids').length
+  const peer = node.peer
+  node.setHub(true)
+  await until('snapshot replayed', () => node.all('runtime.assistant_pids').length > reports)
+  assert.equal(node.peer, peer)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+  node.setHub(false)
+  await until('hub gone again', () => !rt.hubConnected)
+  const beforeReconnect = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('next socket sends its empty snapshot', () => node.peer !== peer && node.all('runtime.assistant_pids').length > beforeReconnect)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+})
+
+for (const [assistant, features] of [[true, []], [false, ['assistant_pids']]]) {
+  test(`assistant PID reports require both sides to opt in (assistant=${assistant})`, async (t) => {
+    const node = await startFakeNode(t, { features })
+    const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+      runtime: 'toy', assistant, socketPath: node.path, refreshMs: 0,
+    })
+    t.after(() => rt.stop())
+    await rt.start()
+    await until('runtime listed', () => node.last('runtime.sessions'))
+    assert.equal(rt.assistantPid('s1', 110), false)
+    await rt.pushNow()
+    assert.equal(node.last('runtime.assistant_pids'), undefined)
+  })
+}
 
 test('a list carries the transcripts the runtime names as its own though it does not list them', async (t) => {
   const n = await startFakeNode(t)
@@ -145,6 +257,193 @@ test('content rewritten under another history goes out even where its seq did no
   assert.equal(n.all('session.items').length, 3)
 })
 
+test('a wake batch reaches a watcher before the first live text of the new exchange', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ items: async () => ({ items: [], history: 'h', to_seq: 0 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  rt.append('s1', { items: [{ id: 'reply#0', seq: 1, kind: 'text' }], fromSeq: 0, toSeq: 1, history: 'h' })
+  rt.append('s1', { items: [{ id: 'reply#-1', seq: 2, kind: 'notice', wake: true }], fromSeq: 1, toSeq: 2, history: 'h' })
+  rt.stream('s1', 'Checking again.')
+  await until('new exchange starts streaming', () => n.last('session.delta')?.text === 'Checking again.')
+  const events = n.events.filter(entry => entry.event === 'session.items' || entry.event === 'session.delta')
+  assert.deepEqual(events.map(entry => entry.event), ['session.items', 'session.delta'])
+  assert.deepEqual(events[0].params.items.map(item => item.id), ['reply#0', 'reply#-1'])
+})
+
+test('in-place item updates under the same history go out without advancing seq and coalesce by id', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ items: async () => ({ items: [], history: 'h1', to_seq: 5 }) }), { runtime: 'toy', socketPath: n.path, retryMs: 20 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  // Two rapid in-place updates within the append window coalesce into the latest copy of that item id.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  await until('coalesced in-place update pushed', () => n.all('session.items').length === 1)
+  assert.deepEqual(n.all('session.items')[0], {
+    session_id: 's1',
+    items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2' }],
+    from_seq: 5,
+    to_seq: 5,
+    history: 'h1',
+    update: true,
+  })
+  // Without update: true, a same-seq append is still ignored as already pushed.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'ignored' }], fromSeq: 5, toSeq: 5, history: 'h1' })
+  await new Promise((r) => setTimeout(r, 120))
+  assert.equal(n.all('session.items').length, 1)
+  // A follow-up in-place update after flush still goes out under the same history and seq.
+  rt.append('s1', { items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2 + 3' }], fromSeq: 5, toSeq: 5, history: 'h1', update: true })
+  await until('second in-place update pushed', () => n.all('session.items').length === 2)
+  assert.deepEqual(n.all('session.items')[1], {
+    session_id: 's1',
+    items: [{ id: '5#0', seq: 5, kind: 'thinking', text: 'Step 1 + 2 + 3' }],
+    from_seq: 5,
+    to_seq: 5,
+    history: 'h1',
+    update: true,
+  })
+})
+
+test('mixed append batches preserve update in either order without leaking to later batches', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ cursor: async () => ({ history: 'h', to_seq: 5 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1' })
+  for (const updateFirst of [true, false]) {
+    const from = updateFirst ? 5 : 6
+    const append = { items: [{ id: `i${from + 1}`, seq: from + 1 }], fromSeq: from, toSeq: from + 1, history: 'h' }
+    const update = { items: [{ id: `i${from}`, seq: from, text: 'revised' }], toSeq: from, history: 'h', update: true }
+    for (const a of updateFirst ? [update, append] : [append, update]) rt.append('s1', a)
+    await until('mixed batch', () => n.all('session.items').length === (updateFirst ? 1 : 2))
+    assert.equal(n.last('session.items').update, true)
+    assert.equal(n.last('session.items').items.length, 2)
+  }
+  rt.append('s1', { items: [], fromSeq: 7, toSeq: 8, history: 'h' })
+  await until('plain batch', () => n.all('session.items').length === 3)
+  assert.equal(n.last('session.items').update, undefined)
+})
+
+test('watch catch-up signals a rewind without claiming its missing items are complete', async (t) => {
+  const { page } = await import('../index.js')
+  for (const toSeq of [5, 0]) {
+    await t.test(`cursor ${toSeq}`, async (t) => {
+      const n = await startFakeNode(t)
+      const all = Array.from({ length: toSeq }, (_, i) => ({ id: `i${i + 1}`, seq: i + 1, role: 'user', kind: 'text', text: `message ${i + 1}` }))
+      const requests = []
+      const rt = createRuntime(minimal({ cursor: async () => toSeq, items: async (params) => {
+        requests.push(params)
+        return page(all, params, { history: 'rewritten', toSeq })
+      } }), { runtime: 'toy', socketPath: n.path })
+      t.after(() => rt.stop())
+      rt.start()
+      await n.ready
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+      assert.equal(n.all('session.items').length, 1)
+      const batch = n.last('session.items')
+      assert.equal(batch.history, 'rewritten')
+      assert.equal(batch.to_seq, toSeq)
+      assert.equal(batch.from_seq, 20, 'a continuing batch from another history must trigger reload')
+      assert.deepEqual(batch.items, [])
+      assert.deepEqual(requests, [{ session_id: 's1', after_seq: 20 }], 'the catch-up response carries the real cursor')
+      const reloaded = await n.peer.call('session.items', { session_id: 's1', limit: 80 })
+      assert.deepEqual(reloaded.items, all, 'reload recovers every rewound message')
+      rt.append('s1', { items: [{ id: 'next', seq: toSeq + 1 }], fromSeq: toSeq, toSeq: toSeq + 1, history: 'rewritten' })
+      await until('content after rewind', () => n.all('session.items').length === 2)
+      assert.equal(n.last('session.items').to_seq, toSeq + 1)
+    })
+  }
+})
+
+test('an idle watch reads one catch-up page without pushing an empty batch', async (t) => {
+  const { page } = await import('../index.js')
+  const n = await startFakeNode(t)
+  const requests = []
+  const rt = createRuntime(minimal({ items: async (params) => {
+    requests.push(params)
+    return page([{ id: 'last', seq: 20 }], params, { history: 'current', toSeq: 20 })
+  } }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+  assert.deepEqual(requests, [{ session_id: 's1', after_seq: 20 }])
+  assert.deepEqual(n.all('session.items'), [])
+})
+
+test('rewatching a known history reports a same-length rewrite', async (t) => {
+  const { page } = await import('../index.js')
+  const n = await startFakeNode(t)
+  let history = 'old'
+  const rt = createRuntime(minimal({ items: async (params) => page([{ id: 'last', seq: 20 }], params, { history, toSeq: 20 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  history = 'rewritten'
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 20 })
+  assert.equal(n.all('session.items').length, 1)
+  assert.equal(n.last('session.items').history, history)
+  assert.equal(n.last('session.items').from_seq, 20)
+  assert.equal(n.last('session.items').to_seq, 20)
+})
+
+test('watch history detects same-length rewrites after unwatch or reconnect', async (t) => {
+  const { page } = await import('../index.js')
+  for (const reconnect of [false, true]) {
+    await t.test(reconnect ? 'reconnect' : 'unwatch', async (t) => {
+      const n = await startFakeNode(t)
+      let history = 'old'
+      let reads = 0
+      const rt = createRuntime(minimal({ items: async (params) => {
+        reads++
+        return page([{ id: 'last', seq: 20 }], params, { history, toSeq: 20 })
+      } }), { runtime: 'toy', socketPath: n.path, retryMs: 20 })
+      t.after(() => rt.stop())
+      rt.start()
+      await n.ready
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+      if (reconnect) {
+        const oldPeer = n.peer
+        oldPeer.close()
+        await until('runtime reconnects', () => n.peer !== oldPeer && n.hellos === 2)
+      } else {
+        await n.peer.call('session.unwatch', { session_id: 's1' })
+      }
+      reads = 0
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20, history: 'old' })
+      assert.equal(reads, 1)
+      assert.deepEqual(n.all('session.items'), [], 'known unchanged history stays quiet')
+      await n.peer.call('session.unwatch', { session_id: 's1' })
+      history = 'rewritten'
+      await n.peer.call('session.watch', { session_id: 's1', since_seq: 20, history: 'old' })
+      assert.equal(n.all('session.items').length, 1, 'the supplied history survives a lost watch')
+      assert.deepEqual(n.last('session.items'), { session_id: 's1', items: [], history, from_seq: 20, to_seq: 20 })
+    })
+  }
+})
+
+test('an explicit zero start resets append watermarks without a new history', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ cursor: async () => ({ history: 'h', to_seq: 20 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1' })
+  rt.append('s1', { items: Array.from({ length: 5 }, (_, i) => ({ id: `i${i + 1}`, seq: i + 1 })), fromSeq: 0, toSeq: 5, history: 'h' })
+  await until('explicit reset', () => n.all('session.items').length === 1)
+  assert.equal(n.last('session.items').to_seq, 5)
+  rt.append('s1', { items: [{ id: 'next', seq: 6 }], fromSeq: 5, toSeq: 6, history: 'h' })
+  await until('content after reset', () => n.all('session.items').length === 2)
+  assert.equal(n.last('session.items').to_seq, 6)
+})
+
 test('a capped watch catch-up says there is more after its last batch', async (t) => {
   const n = await startFakeNode(t)
   const { page } = await import('../index.js')
@@ -219,6 +518,60 @@ test('asking the phone marks the session as needing you, and a withdrawn ask tak
   await assert.rejects(withdrawn, /gone/)
   await until('cancelled', () => n.last('interaction.cancel')?.id === 'toy-2')
   assert.equal(interactionId('toy', 's1', 'permission', 'call-1'), id, 'stable ids')
+})
+
+for (const loss of ['hub', 'node']) {
+  test(`an aborted ask withdraws its card after ${loss} recovery`, async (t) => {
+    const n = await startFakeNode(t)
+    const rt = createRuntime(minimal(), { runtime: `toy-cancel-${loss}`, socketPath: n.path, retryMs: loss === 'node' ? 200 : 20, pushDelayMs: 5, resumeWaitMs: 5000 })
+    t.after(() => rt.stop())
+    rt.start()
+    await n.ready
+    await until('listed', () => n.last('runtime.sessions'))
+    n.resolve = () => new Promise(() => {})
+    const ac = new AbortController()
+    const asking = rt.ask({ id: `cancel-after-${loss}`, kind: 'question', session_id: 's1' }, { signal: ac.signal })
+    await until('asked', () => n.asked.length === 1)
+    if (loss === 'hub') {
+      n.setHub(false)
+      await until('hub lost', () => !rt.hubConnected)
+    } else {
+      n.peer.close(new Error('node restarted'))
+      await until('node lost', () => !rt.connected)
+    }
+    ac.abort(new Error('answered elsewhere'))
+    await assert.rejects(asking, /answered elsewhere/)
+    assert.equal(n.all('interaction.cancel').length, 0, 'the cancel waits for a connected hub')
+    if (loss === 'hub') n.setHub(true)
+    await until('cancel delivered after recovery', () => n.last('interaction.cancel')?.id === `cancel-after-${loss}`)
+    assert.equal(n.asked.length, 1, 'the aborted ask is not resumed')
+  })
+}
+
+test('an aborted ask retains its cancel when the peer has just closed', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy-cancel-closing', socketPath: n.path, retryMs: 200, pushDelayMs: 5, resumeWaitMs: 5000 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('listed', () => n.last('runtime.sessions'))
+  n.resolve = () => new Promise(() => {})
+  const ac = new AbortController()
+  const asking = rt.ask({ id: 'cancel-while-closing', kind: 'question', session_id: 's1' }, { signal: ac.signal })
+  await until('asked', () => n.asked.length === 1)
+  const close = Peer.prototype.close
+  let closing = true
+  Peer.prototype.close = function (err) {
+    close.call(this, err)
+    if (closing && this.prefix === 'd') ac.abort(new Error('answered elsewhere'))
+  }
+  t.after(() => { Peer.prototype.close = close })
+  n.peer.close(new Error('node restarted'))
+  await assert.rejects(asking, /connection closed/)
+  closing = false
+  assert.equal(n.all('interaction.cancel').length, 0)
+  await until('cancel delivered after recovery', () => n.last('interaction.cancel')?.id === 'cancel-while-closing')
+  assert.equal(n.asked.length, 1, 'the aborted ask is not resumed')
 })
 
 test("a card up longer than the resume wait still waits for the hub that went away under it, from when it went", async (t) => {
@@ -934,4 +1287,50 @@ test('send_and_interrupt_say_queued_and_settled_as_the_driver_does', async (t) =
   assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true }, 'a stop not confirmed says nothing more')
   settle = true
   assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true, settled: true })
+})
+
+test('supervision_policy is advertised only when both assistant and supervisionPolicy are enabled (#11173)', async (t) => {
+  const full = await startFakeNode(t)
+  const capable = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'agy-like', socketPath: full.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+  )
+  t.after(() => capable.stop())
+  capable.start()
+  await full.ready
+  assert.equal(full.hello.caps.assistant, true)
+  assert.equal(full.hello.caps.supervision_policy, true)
+
+  const legacy = await startFakeNode(t)
+  const plainAsst = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'dsh-like', socketPath: legacy.path, retryMs: 20, assistant: true },
+  )
+  t.after(() => plainAsst.stop())
+  plainAsst.start()
+  await legacy.ready
+  assert.equal(legacy.hello.caps.assistant, true)
+  assert.equal(legacy.hello.caps.supervision_policy, undefined, 'absent unless explicitly opted in')
+
+  const noAsst = await startFakeNode(t)
+  const nonAsst = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
+    { runtime: 'plain', socketPath: noAsst.path, retryMs: 20, assistant: false, supervisionPolicy: true },
+  )
+  t.after(() => nonAsst.stop())
+  nonAsst.start()
+  await noAsst.ready
+  assert.equal(noAsst.hello.caps.assistant, false)
+  assert.equal(noAsst.hello.caps.supervision_policy, undefined, 'never advertised without assistant')
+
+  const noSend = await startFakeNode(t)
+  const incomplete = createRuntime(
+    minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }) }),
+    { runtime: 'half-asst', socketPath: noSend.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+  )
+  t.after(() => incomplete.stop())
+  incomplete.start()
+  await noSend.ready
+  assert.equal(noSend.hello.caps.assistant, false)
+  assert.equal(noSend.hello.caps.supervision_policy, undefined, 'never advertised when start/send are incomplete')
 })

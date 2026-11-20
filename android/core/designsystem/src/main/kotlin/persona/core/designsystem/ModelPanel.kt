@@ -150,7 +150,7 @@ private fun Rail(providers: List<PanelProvider>, view: PanelView, searching: Boo
         Cell(stringResource(R.string.designsystem_modelpanel_all), shown == PanelView.All, { onView(PanelView.All) }) {
             JIcon(PhIcons.SquaresFour, null, size = Tokens.Size.iconXS, tint = palette.ink2)
         }
-        providers.forEach { p ->
+        providers.distinctBy { it.id }.forEach { p ->
             Cell(p.name, shown == PanelView.Provider(p.id), { onView(PanelView.Provider(p.id)) }) { JProviderTile(p.name, size = Tokens.Size.iconXS) }
         }
     }

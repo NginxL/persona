@@ -19,6 +19,7 @@ class InboxSuggestionStale(val item: JsonObject?) : IllegalStateException("sugge
 /** One immutable pairing owns a transport and all its requests, including media. */
 interface InboxAssistantTransport {
     val scope: String
+    val replyImages: ReplyImageSource? get() = null
     suspend fun inbox(): JsonObject
     /** One item by its hub id, including a done item the list no longer carries; 404 means it does not exist. */
     suspend fun item(itemId: String): JsonObject = throw UnsupportedOperationException("Inbox item lookup unavailable")

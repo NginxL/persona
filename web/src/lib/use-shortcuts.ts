@@ -43,6 +43,14 @@ export function helpKey() {
 /** The panel ⌘B closed last, to bring back. */
 let lastPanel: Panel | null = null;
 
+/** An overview-origin detail is valid only while that overview is open. Invalidate its visible and Cmd+B-remembered
+ * states together when the origin goes away; a list-origin detail and an unrelated remembered panel stay untouched. */
+export function invalidateOverviewPanel(mid: string, sid: string) {
+  const dependent = (p: Panel | null) => p?.kind === "background" && p.from === "overview" && p.mid === mid && p.sid === sid;
+  if (dependent(lastPanel)) lastPanel = null;
+  if (dependent(getPanel())) closePanel();
+}
+
 /** The narrow layout's sidebar drawer's label (App.tsx): a modal dialog the page's shortcuts don't stand aside for. */
 export const SIDEBAR_LABEL = t("lib-use-shortcuts.sidebar");
 

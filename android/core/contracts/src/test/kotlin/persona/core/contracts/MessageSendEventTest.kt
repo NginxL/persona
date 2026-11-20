@@ -8,7 +8,7 @@ class MessageSendEventTest {
         """{"type":"message_send_state","machine_id":"computer","session_id":"chat","client_msg_id":"attempt","state":"$state","at":"$at"}"""
 
     @Test fun receiptsDecodeAndRoundTripWithNanosecondTime() {
-        for (state in listOf("processing", "delivered", "failed", "unknown")) {
+        for (state in listOf("processing", "delivered", "failed", "unknown", "kept")) {
             val event = ServerEvent.decode(frame(state)) as MessageSendStateEvent
             assertEquals("computer", event.machineId)
             assertEquals("chat", event.sessionId)

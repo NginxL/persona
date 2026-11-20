@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -50,20 +51,28 @@ func webApp(dir string) http.Handler {
 
 func webFrom(dir string, embedded fs.FS) http.Handler {
 	tags := &rootTags{}
+	var hasEmbedded bool
+	var embeddedAt time.Time
+	if embedded != nil {
+		if st, err := fs.Stat(embedded, "index.html"); err == nil && !st.IsDir() {
+			hasEmbedded, embeddedAt = true, buildTime(embedded)
+		}
+	}
+	disk := &diskStamp{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// The data dir wins (scripts/deploy/deploy.sh web swaps it in whole), checked on every request like before.
+		// The data dir wins (scripts/deploy/deploy.sh web swaps it in whole), checked on every request like before,
+		// unless it is older than the copy built into personad: a web-only deploy left behind by an update that brought
+		// a newer web client inside the binary would otherwise keep serving the old one for good (#11794).
 		var site fs.FS
 		builtIn := false // site is the copy built into personad, whose assets may be stored gzipped
-		if st, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !st.IsDir() {
+		if st, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !st.IsDir() && !(hasEmbedded && embeddedAt.After(disk.at(dir, st))) {
 			site = os.DirFS(dir)
-		} else if embedded != nil {
-			if st, err := fs.Stat(embedded, "index.html"); err == nil && !st.IsDir() {
-				site, builtIn = embedded, true
-			}
+		} else if hasEmbedded {
+			site, builtIn = embedded, true
 		}
 		if site == nil {
 			http.NotFound(w, r)
@@ -138,6 +147,49 @@ func webFrom(dir string, embedded fs.FS) http.Handler {
 		}
 		http.ServeContent(w, r, path.Base(file), st.ModTime(), rs)
 	})
+}
+
+// buildStampFile is where the web build writes when it was made (web/vite.config.ts `buildStamp`): {"built_at": RFC 3339}.
+// A dot file, so it is never served.
+const buildStampFile = ".build.json"
+
+// buildTime is when the copy in site was built, from its buildStampFile; zero when it has none (a build from before
+// it) or it cannot be read.
+func buildTime(site fs.FS) time.Time {
+	b, err := fs.ReadFile(site, buildStampFile)
+	if err != nil {
+		return time.Time{}
+	}
+	var stamp struct {
+		BuiltAt time.Time `json:"built_at"`
+	}
+	if json.Unmarshal(b, &stamp) != nil {
+		return time.Time{}
+	}
+	return stamp.BuiltAt
+}
+
+// diskStamp keeps when the data dir's copy was built, read again only when its index.html changes (deploy.sh web swaps
+// the whole directory in, so a new copy always brings a new index.html). A copy without a stamp, from a build before
+// it, counts from its index.html's modification time: the build's, which tar keeps when deploy.sh web unpacks it.
+type diskStamp struct {
+	mu    sync.Mutex
+	index time.Time
+	size  int64
+	built time.Time
+}
+
+func (d *diskStamp) at(dir string, index os.FileInfo) time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !index.ModTime().Equal(d.index) || index.Size() != d.size {
+		d.index, d.size = index.ModTime(), index.Size()
+		d.built = buildTime(os.DirFS(dir))
+		if d.built.IsZero() {
+			d.built = index.ModTime()
+		}
+	}
+	return d.built
 }
 
 // rootFile: a file beside index.html that keeps its name across builds (the shell, sw.js, the manifest, the icons,

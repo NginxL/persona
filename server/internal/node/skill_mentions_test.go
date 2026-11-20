@@ -12,6 +12,8 @@ import (
 )
 
 func TestSkillCatalogIsolationProfilesDeletionAndFailure(t *testing.T) {
+	managed, _ := fakeClaudeManagedSettings(t)
+	writeFile(t, managed, `{"hooks":{}}`) // an administrator's file that restricts no skill (#9862)
 	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
@@ -69,6 +71,7 @@ func TestSkillCatalogIsolationProfilesDeletionAndFailure(t *testing.T) {
 }
 
 func TestSkillCatalogToClaudeDelivery(t *testing.T) {
+	fakeClaudeManagedSettings(t)
 	f := cliTest(t)
 	n := f.n
 	n.home = os.Getenv("HOME")
@@ -94,6 +97,7 @@ func TestSkillCatalogToClaudeDelivery(t *testing.T) {
 }
 
 func TestClaudeSkillCatalogDoesNotBypassCustomizationOrSkillPermissions(t *testing.T) {
+	fakeClaudeManagedSettings(t)
 	profile, cwd := t.TempDir(), t.TempDir()
 	entries := []assistantskills.Entry{{Name: "review", Path: "/fixture/SKILL.md"}}
 	for _, settings := range []string{
@@ -117,6 +121,7 @@ func TestClaudeSkillCatalogDoesNotBypassCustomizationOrSkillPermissions(t *testi
 func TestClaudeSkillCatalogRespectsLauncherSettings(t *testing.T) {
 	probedLaunchers(t, map[string]string{"policy-claude": "claude"})
 	withLauncherSettings(t, map[string]string{"policy-claude": `{"permissions":{"deny":["Skill(review)"]}}`})
+	fakeClaudeManagedSettings(t)
 	f := cliTest(t)
 	f.n.home = os.Getenv("HOME")
 	profile, cwd := t.TempDir(), t.TempDir()
@@ -124,6 +129,125 @@ func TestClaudeSkillCatalogRespectsLauncherSettings(t *testing.T) {
 	_, err := f.n.skillCatalog(context.Background(), skillCatalogRequest{Owner: "helper", Cwd: cwd, Launcher: "policy-claude", ConfigDir: profile})
 	if err == nil {
 		t.Fatal("launcher Skill deny policy was bypassed")
+	}
+}
+
+// fakeClaudeManagedSettings points every system's managed settings at a new directory, so a test never reads this
+// computer's, and returns that directory's managed-settings.json and managed-settings.d.
+func fakeClaudeManagedSettings(t *testing.T) (file, dir string) {
+	t.Helper()
+	mac, macDirs, linux, linuxDirs := claudeManagedSettings, claudeManagedSettingsDirs, claudeLinuxManagedSettings, claudeLinuxManagedSettingsDirs
+	t.Cleanup(func() {
+		claudeManagedSettings, claudeManagedSettingsDirs, claudeLinuxManagedSettings, claudeLinuxManagedSettingsDirs = mac, macDirs, linux, linuxDirs
+	})
+	root := t.TempDir()
+	file, dir = filepath.Join(root, "managed-settings.json"), filepath.Join(root, "managed-settings.d")
+	claudeManagedSettings, claudeManagedSettingsDirs = []string{file}, []string{dir}
+	claudeLinuxManagedSettings, claudeLinuxManagedSettingsDirs = nil, nil
+	t.Setenv("ProgramFiles", "")
+	return file, dir
+}
+
+// An administrator's managed-settings.json and managed-settings.d go through the same checks as the other layers, so
+// one that only sets hooks leaves every skill listed (#9862).
+func TestClaudeSkillCatalogFollowsManagedSettings(t *testing.T) {
+	file, dir := fakeClaudeManagedSettings(t)
+	profile, cwd := t.TempDir(), t.TempDir()
+	visible := func() ([]string, error) {
+		entries := []assistantskills.Entry{{Name: "review", Path: "/fixture/review/SKILL.md"}, {Name: "deploy", Path: "/fixture/deploy/SKILL.md"}}
+		// The launcher's settings, a lower layer than the administrator's, turn review on.
+		out, err := visibleClaudeSkills(entries, profile, cwd, map[string]any{"skillOverrides": map[string]any{"review": "on"}})
+		names := []string{}
+		for _, e := range out {
+			names = append(names, e.Name)
+		}
+		return names, err
+	}
+	reset := func() {
+		for _, path := range []string{file, dir, filepath.Join(profile, "remote-settings.json")} {
+			if err := os.RemoveAll(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	listed := func(what string, want ...string) {
+		t.Helper()
+		if names, err := visible(); err != nil || strings.Join(names, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s: got %v %v, want %v", what, names, err, want)
+		}
+	}
+
+	// A file that is not there holds no policy: readSettingsFile gives it as an empty map, not as the nil of a file that
+	// holds null (review of #9870).
+	if m, err := readSettingsFile(file); err != nil || m == nil || len(m) != 0 {
+		t.Fatalf("a missing managed-settings.json: %v %v, want an empty map", m, err)
+	}
+	listed("no managed settings", "review", "deploy")
+	writeFile(t, file, `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/opt/example/hook"}]}]}}`)
+	writeFile(t, filepath.Join(dir, "10-hooks.json"), `{"hooks":{}}`)
+	listed("hooks only", "review", "deploy")
+
+	deny := `{"permissions":{"deny":["Skill(review)"]}}`
+	for _, c := range []struct{ what, path, body string }{
+		{"deny rule in managed-settings.json", file, deny},
+		{"deny rule in a drop-in", filepath.Join(dir, "20-skills.json"), `{"permissions":{"deny":["Skill"]}}`},
+		{"ask rule in a drop-in", filepath.Join(dir, "20-skills.json"), `{"permissions":{"ask":["Skill(deploy *)"]}}`},
+		{"strict plugin-only list", file, `{"strictPluginOnlyCustomization":["skills"]}`},
+		{"strict plugin-only true", filepath.Join(dir, "20-strict.json"), `{"strictPluginOnlyCustomization":true}`},
+		{"strict plugin-only it cannot read", file, `{"strictPluginOnlyCustomization":"skills"}`},
+		{"policy helper", file, `{"policyHelper":{"path":"/opt/example/policy-helper"}}`},
+		{"malformed managed-settings.json", file, `{broken`},
+		{"malformed drop-in", filepath.Join(dir, "20-broken.json"), `{"permissions":`},
+		{"null", file, `null`},
+		{"not an object", filepath.Join(dir, "20-list.json"), `[]`},
+		{"drop-in directory that cannot be listed", dir, `{}`},
+		{"server-policy cache", filepath.Join(profile, "remote-settings.json"), `{}`},
+	} {
+		reset()
+		writeFile(t, c.path, c.body)
+		if names, err := visible(); err == nil {
+			t.Fatalf("%s: listed %v", c.what, names)
+		}
+	}
+	reset()
+	if err := os.MkdirAll(file, 0o700); err != nil { // there, but cannot be read as a file
+		t.Fatal(err)
+	}
+	if names, err := visible(); err == nil {
+		t.Fatalf("unreadable managed-settings.json: listed %v", names)
+	}
+	reset()
+	writeFile(t, filepath.Join(dir, ".20-skills.json"), deny) // Claude Code skips hidden files
+	writeFile(t, filepath.Join(dir, "notes.txt"), `{broken`)  // and files that do not end in .json
+	listed("hidden and non-JSON drop-ins", "review", "deploy")
+
+	reset()
+	writeFile(t, file, `{"skillOverrides":{"review":"off"}}`)
+	for _, lower := range []string{filepath.Join(profile, "settings.json"), filepath.Join(cwd, ".claude", "settings.json"),
+		filepath.Join(cwd, ".claude", "settings.local.json")} {
+		writeFile(t, lower, `{"skillOverrides":{"review":"on"}}`)
+	}
+	listed("managed off over every lower on", "deploy")
+	// Drop-ins merge after managed-settings.json, alphabetically; an entry Claude Code cannot read changes nothing.
+	writeFile(t, filepath.Join(dir, "20-on.json"), `{"skillOverrides":{"review":"on"}}`)
+	writeFile(t, filepath.Join(dir, "10-off.json"), `{"skillOverrides":{"review":"off","deploy":"off"}}`)
+	writeFile(t, filepath.Join(dir, "30-unreadable.json"), `{"skillOverrides":{"deploy":true}}`)
+	listed("drop-ins in order", "review")
+
+	// Every system's place is read.
+	linux, programFiles := t.TempDir(), t.TempDir()
+	claudeLinuxManagedSettings = []string{filepath.Join(linux, "managed-settings.json")}
+	claudeLinuxManagedSettingsDirs = []string{filepath.Join(linux, "managed-settings.d")}
+	t.Setenv("ProgramFiles", programFiles)
+	for _, path := range []string{filepath.Join(linux, "managed-settings.json"), filepath.Join(linux, "managed-settings.d", "x.json"),
+		filepath.Join(programFiles, "ClaudeCode", "managed-settings.json"), filepath.Join(programFiles, "ClaudeCode", "managed-settings.d", "x.json")} {
+		writeFile(t, path, deny)
+		if names, err := visible(); err == nil {
+			t.Fatalf("%s not read: listed %v", path, names)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

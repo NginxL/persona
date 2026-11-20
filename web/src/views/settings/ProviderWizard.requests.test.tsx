@@ -247,9 +247,7 @@ describe("provider discovery ownership", () => {
       click("settings-providerwizard.direct_api");
       if (field === "protocol") act(() => [...document.querySelectorAll("button")].find((el) => el.textContent === "OpenAI Responses")!.click());
     } else {
-      click("settings-providerwizard.next");
-      click("settings-providerwizard.advanced");
-      const headers = document.querySelector<HTMLTextAreaElement>("textarea")!;
+      const headers = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="X-Name"]')!;
       type(headers, "X-Example: changed");
     }
     const expectedURL = field === "endpoint" ? "https://b.example.com" : "https://a.example.com";
@@ -257,8 +255,8 @@ describe("provider discovery ownership", () => {
     if (field !== "headers") {
       expect(input('input[inputmode="url"]').value).toBe(expectedURL);
       expect(input('input[type="password"]').value).toBe(field === "key" ? "example-key-b" : "example-key-a");
-      click("settings-providerwizard.next");
     }
+    click("settings-providerwizard.next");
     expect(document.querySelector('[data-model="a-only-model"]')).toBeNull();
     await addModel("manual-model");
     click("common.save");

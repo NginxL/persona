@@ -34,15 +34,35 @@ var coreTools = []string{
 // these definitions does not change each tool's caller authorization.
 var leaderCoreTools = []string{"leader_progress", "todo_create", "ask_escalate", "direction_name"}
 
+// The operations taught by persona-work. Match built-in names exactly: an
+// extension sharing a prefix must keep its own loading policy.
+var workGuideTools = []string{
+	"machines_list", "agents_list", "agent_read", "agent_send", "agent_start", "agent_interrupt",
+	"agent_switch", "agents_switch", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt",
+	"agent_supervise", "agent_transfer", "task_plan", "task_plan_withdraw", "task_scope", "task_retry",
+	"task_start_screen", "task_start_keys", "task_review", "task_decided", "leader_progress", "direction_name",
+	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
+	"conversations_list", "conversation_read", "conversation_rename", "conversation_tags_set", "conversation_new",
+	"conversation_send", "conversation_archive", "conversation_unarchive", "repositories_list", "repository_get",
+	"repository_add", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_add", "todo_repository_links_set",
+}
+
 // withToolLoading is a conversation's tools with DeferLoading set by the manager alone, whatever the list came with (a
 // connector program's tools are decoded as it sent them): when deferring (an assistant conversation that has ToolSearch)
 // all but coreTools (plus leaderCoreTools for leaders) are deferred, unless assistant.load_all_tools is on; otherwise (a guest, an agent) none is. A copy:
 // the list it is given may be shared.
 func (s *Service) withToolLoading(ctx context.Context, self string, tools []proto.Tool, deferring bool) []proto.Tool {
-	deferring = deferring && !s.loadAllTools(ctx)
+	settings := s.settings(ctx)
+	guide := deferring && settings.workGuideOn() && toolSetOf(ctx) == ""
+	cleanRound := guide && s.cleanRoundSession(self)
+	deferring = deferring && !(settings.LoadAllTools != nil && *settings.LoadAllTools)
 	leader := deferring && s.isLeader(ctx, self)
 	out := slices.Clone(tools)
 	for i := range out {
+		// Keep planning and its allowed preflight reads directly available in a granted round.
+		// Discovery would add a separate tool call to the grant's transcript check.
+		out[i].WorkGuideTool = guide && slices.Contains(workGuideTools, out[i].Name) &&
+			!(cleanRound && (out[i].Name == "task_plan" || grantSafeTools[out[i].Name]))
 		out[i].DeferLoading = deferring && !slices.Contains(coreTools, out[i].Name) &&
 			!(leader && slices.Contains(leaderCoreTools, out[i].Name))
 	}

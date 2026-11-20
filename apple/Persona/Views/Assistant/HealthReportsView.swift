@@ -65,10 +65,11 @@ struct HealthReportsView: View {
             }
             #endif
             .sheet(item: $file) { FileViewer(ref: $0) }
-            .confirmationDialog(
+            .accessibleConfirmationDialog(
                 "Delete this report?",
                 isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                 titleVisibility: .visible,
+                hasCancel: true,
                 presenting: deleting
             ) { report in
                 Button("Delete for good", role: .destructive) { Task { await page.delete(report) } }

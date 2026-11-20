@@ -55,6 +55,11 @@ func TestChooseValidation(t *testing.T) {
 	ineligible := chooseCard("fields", false)
 	ineligible.Fields = []proto.Field{{Key: "input", Label: "Input"}}
 	reportInteraction(t, h, ineligible)
+	// Its asker said going ahead cannot be undone: answered in the app only (#10465), so an option from an older
+	// notification is refused too.
+	cannotUndo := chooseCard("irreversible", false)
+	cannotUndo.ToolName, cannotUndo.Reversible = "ask_user", new(false)
+	reportInteraction(t, h, cannotUndo)
 	rev, multiRev := askRev(one.Questions[0]), askRev(many.Questions[0])
 	mux := h.routes()
 	for _, tc := range []struct {
@@ -81,6 +86,7 @@ func TestChooseValidation(t *testing.T) {
 		{"trailing", "one", `{"option":0,"rev":"` + rev + `"} {}`, 400, "bad_request"},
 		{"too large", "one", `{"rev":"` + strings.Repeat("x", 4096) + `"}`, 413, "too_large"},
 		{"fields", "fields", `{"option":0,"rev":"` + rev + `"}`, 400, "not_choosable"},
+		{"cannot be undone", "irreversible", `{"option":0,"rev":"` + rev + `"}`, 400, "not_choosable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {

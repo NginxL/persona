@@ -26,6 +26,8 @@
   "change_briefing_waits": "朝夕のブリーフィングの停滞一覧：{before} → {after}",
   "title_interject_background": "割り込んだら実行中の作業をバックグラウンドへ",
   "change_interject_background": "「割り込んだら実行中の作業をバックグラウンドへ」：{before} → {after}",
+  "title_claude_interactive": "Claude のチャットを対話型 Claude Code で動かす",
+  "change_claude_interactive": "「Claude のチャットを対話型 Claude Code で動かす」：{before} → {after}",
   "title_load_all_tools": "Persona のツールを最初からすべて読み込む",
   "change_load_all_tools": "「Persona のツールを最初からすべて読み込む」：{before} → {after}",
   "title_agent_tasks": "Persona が開始した Agent はすべて監督付きタスクにする",
@@ -88,5 +90,10 @@
   "idle_auto_compact_unchanged": "アイドル会話の自動整理設定は変更されていません。",
   "idle_auto_compact_saved": "アイドル会話の自動整理設定を保存しました。",
   "change_idle_auto_compact_minutes": "圧縮までの離席時間：{before} → {after} 分",
-  "change_idle_auto_compact_tokens": "圧縮するコンテキストの大きさ：{before} → {after} トークン"
+  "change_idle_auto_compact_tokens": "圧縮するコンテキストの大きさ：{before} → {after} トークン",
+  "title_supervision_batch_minutes": "通常の監督通知を受信者ごとにまとめる",
+  "change_supervision_batch_minutes": "通常の監督通知を受信者ごとにまとめる間隔：{before} → {after} 分（0 は既存の間隔を維持）",
+  "bad_supervision_batch_minutes": "0〜1440の整数分で指定してください。",
+  "supervision_batch_minutes_unchanged": "通常の監督通知をまとめる間隔は変更されていません。",
+  "supervision_batch_minutes_saved": "通常の監督通知をまとめる間隔を{value}分に保存しました。"
 }

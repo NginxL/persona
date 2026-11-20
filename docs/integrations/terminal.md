@@ -591,7 +591,7 @@ Correct implementation needs node to include herdr scroll offset in frames or a 
 - Output URLs: `@xterm/addon-web-links`, http(s) only, click through `openLink`; no simultaneous `terminal_click` (`linkHit`).
 - Context menu: Copy / Paste / Select All / Find… / Clear Selection, existing `Menu` in `ui/atoms.tsx` unchanged. Since `Menu` anchors only to elements, a zero-size fixed element is placed at the mouse position. Blur xterm while menu is open (focused xterm swallows keys; Esc goes to program instead of closing menu).
 - Mac line-editing keys: ⌘⌫ → `\x15`, ⌘← → `\x01`, ⌘→ → `\x05`, only while controlling and with ⌘ alone (`lineEditBytes`).
-- Options: cursor style, blink, WebGL rendering (`@xterm/addon-webgl`, dynamically loaded on first enable; disable/context loss/no WebGL disposes and falls back to DOM); `persona.terminal.cursorStyle / cursorBlink / webgl`, defaults don't write keys. Appearance (light / dark apart from the page) is section 29.
+- Options: cursor style, blink; `persona.terminal.cursorStyle / cursorBlink`, defaults don't write keys. The renderer (`@xterm/addon-webgl`, dynamically loaded only for a terminal opened with WebGL chosen; context loss / no WebGL disposes it, falls back to DOM and sets the choice back to Standard) is chosen in Settings › Labs and read when a terminal opens (`docs/web/web.md`, "Labs"); the key `persona.terminal.webgl` is unchanged. Appearance (light / dark apart from the page) is section 29.
 - Focus: under control, clicking panel or refocusing window returns keyboard to terminal unless text is selected, a dialog/menu/popover is open, focus is in another input (including Find) or outside-panel control, or terminal is hidden beneath another retained terminal (`inert`).
 
 ### Verification
@@ -667,6 +667,11 @@ These suggestions apply only to creation and do not establish ownership for clos
 - **Delegate to herdr**: herdr 0.9 has `worktree create` (socket `worktree.create {workspace_id, branch, path, focus}`, CLI fallback `herdr worktree create --workspace … --branch … --path … --no-focus`):
   check out existing branch, otherwise create from workspace HEAD. New workspace carries worktree provenance, grouped under original, recognized by herdr sidebar grouping too. No computer focus stealing (like other menu actions); web navigates itself.
   herdr and Orca implement `host.Worktreer` (`CanWorktree` checks `herdr worktree --help`, `WorktreesDir`, `CreateWorktree`).
+  When no herdr workspace holds the repository (none is open there, or the one there has tabs in different folders, so it is no
+  reliable source), the node calls `herdr worktree create --cwd <repository root>` instead of opening a plain workspace: herdr
+  makes it from that repository, and the workspace still carries its `worktree.repo_key`, so the sidebar files it under the repository.
+  When an Agent's tab opens in a worktree the assistant made for it, the worktree's first shell (marked, below and
+  `docs/integrations/engines.md`) closes at once if nothing is in it, so the workspace holds the Agent's tab, named for its task, not an empty `1` beside it.
 - **Delegate to Orca** (#5325, `node/hostorca_worktree.go`): Orca runtime's `worktree.create {repo: "id:<project id>", name, branchNameOverride, baseBranch?, parentWorktree, activate: false}` (the one call `orca worktree create` makes).
   The new worktree is Orca's own: listed under the source workspace in Orca's sidebar (`parentWorktree`) and in Persona's workspaces; not activated, no setup hooks, no focus stealing. Orca opens a terminal in it itself; the node waits up to 5 seconds for it and points the web client at it.
   - Branch: an existing local branch is checked out as is (no `baseBranch`), otherwise created from the source workspace's HEAD like herdr (`baseBranch` is the current branch as git reads it now, the commit on a detached HEAD; Orca uses the local branch, unpushed commits included, measured 2026-11-05).
@@ -685,7 +690,7 @@ These suggestions apply only to creation and do not establish ownership for clos
 - **Default path**: herdr convention `<worktrees.directory>/<repo name>/<branch slug>`, reading `[worktrees] directory` from the config file herdr reads (`$HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else `~/.config/herdr/config.toml`, `%APPDATA%\herdr\config.toml` on Windows), default `~/.herdr/worktrees`; `~`/relative paths resolved against user home.
   Slug matches herdr: lowercase, consecutive non-ASCII-alphanumeric characters become one `-`, stripped from ends (`Feat/A_b.c` → `feat-a-b-c`, `fix/中文` → `fix`, demonstrating CJK stripping). Measured on herdr 0.9.5 on 2026-11-05; `herdr.WorktreeSlug` and web `branchSlug` both tested.
 - **Node guards** (`worktreeCreate`, before herdr/git): workspace must be host-listed and in Git repo; branch passes `git check-ref-format --branch`, can't start `-` or be a revision expression such as `@{-1}`.
-  Checkout path absolute (`~/` expanded), not an existing file, existing directory must be empty (Git can reuse it), never inside repo `.git`. Git rejection (branch checked out elsewhere, bad path…) returns original `fatal:` line; no forcing, deleting or partial artifacts on failure.
+  Checkout path absolute (`~/` expanded), not an existing file, existing directory must be empty (Git can reuse it), never inside repo `.git`. Git rejection (branch checked out elsewhere, bad path…) returns original `fatal:` line, after an earlier line that names the cause when there is one (a program the shell could not find, else the last `error:` line): an LFS filter whose `git-lfs` is not on PATH says `git-lfs filter-process: git-lfs: command not found; the remote end hung up unexpectedly`, not only the second half (#10127). No forcing, deleting or partial artifacts on failure.
 - **Dialog** (`views/NewWorktree.tsx`, logic `lib/worktree.ts`): reads repo on open ("Reading repository…"); path follows branch until manually changed, clears to restore auto-follow; immediate branch validation (empty: "Enter a branch name").
   Creation shows spinner and disables dismissal; failure inside dialog ("Couldn't create worktree: …"), missing old-hub/node API says "Persona on this computer is too old; update to create worktrees". Success: toast, reload tree, open new workspace terminal.
 - **iOS / Mac** (#3099): space ⋯ in Agents list has New Worktree…, same two routes/form rules (`WorktreeForm`); success opens New Chat prefilled with new workspace instead of terminal (`docs/apple/ios.md`, "Information architecture").
@@ -993,7 +998,7 @@ Shared `views/session/terminal/transfer.ts` (`FileTransfer`, also used by Single
 User screenshot: Claude table rows containing Chinese/fullwidth punctuation shift right border by 1–2 cells, adjacent fish pane's left border becomes jagged `||`. Moshi web lacks the issue, so its implementation was checked:
 
 - Moshi registers no Unicode-width addon (xterm default Unicode 6), no CJK font handling. Uses WebGL cell-grid rendering, bundled JetBrainsMono Nerd Font Mono, waiting on `document.fonts.load` before opening.
-- Persona Full view uses DOM renderer (Single pane WebGL optional, off by default), font stack `"JetBrains Mono", "SF Mono", ui-monospace, …`; fonts and CJK fallback (`cjk.ts`, `size-adjust` to exactly two cells) already existed, with `terminalFontReady` before opening.
+- Persona Full view uses DOM renderer (Single pane WebGL optional in Settings › Labs, off by default), font stack `"JetBrains Mono", "SF Mono", ui-monospace, …`; fonts and CJK fallback (`cjk.ts`, `size-adjust` to exactly two cells) already existed, with `terminalFontReady` before opening.
 
 So rather than copy "switch to WebGL", measurements were taken in a temporary session first.
 

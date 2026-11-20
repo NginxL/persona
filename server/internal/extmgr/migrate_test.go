@@ -125,6 +125,86 @@ func TestABuiltinSwitchesToItsDefaultSubscription(t *testing.T) {
 	}
 }
 
+// A source read through its default subscription shows that subscription's reads as its Last read (#11762): the Inbox
+// round no longer reads it, and the round's record is memory only, so it said "Not yet" after a restart. Switched
+// back, the round's record again.
+func TestASwitchedSourceShowsItsSubscriptionsReads(t *testing.T) {
+	h := newTestManager(t)
+	ctx := context.Background()
+	h.connectors = connector.NewRegistry(nil)
+	c := &inboxConnector{}
+	_ = h.addConnector(c)
+	store := subscriptions.NewMemStore()
+	h.subs = subscriptions.New(h.subscriptionOptions(store))
+	h.subsLive.Store(h.subs)
+	migrations[c.ID()] = subscriptions.Migration{Connector: c.ID(), Source: "notices", Recipe: migrations["imessage"].Recipe}
+	defer delete(migrations, c.ID())
+	b := builtinSources{h}
+	readOf := func() *subscriptionsui.Read {
+		t.Helper()
+		for _, s := range b.List(ctx) {
+			if s.ID == c.ID() {
+				return s.Read
+			}
+		}
+		t.Fatal("the built-in is not listed")
+		return nil
+	}
+	// run commits one run of the default subscription at at: one that worked (p nil) or failed with p.
+	run := func(at time.Time, p *subscriptions.Problem) {
+		t.Helper()
+		cur, err := store.GetSubscription(ctx, subscriptions.MigrationID(c.ID()))
+		if err != nil || cur == nil {
+			t.Fatalf("its subscription: %v %v", cur, err)
+		}
+		next := *cur
+		next.LastRunAt = &at
+		if p == nil {
+			next.RunState, next.Error, next.FailCount, next.LastOKAt = subscriptions.StateOK, nil, 0, &at
+		} else {
+			next.RunState, next.Error, next.FailCount = subscriptions.StateFailing, p, next.FailCount+1
+		}
+		if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: next, Revision: cur.Revision, Now: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	h.inboxReads.note(c.ID(), start, "")
+	if r := readOf(); r == nil || !r.At.Equal(start) || r.Error != "" {
+		t.Fatalf("before the switch, the round's read: %+v", r)
+	}
+	if err := b.SetMigrated(ctx, c.ID(), true, subscriptions.Actor{}); err != nil {
+		t.Fatal(err)
+	}
+	if r := readOf(); r != nil {
+		t.Fatalf("switched, before its subscription first ran: %+v", r)
+	}
+	worked := start.Add(15 * time.Minute)
+	run(worked, nil)
+	if r := readOf(); r == nil || !r.At.Equal(worked) || r.OK == nil || !r.OK.Equal(worked) || r.Error != "" {
+		t.Fatalf("after a run that worked: %+v", r)
+	}
+	failed := worked.Add(15 * time.Minute)
+	run(failed, &subscriptions.Problem{Code: subscriptions.CodeRateLimited}) // worded as the round's rate_limited
+	if r := readOf(); r == nil || !r.At.Equal(failed) || r.OK == nil || !r.OK.Equal(worked) || r.Error != assistantwire.ReadRateLimited {
+		t.Fatalf("after a failed run: %+v", r)
+	}
+	h.inboxReads = sourceReads{} // the manager restarted: the round's record is gone, the subscription's stays
+	if r := readOf(); r == nil || !r.At.Equal(failed) || r.Error != assistantwire.ReadRateLimited {
+		t.Fatalf("after a restart: %+v", r)
+	}
+	run(failed.Add(15*time.Minute), &subscriptions.Problem{})
+	if r := readOf(); r == nil || r.Error != assistantwire.ReadFailed {
+		t.Fatalf("a failure without a code: %+v", r)
+	}
+	if err := b.SetMigrated(ctx, c.ID(), false, subscriptions.Actor{}); err != nil {
+		t.Fatal(err)
+	}
+	if r := readOf(); r != nil {
+		t.Fatalf("switched back, the round has not read it since the restart: %+v", r)
+	}
+}
+
 // A built-in read through its default subscription keeps what the Inbox does with its things (#6381): its round entry
 // is the built-in's, grouping, event meta and settling included, with the connector's own rows as they came, no
 // counts of the subscription's and no subscription named for the AI twin.

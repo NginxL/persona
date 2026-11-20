@@ -11,6 +11,7 @@ export interface LarkAccount {
   id: number;
   name?: string;
   avatar?: string;
+  avatar_url?: string;
   tenant?: string;
   user_id?: string;
   signed_in: boolean;

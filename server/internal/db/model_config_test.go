@@ -121,7 +121,40 @@ func TestPutSettingsIsAllOrNothing(t *testing.T) {
 	}
 }
 
-// A launcher switch waiting for the next message (node/launcher_switch.go) comes back after a node restart, and a
+func TestSettingsPrefix(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	values := map[string]any{
+		"model_config.unknown":               map[string]any{"revision": 3, "binding": map[string]string{"model": "sonnet"}},
+		"model_config.overrides.v1.task.old": map[string]any{"revision": 4, "binding": map[string]string{"provider": "launcher.chat"}},
+		"model_config_future":                "excluded",
+		"modelXconfig.test":                  "excluded",
+		"model_profiles":                     "excluded",
+	}
+	if err := d.PutSettings(ctx, values); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.SettingsPrefix(ctx, "model_config.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("keys = %v", got)
+	}
+	for _, key := range []string{"model_config.unknown", "model_config.overrides.v1.task.old"} {
+		var want, value any
+		raw, _ := json.Marshal(values[key])
+		if err := json.Unmarshal(raw, &want); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(got[key], &value); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(value, want) {
+			t.Fatalf("%s = %s, want %s", key, got[key], raw)
+		}
+	}
+}
+
 // record written without one has none (#5035).
 func TestNodePendingSwitchIsPersisted(t *testing.T) {
 	d, ctx := open(t), context.Background()

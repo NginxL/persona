@@ -8,7 +8,8 @@
   "launcher_not_main_chat": "{launcher} can start Agents on {machine} but can’t run assistant chats, so this message wasn’t sent. Pick another launcher in the menu and send again.",
   "launcher_not_main_chat_instead": "{launcher} can start Agents on {machine} but can’t run assistant chats, so this message wasn’t sent. Choose {instead} in the menu and send again.",
   "launcher_other_kind": "{launcher} runs {launcher_agent}, but this conversation runs on {conversation_agent} and can't change it, so this message wasn't sent. Pick a {conversation_agent} launcher, or start a new conversation on {launcher}.",
-  "launcher_no_substitute": "{launcher} isn’t on {machine} any more, and no other launcher of the same kind there can run assistant chats, so this message wasn’t sent. Choose one in Model configuration › Main chat.",
+  "launcher_no_substitute": "{launcher} is unavailable on {machine}, and no configured substitute can run this assistant chat there, so this message wasn’t sent. Choose a launcher in Model configuration › Main chat.",
   "launcher_swapped": "{launcher} can’t run assistant chats on {machine}, so this runs on {to}",
-  "launcher_swapped_model": "{launcher} can’t run assistant chats on {machine}, so this runs on {to} with its default model ({model} isn’t in its list)"
+  "launcher_swapped_model": "{launcher} can’t run assistant chats on {machine}, so this runs on {to} with its default model ({model} isn’t in its list)",
+  "model_missing": "{model} is no longer available from {launcher}, so this message uses its default model"
 }

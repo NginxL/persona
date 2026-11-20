@@ -76,7 +76,7 @@ func (s *Service) InboxSources(ctx context.Context) ([]InboxSource, error) {
 	out := []InboxSource{}
 	replying := s.replying(ctx)
 	for _, sub := range all {
-		src := InboxSource{ID: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label), Things: []connector.InboxThing{}}
+		src := InboxSource{ID: sub.ID, Name: sub.Label, Kinds: kindsOf(sub.Label, s.o.Lang()), Things: []connector.InboxThing{}}
 		builtin, migrated := MigratedFrom(sub)
 		if migrated {
 			src.ID, src.Switched = builtin, true // the built-in's Inbox feed now: under its own source id (#6265)
@@ -174,10 +174,14 @@ func readErrorOf(state string) string {
 	return ""
 }
 
-func kindsOf(label string) map[string]string {
+func kindsOf(label string, lang i18n.Lang) map[string]string {
+	language := ""
+	if lang != i18n.Default && i18n.Valid(lang) {
+		language = lang.Name()
+	}
 	out := make(map[string]string, len(itemKinds))
 	for _, k := range itemKinds {
-		out[k] = prompts.RenderSubscriptionKind(prompts.SubscriptionKind{Kind: k, Label: label})
+		out[k] = prompts.RenderSubscriptionKind(prompts.SubscriptionKind{Language: language, Kind: k, Label: label})
 	}
 	return out
 }

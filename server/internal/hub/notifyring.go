@@ -9,7 +9,7 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
-// The notify events kept for a device that has no push route while it has no ws_notify socket (#4043). APNs keeps an
+// The notify events kept for a device with no push route when no ws_notify socket accepts them (#4043, #10394). APNs keeps an
 // iPhone's alert until the phone is back, but an Android phone or a browser hears of a question or a finished turn only
 // on its WebSocket, and notifyWSFrom sends to live sockets alone: a device that was away at that moment (a network
 // change, Doze, a frozen app) never got the notification, only the card in its lists. So the hub keeps, per such device,
@@ -24,8 +24,8 @@ const (
 )
 
 // notifyRings are the devices whose last client_hello declared ws_notify, by device credential, with what is kept for
-// each; guarded by Hub.mu, the lock notifyWSFrom walks the sockets under, so an event is either sent to a socket that
-// declared ws_notify or kept for the hello that takes the ring.
+// each; guarded by Hub.mu, the lock notifyWSFrom walks the sockets under, so an event is either accepted by a socket
+// that declared ws_notify or kept for the hello that takes the ring.
 type notifyRings struct {
 	devices map[string]*notifyRing
 	now     func() time.Time // tests; nil is time.Now
@@ -137,8 +137,8 @@ func (h *Hub) replayNotifyRing(c *client) {
 	}
 }
 
-// ringNotify keeps a notify event for the remembered devices that have no ws_notify socket now (live), have the
-// capability it requires and no push route, and whose settings take it (wantsOn, the same decision a socket gets). msgIn
+// ringNotify keeps a notify event for remembered devices with no accepting ws_notify socket (live), the required
+// capability and no push route, whose settings take it (wantsOn, the same decision a socket gets). msgIn
 // is the event in a language, encoded the event quiet or not. Called under h.mu by notifyWSFrom. It returns how many
 // devices kept it.
 func (h *Hub) ringNotify(live map[string]bool, required []string, wantsOn func(device string) (ok, quiet bool),

@@ -289,7 +289,8 @@ func TestInboxSuggestionRejectInstruct(t *testing.T) {
 	}
 }
 
-// A send that fails leaves the event Needs you without a suggestion, the chain says so.
+// A send that fails leaves the event Needs you with its suggestion and explicit uncertain result, not a false
+// not-sent card. This source's unclassified error does not establish that a retry is safe.
 func TestInboxSuggestionSendFails(t *testing.T) {
 	h, _, it := handledHub(t)
 	h.in.mu.Lock()
@@ -304,9 +305,12 @@ func TestInboxSuggestionSendFails(t *testing.T) {
 	}
 	h.inbox.mu.Lock()
 	defer h.inbox.mu.Unlock()
-	if it.Suggestion != nil || it.Handling.State != HandlingFailed || it.status() != StatusAction || !it.open() ||
+	if it.Suggestion == nil || it.Suggestion.Version != 1 || it.Suggestion.Text != "好的" || it.Handling.State != HandlingFailed || it.status() != StatusAction || !it.open() ||
 		it.Chain[len(it.Chain)-1].Kind != ChainFailed || it.Handling.Error != "发送没有成功" {
 		t.Fatalf("after the failure: %+v %+v %v", it.Suggestion, it.Handling, chainKinds(it))
+	}
+	if a := suggestionAttempt(it, 1); a == nil || a.Status != suggestionUnknown || a.Retryable {
+		t.Fatalf("unclassified failure was treated as safely retryable: %+v", a)
 	}
 }
 

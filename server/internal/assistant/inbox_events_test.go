@@ -249,10 +249,14 @@ func TestInboxMergeFollowsHandledEvent(t *testing.T) {
 	}
 	ev := &InboxItem{ID: "lark:ev1", Source: "lark", Title: "报价", Summary: "客户要报价", Tier: TierAction, Last: "m1", Count: 1,
 		Handling: &InboxHandling{Owner: HandlingOwner, State: HandlingWaiting}, Group: &InboxGroup{Connector: "lark", Thread: "chat:g"}}
+	h.inbox.mu.Lock()
 	h.inbox.items[ev.ID] = ev
+	h.inbox.mu.Unlock()
 	c := assistantwire.InboxSource{ID: "lark", Name: "飞书"}
 	thing := connector.InboxThing{ID: ev.ID, Thread: "chat:g", Kind: KindGroup, Title: "x", Last: "m2", At: time.Now()}
 	h.putEvent(c, "chat:g", plannedEvent{existing: ev.ID, messages: []string{"m2"}, title: "闲聊", summary: "无关", tier: TierNoise}, thing, true)
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
 	if ev.Tier != TierAction || ev.Title != "报价" || ev.Summary != "客户要报价" || ev.Count != 2 {
 		t.Fatalf("the event moved: %+v", ev)
 	}

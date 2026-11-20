@@ -3,6 +3,8 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,12 @@ func outcomeEnv(t *testing.T, st Store, reply string) (*Service, *fakeHub, Todo)
 	}
 	p, _ := e.Store.Project("天气-app")
 	p.OneLine = "天气 App 的 iOS 和安卓版"
-	if err := e.Store.PutProject(p); err != nil {
+	// Seed an owner-written legacy OneLine. Ordinary PutProject now preserves that field on existing projects.
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.Store.Path(kb.KindProject, p.Slug, "meta.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -278,6 +285,127 @@ func TestAgentStartCarriesExtensionProjectContext(t *testing.T) {
 	s2, _, _ := outcomeEnv(t, nil, outcomeReply) // no answer: the call fails, nothing from extensions
 	if got := s2.projectContext(context.Background(), "box", "/code/weather"); strings.Contains(got, "扩展") {
 		t.Fatalf("without extensions: %q", got)
+	}
+}
+
+func TestProjectContextMemoryOrderBoundsAndConflicts(t *testing.T) {
+	s, f, _ := outcomeEnv(t, nil, outcomeReply)
+	f.hello.Locale = "en"
+	e := kbEng(t, s)
+	p, _ := e.Store.Project("天气-app")
+	p.Kind = "long"
+	if err := e.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.PutSummary(kb.KindProject, p.Slug, "Bounded project summary"); err != nil {
+		t.Fatal(err)
+	}
+	append := func(record kb.ProjectMemoryRecord) {
+		t.Helper()
+		record.Verification = kb.ProjectMemoryAgentReported
+		if err := e.AppendProjectMemory(p.Slug, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 6; i++ {
+		append(kb.ProjectMemoryRecord{ID: fmt.Sprintf("outcome-id-%d", i), Type: kb.ProjectMemoryOutcome,
+			Conclusion: fmt.Sprintf("outcome-%d", i), RecordedAt: fmt.Sprintf("2026-11-20T02:0%d:00Z", i)})
+	}
+	for i := 0; i < 6; i++ {
+		record := kb.ProjectMemoryRecord{ID: fmt.Sprintf("decision-%d", i), Type: kb.ProjectMemoryDecision,
+			Question: "shared question", Decision: fmt.Sprintf("choice-%d", i), Reason: fmt.Sprintf("reason-%d", i),
+			RecordedAt: fmt.Sprintf("2026-11-20T03:0%d:00Z", i)}
+		if i == 5 {
+			record.SupersedesID = "decision-0"
+		}
+		append(record)
+	}
+	for i := 0; i < 4; i++ {
+		append(kb.ProjectMemoryRecord{ID: fmt.Sprintf("pitfall-%d", i), Type: kb.ProjectMemoryPitfall,
+			Conclusion: fmt.Sprintf("pit-%d", i), RecordedAt: fmt.Sprintf("2026-11-20T04:0%d:00Z", i)})
+	}
+	got := s.projectContext(context.Background(), "box", "/code/weather")
+	for _, want := range []string{"Bounded project summary", "outcome-5", "choice-5", "choice-4", "reason-5",
+		"decision-5", "decision-4", "2026-11-20T03:05:00Z", "2026-11-20T03:04:00Z", "pit-3", "agent_reported", "not supervisor-accepted"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("memory context lacks %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"outcome-0", "decision-0", "pit-0"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("memory context included %q outside its effective bound:\n%s", unwanted, got)
+		}
+	}
+	ordered := []string{"Project summary:", "Recent outcomes", "Effective decisions", "Pitfalls"}
+	at := 0
+	for _, section := range ordered {
+		next := strings.Index(got[at:], section)
+		if next < 0 {
+			t.Fatalf("section %q is missing or out of order:\n%s", section, got)
+		}
+		at += next + len(section)
+	}
+}
+
+func TestProjectContextMemoryFallsBackToOneLineWithoutSummary(t *testing.T) {
+	s, f, _ := outcomeEnv(t, nil, outcomeReply)
+	f.hello.Locale = "en"
+	e := kbEng(t, s)
+	if err := e.AppendProjectMemory("天气-app", kb.ProjectMemoryRecord{ID: "one", Type: kb.ProjectMemoryOutcome, Conclusion: "result"}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.projectContext(context.Background(), "box", "/code/weather")
+	if !strings.Contains(got, "天气 App 的 iOS 和安卓版") || !strings.Contains(got, "result") {
+		t.Fatalf("OneLine fallback = %q", got)
+	}
+}
+
+func TestProjectContextSummaryUsesLongProjectBudget(t *testing.T) {
+	s, f, _ := outcomeEnv(t, nil, outcomeReply)
+	f.hello.Locale = "en"
+	e := kbEng(t, s)
+	p, _ := e.Store.Project("天气-app")
+	p.Kind = "long"
+	if err := e.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.PutSummary(kb.KindProject, p.Slug, strings.Repeat("界", projectSummaryLongRunes+100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AppendProjectMemory(p.Slug, kb.ProjectMemoryRecord{ID: "one", Type: kb.ProjectMemoryOutcome, Conclusion: "result"}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.projectContext(context.Background(), "box", "/code/weather")
+	start := strings.Index(got, "Project summary:\n")
+	end := strings.Index(got, "\n\nRecent outcomes")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatalf("summary section = %q", got)
+	}
+	summary := strings.TrimSpace(got[start+len("Project summary:\n") : end])
+	if len([]rune(summary)) != projectSummaryLongRunes || !strings.HasSuffix(summary, "…") {
+		t.Fatalf("summary has %d runes, want %d with an ellipsis", len([]rune(summary)), projectSummaryLongRunes)
+	}
+}
+
+func TestProjectContextWithoutMemoryStaysLegacy(t *testing.T) {
+	s, f, todo := outcomeEnv(t, nil, outcomeReply)
+	f.hello.Locale = "en"
+	e := kbEng(t, s)
+	if err := e.Store.PutSummary(kb.KindProject, "天气-app", "Legacy summary must not replace OneLine"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.AppendLog("天气-app", time.Now(), kb.TodoLogSource+kb.TodoLogTitle(todo.Title), "结论：legacy outcome"); err != nil {
+		t.Fatal(err)
+	}
+	got := s.projectContext(context.Background(), "box", "/code/weather")
+	if !strings.HasPrefix(got, `<persona-context kind="context" title="Project · 天气 App · Background"`) ||
+		!strings.Contains(got, "Project: 天气 App 的 iOS 和安卓版") || !strings.Contains(got, "legacy outcome") ||
+		strings.Contains(got, "Legacy summary must not replace OneLine") ||
+		strings.Contains(got, "agent_reported") || strings.Contains(got, "Direction memory") {
+		t.Fatalf("legacy context changed: %q", got)
+	}
+	if _, err := os.Stat(e.Store.Path(kb.KindProject, "天气-app", "memory.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("dispatch created memory.jsonl: %v", err)
 	}
 }
 

@@ -1,0 +1,41 @@
+{
+  "title": "Control room",
+  "sections": [
+    {
+      "items": [
+        {"type": "header", "title": "Control room", "subtitle": "One nightly build, four runs",
+         "badges": [{"text": "Running", "tone": "caution"}],
+         "facts": [
+           {"label": "Owner", "value": "build team", "icon": "person"},
+           {"label": "Region", "value": "eu-west", "icon": "location"}
+         ]},
+        {"type": "graph", "key": "runs", "selected": "verify", "nodes": [
+          {"id": "root", "title": "Nightly build", "subtitle": "2 of 4 runs ended", "icon": "play",
+           "badge": {"text": "Running", "tone": "caution"}, "progress": 0.5,
+           "started_at": 1726399980, "ended_at": 1726400120,
+           "facts": [{"label": "Attempt", "value": "2"}, {"label": "Queue", "value": "empty"}],
+           "detail": "A second attempt runs while the first waits for review.",
+           "links": [{"title": "Work session", "url": "https://hub.example.com/s/dev-box/run-1"}],
+           "action": {"id": "open", "values": {"id": "root"}}},
+          {"id": "plan", "title": "Draft the plan", "tone": "positive",
+           "badge": {"text": "Done", "tone": "positive"},
+           "started_at": 1726400000, "ended_at": 1726400012},
+          {"id": "build", "title": "Build", "subtitle": "2 of 3 steps", "tone": "caution", "progress": 0.66,
+           "badge": {"text": "Running", "tone": "caution"},
+           "started_at": 1726400012, "ended_at": 1726400012,
+           "detail": "The archive step retries after a flaky upload."},
+          {"id": "verify", "title": "Verify", "badge": {"text": "Needs you", "tone": "danger"}, "icon": "check",
+           "started_at": 1726400030,
+           "facts": [{"label": "Suites", "value": "3 of 4 passed", "icon": "check"},
+                     {"label": "Owner", "value": "you", "icon": "person"}],
+           "links": [{"title": "Verifier session", "url": "https://hub.example.com/s/dev-box/verify-1"},
+                     {"title": "Failing suite", "url": "https://hub.example.com/s/dev-box/verify-1#tests"}]},
+          {"id": "ship", "title": "Ship", "icon": "share", "badge": {"text": "Queued"}}
+        ], "edges": [
+          {"from": "root", "to": "plan"}, {"from": "root", "to": "build"},
+          {"from": "build", "to": "verify"}, {"from": "verify", "to": "ship"}
+        ]}
+      ]
+    }
+  ]
+}

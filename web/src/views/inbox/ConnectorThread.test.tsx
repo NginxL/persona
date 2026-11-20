@@ -65,6 +65,50 @@ afterEach(() => {
 });
 
 describe("连接器会话页", () => {
+  it("opens a Telegram sender's sized avatar on the item's manager and keeps the legacy media fallback", async () => {
+    const path = "/api/v1/avatars/telegram/YS51MS41MDE";
+    pages.newest = {
+      chat: { id: "g", name: "Workshop", kind: "group", avatar_url: "/api/v1/avatars/telegram/Z3JvdXA" },
+      messages: [
+        msg("1", { sender: { name: "Artist", avatar: "a.u1.501", avatar_url: path } }),
+        msg("2", { sender: { name: "Editor", avatar: "legacy:2" } }),
+        msg("3", { sender: { name: "Guest" } }),
+      ],
+    };
+    const face = (id: string) => host.querySelector<HTMLImageElement>(`[data-mid="${id}"] img`);
+    act(() => root.render(<ConnectorBody item={{ ...item, source: "telegram", manager: "studio" }} />));
+    await flush();
+    const first = new URL(face("1")!.src);
+    expect(first.pathname).toBe(path);
+    expect(first.searchParams.get("size")).toBe(String(32 * devicePixelRatio));
+    expect(first.searchParams.get("manager")).toBe("studio");
+    const legacy = new URL(face("2")!.src);
+    expect(legacy.pathname).toBe("/api/v1/connectors/telegram/media");
+    expect(legacy.searchParams.get("ref")).toBe("legacy:2");
+    expect(legacy.searchParams.get("manager")).toBe("studio");
+    expect(face("3")).toBeNull();
+    act(() => face("1")!.dispatchEvent(new Event("error")));
+    expect(face("1")).toBeNull();
+    expect(host.querySelector('[data-mid="1"] [aria-hidden]')?.textContent).toBe("A");
+    act(() => root.render(<ConnectorBody item={{ ...item, source: "telegram", manager: "garden" }} />));
+    await flush();
+    expect(new URL(face("1")!.src).searchParams.get("manager")).toBe("garden");
+  });
+
+  it("uses the GitHub author's and commenter's separate hub pictures", async () => {
+    const author = "/api/v1/avatars/github/YXV0aG9y", reviewer = "/api/v1/avatars/github/cmV2aWV3ZXI";
+    pages.newest = {
+      chat: { id: "demo#1", name: "A change", kind: "pr", body: "Description",
+        author: { name: "Author", avatar: "old-author", avatar_url: author } },
+      messages: [msg("1", { sender: { name: "Reviewer", avatar: "old-reviewer", avatar_url: reviewer } })],
+    };
+    act(() => root.render(<ConnectorBody item={{ ...item, source: "github" }} />));
+    await flush();
+    const pictures = [...host.querySelectorAll<HTMLImageElement>("img")].map((img) => new URL(img.src));
+    expect(pictures.map((url) => url.pathname)).toEqual([author, reviewer]);
+    expect(pictures.every((url) => url.searchParams.get("size") === String(28 * devicePixelRatio) && !url.searchParams.has("manager"))).toBe(true);
+  });
+
   it("keeps own-message quotes, attachment details and focus readable on blue bubbles", async () => {
     pages.newest = {
       chat: { id: "demo", name: "Demo group", kind: "group" },
@@ -173,6 +217,74 @@ describe("连接器会话页", () => {
     const viewer = document.querySelector<HTMLElement>('[aria-label="图片"]');
     expect(viewer).not.toBeNull();
     expect(viewer!.querySelector("img")?.getAttribute("src")).toContain("img-1");
+  });
+
+  describe("when its box changes size", () => {
+    // fired by hand for whatever watches the element; jsdom has no layout, so the list's sizes are the test's
+    const watchers: { cb: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    beforeEach(() => {
+      watchers.length = 0;
+      vi.stubGlobal("ResizeObserver", class {
+        targets = new Set<Element>();
+        constructor(cb: ResizeObserverCallback) { watchers.push({ cb, targets: this.targets }); }
+        observe(el: Element) { this.targets.add(el); }
+        unobserve(el: Element) { this.targets.delete(el); }
+        disconnect() { this.targets.clear(); }
+      });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+    const resize = (el: Element) => act(() => {
+      for (const w of watchers) if (w.targets.has(el)) w.cb([], {} as ResizeObserver);
+    });
+    const open = async (page: ThreadPage) => {
+      pages.newest = page;
+      act(() => root.render(<ConnectorBody item={item} />));
+      await flush();
+      const el = host.querySelector("[data-mid]")!.closest<HTMLElement>(".overflow-y-auto")!;
+      const m = { scrollHeight: 2000, clientHeight: 600, scrollTop: 1400 };
+      Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => m.scrollHeight });
+      Object.defineProperty(el, "clientHeight", { configurable: true, get: () => m.clientHeight });
+      Object.defineProperty(el, "scrollTop", { configurable: true, get: () => m.scrollTop, set: (v: number) => (m.scrollTop = Math.max(0, Math.min(v, m.scrollHeight - m.clientHeight))) });
+      const scroll = (top: number) => act(() => {
+        m.scrollTop = top;
+        el.dispatchEvent(new Event("scroll"));
+      });
+      scroll(1400);
+      return { el, m, scroll };
+    };
+    const chat = { id: "g", name: "示例群", kind: "group" } as const;
+
+    it("at the newest message keeps it in view; scrolled up stays", async () => {
+      const { el, m, scroll } = await open({ chat, messages: [msg("1"), msg("2")] });
+      expect(watchers.some((w) => w.targets.has(el) && w.targets.has(el.firstElementChild!))).toBe(true);
+      m.clientHeight = 300; // the keyboard up
+      resize(el);
+      expect(m.scrollTop).toBe(1700);
+      scroll(900);
+      m.clientHeight = 220;
+      resize(el);
+      expect(m.scrollTop).toBe(900);
+    });
+
+    it("leaves a quote's jump where it goes", async () => {
+      const { el, m } = await open({ chat, messages: [msg("5"), msg("6", { reply_to: { id: "5", text: "消息 5" } })] });
+      act(() => buttons().find((b) => b.getAttribute("aria-label")?.includes("消息 5"))!.click());
+      await flush();
+      m.clientHeight = 300; // while the quote is lit, its glide is not pulled back
+      resize(el);
+      expect(m.scrollTop).toBe(1400);
+    });
+
+    it("leaves the list where it is when older messages are asked for", async () => {
+      const { el, m } = await open({ chat, messages: [msg("5"), msg("6")], before: "5" });
+      pages.older = { chat, messages: [msg("2")] } satisfies ThreadPage;
+      act(() => buttons().find((b) => b.textContent?.trim() === "更早的消息")!.click());
+      await flush();
+      expect(host.querySelector('[data-mid="2"]')).not.toBeNull();
+      m.scrollHeight = 2300; // the older page drawn above
+      resize(el);
+      expect(m.scrollTop).toBe(1400);
+    });
   });
 
   it("keeps a sticker as it is, as iOS does (G039)", async () => {

@@ -22,6 +22,11 @@ public nonisolated struct APIErrorInfo: Hashable, Sendable {
     nonisolated(unsafe) private static let requestRe = /(?i)\b(?:req(?:uest)?(?:[ _-]?id)?)[:=\s"]+([A-Za-z0-9_-]{8,})/
     nonisolated(unsafe) private static let sessionRe = /(?i)\bsession(?:[ _-]?id)?[:=\s"]+([A-Za-z0-9_:-]{6,})/
 
+    public static func unrecoverable(_ text: String?) -> Bool {
+        let s = (text ?? "").lowercased()
+        return s.contains("compacted natively") && s.contains("compaction is sealed") && s.contains("to that account")
+    }
+
     public static func parse(_ text: String?) -> APIErrorInfo? {
         guard let t = text?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
         let body: String
@@ -29,6 +34,8 @@ public nonisolated struct APIErrorInfo: Hashable, Sendable {
             body = String(t.dropFirst("API Error:".count))
         } else if t.hasPrefix("API 错误：") { // i18n-ignore: the hub's Chinese retry notice, matched as it writes it
             body = String(t.dropFirst("API 错误：".count)) // i18n-ignore
+        } else if unrecoverable(t), t.lowercased().hasPrefix("this conversation was compacted natively by ") {
+            body = t
         } else {
             return nil
         }
@@ -46,6 +53,9 @@ public nonisolated struct APIErrorInfo: Hashable, Sendable {
 
     /// What went wrong, as a person would say it, and whether it is likely to pass.
     private static func explain(_ s: String, status: Int?) -> (String, Bool?) {
+        if unrecoverable(s) {
+            return (String(localized: "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue."), false)
+        }
         if s.contains("no available gpu") { return (String(localized: "The inference service has no GPU available right now"), true) }
         if s.contains("overloaded") || status == 529 { return (String(localized: "The model service is overloaded"), true) }
         if status == 401 || status == 403 || s.contains("authentication") || s.contains("/login") || s.contains("login expire") {

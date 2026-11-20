@@ -7,5 +7,6 @@
     <string name="agents_todo_stage_merge">Merge</string>
     <string name="agents_todo_stage_deploy">Deploy</string>
     <string name="agents_todo_stage_verify">Verified</string>
+    <string name="agents_todo_stage_done">Done</string>
     <string name="agents_todo_stage_a11y">Stage: %1$s (step %2$d of %3$d)</string>
 </resources>

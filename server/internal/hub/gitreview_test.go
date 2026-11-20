@@ -27,6 +27,16 @@ func TestGitReviewRoute(t *testing.T) {
 	var got proto.GitReviewRequest
 	old := false
 	nodePeer.OnRequest = func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		if method == "git.backend.review" && !old {
+			var in map[string]any
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			if in["backend_workspace_id"] != "ws_example" || in["repo_id"] != "api" || in["scope"] != "commit" {
+				return nil, fmt.Errorf("wrong repository selection: %v", in)
+			}
+			return proto.GitReview{Root: "/work/api"}, nil
+		}
 		if method != "git.review" || old {
 			return nil, fmt.Errorf("unknown method %s", method)
 		}
@@ -72,6 +82,12 @@ func TestGitReviewRoute(t *testing.T) {
 	_, watch := call(t, handler, "POST", "/api/v1/auth/tokens", h.cfg.Token, `{"name":"Watch","kind":"watch"}`)
 	if code, _ := call(t, handler, "GET", base+"?cwd=/work/web&scope=uncommitted", watch["token"].(string), ""); code != http.StatusForbidden {
 		t.Fatalf("a watch's token: %d", code)
+	}
+	if code, res := call(t, handler, "GET", base+"?backend_workspace_id=ws_example&repo_id=api&scope=commit", h.cfg.Token, ""); code != 200 || res["root"] != "/work/api" {
+		t.Fatalf("selected repository: %d %v", code, res)
+	}
+	if code, _ := call(t, handler, "GET", base+"?backend_workspace_id=ws_example&cwd=/work/web", h.cfg.Token, ""); code != 400 {
+		t.Fatalf("missing repository: %d", code)
 	}
 	old = true
 	if code, res := call(t, handler, "GET", base+"?cwd=/work/web&scope=uncommitted", h.cfg.Token, ""); code != http.StatusConflict || res["code"] != proto.CodeNodeOutdated || res["error"] == "" {

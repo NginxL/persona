@@ -22,12 +22,12 @@ import (
 // On Windows a node takes updates only when persona-link's supervisor says it restarts it (node --attach --supervised);
 // without that it tells the user to install Persona Link again, not about launchd or systemd.
 func TestWindowsNodeTakesUpdatesOnlyWhenSupervised(t *testing.T) {
-	declared := New("old", func() {}, Options{Supervised: true})
+	declared := New("old", func(string) {}, Options{Supervised: true})
 	t.Cleanup(declared.Close)
 	if ok, reason := declared.Capability(); !ok {
 		t.Fatalf("a node persona-link's supervisor restarts cannot take updates: %s", reason)
 	}
-	undeclared := New("old", func() {}, Options{})
+	undeclared := New("old", func(string) {}, Options{})
 	t.Cleanup(undeclared.Close)
 	if ok, reason := undeclared.Capability(); ok || reason != windowsUnsupervised {
 		t.Fatalf("got %v %q, want the Windows reason", ok, reason)

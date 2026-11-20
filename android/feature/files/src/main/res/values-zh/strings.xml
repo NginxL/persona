@@ -30,6 +30,17 @@
     <string name="files_copy_path">拷贝路径</string>
     <string name="files_rename">重命名</string>
     <string name="files_rename_name">名称</string>
+    <string name="files_move">移动…</string>
+    <string name="files_move_title">移动「%1$s」</string>
+    <string name="files_move_here">移到此处</string>
+    <string name="files_move_no_folders">这里没有文件夹</string>
+    <string name="files_move_same_folder">此项目已在当前文件夹中。</string>
+    <string name="files_move_inside_itself">文件夹无法移入自身。</string>
+    <string name="files_move_conflict_message">「保留两者」会为移入的项目名称加上编号。「替换」会把已有文件移到电脑的废纸篓。</string>
+    <string name="files_move_keep_both">保留两者</string>
+    <string name="files_move_replace">替换</string>
+    <string name="files_moving">正在移动…</string>
+    <string name="files_moved">已将「%1$s」移到「%2$s」</string>
     <string name="files_trash">移到废纸篓</string>
     <string name="files_trash_title">把「%1$s」移到废纸篓？</string>
     <string name="files_trash_message">会移到那台电脑的废纸篓。可以马上撤销，也可以之后从那里的废纸篓放回。</string>

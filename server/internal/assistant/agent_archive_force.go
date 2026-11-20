@@ -30,13 +30,24 @@ func (s *Service) forceArchiveConfirmation(ctx context.Context, mid, sid string)
 		return err
 	}
 	raw, listed := s.nodeSession(row.MachineID, sid)
-	if !confirmationArchiveSafe(row) || !listed || !confirmationArchiveSafe(raw) {
-		return archiveRefusal(http.StatusConflict, "agent_busy", i18n.Err("hub-agent_archives.close_busy"))
+	if !confirmationArchiveSafe(row) {
+		return forceArchiveRefusal(row)
+	}
+	if !listed {
+		return archiveRefusal(http.StatusConflict, "agent_busy", i18n.ErrEnglish("hub-agent_archives.force_unverified"))
+	}
+	if !confirmationArchiveSafe(raw) {
+		// The decorated target is blocked even if the raw row no longer is.
+		// Do not suggest plain archive from that less restrictive snapshot.
+		if agentArchiveBusy(raw) {
+			return archiveBusyRefusal(raw, false)
+		}
+		return archiveRefusal(http.StatusConflict, "agent_busy", i18n.ErrEnglish("hub-agent_archives.force_unverified"))
 	}
 	for _, ix := range s.pendingInteractions() {
 		if ix.MachineID == row.MachineID && ix.SessionID == sid &&
 			ix.Kind != proto.IxPermission && ix.Kind != proto.IxPlan && ix.Kind != proto.IxScreen {
-			return archiveRefusal(http.StatusConflict, "agent_busy", i18n.Err("hub-agent_archives.close_busy"))
+			return archiveRefusal(http.StatusConflict, "agent_busy", i18n.ErrEnglish("hub-agent_archives.force_question"))
 		}
 	}
 	// Persist the archive and close fence together before the node can cancel its runtime.
@@ -103,4 +114,13 @@ func (s *Service) confirmationArchiveFence(ctx context.Context, row proto.Sessio
 	}
 	delete(b.pending, key)
 	return nil
+}
+
+// An idle session does not qualify for force cancellation, even if plain archive
+// is available. Keep that distinction from the busy-state refusal.
+func forceArchiveRefusal(row proto.Session) error {
+	if !agentCloseBusy(row) {
+		return archiveRefusal(http.StatusConflict, "agent_busy", i18n.ErrEnglish("hub-agent_archives.force_not_blocked"))
+	}
+	return archiveBusyRefusal(row, true)
 }

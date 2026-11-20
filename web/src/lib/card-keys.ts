@@ -3,6 +3,7 @@
 // is the part with no DOM of its own: whose key it is, and where focus goes. The cards hang these on their root
 // (useCardKeys in views/chat/Interactions.tsx); the shortcut that hands the card the keyboard is "focus-card"
 // (lib/shortcuts.ts, lib/use-shortcuts.ts).
+import { COMPOSER_INPUT } from "./dock-focus";
 import { composing } from "./send-history";
 import { EDITABLE } from "./shortcuts";
 
@@ -56,7 +57,7 @@ export function cardKeyAction(e: CardKeyEvent, root: Element | null): CardKeyAct
 /** The chat's composer on this page, if there is one to type into; the card's Esc hands focus back to it. The dock
  *  holds it (only there — a comment being edited in the transcript is not the composer). */
 export function focusComposer(): boolean {
-  const el = [...document.querySelectorAll<HTMLTextAreaElement>("[data-chat-dock] textarea")].find((t) => !t.disabled && t.getClientRects().length > 0);
+  const el = [...document.querySelectorAll<HTMLTextAreaElement>(`[data-chat-dock] ${COMPOSER_INPUT}`)].find((t) => !t.disabled && t.getClientRects().length > 0);
   if (!el) return false;
   el.focus();
   return true;

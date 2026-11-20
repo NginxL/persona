@@ -152,7 +152,7 @@ Every Bash call from the assistant goes through the PreToolUse gate in `node/lar
 | `auth login / logout`, `config …`, `profile …`, `update`, switching `--profile`, reading lark-cli's credential files | Deny: logging in, switching apps and changing config are done by the user |
 | `api GET / HEAD …` | Allow |
 | Other `api` methods | Phone confirmation; the card shows the method, path and `--data` |
-| Domain commands (`im +messages-send` etc.) | Ask lark-cli for the risk level by running the same words plus `--help` (cached per command): `read` is allowed; `write`, `high-risk-write`, or no answer all need phone confirmation, with the full command on the card |
+| Domain commands (`im +messages-send` etc.) | Ask lark-cli for the risk level by running the same words plus `--help` (cached per command): `read` is allowed; `write`, `high-risk-write`, or no answer all need phone confirmation, with the full command on the card. A command lark-cli does not have (its `--help` is the parent group's, whose `Available Commands` lack the last word) runs, and lark-cli answers "unknown subcommand" (#10845) |
 | `event consume` | Allow (read-only); the prompt requires `--max-events` / `--timeout` |
 | A command the gate cannot parse (loops, `$(…)`) containing a lark-cli write | Phone confirmation for the whole command (same as `ol`) |
 

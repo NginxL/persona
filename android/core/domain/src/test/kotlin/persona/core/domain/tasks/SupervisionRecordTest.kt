@@ -21,7 +21,7 @@ class SupervisionRecordTest {
     private val supervise = Injected("system", "supervise", "Supervision")
     private val digest = listOf(user(1, "My question"), reply(2, "My answer"),
         user(3, "Supervision: 2 tasks running, nothing for the owner", injected = supervise), use(4, "Bash"), result(5, 4),
-        reply(6, "Nothing needs the owner"),
+        reply(6, "Checking the tasks").copy(narration = true),
         user(7, "Next question"), reply(8, "Next answer"))
 
     private fun project(items: List<Item>, folding: BackgroundFolding? = BackgroundFolding(rounds = false), inline: Boolean = true,
@@ -50,15 +50,31 @@ class SupervisionRecordTest {
 
     @Test fun aRoundThatToldTheUserStaysShown() {
         val told = listOf(user(1, "Supervision: the deploy failed", injected = supervise),
-            use(2, "mcp__persona__notify_user"), result(3, 2), reply(4, "Told the owner"))
+            use(2, "mcp__persona__notify_user"), result(3, 2))
         val foreground = project(told).foreground
         assertTrue(folds(foreground).isEmpty())
-        assertTrue(foreground.any { it.id == "a4" })
+        assertTrue(foreground.any { it.id == "u1" })
+    }
+
+    @Test fun completedSupervisionReplyStaysVisibleAcrossStylesUnlessTheFinishWasSilent() {
+        val input = user(1, "Check", injected = supervise)
+        val finish = use(2, "mcp__persona__supervision_finish")
+        val silent = result(3, 2).copy(text = """{"visibility":"silent"}""")
+        val reply = reply(4, "The example build is ready.")
+        for (inline in listOf(false, true)) {
+            val shown = project(listOf(input, reply), BackgroundFolding(), inline)
+            assertTrue(folds(shown.foreground).isEmpty())
+            assertTrue(shown.foreground.any { it.id == reply.id })
+            val quiet = project(listOf(input, finish, silent, reply), BackgroundFolding(), inline)
+            assertFalse(quiet.foreground.any { it.id == reply.id })
+            if (inline) assertTrue(folds(quiet.foreground).single().lines.any { it.id == reply.id })
+            else assertTrue(quiet.background.any { it.id == reply.id })
+        }
     }
 
     @Test fun scheduledRoundsReadAsTheyAreUnlessBackgroundRoundsFold() {
         val items = listOf(user(1, "Daily: summarize the inbox",
-            injected = Injected("followup", "daily", "Inbox digest", line = "Inbox digest")), reply(2, "Digest done"))
+            injected = Injected("followup", "daily", "Inbox digest", line = "Inbox digest")), reply(2, "Digest done").copy(narration = true))
         val shown = project(items)
         assertTrue(folds(shown.foreground).isEmpty())
         assertTrue(shown.foreground.any { it.id == "a2" })

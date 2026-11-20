@@ -6,8 +6,12 @@
 // as launchd / systemd keep it), it installs the version the node carries as current and exits once idle; its
 // supervisor starts it again on the new code (KeepAlive / Restart=always). --no-update: never.
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { selfPackage } from '../runtime-sdk/index.js'
+import { installMediaGuard } from './lib/media-guard.js'
 import { createAgyRuntime } from './lib/runtime.js'
 
 const { values } = parseArgs({
@@ -15,6 +19,8 @@ const { values } = parseArgs({
     socket: { type: 'string' },
     'agy-dir': { type: 'string' },
     'agy-bin': { type: 'string' },
+    instance: { type: 'string' },
+    'parent-stdin': { type: 'boolean' },
   },
   strict: false,
 })
@@ -26,6 +32,7 @@ const runtime = createAgyRuntime({
   socketPath: values.socket || undefined,
   agyDir: values['agy-dir'] || undefined,
   agyBin: values['agy-bin'] || undefined,
+  instance: values.instance || undefined,
   log,
   update: self.store && !process.argv.includes('--no-update') ? {
     name: self.name,
@@ -40,13 +47,30 @@ const runtime = createAgyRuntime({
 })
 
 runtime.start()
+// Pictures agy cannot send are refused before read_file opens them (lib/media-guard.js). --no-media-guard: not written.
+if (!process.argv.includes('--no-media-guard')) {
+  const agyDir = values['agy-dir'] || process.env.ANTIGRAVITY_CLI_CONFIG_DIR || join(homedir(), '.gemini', 'antigravity-cli')
+  const dir = installMediaGuard({ agyDir, script: fileURLToPath(new URL('./media-guard.mjs', import.meta.url)), log })
+  if (dir) log(`media guard: ${dir}`)
+}
 alive = setInterval(() => {}, 1 << 30)
 log('started Antigravity (agy) runtime for Persona')
 
+let stopping = false
+function stopCompanion() {
+  if (stopping) return
+  stopping = true
+  clearInterval(alive)
+  // Exit once agy is gone (killed after a short grace when it ignores SIGTERM), so it does not outlive the companion.
+  runtime.stop().finally(() => process.exit(0))
+}
+
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
-    clearInterval(alive)
-    // Exit once agy is gone (killed after a short grace when it ignores SIGTERM), so it does not outlive the companion.
-    runtime.stop().finally(() => process.exit(0))
-  })
+  process.on(sig, stopCompanion)
+}
+
+if (values['parent-stdin'] && !process.stdin.isTTY) {
+  process.stdin.on('end', stopCompanion)
+  process.stdin.on('error', stopCompanion)
+  process.stdin.resume()
 }

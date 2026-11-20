@@ -88,9 +88,22 @@ func TestFindProjectPrefersNameThenRecent(t *testing.T) {
 // A "same" the model is not sure of, or whose reason hedges, is not merged and is kept as different.
 func TestDedupeSkipsDoubtfulMerges(t *testing.T) {
 	for name, reply := range map[string]string{
-		"not sure": `{"same":true,"sure":false,"keep":"A","reason":"共同人少"}`,
-		"no sure":  `{"same":true,"keep":"A","reason":"同一个需求"}`,
-		"hedged":   `{"same":true,"sure":true,"keep":"A","reason":"方向是否一致存疑"}`,
+		"not sure":              `{"same":true,"sure":false,"keep":"A","reason":"共同人少"}`,
+		"no sure":               `{"same":true,"keep":"A","reason":"同一个需求"}`,
+		"hedged":                `{"same":true,"sure":true,"keep":"A","reason":"方向是否一致存疑"}`,
+		"English uncertain":     `{"same":true,"sure":true,"keep":"A","reason":"Uncertain direction"}`,
+		"English not sure":      `{"same":true,"sure":true,"keep":"A","reason":"Not sure it is the same"}`,
+		"English perhaps":       `{"same":true,"sure":true,"keep":"A","reason":"Perhaps the same goal"}`,
+		"English probably not":  `{"same":true,"sure":true,"keep":"A","reason":"Probably not the same project"}`,
+		"English may not":       `{"same":true,"sure":true,"keep":"A","reason":"May not be the same work"}`,
+		"English seems":         `{"same":true,"sure":true,"keep":"A","reason":"Seems different"}`,
+		"English not same":      `{"same":true,"sure":true,"keep":"A","reason":"Not same project"}`,
+		"English not identical": `{"same":true,"sure":true,"keep":"A","reason":"Not identical"}`,
+		"English can't tell":    `{"same":true,"sure":true,"keep":"A","reason":"I can't tell if these are the same"}`,
+		"English can’t tell":    `{"same":true,"sure":true,"keep":"A","reason":"I can’t tell if these are the same"}`,
+		"Japanese uncertain":    `{"same":true,"sure":true,"keep":"A","reason":"同じ仕事か不確か"}`,
+		"Japanese possibility":  `{"same":true,"sure":true,"keep":"A","reason":"別の要件かもしれない"}`,
+		"Japanese cannot tell":  `{"same":true,"sure":true,"keep":"A","reason":"同一か判断できない"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := &scriptModel{replies: []string{reply}}

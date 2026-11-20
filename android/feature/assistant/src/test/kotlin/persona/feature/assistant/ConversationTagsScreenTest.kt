@@ -117,11 +117,11 @@ class ConversationTagsScreenTest {
         rule.onNodeWithTag("conversation-row-tags-hub/work").assertExists()
         tagChip("Travel").performClick()
         rule.onNodeWithText("Trip itinerary").assertExists()
-        rule.onAllNodesWithText("Main chat").assertCountEquals(0)
+        rule.onAllNodesWithText("Main conversation").assertCountEquals(0)
         rule.onAllNodesWithText("Release plan").assertCountEquals(0)
 
         tagChip("Planning").performClick()
-        rule.onNodeWithText("Main chat").assertExists()
+        rule.onNodeWithText("Main conversation").assertExists()
         rule.onNodeWithText("Search chats").performTextInput("Release")
         rule.onNodeWithText("Release plan").assertExists()
         rule.onAllNodesWithText("Release personal").assertCountEquals(0)

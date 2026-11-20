@@ -615,6 +615,11 @@ struct ChatLinesTests {
         #expect(outcome("restart_done", "already_in") == "已经是「\(all)」了，不用重启")
         #expect(outcome("restart_dropped", "process_replaced") == "已取消，不会重启到「\(all)」：会话换了进程")
         #expect(outcome("restart_dropped", "process_exited") == "已取消，不会重启到「\(all)」：原进程已经退出")
+        #expect(outcome("restart_dropped", "replaced") == "已取消，不会重启到「\(all)」：被另一次切换取代")
+        // the mode it runs in picked again (#11089): called off, not replaced
+        #expect(outcome("restart_dropped", "cancelled") == "已取消，不会重启到「\(all)」：会话保持当前模式")
+        // a code this app does not know yet (a newer node): the plain line
+        #expect(outcome("restart_dropped", "some_later_code") == "已取消，不会重启到「\(all)」")
         #expect(outcome("restart_failed", "start_failed") == "没能重启到「\(all)」：新进程没起来，会话按原来的模式继续")
         #expect(outcome("restart_failed", nil) == "没能重启到「\(all)」")
         #expect(outcome("restart_dropped", "claude 4101, the process it was picked for, has exited") == "已取消，不会重启到「\(all)」")

@@ -140,9 +140,9 @@ struct BriefCard: View {
                         Text(p.title).font(Theme.Font.secondaryMedium).frame(maxWidth: .infinity, alignment: .leading)
                         BriefOpenButton(title: p.title) { TasksStore.shared.detailTask = p.id }
                     }
-                    if let stage = TodoStage(hub: p.stage) {
+                    if let stage = TodoStage(hub: p.shownStage) {
                         TodoStageBar(stage: stage)
-                    } else if let stage = p.stage?.trimmingCharacters(in: .whitespacesAndNewlines), !stage.isEmpty {
+                    } else if let stage = p.shownStage?.trimmingCharacters(in: .whitespacesAndNewlines), !stage.isEmpty {
                         BriefNote(stage) // a stage this build doesn't know: the hub's word for it
                     }
                 }

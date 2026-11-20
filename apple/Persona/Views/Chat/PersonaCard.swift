@@ -198,6 +198,7 @@ struct AssistantViewCard: View {
         ExtensionViewStack(view: view, model: nil, cards: false, titles: true, link: Binding(
             get: { nil },
             set: { if let url = $0?.url { openURL(url) } }))
+            .environment(\.pluginUICompact, true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card(padding: Theme.Space.m)
             .accessibilityIdentifier("assistant-view-card")

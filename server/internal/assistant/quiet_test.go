@@ -98,7 +98,7 @@ func TestQuietTaskTellsTheMainConversation(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "修好了，提了 https://github.com/o/r/pull/901", 0)
 	waitFor(t, "the notice", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
-	for _, want := range []string{"📋 督办", "任务「修登录崩溃」（" + todo.ID + "，signal=review）：hub 判断做完了，等你验收（修好了）；在 box", "修好了，提了 https://github.com/o/r/pull/901", "不是用户发的"} {
+	for _, want := range []string{"📋 督办", "任务「修登录崩溃」（" + todo.ID + "，signal=review）：待逐项复核，不代表完成（修好了）；在 box", "修好了，提了 https://github.com/o/r/pull/901", "不是用户发的"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("notice lacks %q:\n%s", want, n)
 		}
@@ -131,7 +131,7 @@ func TestQuietNoticesMerge(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "用 main 做完了", 0)
 	waitFor(t, "the notice", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
-	if !strings.Contains(n, "做完了，等你验收") || strings.Contains(n, "用哪个分支") || strings.Count(n, "任务「") != 1 {
+	if !strings.Contains(n, "待逐项复核，不代表完成") || strings.Contains(n, "用哪个分支") || strings.Count(n, "任务「") != 1 {
 		t.Fatalf("notice:\n%s", n)
 	}
 	time.Sleep(3 * quietNoticeDelay)

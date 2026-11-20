@@ -61,6 +61,9 @@ type Tagging struct {
 	// Provenance says which extension holds a locked field and what it based the value on; a locked field without
 	// an entry is the user's (docs/assistant/knowledge.md "Extensions organizing the knowledge base").
 	Provenance map[string]Provenance `json:"provenance,omitempty"`
+	// Excluded: the links the user removed by hand, by list ("people", "chats", "projects", "items"), which automatic
+	// writes leave out (docs/assistant/knowledge.md "Removed links").
+	Excluded map[string][]string `json:"excluded,omitempty"`
 }
 
 // Provenance is who last wrote a locked field and from what.

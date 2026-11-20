@@ -6,6 +6,7 @@ import SwiftUI
 /// one-time hint says how to stop iOS asking every time.
 struct ClipboardSection: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.displayScale) private var displayScale
     let ref: MachineRef
     let machine: Machine
     var listed: MachineClipboard
@@ -43,7 +44,11 @@ struct ClipboardSection: View {
             await model?.refresh(machineID: ref.id)
             #if DEBUG
             let d = UserDefaults.standard
-            if d.bool(forKey: "showClipboardHint") { model?.preview(fetched: nil, hint: true) }
+            if let kind = d.string(forKey: "showClipboardFetched") {
+                await model?.preview(fetched: Self.screenshotContent(kind), hint: d.bool(forKey: "showClipboardHint"), scale: displayScale)
+            } else if d.bool(forKey: "showClipboardHint") {
+                await model?.preview(fetched: nil, hint: true)
+            }
             // `-showClipboardFetch YES`: runs Get Clipboard against the (mock) hub on opening (screenshots).
             if d.bool(forKey: "showClipboardFetch"), state.usable, online { await fetch() }
             #endif
@@ -58,6 +63,27 @@ struct ClipboardSection: View {
             app.applyMachine(m)
         }, hints: .live())
     }
+
+    #if DEBUG
+    /// A self-contained picture or text preview for screenshot launches, without a hub or an asset in the app bundle.
+    private static func screenshotContent(_ kind: String) -> ClipboardContent? {
+        switch kind {
+        case "text":
+            return .text("Clipboard preview")
+        case "image":
+            let size = CGSize(width: 480, height: 300)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let data = UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+                UIColor.systemTeal.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+            }
+            return .image(ClipboardImage(mime: "image/png", bytes: data))
+        default:
+            return nil
+        }
+    }
+    #endif
 
     // MARK: Actions
 
@@ -128,7 +154,7 @@ struct ClipboardSection: View {
             .font(Theme.Font.label)
             switch content.kind {
             case .image:
-                if let bytes = content.image?.bytes, let image = UIImage(data: bytes) {
+                if let image = model?.fetchedPicture {
                     Image(uiImage: image).resizable().scaledToFit()
                         .clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
@@ -217,7 +243,7 @@ struct ClipboardSection: View {
 
     private func fetch() async {
         guard let model else { return }
-        report(await model.fetch(machineID: ref.id))
+        report(await model.fetch(machineID: ref.id, scale: displayScale))
     }
 
     private func report(_ outcome: ClipboardOutcome) {

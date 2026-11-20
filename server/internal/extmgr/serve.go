@@ -121,6 +121,7 @@ func (h *Manager) registerRoutes(api *http.ServeMux) {
 	h.messagingRoutes(api)
 	h.adminExtensionRoutes(api) // with the old /api/v1/admin/plugins paths
 	h.subscriptionRoutes(api)
+	h.avatarRoutes(api)
 	api.HandleFunc("POST /api/v1/error-reports", h.postErrorReports)
 	// The assistant's WebSocket routes, relayed like the extensions' (a relay stream), are the assistant's to answer.
 	for _, pattern := range assistantwire.SocketRoutes {
@@ -495,6 +496,7 @@ func (h *Manager) hubCall(ctx context.Context, method string, params json.RawMes
 		Base      string          `json:"base"`
 		TZ        string          `json:"tz"`
 		Sender    string          `json:"sender"`
+		Proof     string          `json:"proof"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &a); err != nil {
@@ -510,6 +512,12 @@ func (h *Manager) hubCall(ctx context.Context, method string, params json.RawMes
 	case extwire.HubSettingsTool:
 		text, err := h.toolPersonaSettings(ctx, a.MachineID, a.SessionID, a.Arguments)
 		return map[string]any{"text": text}, err
+	case extwire.HubClarificationTake:
+		proof, ok := h.clarificationProofs.take(a.Proof)
+		if !ok {
+			return nil, errors.New("clarification proof is unknown, expired, or already used")
+		}
+		return proof, nil
 	case extwire.HubAudit:
 		var au extwire.Audit
 		if err := json.Unmarshal(params, &au); err != nil || au.Extension == "" ||

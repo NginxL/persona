@@ -23,8 +23,8 @@ describe("the first screen's extension files", () => {
     const source = read("./ExtensionSlots.tsx");
     expect(staticImports(source)).not.toContain("../settings/ExtensionView");
     expect(source).toMatch(/import\(\s*["']\.\.\/settings\/ExtensionView["']\s*\)/);
-    // the page, a card and a section each wait under their own Suspense, not App's
-    expect(source.match(/<Suspense fallback=\{<Loading \/>\}>\s*<ExtensionUI /g)).toHaveLength(3);
+    // the page, a card and a section each wait under their own Suspense, not App's (the owner scoping sits inside)
+    expect(source.match(/<Suspense fallback=\{<Loading \/>\}>\s*<OwnerScope extension=\{[^}]+\}>\s*<ExtensionUI /g)).toHaveLength(3);
   });
 
   it("the assistant's cards load the renderer through the first-screen module (#3614)", () => {

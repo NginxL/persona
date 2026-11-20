@@ -10,6 +10,7 @@ vi.hoisted(() => {
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 import { loadPages } from "../lib/lazy-page";
+import { saveAgentsDisplay, refreshAgentsDisplay } from "../lib/agents-display";
 import { connect, reset } from "../lib/store";
 import type { Todo } from "../lib/todos";
 import type { Session } from "../lib/types";
@@ -35,6 +36,7 @@ const SHIP = { id: "todo_ship", title: "Ship 1.3" }, REVIEW = { id: "todo_review
 const ROWS = [row("Widget tests", 9, SHIP, "working"), row("Release notes", 8, REVIEW), row("Screenshots", 7, REVIEW), row("Sort downloads", 6),
   row("Waiting on CI", 5, undefined, "working", { background_waiting: true }), row("Weekly numbers", 4, undefined, "needs_you", { pane_id: "botmux:x" })];
 let rowsNow = ROWS;
+let showBotmux = true;
 const origin = (r: Session) => (r.pane_id?.startsWith("botmux:") ? "feishu" : "terminal");
 const TODOS: Todo[] = [
   { id: SHIP.id, title: SHIP.title, created_at: at(1), updated_at: at(9), agents: [] },
@@ -45,9 +47,13 @@ let host: HTMLDivElement, root: Root;
 const flush = async () => { for (let i = 0; i < 12; i++) await act(async () => { await Promise.resolve(); }); };
 
 async function render(features: string[]) {
-  const fetch = vi.fn((input: string) => {
+  const fetch = vi.fn((input: string, init?: RequestInit) => {
     const url = new URL(input, "http://hub.example.com");
     const q = url.searchParams;
+    if (url.pathname.endsWith("/agents/display-settings")) {
+      if (init?.method === "PUT") showBotmux = JSON.parse(String(init.body)).show_botmux;
+      return json({show_botmux: showBotmux, configured: true});
+    }
     if (url.pathname.endsWith("/sessions")) {
       const todo = q.get("todo"), state = q.get("state"), waiting = q.get("waiting"), only = q.get("pane_source"), not = q.get("exclude_pane_source");
       const rows = rowsNow.filter((r) => (!todo || (todo === "none" ? !r.todo : r.todo?.id === todo)) && (!state || r.state === state) &&
@@ -85,6 +91,7 @@ const paths = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.map(([input]
 
 beforeEach(() => {
   rowsNow = ROWS;
+  showBotmux = true;
   localStorage.clear();
   reset();
   FakeSocket.all = [];
@@ -139,16 +146,38 @@ describe("the sidebar's paged Agents by to-do", () => {
     await flush();
     expect(localStorage.getItem("persona.agentFilter")).toBe("feishu");
     expect(reads().some((q) => q.get("pane_source") === "feishu" && !q.has("state"))).toBe(true);
-    // hiding botmux leaves its origin out of every read and goes back to All
-    const botmux = host.querySelector<HTMLButtonElement>('button[aria-pressed]')!;
-    expect(botmux.textContent).toContain("botmux");
+    // The Settings write hides its origin from every read; a stale selection
+    // resolves to All without changing either saved preference.
+    expect(host.querySelector('button[aria-pressed]')?.textContent ?? "").not.toContain("botmux");
     fetch.mockClear();
-    await act(async () => botmux.click());
+    await act(async () => saveAgentsDisplay(false));
     await flush();
-    expect(localStorage.getItem("persona.agentFilter")).toBe("all");
+    expect(localStorage.getItem("persona.agentFilter")).toBe("feishu");
     expect(reads().length).toBeGreaterThan(0);
     expect(reads().every((q) => q.get("exclude_pane_source") === "feishu")).toBe(true);
-    expect(chips().map((b) => b.getAttribute("aria-label"))).not.toContain("飞书群 1");
+    expect(chips().some((b) => b.textContent!.startsWith("飞书群"))).toBe(false);
+    expect(chips().find((b) => b.getAttribute("aria-checked") === "true")!.textContent).toBe("全部");
+    // Another browser switched it back; the next refresh restores the rows/filter.
+    showBotmux = true;
+    await act(async () => refreshAgentsDisplay()); await flush();
+    expect(chips().map((b) => b.getAttribute("aria-label"))).toContain("飞书群 1");
+
+  });
+
+  it("uses the same setting for complete lists without changing inventory or the old filter", async () => {
+    localStorage.setItem("persona.agentFilter", "feishu");
+    const fetch = await render(["sessions_list", "sessions_lookup", "sessions_agents_only"]);
+    expect(host.textContent).toContain("Weekly numbers");
+    fetch.mockClear();
+    await act(async () => saveAgentsDisplay(false)); await flush();
+    expect(host.textContent).not.toContain("Weekly numbers");
+    expect(host.textContent).toContain("Waiting on CI");
+    expect(localStorage.getItem("persona.agentFilter")).toBe("feishu");
+    expect(host.querySelector('[role="radio"][aria-label^="飞书群"]')).toBeNull();
+    expect(fetch.mock.calls.filter(([input]) => String(input).includes("/machines/")).length).toBe(0);
+    showBotmux = true;
+    await act(async () => refreshAgentsDisplay()); await flush();
+    expect(host.textContent).toContain("Weekly numbers");
   });
 
   it("keeps the paged list's own state chips on a hub that cannot select the quick filters", async () => {

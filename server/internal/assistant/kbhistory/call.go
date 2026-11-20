@@ -43,7 +43,7 @@ func (d *historyDriver) gate(ctx context.Context) error {
 		return halt(false, "selection_unavailable")
 	}
 	if n, err := d.revokeWidened(d.source, sel, ret); err != nil {
-		return halt(true, "plan_save_failed", "class", errClass(err))
+		return failed(ctx, "plan_save_failed", err)
 	} else if n > 0 {
 		return halt(false, "plan_changed", "count", strconv.Itoa(n))
 	}

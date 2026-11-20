@@ -166,11 +166,13 @@ func newFakeCodex(t *testing.T, n *Node, cwd string) (*assistantProc, *codexConn
 
 // fakeHub answers the node's calls the way the hub would: the Feishu gate config, the snapshot, and the phone's answers.
 type fakeHub struct {
+	modeSets  []proto.ModeSetEvent
 	mu        sync.Mutex
 	asked     []proto.Interaction
 	answer    func(proto.Interaction) proto.Resolution
 	deltas    []string
 	model     map[string]any        // assistant.model's answer; nil: an older hub without it
+	state     any                   // state.load's sessions value, in the hub's persisted representation
 	queried   map[string]string     // the session id the node asked about, by method
 	context   map[string]any        // assistant.context's answer; nil: just a snapshot
 	acks      []json.RawMessage     // assistant.context calls that acked view errors
@@ -214,6 +216,10 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 		switch method {
 		case "assistant.lark":
 			return proto.AssistantLark{}, nil
+		case "state.load":
+			fh.mu.Lock()
+			defer fh.mu.Unlock()
+			return map[string]any{"sessions": fh.state}, nil
 		case "assistant.context":
 			var p struct {
 				Ack json.RawMessage `json:"ack"`
@@ -281,6 +287,14 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 		return map[string]any{}, nil
 	}
 	hub.OnEvent = func(event string, params json.RawMessage) {
+		if event == proto.EventModeSet {
+			var e proto.ModeSetEvent
+			_ = json.Unmarshal(params, &e)
+			fh.mu.Lock()
+			fh.modeSets = append(fh.modeSets, e)
+			fh.mu.Unlock()
+			return
+		}
 		if event == "sessions.changed" {
 			var p struct {
 				Sessions []proto.Session `json:"sessions"`
@@ -863,6 +877,7 @@ func TestAssistantCodexTurnError(t *testing.T) {
 	p.id = testThread
 	c.threadID = testThread
 	n.procs[testThread] = p
+	n.state.put(testThread, sessionState{Launcher: "codex", Cwd: cwd, OriginKnown: true})
 
 	turn := func(id string) {
 		f.push(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": testThread, "turn": map[string]any{"id": id, "status": "inProgress"}}})
@@ -896,14 +911,12 @@ func TestAssistantCodexTurnError(t *testing.T) {
 	transient := map[string]any{"message": "unexpected status 503", "codexErrorInfo": map[string]any{"httpConnectionFailed": map[string]any{"httpStatusCode": 503}}}
 	f.push(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": testThread,
 		"turn": map[string]any{"id": "t1", "status": "failed", "error": transient}}})
-	waitFor(t, "the same-model Codex retry", func() bool { return len(f.sent("turn/start")) == 1 })
-	if got := f.sent("turn/start"); len(got) != 1 || !strings.Contains(string(got[0].Params), "persona-context") {
-		t.Fatalf("the retry did not resume with hidden context: %+v", got)
+	waitFor(t, "transient failure published", func() bool { return session().TurnError != "" })
+	if got := f.sent("turn/start"); len(got) != 0 {
+		t.Fatalf("node retried instead of awaiting manager: %+v", got)
 	}
-	turn("t1-retry")
-	end("t1-retry", "failed", transient) // no next model: the second failure is final
 	if s := session(); s.TurnError != "unexpected status 503" || s.TurnErrorKind != proto.TurnErrorTransient {
-		t.Fatalf("failed turn after its bounded recovery: %q, %q", s.TurnError, s.TurnErrorKind)
+		t.Fatalf("transient failure: %+v", s)
 	}
 
 	turn("t2")

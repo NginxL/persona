@@ -92,6 +92,18 @@ func halt(stop bool, code string, kv ...string) *Halt {
 
 func HaltWhy(stop bool, why historyReason) *Halt { return &Halt{stop: stop, why: why} }
 
+// failed is what a write or save of the import's own that failed with err ends the run with: a stop for code (with
+// err's class), unless the run's context has ended, as it does when the manager shuts down. Then the failure is
+// taken as the shutdown cutting it short, whatever err says: the run ends as the gate ends it then (ctx.Err()),
+// nothing of the step is saved, and the next start does the step again (a page written twice adds nothing:
+// kb.Engine.WriteHistory). A failure that was real fails again then, and stops.
+func failed(ctx context.Context, code string, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	return halt(true, code, "class", errClass(err))
+}
+
 // ChatSource is how the import reaches the connectors.
 type ChatSource = historySource
 
@@ -147,6 +159,9 @@ func SleepCtx(ctx context.Context, d time.Duration) error { return sleepCtx(ctx,
 
 // historySearchIndexed is kb.SearchIndexed (a var for the tests).
 var historySearchIndexed = kb.SearchIndexed
+
+// historyWriteKB is kb.Engine.WriteHistory (a var for the tests).
+var historyWriteKB = (*kb.Engine).WriteHistory
 
 // historyIndexed reports whether the knowledge base e has its search index (kb.Store.SearchIndexReady): the index
 // lane (kb_lanes.go) builds it, within its first run on an archive that never had one. Until then a source that

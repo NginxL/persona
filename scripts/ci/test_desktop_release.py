@@ -1,3 +1,5 @@
+import fnmatch
+import gzip
 import os
 from pathlib import Path
 import re
@@ -12,6 +14,7 @@ GATE = ROOT / "scripts/ci/desktop-release-gate.sh"
 PACKAGE = ROOT / "scripts/ci/desktop-package.sh"
 MAC = ("PERSONA_DESKTOP_APP_ID", "MAC_CSC_LINK", "MAC_CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER")
 WIN = ("PERSONA_DESKTOP_APP_ID", "WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD")
+DARWIN_CLI = ("MAC_CSC_LINK", "MAC_CSC_KEY_PASSWORD")
 
 
 class DesktopReleaseGateTests(unittest.TestCase):
@@ -29,9 +32,10 @@ class DesktopReleaseGateTests(unittest.TestCase):
 
     def test_no_secrets_skips_both_platforms_and_names_what_is_missing(self):
         values, summary = self.gate("v1.2.0")
-        self.assertEqual(values, {"version": "1.2.0", "mac": "false", "win": "false"})
+        self.assertEqual(values, {"version": "1.2.0", "mac": "false", "win": "false", "darwin_cli": "false"})
         self.assertIn("macOS desktop packages skipped: Environment secrets not configured: " + " ".join(MAC), summary)
         self.assertIn("Windows desktop package skipped: Environment secrets not configured: " + " ".join(WIN), summary)
+        self.assertIn("Darwin CLI signing blocked: Environment secrets not configured: " + " ".join(DARWIN_CLI), summary)
 
     def test_each_platform_needs_all_of_its_own_secrets(self):
         values, summary = self.gate("v1.2.0", MAC)
@@ -45,18 +49,23 @@ class DesktopReleaseGateTests(unittest.TestCase):
                 self.assertEqual(values["mac"], "false")
                 self.assertIn(absent, summary)
         values, _ = self.gate("v1.2.0", set(MAC) | set(WIN))
-        self.assertEqual(values, {"version": "1.2.0", "mac": "true", "win": "true"})
+        self.assertEqual(values, {"version": "1.2.0", "mac": "true", "win": "true", "darwin_cli": "true"})
 
-    def test_the_version_is_the_tag_and_must_be_a_stable_semver(self):
-        self.assertEqual(self.gate("v10.20.30", set(MAC) | set(WIN))[0], {"version": "10.20.30", "mac": "true", "win": "true"})
+    def test_the_version_is_the_tag_and_a_stable_or_beta_semver(self):
+        self.assertEqual(self.gate("v10.20.30", set(MAC) | set(WIN))[0], {"version": "10.20.30", "mac": "true", "win": "true", "darwin_cli": "true"})
         for tag in ("v1.2", "vnext", "v1.2.0+build", "v1.2.0 x"):
             with self.subTest(tag=tag):
                 values, summary = self.gate(tag, set(MAC) | set(WIN))
-                self.assertEqual((values["mac"], values["win"]), ("false", "false"))
+                self.assertEqual((values["mac"], values["win"], values["darwin_cli"]), ("false", "false", "false"))
                 self.assertIn("is not v<major>.<minor>.<patch>", summary)
         values, summary = self.gate("v1.3.0-rc1", set(MAC) | set(WIN))
-        self.assertEqual(values, {"version": "1.3.0-rc1", "mac": "false", "win": "false"})
-        self.assertIn("is a prerelease tag", summary)
+        self.assertEqual(values, {"version": "1.3.0-rc1", "mac": "false", "win": "false", "darwin_cli": "true"})
+        self.assertIn("is not v<major>.<minor>.<patch>", summary)
+        for tag in ("v1.3.0-beta.2",):
+            values, summary = self.gate(tag, set(MAC) | set(WIN))
+            self.assertEqual(values, {"version": tag[1:], "mac": "true", "win": "true", "darwin_cli": "true"})
+            self.assertIn("beta channel", summary)
+            self.assertIn("stable latest.yml is not replaced", summary)
 
     def test_a_secret_value_never_reaches_the_gate(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
@@ -64,6 +73,29 @@ class DesktopReleaseGateTests(unittest.TestCase):
         for line in gate.splitlines():
             if "secrets." in line:
                 self.assertRegex(line, r"^\s+HAS_[A-Z_]+: \$\{\{ secrets\.[A-Z_]+ != '' \}\}$")
+
+    def test_prerelease_cli_signing_is_available_when_desktop_packages_are_not(self):
+        for tag, version in (("v1.3.0", "1.3.0"), ("v1.3.0-beta.1", "1.3.0-beta.1")):
+            with self.subTest(tag=tag):
+                values, summary = self.gate(tag, DARWIN_CLI)
+                self.assertEqual(values["version"], version)
+                self.assertEqual((values["mac"], values["win"]), ("false", "false"))
+                self.assertEqual(values.get("darwin_cli"), "true")
+                if "-" in version:
+                    self.assertIn("Desktop prerelease packages use electron-updater's beta channel", summary)
+                    self.assertIn("stable latest.yml is not replaced", summary)
+
+    def test_missing_cli_certificate_reports_a_distinct_blocked_result(self):
+        for tag in ("v1.3.0", "v1.3.0-beta.1"):
+            for absent in DARWIN_CLI:
+                with self.subTest(tag=tag, absent=absent):
+                    present = [name for name in DARWIN_CLI if name != absent]
+                    values, summary = self.gate(tag, present)
+                    blocked = [line for line in summary.splitlines() if "Darwin CLI signing blocked" in line]
+                    self.assertEqual(len(blocked), 1, summary)
+                    self.assertEqual(values.get("darwin_cli"), "false")
+                    mentioned = {name for name in set(MAC) | set(WIN) if name in blocked[0]}
+                    self.assertEqual(mentioned, {absent})
 
 
 class DesktopPackageScriptTests(unittest.TestCase):
@@ -86,6 +118,18 @@ class DesktopPackageScriptTests(unittest.TestCase):
         result = self.package(PERSONA_DESKTOP_VERSION="1.2")
         self.assertEqual(result.returncode, 2)
         self.assertIn("not a semantic version", result.stderr)
+
+    def test_beta_packaging_uses_its_own_update_channel_and_prerelease(self):
+        script = PACKAGE.read_text()
+        self.assertIn('"$PERSONA_DESKTOP_VERSION" == *-beta.*', script)
+        self.assertIn('"-c.publish.channel=beta"', script)
+        self.assertIn('"-c.publish.releaseType=prerelease"', script)
+        self.assertIn("only beta prereleases have a supported update channel", script)
+        # The pinned builder derives the metadata filename from publish.channel, not from extraMetadata.version.
+        builder = (ROOT / "desktop/node_modules/app-builder-lib/out/publish/updateInfoBuilder.js")
+        if builder.is_file():
+            self.assertIn('publishConfig.channel || "latest"', builder.read_text())
+            self.assertIn('`${channel}${osSuffix}', builder.read_text())
 
     def test_no_registered_identity_is_written_into_the_repository(self):
         production = yaml.load((ROOT / "desktop/electron-builder.yml").read_text(), Loader=yaml.BaseLoader)
@@ -137,6 +181,102 @@ class DesktopReleaseWorkflowTests(unittest.TestCase):
         self.assertLess(script.index('"${packages[@]}" --clobber'), script.index('"${metadata[@]}" --clobber'))
         for pattern in ("*.dmg", "*.zip", "*.exe", "*.blockmap", "*.yml"):
             self.assertIn(pattern, script)
+
+    def test_prerelease_cli_job_uses_cli_availability_version_and_beta_channel(self):
+        job = self.jobs["darwin-cli-sign"]
+        self.assertEqual(job["needs"], ["authorize", "desktop-gate", "publish"])
+        steps = job["steps"]
+        build = next(step for step in steps if "scripts/release/publish.sh" in step.get("run", ""))
+        manifest = next(step for step in steps if "release manifest" in step.get("run", ""))
+        for step in (build, manifest):
+            self.assertEqual(step["env"]["VERSION"], "${{ needs.desktop-gate.outputs.version }}")
+            self.assertEqual(step["env"]["RELEASE_CHANNEL"], "${{ contains(github.ref_name, '-') && 'beta' || 'release' }}")
+        self.assertEqual(build["env"]["PERSONA_RELEASE_BUILD"], "${{ steps.resume.outputs.number }}")
+        upload = next(step for step in steps if "gh release upload" in step.get("run", ""))
+        self.assertEqual(upload["env"]["RELEASE_TAG"], "${{ github.ref_name }}")
+        self.assertEqual(job["if"], "needs.desktop-gate.outputs.darwin_cli == 'true'")
+
+    def test_prerelease_cli_path_signs_verifies_rehashes_and_uploads_all_downloads(self):
+        job = self.jobs["darwin-cli-sign"]
+        steps = job["steps"]
+        build = next(step for step in steps if "scripts/release/publish.sh" in step.get("run", ""))
+        install = next(step for step in steps if "security import" in step.get("run", ""))
+        sign = next(step for step in steps if "sign_darwin_cli.py" in step.get("run", ""))
+        manifest = next(step for step in steps if "release manifest" in step.get("run", ""))
+        upload = next(step for step in steps if "gh release upload" in step.get("run", ""))
+        self.assertLess(steps.index(build), steps.index(install))
+        self.assertLess(steps.index(install), steps.index(sign))
+        self.assertLess(steps.index(sign), steps.index(manifest))
+        self.assertLess(steps.index(manifest), steps.index(upload))
+        self.assertIn("Developer ID Application", install["run"])
+        self.assertIn("Darwin CLI signing blocked", install["run"])
+        self.assertIn("sign_darwin_cli.py build-publish/bin --identity", sign["run"])
+        self.assertIn("shasum -a 256 -- *.gz > ci-SHA256SUMS", manifest["run"])
+        self.assertIn("release manifest", manifest["run"])
+        self.assertIn("release verify", manifest["run"])
+        patterns = re.findall(r'build-publish/bin/[^\s";]+', upload["run"])
+        for program in ("personad", "persona-node", "persona-link", "persona-hub", "persona-manager"):
+            for architecture in ("amd64", "arm64"):
+                archive = f"build-publish/bin/{program}-darwin-{architecture}.gz"
+                with self.subTest(archive=archive):
+                    self.assertTrue(any(fnmatch.fnmatchcase(archive, pattern) for pattern in patterns), archive)
+        for metadata in ("ci-latest.json", "ci-SHA256SUMS", "VERSION"):
+            self.assertIn(f"build-publish/bin/{metadata}", upload["run"])
+        self.assertIn(".digest", upload["run"])
+        # A missing certificate makes the whole build/sign/upload job skip; there is no ad-hoc upload fallback.
+        self.assertEqual(job["if"], "needs.desktop-gate.outputs.darwin_cli == 'true'")
+
+    def test_signed_darwin_binaries_are_recompressed_before_hashing(self):
+        manifest = next(step for step in self.jobs["darwin-cli-sign"]["steps"] if "release manifest" in step.get("run", ""))
+        script = manifest["run"]
+        self.assertIn("for program in personad persona-node persona-link persona-hub persona-manager; do", script)
+        compress = "for program in " + script.split("for program in ", 1)[1].split("(cd build-publish/bin", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = root / "build-publish/bin"
+            binaries.mkdir(parents=True)
+            expected = {}
+            for program in ("personad", "persona-node", "persona-link", "persona-hub", "persona-manager"):
+                for architecture in ("amd64", "arm64"):
+                    path = binaries / f"{program}-darwin-{architecture}"
+                    expected[path.name] = f"Developer ID signed {program} {architecture}".encode()
+                    path.write_bytes(expected[path.name])
+                    Path(str(path) + ".gz").write_bytes(gzip.compress(b"stale ad-hoc bytes"))
+            result = subprocess.run(["bash", "-eu", "-o", "pipefail", "-c", compress], cwd=root,
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name, contents in expected.items():
+                with self.subTest(archive=name):
+                    self.assertEqual(gzip.decompress((binaries / (name + ".gz")).read_bytes()), contents)
+        self.assertLess(script.index('gzip -n -9 -c "$bin" > "$bin.gz"'), script.index("shasum -a 256"))
+
+    def test_cli_signing_leaves_stable_desktop_and_latest_policies_unchanged(self):
+        self.assertEqual(self.jobs["desktop-mac"]["if"], "needs.desktop-gate.outputs.mac == 'true'")
+        self.assertEqual(self.jobs["desktop-win"]["if"], "needs.desktop-gate.outputs.win == 'true'")
+        metadata = next(step for step in self.jobs["publish"]["steps"] if step.get("uses") == "docker/metadata-action@v5")
+        self.assertEqual(metadata["with"]["flavor"], "latest=false")
+        self.assertIn("type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}",
+                      metadata["with"]["tags"])
+        create = next(step for step in self.jobs["publish"]["steps"] if step.get("name") == "Create GitHub Release")
+        self.assertIn('if [[ "$RELEASE_TAG" == *-* ]]; then', create["run"])
+        self.assertIn("args+=(--prerelease)", create["run"])
+        self.assertIn("args=(--latest=false ", create["run"])
+        self.assertEqual(self.jobs["darwin-cli-sign"]["if"], "needs.desktop-gate.outputs.darwin_cli == 'true'")
+
+    def test_cli_gate_uses_presence_only_and_signing_stays_in_protected_environment(self):
+        gate = self.jobs["desktop-gate"]
+        gate_step = next(step for step in gate["steps"] if "desktop-release-gate.sh" in step.get("run", ""))
+        for name in DARWIN_CLI:
+            self.assertEqual(gate_step["env"][f"HAS_{name}"], f"${{{{ secrets.{name} != '' }}}}")
+        job = self.jobs["darwin-cli-sign"]
+        self.assertEqual(job["environment"], "persona-desktop-release")
+        install = next(step for step in job["steps"] if "security import" in step.get("run", ""))
+        for name in DARWIN_CLI:
+            self.assertEqual(install["env"][name], f"${{{{ secrets.{name} }}}}")
+            for step in job["steps"]:
+                if step is not install:
+                    self.assertNotIn(f"secrets.{name}", str(step))
+        self.assertEqual(gate["outputs"].get("darwin_cli"), "${{ steps.gate.outputs.darwin_cli }}")
 
     def test_documented_secrets_are_in_their_protected_environment(self):
         text = (ROOT / "docs/desktop/desktop.md").read_text()

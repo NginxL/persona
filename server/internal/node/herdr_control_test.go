@@ -31,7 +31,7 @@ func startHerdr(f *fakeHerdr, pane, status string) {
 // herdr's tab.create / workspace.create take it.
 var agentEnvParam = map[string]any{
 	"PERSONA_AGENT": "1", "DISABLE_AUTO_UPDATE": "true", "DISABLE_UPDATE_PROMPT": "true",
-	"POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD": "true",
+	"ZSH_DISABLE_COMPFIX": "true", "POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD": "true",
 }
 
 // startCmd is the command a Claude start types into its herdr pane (and herdr's resume of it evals): the node's

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -81,9 +85,106 @@ func startedAssistant(t *testing.T, n *Node, host *fakeRuntime) string {
 	return res.SessionID
 }
 
+func TestRuntimeAssistantQueue(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	hello := assistantRuntimeHello()
+	hello["caps"].(map[string]any)["queue_edit"] = true
+	hello["caps"].(map[string]any)["queue_send_now"] = true
+	host := dialRuntime(t, n, hello)
+	id := startedAssistant(t, n, host)
+	const child = "queue-child"
+	image := proto.Image{Mime: "image/png", Data: "aW1hZ2U="}
+	host.mu.Lock()
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		switch method {
+		case "session.send":
+			return map[string]bool{"queued": true}, nil
+		case "session.queue.edit":
+			return proto.QueueEdit{Queue: []string{"first", ""}, Images: [][]proto.Image{nil, {image}}}, nil
+		case "session.queue.send_now":
+			return map[string]bool{"sent": true}, nil
+		}
+		return nil, fmt.Errorf("unexpected %s", method)
+	}
+	host.mu.Unlock()
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []proto.Session{
+		{SessionID: id, Status: proto.StatusWorking, Queued: []string{"first", ""}}, {SessionID: child, IsSubagent: true},
+	}})
+	waitFor(t, "runtime queue listed", func() bool {
+		rows := listed(t, n)
+		return len(rows[id].Queued) == 2 && rows[child].Capabilities != nil
+	})
+	for sid, want := range map[string]bool{id: true, child: false} {
+		caps := listed(t, n)[sid].Capabilities
+		if caps == nil || caps.QueueEdit == nil || caps.QueueSendNow == nil || *caps.QueueEdit != want || *caps.QueueSendNow != want {
+			t.Fatalf("queue capabilities for %s: %+v", sid, caps)
+		}
+	}
+	if out, err := nodeCall(t, n, "session.send", map[string]any{"session_id": id, "text": "next"}); err != nil || string(out) != `{"ok":true,"queued":true}` {
+		t.Fatalf("assistant send: %s, %v", out, err)
+	}
+	edit := "session.queue.edit"
+	sendNow := "session.queue.send_now"
+	out, err := nodeCall(t, n, edit, map[string]any{"session_id": id, "keep": []int{1}})
+	if err != nil || string(out) != `{"queue":["first",""],"images":[null,[{"mime":"image/png","data":"aW1hZ2U="}]]}` {
+		t.Fatalf("assistant queue edit: %s, %v", out, err)
+	}
+	if calls := host.got(edit); len(calls) != 1 || string(calls[0]) != `{"keep":[1],"session_id":"`+id+`"}` {
+		t.Fatalf("forwarded edit: %s", calls)
+	}
+	if out, err := nodeCall(t, n, sendNow, map[string]any{"session_id": id}); err != nil || string(out) != `{"sent":true}` {
+		t.Fatalf("assistant send-now: %s, %v", out, err)
+	}
+	for _, method := range []string{edit, sendNow} {
+		if _, err := nodeCall(t, n, method, map[string]any{"session_id": id + subagentSep + child}); rpcCode(err) != "unsupported" || len(host.got(method)) != 1 {
+			t.Fatalf("%s forwarded to subagent: %v", method, err)
+		}
+	}
+	_ = host.conn.Close()
+	waitFor(t, "runtime disconnected", func() bool {
+		conn, _, _ := n.runtimes.belongs(id)
+		return conn == nil
+	})
+	for _, method := range []string{edit, sendNow} {
+		if _, err := nodeCall(t, n, method, map[string]any{"session_id": id}); rpcCode(err) != "runtime_away" {
+			t.Fatalf("%s offline: %v", method, err)
+		}
+	}
+}
+
+func TestRuntimeAssistantModeForwardsAssistant(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	id := startedAssistant(t, n, host)
+	if _, err := nodeCall(t, n, "session.modes", map[string]any{"session_id": id, "permission_mode": "plan"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := host.got("session.modes")
+	if len(calls) != 1 {
+		t.Fatalf("session.modes calls: %s", calls)
+	}
+	var got struct {
+		SessionID string `json:"session_id"`
+		Mode      string `json:"permission_mode"`
+		Assistant bool   `json:"assistant"`
+	}
+	if err := json.Unmarshal(calls[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != id || got.Mode != "plan" || !got.Assistant {
+		t.Fatalf("session.modes payload: %s", calls[0])
+	}
+}
+
 func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
+	n.dir = filepath.Join(n.home, ".persona")
+	cwd := filepath.Join(n.dir, "assistant")
+	privateMemory := filepath.Join(n.dir, "profiles", "claude", "projects", memoryKey(cwd), "memory")
+	writeNote(t, privateMemory, "runtime-copy.md", "A note from another profile.\n", time.Time{})
 	host := dialRuntime(t, n, assistantRuntimeHello())
 	if a, err := n.assistantAgent(context.Background(), "dsh"); err != nil || a != assistantOnRuntime {
 		t.Fatalf("assistantAgent: %q %v", a, err)
@@ -111,6 +212,12 @@ func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(p.Context, "测试时间") || !strings.Contains(p.Context, "MEMORY.md") {
 		t.Fatalf("the first message's context: %q", p.Context)
+	}
+	if p.MemoryDir != n.memoryDir(cwd) || !strings.Contains(p.Context, "(runtime-copy.md)") {
+		t.Fatalf("the runtime's first turn missed the merged memory: %s", sends[0])
+	}
+	if got := readNote(t, p.MemoryDir, "runtime-copy.md"); got != "A note from another profile.\n" {
+		t.Fatalf("the runtime's memory note: %q", got)
 	}
 	if st, ok := n.state.get(sid); !ok || st.Launcher != "dsh" || !strings.HasSuffix(st.Cwd, "/.persona/assistant") {
 		t.Fatalf("state %+v", st)
@@ -164,6 +271,37 @@ func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	}
 	if got := host.got("session.send"); len(got) != 4 || !strings.Contains(string(got[3]), "on claude") {
 		t.Fatalf("sends %d", len(got))
+	}
+}
+
+// A public mention on a runtime-backed main chat gets the runtime's ordinary input but no owner snapshot (#11130).
+func TestAssistantPublicSendOnRuntimeSkipsSnapshot(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	sid := startedAssistant(t, n, host)
+	hub.mu.Lock()
+	base := hub.answer
+	contextCalls := 0
+	hub.answer = func(method string, params json.RawMessage) (any, error, bool) {
+		if method == "assistant.context" {
+			contextCalls++
+		}
+		return base(method, params)
+	}
+	hub.mu.Unlock()
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "public mention", "public": true}); err != nil {
+		t.Fatal(err)
+	}
+	hub.mu.Lock()
+	if contextCalls != 0 {
+		hub.mu.Unlock()
+		t.Fatalf("public runtime send requested %d owner snapshots", contextCalls)
+	}
+	hub.mu.Unlock()
+	sends := host.got("session.send")
+	if len(sends) != 2 || strings.Contains(string(sends[1]), "测试时间") {
+		t.Fatalf("public runtime input carries the owner snapshot: %s", sends)
 	}
 }
 
@@ -359,6 +497,93 @@ func TestAssistantToolsOnlyForTheAssistantsConversations(t *testing.T) {
 	}
 }
 
+func TestAssistantRuntimePIDReportsOnTheSocket(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no local peer process lookup")
+	}
+	previousLineage := nodeLineage
+	t.Cleanup(func() { nodeLineage = previousLineage })
+	nodeLineage = func() []int { return nil }
+	rh := sharedHost(t)
+	n, _ := runtimeNodeOn(t, rh)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	plain := dialRuntime(t, n, map[string]any{"runtime": "plain-pid", "caps": map[string]any{"start": true, "send": true}})
+	if features, _ := host.helloR["features"].([]any); !slices.Contains(features, any("assistant_pids")) {
+		t.Fatalf("assistant_pids not advertised: %v", features)
+	}
+	worker := exec.CommandContext(t.Context(), "sleep", "60")
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = worker.Wait() })
+	const chat, other = "session-assistant-worker", "session-other-worker"
+	for index, client := range []*fakeRuntime{host, plain} {
+		id := []string{chat, other}[index]
+		if err := client.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+			{"session_id": id, "cwd": identity.AssistantDir(n.home), "status": "idle"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, "runtimes own their Assistant-directory rows", func() bool {
+		_, _, chatListed := n.runtimes.rowOf(chat)
+		_, _, otherListed := n.runtimes.rowOf(other)
+		return chatListed && otherListed
+	})
+	report := func(t *testing.T, client *fakeRuntime, pids map[string]int) {
+		t.Helper()
+		if err := client.peer.Notify("runtime.assistant_pids", map[string]any{"pids": pids}); err != nil {
+			t.Fatal(err)
+		}
+		var response any
+		if err := client.peer.Call(t.Context(), "mcp.tools", map[string]any{"session_id": "not-owned"}, &response); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pid := worker.Process.Pid
+	report(t, plain, map[string]int{other: pid})
+	report(t, host, map[string]int{other: pid, "unlisted-assistant": pid})
+	if roots := n.assistantRoots(); len(roots) != 0 {
+		t.Fatalf("accepted PID without assistant capability or ownership: %v", roots)
+	}
+	report(t, host, map[string]int{chat: pid})
+	if got := n.assistantRoots()[pid]; got != chat {
+		t.Fatalf("worker authorized as %q, want %q", got, chat)
+	}
+	report(t, host, map[string]int{})
+	if got := n.assistantRoots()[pid]; got != "" {
+		t.Fatalf("omitted worker still authorized as %q", got)
+	}
+	t.Run("hub reconnect", func(t *testing.T) {
+		report(t, host, map[string]int{chat: pid})
+		rh.detach(n)
+		if workers := rh.reg.assistantWorkers(); len(workers) != 0 {
+			t.Fatalf("hub detach kept assistant workers: %v", workers)
+		}
+		report(t, host, map[string]int{chat: pid})
+		if workers := rh.reg.assistantWorkers(); len(workers) != 0 {
+			t.Fatalf("accepted PIDs without a hub: %v", workers)
+		}
+		report(t, host, map[string]int{})
+		reconnected, _ := runtimeNodeOn(t, rh)
+		if _, _, ok := reconnected.runtimes.rowOf(chat); !ok {
+			t.Fatal("assistant row did not survive hub reconnect")
+		}
+		if got := reconnected.assistantRoots()[pid]; got != "" {
+			t.Fatalf("former worker still authorized after hub reconnect as %q", got)
+		}
+		report(t, host, map[string]int{chat: pid})
+		if got := reconnected.assistantRoots()[pid]; got != chat {
+			t.Fatalf("fresh snapshot authorized worker as %q, want %q", got, chat)
+		}
+	})
+	report(t, host, map[string]int{chat: pid})
+	if err := host.conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "disconnected worker cleared", func() bool { return n.assistantRoots()[pid] == "" })
+}
+
 func TestRuntimeAgentToolsRequireOwnedSessions(t *testing.T) {
 	n, hub := runtimeNode(t)
 	calls := assistantHub(hub)
@@ -411,12 +636,21 @@ func TestGatedToolGoesThroughTheGate(t *testing.T) {
 	assistantHub(hub)
 	skills := filepath.Join(n.home, ".persona", "skills")
 	t.Setenv("PERSONA_SKILLS_DIR", skills)
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
 	n.dir = filepath.Join(n.home, ".persona")
 	script := filepath.Join(skills, "example", "scripts", "ex.sh")
-	_ = os.MkdirAll(filepath.Dir(script), 0o755)
-	_ = os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644)
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ran := filepath.Join(n.home, "ran")
-	_ = os.WriteFile(script, []byte("#!/bin/bash\necho \"$*\" >> "+shellQuote(ran)+"\necho done \"$*\"\n"), 0o755)
+	if err := os.WriteFile(script, []byte("#!/bin/bash\necho \"$*\" >> "+shellQuote(ran)+"\necho done \"$*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The hub prepares its assistant directory before sending. User-selected task directories keep their own skills.
+	prepareAssistantForTest(t, n, ".persona/assistant", nil, nil)
 	g := exampleGate("")
 	g.Tool = &proto.GateTool{Name: "example_api", Description: "Run ex."}
 	n.mu.Lock()
@@ -480,4 +714,87 @@ func toolList(ts []proto.Tool) string {
 		out = append(out, x.Name)
 	}
 	return strings.Join(out, ",")
+}
+
+// A message that is only a slash command goes to the runtime on its own. With the <persona-context> block in front, an
+// agent that runs its own commands (Antigravity's /compact) no longer sees a command: it records the line as plain text,
+// `/compact/compact`, and compacts nothing. The snapshot is not lost: it stays unsent and rides with the next ordinary
+// message, and after a /compact the conversation is told everything again, as after Persona's own compaction.
+func TestAssistantOnARuntimeSendsASlashCommandOnItsOwn(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	sid := startedAssistant(t, n, host)
+	sentText := func(i int) (text, context string) {
+		t.Helper()
+		sends := host.got("session.send")
+		if len(sends) <= i {
+			t.Fatalf("%d sends, want more than %d", len(sends), i)
+		}
+		var p struct {
+			Text    string `json:"text"`
+			Context string `json:"context"`
+		}
+		_ = json.Unmarshal(sends[i], &p)
+		return p.Text, p.Context
+	}
+	seen := func() map[string]string {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.ctxSent[sid]
+	}
+	if seen() == nil {
+		t.Fatal("the first message did not record the snapshot as sent")
+	}
+
+	// /status: no context in front, and what the conversation has seen stays as it was.
+	before := seen()
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/status", "client_msg_id": "m-status"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(1); text != "/status" || ctx != "" {
+		t.Fatalf("/status went as %q with context %q", text, ctx)
+	}
+	if got := seen(); len(got) != len(before) {
+		t.Fatalf("/status changed what the conversation has seen: %v -> %v", before, got)
+	}
+
+	// /compact: on its own too, and the conversation has to be told everything again afterwards.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/compact\n", "client_msg_id": "m-compact"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(2); strings.TrimSpace(text) != "/compact" || ctx != "" {
+		t.Fatalf("/compact went as %q with context %q", text, ctx)
+	}
+	if got := seen(); got != nil {
+		t.Fatalf("after /compact the conversation still counts the snapshot as told: %v", got)
+	}
+
+	// The next ordinary message carries the whole snapshot again.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "next", "client_msg_id": "m-next"}); err != nil {
+		t.Fatal(err)
+	}
+	if text, ctx := sentText(3); text != "next" || !strings.Contains(ctx, "测试时间") {
+		t.Fatalf("the message after /compact went as %q with context %q", text, ctx)
+	}
+	if seen() == nil {
+		t.Fatal("the message after /compact did not record the snapshot as sent")
+	}
+
+	// Words that merely begin with a slash, a path or a command with a sentence, are messages: they carry the context.
+	for i, text := range []string{"/tmp/report.md is ready\nplease read it", "/data/logs"} {
+		if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": text, "client_msg_id": "m-words-" + string(rune('a'+i))}); err != nil {
+			t.Fatal(err)
+		}
+		if got, ctx := sentText(4 + i); got != text || !strings.Contains(ctx, "测试时间") {
+			t.Fatalf("%q went as %q with context %q", text, got, ctx)
+		}
+	}
+	// A picture makes it a message, whatever the words.
+	if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": sid, "text": "/status", "client_msg_id": "m-pic", "images": []map[string]any{{"mime": "image/png", "data": "AA=="}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ctx := sentText(6); !strings.Contains(ctx, "测试时间") {
+		t.Fatalf("a /status with a picture went without context: %q", ctx)
+	}
 }

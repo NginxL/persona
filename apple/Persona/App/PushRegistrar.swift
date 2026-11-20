@@ -128,6 +128,8 @@ final class PushRegistrar {
         if registered {
             guard lastToken != nil || apnsFailure != nil else { return nil } // APNs hasn't answered yet
             return queue { [self] in
+                // The main-screen notice needs the system switch now, not only the value cached at launch (#9612 item 4).
+                if let allowed = await system.allowed() { health.update { $0.notificationsAllowed = allowed } }
                 await retryDue()
                 await checkRoutes()
             }
@@ -289,7 +291,7 @@ final class PushRegistrar {
                 #if os(iOS)
                 UrgentCallReach.shared.routes[hub.group] = routes.call
                 #endif
-                health.update { $0.read(routes.push, group: hub.group) }
+                health.update { $0.readRegistration(routes.push, group: hub.group) }
                 checked[hub.group] = system.now()
                 done.insert(hub.group)
             } catch {

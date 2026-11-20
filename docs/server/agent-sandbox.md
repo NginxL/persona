@@ -23,7 +23,7 @@ Except where a row names a platform gap, every row below fails inside the sandbo
 | Read another launcher's merged settings in `launcher-settings/` | Refused; the files this start passes to its own agent stay readable |
 | Connect to an extension's proxy socket or the hub's edge socket (`extensions/run/`, `run/`) | Refused |
 | Rename the data directory, a folder above it, or `extensions/` (which holds `extensions/data/` and `extensions/run/`) | Refused, so the secrets cannot be moved out from under the rules (#6117) |
-| Replace the `~/.persona` link | Refused on macOS. **Not yet denied on Linux**: stock bwrap cannot filter unlink/rename by path while leaving the link's parent directory writable; see the Linux section |
+| Replace the `~/.persona` link | Refused on both platforms; Linux mounts the symlink inode without following it (see the direct-mount-administration limit below) |
 | Remove the switch file `agent-sandbox.on` | Refused |
 | Read `launch.key`, which `personad launch` needs before the node hands out a managed launcher's settings (`launcher.env` on `node.sock`, #5588) | Refused, so the node refuses an agent any launcher's settings |
 
@@ -39,6 +39,9 @@ inside an already-bound directory such as `data/` remain visible.
 
 The sandbox covers only the processes Persona starts in it. These reach the secrets anyway:
 
+- **Linux mount administration.** The agent keeps bubblewrap's user-namespace capabilities so nested-namespace tools
+  work as before. A deliberate `umount` in that same namespace can remove the masked data-directory and alias views and
+  reach the underlying paths. The no-follow alias mount below does not change this existing boundary.
 - **Docker.** An agent that can run `docker` can mount the data directory into a container and read it there.
   `personad hub setup` runs Postgres in Docker, so Docker is there on most hub machines. Closing the Docker socket
   would take Docker away from every agent, so the sandbox leaves it open.
@@ -57,9 +60,10 @@ The sandbox covers only the processes Persona starts in it. These reach the secr
 ## Four starts are wrapped
 
 `sandbox.WrapAgent` puts `/usr/bin/sandbox-exec -p <profile>` or `bwrap <mount options> --` in front of the command
-and `PERSONA_AGENT_SANDBOXED=1` in its environment. On macOS the process keeps its pid. Stock bwrap keeps a supervisor
-process and starts the agent as its direct child; there is no pid namespace, so the node-started bwrap pid is the agent's
-`PPID` and both remain visible to the node.
+and `PERSONA_AGENT_SANDBOXED=1` in its environment. A Linux start with explicit symlink aliases also invokes the node
+binary's internal `agent-sandbox-exec` helper after bwrap; it execs the agent at the same pid. On macOS the process keeps
+its pid. Stock bwrap keeps a supervisor process and starts the helper or agent as its direct child; there is no pid
+namespace, so the node-started bwrap pid is the agent's `PPID` and both remain visible to the node.
 
 | Start | Started by | Code |
 | --- | --- | --- |
@@ -150,7 +154,8 @@ readable.
 `/dev` mounts. A missing binary, a locked-down unprivileged user namespace, or a failed mount reports `unavailable`
 with the error; a binary on `PATH` alone is not support. Linux does not cache this probe or the full-profile preflight:
 installing, removing or replacing bwrap and a namespace recovery are observed on the next start, and different working
-directories do not accumulate profile keys. Every real start runs `true` with every generated mount before the agent.
+directories do not accumulate profile keys. Every real start runs `true` with every generated mount and, when aliases
+are present, the same pre-exec helper before the agent.
 
 The agent profile is deliberately not the extension sandbox's whitelist. It starts with a read-write bind of `/` and a
 `--dev-bind /dev /dev` (ordinary tools need `/dev/null`), uses `--unshare-user`, and does **not** unshare the network,
@@ -177,17 +182,16 @@ For every resolved data directory, the profile then:
 - bind-mounts every ancestor of the real data directory onto itself. Renaming the data directory, an ancestor or a
   partial-view directory such as `extensions/` fails with `EBUSY`, while writes inside allowed children still work.
 
-An explicit symlink name for the data directory receives the same masked view, so neither that name nor a symlink
-elsewhere can read a secret. The closed socket directories are absent from every view: connecting to their sockets
-fails because the path does not exist, not because bwrap filters the `connect` syscall. The rest of the network stays
-available.
+An explicit symlink name for the data directory receives the same masked view. Before the agent starts, the node helper
+uses `open_tree` with `AT_SYMLINK_NOFOLLOW` to clone the symlink inode itself and `move_mount` without following the
+destination to move that clone onto the alias. The alias is then a mount point, so unlinking or renaming it fails with
+`EBUSY` while its parent directory remains writable. Reading through it still resolves to the masked data directory.
+The helper then resolves the agent on `PATH` when needed and execs it at the same pid. The preflight runs this helper
+with `true`; missing kernel support or a failed alias mount makes the start `unavailable` and leaves the agent
+unwrapped, rather than failing its launch.
 
-**Linux gap: replacing the data-directory symlink is not denied.** Mount namespaces can make a directory mount point
-unmovable, but bwrap has no path-aware unlink/rename rule for a symlink whose parent (usually the home directory) must
-remain writable. Making the whole home read-only or replacing it with a tmpfs would break the default-allow contract,
-so this slice does not pretend to enforce that one macOS row. Closing it needs a path-aware follow-up mechanism rather
-than more bwrap mount flags. The real data directory and its ancestors are still protected, and replacing the link does
-not expose the secrets in the running sandbox.
+The closed socket directories are absent from every view: connecting to their sockets fails because the path does not
+exist, not because bwrap filters the `connect` syscall. The rest of the network stays available.
 
 ### Linux path, namespace and scale limits
 
@@ -264,9 +268,8 @@ directory, which the doctor reads.
 `TestLinuxAgentSandboxForReal` (`agent_linux_test.go`) run shell commands under the real profile in a fake data
 directory and check both what must fail and what must work. Each has an unmasked control for the must-fail commands.
 The Linux matrix also covers a secret created after profile generation, view-internal file and directory symlinks (both
-closed and ordinary working links), all closed directories, local network access when curl is present, ssh and a
-compiler when present, and the direct bwrap-parent/agent-child pid relationship. The alias-replacement gap is exercised
-separately with assertions that both real and alias paths still hide the secret.
+closed and ordinary working links), all closed directories, data-directory alias replacement, local network access when
+curl is present, ssh and a compiler when present, and the direct bwrap-parent/agent-child pid relationship.
 `TestLinuxAgentSandboxSnapshotForReal` replaces a socket after bwrap is ready and proves the old/new inode behavior;
 `TestLinuxAgentSandboxNamespaceBoundariesForReal` covers `/proc/<pid>/root` and nested unshare/umount. Lifecycle tests
 cover probe recovery, bwrap removal, 120 different working directories with no profile cache, and the 9000-argument
@@ -278,6 +281,9 @@ Run them locally in `server/`:
 go test ./internal/extension/sandbox/ -run ForReal -v
 ```
 
-The Darwin test skips elsewhere (CI has no macOS runner). The Linux test skips when bwrap or its user-namespace probe
-is unavailable; run it on stock bubblewrap 0.8.x after changing the profile. Apple marks `sandbox-exec` deprecated and
-does not document its profile language, so run the Darwin test after a macOS update.
+The Darwin test skips elsewhere (CI has no macOS runner). The Linux tests skip when bwrap or its user-namespace probe
+is unavailable. They also skip when the full-profile preflight reports the exact alias `open_tree: operation not
+permitted` failure seen on Linux 5.4: production reports the same start `unavailable` and leaves it unwrapped, so this
+is not a fallback or a successful sandbox run. Other profile failures, including `move_mount` failures, remain test
+failures (#11073). Run the tests on stock bubblewrap 0.8.x after changing the profile. Apple marks `sandbox-exec`
+deprecated and does not document its profile language, so run the Darwin test after a macOS update.

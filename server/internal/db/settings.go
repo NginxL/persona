@@ -177,6 +177,33 @@ func (d *DB) Setting(ctx context.Context, key string, out any) (bool, error) {
 	return true, json.Unmarshal(raw, out)
 }
 
+// SettingsPrefix returns the raw values of every key under prefix. Callers that migrate a whole family use this
+// instead of a catalog, so dormant and unknown records are not skipped.
+func (d *DB) SettingsPrefix(ctx context.Context, prefix string) (map[string]json.RawMessage, error) {
+	const limit = 100000
+	rows, err := d.pool.Query(ctx, `SELECT key, value FROM `+d.settingsTable()+` WHERE starts_with(key, $1) LIMIT $2`, prefix, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := map[string]json.RawMessage{}
+	for rows.Next() {
+		if len(values) == limit {
+			return nil, fmt.Errorf("settings prefix %q has more than %d keys", prefix, limit)
+		}
+		var key string
+		var raw json.RawMessage
+		if err := rows.Scan(&key, &raw); err != nil {
+			return nil, err
+		}
+		values[key] = raw
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
 func (d *DB) PutSetting(ctx context.Context, key string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -291,4 +318,16 @@ func (d *DB) CompareSetting(ctx context.Context, key string, revision int64, val
 			WHERE key = $1 AND COALESCE((value->>'revision')::bigint, 0) = $3`, key, raw, revision)
 	}
 	return tag.RowsAffected() == 1, err
+}
+
+// PutSettingIfUnset migrates a legacy client preference without overwriting a
+// concurrent explicit choice. The unique key arbitrates across manager processes.
+func (d *DB) PutSettingIfUnset(ctx context.Context, key string, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = d.pool.Exec(ctx, `INSERT INTO `+d.settingsTable()+` (key, value, updated_at)
+ VALUES ($1, $2, now()) ON CONFLICT (key) DO NOTHING`, key, raw)
+	return err
 }

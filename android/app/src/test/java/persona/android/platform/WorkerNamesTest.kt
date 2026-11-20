@@ -50,8 +50,17 @@ class WorkerNamesTest {
         assertEquals(persona.core.contracts.ProtocolCompatibility.appSchemes.flatMap { scheme ->
             listOf(scheme to "pair") +
                 (if (scheme == "persona") listOf(scheme to "password-login") else emptyList()) +
-                listOf(scheme to "open")
+                listOf(scheme to "open") +
+                (if (scheme == "persona") listOf(scheme to "provider") else emptyList())
         }, routes)
+        // persona://open/<path>[?query] is the canonical app link. No path restriction may exclude a route-table page.
+        val openData = app.getElementsByTagName("data").let { nodes ->
+            (0 until nodes.length).map { nodes.item(it) as Element }.filter { it.getAttributeNS(namespace, "host") == "open" }
+        }
+        assertEquals(persona.core.contracts.ProtocolCompatibility.appSchemes.size, openData.size)
+        for (data in openData) for (attribute in listOf("path", "pathPrefix", "pathPattern", "pathAdvancedPattern", "pathSuffix")) {
+            assertTrue("persona://open paths are unrestricted", data.getAttributeNS(namespace, attribute).isEmpty())
+        }
         assertTrue(activity.getAttributeNS(namespace, "exported").toBoolean())
     }
 

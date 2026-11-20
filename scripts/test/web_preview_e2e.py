@@ -4,7 +4,8 @@ running server's page; the address bar goes to another page; Pick element outlin
 the comment lands above the message box with the page and the element; a screenshot lands in the message box; a link
 elsewhere is offered in a new tab; Phone size; the servers menu; a server that is not running is started after its
 command is confirmed (the node is asked with the session's workspace) and shown once it answers; and the states with
-nothing to show: no launch.json, no browser on the computer, a node from before previews.
+nothing to show: no launch.json, no browser on the computer, a node from before previews. On a phone with only a finger
+(#11511): a scroll, Pick and Go leave the keyboard down and the page its size; a tap focuses the keys field once it lifts.
 
 Needs a running web page against the fake hub with MOCK_PREVIEW=1 (scripts/mock/mock_preview.py: its GET
 /mock/preview?mode= switches the state, and lists what the panel sent) and Playwright for Python:
@@ -15,10 +16,12 @@ Needs a running web page against the fake hub with MOCK_PREVIEW=1 (scripts/mock/
 
 The pictures of the made-up page are drawn by the browser this computer has (PERSONA_CHROME, else Playwright's). Prints
 one line per check and a verdict; exits 1 on the first failure. Runs light and dark at desktop width, and light at phone
-width; --shots saves each state there. --channel msedge, or --executable <path>, where there is no Chrome.
+width, then the touch phone at 390; --shots saves each state there. --channel msedge, or --executable <path>, where
+there is no Chrome.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -28,6 +31,30 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_
 SIZES = {"wide": {"width": 1440, "height": 900}, "narrow": {"width": 390, "height": 844}}
 MID = "macbook"
 SID = "a1f3c2d4-0000-4000-8000-000000000001"
+UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
+KEYS = "在预览里输入"  # the panel's keys field (preview.keyboard_label)
+
+# iOS: a focused text field raises the keyboard, which shrinks only the visual viewport. A stand-in the page follows
+# (as web_mobile_input_e2e.py's), up while a text field has focus; __raised counts how often it came up.
+IOS_KEYBOARD = """(() => {
+  const et = new EventTarget();
+  let up = false;  // innerHeight is read late: before the viewport tag is parsed it is the 980-pixel layout's
+  const vv = { get height() { return innerHeight - (up ? 336 : 0); }, get width() { return innerWidth; }, offsetTop: 0, offsetLeft: 0,
+    scale: 1, pageTop: 0, addEventListener: et.addEventListener.bind(et), removeEventListener: et.removeEventListener.bind(et) };
+  Object.defineProperty(window, 'visualViewport', { get: () => vv });
+  window.__raised = 0;
+  const typing = (e) => !!e && (e.tagName === 'TEXTAREA' || e.isContentEditable ||
+    (e.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'range'].includes(e.type)));
+  const follow = () => {
+    if (up === typing(document.activeElement)) return;
+    up = !up;
+    if (up) window.__raised++;
+    et.dispatchEvent(new Event('resize'));
+  };
+  addEventListener('focusin', () => setTimeout(follow));
+  addEventListener('focusout', () => setTimeout(follow));
+})();"""
 
 
 def ok(msg):
@@ -195,6 +222,130 @@ def run(browser, base, hub, token, size, theme, shots, full):
     ctx.close()
 
 
+def phone_touch(browser, base, hub, token, shots, w=390, h=844, theme="light"):
+    """A phone with only a finger (#11511): scrolling the page, Pick and Go leave the panel's keys field alone, so the
+    keyboard stays down and the page keeps its size; a tap clicks the page and focuses the field once the finger lifts.
+    Only taps and CDP touches here: one mouse event would make the page treat this as a computer with a mouse."""
+    tag = f"phone {w}/{theme}"
+    mock(hub, token, "?mode=1")
+    ctx = browser.new_context(viewport={"width": w, "height": h}, device_scale_factor=3, is_mobile=True, has_touch=True,
+                              user_agent=UA, locale="zh-CN")
+    ctx.add_init_script(IOS_KEYBOARD)
+    page = ctx.new_page()
+    page.set_default_timeout(20000)
+    page.goto(base + "/overview?token=" + token)
+    page.wait_for_function("localStorage.getItem('persona.token')")
+    page.evaluate(f"localStorage.setItem('persona.theme', '{theme}'); sessionStorage.clear()")
+    page.goto(f"{base}/s/{MID}/{SID}")
+    if page.evaluate("matchMedia('(any-pointer: fine)').matches"):
+        fail(f"{tag}: the browser reports a fine pointer, so this proves nothing")
+    for _ in range(20):
+        page.get_by_role("button", name="更多").first.tap()
+        item = page.get_by_role("menuitem", name="预览")
+        try:
+            item.wait_for(timeout=1000)
+        except PlaywrightTimeout:
+            page.keyboard.press("Escape")
+            continue
+        item.tap()
+        break
+    else:
+        fail(f"{tag}: the ⋯ menu has no Preview")
+    panel = page.locator("[data-preview-panel]")
+    expect(panel).to_be_visible()
+    page.wait_for_function("(() => { const c = document.querySelector('[data-preview-canvas]'); return c && c.width > 1 && getComputedStyle(c).opacity !== '0'; })()", timeout=40000)
+    page.wait_for_timeout(800)
+    cdp = ctx.new_cdp_session(page)
+
+    def touch(kind, x=0, y=0):
+        cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": [] if kind == "touchEnd" else [{"x": x, "y": y}]})
+
+    def focused():
+        return page.evaluate("document.activeElement ? (document.activeElement.getAttribute('aria-label') || document.activeElement.tagName) : ''")
+
+    def page_height():
+        # the page's height as the node was last told: the socket's open, then each size
+        hh = 0
+        for m in mock(hub, token)["log"]:
+            if "open" in m:
+                hh = m["open"]["h"]
+            elif m.get("t") == "size":
+                hh = m["h"]
+        return hh
+
+    def kept(what, n0, least):
+        """Neither the keys field nor the keyboard: no size under `least` went to the node."""
+        page.wait_for_timeout(800)
+        if focused() == KEYS:
+            fail(f"{tag}: {what} focused the keys field")
+        if page.evaluate("window.__raised"):
+            fail(f"{tag}: {what} raised the keyboard")
+        smaller = [m for m in mock(hub, token)["log"][n0:] if m.get("t") == "size" and m["h"] < least]
+        if smaller:
+            fail(f"{tag}: {what} told the node the page is smaller: {smaller}")
+
+    def shot(name):
+        if shots:
+            page.screenshot(path=os.path.join(shots, f"preview-phone-{w}-{theme}-{name}.png"))
+
+    h0 = page_height()
+    n0 = len(mock(hub, token)["log"])
+    box = page.locator("[data-preview-canvas]").bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.7
+    touch("touchStart", x, y)
+    for i in range(1, 9):
+        touch("touchMove", x, y - 25 * i)
+        page.wait_for_timeout(16)
+    touch("touchEnd")
+    kept("a finger's scroll", n0, h0)
+    if not any(m.get("t") == "wheel" for m in mock(hub, token)["log"][n0:]):
+        fail(f"{tag}: the scroll did not reach the page")
+    ok(f"{tag}: a finger's scroll scrolls the page; the keyboard stays down and the page keeps its height ({h0})")
+    shot("scrolled")
+
+    pick = panel.get_by_role("button", name="选一个元素来评论")
+    pick.tap()
+    banner = page.locator("[data-preview-picking]")
+    expect(banner).to_be_visible()
+    kept("Pick", n0, h0 - math.ceil(banner.bounding_box()["height"]))  # the picking line takes its own room
+    ok(f"{tag}: Pick leaves the keyboard down")
+    shot("picking")
+    banner.get_by_role("button", name="取消").tap()
+    expect(banner).to_have_count(0)
+
+    # the address field raises its own keyboard; Go puts it away and the page is its height again
+    addr = page.locator("[data-preview-address]")
+    addr.tap()
+    addr.fill("/settings")
+    addr.press("Enter")
+    page.wait_for_timeout(1200)
+    if focused() == KEYS or page.evaluate("!!document.activeElement?.matches('[data-preview-address]')"):
+        fail(f"{tag}: after Go the focus is on {focused()}")
+    if page.evaluate("visualViewport.height") != h:
+        fail(f"{tag}: the keyboard is still up after Go")
+    if page_height() != h0:
+        fail(f"{tag}: after Go the page is {page_height()} high, not {h0}")
+    if not any(m.get("t") == "nav" and m.get("url") == "/settings" for m in mock(hub, token)["log"][n0:]):
+        fail(f"{tag}: Go did not navigate")
+    ok(f"{tag}: Go navigates and puts the keyboard away")
+    shot("after-go")
+
+    # a tap: nothing on the press, the click and the keys field once the finger lifts
+    n1 = len(mock(hub, token)["log"])
+    touch("touchStart", x, y)
+    page.wait_for_timeout(200)
+    if focused() == KEYS:
+        fail(f"{tag}: a finger's press focused the keys field before it lifted")
+    touch("touchEnd")
+    page.wait_for_timeout(500)
+    if focused() != KEYS:
+        fail(f"{tag}: a tap left the focus on {focused()}, not the keys field")
+    if not any(m.get("t") == "mouse" and m.get("type") == "down" for m in mock(hub, token)["log"][n1:]):
+        fail(f"{tag}: the tap did not click the page")
+    ok(f"{tag}: a tap clicks the page and focuses its keys field once the finger lifts")
+    ctx.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("base")
@@ -210,6 +361,7 @@ def main():
         browser = p.chromium.launch(executable_path=a.executable) if a.executable else p.chromium.launch(channel=a.channel)
         for size, theme in (("wide", "light"), ("wide", "dark"), ("narrow", "light")):
             run(browser, a.base, a.hub, a.token, size, theme, a.shots, full=size == "wide")
+        phone_touch(browser, a.base, a.hub, a.token, a.shots)
         browser.close()
     print("PASS web preview", flush=True)
 

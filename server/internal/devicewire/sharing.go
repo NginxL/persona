@@ -20,6 +20,11 @@ type Submission struct {
 	Kind         string `json:"kind"`
 	OriginalText string `json:"original_text"`
 }
+
+// SubmissionApprovalClarification is created only by the hub after consuming a
+// one-time proof bound to an authenticated question on a prepared approval.
+const SubmissionApprovalClarification = "approval_clarification"
+
 type ShareAuthority struct {
 	Issuer     string `json:"issuing_authority"`
 	Machine    string `json:"machine_reference"`
@@ -133,3 +138,18 @@ type ShareProjection struct {
 	Omitted   int                      `json:"omitted_messages"`
 	Omissions []string                 `json:"omissions"`
 }
+
+type modeActorKey struct{}
+
+// WithModeActor carries display-only provenance from a trusted bus request.
+func WithModeActor(ctx context.Context, a *Actor) context.Context {
+	return context.WithValue(ctx, modeActorKey{}, a)
+}
+
+func ModeActorOf(ctx context.Context) *Actor {
+	a, _ := ctx.Value(modeActorKey{}).(*Actor)
+	return a
+}
+
+// AssistantModeActor identifies an internal assistant request in existing timeline clients.
+func AssistantModeActor() *Actor { return &Actor{Kind: "assistant", DeviceName: "Persona"} }

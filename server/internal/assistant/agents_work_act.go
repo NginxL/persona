@@ -3,12 +3,14 @@ package assistant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modelretry"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -21,6 +23,10 @@ func (s *Service) actOn(ctx context.Context, v *workView, machine string, c prot
 	cfg, sw := s.triageCfg(ctx), s.triageSwitches(ctx)
 	l := s.lang(ctx)
 	w := &e.Work
+	if proto.UnrecoverableTurnErrorCode(c.TurnError) != "" || c.TurnErrorKind == proto.TurnErrorUnrecoverable {
+		e.WakeAt, w.WakeAt = nil, nil
+		return // An invalid conversation needs a replacement, not a retry card or a scheduled Continue.
+	}
 	now := time.Now()
 	k := [2]string{e.MachineID, e.SessionID}
 	s.workWould(k, "") // of the stop before this one
@@ -34,20 +40,11 @@ func (s *Service) actOn(ctx context.Context, v *workView, machine string, c prot
 			w.Line = clip(oneLine(workT(l, "model_error", i18n.Args{"error": w.Wait})), 60)
 			return
 		}
-		if e.Retries >= maxRetries(cfg) {
-			s.logf("work %s/%s: auto-continue: transient model error persists after %d automatic continues, left to the user: %s",
-				e.MachineID, short(e.SessionID), e.Retries, clip(w.Wait, 120))
-			*w = proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitUser, TurnAt: w.TurnAt, At: w.At, By: w.By,
-				Line: workT(l, "retries_line", i18n.Args{"n": e.Retries}),
-				Questions: []proto.Question{{Question: workT(l, "retries_ask", i18n.Args{"n": e.Retries, "error": clip(w.Wait, 300)}),
-					Header: workT(l, "header_model"), Options: []proto.QuestionOption{{Label: answerLabel(l, answerRetry)}, {Label: answerLabel(l, answerSkip)}}}}}
-			break
-		}
-		after := retryBackoff(cfg, e.Retries, rateLimitError(c.TurnError))
+		after := modelretry.Delay(time.Duration(min(cmp0(cfg.RetryBaseSeconds, 15), 1800))*time.Second, e.Retries, rateLimitError(c.TurnError))
 		at := now.Add(after).UTC()
-		e.WakeAt, w.WakeAt, w.Attempts, w.Max = &at, &at, e.Retries, maxRetries(cfg)
-		s.logf("work %s/%s: auto-continue: transient model error, attempt %d/%d in %s: %s", e.MachineID, short(e.SessionID),
-			e.Retries+1, maxRetries(cfg), after, clip(w.Wait, 120))
+		e.WakeAt, w.WakeAt, w.Attempts, w.Max = &at, &at, e.Retries, 0
+		s.logf("work %s/%s: auto-continue: transient model error, attempt %d in %s: %s", e.MachineID, short(e.SessionID),
+			e.Retries+1, after, clip(w.Wait, 120))
 		return
 	case proto.WaitExternal, proto.WaitAgent:
 		if w.ResetsAt != nil {
@@ -345,9 +342,9 @@ func (s *Service) workAnswer(ctx context.Context, id string, r proto.Resolution)
 			out = append(out, agentAnswerItem{it.question, it.answer})
 		}
 		if r.AnsweredBy == proto.AnsweredByAssistant {
-			return renderDelegatedAnswer(out, r.Reason)
+			return renderDelegatedAnswer(out, r.Reason, answerLanguage(s.hello(ctx).Locale))
 		}
-		return renderAnswer(out)
+		return renderAnswer(out, answerLanguage(s.hello(ctx).Locale))
 	}
 	if !only[answerGo] {
 		s.work.mu.Lock()
@@ -441,4 +438,19 @@ func (s *Service) sendToSession(ctx context.Context, machine, sid, text string) 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return s.call(ctx, machine, DeviceSessionSend, map[string]any{"session_id": sid, "text": text}, nil)
+}
+
+// sendModelRetry ties uncertain delivery retries to one message, rather than
+// submitting another continuation after a lost acknowledgement.
+func (s *Service) sendModelRetry(ctx context.Context, e db.SessionWork, text string) error {
+	s.work.mu.Lock()
+	s.work.init()
+	s.work.sent[[2]string{e.MachineID, e.SessionID}] = time.Now()
+	s.work.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	// PostgreSQL timestamps retain microseconds. Use that same precision before
+	// and after loading a due row so a crash cannot change its once-only send ID.
+	id := fmt.Sprintf("model-retry:%s:%d:%d", e.SessionID, e.TurnAt.Truncate(time.Microsecond).UnixNano(), e.Retries)
+	return s.call(ctx, e.MachineID, DeviceSessionSendOnce, map[string]any{"session_id": e.SessionID, "text": text, "client_msg_id": id}, nil)
 }

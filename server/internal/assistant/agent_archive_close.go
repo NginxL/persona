@@ -63,7 +63,7 @@ func (svc *Service) archiveAndCloseAgentSession(ctx context.Context, mid, sid st
 		return agentArchiveCloseResult{}, err
 	}
 	if agentCloseBusy(row) {
-		return agentArchiveCloseResult{}, archiveRefusal(http.StatusConflict, "agent_busy", i18n.Err("hub-agent_archives.close_busy"))
+		return agentArchiveCloseResult{}, archiveBusyRefusal(row, true)
 	}
 	if row, err = svc.setAgentArchive(ctx, row.MachineID, row.SessionID, true); err != nil {
 		return agentArchiveCloseResult{}, err

@@ -4,8 +4,9 @@
 // subagents) and Completed (the ended workflow runs and retained shell / Monitor outcomes the node still lists, newest
 // end first). A row is a round kind mark, a status mark and the title, with "status · progress · duration · tokens ·
 // tool uses" under it. A workflow row opens its detail in the panel (Back, the run's head, progress and phases:
-// WorkflowCard); a background task with an output file opens its result, full command and bounded output here, with
-// Back to the list. The panel reads the session from the store, live; clocks tick only while something runs.
+// WorkflowCard); a background command or Monitor opens its result, full command and bounded output here, with Back to
+// the list, before its output file is known too (a Monitor's arrives with its first event, #10852); a subagent opens
+// only with one. The panel reads the session from the store, live; clocks tick only while something runs.
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { credentialOwner, subscribeCredentialOwner } from "../../lib/api";
@@ -46,6 +47,10 @@ export function backgroundSections(s: Session | undefined, now: number): { loop?
   };
 }
 
+/** Whether a row opens its detail: a command or Monitor always (its output file may come later, #10852), anything else
+ *  only with an output to read. A subagent's work is its own conversation, not a file. */
+const opensDetail = (task: BackgroundTask) => Boolean(task.output_file) || task.kind === "shell" || task.kind === "monitor";
+
 /** A background task's round kind mark: a command's terminal, a Monitor's, a subagent's, a run an older hub lists. */
 function taskIcon(task: BackgroundTask): IconName {
   if (task.kind === "shell") return "terminal";
@@ -65,11 +70,11 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   type Selection = { kind: "run"; id: string; fromRow: boolean }
     | { kind: "command"; task: BackgroundTask; cwd?: string; owner: string; manager?: string; fromRow: boolean };
   const asks = (p: BackgroundPanelObject, previous?: Selection | null): Selection | null => {
-    if (p.run) return { kind: "run", id: p.run, fromRow: false };
+    if (p.run) return { kind: "run", id: p.run, fromRow: p.from === "overview" };
     if (!p.task) return null;
     const task = [...otherBackground(session), ...(session?.background_ended ?? [])].find((entry) => entry.id === p.task);
     const same = previous?.kind === "command" && previous.task.id === p.task && previous.owner === owner && previous.manager === session?.manager;
-    return task ? { kind: "command", task, cwd: same ? previous.cwd : session?.cwd, owner, manager: session?.manager, fromRow: Boolean(same && previous.fromRow) }
+    return task ? { kind: "command", task, cwd: same ? previous.cwd : session?.cwd, owner, manager: session?.manager, fromRow: p.from === "overview" || Boolean(same && previous.fromRow) }
       : same ? previous : null;
   };
   const [asked, setAsked] = useState(opened);
@@ -102,12 +107,17 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   // Keep the last task metadata when it leaves both lists; disappearance does not report its outcome.
   if (command && currentCommand && command.task !== currentCommand) setShown({ ...command, task: currentCommand });
   useEffect(() => {
-    if ((shown?.kind === "run" && !run) || (command && !commandCurrent)) setShown(null);
-  }, [shown, run, command, commandCurrent]);
+    const retired = (shown?.kind === "run" && !run) || (command && !commandCurrent);
+    if (retired) setShown(null);
+    // A fallback list has no overview to return to. Clear the origin so ChatView shows the overview again and a row
+    // opened from this list keeps the list's own Back behavior.
+    if (opened.from === "overview" && (retired || !shown)) openPanel({ kind: "background", mid, sid });
+  }, [shown, run, command, commandCurrent, opened.from, mid, sid]);
   useEffect(() => { if (!owned) onClose(); }, [owned, onClose]);
   const rememberList = () => { listTop.current = list.current?.querySelector<HTMLElement>("[data-background-list]")?.scrollTop ?? 0; };
   const goBack = () => {
     if (!shown) return;
+    if (opened.from === "overview") { onClose(); return; }
     back.current = { kind: shown.kind, id: shown.kind === "run" ? shown.id : shown.task.id, top: listTop.current };
     setShown(null);
     openPanel({ kind: "background", mid, sid });
@@ -133,14 +143,16 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
         />
       ) : command && commandCurrent ? (
         <BackgroundCommandDetail
-          key={JSON.stringify([mid, sid, command.task.id, command.task.output_file])}
+          // Not the output file: a Monitor's arrives later, and the detail switches to it in place (#10852).
+          key={JSON.stringify([mid, sid, command.task.id])}
           mid={mid} sid={sid} cwd={command.cwd} task={currentCommand ?? command.task}
           running={Boolean(runningCommand && !endedCommand)} focus={command.fromRow} owner={command.owner} manager={command.manager}
           onBack={goBack}
           onOpenFile={() => {
             const current = getSession(mid, sid);
-            if (credentialOwner() !== command.owner || !current || current.manager !== command.manager) return;
-            openPanel({ kind: "file", mid, path: (currentCommand ?? command.task).output_file!, cwd: command.cwd });
+            const path = (currentCommand ?? command.task).output_file;
+            if (!path || credentialOwner() !== command.owner || !current || current.manager !== command.manager) return;
+            openPanel({ kind: "file", mid, path, cwd: command.cwd });
           }}
         />
       ) : (
@@ -195,7 +207,7 @@ export function BackgroundList({ session, mid, sid, onOpenRun, onOpenTask, inOve
           const current = getSession(mid, sid);
           if (owner === credentialOwner() && current && current.manager === session?.manager && task.command) void copyText(task.command);
         }}
-        onClick={task.output_file ? () => onOpenTask(task) : undefined}
+        onClick={opensDetail(task) ? () => onOpenTask(task) : undefined}
         data={{ "data-bg-task": task.id }}
       />
     );

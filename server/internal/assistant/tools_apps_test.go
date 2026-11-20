@@ -55,6 +55,61 @@ func TestKBProjectNoteRoundTrip(t *testing.T) {
 	}
 }
 
+// kb_update takes a wrong person or chat off a project for good, and only that link: the lists stay open to the
+// pipeline, which no longer brings the removed ones back (#10333).
+func TestKBUpdateRemovesOneLink(t *testing.T) {
+	s := newKBService(t, newFakeHub())
+	e := kbEng(t, s)
+	_ = e.Store.PutPerson(&kb.Person{ID: "alice", Name: "alice", Projects: []string{"billing-migration"}})
+	_ = e.Store.PutChat(&kb.Chat{ID: "team-chat", Name: "team-chat", Kind: "group", Projects: []string{"billing-migration"}})
+	_ = e.Store.PutProject(&kb.Project{Slug: "billing-migration", Name: "billing-migration", Status: "active",
+		People: []string{"alice"}, Chats: []string{"team-chat"}})
+	out, err := runTool(s, "c1", "kb_update", map[string]any{"kind": "projects", "id": "billing-migration",
+		"remove_people": []string{"alice"}, "remove_chats": []string{"team-chat"}})
+	if err != nil || out != "Saved projects/billing-migration." {
+		t.Fatalf("update: %q %v", out, err)
+	}
+	p, _ := e.Store.Project("billing-migration")
+	if len(p.People)+len(p.Chats)+len(p.LockedFields) != 0 || len(p.Excluded["people"]) != 1 || len(p.Excluded["chats"]) != 1 {
+		t.Fatalf("project after the removal: people %v, chats %v, locked %v, excluded %v", p.People, p.Chats, p.LockedFields, p.Excluded)
+	}
+	p.People, p.Chats = []string{"alice", "bob"}, []string{"team-chat", "new-chat"}
+	_ = e.Store.PutProject(p)
+	if p, _ = e.Store.Project("billing-migration"); strings.Join(p.People, ",") != "bob" || strings.Join(p.Chats, ",") != "new-chat" {
+		t.Fatalf("pipeline after the removal: people %v, chats %v", p.People, p.Chats)
+	}
+}
+
+// The app's PUT takes lock_lists and allow_*: a removal that does not lock, the detail naming what was removed, and
+// allowing it again; an allow_* list the kind has no list for is said, not applied.
+func TestKBRouteRemovesOneLinkAndAllowsItAgain(t *testing.T) {
+	s := newKBService(t, newFakeHub())
+	e := kbEng(t, s)
+	_ = e.Store.PutPerson(&kb.Person{ID: "alice", Name: "alice", Projects: []string{"billing-migration"}})
+	_ = e.Store.PutProject(&kb.Project{Slug: "billing-migration", Name: "billing-migration", Status: "active", People: []string{"alice"}})
+	path := "/api/v1/kb/projects/billing-migration"
+	if w := boardCall(s, "PUT", path, `{"remove_people":["alice"],"lock_lists":false}`, roleFull); w.Code != 200 {
+		t.Fatalf("remove: HTTP %d %s", w.Code, w.Body)
+	}
+	w := boardCall(s, "GET", path, "", roleFull)
+	var got struct {
+		Detail struct {
+			Meta    map[string]any `json:"meta"`
+			Removed []kb.Entry     `json:"removed"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Detail.Removed) != 1 || got.Detail.Removed[0].ID != "alice" || got.Detail.Meta["locked_fields"] != nil {
+		t.Fatalf("detail: %v %s", err, w.Body)
+	}
+	w = boardCall(s, "PUT", path, `{"allow_people":["alice"],"allow_projects":["other"]}`, roleFull)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"field":"allow_projects"`) {
+		t.Fatalf("allow: HTTP %d %s", w.Code, w.Body)
+	}
+	if p, _ := e.Store.Project("billing-migration"); len(p.Excluded) != 0 || len(p.People) != 0 {
+		t.Fatalf("after allowing: people %v, excluded %v", p.People, p.Excluded)
+	}
+}
+
 // The kb_* tools read the assistant's knowledge base and write what the model reads: defaults and caps of their
 // arguments, the lines, the list, an entry with its meta.json as the file has it and dates in the user's zone.
 func TestKBToolsFormatTheData(t *testing.T) {

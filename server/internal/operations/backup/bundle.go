@@ -104,6 +104,9 @@ func (m *Manifest) validate() error {
 			return fmt.Errorf("invalid payload identity for %s", entry.Path)
 		}
 	}
+	if name := overlappingPayload(seen); name != "" {
+		return fmt.Errorf("payload path %q is both a file and a parent directory", name)
+	}
 	for _, required := range []string{hubDumpPath, managerDumpPath, "runtime/hub.json", hubKeyPath, managerKeyPath, "runtime/managers/assistant/manager.json"} {
 		if !seen[required] {
 			return fmt.Errorf("the bundle lacks required member %s", required)
@@ -120,6 +123,21 @@ func (m *Manifest) validate() error {
 		}
 	}
 	return nil
+}
+
+func overlappingPayload(files map[string]bool) string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		prefix := name + "/"
+		if i := sort.SearchStrings(names, prefix); i < len(names) && strings.HasPrefix(names[i], prefix) {
+			return name
+		}
+	}
+	return ""
 }
 
 func manifestFiles(staging string) ([]FileEntry, error) {
@@ -312,108 +330,201 @@ func decodeManifest(reader io.Reader) (*Manifest, error) {
 	return &manifest, nil
 }
 
-func readBundleManifest(bundle string) (*Manifest, int64, error) {
+type bundleProblemKind string
+
+const (
+	bundleUnreadable bundleProblemKind = "unreadable"
+	bundleUnsafe     bundleProblemKind = "unsafe"
+	bundleManifest   bundleProblemKind = "manifest"
+	bundleLayout     bundleProblemKind = "layout"
+	bundleDigest     bundleProblemKind = "digest"
+	bundleIncomplete bundleProblemKind = "incomplete"
+	bundleKey        bundleProblemKind = "key"
+)
+
+type bundleProblem struct {
+	kind bundleProblemKind
+	err  error
+}
+
+func (e *bundleProblem) Error() string { return e.err.Error() }
+func (e *bundleProblem) Unwrap() error { return e.err }
+
+func problem(kind bundleProblemKind, err error) error {
+	return &bundleProblem{kind: kind, err: err}
+}
+
+func openBundle(bundle string) (*os.File, int64, error) {
 	info, err := os.Lstat(bundle)
 	if err != nil {
+		return nil, 0, problem(bundleUnreadable, err)
+	}
+	if err := checkBundleFile(info); err != nil {
 		return nil, 0, err
 	}
+	file, err := os.Open(bundle)
+	if err != nil {
+		return nil, 0, problem(bundleUnreadable, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, 0, problem(bundleUnreadable, err)
+	}
+	if !os.SameFile(info, opened) {
+		file.Close()
+		return nil, 0, problem(bundleUnreadable, errors.New("the bundle changed while it was opened"))
+	}
+	if err := checkBundleFile(opened); err != nil {
+		file.Close()
+		return nil, 0, err
+	}
+	return file, opened.Size(), nil
+}
+
+func checkBundleFile(info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
-		return nil, 0, errors.New("the bundle is not a regular file")
+		return problem(bundleUnsafe, errors.New("the bundle is not a regular file"))
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return nil, 0, errors.New("the bundle must be mode 0600 before it is read")
+		return problem(bundleUnsafe, errors.New("the bundle must be mode 0600 before it is read"))
 	}
-	file, err := os.Open(bundle)
+	return nil
+}
+
+func readBundleManifest(bundle string) (*Manifest, int64, error) {
+	file, size, err := openBundle(bundle)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer file.Close()
-	reader := tar.NewReader(file)
+	manifest, err := findBundleManifest(file)
+	return manifest, size, err
+}
+
+func findBundleManifest(source io.Reader) (*Manifest, error) {
+	reader := tar.NewReader(source)
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, 0, errors.New("the bundle has no manifest")
+			return nil, problem(bundleManifest, errors.New("the bundle has no manifest"))
 		}
 		if err != nil {
-			return nil, 0, err
+			return nil, problem(bundleManifest, err)
 		}
-		if header.Name != manifestPath {
-			continue
+		if header.Name == manifestPath {
+			return readArchiveManifest(reader, header)
 		}
-		if header.Typeflag != tar.TypeReg || header.Size > maxManifestSize {
-			return nil, 0, errors.New("the bundle manifest is invalid")
+		if !regularArchiveFile(header) {
+			return nil, problem(bundleLayout, errors.New("the archive contains a non-regular member"))
 		}
-		manifest, err := decodeManifest(io.LimitReader(reader, maxManifestSize+1))
-		return manifest, info.Size(), err
 	}
 }
 
+func regularArchiveFile(header *tar.Header) bool {
+	if header.Typeflag != tar.TypeReg {
+		return false
+	}
+	// The writer only produces regular non-sparse members. PAX sparse fields
+	// can turn a small physical archive into a very large logical member.
+	for field := range header.PAXRecords {
+		if strings.HasPrefix(field, "GNU.sparse.") {
+			return false
+		}
+	}
+	return true
+}
+
+func readArchiveManifest(reader io.Reader, header *tar.Header) (*Manifest, error) {
+	if !regularArchiveFile(header) || header.Size > maxManifestSize {
+		return nil, problem(bundleManifest, errors.New("the bundle manifest is invalid"))
+	}
+	manifest, err := decodeManifest(io.LimitReader(reader, header.Size))
+	if err != nil {
+		return nil, problem(bundleManifest, err)
+	}
+	return manifest, nil
+}
+
 func extractBundle(bundle, destination string, manifest *Manifest) error {
-	file, err := os.Open(bundle)
+	file, _, err := openBundle(bundle)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
+	return walkBundle(file, manifest, func(reader io.Reader, header *tar.Header) error {
+		return extractValidatedManifest(reader, destination, header, manifest)
+	}, func(reader io.Reader, entry FileEntry) error {
+		return extractMember(reader, destination, entry)
+	})
+}
+
+// walkBundle enforces the same layout for restoration and offline inspection.
+// Each visitor consumes its full member and verifies its contents.
+func walkBundle(source io.Reader, manifest *Manifest, onManifest func(io.Reader, *tar.Header) error, onMember func(io.Reader, FileEntry) error) error {
 	expected := make(map[string]FileEntry, len(manifest.Files))
 	for _, entry := range manifest.Files {
 		expected[entry.Path] = entry
 	}
-	seen := make(map[string]bool, len(expected))
-	reader := tar.NewReader(file)
+	seenManifest := false
+	reader := tar.NewReader(source)
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return err
+			return problem(bundleIncomplete, err)
 		}
 		if header.Name == manifestPath {
-			if seen[manifestPath] {
-				return errors.New("duplicate bundle manifest")
+			if seenManifest {
+				return problem(bundleLayout, errors.New("duplicate bundle manifest"))
 			}
-			seen[manifestPath] = true
-			if err := extractValidatedManifest(reader, destination, header.Size, manifest); err != nil {
+			seenManifest = true
+			if err := onManifest(reader, header); err != nil {
 				return err
 			}
 			continue
 		}
 		entry, ok := expected[header.Name]
 		if !ok {
-			return fmt.Errorf("unlisted bundle member %q", header.Name)
+			return problem(bundleLayout, fmt.Errorf("unlisted or duplicate bundle member %q", header.Name))
 		}
-		if seen[header.Name] || header.Typeflag != tar.TypeReg || header.Size != entry.Size || uint32(header.Mode&0o777) != entry.Mode {
-			return fmt.Errorf("invalid bundle member %s", header.Name)
+		if !regularArchiveFile(header) || header.Size != entry.Size || header.Mode != int64(entry.Mode) {
+			return problem(bundleLayout, fmt.Errorf("invalid bundle member %s", header.Name))
 		}
-		seen[header.Name] = true
-		if err := extractMember(reader, destination, entry); err != nil {
+		delete(expected, header.Name)
+		if err := onMember(reader, entry); err != nil {
 			return err
 		}
 	}
 	for name := range expected {
-		if !seen[name] {
-			return fmt.Errorf("bundle member %s is missing", name)
-		}
+		return problem(bundleIncomplete, fmt.Errorf("bundle member %s is missing", name))
 	}
-	if !seen[manifestPath] {
-		return errors.New("the bundle manifest is missing")
+	if !seenManifest {
+		return problem(bundleManifest, errors.New("the bundle manifest is missing"))
 	}
 	return nil
 }
 
-func extractValidatedManifest(reader io.Reader, destination string, size int64, expected *Manifest) error {
-	if size > maxManifestSize {
-		return errors.New("the bundle manifest is too large")
+func compareArchiveManifest(reader io.Reader, header *tar.Header, expected *Manifest) error {
+	manifest, err := readArchiveManifest(reader, header)
+	if err != nil {
+		return err
 	}
+	if !reflect.DeepEqual(manifest, expected) {
+		return problem(bundleManifest, errors.New("the bundle manifest changed between validation passes"))
+	}
+	return nil
+}
+
+func extractValidatedManifest(reader io.Reader, destination string, header *tar.Header, expected *Manifest) error {
 	name := filepath.Join(destination, manifestPath)
 	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	manifest, decodeErr := decodeManifest(io.TeeReader(io.LimitReader(reader, size), file))
-	if decodeErr == nil && !reflect.DeepEqual(manifest, expected) {
-		decodeErr = errors.New("the bundle manifest changed between validation passes")
-	}
+	decodeErr := compareArchiveManifest(io.TeeReader(reader, file), header, expected)
 	if syncErr := file.Sync(); decodeErr == nil {
 		decodeErr = syncErr
 	}
@@ -432,14 +543,7 @@ func extractMember(reader io.Reader, destination string, entry FileEntry) error 
 	if err != nil {
 		return err
 	}
-	hash := sha256.New()
-	written, copyErr := io.CopyN(io.MultiWriter(file, hash), reader, entry.Size)
-	if copyErr == nil && written != entry.Size {
-		copyErr = io.ErrUnexpectedEOF
-	}
-	if copyErr == nil && hex.EncodeToString(hash.Sum(nil)) != entry.SHA256 {
-		copyErr = fmt.Errorf("SHA-256 mismatch for %s", entry.Path)
-	}
+	copyErr := checkBundleMember(reader, file, entry)
 	if syncErr := file.Sync(); copyErr == nil {
 		copyErr = syncErr
 	}
@@ -447,4 +551,15 @@ func extractMember(reader io.Reader, destination string, entry FileEntry) error 
 		copyErr = closeErr
 	}
 	return copyErr
+}
+
+func checkBundleMember(reader io.Reader, destination io.Writer, entry FileEntry) error {
+	hash := sha256.New()
+	if _, err := io.CopyN(io.MultiWriter(destination, hash), reader, entry.Size); err != nil {
+		return problem(bundleIncomplete, err)
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != entry.SHA256 {
+		return problem(bundleDigest, fmt.Errorf("SHA-256 mismatch for %s", entry.Path))
+	}
+	return nil
 }

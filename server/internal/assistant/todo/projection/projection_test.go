@@ -176,7 +176,7 @@ func TestOwnerDecidesWithoutAReview(t *testing.T) {
 	f := Facts{ID: "todo_r", CreatedAt: hours(-5), UpdatedAt: hours(-5), Agents: []Agent{},
 		Supervision: &Supervision{State: reviewNeedsUser, UpdatedAt: hours(-1)}}
 	if v := View(f, testNow); v.Reason != assistantwire.TodoReasonOwnerDecides || v.Line == nil ||
-		v.Line.Key != lineDecision || v.Line.Args != nil || !v.Since.IsZero() {
+		v.Line.Key != assistantwire.TodoLineKeyDecision || v.Line.Args != nil || !v.Since.IsZero() {
 		t.Fatalf("%+v", v)
 	}
 }

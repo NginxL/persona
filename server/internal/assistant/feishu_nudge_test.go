@@ -790,6 +790,8 @@ func TestNudgeDeadlineWaitsForResume(t *testing.T) {
 	wantNudges(t, r, 0, "the original deadline passed during a question pause")
 
 	r.s.fleet.mu.Lock()
+	// Production resume publishes the decision deadline moved by the completed pause.
+	p.ix.ExpiresAt = p.ix.ExpiresAt.Add(10 * time.Minute)
 	p.prepared.paused = false
 	p.prepared.pausedTotal = 10 * time.Minute
 	r.s.fleet.mu.Unlock()

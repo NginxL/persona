@@ -21,9 +21,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/streams"
 )
 
 // The ports the agents listen on (docs/operations/ports.md): each live agent's processes — what runs under it and what else
@@ -706,20 +708,7 @@ func procNetAddr(h string) (string, bool) {
 // portDial is port.dial: a stream (streams.Mux) to the port on this machine, at the address the scan found it on,
 // else at loopback. Only this machine's own addresses are ever dialed.
 func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error) {
-	var p struct {
-		ID   string `json:"id"`
-		Port int    `json:"port"`
-		// The live screen (5900) is being watched: the Mac stays awake until it closes (awake.go).
-		KeepAwake bool `json:"keep_awake"`
-		// Pair ties this 5900 stream to a later screen.dial for the video channel (#3954); the node follows Screen
-		// Sharing's login on it. Empty for every other port and for 5900 without the video channel.
-		Pair string `json:"pair"`
-		// Link: the phone asked for a screen session (#6398, screenlink): the stream carries the session's framing,
-		// not Screen Sharing's bytes, and the answer says {link: 1}. Attach: a relay rejoining the live session for
-		// pair, which sends the session's token first; nothing is dialed. Only for 5900 with a pair.
-		Link   bool `json:"link"`
-		Attach bool `json:"attach"`
-	}
+	var p devicewire.PortDial
 	if err := json.Unmarshal(params, &p); err != nil || p.ID == "" || p.Port <= 0 || p.Port > 65535 {
 		return nil, errors.New("port.dial: need id and port")
 	}
@@ -758,6 +747,10 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 		_, relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here
 		n.streams.Start(p.ID, relay)
 		return map[string]any{"link": 1}, nil
+	}
+	if tcp, ok := c.(streams.HalfCloseConn); ok && p.StreamVersion == devicewire.PortStreamHalfCloseV1 {
+		n.streams.StartHalfClose(p.ID, tcp, true)
+		return devicewire.PortDialReply{StreamVersion: p.StreamVersion}, nil
 	}
 	n.streams.Start(p.ID, c)
 	return map[string]any{}, nil

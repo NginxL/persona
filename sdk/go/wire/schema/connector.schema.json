@@ -445,6 +445,10 @@
         "defer_loading": {
           "type": "boolean",
           "description": "Set by Persona itself on an assistant conversation's tool list: a rarely used tool is sent by name only and loaded with tool search when needed (#7317). A connector does not need to send it; the manager sets it on every list whatever a connector sent."
+        },
+        "work_guide_tool": {
+          "type": "boolean",
+          "description": "Set by Persona itself on the tool list of an assistant conversation with the work guide on: the tool is found on demand through the guide (#11078). A connector does not need to send it; the manager sets it on every list whatever a connector sent."
         }
       },
       "required": ["name", "description", "input_schema"]
@@ -757,6 +761,7 @@
         "open_url": {"type": "string", "description": "A link the system opens instead (sms:…)."},
         "reply_to": {"type": "string", "description": "Where a reply goes and who sees it."},
         "can_reply": {"type": "boolean"},
+        "avatar": {"type": "string", "maxLength": 2048, "description": "The thread's picture: one of the connector's own media refs (thread.media, as a ThreadChat's avatar) or an https address the hub fetches, either always naming the same bytes (docs \"Avatars\"). The other person of a private chat, a group's own. The Inbox row draws it; without one, the initial."},
         "tier": {"type": "string", "description": "ConnectorTier, or empty for the model."},
         "why": {"type": "string"},
         "rules": {"type": "string", "maxLength": 4000, "description": "The user's own triage rules for this source or account; when set the model gets them instead of the hub's."},
@@ -966,7 +971,10 @@
         "muted": {"type": "boolean", "description": "The owner muted it (a source's automatic muting of large groups included)."},
         "collapsed": {"type": "boolean", "description": "The owner folded it away (a chat box, folded groups)."},
         "done": {"type": "boolean", "description": "The owner marked it done."},
-        "updated_at": {"type": "string", "format": "date-time"}
+        "updated_at": {"type": "string", "format": "date-time"},
+        "state": {"type": "string", "enum": ["open", "merged", "closed"], "description": "Where the conversation stands at the source, as the source records it (a pull request or issue: open, merged or closed); omitted when the source has no such state. A fact, not the owner's done flag: the selection does not read it; the knowledge base keeps it on the chat, finishes projects whose chats have all ended and leaves ended chats out of the assistant's snapshot."},
+        "state_at": {"type": "string", "format": "date-time", "description": "When the conversation got to state; omitted when unknown."},
+        "source_url": {"type": "string", "description": "Stable HTTP(S) link to the conversation at its source, when available."}
       },
       "required": ["id", "name", "kind"]
     },
@@ -1114,7 +1122,8 @@
         "tagged_at": {"type": "string", "format": "date-time"},
         "pinned": {"type": "string"},
         "locked_fields": {"type": "array", "items": {"type": "string"}},
-        "provenance": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ConnectorKBProvenance"}, "description": "The store's: which extension holds a locked field. A connector's is ignored."}
+        "provenance": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ConnectorKBProvenance"}, "description": "The store's: which extension holds a locked field. A connector's is ignored."},
+        "excluded": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}, "description": "The store's: the links the user removed, by list. A connector's is ignored."}
       },
       "required": ["kind", "id", "title"]
     },

@@ -1,0 +1,10 @@
+会話：chat:F1
+分類する新着メッセージ：m1060、m1061
+
+10:05 丙：示例 A 那个周四下午可以 (m1060)
+10:06 丁：示例 B 的接口改了 (m1061)
+
+この会話の現在の案件（query なしの events の結果）：
+[{"id":"lark:F1:1051","title":"示例 A 方案评审","summary":"等你定时间","tier":"action","version":"fad0d26f49476dcf","done":false,"meta":{"messages":["m1051"]}},{"id":"lark:F1:900","title":"示例上周的发布","tier":"fyi","version":"c836f9ca5b04f83e","done":true,"meta":{"messages":["m900"]}}]
+
+あと 4 回調べられます。

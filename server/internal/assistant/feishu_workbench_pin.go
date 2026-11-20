@@ -62,8 +62,10 @@ func (s *Service) standingCard(ctx context.Context) (card *feishubot.Card, fallb
 	return s.boardCard(ctx)
 }
 
-// workbenchStamp adds the workbench button to a card the bot posts or redraws, with the switch on: any card can bring
-// up the latest workbench. Not to one that has a way back already (the workbench's own cards) or is near its size.
+// workbenchStamp adds a way back to the workbench to a card the bot posts or redraws, with the switch on: any card can
+// bring up the latest workbench. It is a small text button, in the card's row of links or as a line of its own at its
+// end, never beside its actions (#5317); not on a card that has a way back already (the workbench's own cards) or is
+// near its size.
 func (s *Service) workbenchStamp(ctx context.Context, c *feishubot.Card) *feishubot.Card {
 	if c == nil || !s.workbench.on.Load() {
 		return c
@@ -72,7 +74,7 @@ func (s *Service) workbenchStamp(ctx context.Context, c *feishubot.Card) *feishu
 	if strings.Contains(js, `"a":"nav"`) || len(js) > workbenchStampMost {
 		return c
 	}
-	return c.AppendToLinks(wbNavButton(wbT(s.botLang(ctx), "btn_home"), feishubot.Default, "home"))
+	return c.AppendToLinks(feishubot.TextBtn(wbT(s.botLang(ctx), "stamp_home"), map[string]any{"a": "nav", "to": "home"}))
 }
 
 // summonWorkbench posts a fresh workbench at the bottom of the chat, pins it as the only pin of the bot's, and
@@ -139,7 +141,7 @@ func (s *Service) workbenchRefresh(ctx context.Context) {
 func (s *Service) workbenchBringCard(ctx context.Context, id string) {
 	var ix proto.Interaction
 	found := false
-	for _, p := range s.pendingInteractions() {
+	for _, p := range s.visiblePendingInteractions() {
 		if p.ID == id {
 			ix, found = p, true
 			break

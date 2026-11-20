@@ -17,7 +17,7 @@ import (
 // fail can't be read. With release set, a read waits for it to close instead of delay. It records how many reads
 // ran at once.
 type slowMail struct {
-	Mail
+	inboxOnlyMail
 	accounts []mail.MailAccount
 	delay    time.Duration
 	release  chan struct{}

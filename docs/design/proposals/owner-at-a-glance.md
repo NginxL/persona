@@ -1,7 +1,10 @@
 # Proposal: the owner sees every direction at a glance
 
-Status: proposal (#3465); H1 built (#3494, #3519, #3530), H2 built (#3561, `docs/assistant/todos.md` "Concerns"); H3 built (#3607, #3608, #3679, `docs/assistant/unified-entry.md` "New chat opens a direction", "New agent goes under a leader", "Names and progress"); P1 built (#3609). Covers hub, prompts, web, iOS / Mac and Android, plus a contract with
-work-log extensions.
+Status for #3465. H1 shipped in #3494, #3519 and #3530, H2 in #3561 (`docs/assistant/todos.md` "Concerns"), and P1 in #3609.
+The H3 New agent and progress work shipped in #3608 and #3679. The New chat offer strip proposed below never shipped,
+and #11700 removed its background classifier from #3607. The owner pins an ordinary chat to make it a direction.
+See `docs/assistant/unified-entry.md` "Pin a chat as a direction", "New agent goes under a leader" and "Names and progress".
+The proposal covers the hub, prompts, web, iOS, Mac and Android plus a contract with work-log extensions.
 
 ## 1. Goal
 

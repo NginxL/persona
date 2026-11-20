@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -106,8 +107,8 @@ func TestCloseoutSwitchSurvivesOlderApps(t *testing.T) {
 }
 
 func TestGoldenAgentCloseoutRequired(t *testing.T) {
-	golden(t, "agent_closeout_required", renderCloseoutRequired("简体中文"))
-	golden(t, "agent_closeout_required.no_language", renderCloseoutRequired(""))
+	golden(t, "agent_closeout_required", renderCloseoutRequired("简体中文", closeout.Example))
+	golden(t, "agent_closeout_required.no_language", renderCloseoutRequired("", closeout.Example))
 }
 
 const mergedCloseout = "合了。\n<closeout status=\"done\" merged=\"yes\" deployed=\"yes\">\ndid: 修了重试\nartifact: pr https://github.com/o/r/pull/9\n</closeout>"

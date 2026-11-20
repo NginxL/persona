@@ -652,20 +652,7 @@ struct TodoRow: View {
                     }
                 }
 
-                HStack(spacing: Theme.Space.sm) {
-                    StatusDot(state: urgent?.status ?? (status == .done ? .idle : .unknown), size: Theme.Size.dotS)
-                    Text(todo.statusLabel(status))
-                        .font(Theme.Font.labelStrong)
-                        .foregroundStyle(todo.shownState(status).todoTone.text)
-                    if !activeAgents.isEmpty {
-                        Text("· \(activeAgents.count) agents")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    // An accepted open concern waits for its report in its open state, without an Accepted tag (#3582).
-                    if !todo.isDone && !(todo.isConcern && todo.reviewState == .accepted) { ReviewChip(todo: todo, compact: true) }
-                }
+                statusLine(status: status, urgent: urgent, activeAgents: activeAgents, onSeen: onSeen)
 
                 // Nobody is working on it (#3618): under its state, where its supervision shows.
                 OrphanedLine(todo: todo, state: status)
@@ -701,22 +688,6 @@ struct TodoRow: View {
                     .foregroundStyle(Theme.accent)
                     .buttonStyle(.borderless)
                     .accessibilityIdentifier("todos.restore")
-                }
-
-                if let onSeen {
-                    Button(action: onSeen) {
-                        Label("Got It [To-do Seen]", systemImage: Theme.Icon.seen)
-                            .lineLimit(1)
-                            .scaledFrame(minHeight: Theme.Size.tapTarget, alignment: .leading)
-                            .contentShape(.rect)
-                    }
-                    .font(Theme.Font.captionStrong)
-                    .foregroundStyle(Theme.accent)
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(todo.isConcern && todo.doneAt == nil
-                        ? Text("Got It: move \(todo.title) to Other open")
-                        : Text("Got It: move \(todo.title) to Done"))
-                    .accessibilityIdentifier("todos.seen.\(todo.id)")
                 }
 
                 if failedOpen, let error = todo.startError {
@@ -766,6 +737,68 @@ struct TodoRow: View {
             }
             .padding(.vertical, Theme.Space.xs)
         }
+    }
+
+    /// Got It ends the status line when the words and chip fit whole. Otherwise only Got It moves to the trailing end
+    /// of the next line; the status keeps the wrapping it has without the button. MeasuredOnce avoids remeasuring the
+    /// candidates whenever the row moves on screen (#7148, docs/apple/performance.md P7).
+    @ViewBuilder private func statusLine(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent],
+                                        onSeen: (() -> Void)?) -> some View {
+        let words = statusWords(status: status, urgent: urgent, activeAgents: activeAgents)
+        if let onSeen {
+            ViewThatFits(in: .horizontal) {
+                MeasuredOnce {
+                    HStack(spacing: Theme.Space.sm) {
+                        words.fixedSize(horizontal: true, vertical: false)
+                        Spacer(minLength: Theme.Space.xs)
+                        seenButton(onSeen)
+                    }
+                }
+                MeasuredOnce {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        HStack(spacing: Theme.Space.sm) { words }
+                        HStack {
+                            Spacer()
+                            seenButton(onSeen)
+                        }
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: Theme.Space.sm) { words }
+        }
+    }
+
+    /// The status line's words: the state, its agents, the review.
+    @ViewBuilder private func statusWords(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent]) -> some View {
+        StatusDot(state: urgent?.status ?? (status == .done ? .idle : .unknown), size: Theme.Size.dotS)
+        Text(todo.statusLabel(status))
+            .font(Theme.Font.labelStrong)
+            .foregroundStyle(todo.shownState(status).todoTone.text)
+        if !activeAgents.isEmpty {
+            Text("· \(activeAgents.count) agents")
+                .font(Theme.Font.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        // An accepted open concern waits for its report in its open state, without an Accepted tag (#3582).
+        if !todo.isDone && !(todo.isConcern && todo.reviewState == .accepted) { ReviewChip(todo: todo, compact: true) }
+    }
+
+    /// Got It (#5707) at the end of the status line, under the time (#6578): a compact accent chip, as the minutes' time
+    /// chip, whose capsule hangs over the line so the row is as tall as without it, hit like a finger-sized row
+    /// (`tapTargetOutset`). A borderless button in the row: its tap stays its own and never opens the to-do.
+    private func seenButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Chip(text: String(localized: "Got It [To-do Seen]"), symbol: Theme.Icon.seen, look: .tint(Theme.accent), compact: true)
+                .padding(.vertical, -Chip.compactInset)
+                .tapTargetOutset()
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(todo.isConcern && todo.doneAt == nil
+            ? Text("Got It: move \(todo.title) to Other open")
+            : Text("Got It: move \(todo.title) to Done"))
+        .accessibilityIdentifier("todos.seen.\(todo.id)")
     }
 
     private func mostUrgentSummary(urgent: TodoMostUrgent?) -> String? {

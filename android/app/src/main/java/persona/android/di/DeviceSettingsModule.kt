@@ -62,6 +62,8 @@ class WiredDeviceSettings @Inject constructor(
                                     throw error
                                 }
                             }
+                            override suspend fun browserLogin(id: String, hub: String, allow: Boolean?) =
+                                checked { http.browserLogin(id, hub, allow) }
                             override suspend fun devices() = checked { http.devices() }
                             override suspend fun revoke(credentialId: String) = checked { http.revoke(credentialId) }
                             override suspend fun preferences() = checked { http.preferences() }.also { mutablePreferences.value = it }

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SESSIONS_HIERARCHY_FEATURE } from "../lib/child-sessions";
 import { homeKey } from "../lib/folded-rows";
-import { ago, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
+import { ago, backgroundWaiting, interactionCanAnswer, sessionCan, sessionPreview, shortDuration, sourceSubtitle, sessionTitle, stateOf, tabLabel } from "../lib/format";
 import { usePendingLine } from "../lib/card-answer";
 import { cardState, requestRoute } from "../lib/card-focus";
 import { interactionAsk } from "../lib/inbox";
@@ -27,7 +27,11 @@ import { getSession, useStore, withTaskRows } from "../lib/store";
 import { retryAgentList } from "../lib/sessions";
 import { discardOutbox, outboxEntry, queueToSession, retryOutboxEntry } from "../lib/outbox";
 import { homeTasks, type HomeTask } from "../lib/home-tasks";
-import { heldDelivery, makeSessionLookup, orphanedLine, TODO_STATUS_INFO, TODO_TONE_CLASS, todoStatusLabel } from "../lib/todos";
+import { sessionLauncher } from "../lib/model-switch";
+import { effortTitle } from "../lib/session-actions";
+import { modelList, pillView, useModelLists } from "../lib/session-models";
+import { heldDelivery, makeSessionLookup, orphanedLine, TODO_TONE_CLASS } from "../lib/todos";
+import { todoLook } from "../lib/todo-wait-reason";
 import { BUSY_MOTION, spinStyle } from "../lib/busy-motion";
 import type { AgentState, Interaction, Machine, Session } from "../lib/types";
 import { Button, Collapse, cx, EASE, IconButton, Loading, useNow } from "../ui/atoms";
@@ -38,7 +42,8 @@ import { Icon } from "../ui/icons";
 import { MarkSeenDialog } from "./AgentMenus";
 import { answeredLookup, answeredSessions } from "./assistant/answered-lookup";
 import { resolve } from "./chat/Interactions";
-import { OverviewCards } from "./extensions/ExtensionSlots";
+import { OverviewArrangeButton } from "./extensions/ExtensionSlots";
+import { OverviewBody, type OverviewSections } from "./OverviewBody";
 import { TodoStageBar } from "./TodoStageBar";
 import { t } from "../i18n";
 import { markAllSeenLabel, STATE_LABEL, stateCount, stateName } from "../lib/state-labels";
@@ -79,7 +84,6 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
     }
     return byMachine;
   }, [list, whole, hubAgentCounts, agentSessions]);
-  const now = useNow(5000, counts.working > 0);
 
   // the agents of one herdr tab are one row (#2320), filed under the most urgent of them; a card waiting counts as
   // something to do, and "Mark all as seen" marks every unread agent, wherever its tab is filed
@@ -113,12 +117,154 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   // Back from a card opened here lands where the reader was, not at the top (#5133)
   const scroller = useRef<HTMLDivElement>(null);
   useScrollMemory(scroller, "/overview");
+  // Overview being arranged (#9745, #10905): the order of its cards and sections, which are hidden, how wide a card is
+  const [arranging, setArranging] = useState(false);
+
+  // Overview's own sections, above the cards by default (#11147), each what it draws (nothing while it has no rows): the user may move them,
+  // and hide the ones whose rows don't need them (#10905, views/OverviewBody.tsx)
+  const sections: OverviewSections = {
+    // the headline counts agents, this counts cards: say so when one agent has several cards waiting
+    needs_you: loaded && (interactions.length > 0 || held.length > 0) && (
+      <Group title={stateName("needs_you")} count={interactions.length} hint={new Set(interactions.map(homeKey)).size < interactions.length ? t("home.needs_you_hint") : undefined} grid="cards">
+        {withHeld(interactions, held).map(({ ix, held: h }, i, rows) => {
+          const s = sessions.find((x) => x.machine_id === ix.machine_id && x.session_id === ix.session_id);
+          const title = ix.session_title || (s ? sessionTitle(s) : ix.cwd || t("home.session"));
+          // what the row answers in one tap, as iOS's "Needs you" cards; the rest (plans, forms, typing) opens the chat
+          const quick = interactionCanAnswer(ix, s ?? getSession(ix.machine_id, ix.session_id)) ? quickAnswers(ix) : null;
+          // allowed in one tap, a permission says the tool and what it runs or touches (iOS: "Bash: swift test"),
+          // not the agent's description of it
+          const tool = quick && ix.kind === "permission" ? cardToolName(ix) : "";
+          // and a terminal dialog what it is about (the command under its question), as iOS's card does. Both
+          // as they are: read as Markdown, `ls **/*.ts` lost its stars and `a <in >out` its redirections
+          const about = quick && ix.kind === "screen" ? [ix.dialog?.question, ix.dialog?.detail].filter(Boolean).join(" · ") : "";
+          const raw = (tool && permissionDetail(ix.tool_name, ix.tool_input)?.fields[0]?.value) || about;
+          const ask = (ix.kind === "plan" ? t("home.plan_ready") : raw || plainMarkdown(interactionAsk(ix))).replace(/\s+/g, " ").trim();
+          const done = h !== undefined && h.phase !== "sending";
+          // every row in a Collapse, so an answered one folds away where it is; answered, it keeps its words
+          // and its height ("Answered" in the buttons' place) until then
+          return (
+            // the room around the row (-m-2 / p-2) is its shadow's: the collapse clips what is outside it
+            <Collapse key={ix.id} open={h?.phase !== "leaving"} className="-m-2">
+              <div className="p-2">
+                <TaskRow
+                  i={i}
+                  state="needs_you"
+                  done={done}
+                  to={requestRoute(ix)}
+                  title={title}
+                  tags={rowTags(title, [name(ix.machine_id), s?.space_name, s && tabLabel(s)])}
+                  detail={(tool && ask && ask !== tool ? t("home.permission_detail", { tool, what: ask }) : ask) || undefined}
+                  pill={!done && <Pill>{interactionKicker(ix)}</Pill>}
+                  entry={cardState(ix.id)}
+                  actions={done ? <AnsweredLine ix={ix} body={h.body} /> : quick && <QuickAnswers ix={ix} choices={quick} sending={h?.pick} onPick={(c) => void answer(ix, i, rows[i + 1]?.ix.id, c)} />}
+                />
+              </div>
+            </Collapse>
+          );
+        })}
+      </Group>
+    ),
+    waiting_on_computer: loaded && groups.needs.length > 0 && (
+      <Group title={t("home.waiting_on_computer")} count={groups.needs.length} hint={t("home.waiting_on_computer_hint")} grid>
+        {groups.needs.map((g, i) => (
+          <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<Pill>{stateName("needs_you")}</Pill>} />
+        ))}
+      </Group>
+    ),
+    in_progress: loaded && tasks.rows.length > 0 && (
+      <Group
+        title={t("home.tasks")}
+        count={tasks.total}
+        right={tasks.total > tasks.rows.length && <a href={href({ name: "todos" })} onClick={(e) => onLinkClick(e, { name: "todos" })} className="touch-hit text-[12px] text-ink-3 hover:text-ink-2">{t("home.tasks_all")}</a>}
+        grid="tasks"
+      >
+        {tasks.rows.map((r) => (
+          <TaskCard key={r.todo.id} task={r} machine={name} />
+        ))}
+      </Group>
+    ),
+    // Working, then those only waiting on background commands (#6045): apart from Working, as the sidebar's quick filters
+    // and By status have them, timed from when the wait began (#10938); placed and hidden with Working
+    working: loaded && (groups.working.length > 0 || groups.waiting.length > 0) && (
+      <>
+        {groups.working.length > 0 && (
+          <Group title={stateName("working")} count={groups.working.length} grid>
+            {groups.working.map((g, i) => (
+              <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<Since iso={g.lead.state_since} />} />
+            ))}
+          </Group>
+        )}
+        {groups.waiting.length > 0 && (
+          <Group title={stateName("bg_waiting")} count={groups.waiting.length} grid>
+            {groups.waiting.map((g, i) => (
+              <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<Since iso={g.lead.state_since} />} />
+            ))}
+          </Group>
+        )}
+      </>
+    ),
+    unread: loaded && groups.unread.length > 0 && (
+      <Group
+        title={stateName("unread")}
+        count={groups.unread.length}
+        right={markAllAt === "section" && markAll}
+        grid
+      >
+        {groups.unread.map((g, i) => (
+          <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<Ago iso={g.lead.updated_at} />} footer={sessionCan(g.lead, "send") ? <ContinueAction s={g.lead} title={sessionTitle(g.launcher ?? g.sessions[0]!)} several={g.sessions.length > 1} /> : undefined} />
+        ))}
+      </Group>
+    ),
+    computers: loaded && machines.length > 0 && (
+      <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="touch-hit text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
+          {machines.map((m) => {
+            const count = agentCounts && (agentCounts.get(m.id) ?? 0);
+            const line = m.online ? [count !== undefined && t("home.machine_agents", { count }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
+            const hub = hubLabel(m, machines);
+            const detail = { name: "machine" as const, mid: m.id };
+            return (
+              <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card transition-colors hover:bg-hover">
+                <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
+                  <Icon name="machine" size={15} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium text-ink">{m.name}</span>
+                    {hub && <span className="shrink-0 truncate text-[11.5px] text-ink-3">{hub}</span>}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-ink-3" title={!m.online && m.error && offlineLine(m) !== m.error ? m.error : undefined} data-machine-line>{line}</span>
+                </span>
+                <span className={cx("size-2 shrink-0 rounded-full", m.online ? "bg-green" : "bg-line-strong")} title={m.online ? t("home.online") : t("home.offline")} />
+              </a>
+            );
+          })}
+        </div>
+      </Group>
+    ),
+  };
+  // with nothing to do, after Unread's place whether it is drawn or not: all is quiet, or how to add a computer
+  const quietCard = loaded && quiet && interactions.length === 0 && held.length === 0 && (noMachines || list === "loaded") && (
+    <div className="flex flex-col items-start gap-3 rounded-card bg-surface p-4 shadow-card">
+      <span className={cx("flex size-8 items-center justify-center rounded-full", noMachines ? "bg-field text-ink-2" : "bg-green-tint text-green")}>
+        <Icon name={noMachines ? "machine" : "check"} size={15} stroke={noMachines ? undefined : 2.6} />
+      </span>
+      <div>
+        <p className="text-[13.5px] font-medium text-ink">{noMachines ? t("home.no_machines") : t("home.all_set")}</p>
+        <p className="mt-0.5 text-[12.5px] text-ink-2">{noMachines ? t("home.no_machines_hint") : t("home.all_set_hint")}</p>
+      </div>
+      <Button tone="primary" icon={noMachines ? "machine" : "plus"} onClick={noMachines ? () => navigate({ name: "machines" }) : onNewAgent}>
+        {noMachines ? t("home.open_machines") : t("home.new_agent")}
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4 lg:border-transparent">
         <IconButton icon="sidebar" label={t("home.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <span className="flex-1" />
+        <OverviewArrangeButton on={arranging} onClick={() => setArranging((on) => !on)} />
         {!noMachines && (
           <Button tone="secondary" icon="plus" onClick={onNewAgent}>
             {t("home.new_agent")}
@@ -143,139 +289,13 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
             </div>
           </div>
 
-          {/* the extensions' cards (docs/extensions/extensions.md"UI slots" overview_card), under the agents' summary */}
-          <OverviewCards />
-
-          {/* Before the first snapshot the socket streams the machines' agents and cards in one by one, each moving the
-              groups already painted, and "Loading" then went from over them: until it is in only "Loading", then all at once. */}
-          {!loaded && <Loading label={t("common.loading")} />}
-
-          {/* the headline counts agents, this counts cards: say so when one agent has several cards waiting */}
-          {loaded && (interactions.length > 0 || held.length > 0) && (
-            <Group title={stateName("needs_you")} count={interactions.length} hint={new Set(interactions.map(homeKey)).size < interactions.length ? t("home.needs_you_hint") : undefined} grid="cards">
-              {withHeld(interactions, held).map(({ ix, held: h }, i, rows) => {
-                const s = sessions.find((x) => x.machine_id === ix.machine_id && x.session_id === ix.session_id);
-                const title = ix.session_title || (s ? sessionTitle(s) : ix.cwd || t("home.session"));
-                // what the row answers in one tap, as iOS's "Needs you" cards; the rest (plans, forms, typing) opens the chat
-                const quick = interactionCanAnswer(ix, s ?? getSession(ix.machine_id, ix.session_id)) ? quickAnswers(ix) : null;
-                // allowed in one tap, a permission says the tool and what it runs or touches (iOS: "Bash: swift test"),
-                // not the agent's description of it
-                const tool = quick && ix.kind === "permission" ? cardToolName(ix) : "";
-                // and a terminal dialog what it is about (the command under its question), as iOS's card does. Both
-                // as they are: read as Markdown, `ls **/*.ts` lost its stars and `a <in >out` its redirections
-                const about = quick && ix.kind === "screen" ? [ix.dialog?.question, ix.dialog?.detail].filter(Boolean).join(" · ") : "";
-                const raw = (tool && permissionDetail(ix.tool_name, ix.tool_input)?.fields[0]?.value) || about;
-                const ask = (ix.kind === "plan" ? t("home.plan_ready") : raw || plainMarkdown(interactionAsk(ix))).replace(/\s+/g, " ").trim();
-                const done = h !== undefined && h.phase !== "sending";
-                // every row in a Collapse, so an answered one folds away where it is; answered, it keeps its words
-                // and its height ("Answered" in the buttons' place) until then
-                return (
-                  // the room around the row (-m-2 / p-2) is its shadow's: the collapse clips what is outside it
-                  <Collapse key={ix.id} open={h?.phase !== "leaving"} className="-m-2">
-                    <div className="p-2">
-                      <TaskRow
-                        i={i}
-                        state="needs_you"
-                        done={done}
-                        to={requestRoute(ix)}
-                        title={title}
-                        tags={rowTags(title, [name(ix.machine_id), s?.space_name, s && tabLabel(s)])}
-                        detail={(tool && ask && ask !== tool ? t("home.permission_detail", { tool, what: ask }) : ask) || undefined}
-                        pill={!done && <Pill>{interactionKicker(ix)}</Pill>}
-                        entry={cardState(ix.id)}
-                        actions={done ? <AnsweredLine ix={ix} body={h.body} /> : quick && <QuickAnswers ix={ix} choices={quick} sending={h?.pick} onPick={(c) => void answer(ix, i, rows[i + 1]?.ix.id, c)} />}
-                      />
-                    </div>
-                  </Collapse>
-                );
-              })}
-            </Group>
-          )}
-
-          {loaded && groups.needs.length > 0 && (
-            <Group title={t("home.waiting_on_computer")} count={groups.needs.length} hint={t("home.waiting_on_computer_hint")} grid>
-              {groups.needs.map((g, i) => (
-                <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<Pill>{stateName("needs_you")}</Pill>} />
-              ))}
-            </Group>
-          )}
-
-          {loaded && tasks.rows.length > 0 && (
-            <Group
-              title={t("home.tasks")}
-              count={tasks.total}
-              right={tasks.total > tasks.rows.length && <a href={href({ name: "todos" })} onClick={(e) => onLinkClick(e, { name: "todos" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.tasks_all")}</a>}
-              grid="tasks"
-            >
-              {tasks.rows.map((r) => (
-                <TaskCard key={r.todo.id} task={r} />
-              ))}
-            </Group>
-          )}
-
-          {loaded && groups.working.length > 0 && (
-            <Group title={stateName("working")} count={groups.working.length} grid>
-              {groups.working.map((g, i) => (
-                <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<When>{g.lead.state_since ? shortDuration(now - Date.parse(g.lead.state_since)) : ""}</When>} />
-              ))}
-            </Group>
-          )}
-
-          {loaded && groups.unread.length > 0 && (
-            <Group
-              title={stateName("unread")}
-              count={groups.unread.length}
-              right={markAllAt === "section" && markAll}
-              grid
-            >
-              {groups.unread.map((g, i) => (
-                <GroupTask key={g.key} g={g} i={i} machine={name(g.lead.machine_id)} pill={<When>{ago(g.lead.updated_at) || stateName("done")}</When>} footer={sessionCan(g.lead, "send") ? <ContinueAction s={g.lead} title={sessionTitle(g.launcher ?? g.sessions[0]!)} several={g.sessions.length > 1} /> : undefined} />
-              ))}
-            </Group>
-          )}
-
-          {loaded && quiet && interactions.length === 0 && held.length === 0 && (noMachines || list === "loaded") && (
-            <div className="flex flex-col items-start gap-3 rounded-card bg-surface p-4 shadow-card">
-              <span className={cx("flex size-8 items-center justify-center rounded-full", noMachines ? "bg-field text-ink-2" : "bg-green-tint text-green")}>
-                <Icon name={noMachines ? "machine" : "check"} size={15} stroke={noMachines ? undefined : 2.6} />
-              </span>
-              <div>
-                <p className="text-[13.5px] font-medium text-ink">{noMachines ? t("home.no_machines") : t("home.all_set")}</p>
-                <p className="mt-0.5 text-[12.5px] text-ink-2">{noMachines ? t("home.no_machines_hint") : t("home.all_set_hint")}</p>
-              </div>
-              <Button tone="primary" icon={noMachines ? "machine" : "plus"} onClick={noMachines ? () => navigate({ name: "machines" }) : onNewAgent}>
-                {noMachines ? t("home.open_machines") : t("home.new_agent")}
-              </Button>
-            </div>
-          )}
-
-          {loaded && machines.length > 0 && (
-            <Group title={t("home.computers")} count={machines.length} right={<a href={href({ name: "machines" })} onClick={(e) => onLinkClick(e, { name: "machines" })} className="text-[12px] text-ink-3 hover:text-ink-2">{t("home.monitor")}</a>}>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[84rem]:grid-cols-4 @min-[110rem]:grid-cols-5">
-                {machines.map((m) => {
-                  const count = agentCounts && (agentCounts.get(m.id) ?? 0);
-                  const line = m.online ? [count !== undefined && t("home.machine_agents", { count }), m.system?.name].filter(Boolean).join(" · ") || t("home.online") : offlineLine(m);
-                  const hub = hubLabel(m, machines);
-                  const detail = { name: "machine" as const, mid: m.id };
-                  return (
-                    <a key={m.id} href={href(detail)} onClick={(e) => onLinkClick(e, detail)} className="flex items-center gap-3 rounded-card bg-surface px-3 py-2.5 shadow-card transition-colors hover:bg-hover">
-                      <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", m.online ? "bg-field text-ink-2" : "bg-inset text-ink-3")}>
-                        <Icon name="machine" size={15} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate text-[13px] font-medium text-ink">{m.name}</span>
-                          {hub && <span className="shrink-0 truncate text-[11.5px] text-ink-3">{hub}</span>}
-                        </span>
-                        <span className="block truncate text-[11.5px] text-ink-3" title={!m.online && m.error && offlineLine(m) !== m.error ? m.error : undefined} data-machine-line>{line}</span>
-                      </span>
-                      <span className={cx("size-2 shrink-0 rounded-full", m.online ? "bg-green" : "bg-line-strong")} title={m.online ? t("home.online") : t("home.offline")} />
-                    </a>
-                  );
-                })}
-              </div>
-            </Group>
-          )}
+          {/* the extensions' cards (docs/extensions/extensions.md "UI slots" overview_card) and the sections, in the order the
+              user arranged them (#9745, #10905); with nothing arranged, the sections, then the cards last: under everything
+              about the owner's agents (what needs them, what is running, what just finished) and the computers, so no
+              number of cards pushes those off the first screen (#11147). Before the first snapshot the socket streams the
+              machines' agents and cards in one by one, each moving the groups already painted, and "Loading" then went
+              from over them: until it is in only "Loading" (where the sections begin), then all at once. */}
+          <OverviewBody editing={arranging} onDone={() => setArranging(false)} sections={sections} start={!loaded && <Loading label={t("common.loading")} />} after={{ unread: quietCard }} />
         </div>
       </div>
       <MarkSeenDialog list={confirmSeen} onClose={() => setConfirmSeen(null)} />
@@ -283,10 +303,11 @@ export function Home({ onNewAgent, onToggleSidebar }: { onNewAgent: () => void; 
   );
 }
 
-/** The line under the greeting: how many agents need you, work and finished unseen. With none of them, the cards
- *  that wait (a Persona conversation's, whose agent is not counted) are what needs you: never an empty sentence. */
-function summary(counts: { needs: number; working: number; unread: number }, cards: number): string {
-  const parts = [counts.needs && t("home.summary_needs", { count: counts.needs }), counts.working && stateCount("working", counts.working), counts.unread && stateCount("unread", counts.unread)].filter(Boolean);
+/** The line under the greeting: how many agents need you, work, only wait in the background (counted apart from the
+ *  working ones, #10938) and finished unseen. With none of them, the cards that wait (a Persona conversation's, whose
+ *  agent is not counted) are what needs you: never an empty sentence. */
+function summary(counts: { needs: number; working: number; waiting: number; unread: number }, cards: number): string {
+  const parts = [counts.needs && t("home.summary_needs", { count: counts.needs }), counts.working && stateCount("working", counts.working), counts.waiting && stateCount("bg_waiting", counts.waiting), counts.unread && stateCount("unread", counts.unread)].filter(Boolean);
   if (parts.length) return t("home.summary", { list: parts.join(t("home.summary_separator")) });
   return cards ? t("home.summary_cards", { count: cards }) : t("home.all_quiet");
 }
@@ -326,27 +347,48 @@ function Group({ title, count, children, right, hint, grid }: { title: string; c
   );
 }
 
+/** Who works on a task (#10904): its lead agent's computer, then the model and effort as that agent's model pill names
+ *  them (its list's name once the pill has read the list, else the short form of the id; no effort, none said), and how
+ *  many other agents it has. With no row of its agents read, how many there are (the Tasks page's words). */
+function taskAgentLine({ agents, lead }: Pick<HomeTask, "agents" | "lead">, machine: (mid: string) => string): { who: string; more: number } {
+  if (!lead) return { who: agents > 0 ? t("todos.agent_count", { count: agents }) : "", more: 0 };
+  const view = pillView(lead, modelList(lead.machine_id, sessionLauncher(lead)));
+  return { who: [machine(lead.machine_id), view.model, view.effort && effortTitle(view.effort)].filter(Boolean).join(" · "), more: agents - 1 };
+}
+
 // One task on the overview: its title (opens the task), its status, the stage bar with its PR, and what holds its
-// delivery or how many agents it has (the Tasks page's words). The PR link is beside the title link, not inside it.
-function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
+// delivery, then who works on it (taskAgentLine). The PR link is beside the title link, not inside it. On a touch
+// screen the title link's overlay spans the card, so a tap anywhere on it opens the task; the PR link sits above it.
+function TaskCard({ task, machine }: { task: HomeTask; machine: (mid: string) => string }) {
+  const { todo, status } = task;
+  // its state word and tone; a waiting one's say what it waits on, attention only on the owner (#11090)
+  const look = todoLook(todo, status, task.wait, status);
+  useModelLists(); // a model list the pill reads later names the model here too
   const to: Route = { name: "todos", id: todo.id };
   const held = heldDelivery(todo);
   const orphan = status !== "needs_you" ? orphanedLine(todo) : undefined;
-  const line = [held && t(`todos.delivery_${held.state}`), agents > 0 && t("todos.agent_count", { count: agents })].filter(Boolean).join(" · ");
+  const { who, more } = taskAgentLine(task, machine);
+  const line = [held && t(`todos.delivery_${held.state}`), who].filter(Boolean).join(" · ");
   return (
-    <div className="flex h-full flex-col gap-2 rounded-card bg-surface px-3 py-2.5 shadow-card" data-task={todo.id}>
+    <div className="flex h-full flex-col gap-2 rounded-card bg-surface px-3 py-2.5 shadow-card pointer-coarse:relative pointer-coarse:isolate" data-task={todo.id}>
       <div className="flex min-w-0 items-center gap-2">
-        <a href={href(to)} onClick={(e) => onLinkClick(e, to)} className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink hover:underline">
+        <a href={href(to)} onClick={(e) => onLinkClick(e, to)} className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink hover:underline pointer-coarse:after:absolute pointer-coarse:after:inset-0 pointer-coarse:after:z-[1] pointer-coarse:after:content-['']">
           {todo.title}
         </a>
         {todo.kind === "concern" && <Tag><span data-testid="todo-concern">{t("todos.concern")}</span></Tag>}
-        <span className={cx("inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap", TODO_TONE_CLASS[TODO_STATUS_INFO[status].tone])}>{todoStatusLabel(todo, status)}</span>
+        <span className={cx("inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap", TODO_TONE_CLASS[look.tone])} data-testid="task-status">{look.label}</span>
       </div>
-      <TodoStageBar stage={todo.stage} stageKind={todo.stage_kind} prURL={todo.pr_url} />
+      <TodoStageBar stage={todo.stage} stageKind={todo.stage_kind} prURL={todo.pr_url} done={todo.stage_done} />
       {/* the lines under the stage bar sit at the card's bottom, so a row of cards of one height lines up */}
       {(line || orphan) && (
         <div className="mt-auto flex flex-col gap-2">
-          {line && <p className={cx("truncate text-[11.5px]", held ? "text-orange" : "text-ink-3")}>{line}</p>}
+          {/* the other agents' count stays when the line is cut short */}
+          {line && (
+            <p data-task-agents className={cx("flex min-w-0 gap-1 text-[11.5px]", held ? "text-orange" : "text-ink-3")}>
+              <span className="truncate">{line}</span>
+              {more > 0 && <span className="shrink-0 tabular-nums">{t("home.task_agents_more", { count: more })}</span>}
+            </p>
+          )}
           {/* nobody is working on it (#3618): the hub's finding and why; a card that waits for the user says that instead */}
           {orphan && (
             <p data-orphaned-line className="truncate text-[11.5px] text-ink-3">
@@ -360,13 +402,31 @@ function TaskCard({ task: { todo, status, agents } }: { task: HomeTask }) {
   );
 }
 
-function Pill({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap text-attention">{children}</span>;
+// On a phone's width the pill and the title share what the row leaves them, the pill never wider than its words: its
+// words are cut only where they are wider than the title would be (the full words stay its tooltip and the link's name).
+function Pill({ children }: { children: string }) {
+  return (
+    <span title={children} className="inline-flex h-5 shrink-0 items-center rounded-full bg-field px-1.5 text-[11px] font-medium whitespace-nowrap text-attention max-sm:min-w-0 max-sm:flex-1 max-sm:max-w-max">
+      <span className="truncate">{children}</span>
+    </span>
+  );
 }
 
 /** When a row last changed or how long it has worked: quiet text, its badge already says the state. */
 function When({ children }: { children: React.ReactNode }) {
   return <span className="shrink-0 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums">{children}</span>;
+}
+
+/** How long a row has been in its state, on its own 5 s clock: the page around it does not re-render with each tick. */
+function Since({ iso }: { iso?: string }) {
+  const now = useNow(5000, Boolean(iso));
+  return <When>{iso ? shortDuration(now - Date.parse(iso)) : ""}</When>;
+}
+
+/** When a finished row last changed, read at each render and moved on by its own half-minute clock, as `Since` is. */
+function Ago({ iso }: { iso?: string }) {
+  useNow(30_000, Boolean(iso));
+  return <When>{ago(iso) || stateName("done")}</When>;
 }
 
 /** A row's place as small tags, without one that only repeats the title: a tab is often named after its agent's first
@@ -387,7 +447,8 @@ export function rowTags(title: string, parts: (string | false | null | undefined
 function SessionTask({ s, i, machine, pill, footer }: { s: Session; i: number; machine: string; pill: React.ReactNode; footer?: React.ReactNode }) {
   const title = sessionTitle(s);
   // the source is a tag once, not again in front of the latest words
-  return <TaskRow i={i} state={stateOf(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={sessionPreview(s)} pill={pill} footer={footer} />;
+  // the latest words are Markdown: one line of them reads without its marks, as the sidebar's row line does (#10939)
+  return <TaskRow i={i} state={stateOf(s)} waiting={backgroundWaiting(s)} to={{ name: "session", mid: s.machine_id, sid: s.session_id }} title={title} tags={rowTags(title, [sourceSubtitle(s), machine, s.space_name, tabLabel(s)])} detail={plainMarkdown(sessionPreview(s))} pill={pill} footer={footer} />;
 }
 
 // One tab's agents as one row (#2320): the "Lead"'s title (the first pane's when the panes are peers), the most urgent
@@ -396,20 +457,21 @@ function GroupTask({ g, i, machine, pill, footer }: { g: TabGroup; i: number; ma
   if (g.sessions.length === 1) return <SessionTask s={g.lead} i={i} machine={machine} pill={pill} footer={footer} />;
   const head = g.launcher ?? g.sessions[0]!;
   const s = g.lead;
-  const preview = sessionPreview(s);
+  const preview = plainMarkdown(sessionPreview(s));
   return (
     <TaskRow
       i={i}
       state={g.state}
+      waiting={backgroundWaiting(s)}
       to={paneRoute(s)}
       title={sessionTitle(head)}
       tags={rowTags(sessionTitle(head), [machine, s.space_name, tabLabel(s)])}
       detail={s === head ? preview : agentLabel(s) && preview ? t("home.agent_preview", { agent: agentLabel(s), preview }) : agentLabel(s) || preview}
       pill={
         <>
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums" title={g.sessions.map((x) => `${agentLabel(x)} · ${sessionTitle(x)} · ${STATE_LABEL[stateOf(x)]}`).join("\n")}>
+          <span className="flex shrink-0 items-center gap-1 text-[11.5px] whitespace-nowrap text-ink-3 tabular-nums" title={g.sessions.map((x) => `${agentLabel(x)} · ${sessionTitle(x)} · ${backgroundWaiting(x) ? stateName("bg_waiting") : STATE_LABEL[stateOf(x)]}`).join("\n")}>
             <span aria-hidden className="flex items-center gap-0.5">
-              {g.sessions.map((x) => <StatusMark key={x.session_id} state={stateOf(x)} size="sm" />)}
+              {g.sessions.map((x) => <StatusMark key={x.session_id} state={stateOf(x)} size="sm" waiting={backgroundWaiting(x)} />)}
             </span>
             <span className="max-sm:sr-only">{t("home.machine_agents", { count: g.sessions.length })}</span>
           </span>
@@ -558,7 +620,7 @@ function AnsweredLine({ ix, body }: { ix: Interaction; body: Resolution }) {
 // One Task Rows capsule, compact: status badge, the title alone on its line (it is what tells rows apart), then
 // where it runs as small tags and the latest words; when on the right. With `actions` (a card's one-tap answers) they
 // sit under it in the same capsule, outside the link, and its words take up to three lines: read before answering.
-function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions, footer }: { i: number; state: AgentState; done?: boolean; to: Route; title: string; tags: string[]; detail?: string; pill: React.ReactNode; entry?: Record<string, unknown>; actions?: React.ReactNode; /** Under the row, the row itself drawn as without it (Continue, #6449). */ footer?: React.ReactNode }) {
+function TaskRow({ i, state, waiting, done, to, title, tags, detail, pill, entry, actions, footer }: { i: number; state: AgentState; /** Working, but only waiting in the background: the clock, not the spinner. */ waiting?: boolean; done?: boolean; to: Route; title: string; tags: string[]; detail?: string; pill: React.ReactNode; entry?: Record<string, unknown>; actions?: React.ReactNode; /** Under the row, the row itself drawn as without it (Continue, #6449). */ footer?: React.ReactNode }) {
   const below = actions ?? footer;
   const enter = { animation: `fade-up 420ms ${EASE} ${Math.min(i, 8) * 50}ms both` };
   const link = (
@@ -574,7 +636,7 @@ function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions
           <Icon name="check" size={11} stroke={3.2} />
         </span>
       ) : (
-        <Badge state={state} />
+        <Badge state={state} waiting={waiting} />
       )}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13.5px] leading-[18px] font-medium text-ink">{title}</span>
@@ -605,8 +667,8 @@ function TaskRow({ i, state, done, to, title, tags, detail, pill, entry, actions
   );
 }
 
-function Badge({ state }: { state: AgentState }) {
-  if (state === "working") {
+function Badge({ state, waiting = false }: { state: AgentState; waiting?: boolean }) {
+  if (state === "working" && !waiting) {
     const size = 20,
       stroke = 2,
       r = (size - stroke) / 2,
@@ -634,7 +696,7 @@ function Badge({ state }: { state: AgentState }) {
     );
   return (
     <span className="flex size-5 shrink-0 items-center justify-center">
-      <StatusMark state={state} />
+      <StatusMark state={state} waiting={waiting} />
     </span>
   );
 }

@@ -2,6 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +78,110 @@ func TestRevokeMachineCredentials(t *testing.T) {
 	}
 	if p, _ := d.PairTokenByHash(ctx, "pair-laptop"); p == nil || p.ExpiresAt.After(time.Now()) {
 		t.Fatalf("the laptop's pairing code still works: %+v", p)
+	}
+}
+
+// Whether a computer has a Persona Link already (a switch from ssh refuses one that has): a live link credential or
+// a pairing code for it that is still open counts; a revoked credential, a used or expired code, another computer's,
+// and a peer hub's credential that binds the same id do not.
+func TestMachineLinkInUse(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	inUse := func(machine string) bool {
+		t.Helper()
+		got, err := d.MachineLinkInUse(ctx, machine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if inUse("laptop") {
+		t.Fatal("nothing yet")
+	}
+	if err := d.CreateDeviceToken(ctx, DeviceToken{ID: "peer-1", Name: "hub", Kind: "peer", Role: "peer", MachineID: "laptop"}, "hash-peer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreateDeviceToken(ctx, DeviceToken{ID: "link-desk", Name: "desk", Kind: "link", Role: "link", MachineID: "desk"}, "hash-desk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreatePairToken(ctx, "pair-desk", time.Now().Add(time.Hour), "desk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreatePairToken(ctx, "pair-over", time.Now().Add(-time.Minute), "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreatePairToken(ctx, "pair-app", time.Now().Add(time.Hour), ""); err != nil {
+		t.Fatal(err)
+	}
+	if inUse("laptop") {
+		t.Fatal("a peer's credential, another computer's, an expired code or an app's code counts")
+	}
+	if err := d.CreatePairToken(ctx, "pair-open", time.Now().Add(time.Hour), "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	if !inUse("laptop") {
+		t.Fatal("an open pairing code does not count")
+	}
+	link := DeviceToken{ID: "link-1", Name: "laptop", Kind: "link", Role: "link", MachineID: "laptop"}
+	if ok, err := d.RedeemPairToken(ctx, "pair-open", link, "hash-link-1"); err != nil || !ok {
+		t.Fatalf("redeem: %v %v", ok, err)
+	}
+	if !inUse("laptop") {
+		t.Fatal("a live credential does not count")
+	}
+	if ok, err := d.RevokeDeviceToken(ctx, "link-1"); err != nil || !ok {
+		t.Fatalf("revoke: %v %v", ok, err)
+	}
+	if inUse("laptop") {
+		t.Fatal("a revoked credential or a used code counts")
+	}
+	if !inUse("desk") {
+		t.Fatal("desk's credential and code do not count")
+	}
+	if _, err := d.MachineLinkInUse(ctx, ""); err == nil {
+		t.Fatal("no machine accepted")
+	}
+}
+
+// A switch's audit rows: the computer's latest, and one operation's history, oldest first; another action's rows and
+// another computer's are not in them. The audit is not cleared between tests: the computers are this run's.
+func TestLinkSwitchRows(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	run := fmt.Sprintf("%x", time.Now().UnixNano())
+	laptop, desk := "rows-laptop-"+run, "rows-desk-"+run
+	if latest, err := d.LinkSwitchLatest(ctx, laptop); err != nil || latest != nil {
+		t.Fatalf("never switched: %+v %v", latest, err)
+	}
+	for _, a := range []struct{ machine, action, detail string }{
+		{laptop, "link_switch", `{"operation":"ls_a","step":"begin","by":"device"}`},
+		{laptop, "link_switch", `{"operation":"ls_a","step":"begun","pair_hash":"h-a"}`},
+		{desk, "link_switch", `{"operation":"ls_a","step":"begin"}`},
+		{laptop, "code", `{"operation":"ls_a","step":"rolled_back"}`},
+		{laptop, "link_switch", `{"operation":"ls_a","step":"succeeded"}`},
+		{laptop, "link_switch", `{"operation":"ls_b","step":"begin"}`},
+	} {
+		if err := d.AddMachineAudit(ctx, a.machine, a.action, "manager:assistant", json.RawMessage(a.detail)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := d.LinkSwitchLatest(ctx, laptop)
+	if err != nil || latest == nil || latest.Operation != "ls_b" || latest.Step != "begin" || latest.Actor != "manager:assistant" || latest.At.IsZero() {
+		t.Fatalf("latest %+v %v", latest, err)
+	}
+	history, err := d.LinkSwitchHistory(ctx, laptop, "ls_a")
+	var steps []string
+	for _, r := range history {
+		steps = append(steps, r.Step+":"+r.PairHash)
+	}
+	if err != nil || strings.Join(steps, " ") != "begin: begun:h-a succeeded:" {
+		t.Fatalf("history %v %v", steps, err)
+	}
+	if history, err := d.LinkSwitchHistory(ctx, laptop, "ls_none"); err != nil || len(history) != 0 {
+		t.Fatalf("an operation that never began: %+v %v", history, err)
+	}
+	if _, err := d.LinkSwitchHistory(ctx, laptop, ""); err == nil {
+		t.Fatal("no operation accepted")
 	}
 }
 

@@ -105,6 +105,19 @@ describe("To-dos grouped by 常驻", () => {
     expect(host.querySelector<HTMLInputElement>("[data-testid=todos-detail-column] input[type=text]")?.value).toBe("Infra");
   });
 
+  it("marks the rows the sidebar's badge counts, and counts them on a folded direction's title (#11838)", async () => {
+    localStorage.setItem("persona.todos.grouping", "direction");
+    await render();
+    const product = sections()[1];
+    // the owner's own to-dos with no Agent on them: each counted by the badge, each marked
+    expect(product.querySelectorAll("[data-testid=todo-owner-mark]")).toHaveLength(2);
+    const title = product.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    expect(title.querySelector("[data-testid=todo-owner-count]")).toBeNull();
+    await act(async () => title.click());
+    expect(product.querySelector("[data-testid=todo-owner-mark]")).toBeNull();
+    expect(title.querySelector("[data-testid=todo-owner-count]")?.textContent).toBe(t("todos.owner_mark_count", { count: 2 }));
+  });
+
   it("opens a row's menu on a right click, as the other groupings do", async () => {
     localStorage.setItem("persona.todos.grouping", "direction");
     await render();

@@ -1,6 +1,7 @@
 {
   "rail": "User input navigation",
   "input": "User input {index}",
+  "loading_target": "Loading message…",
   "target_failed": "This input could not be loaded. Try again.",
   "jump": "Jump to user input {index}: {preview}",
   "keys": "Use arrow keys to preview, Home or End for the first or last input, and Enter or Space to jump. Escape cancels the preview.",

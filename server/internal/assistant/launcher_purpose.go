@@ -3,6 +3,7 @@ package assistant
 import "context"
 
 type launcherPurposeKey struct{}
+type launcherModelHostKey struct{}
 
 // Keep assistant model discovery separate from an engine's provider of the same
 // name: an assistant conversation runs the shell launcher or an assistant runtime.

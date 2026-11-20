@@ -56,8 +56,14 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	}
 	n.mu.Lock()
 	agents := make(map[string]host.Agent, len(n.agents))
-	for k, v := range n.agents {
-		agents[k] = v
+	agyRuntimeIDs := map[string]string{}
+	for id, agent := range n.agents {
+		agents[id] = agent
+		if agent.Agent == agyAgent && agent.AgentStatus != proto.StatusOffline && agent.AgentStatus != proto.StatusInterrupted {
+			if conversation := n.agyConversationLocked(id, agent.PaneID); conversation != "" {
+				agyRuntimeIDs[id] = agyAgent + "-" + conversation
+			}
+		}
 	}
 	onList := n.onAgentsList // replaced whole with n.agents (setAgentsAt), never changed in place
 	n.mu.Unlock()
@@ -86,6 +92,9 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			codexWaitRow(&s, a)
 			if w := n.codexWaitByID(id); w != nil {
 				s.UpdatedAt = w.began.UTC()
+				if w.manual && s.HerdrTabName() != "" {
+					s.Title = s.HerdrTabName()
+				}
 			}
 			n.decorateIn(&s, pass)
 			out = append(out, s)
@@ -147,9 +156,11 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		// textAt: when the transcript last had the agent's words; rollout: a Codex pane's rollout meta, for its effort.
 		var textAt, promptAt time.Time
 		var rollout quickMeta
+		var rolloutPath string
 		if p := n.transcriptPath(id); p != "" {
 			if st, err := os.Stat(p); err == nil {
 				m := n.meta(p, st)
+				rolloutPath = p
 				textAt = m.lastTextAt
 				rollout = m
 				if m.title != "" && a.Agent != "codex" && a.Agent != traexAgent {
@@ -168,11 +179,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				}
 				m.turnErr.set(&s)
 				s.Activity, s.ActivityAt = m.activityOf()
-				setContext(&s, m)
+				n.setSessionContext(&s, m)
 				s.ModelFallback = m.modelFallback
-				if a.Agent != "codex" && a.Agent != traexAgent {
-					s.PermissionMode, s.Effort = n.currentModes(id, m)
-				}
 				s.WokeByTask = m.wake
 				if s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked {
 					s.Queued = m.queue // an idle agent has taken everything; stale entries are from outside the tail
@@ -183,6 +191,15 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 				s.Subagents = n.subagents(id)
 			}
+		}
+		if a.Agent != "codex" && a.Agent != traexAgent {
+			n.terminalModesRow(&s, rollout)
+		}
+		blockedSince := n.noteBlockedAt(id, s.Status == proto.StatusBlocked, now)
+		if a.Agent == "codex" && host.ParsePane(a.PaneID).Kind != host.Botmux && s.Status == proto.StatusBlocked &&
+			n.codexRolloutWorkingOverBlocked(ctx, id, a.PaneID, rolloutPath, rollout, blockedSince, now) {
+			s.Status = proto.StatusWorking
+			s.AttentionReason = ""
 		}
 		// The host's record of the answer (botmux's reply in the topic), unless the transcript has words well after it:
 		// the session went on outside the host (a `claude --resume` in a terminal). Text written in the same turn
@@ -214,7 +231,15 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			s.Title = opencodeTitle(a.Title)
 			n.mergeOpencodeRow(&s) // its conversation is the plugin's (opencode.go)
 		case a.Agent == cursorAgent || a.Agent == agyAgent:
-			// herdr drives the pane (agent.prompt, the keys); Persona does not read the conversation (workagent.go).
+			// Herdr drives the pane (agent.prompt, the keys). Agy can also read its verified conversation (workagent.go).
+			if runtimeID := agyRuntimeIDs[id]; runtimeID != "" {
+				seen[runtimeID] = true
+				if s.Model == "" {
+					if runtimeRow, _, ok := n.runtimes.rowOf(runtimeID); ok {
+						s.Model = runtimeRow.Model
+					}
+				}
+			}
 		case otherAgent(a):
 			s.ReadOnlyReason = otherNoReader(a.Agent)
 		}
@@ -250,7 +275,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if seen[s.SessionID] {
 			continue
 		}
-		n.decorateState(s)
+		n.decorateState(s, false)
 		if n.runtimeAssistant(s.SessionID) { // the assistant keeps its mode (assistant_runtime.go)
 			if m := n.assistantModeOf(s.SessionID); m != "" {
 				s.PermissionMode = m
@@ -292,6 +317,10 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		out = append(out, s)
 		seen[s.SessionID] = true
 	}
+	for _, s := range n.traexSessions(seen) {
+		out = append(out, s)
+		seen[s.SessionID] = true
+	}
 	n.forgetDialogs(livePanes) // after every row that reads a pane's dialog, the tmux claudes' too
 	for _, s := range n.codexSessionsIn(seen, pass) {
 		out = append(out, s)
@@ -328,7 +357,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if earlier[s.SessionID] || !n.sessionScopeAllows(s.Cwd) {
 			continue
 		}
-		if s.Cwd != "" && n.cwdBlocked(s.Cwd) && !n.isAssistantSession(s.SessionID) && !n.keptSessions()[s.SessionID] {
+		if n.listBlocked(s.SessionID, s.Cwd) {
 			continue
 		}
 		if s.Status == proto.StatusWorking && (s.Agent == "" || s.Agent == "claude" || s.Agent == "codex") {
@@ -351,6 +380,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	out = out[:j]
 	parents, origins := n.offlineDesktop()
 	linkSideSessions(out, parents)           // the desktop app's side sessions under the sessions that started them (#5935)
+	linkHerdrChildren(out, agents)           // herdr's sub-agent terminals under the session of the terminal that started them
 	placeClaudeDesktop(out, origins, n.home) // and in their projects (#8521)
 	sortNewestFirst(out)
 	return out
@@ -393,7 +423,7 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 	if s.PaneID != "" && s.Host == "" {
 		s.Host = host.ParsePane(s.PaneID).Kind // the host it runs in (#2576)
 	}
-	if st, ok := n.decorateState(s); ok {
+	if st, ok := n.decorateState(s, true); ok {
 		s.Compaction = st.Compaction
 		s.PendingSwitch = st.PendingSwitch   // launcher_switch.go
 		s.SetEngineHistory(st.EngineHistory) // engine_switch.go
@@ -408,20 +438,34 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 	if s.Launcher == "" {
 		s.Launcher = n.inferLauncher(s.SessionID)
 	}
-	if s.Title == "" {
+	n.normalizeSessionRowModel(s) // keep the echoed model for display, clearing stand-in markers ("<synthetic>")
+	n.applyLauncherContextWindow(s)
+	if s.Title == "" && s.HerdrTabName() == "" {
 		s.Title = filepath.Base(s.Cwd)
 	}
 	s.BypassAvailable = n.hooks.canBypass(s.SessionID) // modes.go claudeCanBypass
 	n.modeRestartRow(s)                                // mode_restart.go
 	n.ultracodeRow(s, pass)
+	n.wakeEffortChange(s)
 }
 
 // decorateState restores metadata recorded when Persona started the session.
-func (n *Node) decorateState(s *proto.Session) (sessionState, bool) {
+func (n *Node) decorateState(s *proto.Session, managesModel bool) (sessionState, bool) {
 	st, ok := n.state.get(s.SessionID)
+	if ok && isCodexWaitID(s.SessionID) && st.Launcher == "" {
+		return sessionState{}, false // a manually discovered waiting row's pane binding is not an app start
+	}
 	if ok {
 		s.StartedByPersona = true
 		s.Launcher = st.Launcher
+		s.OffLauncher = n.offLauncher(s.SessionID) // its claude not started by Persona's command (offlauncher.go)
+		if st.TaskExecution {
+			classifyTaskTurnFailure(s)
+		}
+		if managesModel {
+			model := st.Model
+			s.RequestedModel = &model
+		}
 		// A row without a pane is listed where its record says it started, when that is an assistant or health
 		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's.
 		if s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd) {
@@ -554,4 +598,10 @@ func (n *Node) revsChanged(list []proto.Session) map[string]int64 {
 	}
 	n.lastRevs = next
 	return out
+}
+
+// listBlocked: the live list leaves session sid out for its working folder cwd: a blocked Agent folder or Claude config
+// folder, except the assistant's own conversations and the sessions the hub keeps.
+func (n *Node) listBlocked(sid, cwd string) bool {
+	return cwd != "" && n.cwdBlocked(cwd) && !n.isAssistantSession(sid) && !n.keptSessions()[sid]
 }

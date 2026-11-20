@@ -49,6 +49,7 @@
                 <data android:scheme="persona" android:host="pair" />
                 <data android:scheme="persona" android:host="password-login" />
                 <data android:scheme="persona" android:host="open" />
+                <data android:scheme="persona" android:host="provider" />
                 <data android:scheme="@string/compatibility_legacy_scheme" android:host="pair" />
                 <data android:scheme="@string/compatibility_legacy_scheme" android:host="open" />
             </intent-filter>
@@ -67,6 +68,21 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".dev.DiagnosticsShareActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <provider
+            android:name=".dev.DevShareProvider"
+            android:authorities="${applicationId}.dev.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/dev_file_paths" />
+        </provider>
 
         <receiver
             android:name="persona.android.capsule.CapsuleKeeperUpdateReceiver"

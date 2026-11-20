@@ -52,7 +52,7 @@
 9. 任务「跑回归」（todo_12，signal=orphaned）：没有 Agent 在做了：它的 Agent 所在的电脑离线了；在 laptop
    验收标准：未记录
 
-10. 任务「修登录崩溃」（todo_1，signal=review，链接 https://hub.example.com/todos?id=todo_1）：hub 判断做完了，等你验收（PR 已合并）；在 box session_id=a1b2c3d4
+10. 任务「修登录崩溃」（todo_1，signal=review，链接 https://hub.example.com/todos?id=todo_1）：待逐项复核，不代表完成（PR 已合并）；在 box session_id=a1b2c3d4
    验收标准：PR 合并到 master；浅色 / 深色截图贴进 PR
    Agent 最后说的：
    修好了，PR https://github.com/o/r/pull/901 已合并

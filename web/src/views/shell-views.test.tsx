@@ -28,12 +28,12 @@ describe("「助手 | Agents」", () => {
   it("marks the page it is on and links to the other", () => {
     const html = renderToStaticMarkup(<ShellSwitchView page="assistant" waiting={0} />);
     expect(html).toMatch(/<a href="\/" aria-current="page" aria-label="助手"/);
-    expect(html).toMatch(/<a href="\/terminal" aria-label="会话与终端"/);
-    expect(renderToStaticMarkup(<ShellSwitchView page="agents" waiting={0} />)).toMatch(/href="\/terminal" aria-current="page"/);
+    expect(html).toMatch(/<a href="\/agents" aria-label="Agents"/);
+    expect(renderToStaticMarkup(<ShellSwitchView page="agents" waiting={0} />)).toMatch(/href="\/agents" aria-current="page"/);
   });
   it("carries the agents waiting for you on its Agents side, none at 0", () => {
     const html = renderToStaticMarkup(<ShellSwitchView page="assistant" waiting={3} />);
-    expect(html).toContain('aria-label="会话与终端，3 个需要你"');
+    expect(html).toContain('aria-label="Agents，3 个需要你"');
     expect(html).toMatch(/text-attention[^"]*">3<\/span>/);
     expect(renderToStaticMarkup(<ShellSwitchView page="assistant" waiting={0} />)).not.toContain("bg-red");
   });
@@ -49,8 +49,8 @@ describe("「助手 | Agents」", () => {
     expect(html.match(/min-w-0 [^"]*px-2 [^"]*sm:shrink-0 sm:px-3\.5/g)).toHaveLength(2);
     expect(html.match(/<span class="min-w-0 truncate" data-switch-label="true">/g)).toHaveLength(2);
     // Sessions: the short name on a phone, the full one wider, the full one always its name and tooltip
-    expect(html).toContain('<span class="sm:hidden">会话</span><span class="max-sm:hidden">会话与终端</span>');
-    expect(html).toMatch(/<a href="\/terminal" aria-label="会话与终端，2 个需要你" title="会话与终端"/);
+    expect(html).toContain('Agents');
+    expect(html).toMatch(/<a href="\/agents" aria-label="Agents，2 个需要你"/);
     // the assistant side has no short name and no tooltip
     expect(html).toMatch(/<a href="\/" aria-current="page" aria-label="助手" class=/);
     // the count: inline when wide, on the segment's corner on a phone

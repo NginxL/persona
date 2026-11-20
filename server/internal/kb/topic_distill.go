@@ -311,10 +311,12 @@ func (e *Engine) distill(ctx context.Context, src distillSource, now time.Time, 
 		in.Name, in.Summary = c.Name, clip(sum, distillInput)
 		mark = topicMark{Summary: summaryHash(sum), At: now}
 	}
+	owner := e.knowledgeOwner()
+	in.Language = owner.Language
 	var d distillDigest
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	system := prompts.RenderKBTopicDistill(prompts.KBTopicDistill{Owner: e.ownerName(), MaxPoints: distillMaxPoints})
+	system := prompts.RenderKBTopicDistill(prompts.KBTopicDistill{Language: owner.Language, Owner: e.ownerName(), MaxPoints: distillMaxPoints})
 	if err := e.modelFor("kb.topics").JSONMax(cctx, system, prompts.RenderKBTopicDistillInput(in), 12000, &d); err != nil {
 		return sent, err
 	}

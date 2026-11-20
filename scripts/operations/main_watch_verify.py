@@ -55,7 +55,12 @@ def commands(config, worktree):
     timeout = config.get("timeout_seconds", 3600)
     if not isinstance(timeout, int) or isinstance(timeout, bool) or not 60 <= timeout <= 21600:
         raise WatchError("verification timeout must be between 60 and 21600 seconds")
-    trusted = str(config.get("trusted_checkout") or Path(__file__).resolve().parents[2])
+    # Ordinary main verification keeps the checker and tested source at one
+    # commit, even after the resident watcher's own checkout becomes stale.
+    # Repair verification sets trusted_checkout to the frozen original-main
+    # snapshot outside the worker's writable tree; never inherit that boundary
+    # from the watcher's long-lived implementation path.
+    trusted = str(config.get("trusted_checkout") or Path(worktree).resolve())
     return [(name, [arg.replace("{worktree}", str(worktree)).replace("{trusted}", trusted) for arg in argv],
              item_timeout if profile == "commands" and index < len(config.get("commands", [])) else timeout)
             for index, (name, argv, item_timeout) in enumerate(selected)]

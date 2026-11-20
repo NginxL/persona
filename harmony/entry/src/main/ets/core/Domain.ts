@@ -175,6 +175,7 @@ export interface TranscriptItem extends JsonObject {
   readonly toolUseId?: string;
   readonly supervision_user?: boolean;
   readonly fold?: TranscriptFold;
+  readonly wake?: boolean;
 }
 
 export type TranscriptGap = "none" | "fill" | "reload";

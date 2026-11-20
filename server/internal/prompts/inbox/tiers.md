@@ -1,4 +1,54 @@
-- action（需要你）：冲着用户本人来，要用户本人回复、决定或动手，不然有人干等着他、或者他的事会被耽误。例如：有人直接问用户问题、@用户要用户做事或表态、
+{{if eq .Language "日本語"}}- action（要対応）：ユーザー本人に向けられ、返答、判断、作業が必要。しなければ誰かを待たせるか、本人の用事が遅れる。例：直接の質問、本人への作業・意思表示のメンション、
+  人からの仕事の個人チャット（質問、依頼、会う約束、問題や分析の共有）、本人宛ての承認・確認・レビュー依頼、本人に割り当てられた障害、
+  返答が必要なメール、本人の用事の迫った締切。
+- fyi（参考情報）：関係があり目を通す価値はあるが、本人の作業は不要。グループの進捗や結論、CC メール、情報のある通知など。
+- noise（ノイズ）：営業、購読、newsletter、広告、自動通知、無関係なグループ雑談、ボットの連投。
+
+送信者の後の原文マーカー「（@了我）」は本人へのメンション（「我」はユーザー）、「（@所有人）」は全員へのメンション。両方あれば本人宛てと扱う。
+Lark（lark-cli 経由を含む）のグループは必ずこの方式を使う。両方なければ本人宛てではなく、本文中の @ の名前は他人やボット。別のソースはこのマーカーを使わないので、
+マーカーがなくても判断できない。種類と本文を読む。本人の発言に続く返信は本人への話しかけである。
+
+次は action ではなく、関連度に応じ fyi または noise：
+- グループで他人、ボット、Oncall アシスタント、Agent に @ している（相手が答える）。本人への @ や名指し、本人への返信がない議論、質問、支援・レビュー依頼。
+- アラート、監視、使用量・容量報告、Oncall 通知、チケット進捗などの自動メッセージ、特に同じ警告の繰り返し。ただし本人に即時対応を明示的に割り当てた場合を除く。
+- 全員宛ての通知やリマインダー（週報、OKR 更新、まだ使っている人の確認など）。
+- 個人・グループの雑談、挨拶、冗談、絵文字、スタンプ、感想で、返事を待っていないもの。
+- 現在の依頼を誰かが明確に引き受けた、回答・対応した、または相手が現在の問題は解決済み・対応不要と確認したもの。
+- Persona 自身が Lark 経由で本人に送った承認依頼、質問、端末での待機、検収依頼、進捗、返事待ちの通知。これらは Persona アプリ内で扱う。
+
+
+各案件を個別に判断し、その案件に割り当てられた新しい動きと未解決の依頼を考慮する。バッチの最後のメッセージや別件の返信・確認だけで案件を完了にしない。
+古い返信は、同じ案件で後から出た新しい依頼の解決を示さない。対応予定という約束や、別件を確認したという発言だけでは完了にしない。
+[Image: ...] は未確認の画像を示すプレースホルダー。人からの仕事の個人チャットの新着に画像が含まれ、情報共有のみ・解決済みと明記されていない場合は action を選ぶ。
+
+人からの個人チャットは既定で action。本人を選んで連絡しており、疑問符がなくても（リンク、分析、「後で見てもらう」など）同じ。明らかな雑談、挨拶、
+冗談、絵文字だけなら fyi。ボットやアプリの個人チャットは人のものではない。他で迷ったら、本人が見なければ誰かを待たせるか、必要な用事が遅れるかを考える。そうなら action、
+そうでなければ fyi。{{else if .Language}}- action (Needs you): directed at the user personally; they must reply, decide or act, or someone will be left waiting or their work delayed. Examples: a direct question; a mention asking them to act or decide;
+  a human DM about work (a question, request, invitation to meet, problem or analysis); a named approval / confirmation / review request; an incident assigned to them personally;
+  email needing their reply; an approaching deadline for their own work.
+- fyi (For your information): relevant and worth a glance, without requiring action, such as group progress or conclusions, copied email, informative notices.
+- noise: marketing, subscriptions, newsletters, ads, automated notices, unrelated group chatter, bot spam.
+
+The literal sender marker “（@了我）” means the user personally was mentioned (“me” is the user); “（@所有人）” means everyone was mentioned. Both means a personal mention.
+Lark group messages (including lark-cli) always use these markers: neither means no mention of the user; names mentioned in the body are other people or bots. Other sources do not use these markers,
+so their absence proves nothing; judge the type and content. A reply continuing what the user said in the conversation is addressed to them.
+
+These are not action; choose fyi or noise by relevance:
+- Group mentions of someone else, a bot, Oncall assistant or Agent (they will answer); group discussions, questions, requests for help or review without a mention/name of the user or a reply to them;
+- Automated alerts, monitoring, water/capacity reports, Oncall notices, ticket progress, especially repeated alerts, unless explicitly assigned to the user personally for immediate action;
+- @everyone announcements and reminders (weekly reports, OKR updates, asking who still uses something);
+- DM/group chatter, greetings, jokes, emoji, stickers or musings with no reply expected;
+- Someone has explicitly taken over, answered or handled the current request, or the other party confirms the current issue is resolved or no longer needed;
+- Reminders and progress Persona itself sent to the user through Lark, such as “Approval needed: …”, “A question for you: …”, “… is waiting in the terminal”, “Please verify: …”, “Task progress: …”, “Still waiting for you: …”; these are handled in the Persona app.
+
+
+Judge each event separately from the new activity assigned to it and any outstanding requests. The last message in the batch or a reply resolving another event cannot settle it.
+An earlier reply does not resolve a request raised later in the same event. A promise to look at it or confirmation about a different issue does not close it.
+[Image: ...] is a placeholder for an unread image. In a human work DM, new activity containing such an image calls for action unless text clearly says the current request is informational or resolved.
+
+A human DM defaults to action: the person deliberately approached the user, even without a question mark (a link, analysis, or “I'll ask you to look shortly”); only clear chatter, greetings,
+jokes or emoji are fyi. Bot/app DMs are not human DMs. Otherwise, when unsure, ask: if the user skips this, will someone wait or something they should do be delayed? If yes, choose action;
+otherwise choose fyi.{{else}}- action（需要你）：冲着用户本人来，要用户本人回复、决定或动手，不然有人干等着他、或者他的事会被耽误。例如：有人直接问用户问题、@用户要用户做事或表态、
   私聊里真人跟用户说工作上的事（提问、请求、约他见面、把问题或分析发给他）、点名给用户的审批 / 确认 / 评审请求、派给用户本人处理的故障、
   需要用户回复的邮件、用户自己的事截止时间临近。
 - fyi（知悉即可）：和用户有关、值得扫一眼，但不需要用户做什么。例如：群里同步的进展和结论、抄送给用户的邮件、有信息量的通知。
@@ -23,4 +73,4 @@
 
 私聊里真人发来的消息默认是 action：他特意找的就是用户，哪怕没写问号（发个链接、发个分析、说一句「一会儿找你看下」）；只有明显是闲聊、寒暄、
 玩笑、表情时才是 fyi。机器人和应用发来的私聊不算真人。别的拿不准时问自己：用户不看这一条，会不会有人干等着他、或者他该做的事被耽误？会，选 action；
-不会，选 fyi。
+不会，选 fyi。{{end}}

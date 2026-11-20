@@ -10,8 +10,19 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+// originErrorStore makes the origin book unreadable while every other assistant setting remains available.
+type originErrorStore struct{ Store }
+
+func (s originErrorStore) Setting(ctx context.Context, key string, out any) (bool, error) {
+	if key == originsKey {
+		return false, fmt.Errorf("origin store unavailable")
+	}
+	return s.Store.Setting(ctx, key, out)
+}
 
 // policyExtensions is an extension registry whose read/write declarations and calls can be observed without any
 // connector running. Embedding keeps this test double small while ToolAccess and CallTool are the policy boundary.
@@ -203,9 +214,10 @@ func TestOrdinaryOriginsKeepNotifyDelegationAndConversationSend(t *testing.T) {
 	}
 }
 
-// Inbox starts are Plan even if the caller asks for bypass, and the initial node request carries origin. Ordinary
-// starts retain their selected mode.
-func TestInboxStartForcesPlanAndAttestsOrigin(t *testing.T) {
+// Inbox starts use non-bypass default even if the caller asks for bypass, and the initial node request carries origin.
+// Unlike Plan, default lets the node's explicit Persona MCP allowlist run investigation and inbox_suggest unasked.
+// Ordinary starts retain their selected mode.
+func TestInboxStartForcesDefaultAndAttestsOrigin(t *testing.T) {
 	h := agentHub(t)
 	sess, err := h.Start(t.Context(), StartParams{Text: "Investigate", Origin: OriginInbox, PermissionMode: proto.ModeBypass})
 	if err != nil {
@@ -214,7 +226,7 @@ func TestInboxStartForcesPlanAndAttestsOrigin(t *testing.T) {
 	h.f.mu.Lock()
 	inboxStart := h.f.sends[len(h.f.sends)-1]
 	h.f.mu.Unlock()
-	if inboxStart["permission_mode"] != proto.ModePlan || inboxStart["origin"] != OriginInbox || sess.PermissionMode != proto.ModePlan {
+	if inboxStart["permission_mode"] != "default" || inboxStart["origin"] != OriginInbox || inboxStart["origin_known"] != true || sess.PermissionMode != "default" {
 		t.Fatalf("Inbox start params=%v session mode=%q", inboxStart, sess.PermissionMode)
 	}
 	sess, err = h.Start(t.Context(), StartParams{Text: "Ordinary", Origin: OriginUser, PermissionMode: proto.ModeBypass})
@@ -224,7 +236,7 @@ func TestInboxStartForcesPlanAndAttestsOrigin(t *testing.T) {
 	h.f.mu.Lock()
 	ordinaryStart := h.f.sends[len(h.f.sends)-1]
 	h.f.mu.Unlock()
-	if ordinaryStart["permission_mode"] != proto.ModeBypass || ordinaryStart["origin"] != OriginUser || sess.PermissionMode != proto.ModeBypass {
+	if ordinaryStart["permission_mode"] != proto.ModeBypass || ordinaryStart["origin"] != OriginUser || ordinaryStart["origin_known"] != true || sess.PermissionMode != proto.ModeBypass {
 		t.Fatalf("ordinary start params=%v session mode=%q", ordinaryStart, sess.PermissionMode)
 	}
 }
@@ -238,12 +250,116 @@ func TestInboxLaterSendReattestsManagerOrigin(t *testing.T) {
 	h.f.setSessions("server", proto.Session{SessionID: session, Assistant: true, Status: proto.StatusWorking, Cwd: "/work"})
 	h.originSet(t.Context(), "server", session, OriginInbox, "lark:real-item:1", "")
 	params, err := h.SendParams(t.Context(), SendParams{MachineID: "server", SessionID: session,
-		Params: map[string]any{"text": "Continue", "origin": OriginUser, "permission_mode": proto.ModeBypass}})
+		Params: map[string]any{"text": "Continue", "origin": OriginUser, "origin_known": false, "permission_mode": proto.ModeBypass}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if params["origin"] != OriginInbox {
-		t.Fatalf("later send origin=%v, want the manager's Inbox attestation", params["origin"])
+	if params["origin"] != OriginInbox || params["origin_known"] != true {
+		t.Fatalf("later send origin=%v known=%v, want the manager's explicit Inbox attestation", params["origin"], params["origin_known"])
+	}
+}
+
+// The real continuation path is deliverNotes -> sendToSession -> session.send, not assistant.send's SendParams.
+// Re-attest there too: the manager's origin book, not a caller-supplied field or the node's pre-reload memory, is authoritative.
+func TestInboxDeliverNotesReattestsSessionSendOrigin(t *testing.T) {
+	h, _, it := handledHub(t)
+	h.originSet(t.Context(), "server", "s1", OriginInbox, it.ID, "")
+	h.inbox.mu.Lock()
+	h.inbox.tell(it, inboxNote{Name: prompts.NoteNewMessages, Text: "A new message"}, true, time.Now())
+	h.inbox.mu.Unlock()
+	h.deliverNotes(t.Context(), it)
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if len(h.f.agentSent) != 1 {
+		t.Fatalf("deliverNotes made %d session.send calls, want 1", len(h.f.agentSent))
+	}
+	if got := h.f.agentSent[0]["origin"]; got != OriginInbox || h.f.agentSent[0]["origin_known"] != true {
+		t.Fatalf("session.send origin=%v known=%v, want the manager's explicit Inbox attestation", got, h.f.agentSent[0]["origin_known"])
+	}
+}
+
+// An origin-book read failure is unknown, not an explicit ordinary decision. Both assistant.model's SendParams and the
+// real session.send decoration omit the attestation so the node retains a persisted Inbox decision or fails closed.
+func TestInboxAttestationStoreErrorStaysUnknown(t *testing.T) {
+	h := agentHub(t)
+	const session = "inbox-origin-store-error"
+	h.f.setSessions("server", proto.Session{SessionID: session, Assistant: true, Status: proto.StatusWorking, Cwd: "/work"})
+	h.originSet(t.Context(), "server", session, OriginInbox, "lark:real-item:1", "")
+	h.origins.mu.Lock()
+	h.origins.loaded, h.origins.m = false, nil
+	h.origins.mu.Unlock()
+	h.store = func() Store { return originErrorStore{h.st} }
+	params, err := h.SendParams(t.Context(), SendParams{MachineID: "server", SessionID: session,
+		Params: map[string]any{"text": "Continue", "origin": OriginUser, "origin_known": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, set := params["origin"]; set {
+		t.Fatalf("store error produced an origin attestation: %v", params)
+	}
+	if _, set := params["origin_known"]; set {
+		t.Fatalf("store error produced an explicit ordinary decision: %v", params)
+	}
+	if err := h.call(t.Context(), "server", DeviceSessionSend, map[string]any{"session_id": session, "text": "Continue", "origin": OriginUser, "origin_known": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if len(h.f.agentSent) != 1 {
+		t.Fatalf("session.send calls=%d, want 1", len(h.f.agentSent))
+	}
+	if _, set := h.f.agentSent[0]["origin"]; set {
+		t.Fatalf("session.send store error produced an origin attestation: %v", h.f.agentSent[0])
+	}
+	if _, set := h.f.agentSent[0]["origin_known"]; set {
+		t.Fatalf("session.send store error produced an explicit ordinary decision: %v", h.f.agentSent[0])
+	}
+}
+
+// A missing origin-book entry is not an ordinary attestation: the asynchronous backfill may not have reached a legacy
+// Inbox conversation yet. A positive ordinary record remains sufficient once the backfill has actually classified it.
+func TestInboxAttestationMissingOriginStaysUnknown(t *testing.T) {
+	h := agentHub(t)
+	const session = "legacy-before-origin-backfill"
+	h.f.setSessions("server", proto.Session{SessionID: session, Assistant: true, Status: proto.StatusWorking, Cwd: "/work"})
+	params, err := h.SendParams(t.Context(), SendParams{MachineID: "server", SessionID: session,
+		Params: map[string]any{"text": "Continue", "origin": OriginUser, "origin_known": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, set := params["origin"]; set {
+		t.Fatalf("missing origin record produced an origin attestation: %v", params)
+	}
+	if _, set := params["origin_known"]; set {
+		t.Fatalf("missing origin record was attested ordinary before backfill: %v", params)
+	}
+	h.originSet(t.Context(), "server", session, OriginUser, "", "")
+	params, err = h.SendParams(t.Context(), SendParams{MachineID: "server", SessionID: session, Params: map[string]any{"text": "Continue"}})
+	if err != nil || params["origin_known"] != true {
+		t.Fatalf("a positive ordinary origin record was not attested: %v %v", params, err)
+	}
+}
+
+// The hub forwards session.send_once to session.send. Attestation must therefore be attached at the manager's device
+// call boundary, including on CI/view-action paths that do not pass through SendParams.
+func TestInboxSendOnceReattestsManagerOrigin(t *testing.T) {
+	h := agentHub(t)
+	const session = "inbox-send-once"
+	h.f.setSessions("server", proto.Session{SessionID: session, Assistant: true, Status: proto.StatusWorking, Cwd: "/work"})
+	h.originSet(t.Context(), "server", session, OriginInbox, "lark:real-item:1", "")
+	if err := h.call(t.Context(), "server", DeviceSessionSendOnce, map[string]any{
+		"session_id": session, "text": "Continue", "client_msg_id": "send-once-1", "origin": OriginUser, "origin_known": false,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if len(h.f.sentOnce) != 1 {
+		t.Fatalf("session.send_once calls=%d, want 1", len(h.f.sentOnce))
+	}
+	params := h.f.sentOnce[0]
+	if params["origin"] != OriginInbox || params["origin_known"] != true {
+		t.Fatalf("forwarded send_once origin=%v known=%v, want explicit Inbox attestation", params["origin"], params["origin_known"])
 	}
 }
 

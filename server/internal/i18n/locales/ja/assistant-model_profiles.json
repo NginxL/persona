@@ -20,6 +20,7 @@
   "err_tier_name": "無効な階層名：{tier}。",
   "err_tier_launcher": "階層 {tier} にランチャーが必要です。",
   "err_effort": "{where} の思考強度 {effort} は無効です。選択肢：{levels}。",
+  "err_tier_speed": "プリセット {tier} の速度 {speed} は無効です。選択肢：standard、fast、ultrafast。",
   "err_cannot_run": "{purpose} を実行できません：{error}",
   "err_profiles": "モデルプロファイルは最大 {max} 個です。",
   "err_active": "プロファイル {name} は使用中です。削除する前に切り替えてください。",

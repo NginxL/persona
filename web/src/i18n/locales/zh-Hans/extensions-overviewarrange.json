@@ -1,0 +1,21 @@
+{
+  "title": "整理总览",
+  "hint": "拖动卡片或分区，或用它的箭头，调整顺序；卡片可以占半行或整行；关掉开关就把它隐藏。",
+  "done": "完成",
+  "reset": "恢复默认",
+  "reset_done": "总览已恢复默认。",
+  "undo": "撤销",
+  "drag": "拖动调整位置",
+  "width": "「{name}」的宽度",
+  "half": "半行",
+  "full": "整行",
+  "earlier": "把「{name}」往前移",
+  "later": "把「{name}」往后移",
+  "show": "在总览上显示「{name}」",
+  "hidden": "已隐藏：不加载",
+  "line": "{hint}{where}",
+  "undo_stale": "没有撤销：总览在这之后又改过了。",
+  "always_shown": "始终显示：这里是需要你处理的事",
+  "section_hidden": "已隐藏",
+  "sections_local": "卡片会同步到你的所有设备；分区的顺序只存在这个浏览器里：这个 Hub 还不能保存它。"
+}

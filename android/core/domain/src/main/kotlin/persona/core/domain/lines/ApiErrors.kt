@@ -28,6 +28,11 @@ data class ApiErrorInfo(
     val needsAction: Boolean get() = transient == false
 
     companion object {
+        fun unrecoverable(text: String?): Boolean {
+            val s = text.orEmpty().lowercase()
+            return "compacted natively" in s && "compaction is sealed" in s && "to that account" in s
+        }
+
         private val statusPattern = Regex("""^\s*(\d{3})\b""")
         /** One short sentence, then the error ("Failed to authenticate. API Error:"), not prose that mentions one. */
         private val lead = Regex("""^[A-Z][A-Za-z ]{2,40}\.\s+API Error:""")
@@ -40,6 +45,7 @@ data class ApiErrorInfo(
             val body = when {
                 trimmed.startsWith("API Error:") -> trimmed.removePrefix("API Error:")
                 trimmed.startsWith("API 错误：") -> trimmed.removePrefix("API 错误：") // i18n-ignore: the hub's retry notice it reads
+                unrecoverable(trimmed) && trimmed.lowercase().startsWith("this conversation was compacted natively by ") -> trimmed
                 // Claude Code leads with a sentence for some: "Failed to authenticate. API Error: 401 …".
                 else -> lead.find(trimmed)?.let { trimmed.substring(it.range.last + 1) } ?: return null
             }
@@ -51,6 +57,7 @@ data class ApiErrorInfo(
 
         /** What went wrong, as a person would say it, and whether it is likely to pass (the iOS wording). */
         private fun explain(s: String, status: Int?): Pair<CoreText, Boolean?> = when {
+            unrecoverable(s) -> CoreText.of(Key.ApiConversationInvalid) to false
             "no available gpu" in s -> CoreText.of(Key.ApiNoGpu) to true
             "overloaded" in s || status == 529 -> CoreText.of(Key.ApiOverloaded) to true
             status == 401 || status == 403 || "authentication" in s || "/login" in s || "login expire" in s ->

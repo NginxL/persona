@@ -1,1 +1,1 @@
-本任务只读：不改项目文件、不提交、不对外写入
+{{if and .Language (ne .Language "zh-Hans") (ne .Language "简体中文")}}{{if eq .Language "日本語"}}このタスクは読み取り専用です。プロジェクトのファイル変更、コミット、外部システムへの書き込みは禁止です。{{else}}This task is read-only: do not change project files, commit, or write to external systems.{{end}}{{else}}本任务只读：不改项目文件、不提交、不对外写入{{end}}

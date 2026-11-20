@@ -1,0 +1,15 @@
+{
+  "merge_push_title": "Persona 的记忆合成了一份",
+  "merge_push_body": "从另一份并进来 {added} 条，内容不一样的 {conflicts} 条。清单在助手「记忆」页的「记忆合并清单」里。",
+  "merge_report_title": "记忆合并清单",
+  "merge_report_description": "从其他对话各自保存的那份记忆里并进来了哪些，哪些条目内容不一样",
+  "merge_report_intro": "以前，有些对话的记忆单独存了一份，这一页里看不到。现在所有对话共用这一份。下面这些条目来自另一份。两边有同名文件而内容不同的，保留了修改时间较新的那个。没有删除任何东西：另一份还在原处，每次合并前都先做了备份。想改结果，可以直接在这一页编辑对应条目，或者让 Persona 换成另一个版本。看完可以删掉这份清单。",
+  "merge_report_run": "{time} 的合并",
+  "merge_report_backup": "合并前这份记忆的原样，以及读到的条目，备份在：{path}",
+  "merge_report_added": "并进来的条目（{count}）",
+  "merge_report_conflicts": "内容不一样的条目（{count}）",
+  "merge_report_kept_copy": "保留了另一份的版本（修改于 {copy_time}），替换了这份记忆里的版本（修改于 {memory_time}）。",
+  "merge_report_kept_memory": "保留了这份记忆里的版本（修改于 {memory_time}），没有采用另一份的版本（修改于 {copy_time}）。",
+  "merge_report_other": "没有保留的那个版本：",
+  "merge_report_truncated": "上面的内容被截短了，完整文件在备份里。"
+}

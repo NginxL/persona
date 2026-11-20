@@ -5,8 +5,32 @@
     <string name="settings_browser_login_title">允许此浏览器登录？</string>
     <string name="settings_browser_login_loading">正在检查登录请求…</string>
     <string name="settings_browser_login_failed">二维码已过期或不属于当前 Persona，请在电脑上刷新。</string>
-    <string name="settings_browser_login_details">允许 %1$s 访问你的 Persona？仅确认你本人正在使用的浏览器，可在设备中撤销。</string>
+    <string name="settings_browser_login_only_yours">只有你本人此刻正在登录的浏览器，才可以允许。</string>
+    <string name="settings_browser_login_browser">浏览器</string>
+    <string name="settings_browser_login_browser_note">这是浏览器自己填的名字</string>
+    <string name="settings_browser_login_from">来自</string>
+    <string name="settings_browser_login_network_lan">你的局域网</string>
+    <string name="settings_browser_login_network_internet">互联网</string>
+    <string name="settings_browser_login_network_unknown">无法判断</string>
+    <string name="settings_browser_login_network_unknown_note">请求经过了转发，看不到真实来源</string>
+    <string name="settings_browser_login_requested">发起时间</string>
+    <string name="settings_browser_login_gets">会得到</string>
+    <string name="settings_browser_login_full_access">和这台手机一样的完整权限</string>
+    <string name="settings_browser_login_revoke">可随时在「设置 › 设备」撤销</string>
+    <string name="settings_browser_login_internet_warning">这个请求来自互联网。只有你本人此刻正在登录的浏览器，才可以允许。</string>
     <string name="settings_browser_login_allow">允许登录</string>
     <string name="settings_browser_login_cancel">取消</string>
-    <string name="settings_browser_login_source">来源 %1$s · %2$d 秒前发起</string>
+
+    <string name="settings_browser_login_number_title">在浏览器里输入这个数字</string>
+    <string name="settings_browser_login_number_secret">不要把这个数字告诉任何人。</string>
+    <string name="settings_browser_login_number_one_try">只能输一次，输错这次登录就作废。</string>
+    <string name="settings_browser_login_number_waiting">等待浏览器输入…</string>
+    <string name="settings_browser_login_decided">这次登录已经处理过了</string>
+    <string name="settings_browser_login_signed_in">浏览器已登录</string>
+    <string name="settings_browser_login_signed_in_detail">「%1$s」已添加到「设置 › 设备」。</string>
+    <string name="settings_browser_login_voided">数字不对，这次登录已作废</string>
+    <string name="settings_browser_login_voided_detail">请在浏览器上刷新二维码再试。</string>
+    <string name="settings_browser_login_denied">这次登录已拒绝</string>
+    <string name="settings_browser_login_expired">二维码已过期</string>
+    <string name="settings_browser_login_expired_detail">请在浏览器上刷新二维码再试。</string>
 </resources>

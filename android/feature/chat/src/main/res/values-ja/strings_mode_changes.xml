@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_mode_change_changed_from">%1$sが権限モードを「%2$s」から「%3$s」に変更しました</string>
+    <string name="chat_mode_change_changed_to">%1$sが権限モードを「%2$s」に変更しました</string>
+    <string name="chat_mode_change_restart_queued">%1$sが「%2$s」を選びました。このターンが終わるとセッションを再起動して切り替えます</string>
+    <string name="chat_mode_change_restart_done">「%1$s」で再起動しました</string>
+    <string name="chat_mode_change_restart_already">すでに「%1$s」です。再起動は不要です</string>
+    <string name="chat_mode_change_restart_failed">「%1$s」で再起動できませんでした</string>
+    <string name="chat_mode_change_restart_failed_why">「%1$s」で再起動できませんでした：%2$s</string>
+    <string name="chat_mode_change_restart_dropped">取り消しました。「%1$s」では再起動しません</string>
+    <string name="chat_mode_change_restart_dropped_why">取り消しました。「%1$s」では再起動しません：%2$s</string>
+    <string name="chat_mode_change_why_cancelled">セッションは現在のモードのままです</string>
+    <string name="chat_mode_change_why_replaced">別の切り替えに置き換えられました</string>
+    <string name="chat_mode_change_why_process_exited">元のプロセスが終了しました</string>
+    <string name="chat_mode_change_why_process_replaced">セッションが別のプロセスに変わりました</string>
+    <string name="chat_mode_change_why_process_unknown">どのプロセスを再起動するか分かりませんでした</string>
+    <string name="chat_mode_change_why_expired">2時間以上待ちました</string>
+    <string name="chat_mode_change_why_not_stopped">元のプロセスが終了しませんでした</string>
+    <string name="chat_mode_change_why_start_failed">新しいプロセスが起動せず、セッションは元のモードのまま続いています</string>
+    <string name="chat_mode_change_why_stopped">新しいプロセスが起動せず、セッションは停止しました</string>
+    <string name="chat_mode_change_by_hub">ハブ</string>
+    <string name="chat_mode_change_by_unknown">デバイス</string>
+</resources>

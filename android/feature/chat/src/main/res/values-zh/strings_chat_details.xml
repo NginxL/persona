@@ -31,4 +31,11 @@
     <string name="chat_outbox_resend">重发</string>
     <string name="chat_outbox_waiting_spoken">等网络，连上后自动发送</string>
     <string name="chat_outbox_failed_spoken">发送失败，重发或删除</string>
+    <string name="chat_undelivered_waiting">未送达：%1$s。恢复后会自动发送。</string>
+    <string name="chat_undelivered_failed">未送达：%1$s</string>
+    <string name="chat_undelivered_default_reason">助手没能启动</string>
+    <string name="chat_undelivered_images">图片：%1$d 张</string>
+    <string name="chat_undelivered_action_failed">没有成功：%1$s</string>
+    <string name="chat_undelivered_waiting_spoken">尚未送达。恢复后会自动发送。</string>
+    <string name="chat_undelivered_failed_spoken">未送达。重试或删除。</string>
 </resources>

@@ -1,4 +1,5 @@
 {
+  "agy_pane_integration": "メッセージの送信とターミナルの操作はできます。herdr がこのペインの会話を特定すると、Persona に会話が表示されます。連携機能が未インストールの場合は、herdr integration install antigravity-cli を実行してください。",
   "paseo_unreachable": "Paseoは実行中ですが、Personaから接続できません：{reason}",
   "paseo_not_connected": "Paseoは実行中ですが、Personaはまだ接続できていません",
   "paseo_not_connected_why": "Paseoは実行中ですが、Personaはまだ接続できていません：{reason}",

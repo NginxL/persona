@@ -72,8 +72,10 @@ describe("following the end", () => {
   const view = { scrollHeight: 3000, clientHeight: 800 };
   const fits = { scrollHeight: 800, clientHeight: 800 };
 
-  it("picks up again at the end, or scrolling down within 100 px of it", () => {
-    expect(followsAgain({ gap: 8, delta: -20 })).toBe(true);
+  it("picks up only on downward movement near the end, even after passive layout shrinkage", () => {
+    expect(followsAgain({ gap: 0, delta: 0 })).toBe(false);
+    expect(followsAgain({ gap: 8, delta: -20 })).toBe(false);
+    expect(followsAgain({ gap: 1, delta: 1 })).toBe(true);
     expect(followsAgain({ gap: 9, delta: -20 })).toBe(false);
     expect(followsAgain({ gap: 99, delta: 5 })).toBe(true);
     expect(followsAgain({ gap: 99, delta: 0 })).toBe(false);

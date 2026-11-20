@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import persona.android.data.Hub
 import persona.core.contracts.api.ConnectionState
+import persona.core.contracts.generated.ExtensionErrorReport
 import persona.core.hub.errors.ErrorBreadcrumbs
 import persona.core.hub.errors.ErrorReportBuilder
 import persona.core.hub.errors.ErrorReportContext
@@ -32,8 +33,12 @@ import persona.core.hub.errors.HttpErrorReportTransport
  * is written to the queue before the process dies, ANRs and native crashes are read from the system's exit reasons at
  * the next start, and the queue goes to the selected hub while its hello says `error_reports`.
  */
-class ErrorReporting(private val context: Context) {
-    private val queue = ErrorReportQueue(File(context.filesDir, "error-reports"))
+class ErrorReporting(
+    private val context: Context,
+    localCopy: (ExtensionErrorReport) -> Unit = {},
+    private val localExit: (reason: Int, timestamp: Long) -> Unit = { _, _ -> },
+) {
+    private val queue = ErrorReportQueue(File(context.filesDir, "error-reports"), localCopy = localCopy)
     private val sender = ErrorReportSender(queue)
     private val prefs by lazy { context.getSharedPreferences("error-reports", Context.MODE_PRIVATE) }
     private val builder by lazy {
@@ -96,7 +101,8 @@ class ErrorReporting(private val context: Context) {
 
     private fun recordExits() {
         val manager = context.getSystemService(ActivityManager::class.java) ?: return
-        val exits = manager.getHistoricalProcessExitReasons(context.packageName, 0, 10).map { info ->
+        val historical = manager.getHistoricalProcessExitReasons(context.packageName, 0, 10)
+        val exits = historical.map { info ->
             ExitRecord(
                 timestampMillis = info.timestamp,
                 reason = when (info.reason) {
@@ -112,6 +118,10 @@ class ErrorReporting(private val context: Context) {
         val javaCrash = prefs.getLong(KeyJavaCrash, -1L).takeIf { it >= 0 }
         val plan = ExitReasonPlanner.plan(exits, lastSeen, listOfNotNull(javaCrash), builder)
         plan.reports.forEach(queue::write)
+        // The local recorder keeps every other exit reason too; hub reporting keeps its existing three kinds.
+        if (lastSeen != null) historical.filter { it.timestamp > lastSeen }.forEach { info ->
+            runCatching { localExit(info.reason, info.timestamp) }
+        }
         // First run with no exits at all: still remember that the first run happened.
         prefs.edit { putLong(KeyLastExit, plan.lastSeen ?: 0L) }
     }

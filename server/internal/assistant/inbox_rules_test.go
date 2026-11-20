@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 // vetThings is what the hub does to the things before it hands them over: rules trimmed and cut (hub/inbox.go).
@@ -93,7 +94,7 @@ func TestExtensionKindDescriptions(t *testing.T) {
 	h.inbox.kinds["examplenotes/shared"] = "Example Notes 里有人共享了一篇笔记给用户"
 	h.inbox.srcMu.Unlock()
 	it := &InboxItem{Source: "examplenotes", Kind: "shared", Context: "（正文）", Connector: &InboxConnector{}}
-	if got := h.inbox.triageInput(it); !strings.HasPrefix(got, "类型：Example Notes 里有人共享了一篇笔记给用户\n") {
+	if got := prompts.RenderInboxItem(h.inbox.triagePromptItem(it, "")); !strings.HasPrefix(got, "类型：Example Notes 里有人共享了一篇笔记给用户\n") {
 		t.Fatalf("%q", got)
 	}
 	// From a round: the source's kinds are kept for its items.

@@ -9,6 +9,5 @@
   "openFailedInline": "開けません: {error}",
   "retry": "再試行",
   "tooMany": "ファイルが多すぎるため、先頭の 2000 件のみ表示しています",
-  "gitIgnored": "{path}（Git で無視）",
-  "copyPath": "パスをコピー"
+  "gitIgnored": "{path}（Git で無視）"
 }

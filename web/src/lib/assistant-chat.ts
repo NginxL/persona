@@ -36,7 +36,7 @@ export function runsAssistant(l: AssistantLauncher): boolean {
   const machine = !l.source || l.source === "zshrc" || l.source === "path" || l.source === "builtin";
   if (!machine && !managedProvider(l.source)) return false;
   if (managedProvider(l.source) && l.agent === "codex") return false;
-  return !l.agent || l.agent === "claude" || l.agent === "codex" || l.agent === "agy";
+  return !l.agent || l.agent === "claude" || l.agent === "codex";
 }
 
 /** Whether the assistant's launcher list offers name. A list not loaded yet (null) offers everything: nothing is dropped

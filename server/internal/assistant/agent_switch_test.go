@@ -100,7 +100,7 @@ func TestAgentSwitchMovesAUsageLimitedAgent(t *testing.T) {
 		t.Errorf("pick: %v", p)
 	}
 	p := callParams(t, calls[1])
-	if p["switch_now"] != true || p["apply_switch"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue()) {
+	if p["switch_now"] != true || p["apply_switch"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue("")) {
 		t.Errorf("send: %v", p)
 	}
 }
@@ -175,5 +175,64 @@ func TestAgentsListShowsLauncherAndUsageLimit(t *testing.T) {
 	list := ft.s.describeAgents(context.Background(), "all", "", "")
 	if !strings.Contains(list, " · launcher=sub") || !strings.Contains(list, " · usage_limit resets_at="+reset.Format(time.RFC3339)) {
 		t.Fatalf("agents_list:\n%s", list)
+	}
+}
+
+// An agent its node lists off its launcher (off_launcher, #11792: a herdr restart resumed it with a bare
+// `claude --resume <id>`) runs on none of it, whatever its record says: agents_list says so, and agent_switch to the
+// launcher it was started on moves it back there instead of answering that it runs on it already. Its pick is not
+// taken back when the node refuses: picking its own launcher is the switch back there.
+func TestAgentSwitchBackOntoTheLauncherAnAgentRunsOff(t *testing.T) {
+	ft, _ := switchRig(t)
+	off := agentRow("s1abcdef01", "kimi", proto.StatusIdle)
+	off.StartedByPersona, off.OffLauncher = true, true
+	ft.sessions("mac", off)
+	if list := ft.s.describeAgents(context.Background(), "all", "", ""); !strings.Contains(list, " · launcher=kimi (off_launcher:") {
+		t.Fatalf("agents_list:\n%s", list)
+	}
+	res, err := switchTool(ft, map[string]any{"machine": "mac", "session_id": "s1abcdef", "launcher": "kimi", "text": "go on"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res, "Moved") {
+		t.Fatalf("result: %s", res)
+	}
+	calls := nodeCalls(ft.f)
+	if len(calls) != 2 || calls[0].Method != DeviceSessionModes || calls[1].Method != DeviceSessionSend {
+		t.Fatalf("calls: %+v", calls)
+	}
+	if p := callParams(t, calls[0]); p["launcher"] != "kimi" || p["from"] != "kimi" {
+		t.Errorf("pick: %v", p)
+	}
+
+	ft.f.mu.Lock()
+	ft.f.calls = nil
+	ft.f.mu.Unlock()
+	ft.f.nodes = map[string]nodeAnswer{
+		DeviceSessionSend: func(string, json.RawMessage) (any, error) {
+			return nil, &rpc.Error{Code: proto.CodeSwitchBusy, Message: "the agent is working"}
+		},
+	}
+	if _, err := switchTool(ft, map[string]any{"machine": "mac", "session_id": "s1abcdef", "launcher": "kimi", "text": "go on"}); err == nil {
+		t.Fatal("the node's refusal did not come back")
+	}
+	if calls := nodeCalls(ft.f); len(calls) != 2 {
+		t.Fatalf("taken back with a pick of its own launcher (a switch back for this one): %+v", calls)
+	}
+
+	// To another launcher, a pick whose message did not go is dropped as for any agent: off its launcher, its own
+	// launcher picked while that switch waits cancels it (launcherModes).
+	ft.f.mu.Lock()
+	ft.f.calls = nil
+	ft.f.mu.Unlock()
+	if _, err := switchTool(ft, map[string]any{"machine": "mac", "session_id": "s1abcdef", "launcher": "work", "text": "go on"}); err == nil {
+		t.Fatal("the node's refusal did not come back")
+	}
+	calls = nodeCalls(ft.f)
+	if len(calls) != 3 || calls[2].Method != DeviceSessionModes {
+		t.Fatalf("the switch to work was not dropped: %+v", calls)
+	}
+	if p := callParams(t, calls[2]); p["launcher"] != "kimi" || p["from"] != "kimi" {
+		t.Errorf("drop: %v", p)
 	}
 }

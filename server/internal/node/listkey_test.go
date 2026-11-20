@@ -42,6 +42,12 @@ func listKeyFmt(list []proto.Session) string {
 		if s.Model != "" || s.PermissionMode != "" || s.Effort != "" {
 			fmt.Fprintf(&b, "modes:%q/%q/%q\n", s.Model, s.PermissionMode, s.Effort)
 		}
+		if s.PendingEffort != nil {
+			fmt.Fprintf(&b, "pending-effort:%q/%v\n", *s.PendingEffort, s.EffortChangeFailed)
+		}
+		if s.OffLauncher {
+			b.WriteString("off-launcher\n")
+		}
 		fmt.Fprintf(&b, "source:%s/%s/%s/%s/%v/%v/%s/%s\n", s.SourceKind, s.SourceThreadID, s.SourceInstanceID, s.ReadOnlyReason, capsFmt(s.Capabilities), s.Attached, s.CodexRoute, s.CodexRouteNote)
 		for _, t := range s.Background {
 			b.WriteString(t.ID + ",")
@@ -110,6 +116,9 @@ func capsFmt(c *proto.SessionCapabilities) string {
 	}
 	if c.PluginInput {
 		key += " plugin_input=true"
+	}
+	if c.SupervisionPolicy {
+		key += " supervision_policy=true"
 	}
 	return key + "}"
 }
@@ -195,62 +204,64 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"asking_parent":     func(s *proto.Session) { s.SetAskingParentSessionID("parent-public") },
 		"started_at":        func(s *proto.Session) { s.SetStartedAt(at.Add(-time.Hour)) },
 
-		"session_id":       func(s *proto.Session) { s.SessionID = "s2" },
-		"status":           func(s *proto.Session) { s.Status = proto.StatusDone },
-		"title":            func(s *proto.Session) { s.Title = "t2" },
-		"pane_id":          func(s *proto.Session) { s.PaneID = "%2" },
-		"space":            func(s *proto.Session) { s.SpaceName = "sp2" },
-		"parent_space":     func(s *proto.Session) { s.ParentSpaceID = "" },
-		"slot_name":        func(s *proto.Session) { s.SlotName = "web" },
-		"last_text":        func(s *proto.Session) { s.LastText = "跑测试" },
-		"updated_10s":      func(s *proto.Session) { s.UpdatedAt = at.Add(11 * time.Second) },
-		"updated_churn":    func(s *proto.Session) { s.UpdatedAt = at.Add(4 * time.Second) },
-		"queued":           func(s *proto.Session) { s.Queued = append(s.Queued, "x") },
-		"queued_none":      func(s *proto.Session) { s.Queued = nil },
-		"queued_empty":     func(s *proto.Session) { s.Queued = []string{""} },
-		"suggestion":       func(s *proto.Session) { s.Suggestion = "" },
-		"spawn_from":       func(s *proto.Session) { s.SpawnFrom = "todo_2@mac/parent" },
-		"activity":         func(s *proto.Session) { s.Activity = "在跑测试" },
-		"activity_none":    func(s *proto.Session) { s.Activity = "" },
-		"activity_at":      func(s *proto.Session) { later := act.Add(3 * time.Second); s.ActivityAt = &later },
-		"activity_nil":     func(s *proto.Session) { s.ActivityAt = nil },
-		"attention":        func(s *proto.Session) { s.AttentionReason = "等你\"确认\"" },
-		"failure":          func(s *proto.Session) { s.FailureReason = "" },
-		"external_url":     func(s *proto.Session) { s.ExternalURL = "https://example.com/u" },
-		"chat":             func(s *proto.Session) { s.Chat = "oc_2" },
-		"topic":            func(s *proto.Session) { s.Topic = "om_9" },
-		"dispatched":       func(s *proto.Session) { s.Dispatched = []string{"om_2", "om_3"} },
-		"botmux_none":      func(s *proto.Session) { s.Chat, s.Dispatched = "", nil },
-		"slot_id":          func(s *proto.Session) { s.SlotID = "w1:t2" },
-		"slot_index":       func(s *proto.Session) { s.SlotIndex = 0 },
-		"pane_index":       func(s *proto.Session) { zero := 0; s.PaneIndex = &zero },
-		"pane_none":        func(s *proto.Session) { s.PaneIndex = nil },
-		"pane_same":        func(s *proto.Session) { one := 1; s.PaneIndex = &one },
-		"compaction":       func(s *proto.Session) { s.Compaction = &proto.Compaction{State: "done", StartedAt: at} },
-		"compact_at":       func(s *proto.Session) { s.Compaction = &proto.Compaction{State: "running", StartedAt: act} },
-		"compact_none":     func(s *proto.Session) { s.Compaction = nil },
-		"effort":           func(s *proto.Session) { s.Effort = "low" },
-		"model":            func(s *proto.Session) { s.Model = "claude-opus-5" },        // #6334
-		"permission_mode":  func(s *proto.Session) { s.PermissionMode = "plan" },        // #6334
-		"effort_alone":     func(s *proto.Session) { s.Efforts, s.Effort = nil, "max" }, // #6334
-		"efforts":          func(s *proto.Session) { s.Efforts = []string{"low", "medium", "high"} },
-		"efforts_none":     func(s *proto.Session) { s.Efforts = nil },
-		"source_kind":      func(s *proto.Session) { s.SourceKind = "claude" },
-		"source_thread":    func(s *proto.Session) { s.SourceThreadID = "th2" },
-		"source_inst":      func(s *proto.Session) { s.SourceInstanceID = "in2" },
-		"read_only":        func(s *proto.Session) { s.ReadOnlyReason = "" },
-		"caps":             func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Send: true} },
-		"caps_nil":         func(s *proto.Session) { s.Capabilities = nil },
-		"caps_modes":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Modes: proto.CanModes(false)} },
-		"caps_rewind":      func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rewind: proto.CanModes(true)} },
-		"caps_rewind_code": func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{RewindCode: proto.CanModes(true)} },
-		"caps_model":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Model: proto.CanModes(false)} },
-		"caps_close":       func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Close: proto.CanModes(true)} },
-		"caps_rename":      func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rename: proto.CanModes(true)} },
-		"attached":         func(s *proto.Session) { s.Attached = false },
-		"codex_route":      func(s *proto.Session) { s.CodexRoute = "terminal" },
-		"route_note":       func(s *proto.Session) { s.CodexRouteNote = "" },
-		"background":       func(s *proto.Session) { s.Background = append(s.Background, proto.BackgroundTask{ID: "b2"}) },
+		"session_id":              func(s *proto.Session) { s.SessionID = "s2" },
+		"status":                  func(s *proto.Session) { s.Status = proto.StatusDone },
+		"title":                   func(s *proto.Session) { s.Title = "t2" },
+		"pane_id":                 func(s *proto.Session) { s.PaneID = "%2" },
+		"space":                   func(s *proto.Session) { s.SpaceName = "sp2" },
+		"parent_space":            func(s *proto.Session) { s.ParentSpaceID = "" },
+		"slot_name":               func(s *proto.Session) { s.SlotName = "web" },
+		"last_text":               func(s *proto.Session) { s.LastText = "跑测试" },
+		"updated_10s":             func(s *proto.Session) { s.UpdatedAt = at.Add(11 * time.Second) },
+		"updated_churn":           func(s *proto.Session) { s.UpdatedAt = at.Add(4 * time.Second) },
+		"queued":                  func(s *proto.Session) { s.Queued = append(s.Queued, "x") },
+		"queued_none":             func(s *proto.Session) { s.Queued = nil },
+		"queued_empty":            func(s *proto.Session) { s.Queued = []string{""} },
+		"suggestion":              func(s *proto.Session) { s.Suggestion = "" },
+		"spawn_from":              func(s *proto.Session) { s.SpawnFrom = "todo_2@mac/parent" },
+		"activity":                func(s *proto.Session) { s.Activity = "在跑测试" },
+		"activity_none":           func(s *proto.Session) { s.Activity = "" },
+		"activity_at":             func(s *proto.Session) { later := act.Add(3 * time.Second); s.ActivityAt = &later },
+		"activity_nil":            func(s *proto.Session) { s.ActivityAt = nil },
+		"attention":               func(s *proto.Session) { s.AttentionReason = "等你\"确认\"" },
+		"failure":                 func(s *proto.Session) { s.FailureReason = "" },
+		"external_url":            func(s *proto.Session) { s.ExternalURL = "https://example.com/u" },
+		"chat":                    func(s *proto.Session) { s.Chat = "oc_2" },
+		"topic":                   func(s *proto.Session) { s.Topic = "om_9" },
+		"dispatched":              func(s *proto.Session) { s.Dispatched = []string{"om_2", "om_3"} },
+		"botmux_none":             func(s *proto.Session) { s.Chat, s.Dispatched = "", nil },
+		"slot_id":                 func(s *proto.Session) { s.SlotID = "w1:t2" },
+		"slot_index":              func(s *proto.Session) { s.SlotIndex = 0 },
+		"pane_index":              func(s *proto.Session) { zero := 0; s.PaneIndex = &zero },
+		"pane_none":               func(s *proto.Session) { s.PaneIndex = nil },
+		"pane_same":               func(s *proto.Session) { one := 1; s.PaneIndex = &one },
+		"compaction":              func(s *proto.Session) { s.Compaction = &proto.Compaction{State: "done", StartedAt: at} },
+		"compact_at":              func(s *proto.Session) { s.Compaction = &proto.Compaction{State: "running", StartedAt: act} },
+		"compact_none":            func(s *proto.Session) { s.Compaction = nil },
+		"effort":                  func(s *proto.Session) { s.Effort = "low" },
+		"model":                   func(s *proto.Session) { s.Model = "claude-opus-5" },        // #6334
+		"permission_mode":         func(s *proto.Session) { s.PermissionMode = "plan" },        // #6334
+		"off_launcher":            func(s *proto.Session) { s.OffLauncher = true },             // #11792
+		"effort_alone":            func(s *proto.Session) { s.Efforts, s.Effort = nil, "max" }, // #6334
+		"efforts":                 func(s *proto.Session) { s.Efforts = []string{"low", "medium", "high"} },
+		"efforts_none":            func(s *proto.Session) { s.Efforts = nil },
+		"source_kind":             func(s *proto.Session) { s.SourceKind = "claude" },
+		"source_thread":           func(s *proto.Session) { s.SourceThreadID = "th2" },
+		"source_inst":             func(s *proto.Session) { s.SourceInstanceID = "in2" },
+		"read_only":               func(s *proto.Session) { s.ReadOnlyReason = "" },
+		"caps":                    func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Send: true} },
+		"caps_nil":                func(s *proto.Session) { s.Capabilities = nil },
+		"caps_modes":              func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Modes: proto.CanModes(false)} },
+		"caps_rewind":             func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rewind: proto.CanModes(true)} },
+		"caps_rewind_code":        func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{RewindCode: proto.CanModes(true)} },
+		"caps_model":              func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Model: proto.CanModes(false)} },
+		"caps_close":              func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Close: proto.CanModes(true)} },
+		"caps_rename":             func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{Rename: proto.CanModes(true)} },
+		"caps_supervision_policy": func(s *proto.Session) { s.Capabilities = &proto.SessionCapabilities{SupervisionPolicy: true} },
+		"attached":                func(s *proto.Session) { s.Attached = false },
+		"codex_route":             func(s *proto.Session) { s.CodexRoute = "terminal" },
+		"route_note":              func(s *proto.Session) { s.CodexRouteNote = "" },
+		"background":              func(s *proto.Session) { s.Background = append(s.Background, proto.BackgroundTask{ID: "b2"}) },
 		"background_ended": func(s *proto.Session) {
 			s.SetBackgroundEnded([]proto.BackgroundTask{{ID: "done", Status: "completed", EndedAt: &act}})
 		},
@@ -398,5 +409,17 @@ func TestListKeyModelCapability(t *testing.T) {
 	}
 	if key(nil) == key(proto.CanModes(false)) || key(proto.CanModes(false)) == key(proto.CanModes(true)) {
 		t.Fatal("model capability change was lost")
+	}
+}
+
+func TestListKeyQueuedEffort(t *testing.T) {
+	rows := []proto.Session{{SessionID: "s1", Status: proto.StatusIdle, Effort: "low"}}
+	base := listKey(rows)
+	rows[0].PendingEffort = new("high")
+	pending := listKey(rows)
+	rows[0].EffortChangeFailed = true
+	failed := listKey(rows)
+	if base == pending || pending == failed || failed != listKeyFmt(rows) {
+		t.Fatal("the effort choice and its failure must each change the session list key")
 	}
 }

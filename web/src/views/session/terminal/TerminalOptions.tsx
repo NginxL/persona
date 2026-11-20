@@ -1,6 +1,7 @@
 // "Terminal settings" (iOS TerminalSettingsView, the parts a browser needs): long rows fold or scroll while watching, the key bar,
 // the font size (pinching on iOS; ⌘+ / ⌘− stay the browser's zoom), light / dark apart from the page's (iOS's terminal
-// colors), the cursor (shape, blinking), the WebGL renderer, and the saved commands. Kept in this browser.
+// colors), the cursor (shape, blinking) and the saved commands. Kept in this browser. The renderer is chosen in Settings › Labs
+// (lib/labs.ts); this menu only says what draws this terminal and opens Labs over the page (never away from it).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cx, EASE } from "../../../ui/atoms";
@@ -64,6 +65,7 @@ export function TerminalOptions({
   keyBar,
   onKeyBar,
   onEditShortcuts,
+  onOpenLabs,
   onClose,
 }: {
   anchor: HTMLElement;
@@ -72,6 +74,8 @@ export function TerminalOptions({
   keyBar: boolean;
   onKeyBar: (on: boolean) => void;
   onEditShortcuts: () => void;
+  /** Labs over the page (the panel's LabsDialog), as Edit shortcuts opens its editor: the menu closes first. */
+  onOpenLabs: () => void;
   onClose: () => void;
 }) {
   const driving = v.control === "active" || v.control === "starting";
@@ -175,16 +179,13 @@ export function TerminalOptions({
         </div>
         <Switch checked={v.cursorBlink} onChange={(on) => feed.setCursorBlink(on)} label={t("session-terminal-terminaloptions.cursor_blink")} />
       </div>
-      <div className={ROW}>
-        <Icon name="gauge" size={15} className="shrink-0 text-ink-3" />
-        <div className="min-w-0 flex-1">
-          <div className={LABEL}>{t("session-terminal-terminaloptions.webgl")}</div>
-          <div className={HINT} title={t("session-terminal-terminaloptions.webgl_hint_long")}>
-            {t("session-terminal-terminaloptions.webgl_hint")}
-          </div>
-        </div>
-        <Switch checked={v.webgl} onChange={(on) => feed.setWebgl(on)} label={t("session-terminal-terminaloptions.webgl")} />
-      </div>
+      <RendererRow
+        v={v}
+        onOpenLabs={() => {
+          onClose();
+          onOpenLabs();
+        }}
+      />
       <div className="mx-3 my-1 border-t border-line" />
       <button
         type="button"
@@ -198,6 +199,38 @@ export function TerminalOptions({
         <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{t("session-terminal-terminaloptions.edit_shortcuts")}</span>
       </button>
     </OptionsPopover>
+  );
+}
+
+/** What draws this terminal (it opened with Settings › Labs › Terminal renderer, feed.ts rendererChosen), and the way to
+ *  Labs to change it for the next terminal. Not a switch: one per terminal would be a second, separate setting. Labs opens
+ *  in a dialog over the page rather than navigating to Settings, so the chat beside the terminal (its composer and an
+ *  unsent draft's images, which live only in that component) stays mounted. */
+export function RendererRow({ v, onOpenLabs }: { v: Pick<FeedView, "renderer" | "rendererFellBack">; onOpenLabs: () => void }) {
+  const now = v.rendererFellBack
+    ? t("session-terminal-terminaloptions.renderer_fell_back")
+    : v.renderer === "webgl"
+      ? t("session-terminal-terminaloptions.renderer_webgl")
+      : t("session-terminal-terminaloptions.renderer_standard");
+  return (
+    <div className={ROW} data-terminal-renderer={v.rendererFellBack ? "fell-back" : v.renderer}>
+      <Icon name="gauge" size={15} className="shrink-0 text-ink-3" />
+      <div className="min-w-0 flex-1">
+        <div className={LABEL}>{t("session-terminal-terminaloptions.renderer")}</div>
+        <div className={HINT} title={t("session-terminal-terminaloptions.renderer_tooltip")}>
+          {now}
+        </div>
+      </div>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        onClick={onOpenLabs}
+        className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-control px-2 text-label font-medium text-accent-ink hover:bg-hover"
+      >
+        {t("session-terminal-terminaloptions.renderer_open_labs")}
+        <Icon name="chevronRight" size={11} stroke={2} />
+      </button>
+    </div>
   );
 }
 

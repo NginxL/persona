@@ -420,6 +420,73 @@ class AssistantTraysShotsTest {
         rule.onNodeWithTag("assistant-tray-bar").assertDoesNotExist()
     }
 
+    /**
+     * Finished (#10922): the conversation's tasks that finished in the last 24 hours, newest first, seen or not, after In
+     * progress and counted by its rows. The unseen one says Just finished in Unread's green, the seen one Done; the task
+     * that finished weeks ago is the board's alone. Every style, light and dark.
+     */
+    @Test fun finishedListsNewAndSeenTasksInEveryStyle() = finishedShots("finished", "Just finished", "Done", AppStyle.entries)
+
+    /** The same in Chinese: 已完成 on the entry, 刚做完待看 on the new row. */
+    @Test @Config(qualifiers = "zh-w400dp-h900dp-xhdpi")
+    fun finishedListsNewAndSeenTasksInChinese() = finishedShots("finished-zh", "刚做完待看", "完成", listOf(AppStyle.Glass))
+
+    private fun finishedShots(name: String, newLabel: String, seenLabel: String, styles: List<AppStyle>) {
+        val fixture = Fixture()
+        val now = Instant.now()
+        fun ago(hours: Long) = now.minusSeconds(hours * 3600).toString()
+        fixture.returnedTodos = todoRows +
+            Todo("task-new", "Rename the settings tab", origin = "main", createdAt = ago(4), updatedAt = ago(1), doneAt = ago(1),
+                doneReason = "Renamed the tab and updated its tests") +
+            Todo("task-seen", "Fix the export button", origin = "main", createdAt = ago(6), updatedAt = ago(3), doneAt = ago(3),
+                seenAt = ago(2), doneReason = "The export works again")
+        fixture.tasks.reloadTodos()
+        fixture.requests.value = emptyList(); fixture.drafts.value = emptyList()
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
+                        ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
+                            chrome = ChatChromeBindings(tasks = fixture.tasks, assistantManagement = fixture.management, inboxTrays = fixture.inbox,
+                                inboxScope = "fixture", onOpenSession = { fixture.opened += it }),
+                            renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                    }
+                }
+            }
+        }
+        settle()
+        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-entry-finished").fetchSemanticsNodes().isNotEmpty() }
+        // after In progress, as tall as the other entries
+        assertTrue(rule.onNodeWithTag("assistant-entry-running").getUnclippedBoundsInRoot().left <
+            rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().left)
+        assertEquals(JChipTokens.height, rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().height)
+        rule.onNodeWithTag("assistant-entry-finished").performClick(); settle()
+        // the open entry shows whole: the row scrolls for it, as the web's does
+        val bar = rule.onNodeWithTag("assistant-tray-bar").getUnclippedBoundsInRoot()
+        val chip = rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot()
+        assertTrue("$chip in $bar", chip.left >= bar.left && chip.right <= bar.right)
+        for (s in styles) for (d in listOf(false, true)) {
+            style = s; dark = d; settle()
+            rule.onNodeWithTag("assistant-tray-finished").assertIsDisplayed()
+            val inFinished = hasAnyAncestor(hasTestTag("assistant-tray-finished"))
+            rule.onNodeWithTag("assistant-finished-row-new").assert(hasText(newLabel)).assert(hasText("Renamed the tab and updated its tests"))
+            rule.onNodeWithTag("assistant-finished-row").assert(hasText(seenLabel)).assert(hasText("The export works again"))
+            // newest finished first
+            assertTrue(rule.onNodeWithTag("assistant-finished-row-new").getUnclippedBoundsInRoot().top <
+                rule.onNodeWithTag("assistant-finished-row").getUnclippedBoundsInRoot().top)
+            rule.onNode(hasText(unread.title) and inFinished).assertDoesNotExist()
+            rule.onNodeWithTag("assistant-task-board").assertExists()
+            shot("$name-${s.name.lowercase()}-${if (d) "dark" else "light"}")
+        }
+    }
+
     /** A task whose agent stopped while the hub's completion check found it waiting (#3180): its Progress row says why it is
      *  not done, in every style, light and dark. */
     @Test fun aStoppedTaskSaysWhyItIsNotDoneInEveryStyle() =
@@ -926,5 +993,72 @@ class AssistantTraysShotsTest {
         assertNull(trayApproval(permission.copy(fields = listOf(InteractionField("password", "Password", secret = true))), running))
         assertNull(trayApproval(question, blocked))
         assertEquals(Resolution(approve = true, mode = "acceptEdits"), trayApproval(planRequest, blocked))
+    }
+
+    @Test fun trayScheduleTimeFormatsWireIsoInPageLocale() {
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val now = Instant.parse("2026-11-20T04:00:00Z")
+        val sameDay = "2026-11-20T17:30:00+08:00"
+        val otherDay = "2026-11-23T09:00:00+08:00"
+        for (locale in listOf(java.util.Locale.ENGLISH, java.util.Locale.SIMPLIFIED_CHINESE, java.util.Locale.JAPANESE)) {
+            assertEquals(
+                LocalizedFormats.format(Instant.parse("2026-11-20T09:30:00Z"), LocalizedFormats.TIME, locale, zone),
+                formatTrayScheduleTime(sameDay, locale, zone, now),
+            )
+            assertEquals(
+                LocalizedFormats.format(Instant.parse("2026-11-23T01:00:00Z"), LocalizedFormats.MONTH_DAY_TIME, locale, zone),
+                formatTrayScheduleTime(otherDay, locale, zone, now),
+            )
+        }
+        assertEquals("not-a-timestamp", formatTrayScheduleTime("not-a-timestamp", java.util.Locale.ENGLISH, zone, now))
+    }
+
+    @Test fun runningTrayAndScheduleSheetFormatNextRunInLightDarkAndLargestText() {
+        val nextRunIso = "2026-11-23T09:00:00+08:00"
+        val fixture = Fixture().apply {
+            requests.value = emptyList(); drafts.value = emptyList()
+            returnedTodos = emptyList(); tasks.reloadTodos()
+            sessionRows.value = listOf(Session(main.machineId, main.sessionId, title = "Persona", assistant = true, state = "idle", status = "idle"))
+        }
+        val customManagement = object : AssistantManagement by fixture.management {
+            override suspend fun tasks() = listOf(ScheduledTask("morning", "Morning briefing", prompt = "Summarize overnight updates.",
+                repeats = ScheduledTask.DAILY, enabled = true, nextRun = nextRunIso, lastStatus = "ok"))
+        }
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            val scale = if (large) 2f else 1f
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                fontScale = scale
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            val density = androidx.compose.ui.unit.Density(androidx.compose.ui.platform.LocalDensity.current.density, scale)
+            CompositionLocalProvider(LocalConfiguration provides configuration, androidx.compose.ui.platform.LocalDensity provides density) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                    Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
+                        ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
+                            chrome = ChatChromeBindings(tasks = fixture.tasks, assistantManagement = customManagement, inboxTrays = fixture.inbox,
+                                inboxScope = "fixture", onOpenSession = { fixture.opened += it }),
+                            renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                    }
+                }
+            }
+        }
+        settle()
+        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+        val expected = "Next run: " + formatTrayScheduleTime(nextRunIso, java.util.Locale.ENGLISH)
+        rule.onNodeWithTag("assistant-entry-running").performClick(); settle()
+        for (big in listOf(false, true)) for (d in listOf(false, true)) {
+            dark = d; large = big; settle()
+            rule.onNodeWithText(expected).assertIsDisplayed()
+            rule.onNode(hasText(nextRunIso, substring = true)).assertDoesNotExist()
+            shot("schedule-tray-${if (d) "dark" else "light"}-${if (big) "large" else "default"}")
+        }
+        large = false; dark = false; settle()
+        rule.onNodeWithText("Morning briefing").performClick(); settle()
+        rule.onAllNodesWithText(expected).onFirst().assertIsDisplayed()
+        rule.onNode(hasText(nextRunIso, substring = true)).assertDoesNotExist()
     }
 }

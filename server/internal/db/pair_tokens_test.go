@@ -126,6 +126,117 @@ func TestRevokeDeviceTokenExpiresAssociatedPairToken(t *testing.T) {
 	}
 }
 
+func TestRevokeLinkPairIsScopedAndIdempotent(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	expires := time.Now().Add(time.Hour)
+	for _, hash := range []string{"candidate", "other"} {
+		if err := d.CreatePairToken(ctx, hash, expires, "machine"); err != nil {
+			t.Fatal(err)
+		}
+		device := DeviceToken{ID: hash + "-id", Name: hash, Kind: "link", Role: "link", MachineID: "machine"}
+		if ok, err := d.RedeemPairToken(ctx, hash, device, hash+"-token"); err != nil || !ok {
+			t.Fatalf("redeem %s: %v %v", hash, ok, err)
+		}
+	}
+	if id, found, err := d.RevokeLinkPair(ctx, "candidate", "wrong-machine"); err != nil || found || id != "" {
+		t.Fatalf("wrong machine: %q %v %v", id, found, err)
+	}
+	for i := 0; i < 2; i++ {
+		if id, found, err := d.RevokeLinkPair(ctx, "candidate", "machine"); err != nil || !found || id != "candidate-id" {
+			t.Fatalf("revoke %d: %q %v %v", i, id, found, err)
+		}
+	}
+	if tok, err := d.DeviceTokenByHash(ctx, "candidate-token"); err != nil || tok != nil {
+		t.Fatalf("candidate remains: %+v %v", tok, err)
+	}
+	if tok, err := d.DeviceTokenByHash(ctx, "other-token"); err != nil || tok == nil {
+		t.Fatalf("other credential affected: %+v %v", tok, err)
+	}
+	if p, err := d.PairTokenByHash(ctx, "other"); err != nil || p == nil || p.ExpiresAt.Before(time.Now()) {
+		t.Fatalf("other pair affected: %+v %v", p, err)
+	}
+	if err := d.CreatePairToken(ctx, "unused-candidate", expires, "machine"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if id, found, err := d.RevokeLinkPair(ctx, "unused-candidate", "machine"); err != nil || !found || id != "" {
+			t.Fatalf("unused cancellation %d: %q %v %v", i, id, found, err)
+		}
+	}
+	device := DeviceToken{ID: "late", Name: "late", Kind: "link", Role: "link", MachineID: "machine"}
+	if ok, err := d.RedeemPairToken(ctx, "unused-candidate", device, "late-token"); err != nil || ok {
+		t.Fatalf("redeemed cancelled code: %v %v", ok, err)
+	}
+	if _, _, err := d.RevokeLinkPair(ctx, "", "machine"); err == nil {
+		t.Fatal("empty pair hash accepted")
+	}
+}
+
+func TestRevokeLinkPairRejectsMismatchedCredential(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	if err := d.CreatePairToken(ctx, "bad-pair", time.Now().Add(time.Hour), "machine"); err != nil {
+		t.Fatal(err)
+	}
+	device := DeviceToken{ID: "other-id", Name: "other", Kind: "link", Role: "link", MachineID: "other-machine"}
+	if ok, err := d.RedeemPairToken(ctx, "bad-pair", device, "other-token"); err != nil || !ok {
+		t.Fatalf("redeem: %v %v", ok, err)
+	}
+	if _, _, err := d.RevokeLinkPair(ctx, "bad-pair", "machine"); err == nil {
+		t.Fatal("mismatched credential accepted")
+	}
+	if tok, err := d.DeviceTokenByHash(ctx, "other-token"); err != nil || tok == nil {
+		t.Fatalf("other credential affected: %+v %v", tok, err)
+	}
+	if p, err := d.PairTokenByHash(ctx, "bad-pair"); err != nil || p == nil || p.ExpiresAt.Before(time.Now()) {
+		t.Fatalf("pair expiry was not rolled back: %+v %v", p, err)
+	}
+}
+
+func TestRevokeLinkPairRacesRedemption(t *testing.T) {
+	d := open(t)
+	ctx := context.Background()
+	for i := 0; i < 40; i++ {
+		hash := fmt.Sprintf("race-pair-%d", i)
+		id := fmt.Sprintf("race-id-%d", i)
+		token := fmt.Sprintf("race-token-%d", i)
+		if err := d.CreatePairToken(ctx, hash, time.Now().Add(time.Hour), "machine"); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		var redeemed, found bool
+		var revokedID string
+		var redeemErr, revokeErr error
+		go func() {
+			defer wg.Done()
+			<-start
+			redeemed, redeemErr = d.RedeemPairToken(ctx, hash, DeviceToken{ID: id, Name: id, Kind: "link", Role: "link", MachineID: "machine"}, token)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			revokedID, found, revokeErr = d.RevokeLinkPair(ctx, hash, "machine")
+		}()
+		close(start)
+		wg.Wait()
+		if redeemErr != nil || revokeErr != nil || !found {
+			t.Fatalf("race %d: redeem=%v revoke=%v found=%v", i, redeemErr, revokeErr, found)
+		}
+		if redeemed && revokedID != id || !redeemed && revokedID != "" {
+			t.Fatalf("race %d: redeemed=%v revoked=%q", i, redeemed, revokedID)
+		}
+		if tok, err := d.DeviceTokenByHash(ctx, token); err != nil || tok != nil {
+			t.Fatalf("race %d left a live credential: %+v %v", i, tok, err)
+		}
+		if ok, err := d.RedeemPairToken(ctx, hash, DeviceToken{ID: id + "-late", Name: id, Kind: "link", Role: "link", MachineID: "machine"}, token+"-late"); err != nil || ok {
+			t.Fatalf("race %d allowed late redemption: %v %v", i, ok, err)
+		}
+	}
+}
+
 // A pairing code made for one machine's persona-link carries the machine, and so does the credential it becomes.
 func TestLinkPairTokenKeepsItsMachine(t *testing.T) {
 	d := open(t)

@@ -17,6 +17,16 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 
 @Serializable @SerialName("persona.feature.knowledge.KnowledgeRoute") data object KnowledgeRoute : NavKey
+/** The knowledge list opened at one kind by a deep link; the user can still change the filter in the page. */
+@Serializable @SerialName("persona.feature.knowledge.KnowledgeKindRoute")
+data class KnowledgeKindRoute(val kind: KnowledgeKind) : NavKey
+/**
+ * The knowledge map: topics and their points, or projects and their parts, as an outline (iOS `KBTopicsMap`, the web's Knowledge map).
+ * Of [manager]'s knowledge base, the assistant current when it was opened (null from a page saved before it was kept: the one
+ * current when it opens again); switching assistants while it is open leaves it that one's.
+ */
+@Serializable @SerialName("persona.feature.knowledge.KnowledgeMapRoute")
+data class KnowledgeMapRoute(val manager: String? = null) : NavKey
 /**
  * An entry of [manager]'s knowledge base (the assistant current when it was opened; null from a page saved before it was
  * kept: the one current when it opens again). Its page stays that assistant's (docs/assistant/managers.md "Clients").
@@ -40,6 +50,8 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
     connection: KnowledgeConnection,
     assistant: AssistantConversations,
     sender: MessageSender,
+    sessions: SessionsRepository? = null,
+    namespace: String? = null,
     openLinkInApp: (String) -> Unit,
     onNewAgent: ((KnowledgeAgentStart) -> Unit)? = null,
 ) {
@@ -49,6 +61,19 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
         val assistant = persona.core.designsystem.currentAssistant().id
         val model = viewModel(key = "knowledge:$assistant") { KnowledgeViewModel(connection) }
         KnowledgeScreen(model, navigator)
+    }
+    entry<KnowledgeKindRoute> { route ->
+        val assistant = persona.core.designsystem.currentAssistant().id
+        val model = viewModel(key = "knowledge:$assistant:${route.kind.wire}") {
+            KnowledgeViewModel(connection, initialKind = route.kind)
+        }
+        KnowledgeScreen(model, navigator)
+    }
+    entry<KnowledgeMapRoute> { route ->
+        val current = persona.core.designsystem.currentAssistant().id
+        val owner = route.manager ?: androidx.compose.runtime.saveable.rememberSaveable { current }
+        val model = viewModel(key = "knowledge-map:$owner") { KnowledgeMapViewModel(connection, owner = owner) }
+        KnowledgeMapScreen(model, navigator, owner)
     }
     entry<KnowledgeDetailRoute> { route ->
         val context = LocalContext.current.applicationContext
@@ -62,7 +87,8 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
         val owner = route.manager ?: androidx.compose.runtime.saveable.rememberSaveable { current }
         val hierarchy = rememberUpdatedState("sessions_hierarchy" in LocalHubFeatures.current)
         val model = viewModel(key = "knowledge/$owner/${route.kind.wire}/${route.id}") {
-            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender) { hierarchy.value }
+            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender,
+                sessions = sessions, namespace = namespace) { hierarchy.value }
         }
         KnowledgeDetailScreen(model, navigator, openLinkInApp, onNewAgent)
     }

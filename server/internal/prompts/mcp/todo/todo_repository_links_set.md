@@ -1,4 +1,4 @@
-Replace all links for repo_id at the revision from todo_repositories_get; URLs must match its saved identity. Use {url} or {kind,number}. [] clears; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.
+Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.
 
 ```json
 {
@@ -27,7 +27,8 @@ Replace all links for repo_id at the revision from todo_repositories_get; URLs m
         "type": "object",
         "properties": {
           "url": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "kind": {
             "type": "string",
@@ -37,15 +38,48 @@ Replace all links for repo_id at the revision from todo_repositories_get; URLs m
             ]
           },
           "number": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,19}$"
           },
           "title": {
             "type": "string",
-            "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+            "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
             "maxLength": 1024
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "url"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "number"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "kind",
+              "number"
+            ],
+            "not": {
+              "required": [
+                "url"
+              ]
+            }
+          }
+        ]
       }
     }
   },

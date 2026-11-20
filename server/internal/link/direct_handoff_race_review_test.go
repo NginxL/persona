@@ -114,7 +114,7 @@ func TestReviewDirectWinnerIsNotOrphanedWhenOldReadAlreadyReturned(t *testing.T)
 					<-releaseLog
 				}
 			},
-		}, &reporter{})
+		}, &reporter{}, nil)
 		serveDone <- serveResult{handoff: handoff, err: err}
 	}()
 

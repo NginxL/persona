@@ -98,13 +98,11 @@ const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const commandOf = (inp: Record<string, unknown>) => (Array.isArray(inp.command) ? (inp.command as unknown[]).join(" ") : str(inp.command) || str(inp.cmd));
 
 export interface ActionPresentation {
-  /** Hidden when the agent described the command itself: its sentence is the row. */
+  /** Localized action verb, except for commands which lead directly with their command. */
   verb?: string;
   param?: { text: string; title?: string };
   /** A file the call worked on: drawn as a chip with its name. */
   file?: string;
-  /** A command without a description: on a quieter line under the row. */
-  raw?: string;
 }
 
 /** How a call reads in its row (cindy's describeToolUse + extractDisplayParam). */
@@ -114,14 +112,16 @@ export function presentAction(use: Item): ActionPresentation {
   if (COMMAND_TOOLS.has(name)) {
     const cmd = commandOf(inp);
     const desc = str(inp.description);
-    if (desc) return { param: { text: desc, title: cmd || undefined } };
-    return { verb: t("chat-actionrow.verb_run_command"), raw: cmd || undefined };
+    return { param: { text: cmd || desc || t("chat-actionrow.verb_run_command"), title: desc || cmd || undefined } };
   }
   if (FILE_TOOLS.has(name)) {
     const path = toolFile(name, inp)?.path ?? "";
     return { verb: VERB[name], ...(path ? { file: path, param: { text: truncateParam(fileName(path)), title: path } } : {}) };
   }
-  if (name === "Grep" || name === "Glob") return { verb: VERB[name], param: { text: truncateParam(str(inp.pattern)) } };
+  if (name === "Grep" || name === "Glob") {
+    const subject = [str(inp.pattern), str(inp.path) || str(inp.glob)].filter(Boolean).join(" · ");
+    return { verb: VERB[name], param: { text: truncateParam(subject), title: subject } };
+  }
   if (name === "WebFetch") return { verb: VERB[name], param: { text: truncateParam(str(inp.url)), title: str(inp.url) } };
   if (name === "WebSearch") return { verb: VERB[name], param: { text: truncateParam(str(inp.query)) } };
   if (name === "LS") return { verb: VERB[name], param: { text: truncateParam(str(inp.path)) } };
@@ -208,7 +208,7 @@ export function argumentLines(inp: Record<string, unknown>): string {
   return keys.flatMap((k) => (shown(inp[k]) ? [`${k}: ${shown(inp[k])}`] : [])).join("\n");
 }
 
-export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trace }: { step: ToolStep; running?: boolean; mid: string; sid: string; trace?: boolean }) {
+export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trace, inlineDiff }: { step: ToolStep; running?: boolean; mid: string; sid: string; trace?: boolean; inlineDiff?: boolean }) {
   const { use, result, images } = step;
   const name = use.tool_name ?? "";
   const { tasks, scope } = useChatContext();
@@ -284,10 +284,8 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
           <Icon name={inPlace && open ? "chevron" : "chevronRight"} size={13} stroke={2.2} />
         </span>
       </button>
-      {p.raw && !open && (
-        <div title={p.raw} className="min-w-0 truncate px-2 pb-[3px] pl-[30px] font-mono text-label leading-[1.5] text-tool-ink">
-          {p.raw}
-        </div>
+      {inlineDiff && !trace && diffs && !error && (
+        <div className="mx-2 overflow-x-auto" data-live-edit-diff><DiffBlocks diffs={foldDiffs(diffs).shown} /></div>
       )}
       {images.length > 0 && (
         <div className="flex min-w-0 flex-wrap gap-1.5 py-2 pl-8">
@@ -303,6 +301,7 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
               <StepDetail use={use} result={result} />
             </div>
           )}
+          {COMMAND_TOOLS.has(name) && str((use.tool_input as Record<string, unknown> | undefined)?.description) && <div className="mb-2 font-sans">{str((use.tool_input as Record<string, unknown>).description)}</div>}
           {input && <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{input}</pre>}
           {output && (
             <>

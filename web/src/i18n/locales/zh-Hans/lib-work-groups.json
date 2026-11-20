@@ -9,5 +9,9 @@
   "dur_minutes_seconds": "{m}m {s}s",
   "dur_minutes": "{m}m",
   "dur_hours_minutes": "{h} 小时 {m} 分",
-  "dur_days_hours_minutes": "{d} 天 {h} 小时 {m} 分"
+  "dur_days_hours_minutes": "{d} 天 {h} 小时 {m} 分",
+  "actions_read": "读取 {count} 个文件",
+  "actions_edit": "编辑 {count} 个文件",
+  "actions_run": "运行 {count} 条命令",
+  "actions_search": "搜索 {count} 次"
 }

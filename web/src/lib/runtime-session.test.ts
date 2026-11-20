@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "./api";
-import { exactSession, SessionDetailLoader, UnsupportedSessionLookup, useRuntimeSession, type DetailState } from "./runtime-session";
+import { exactSession, MISSING_RETRIES, SessionDetailLoader, UnsupportedSessionLookup, useRuntimeSession, type DetailState } from "./runtime-session";
 import { getState, reset, upsertSession } from "./store";
 import type { Session } from "./types";
 import { t } from "../i18n";
@@ -15,8 +15,15 @@ const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = n
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 let states: DetailState[];
 let commit: ReturnType<typeof vi.fn<(row: Session) => void>>;
-const loader = (lookup = true, cached: Session | null = row()) => new SessionDetailLoader("demo", "row/with/slashes", () => lookup, () => cached ?? undefined, commit, (state) => states.push(state));
+// every loader a test makes stops after it, so no quiet retry it scheduled reads during a later test
+const made: SessionDetailLoader[] = [];
+const loader = (lookup = true, cached: Session | null = row()) => {
+  const model = new SessionDetailLoader("demo", "row/with/slashes", () => lookup, () => cached ?? undefined, commit, (state) => states.push(state));
+  made.push(model);
+  return model;
+};
 beforeEach(() => { vi.clearAllMocks(); states = []; commit = vi.fn(); vi.mocked(api).mockResolvedValue(page()); });
+afterEach(() => { made.splice(0).forEach((model) => model.stop()); });
 
 describe("exact full-session query", () => {
   it("uses exact machine/session identity and full projection without cursor/since", async () => {
@@ -73,6 +80,58 @@ describe("a failed background read", () => {
       await model.load();
       model.stop();
       await vi.advanceTimersByTimeAsync(120_000);
+      expect(api).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+// A runtime reconnecting or restarting (#11237) lists none of its sessions for a moment: the lookup finds no row.
+describe("a lookup that finds no row", () => {
+  it("asks again with backoff a few times, then waits for a hint or Retry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api).mockResolvedValue(page([]));
+      const model = loader(true, null);
+      await model.load();
+      expect(states.at(-1)).toMatchObject({ loading: false, missing: true, ready: false });
+      expect(api).toHaveBeenCalledTimes(1);
+      let wait = 2_000;
+      for (let i = 1; i <= MISSING_RETRIES; i++) {
+        await vi.advanceTimersByTimeAsync(wait);
+        expect(api).toHaveBeenCalledTimes(1 + i);
+        wait *= 2;
+      }
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(api).toHaveBeenCalledTimes(1 + MISSING_RETRIES);
+      // the person's Retry reads now and re-arms the quiet retries
+      await model.retry();
+      expect(api).toHaveBeenCalledTimes(2 + MISSING_RETRIES);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api).toHaveBeenCalledTimes(3 + MISSING_RETRIES);
+    } finally { vi.useRealTimers(); }
+  });
+  it("recovers by itself when the row is back", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api).mockResolvedValueOnce(page([])).mockResolvedValueOnce(page([]));
+      const model = loader(true, null);
+      await model.load();
+      expect(states.at(-1)).toMatchObject({ missing: true });
+      await vi.advanceTimersByTimeAsync(2_000 + 4_000);
+      expect(commit).toHaveBeenLastCalledWith(row());
+      expect(states.at(-1)).toMatchObject({ loading: false, missing: false, error: "", ready: true });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(api).toHaveBeenCalledTimes(3);
+    } finally { vi.useRealTimers(); }
+  });
+  it("stops asking when the chat goes away", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api).mockResolvedValue(page([]));
+      const model = loader(true, null);
+      await model.load();
+      model.stop();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(api).toHaveBeenCalledTimes(1);
     } finally { vi.useRealTimers(); }
   });

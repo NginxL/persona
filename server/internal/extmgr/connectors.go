@@ -247,6 +247,7 @@ func (h *Manager) forgetSource(ctx context.Context, source string) (sourceForgot
 	var kerr, ierr error
 	out.KBForgotten, kerr = h.forgetArchive(ctx, source)
 	out.Inbox, ierr = h.forgetInbox(ctx, source)
+	h.avatars.Drop(source) // the pictures its rows and pages showed
 	err := errors.Join(kerr, ierr)
 	h.auditConnector(ctx, source, auditConnectorDataDeleted, forgotten(map[string]any{"chats": out.Chats, "people": out.People, "posts": out.Posts, "items": out.Items, "inbox": out.Inbox}, err))
 	return out, err

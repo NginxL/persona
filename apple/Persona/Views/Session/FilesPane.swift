@@ -422,7 +422,7 @@ struct FilesPane: View {
                         crumb(s, current: i == segments.count - 1).id(i)
                     }
                     if !FilesNavigation.writable(shown, home: home), listing != nil {
-                        Chip(text: String(localized: "Read Only"), symbol: Theme.Icon.locked, compact: true)
+                        Chip(text: String(localized: "Read Only"), compact: true)
                             .padding(.leading, Theme.Space.xs)
                             .accessibilityIdentifier("files.readonly")
                     }

@@ -1,7 +1,7 @@
 {
   "held_entry": "被拦推送",
   "held_entry_label": "被拦推送，今天 {count} 条",
-  "held_entry_hint": "低打扰模式开启时被拦下的 P1 / P2 推送",
+  "held_entry_hint": "推送分级开启时被拦下的 P1 / P2 推送",
   "held_title": "今天被拦下的推送",
   "held_explanation": "P1 等你看，P2 静默并默认折叠。",
   "held_p1": "P1 · 等你看",

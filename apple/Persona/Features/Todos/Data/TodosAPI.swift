@@ -1,0 +1,103 @@
+import Foundation
+import PersonaWire
+
+/// A To-dos route the hub (or the manager behind it) does not have yet (#10226; docs/protocol/protocol.md, the to-dos
+/// rows of the REST table): an older hub answers 405 for `GET /api/v1/todos/{id}` and `GET /api/v1/todos/places`, since
+/// `PATCH` and `DELETE /api/v1/todos/{id}` match their path, and 404 for the others. A 404 that says
+/// `todo_not_found` is the to-do itself gone (or another manager's), not the route: `gone`.
+nonisolated enum TodoNotThere {
+    static let goneCode = "todo_not_found"
+
+    static func matches(_ error: Error) -> Bool {
+        guard let e = error as? APIError else { return false }
+        return e.status == 405 || (e.status == 404 && e.code != goneCode)
+    }
+
+    static func gone(_ error: Error) -> Bool {
+        guard let e = error as? APIError else { return false }
+        return e.status == 404 && e.code == goneCode
+    }
+}
+
+/// One to-do as `GET /api/v1/todos/{id}` answers it: the row and its view, worked out over the whole list.
+nonisolated struct ViewedTodo: Equatable, Sendable {
+    var todo: TodoItem
+    var view: TodoSummary?
+}
+
+/// The To-dos redesign's routes (#10465), beside the list's (`APIClient.todos(etag:)`) and today's writes
+/// (`TodoModels.swift`). Ids go in the path with every `/`, `?` and `#` escaped: a run's or a step's ask id carries a
+/// session's ids (`run:<machine>/<session>…`), and `APIClient.encodedPath` takes a path that has escapes as it is.
+nonisolated extension APIClient {
+    /// How long a message to a to-do may take: the hub relays it for up to five minutes (its forward's deadline) while
+    /// the node takes it or a new Agent starts for it, so the call waits a little longer than that.
+    static let todoRelayWait: TimeInterval = 5 * 60 + 20
+
+    /// `id` escaped for one segment of a path.
+    static func todoPath(_ id: String) -> String {
+        id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? id
+    }
+
+    private struct TodoAnswer: Decodable, Sendable { var todo: TodoItem }
+
+    /// `GET /api/v1/todos/{id}`: the row as the list has it, its view included. The answer names no manager: the caller
+    /// keeps the list's stamp (it asked through the to-do's manager). `TodoNotThere` when the hub has no such route.
+    func todo(id: String) async throws -> ViewedTodo {
+        struct Answer: Decodable, Sendable {
+            var todo: TodoItem
+            var view: TodoSummary?
+            enum Outer: String, CodingKey { case todo }
+            enum Inner: String, CodingKey { case view }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: Outer.self)
+                todo = try c.decode(TodoItem.self, forKey: .todo)
+                view = (try? c.nestedContainer(keyedBy: Inner.self, forKey: .todo).decodeIfPresent(TodoSummary.self, forKey: .view)) ?? nil
+            }
+        }
+        let answer = try await getDecodedOffMain("/api/v1/todos/\(Self.todoPath(id))", as: Answer.self)
+        return ViewedTodo(todo: answer.todo, view: answer.view)
+    }
+
+    /// `GET /api/v1/todos/places`: All To-dos, Today, Upcoming and each project with open to-dos, and the list's
+    /// counts. Asked only while the hub lists `todo_places`; `TodoNotThere` from a hub without it.
+    func todoPlaces() async throws -> TodoPlaces {
+        try await getDecodedOffMain("/api/v1/todos/places", as: TodoPlaces.self)
+    }
+
+    /// Someday (`PUT …/someday`): back on `until`, or with none on no set day. The hub answers the to-do; its `view`
+    /// comes with the next read of the list. A closed to-do is refused (409 `todo_closed`).
+    func setSomeday(id: String, until: Date?) async throws -> TodoItem {
+        struct Body: Encodable { var until: Date? }
+        let data = try await request("PUT", "/api/v1/todos/\(Self.todoPath(id))/someday", body: Body(until: until))
+        return try JSON.decoder.decode(TodoAnswer.self, from: data).todo
+    }
+
+    /// Back from Someday (`DELETE …/someday`).
+    func clearSomeday(id: String) async throws -> TodoItem {
+        let data = try await request("DELETE", "/api/v1/todos/\(Self.todoPath(id))/someday")
+        return try JSON.decoder.decode(TodoAnswer.self, from: data).todo
+    }
+
+    /// Restore on an inactive to-do (`PUT …/restored`): activity for its status, never an edit.
+    func restore(id: String) async throws -> TodoItem {
+        let data = try await request("PUT", "/api/v1/todos/\(Self.todoPath(id))/restored")
+        return try JSON.decoder.decode(TodoAnswer.self, from: data).todo
+    }
+
+    /// Tells a to-do's work something through its origin conversation (`POST …/conversations/{origin}/route`); with
+    /// `askedAt`, as the answer to the decision of that round. `opID` rides as `X-Persona-Op-Id`, so a send repeated
+    /// after an unknown outcome gets the first one's answer; the answer is the conversation's new `routed` item.
+    func route(conversation: String, todoID: String, text: String, askedAt: String?, opID: UUID) async throws -> FeedItem {
+        struct Body: Encodable {
+            var todoID: String
+            var text: String
+            var askedAt: String?
+            enum CodingKeys: String, CodingKey { case text, todoID = "todo_id", askedAt = "asked_at" }
+        }
+        struct Answer: Decodable { var item: FeedItem }
+        let body = Body(todoID: todoID, text: HubNaming.outbound(text, canonical: personaNaming), askedAt: askedAt)
+        let data = try await request("POST", "/api/v1/assistant/conversations/\(Self.todoPath(conversation))/route", body: body,
+                                     timeout: Self.todoRelayWait, opID: opID)
+        return try JSON.decoder.decode(Answer.self, from: data).item
+    }
+}

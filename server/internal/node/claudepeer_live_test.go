@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/host"
 )
 
 // TestLivePeerSend sends one message through the peer inbox of a claude started for the test (never a session the user
 // has open): PERSONA_LIVE_PID names that claude, PERSONA_LIVE_DIR its CLAUDE_CONFIG_DIR, PERSONA_LIVE_TEXT the message,
-// PERSONA_LIVE_MODE the from-mode to state (bypass or prompting, as peerAttest would; unset states none).
+// PERSONA_LIVE_MODE the from-mode to state (bypass or prompting, as peerAttest would; unset states none). With
+// PERSONA_LIVE_CLASSIFY set, peerAttest chooses the mode as an owner's message, using the real tmux host.
 // go test -tags peerlive -run TestLivePeerSend ./internal/node/ (docs/lessons/windows.md, "Claude Code's peer inbox").
 func TestLivePeerSend(t *testing.T) {
 	pid, _ := strconv.Atoi(os.Getenv("PERSONA_LIVE_PID"))
@@ -53,6 +56,11 @@ func TestLivePeerSend(t *testing.T) {
 		text = "reply with OK"
 	}
 	p.fromMode = os.Getenv("PERSONA_LIVE_MODE")
+	if os.Getenv("PERSONA_LIVE_CLASSIFY") != "" {
+		n := &Node{hosts: host.NewRegistry(newTmuxHost()), bgScans: map[string]*bgScan{}, metas: map[string]quickMeta{}}
+		ownerCtx, _ := withOwnerDelivery(context.Background())
+		p.fromMode = n.peerAttest(ownerCtx, c, c.SessionID)
+	}
 	start := time.Now()
 	err = peerSend(context.Background(), p, c.SessionID, text)
 	t.Logf("peerSend from-mode %q: %v (%s)", p.fromMode, err, time.Since(start))

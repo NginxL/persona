@@ -14,8 +14,9 @@ interface FeedbackDeps {
   onHubEvent(type: string, listener: (msg: Record<string, unknown>) => void): unknown;
   subscribe(listener: () => void): unknown;
   receiptsAllowed?(): boolean;
+  watchCursor?(mid: string, sid: string): number | undefined;
 }
-let deps: Pick<FeedbackDeps, "getSession" | "send" | "receiptsAllowed"> = { getSession: () => undefined, send: () => {} };
+let deps: Pick<FeedbackDeps, "getSession" | "send" | "receiptsAllowed" | "watchCursor"> = { getSession: () => undefined, send: () => {} };
 
 export type SendFeedback = "sending" | "processing" | "unknown" | "";
 type Phase = "sending" | "processing" | "delivered" | "failed" | "unknown";
@@ -53,7 +54,11 @@ function scopedObservation(k: string, owner = scope()) {
 const publish = () => { handoffAuthority(); listeners.forEach((f) => f()); };
 const owned = (e: Flight) => e.scope === scope() && !e.retired;
 const current = (e: Flight) => owned(e) && flights.get(key(e.mid, e.sid, e.id)) === e;
-const reconcile = (e: Flight) => deps.send({ type: "subscribe", machine_id: e.mid, session_id: e.sid, lazy_images: true, fold_work: true });
+function reconcile(e: Flight, openOnly = false) {
+  const cursor = deps.watchCursor?.(e.mid, e.sid);
+  if (openOnly && cursor !== undefined) return;
+  deps.send({ type: "subscribe", machine_id: e.mid, session_id: e.sid, ...(cursor ? { since_seq: cursor } : {}), lazy_images: true, fold_work: true });
+}
 function end(e: Flight) { clearTimeout(e.timer); e.feedback = ""; }
 function wait(e: Flight) {
   clearTimeout(e.timer);
@@ -81,6 +86,10 @@ function create(mid: string, sid: string, id: string, old = flights.get(key(mid,
   flights.set(key(mid, sid, id), e);
   return e;
 }
+/** What every message send says on its own request (#10661), as client_hello does (lib/api.ts CLIENT_FEATURES): it shows a
+ *  message the hub holds for an Agent whose computer is away (lib/undelivered.ts). The hub holds one only for a page that
+ *  declares it, and a page whose socket is down has no client_hello to go by. */
+const SEND_HEADERS = { "X-Persona-Features": "agent_message_hold" };
 /** Capture the request owner before queuing, so quiet retries cannot move to another login or manager. */
 export function beginMessageSend(mid: string, sid: string, id: string, text?: string) {
   listenOwners();
@@ -91,14 +100,14 @@ export function beginMessageSend(mid: string, sid: string, id: string, text?: st
   e.text = text;
   wait(e);
   publish(); // local Sending precedes network and outbox work
-  reconcile(e); // the target must be subscribed before POST, including sends from another page
+  reconcile(e, true); // the target must be subscribed before POST, including sends from another page
   const manager = managerHeaderFor(sessionPath(mid, sid));
   let pending = true;
   const isCurrent = () => pending && owned(e);
   return {
     current: isCurrent,
     echoed: () => Boolean(e.echoed),
-    request: { token: getToken(), tokenOwner: credentialOwner(), isAuthContextCurrent: isCurrent, headers: manager ? { [MANAGER_HEADER]: manager } : undefined },
+    request: { token: getToken(), tokenOwner: credentialOwner(), isAuthContextCurrent: isCurrent, headers: manager ? { [MANAGER_HEADER]: manager, ...SEND_HEADERS } : SEND_HEADERS },
     finish(phase?: "delivered" | "failed" | "unknown") {
       pending = false;
       if (requests.get(k) === e) requests.delete(k);
@@ -198,7 +207,7 @@ export function configureMessageFeedback(next: FeedbackDeps) {
     if (!Array.isArray(msg.items)) return;
     observeMessageItems(String(msg.machine_id), String(msg.session_id), msg.items as Item[]);
   });
-  next.onHubEvent("hello", () => { for (const e of flights.values()) if (current(e) && e.feedback) reconcile(e); });
+  next.onHubEvent("hello", () => { for (const e of flights.values()) if (current(e) && e.feedback) reconcile(e, true); });
   next.subscribe(() => { if (handoffAuthority()) publish(); });
 }
 function handoffAuthority() {

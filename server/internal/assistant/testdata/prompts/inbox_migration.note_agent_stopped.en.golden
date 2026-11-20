@@ -1,0 +1,7 @@
+The Agent failed (session session_1 on box). Failure reason:
+
+<persona-context kind="agent_result" title="Agent failure reason">
+original  result
+</persona-context>
+
+Read this and continue the matter: call inbox_suggest with the next suggestion and an updated recap.

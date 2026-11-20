@@ -50,7 +50,7 @@ func (s *Service) reportLineFromModel(ctx context.Context, title, kind, text str
 	// Reasoning models think first: a small max_tokens comes back empty (todo_titles.go).
 	out, err := s.purposeModel("agent.triage").Complete(ctx,
 		prompts.RenderAgentReportLine(prompts.AgentReportLine{Language: answerLanguage(locale), Max: max}),
-		prompts.RenderAgentReportLineInput(prompts.AgentReportLineInput{Task: clip(oneLine(title), 120), Kind: kind,
+		prompts.RenderAgentReportLineInput(prompts.AgentReportLineInput{Language: answerLanguage(locale), Task: clip(oneLine(title), 120), Kind: kind,
 			Text: clipMiddleRunes(text, 1500)}), 300)
 	if err != nil {
 		if !ai.IsPaused(err) {

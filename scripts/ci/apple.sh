@@ -88,6 +88,12 @@ PY
 # These are explicitly public synthetic values; persona_config never opens the
 # developer's config. DEVELOPER_DIR already selected above wins in its env helper.
 export PERSONA_META_WEARABLES=NO
+# The whole project, with the watch app and the share extension (apple/lean-dev-build.yml is sim.sh's alone).
+unset PERSONA_LEAN_DEV_BUILD
+ci_run 'Stage resolved packages for Meta configuration' 60 python3 "$CI_ROOT/scripts/ci/apple_resolved.py" \
+  --tracked "$CI_ROOT/apple/Packages/PersonaSSH/Package.resolved" \
+  --staged "$SOURCE/apple/Packages/PersonaSSH/Package.resolved" \
+  --meta "$PERSONA_META_WEARABLES" --evidence "$DIAGNOSTICS/resolved-variant.txt"
 ci_run 'Build PersonaCore XCFramework before package resolution' 1200 "$SOURCE/native/app-core/scripts/build-apple.sh"
 ci_run 'Generate public unsigned Apple config' 60 python3 "$SOURCE/scripts/persona_config.py" xcconfig
 ci_run 'Generate Apple project' 120 xcodegen generate --spec "$SOURCE/apple/project.yml" --project "$SOURCE/apple"

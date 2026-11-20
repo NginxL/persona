@@ -15,6 +15,11 @@ internal data class SlashCommand(val title: String, val word: String, val detail
     val clear: Boolean get() = word == CLEAR
     /** /model: picking it opens the model choices (the "Mode" sheet) instead of typing anything (web `isModelCommand`). */
     val model: Boolean get() = word == MODEL
+    /**
+     * /permissions (#6513, the web's #6476): Persona's own command, picking it opens the permission mode menu with every
+     * mode instead of sending anything to the agent.
+     */
+    val permissions: Boolean get() = word == PERMISSIONS
     /** /loop: picking it types `/loop ` to go on writing, a line under it saying what it will do (web `loopHint`). */
     val loop: Boolean get() = word == LOOP
 
@@ -45,39 +50,52 @@ internal data class SlashCommand(val title: String, val word: String, val detail
         /** Claude Code's /model and /loop (web AGENT_COMMANDS): only in the "/" list, never sent from the "+" sheet. */
         const val MODEL = "/model"
         const val LOOP = "/loop"
+        const val PERMISSIONS = "/permissions"
         /** What picking /loop puts in the box: the word, the interval and the task to follow. */
         const val LOOP_TEXT = "$LOOP "
         fun modelCommand(resources: Resources) = resources.getString(R.string.chat_slash_model_detail).let { SlashCommand(it, MODEL, it, MODEL) }
+        fun permissionsCommand(resources: Resources) =
+            resources.getString(R.string.chat_slash_permissions_detail).let { SlashCommand(it, PERMISSIONS, it, PERMISSIONS) }
+        /** `/permissions` alone in the box (typed out and sent): it opens the menu too (the web's `isPermissionsCommand`). */
+        fun isPermissions(draft: String): Boolean = draft.trim().equals(PERMISSIONS, ignoreCase = true)
         fun loopCommand(resources: Resources) = resources.getString(R.string.chat_slash_loop_detail).let { SlashCommand(it, LOOP, it, LOOP_TEXT) }
 
         /**
          * What the "/" list offers for [draft]: everything for a bare "/", else the words starting with it (any case).
-         * [model] and [loop] add Claude Code's /model and /loop, [clear] its /clear, for a session that takes them.
+         * [model] and [loop] add Claude Code's /model and /loop, [clear] its /clear, for a session that takes them;
+         * [permissions] Persona's /permissions where the chat has a permission mode picker.
          */
-        fun matching(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false): List<SlashCommand> {
+        fun matching(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false,
+                     permissions: Boolean = false): List<SlashCommand> {
             if (!draft.startsWith("/") || draft.any { it == ' ' || it == '\n' }) return emptyList()
-            val list = all(resources) + listOfNotNull(modelCommand(resources).takeIf { model }, loopCommand(resources).takeIf { loop },
-                clearCommand(resources).takeIf { clear })
+            val list = all(resources) + listOfNotNull(modelCommand(resources).takeIf { model }, permissionsCommand(resources).takeIf { permissions },
+                loopCommand(resources).takeIf { loop }, clearCommand(resources).takeIf { clear })
             return list.filter { it.word.startsWith(draft, ignoreCase = true) }
         }
 
         /**
          * The list the composer shows: [matching], except once the draft is exactly the one quick message it matches
          * (picked, or typed out): there is nothing left to choose. /clear stays, so picking it can still ask first.
+         * [keepExact] keeps the built-in row when a saved prompt also matches the draft.
          */
-        fun suggestions(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false): List<SlashCommand> =
-            matching(draft, clear, resources, model, loop).takeUnless {
-                it.singleOrNull()?.let { only -> !only.clear && !only.model && only.word.equals(draft, ignoreCase = true) } == true
+        fun suggestions(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false,
+                        permissions: Boolean = false, keepExact: Boolean = false): List<SlashCommand> =
+            matching(draft, clear, resources, model, loop, permissions).takeUnless {
+                !keepExact && it.singleOrNull()?.let { only ->
+                    !only.clear && !only.model && !only.permissions && only.word.equals(draft, ignoreCase = true)
+                } == true
             }.orEmpty()
 
         /** The main conversation has its own list (web mainCommands), never the Agent quick messages or terminal commands. */
-        fun mainSuggestions(draft: String, clear: Boolean, resources: Resources): List<SlashCommand> {
+        fun mainSuggestions(draft: String, clear: Boolean, resources: Resources, permissions: Boolean = false): List<SlashCommand> {
             if (!draft.startsWith("/") || draft.any { it == ' ' || it == '\n' }) return emptyList()
-            return listOfNotNull(mainClearCommand(resources).takeIf { clear }).filter { it.word.startsWith(draft, ignoreCase = true) }
+            // /permissions where the conversation has a permission mode picker (the web offers it in Persona's too, #6513).
+            return listOfNotNull(permissionsCommand(resources).takeIf { permissions }, mainClearCommand(resources).takeIf { clear })
+                .filter { it.word.startsWith(draft, ignoreCase = true) }
         }
 
         @Composable
-        fun suggestions(draft: String, clear: Boolean, model: Boolean = false, loop: Boolean = false): List<SlashCommand> =
-            suggestions(draft, clear, LocalResources.current, model, loop)
+        fun suggestions(draft: String, clear: Boolean, model: Boolean = false, loop: Boolean = false, permissions: Boolean = false): List<SlashCommand> =
+            suggestions(draft, clear, LocalResources.current, model, loop, permissions)
     }
 }

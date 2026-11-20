@@ -319,6 +319,11 @@
     <string name="agents_new_prefill_offline">“%1$s” is offline, so another one is picked; switch back once it connects</string>
     <string name="agents_new_reload">Reload options</string>
     <string name="agents_new_agent_type">Agent type</string>
+    <string name="agents_new_presets">Agent presets</string>
+    <string name="agents_new_preset_loading">Wait for this preset’s model list before starting.</string>
+    <string name="agents_new_preset_left_out">This preset won’t be applied in full:</string>
+    <string name="agents_new_preset_left_out_model">Model “%1$s” can’t be used here; the launcher’s model will run.</string>
+    <string name="agents_new_preset_left_out_effort">Thinking effort “%1$s” can’t be used here; the launcher’s or model’s own effort will run.</string>
     <!-- The agent type of Paseo's providers other than Claude Code and Codex, each listed by its own name under it (#8143). -->
     <string name="agents_new_type_other">Other agents</string>
     <string name="agents_new_launcher_this_time">Launcher (this time only)</string>
@@ -327,8 +332,8 @@
     <string name="agents_new_no_launchers">No launchers on this machine</string>
     <string name="agents_new_follow_config">Follow model settings</string>
     <string name="agents_new_permission_mode">Permission mode</string>
-    <string name="agents_new_bypass_warning">With everything allowed, editing files and running commands won\'t ask you again.</string>
-    <string name="agents_new_provider_mode_hint">This agent uses its own approval settings unless you pick Allow everything. You can switch in the chat later.</string>
+    <string name="agents_new_bypass_warning">With Full access, editing files and running commands won\'t ask you again.</string>
+    <string name="agents_new_provider_mode_hint">This agent uses its own approval settings unless you pick Full access. You can switch in the chat later.</string>
     <string name="agents_new_effort">Thinking effort</string>
     <string name="agents_new_no_effort">This model has no thinking effort setting</string>
     <string name="agents_new_first_message_codex">First message (required for Codex)</string>
@@ -345,11 +350,11 @@
     <string name="agents_new_recent_remove">Remove from Recent</string>
     <string name="agents_new_recent_clear">Clear Recent Setups</string>
     <string name="agents_mode_follow">Follow launcher</string>
-    <string name="agents_mode_default">Ask each time</string>
-    <string name="agents_mode_accept_edits">Auto-edit files</string>
-    <string name="agents_mode_plan">Plan only</string>
-    <string name="agents_mode_auto">Auto</string>
-    <string name="agents_mode_bypass">Allow everything</string>
+    <string name="agents_mode_default">Default permissions</string>
+    <string name="agents_mode_accept_edits">Auto accept edits</string>
+    <string name="agents_mode_plan">Plan mode</string>
+    <string name="agents_mode_auto">Auto-review</string>
+    <string name="agents_mode_bypass">Full access</string>
     <string name="agents_effort_low">Low</string>
     <string name="agents_effort_medium">Medium</string>
     <string name="agents_effort_high">High</string>
@@ -523,9 +528,6 @@
     <string name="agents_source_feishu_open">Open this topic in Lark</string>
     <string name="agents_filter_feishu">Lark groups</string>
     <string name="agents_filter_terminal">Terminal</string>
-    <string name="agents_botmux">botmux</string>
-    <string name="agents_botmux_hide">Hide botmux sessions</string>
-    <string name="agents_botmux_show">Show botmux sessions</string>
     <string name="agents_menu_sort">Sort: %1$s</string>
     <string name="agents_sort_state">Status first</string>
     <string name="agents_sort_updated">Recently updated</string>

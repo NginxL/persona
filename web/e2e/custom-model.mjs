@@ -87,6 +87,8 @@ async function newAgentList(page, theme) {
     if (i === 60) fail(`${theme}: New agent's lists did not load`);
     await page.waitForTimeout(150);
   }
+  // The catalog is one disclosure per launcher; these existing checks exercise the model actions below them.
+  while (await panel.locator('[data-panel-launcher][aria-expanded="false"]').count()) await panel.locator('[data-panel-launcher][aria-expanded="false"]').first().click();
   return { dialog, trigger, panel };
 }
 

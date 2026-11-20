@@ -1,7 +1,7 @@
 /** @jsxImportSource @persona/extension */
 import { describe, expect, test } from "bun:test";
 import {
-  Button, Grid, Section, Text, View, callback, createElement, mount, useEffect, useFetch, useInterval, useState,
+  Button, Grid, Graph, Section, Text, View, callback, createElement, mount, useEffect, useFetch, useInterval, useState,
   type TimerAdapter, type Renderer, type UIEvent,
 } from "./ui.ts";
 
@@ -130,6 +130,17 @@ describe("server JSX reconciler", () => {
     await session.event({ generation: session.generation, version: session.current().version, eventId: "event", actionId: tile.action.id, key: "tile", values: {} });
     expect(calls).toBe(1); session.dispose();
     expect(() => mount(<View key="root"><Section key="main"><Grid key="grid" tiles={[{ title: "fixture" } as never]} /></Section></View>, allow)).toThrow("UI key");
+  });
+
+  test("graph nodes lower with their node fields and their own callbacks", async () => {
+    let calls = 0;
+    const session = mount(<View key="root"><Section key="main"><Graph key="graph" nodes={[{ id: "a", title: "fixture", progress: 0.5, action: callback(() => { calls++; }) }, { id: "b", title: "other" }]} edges={[{ from: "a", to: "b" }]} folded={["a"]} /></Section></View>, allow);
+    const graph = session.current().view.sections[0].items[0] as { type: string; nodes: { id: string; progress?: number; action: { id: string } }[]; edges: { from: string; to: string }[]; folded: string[] };
+    expect(graph.type).toBe("graph");
+    expect(graph.nodes[0].progress).toBe(0.5);
+    expect(graph.folded).toEqual(["a"]);
+    await session.event({ generation: session.generation, version: session.current().version, eventId: "event", actionId: graph.nodes[0].action.id, key: "graph", values: {} });
+    expect(calls).toBe(1); session.dispose();
   });
 
   test("independent mounted sessions do not share state, callbacks, generations or cleanup", async () => {

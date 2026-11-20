@@ -150,15 +150,22 @@ func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send,
 	if p.Name != "" { // and which device: the manager records who switched a model profile
 		req.Header[assistantwire.DeviceNameHeader] = []string{p.Name}
 	}
+	delete(req.Header, assistantwire.PersonHeader)
+	if personSent(r.Context()) { // and whether a person's own app asks: what may change a held message (#10661)
+		req.Header[assistantwire.PersonHeader] = []string{"1"}
+	}
 	if admin {
 		req.Header[assistantwire.AdminHeader] = []string{"1"}
 	}
 	if p.Role == roleExtension && p.Extension != "" {
 		req.Header[assistantwire.ExtensionHeader] = []string{p.Extension}
 	}
+	req.ModeActor = modesActor(r.Context())
 	req.OwnerAnswer = devicewire.IsOwnerAnswer(r.Context())
+	req.ClarificationProof = clarificationRequestProof(r.Context())
 	req.HandoffApprover = handoffApproverOf(r.Context()) // only the resolve route's gate sets it (secret_handoff.go)
 	req.Human = humanStartOf(r.Context())                // only a new conversation's start sets it (assistant_link.go)
+	req.ReplyInput = assistantwire.ReplyInputOf(r.Context())
 	ctx := r.Context()
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc

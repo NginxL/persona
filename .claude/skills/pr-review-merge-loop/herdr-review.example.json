@@ -1,20 +1,24 @@
 {
   "herdr_command": "/path/to/herdr",
   "session": "agent",
+  "socket_path": "/path/to/private/herdr/sessions/agent/herdr.sock",
   "workspace": "w1",
   "runtime_directory": "/path/to/private/pr-review-runtime/herdr-review-runs",
-  "reviewer_launcher": "/path/to/private/reviewer-launcher",
+  "reviewer_launcher": "cc_k3",
+  "launcher_environment": {
+    "ZDOTDIR": "/path/to/private/pr-review-runtime/review-zdotdir"
+  },
   "slots": 15,
   "lifetime_seconds": 7200,
   "forbidden_flags": ["--model"],
   "startup_warning": "Optional exact startup warning; leave empty to reject every prompt",
   "startup_acceptance": "Optional exact acceptance label; leave empty to reject every prompt",
-  "process_wrapper": "/usr/bin/python3 -I /path/to/repository/.claude/skills/pr-review-merge-loop/scripts/pr_watch_resources.py /path/to/private/pr-review-runtime/resources.json --slot",
+  "process_wrapper": "",
   "scope_properties": {
     "CPUQuota": "400%",
     "CPUWeight": 20,
-    "MemoryHigh": 5368709120,
-    "MemoryMax": 6442450944,
+    "MemoryHigh": "5G",
+    "MemoryMax": "6G",
     "TasksMax": 512
   }
 }

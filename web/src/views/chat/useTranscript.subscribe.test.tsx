@@ -9,7 +9,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Item, ItemsPage } from "../../lib/types";
 import { liveEntry, receiveLive, resetLive } from "../../lib/live";
-import { useTranscript } from "./useTranscript";
+import { useTranscript, type Transcript } from "./useTranscript";
 
 interface Pending {
   url: string;
@@ -37,9 +37,10 @@ vi.mock("../../lib/store", async (orig) => ({
 
 let host: HTMLDivElement;
 let root: Root;
+let shown: Transcript;
 
 function Probe() {
-  useTranscript("m", "A");
+  shown = useTranscript("m", "A");
   return null;
 }
 
@@ -109,6 +110,25 @@ it("never resubscribes or displays a page that arrives after deletion", async ()
   hello();
   expect(subscribes()).toEqual([]);
   expect(sent.some((m) => m.type === "unsubscribe" && m.session_id === "A")).toBe(true);
+});
+
+it("drops an older page that returns after the conversation is deleted", async () => {
+  await settleFirstRead({ items: [item("a10", 10)], to_seq: 10, has_more: true });
+  let read!: Promise<symbol | undefined>;
+  act(() => { read = shown.loadEarlier(); });
+  const older = calls.shift()!;
+  expect(older.url).toContain("before_seq=10");
+
+  await act(async () => {
+    rememberConversationDeleted("m", "A");
+    older.resolve({ items: [item("late", 5)], has_more: false });
+    expect(await read).toBeUndefined();
+    expect(await shown.loadEarlier()).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
+
+  expect(shown.items).toEqual([]);
+  expect(shown.loadingEarlier).toBe(false);
 });
 
 it("recognizes a cold old link's 410 without a prior websocket deletion event", async () => {

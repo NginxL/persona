@@ -27,6 +27,7 @@ let changed: Session[];
 let removed: string[];
 let expired: boolean;
 let scopedNeeds: number;
+let scopedWaiting: number;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -35,6 +36,7 @@ beforeEach(() => {
   removed = [];
   expired = false;
   scopedNeeds = 1;
+  scopedWaiting = 0;
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("location", { protocol: "http:", host: "demo" });
   vi.stubGlobal("localStorage", { getItem: () => "demo-token" });
@@ -51,7 +53,7 @@ beforeEach(() => {
         const scoped = url.searchParams.get("agents_only") === "1";
         // The all-sessions aggregate also includes Assistant and health conversations.
         return Response.json({ total: 8000, machine: { demo: 8000 }, project: { "/demo": 8000 }, group: {},
-          state: scoped ? { needs_you: scopedNeeds, working: 3, unread: 2 } : { needs_you: 3, working: 5, unread: 4 }, revision: "r2" });
+          state: scoped ? { needs_you: scopedNeeds, working: 3, unread: 2 } : { needs_you: 3, working: 5, unread: 4 }, ...(scoped && scopedWaiting ? { background_waiting: scopedWaiting } : {}), revision: "r2" });
       }
       if (!url.search) return Response.json({ sessions: [session("legacy")] });
       if (url.searchParams.has("since")) return Response.json({ sessions: changed, remove: removed, total: 8000, has_more: false, revision: "r2" });
@@ -96,6 +98,14 @@ describe("negotiated bounded runtime lists", () => {
     Socket.last.push({ type: "sessions_list", revision: "r2" });
     await settleThrottled();
     expect(countsShown()).toMatchObject({ needs: 0, badge: 0 });
+  });
+
+  it("takes the Agents that only wait in the background out of the hub's working count (#10938)", async () => {
+    scopedWaiting = 2;
+    hello(["sessions_list", "sessions_lookup", "sessions_hierarchy", "sessions_agents_only"]);
+    await settle();
+
+    expect(countsShown()).toMatchObject({ working: 1, waiting: 2, unread: 2 });
   });
 
   it("retains the legacy aggregate on a paged hub without the scoped query", async () => {

@@ -54,7 +54,7 @@ struct ReviewPage: View {
             if change.git, review.review != nil { review.stale = true }
         }
         .sheet(isPresented: $finishing) { finishSheet }
-        .confirmationDialog(Text("Delete the review's \(review.drafts.count) comments?"), isPresented: $confirmDiscard, titleVisibility: .visible) {
+        .accessibleConfirmationDialog(Text("Delete the review's \(review.drafts.count) comments?"), isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button(role: .destructive) {
                 review.drafts = []
                 finishing = false

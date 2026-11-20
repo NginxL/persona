@@ -221,6 +221,7 @@ func TestRecoveryReturnsToTheConfiguredModelOnTheNextRequest(t *testing.T) {
 	if r := n.modelRecovery(id); r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil {
 		t.Fatalf("quota marker %+v", r)
 	}
+
 	// The fallback answered: the hold starts, as before.
 	fp := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
 	n.mu.Lock()
@@ -294,9 +295,9 @@ func TestDefaultModelRecoveryReturnsAfterProbe(t *testing.T) {
 			st, _ := n.state.get(id)
 			st.Model = requested
 			n.state.put(id, st)
-			p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: requested}}
+			p := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: requested}}
 			n.procs[id] = p
-			const failure = "API Error: 503 no eligible upstream account is currently available"
+			const failure = "API Error: safeguards flagged"
 			if !n.recoverAssistantResult(p, true, failure, "", assistantRecordKind) {
 				t.Fatal("the first default-model failure was not recovered")
 			}
@@ -328,7 +329,7 @@ func TestDefaultModelRecoveryReturnsAfterProbe(t *testing.T) {
 			if st, _ := n.state.get(id); st.ModelRecovery == nil || st.ModelRecovery.From != requested || st.ModelRecovery.ProbeFrom != "primary-model" {
 				t.Fatalf("the default probe identity was not persisted: %+v", st.ModelRecovery)
 			}
-			fp := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
+			fp := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
 			n.mu.Lock()
 			n.procs[id] = fp
 			n.mu.Unlock()
@@ -713,11 +714,13 @@ func TestRecoveryHoldExpiryKeepsStickyFallback(t *testing.T) {
 	if !unavailableKept {
 		t.Fatal("natural expiry cleared the configured model's unavailable record")
 	}
-	if !n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", "", assistantRecordKind) {
-		t.Fatal("the new 429 was not recovered")
+	if n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", "", assistantRecordKind) {
+		t.Fatal("throttling bypassed manager scheduling")
 	}
-	if first := waitRecoverySend(t, sent); first.Model != "fallback-model" {
-		t.Fatalf("the first recovery send used %q, want the sticky fallback without a same-model retry", first.Model)
+	select {
+	case <-sent:
+		t.Fatal("throttling sent an immediate recovery")
+	default:
 	}
 }
 
@@ -777,6 +780,7 @@ func TestRecoveryReturnHonorsNewModelChoice(t *testing.T) {
 			other := modelExecution{Model: "other-model", IsMain: true}
 			execution, expired := n.heldFallbackWithExpiry(id, "claude", other)
 			execution = n.applyModelRecoveryReturn(context.Background(), id, other.Model, execution, expired)
+			n.commitModelChoice(id, execution) // the direct helper models the delivery boundary in assistantSend
 			if execution.Model != "other-model" {
 				t.Fatalf("automatic return overrode the newer model choice with %q", execution.Model)
 			}
@@ -859,6 +863,41 @@ func TestRecoveryConfirmedReturnReleasesFallbackThroughAssistantSend(t *testing.
 			}
 			if tc.probe && probes.Load() == 0 {
 				t.Fatal("the probe case returned without checking the configured model")
+			}
+		})
+	}
+}
+
+func TestTaskExecutionSkipsConversationRecoveryAtRPCBoundary(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary recovery", true: "strict task"}[strict], func(t *testing.T) {
+			n, _ := recoveryTestNode(t, id, false, true)
+			// A persisted marker can survive a restart without an in-memory fallback hold.
+			n.putModelRecovery(id, &proto.ModelRecovery{From: "primary-model", To: "fallback-model", Reason: proto.ModelRecoveryReasonQuota})
+			primary, fallback := errors.New("primary model reached"), errors.New("fallback model reached")
+			modelProbeCache.Lock()
+			for model, err := range map[string]error{"primary-model": primary, "fallback-model": fallback} {
+				modelProbeCache.results[n.home+"\x00claude\x00"+model] = modelProbeResult{at: time.Now(), agent: "claude", err: err}
+			}
+			modelProbeCache.Unlock()
+			t.Cleanup(func() {
+				modelProbeCache.Lock()
+				delete(modelProbeCache.results, n.home+"\x00claude\x00primary-model")
+				delete(modelProbeCache.results, n.home+"\x00claude\x00fallback-model")
+				modelProbeCache.Unlock()
+			})
+			st, _ := n.state.get(id)
+			_, err := nodeCall(t, n, "assistant.send", map[string]any{
+				"session_id": id, "cwd": st.Cwd, "launcher": "claude", "model": "primary-model",
+				"text": "next request", "task_execution": strict, "follows_setting": true,
+			})
+			want := fallback
+			if strict {
+				want = primary
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("wrong model reached: %v, want %v", err, want)
 			}
 		})
 	}

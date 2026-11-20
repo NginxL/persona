@@ -39,6 +39,15 @@ func TestParseBlockedAndLast(t *testing.T) {
 	}
 }
 
+// A file a task made for the user is an artifact like any other: the manager copies it to the conversation's computer
+// (#10511).
+func TestParseFileArtifact(t *testing.T) {
+	c, arts, ok := Parse("<closeout status=\"done\">\nartifact: file /home/me/manual.md\n</closeout>")
+	if !ok || c.Status != proto.CloseoutDone || len(arts) != 1 || arts[0].Kind != "file" || arts[0].Ref != "/home/me/manual.md" {
+		t.Fatalf("closeout = %+v artifacts = %+v ok=%v", c, arts, ok)
+	}
+}
+
 func TestParseRefuses(t *testing.T) {
 	for name, reply := range map[string]string{
 		"none":          "All done, merged and deployed.",
@@ -130,5 +139,47 @@ func TestAskOfAllocations(t *testing.T) {
 		if n := testing.AllocsPerRun(100, func() { AskOf(text) }); n > words {
 			t.Errorf("AskOf allocates %v times for %.40q…, its words alone %v", n, text, words)
 		}
+	}
+}
+
+func TestDeliveryDispositionIsIndependentOfDeploymentFacts(t *testing.T) {
+	c, _, ok := Parse("<closeout status=\"blocked\" merged=\"yes\" deployed=\"yes\">\ndelivery: off\nunblock: user\nmissing: enable the feature\nwaiting: owner approval\n</closeout>")
+	if !ok || c.Delivery != "off" || c.Unblock != "user" || c.Deployed != "yes" || c.Merged != "yes" || c.Missing != "enable the feature" || c.Waiting != "owner approval" {
+		t.Fatalf("closeout=%+v %v", c, ok)
+	}
+	c, _, ok = Parse("<closeout status=\"done\">\ndelivery: invented\nunblock: invented\n</closeout>")
+	if !ok || c.Delivery != "" || c.Unblock != "" {
+		t.Fatalf("unknown enum=%+v %v", c, ok)
+	}
+}
+
+func TestOptionalNextStep(t *testing.T) {
+	const chinese = "按刚才的条件整理候选清单。"
+	const japanese = "候補を三つに絞ってください。"
+	for _, tc := range []struct{ name, status, fields, want string }{
+		{"owner's words", "done", "next: " + chinese, chinese},
+		{"localized colon", "done", "- next：" + japanese + "\nverified: unit tests passed", japanese},
+		{"explicit none", "done", "missing: none\nnext: Draft the list", "Draft the list"},
+		{"blocks", "blocked", "next: Continue", ""},
+		{"unfinished", "not_done", "next: Continue", ""},
+		{"needs an answer", "done", "missing: Choose a format\nnext: Continue", ""},
+		{"waits", "done", "next: Continue\nwaiting: a reviewer", ""},
+		{"duplicate", "done", "next: Draft one\nnext: Draft two", ""},
+		{"empty duplicate", "done", "next: \nnext: Draft two", ""},
+		{"omitted", "done", "did: Summarized the notes", ""},
+		{"placeholder", "done", "next: <short reply>", ""},
+		{"nothing", "done", "next: なし", ""},
+		{"continuation", "done", "next: Prepare a summary\n  with names removed", ""},
+		{"continuation with colon", "done", "next: Prepare a summary\n  Important: omit the names", ""},
+		{"line separator", "done", "next: Prepare a summary\u2028with names removed", ""},
+		{"limit", "done", "next: " + strings.Repeat("字", 180), strings.Repeat("字", 180)},
+		{"over limit", "done", "next: " + strings.Repeat("字", 181), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, ok := Parse("<closeout status=\"" + tc.status + "\">\n" + tc.fields + "\n</closeout>")
+			if !ok || c.Next != tc.want {
+				t.Fatalf("next = %q, valid = %t", c.Next, ok)
+			}
+		})
 	}
 }

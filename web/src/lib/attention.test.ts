@@ -266,3 +266,9 @@ describe("一批做完的怎么显示（#4945）", () => {
     expect(batchDue(0, BATCH_MAX_MS)).toBe(BATCH_MAX_MS);
   });
 });
+
+it("does not notify about a directory-hidden question or completion", () => {
+  const r = detectTransitions(prevOf(["a", "working"], ["b", "working"]), [session("a", "needs_you", { hidden_by_directory: true }), session("b", "unread", { hidden_by_directory: true })], noMutes);
+  expect(r.events).toEqual([]);
+  expect(r.next.size).toBe(0);
+});

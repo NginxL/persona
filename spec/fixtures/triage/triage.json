@@ -835,6 +835,124 @@
       "from_test": "web/src/lib/todo-triage.test.ts > an accepted task reopened by more work is finished, not Follow up"
     },
     {
+      "name": "continued_after_acceptance",
+      "description": "验收后用 task_plan continues 续做（新 Agent 接手）：hub 把上一轮的验收归入历史，state 回到督办中；新 Agent 停着也不是已验收、刚做完（#11553）。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Accepted tasks\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [
+            {
+              "machine_id": "m",
+              "session_id": "old",
+              "linked_at": "2026-11-02T04:00:00.000Z",
+              "released_at": "2026-11-10T08:00:00.000Z"
+            },
+            {
+              "machine_id": "m",
+              "session_id": "idle",
+              "linked_at": "2026-11-10T08:00:01.000Z"
+            }
+          ],
+          "origin": "conv",
+          "reopened_at": "2026-11-10T08:00:00.000Z",
+          "supervision": {
+            "supervisor": "conv",
+            "done_when": [
+              "c1",
+              "c2",
+              "c3",
+              "c4",
+              "c5",
+              "c6",
+              "c7",
+              "c8"
+            ],
+            "state": "",
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-10T07:00:00.000Z",
+                "verdict": "accepted",
+                "checks": [
+                  {
+                    "criterion": "c1",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c2",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c3",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c4",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c5",
+                    "met": true
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "section": "other",
+        "rule": "rest"
+      },
+      "from_test": "server/internal/assistant/supervision_round_test.go > TestContinuationStartsANewSupervisionRound"
+    },
+    {
       "name": "accepted_running_again",
       "description": "已验收的任务 Agent 又在跑：「在做」。",
       "source": [

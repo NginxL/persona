@@ -32,6 +32,15 @@ func retryDecisionFixture(t *testing.T, st *workMemStore) (*Service, *fakeHub) {
 	triage(t, s, "s1")
 	s.workTick(context.Background(), time.Now().Add(16*time.Second))
 	retryFailureAt(t, s, f, recoveryFirstError, time.Now().UTC().Add(-time.Minute))
+	// Simulate a retry-decision card persisted by a previous version. New
+	// transient failures never create one, but its recovery lifecycle remains supported.
+	e := entryOf(t, s, "s1")
+	e.WakeAt, e.Work.WakeAt = nil, nil
+	e.Work.On = proto.WaitUser
+	e.Work.Questions = []proto.Question{{Question: recoveryFirstError, Options: []proto.QuestionOption{{Label: answerRetry}, {Label: answerSkip}}}}
+	e.InteractionID = s.openCard("box", failed, e.Work)
+	e.Work.InteractionID = e.InteractionID
+	s.putWork(context.Background(), e)
 	cards := s.workCards()
 	if len(cards) != 1 || cards[0].ToolName != workCardTool || !strings.Contains(cards[0].Questions[0].Question, recoveryFirstError) {
 		t.Fatalf("setup: retry decision %+v", cards)

@@ -84,6 +84,7 @@ GET /api/v1/sessions/{mid}/{sid}/info
 GET /api/v1/sessions/{mid}/{sid}/items
 GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full
 GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image
+GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization
 GET /api/v1/sessions/{mid}/{sid}/screen
 GET /api/v1/skills
 GET /api/v1/ws
@@ -103,6 +104,7 @@ POST /api/v1/admin/machines
 POST /api/v1/admin/machines/{id}/connector
 POST /api/v1/admin/machines/{id}/link-pair
 POST /api/v1/admin/machines/{id}/reconnect
+POST /api/v1/admin/machines/{mid}/link-switch # admin relay to the computer's manager (link_switch.go)
 POST /api/v1/admin/password
 POST /api/v1/admin/peers
 POST /api/v1/admin/peers/code

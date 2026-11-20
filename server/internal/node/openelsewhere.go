@@ -72,10 +72,17 @@ func literalGlobPath(path string) string {
 
 func literalGlobPathForOS(path, goos string) string {
 	if goos == "windows" {
-		return strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]").Replace(path)
+		return windowsGlobEscapes.Replace(path)
 	}
-	return strings.NewReplacer(`\`, `\\`, "[", `\[`, "*", `\*`, "?", `\?`).Replace(path)
+	return globEscapes.Replace(path)
 }
+
+// Made once: the session list escapes every config directory on each rebuild, and a Replacer builds its table anew
+// each time it is made (#2826's allocation bound).
+var (
+	windowsGlobEscapes = strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
+	globEscapes        = strings.NewReplacer(`\`, `\\`, "[", `\[`, "*", `\*`, "?", `\?`)
+)
 
 // liveClaudes reads the sessions/<pid>.json of every claude still running, in every config directory, once per pid.
 // The list calls it on every rebuild (once a second): a file is read again only once it changed (claudefiles.go).

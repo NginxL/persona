@@ -88,8 +88,8 @@ internal fun recentConversations(snapshot: AssistantSnapshot, limit: Int = RECEN
     val leaders = snapshot.leaders.toSet()
     return snapshot.conversations.distinctBy { it.key }
         .filter { it.key != snapshot.mainSession && it.sessionId !in leaders && !it.archived &&
-            it.sessionId != snapshot.backgroundSupervisor &&
-            automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task }
+            (snapshot.recentTaskChats == true || (it.sessionId != snapshot.backgroundSupervisor &&
+                automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task)) }
         .map { it to it.updated }
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.sessionId })
         .take(limit).map { it.first }
@@ -226,13 +226,21 @@ internal fun conversationWords() = ConversationWords(stringResource(R.string.ass
     stringResource(R.string.assistant_handoff), stringResource(R.string.assistant_handoff_named),
     stringResource(R.string.assistant_background_supervisor))
 
+/** A conversation's name as Persona's history shows it, in [resources]' language (Forward to's rows, #3901). */
+fun Session.personaConversationTitle(resources: android.content.res.Resources): String = conversationTitle(ConversationWords(
+    resources.getString(R.string.assistant_untitled), resources.getString(R.string.assistant_handoff),
+    resources.getString(R.string.assistant_handoff_named)))
+
 private val handoffTag = Regex("""<persona-context\b[^>]*?\btitle="([^"]*)"""")
+private val forwardKind = Regex("""\bkind="forward"""")
 
 /** "Hand to Persona: X" for text that is a `<persona-context title="X">` tag (attributes decoded), null for any other text. */
 internal fun handoffTitle(text: String, words: ConversationWords): String? {
     handoffTag.find(text)?.let { match ->
         val title = match.groupValues[1].replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&amp;", "&").trim()
+        // A forwarded message (#3901) names itself ("Forwarded from Claude · chat"); it was not handed to Persona.
+        if (title.isNotEmpty() && forwardKind.containsMatchIn(match.value)) return title
         return if (title.isEmpty()) words.handoff else words.handoff(title)
     }
     val start = text.trimStart()
@@ -257,6 +265,14 @@ internal suspend fun managerMainTarget(manager: String, snapshot: AssistantSnaps
     snapshot.mainSession?.takeIf { snapshot.managerId == manager } ?: resolve(manager)
 
 /** Null targets always enter the durable main queue before any network request. */
+/**
+ * The forwards over the composer after a send that never reached the outbox: [sent]'s card goes back in front of
+ * [held], once each (a forward the outbox already took is not placed again).
+ */
+internal fun restoreForwards(sent: List<persona.feature.chat.ChatLinkContext>,
+    held: List<persona.feature.chat.ChatLinkContext>): List<persona.feature.chat.ChatLinkContext> =
+    sent.filterNot { ref -> held.any { it.id == ref.id } } + held
+
 internal suspend fun sendAssistantMessage(
     main: MainConversationSender?, sender: MessageSender, session: SessionKey?, text: String, id: String,
 ) {
@@ -272,7 +288,7 @@ internal fun DeliveryState.pendingStatus(): PendingStatus? = when (this) {
     DeliveryState.Verifying -> PendingStatus.Verifying
     DeliveryState.NeedsConfirmation -> PendingStatus.NeedsReview
     DeliveryState.Rejected, DeliveryState.Refused -> PendingStatus.Refused
-    DeliveryState.Sent -> null
+    DeliveryState.Sent, DeliveryState.Held -> null
 }
 
 internal fun assistantStatus(session: Session?, messages: List<OutboxMessage>,

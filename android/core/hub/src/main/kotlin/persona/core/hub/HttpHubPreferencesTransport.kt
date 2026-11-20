@@ -4,6 +4,8 @@ import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.HubPreferenceSet
 import persona.core.contracts.api.HubPreferencesTransport
+import persona.core.contracts.api.AgentDisplayApi
+import persona.core.contracts.api.AgentsDisplaySettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
 import okhttp3.HttpUrl
@@ -17,7 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class HttpHubPreferencesTransport(
     private val connection: OkHttpHubConnection,
     private val isCurrent: () -> Boolean = { true },
-) : HubPreferencesTransport {
+) : HubPreferencesTransport, AgentDisplayApi {
     private suspend fun request(method: String, segments: List<String>, body: String? = null): String {
         if (!isCurrent()) throw CancellationException("Pairing changed")
         val path = HttpUrl.Builder().scheme("https").host("example.com").apply {
@@ -35,4 +37,9 @@ class HttpHubPreferencesTransport(
     override suspend fun seen(session: SessionKey) {
         request("POST", listOf("sessions", session.machineId, session.sessionId, "seen"), "{}")
     }
+    override suspend fun read() = JsonCodec.decodeFromString<AgentsDisplaySettings>(request("GET", displayPath))
+    override suspend fun migrateHidden() = JsonCodec.decodeFromString<AgentsDisplaySettings>(
+        request("PUT", displayPath, """{"show_botmux":false,"only_if_unset":true}"""))
+
+    private companion object { val displayPath = listOf("agents", "display-settings") }
 }

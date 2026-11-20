@@ -2529,6 +2529,23 @@ test('a direct start does not create an Agent when its explicitly owned director
   assert.equal(fake.requestsOf('agent.create.request').length, 0)
 })
 
+test('a managed start requires the prepared directory before creating an agent', async (t) => {
+  const f = projectFixture(t)
+  const { fake, node } = await setup(t)
+  fake.handlers['project.list.request'] = () => ({ payload: { projects: [f.project('prj_original', f.alias)] } })
+  const make = (path) => workspaceDescriptor({ workspaceDirectory: path, projectId: 'prj_original', workspaceKind: 'directory' })
+  fake.handlers['workspace.create.request'] = () => ({ payload: { workspace: make(f.dir) } })
+  const params = { cwd: f.repo, launcher: 'my-codex', prompt: 'Check the repository', backend_workspace_root: true }
+  await assert.rejects(call(node, 'session.start', params), /prepared task directory/)
+  assert.equal(fake.requestsOf('agent.create.request').length, 0)
+  fake.handlers['workspace.create.request'] = () => ({ payload: { workspace: make(f.repo) } })
+  const result = await call(node, 'session.start', params)
+  assert.equal(result.session.cwd, f.repo)
+  assert.equal(fake.requestsOf('agent.create.request').at(-1).config.cwd, f.repo)
+  assert.equal(fake.requestsOf('agent.create.request').at(-1).initialPrompt, undefined)
+  assert.equal(fake.requestsOf('send_agent_message_request').at(-1).text, params.prompt)
+})
+
 test('a directory workspace whose reply was lost uses the same creation key before starting one Agent', async (t) => {
   const f = projectFixture(t)
   const { fake, node } = await setup(t)

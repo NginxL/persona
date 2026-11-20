@@ -136,7 +136,7 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       items.push(...unboundSessions(sessions, filtered)
         .filter((s) => (!machine || s.machine_id === machine) && match(`${s.title} ${s.cwd} ${s.machine_id}`))
         .map(sessionItem));
-      if (!machine) items.push(...todos.filter((todo) => match(`${todo.title} ${todo.notes ?? ""}`)).map((todo) => todoItem(todo, lookup)));
+      items.push(...todos.filter((todo) => (!machine || (todo.agents ?? []).some((a) => !a.released_at && a.machine_id === machine)) && match(`${todo.title} ${todo.notes ?? ""}`)).map((todo) => todoItem(todo, lookup)));
     }
     return workLanes(items);
   }, [view, board, search, machine, archived, sessionsOf, sessions, todos, lookup]);
@@ -286,7 +286,7 @@ function WorkCard({ item, machine }: { item: WorkItem; machine?: Machine }) {
     <div className="mt-2">
       <Button tone="quiet" icon="chevronRight" className="!px-2 !py-1 text-xs" onClick={() => {
         if (s) openAgent(s.machine_id, s.session_id);
-        else navigate("/todos");
+        else navigate(item.todo ? `/todos?id=${encodeURIComponent(item.todo.id)}` : "/todos");
       }}>{item.kind === "todo" ? t("workspaceboard.work_open_todo") : t("workspaceboard.auto_open_session")}</Button>
     </div>
   </article>;

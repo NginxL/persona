@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "older_manager_unchanged",
+      "description": "A manager from before #10465 names no lock-screen rule: the push is exactly as before, TODO_DECIDE with Take Recommendation, and the options it sends are not forwarded.",
+      "source": [
+        "docs/assistant/todos.md \"Waiting for the owner\"",
+        "docs/design/proposals/todos-redesign.md 3.7"
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "options": [
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki"
+          ],
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ]
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE",
+        "mutable_content": false,
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "manager": "assistant"
+        }
+      }
+    },
+    {
+      "name": "safe_decision_offers_its_options",
+      "description": "A decision that is safe to answer from the notification: TODO_DECIDE with its ask, the rule and the options, whole and the recommended first, and mutable-content so the app's extension can offer them as actions.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Answers and taps per surface\"",
+        "docs/design/proposals/todos-redesign.md 5 decision 4 (a)"
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "options": [
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki"
+          ],
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ],
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer"
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE",
+        "mutable_content": true,
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "manager": "assistant",
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer",
+          "options": [
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki"
+          ]
+        }
+      }
+    },
+    {
+      "name": "open_decision_opens_only",
+      "description": "A decision other people will see (or one that cannot be undone): TODO_DECIDE_OPEN, which no app gives actions, so every app, an older one too, opens it on a tap; no options and no mutable-content.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Outside the app\"",
+        "spec/fixtures/todo-view/README.md \"Risk and the lock screen\""
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_release",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Submit today",
+          "options": [
+            "Submit today",
+            "Wait for the widget fix"
+          ],
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ],
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "open_only"
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE_OPEN",
+        "mutable_content": false,
+        "todo": {
+          "id": "todo_release",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Submit today",
+          "manager": "assistant",
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "open_only"
+        }
+      }
+    },
+    {
+      "name": "unknown_rule_opens_only",
+      "description": "A rule this hub does not know, from a newer manager: read as open_only, the safer one, and written so.",
+      "source": [
+        "schema/wire/todo-view.schema.json OwnerAskLockscreen"
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "options": [
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki"
+          ],
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ],
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer_after_unlock"
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE_OPEN",
+        "mutable_content": false,
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "manager": "assistant",
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "open_only"
+        }
+      }
+    },
+    {
+      "name": "options_recommended_first_at_most_four",
+      "description": "The labels as the hub forwards them whatever the manager sent: no empty one or repeat, the recommended first, at most four, each whole however long.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Outside the app\""
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "options": [
+            "Kaede",
+            "",
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki",
+            "Ryokan Hanami near Gion with a late check-in",
+            "Machiya"
+          ],
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ],
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer"
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE",
+        "mutable_content": true,
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "manager": "assistant",
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer",
+          "options": [
+            "Ryokan Hanami",
+            "Kaede",
+            "Tsuki",
+            "Ryokan Hanami near Gion with a late check-in"
+          ]
+        }
+      }
+    },
+    {
+      "name": "safe_decision_without_options",
+      "description": "A safe decision that lists no options: TODO_DECIDE with Take Recommendation only, and no mutable-content, since the extension has nothing to offer.",
+      "source": [
+        "docs/assistant/todos.md \"Waiting for the owner\""
+      ],
+      "input": {
+        "owner": "assistant",
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "responses": [
+            "decide_yourself",
+            "not_what_i_asked",
+            "explain_first"
+          ],
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer"
+        }
+      },
+      "expected": {
+        "category": "TODO_DECIDE",
+        "mutable_content": false,
+        "todo": {
+          "id": "todo_kyoto",
+          "asked_at": "2026-11-10T09:00:00Z",
+          "recommend": "Ryokan Hanami",
+          "manager": "assistant",
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "lockscreen": "answer"
+        }
+      }
+    }
+  ]
+}

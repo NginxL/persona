@@ -134,7 +134,15 @@ func (s *Service) fleetTakeSnapshot(snap Snapshot) {
 	}
 	r.mu.Unlock()
 	s.quietTasksLeft(left) // before the lists are told: the rows go without it
-	s.askOnPhone(snap.Interactions)
+	// Apply interactions in the same order as their snapshot sequence numbers.
+	// A publisher superseded while applying the rest of its snapshot must not
+	// withdraw or restart a card from the current snapshot. Unsequenced direct
+	// applications are authoritative.
+	s.pubMu.Lock()
+	if snap.Seq == 0 || snap.Seq == s.seq {
+		s.askOnPhone(snap.Interactions)
+	}
+	s.pubMu.Unlock()
 	for _, mid := range changed {
 		s.sessionsChanged(mid)
 	}

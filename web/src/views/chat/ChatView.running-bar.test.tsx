@@ -44,9 +44,8 @@ const flush = async () => {
 const dockBar = () => host.querySelector("[data-running-status]");
 const liveWorkLine = () => host.querySelector('[data-work-group="live"]');
 const sendFeedback = () => host.querySelector("[data-message-feedback]");
-// Exactly one in-stream activity indicator: the live work line once the hub accepts the turn, or the sending/preparing
-// feedback while the message is still on its way.
-const inStreamIndicator = () => liveWorkLine() ?? sendFeedback();
+// Activity stays in the stream: receipt feedback, the live work line, then the answer itself while it streams.
+const inStreamIndicator = () => liveWorkLine() ?? sendFeedback() ?? host.querySelector('[data-answer="streaming"]');
 
 beforeEach(async () => {
   localStorage.clear();
@@ -74,23 +73,36 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     expect(liveWorkLine()).not.toBeNull();
     expect(dockBar()).toBeNull();
 
-    // a transcript reload while the turn runs must not let the dock bar leak in (the previous gate used the live line's
-    // mount, which drops during loading)
-    act(() => { transcript.loading = true; });
-    await flush();
-    expect(dockBar()).toBeNull();
-    expect(inStreamIndicator()).not.toBeNull();
-    act(() => { transcript.loading = false; });
+    // Reloading with cached history keeps the live work line in place and leaves the dock hidden.
+    act(() => { transcript.loading = true; root.render(<ChatView mid="hub" sid="c1" assistant />); });
     await flush();
     expect(dockBar()).toBeNull();
     expect(liveWorkLine()).not.toBeNull();
+    expect(sendFeedback()).toBeNull();
+    expect(host.querySelectorAll('[data-work-group="live"], [data-message-feedback]')).toHaveLength(1);
 
-    // streaming the answer: still one place, never the dock bar
-    act(() => { transcript.streaming = "The answer so far"; });
+    // The streamed answer remains visible while the reload is still pending.
+    act(() => { transcript.streaming = "The answer so far"; root.render(<ChatView mid="hub" sid="c1" assistant />); });
     await flush();
     expect(dockBar()).toBeNull();
+    expect(sendFeedback()).toBeNull();
+    expect(host.querySelector('[data-answer="streaming"]')?.textContent).toContain("The answer so far");
+    act(() => { transcript.loading = false; transcript.streaming = ""; root.render(<ChatView mid="hub" sid="c1" assistant />); });
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(liveWorkLine()).not.toBeNull();
+  });
+
+  it("shows Processing feedback on a brand-new working Persona conversation before its first transcript item arrives", async () => {
+    const { noteSent } = await import("../../lib/outbox");
+    transcript.items = [];
+    noteSent("hub", "c1", { text: "Inspect the current workspace" });
+    captured.session = { machine_id: "hub", session_id: "c1", title: "", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z" } as Session;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant starting />));
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(sendFeedback()?.getAttribute("data-message-feedback")).toBe("processing");
     expect(inStreamIndicator()).not.toBeNull();
-    act(() => { transcript.streaming = ""; });
   });
 
   // The sending / awaiting window (an outbox message on its way, before the hub reports working) is covered end to end in
@@ -104,6 +116,10 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant />));
     await flush();
     expect(dockBar()).not.toBeNull();
+    act(() => { transcript.loading = true; root.render(<ChatView mid="hub" sid="c1" assistant />); });
+    await flush();
+    expect(dockBar()).not.toBeNull();
+    expect(sendFeedback()).toBeNull();
   });
 
   it("draws an ended turn with a working background command finished and brings the dock bar back", async () => {
@@ -121,7 +137,7 @@ describe("the Persona conversation says its foreground turn exactly once (#6230)
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();
     expect(dockBar()).not.toBeNull();
-    act(() => { transcript.loading = true; });
+    act(() => { transcript.loading = true; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).not.toBeNull();
   });
@@ -155,22 +171,33 @@ describe("a Persona conversation on the generic session route says its foregroun
     expect(liveWorkLine()).not.toBeNull();
     expect(dockBar()).toBeNull();
 
-    // the same transcript reload that let the bar leak in before the phase-based gate must not bring it back here either
-    act(() => { transcript.loading = true; });
+    // The generic route still uses the cached work line during a reload.
+    act(() => { transcript.loading = true; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).toBeNull();
-    expect(inStreamIndicator()).not.toBeNull();
-    act(() => { transcript.loading = false; });
+    expect(liveWorkLine()).not.toBeNull();
+    expect(sendFeedback()).toBeNull();
+    expect(host.querySelectorAll('[data-work-group="live"], [data-message-feedback]')).toHaveLength(1);
+
+    // An empty transcript still needs an in-stream fallback while loading.
+    const cached = transcript.items;
+    act(() => { transcript.items = []; root.render(<ChatView mid="hub" sid="c1" />); });
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(liveWorkLine()).toBeNull();
+    expect(sendFeedback()?.getAttribute("data-message-feedback")).toBe("processing");
+    expect(host.querySelectorAll('[data-work-group="live"], [data-message-feedback]')).toHaveLength(1);
+    act(() => { transcript.items = cached; transcript.loading = false; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).toBeNull();
     expect(liveWorkLine()).not.toBeNull();
 
     // streaming the answer: still one place, never the dock bar
-    act(() => { transcript.streaming = "The answer so far"; });
+    act(() => { transcript.streaming = "The answer so far"; root.render(<ChatView mid="hub" sid="c1" />); });
     await flush();
     expect(dockBar()).toBeNull();
     expect(inStreamIndicator()).not.toBeNull();
-    act(() => { transcript.streaming = ""; });
+    act(() => { transcript.streaming = ""; root.render(<ChatView mid="hub" sid="c1" />); });
   });
 
   it("brings the dock bar back for background-only work on the generic route", async () => {

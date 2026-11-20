@@ -210,3 +210,108 @@ func TestSkillsListPreparedDirectoryFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkGuidePrepareAndRollback(t *testing.T) {
+	t.Setenv("PERSONA_SKILLS_DIR", t.TempDir())
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	n, _ := testNode(t)
+	n.dir, n.bin, n.logger = t.TempDir(), "/opt/example/personad", log.New(io.Discard, "", 0)
+	other := prepareAssistantForTest(t, n, ".persona/assistant", nil, nil)
+	for _, guide := range []string{"", "short instructions", ""} {
+		params, _ := json.Marshal(map[string]any{"dir": ".persona/managers/second/assistant", "claude_md": "full instructions", "work_guide_md": guide})
+		out, err := n.handle(t.Context(), "assistant.prepare", params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cwd := out.(map[string]any)["cwd"].(string)
+		n.assistantRuntimeSkills(cwd)
+		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+			want := "full instructions"
+			if guide != "" {
+				want = guide
+			}
+			got, err := os.ReadFile(filepath.Join(cwd, name))
+			if err != nil || string(got) != want {
+				t.Fatalf("%s: %q, %v", name, got, err)
+			}
+		}
+		claude := filepath.Join(cwd, ".claude", "skills", "persona-work")
+		codex := filepath.Join(cwd, ".agents", "skills", "persona-work")
+		if guide != "" {
+			target, err := os.Readlink(codex)
+			if err != nil || filepath.Clean(filepath.Join(filepath.Dir(codex), target)) != claude {
+				t.Fatalf("expected a link to the canonical guide, got %q, %v", target, err)
+			}
+		} else if _, err := os.Lstat(codex); !os.IsNotExist(err) {
+			t.Fatalf("guide link after rollback: %v", err)
+		}
+		for _, root := range []string{".claude", ".agents"} {
+			for _, dir := range []string{cwd, other} {
+				path := filepath.Join(dir, root, "skills", "persona-work", "references", "delegate.md")
+				_, err := os.Stat(path)
+				if guide != "" && dir == cwd {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else if !os.IsNotExist(err) {
+					t.Fatalf("unexpected guide at %s: %v", path, err)
+				}
+			}
+		}
+	}
+}
+
+// A resumed process can start before the reconnected manager prepares this directory again.
+func TestWorkGuideSurvivesNodeRestart(t *testing.T) {
+	t.Setenv("PERSONA_SKILLS_DIR", t.TempDir())
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	n, _ := testNode(t)
+	n.dir, n.bin, n.logger = t.TempDir(), "/opt/example/personad", log.New(io.Discard, "", 0)
+	for _, guide := range []string{"read the guide", ""} {
+		params, _ := json.Marshal(map[string]string{"dir": ".persona/assistant", "claude_md": "full", "work_guide_md": guide})
+		out, err := n.handle(t.Context(), "assistant.prepare", params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cwd := out.(map[string]any)["cwd"].(string)
+		n.assistantPrepared = nil
+		args, _ := n.codexAssistantArgs("test", n.dir, cwd)
+		if slices.Contains(args, "features.mcp_tool_list_changed=true") != (guide != "") {
+			t.Fatal("wrong Codex discovery mode", args)
+		}
+		_, release, _ := n.assistantLarkEnvNamed(cwd, "resumed")
+		release()
+		for _, runtime := range []string{".claude", ".agents"} {
+			dir := filepath.Join(cwd, runtime, "skills")
+			_, err := os.Stat(filepath.Join(dir, "persona-work", "references", "record.md"))
+			if guide != "" && err != nil || guide == "" && !os.IsNotExist(err) {
+				t.Fatalf("guide=%q resumed %s: %v", guide, runtime, err)
+			}
+		}
+	}
+}
+
+func TestWorkGuidePrepareWithLocalCodexSkill(t *testing.T) {
+	t.Setenv("PERSONA_SKILLS_DIR", t.TempDir())
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	n, _ := testNode(t)
+	n.dir, n.bin, n.logger = t.TempDir(), "/opt/example/personad", log.New(io.Discard, "", 0)
+	cwd := prepareAssistantForTest(t, n, ".persona/assistant", nil, nil)
+	at := filepath.Join(cwd, ".agents", "skills", "persona-work")
+	if err := os.MkdirAll(at, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(at, "SKILL.md")
+	if err := os.WriteFile(custom, []byte("custom"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(map[string]string{"dir": ".persona/assistant", "claude_md": "full instructions", "work_guide_md": "short instructions"})
+	if _, err := n.handle(t.Context(), "assistant.prepare", params); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{custom: "custom", filepath.Join(cwd, "AGENTS.md"): "full instructions"} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Fatalf("%s: %q, %v", path, got, err)
+		}
+	}
+}

@@ -19,7 +19,7 @@ vi.mock("./api", async (original) => ({
     }),
 }));
 
-import { useUsageWindows } from "./usage-windows";
+import { useUsageWindows, useUsageWindowsReady } from "./usage-windows";
 import { ApiError } from "./api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,7 +28,8 @@ const account = (id: string): UsageAccount => ({ id, provider: "claude", name: i
 
 function Bars() {
   const accounts = useUsageWindows();
-  return <p>{accounts.map((a) => a.id).join(",")}</p>;
+  const ready = useUsageWindowsReady();
+  return <p data-ready={String(ready)}>{accounts.map((a) => a.id).join(",")}</p>;
 }
 
 let root: Root | undefined;
@@ -96,6 +97,19 @@ describe("useUsageWindows", () => {
     root = undefined;
     await settle(() => calls[0].resolve({ accounts: [account("A")] }));
     expect(host.textContent).toBe("");
+  });
+
+  it("gates useUsageWindowsReady on a supported (non-404) response", async () => {
+    const ready = () => host.querySelector("p")?.getAttribute("data-ready");
+    expect(ready()).toBe("false");
+    await settle(() => calls[0].reject(new ApiError(503, "assistant_offline", {})));
+    expect(ready()).toBe("false");
+    backToFront();
+    await settle(() => calls[1].resolve({ accounts: [] }));
+    expect(ready()).toBe("true");
+    backToFront();
+    await settle(() => calls[2].reject(new ApiError(404, "no such route", {})));
+    expect(ready()).toBe("false");
   });
 
   it("does not ask while the tab is hidden", () => {

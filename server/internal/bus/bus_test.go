@@ -118,6 +118,9 @@ type fakeHub struct {
 	refuse atomic.Bool
 	plain  atomic.Bool // refuse with a 401 that says nothing about the token (not CodeTokenRevoked)
 	dials  atomic.Int32
+	// sick answers /api/v1/health with a 503; healths counts the health requests of a Go client (a probe).
+	sick    atomic.Bool
+	healths atomic.Int32
 	// compress accepts as the hub does (internal/hub/bus.go: permessage-deflate when the client offers it).
 	compress bool
 	mu       sync.Mutex
@@ -126,6 +129,18 @@ type fakeHub struct {
 }
 
 func (f *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == healthPath { // as the hub's: no credential, {"ok": true}
+		if strings.HasPrefix(r.UserAgent(), "Go-http-client/") { // the client's probe, not another program's port scan
+			f.healths.Add(1)
+		}
+		if f.sick.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"hub_id":"h"}`))
+		return
+	}
 	// Only the client's dials count: other programs on this machine probe local ports too (a node's port scan in
 	// another package's tests, user agent persona-ports), and one could land on this server's.
 	if r.URL.Path != Path || r.Header.Get("Authorization") == "" {

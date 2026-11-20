@@ -64,4 +64,4 @@ link). A page without `hub` opens on the hub the app is showing.
 | iPhone (`HubPageLinkTests`) | `parse` |
 | Web | `parse` (the web treats a case's only hub as its own origin; cases with two hubs are iPhone's and Android's) |
 | Desktop | `parse` cases with a `route` (accepted, handing on that route) and app-link cases that are `unsafe` (refused) |
-| Android | `parse` (#9932) |
+| Android | `parse` |

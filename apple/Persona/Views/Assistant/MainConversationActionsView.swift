@@ -1,12 +1,12 @@
 import SwiftUI
 
-// The main conversation's Compact context and New Main Chat (#1762, the hub's side in #1727; docs/assistant/assistant.md「Manual compaction」
+// An Assistant conversation's Compact context and the main chat's New Main Chat (#1762; docs/assistant/assistant.md「Manual compaction」
 // 「新建主对话」): the menu entries, the note above the composer while it compacts, and the question before a new one.
 
 extension AppModel {
-    /// Compact context is offered: on the main conversation, when its hub can.
+    /// Compact context is offered in any open Assistant conversation, when its hub can.
     func canCompact(_ key: SessionKey?) -> Bool {
-        guard let key, key == assistantMain else { return false }
+        guard let key else { return false }
         return features(key.group).contains(MainConversationActions.compactFeature)
     }
 

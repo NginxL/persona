@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // Exercise the RPC decoder, real process startup, state persistence and idle resume,
@@ -264,22 +266,227 @@ func TestAssistantSupervisionStoppedCompactionRefreshesRole(t *testing.T) {
 	}
 }
 
-func TestSupervisionRuntimeRefusesRatherThanDroppingPolicy(t *testing.T) {
+// A conversation on a runtime has no separate policy channel. A person's message that arrives with a policy (the hub
+// asks for one when it cannot tell that the conversation runs on a runtime) goes through without it; only the manager's
+// own supervision message, which the policy is for, is refused rather than delivered unsupervised.
+func TestSupervisionRuntimeDropsPolicyForOwnerMessagesButRefusesSupervision(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
 	host := dialRuntime(t, n, assistantRuntimeHello())
-	params := map[string]any{"launcher": "dsh", "cwd": filepath.Join(n.home, ".persona", "assistant"),
-		"text": "Review task evidence", "supervision_instructions": prompts.RenderSupervisionInstructions()}
+	dir := filepath.Join(n.home, ".persona", "assistant")
+	policy := prompts.RenderSupervisionInstructions()
+	supervision := map[string]any{"launcher": "dsh", "cwd": dir, "text": "Review task evidence", "supervision_instructions": policy,
+		"message_source": map[string]any{"kind": "supervision"}}
 	for _, method := range []string{"assistant.send", "assistant.warm"} {
-		if _, err := nodeCall(t, n, method, params); refusalCode(err) != "assistant_supervision_runtime" {
-			t.Fatalf("%s silently accepted a supervisor without its policy: %v", method, err)
+		p := maps.Clone(supervision)
+		if method == "assistant.warm" {
+			delete(p, "message_source") // a warm is nobody's message
+		}
+		if _, err := nodeCall(t, n, method, p); method == "assistant.send" && refusalCode(err) != "assistant_supervision_runtime" {
+			t.Fatalf("%s silently accepted a supervision message without its policy: %v", method, err)
+		} else if method == "assistant.warm" && err != nil {
+			t.Fatalf("warming a runtime with a policy: %v", err)
 		}
 	}
 	if len(host.got("session.start")) != 0 || len(host.got("session.send")) != 0 {
 		t.Fatal("unsupported runtime started a supervisor without system instructions")
 	}
-	// Ordinary runtime conversations retain the existing behavior.
-	startedAssistant(t, n, host)
+	// The owner's message in a conversation the hub took for a supervisor is delivered, without the policy.
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "session-a1", "cwd": dir, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	owner := map[string]any{"launcher": "dsh", "cwd": dir, "text": "Where are we?", "supervision_instructions": policy}
+	if _, err := nodeCall(t, n, "assistant.send", owner); err != nil {
+		t.Fatalf("the owner's message to a runtime conversation was refused: %v", err)
+	}
+	sends := host.got("session.send")
+	if len(sends) != 1 || !strings.Contains(string(sends[0]), "Where are we?") || strings.Contains(string(sends[0]), "supervis") {
+		t.Fatalf("the owner's message did not reach the runtime without the policy: %s", sends)
+	}
+	// A later message to the same conversation, resolved without a policy, is delivered as well.
+	owner = map[string]any{"session_id": "session-a1", "launcher": "dsh", "cwd": dir, "text": "And now?", "resume_only": true, "supervision_instructions": policy}
+	if _, err := nodeCall(t, n, "assistant.send", owner); err != nil {
+		t.Fatalf("the owner's next message was refused: %v", err)
+	}
+	if got := len(host.got("session.send")); got != 2 {
+		t.Fatalf("%d messages reached the runtime, want 2", got)
+	}
+	// And a supervision message to that conversation is still refused.
+	supervision["session_id"] = "session-a1"
+	if _, err := nodeCall(t, n, "assistant.send", supervision); refusalCode(err) != "assistant_supervision_runtime" {
+		t.Fatalf("a supervision message to a runtime conversation = %v", err)
+	}
+	if got := len(host.got("session.send")); got != 2 {
+		t.Fatalf("a refused supervision message reached the runtime: %d sends", got)
+	}
+	if row := listed(t, n)["session-a1"]; row.Capabilities != nil && row.Capabilities.SupervisionPolicy {
+		t.Fatalf("non-capable runtime advertised supervision_policy capability: %+v", row.Capabilities)
+	}
+}
+
+// A runtime that explicitly advertises caps.supervision_policy receives supervision_instructions as a dedicated
+// protocol parameter on session.start and session.send (never concatenated into user text), preserves busy role-change
+// isolation, clears the policy on explicit empty metadata, and fails closed when the runtime returns
+// assistant_supervision_runtime.
+func TestSupervisionCapableRuntimePolicyLifecycleAndFailClosed(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	agyHello := map[string]any{
+		"runtime":  "agy",
+		"name":     "Antigravity",
+		"launcher": "agy",
+		"caps": map[string]any{
+			"start":              true,
+			"send":               true,
+			"interrupt":          true,
+			"assistant":          true,
+			"supervision_policy": true,
+		},
+	}
+	host := dialRuntime(t, n, agyHello)
+	dir := filepath.Join(n.home, ".persona", "assistant")
+	policy := prompts.RenderSupervisionInstructions()
+	const sid = "agy-11111111-2222-4333-8444-555555555555"
+
+	var failSend error
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		switch method {
+		case "session.start":
+			return map[string]any{"session": map[string]any{"session_id": sid, "cwd": dir, "status": "idle"}}, nil
+		case "session.send":
+			if failSend != nil {
+				return nil, failSend
+			}
+			return map[string]any{"ok": true}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+
+	// Start a new supervisor conversation with supervision message_source and policy.
+	raw, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"launcher":                 "agy",
+		"cwd":                      dir,
+		"text":                     "Review task evidence",
+		"supervision_instructions": policy,
+		"message_source":           map[string]any{"kind": "supervision"},
+	})
+	if err != nil {
+		t.Fatalf("capable runtime start/send failed: %v", err)
+	}
+	var res struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil || res.SessionID != sid {
+		t.Fatalf("start response = %s (%v)", raw, err)
+	}
+	if row := listed(t, n)[sid]; row.Capabilities == nil || !row.Capabilities.SupervisionPolicy {
+		t.Fatalf("capable runtime row missing supervision_policy capability: %+v", row.Capabilities)
+	}
+	starts := host.got("session.start")
+	if len(starts) != 1 {
+		t.Fatalf("session.start count = %d, want 1", len(starts))
+	}
+	var startP struct {
+		Assistant               bool   `json:"assistant"`
+		SupervisionInstructions string `json:"supervision_instructions"`
+	}
+	if err := json.Unmarshal(starts[0], &startP); err != nil || !startP.Assistant || startP.SupervisionInstructions != policy {
+		t.Fatalf("session.start did not carry exact supervision_instructions: %s", starts[0])
+	}
+	sends := host.got("session.send")
+	if len(sends) != 1 {
+		t.Fatalf("session.send count = %d, want 1", len(sends))
+	}
+	var sendP struct {
+		Text                    string `json:"text"`
+		Context                 string `json:"context"`
+		SupervisionInstructions string `json:"supervision_instructions"`
+	}
+	if err := json.Unmarshal(sends[0], &sendP); err != nil {
+		t.Fatal(err)
+	}
+	if sendP.SupervisionInstructions != policy || strings.Contains(sendP.Text, "## Task supervision") || strings.Contains(sendP.Context, "## Task supervision") {
+		t.Fatalf("supervision policy was missing or leaked into user text/context: %+v", sendP)
+	}
+	if st, ok := n.state.get(sid); !ok || st.SupervisionInstructions != policy {
+		t.Fatalf("persisted supervision policy = %q (ok=%v)", st.SupervisionInstructions, ok)
+	}
+
+	// While busy, a role change (revoking policy) is refused as busy without calling session.send or mutating state.
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": sid, "cwd": dir, "status": "working"},
+	}})
+	waitFor(t, "session working", func() bool { return listed(t, n)[sid].Status == "working" })
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"session_id":               sid,
+		"launcher":                 "agy",
+		"cwd":                      dir,
+		"text":                     "Role removed while working",
+		"supervision_instructions": "",
+	}); refusalCode(err) != "busy" {
+		t.Fatalf("busy role change = %v, want busy", err)
+	}
+	if got := len(host.got("session.send")); got != 1 {
+		t.Fatalf("busy role change reached runtime: %d sends", got)
+	}
+	if st, _ := n.state.get(sid); st.SupervisionInstructions != policy {
+		t.Fatal("busy role change altered persisted supervision policy")
+	}
+
+	// Once idle, explicit empty supervision_instructions clears the role on the runtime and in state.
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": sid, "cwd": dir, "status": "idle"},
+	}})
+	waitFor(t, "session idle", func() bool { return listed(t, n)[sid].Status == "idle" })
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"session_id":               sid,
+		"launcher":                 "agy",
+		"cwd":                      dir,
+		"text":                     "Ordinary chat now",
+		"supervision_instructions": "",
+	}); err != nil {
+		t.Fatalf("revoking policy while idle failed: %v", err)
+	}
+	sends = host.got("session.send")
+	if len(sends) != 2 {
+		t.Fatalf("session.send count = %d, want 2", len(sends))
+	}
+	var clearP map[string]any
+	if err := json.Unmarshal(sends[1], &clearP); err != nil {
+		t.Fatal(err)
+	}
+	if val, present := clearP["supervision_instructions"]; !present || val != "" {
+		t.Fatalf("role revocation did not send explicit empty supervision_instructions: %v", clearP)
+	}
+	if st, _ := n.state.get(sid); st.SupervisionInstructions != "" {
+		t.Fatalf("persisted supervision policy was not cleared: %q", st.SupervisionInstructions)
+	}
+
+	// That turn ends: the runtime reports the conversation idle. A send marks an Antigravity conversation working until
+	// its runtime says otherwise (#11591), and a policy change while working is refused as busy (above).
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": sid, "cwd": dir, "status": "idle"},
+	}})
+	waitFor(t, "session idle after the ordinary turn", func() bool { return listed(t, n)[sid].Status == "idle" })
+
+	// If the runtime fails closed applying policy, the node propagates assistant_supervision_runtime and keeps prior state.
+	failSend = &rpc.Error{Code: "assistant_supervision_runtime", Message: "policy write failed"}
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"session_id":               sid,
+		"launcher":                 "agy",
+		"cwd":                      dir,
+		"text":                     "Review again",
+		"supervision_instructions": policy,
+		"message_source":           map[string]any{"kind": "supervision"},
+	}); refusalCode(err) != "assistant_supervision_runtime" {
+		t.Fatalf("runtime fail-closed error = %v, want assistant_supervision_runtime", err)
+	}
+	if st, _ := n.state.get(sid); st.SupervisionInstructions != "" {
+		t.Fatalf("failed policy application overwrote persisted state: %q", st.SupervisionInstructions)
+	}
 }
 
 // TestFakeSupervisionCodexServer is the subprocess used by the native startup test.

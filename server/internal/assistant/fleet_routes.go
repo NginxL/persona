@@ -163,7 +163,7 @@ func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.
 	}
 	switch {
 	case p.Device == DeviceAll && p.Method == DeviceInteractionsList:
-		out, err := json.Marshal(map[string]any{"interactions": s.pendingInteractions()})
+		out, err := json.Marshal(map[string]any{"interactions": s.visiblePendingInteractions()})
 		return out, true, err
 	case p.Device == DeviceAll:
 		return nil, false, nil
@@ -322,6 +322,9 @@ func (s *Service) channelClarify(ctx context.Context, ch, id, text, clientMsgID,
 		return nil, err
 	}
 	id = strings.TrimSpace(id)
+	if clientMsgID == "" {
+		clientMsgID = "approval-question-" + id + "-" + randomHex(6)
+	}
 	ix, ok := s.pendingIx(id)
 	if !ok {
 		return map[string]any{"ok": false, "status": s.interactionOutcome(ctx, id)}, nil
@@ -329,9 +332,16 @@ func (s *Service) channelClarify(ctx context.Context, ch, id, text, clientMsgID,
 	if ch != channel.Feishu || !ix.CanClarify || ix.Private {
 		return nil, errClarifyUnavailable
 	}
+	var proof struct {
+		Token string `json:"clarification_proof"`
+	}
 	if err := s.appCall(ctx, AppInteractions, assistantwire.InteractionsOwnerAction, map[string]any{"interaction_id": id,
-		"action": action, "channel": ch, "kind": ix.Kind}, nil); err != nil {
+		"action": action, "channel": ch, "kind": ix.Kind, "clarify": true, "text": text, "client_msg_id": clientMsgID,
+		"machine_id": ix.MachineID, "session_id": ix.SessionID}, &proof); err != nil {
 		return nil, err
+	}
+	if proof.Token != "" {
+		ctx = assistantwire.WithClarificationProof(ctx, proof.Token)
 	}
 	if err := s.clarify(ctx, id, text, clientMsgID, origin); err != nil {
 		if errors.Is(err, errClarifyUnavailable) {

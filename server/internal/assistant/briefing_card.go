@@ -158,7 +158,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		for i, p := range f.Progress {
 			stage := ""
 			if p.StageKind != "general" {
-				stage = stageBar(l, p.Stage)
+				stage = stageBar(l, p.Stage, false) // open work: never done
 			}
 			md := fmt.Sprintf("**%d** %s\n%s", i+1, feishubot.EscapeMarkdown(clip(oneLine(p.Title), 60)), stage+briefLink(l, todoLink(f.web, p.ID)))
 			working = append(working, briefBlock{md: md, plain: fmt.Sprintf("%d. %s", i+1, clip(oneLine(p.Title), 60))})
@@ -447,6 +447,9 @@ func (f *briefFacts) failedLine(x todayFailed, md bool) string {
 	line := i18n.T(f.l, "assistant-briefing."+key, i18n.Args{"title": esc(clip(oneLine(x.Title), 60)), "time": f.clock(x.At)})
 	if x.Why != "" {
 		line += " — " + esc(x.Why)
+	}
+	if md { // what did not go through is red on the card
+		line = "<font color='red'>" + line + "</font>"
 	}
 	return line
 }

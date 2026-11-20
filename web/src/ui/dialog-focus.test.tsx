@@ -102,6 +102,15 @@ describe("Dialog focus", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it("prevents a backdrop click from moving focus after dismissal", () => {
+    const close = () => root.render(<Box open={false} />);
+    act(() => root.render(<Box open onClose={close} />));
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    act(() => { panel().parentElement!.dispatchEvent(press); });
+    expect(press.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("keeps the focus where a footer action moved it outside before closing", () => {
     let open = true;
     const close = () => {

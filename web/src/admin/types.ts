@@ -1,4 +1,5 @@
 // Shapes of the hub's admin API (docs/operations/admin.md "API", docs/archive/operations/plan-hub-mesh.md 2.7 for peers).
+import type { MachineLinkSwitch } from "../lib/types";
 
 export type Access = "loopback" | "lan" | "cidrs" | "any";
 
@@ -105,6 +106,7 @@ export interface AdminMachine {
   proxy?: string; // service: socks5://… it is dialed through (no password)
   hub_id?: string; // the hub it is reached through now
   paths?: MachinePath[];
+  link_switch?: MachineLinkSwitch; // switching this ssh computer to Persona Link (#10662); absent from older hubs
 }
 
 export interface AddedMachine {

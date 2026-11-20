@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { insertPerson, personAt, type LarkPerson, type PersonToken } from "../lib/lark-people";
 import { EASE, Spinner } from "./atoms";
 import { t } from "../i18n";
+import { LarkAvatar } from "../views/inbox/InboxParts";
 
 export type FindPeople = (query: string, signal: AbortSignal) => Promise<LarkPerson[]>;
 
@@ -122,7 +123,7 @@ export function useLarkPeoplePicker({ text, caret, open, find, apply, onPicked }
 }
 
 /** The menu over the box (place it in a `relative` wrapper around the box). Nothing while no `@` is being typed. */
-export function LarkPeopleMenu({ picker, label = t("ui-larkpeoplepicker.label") }: { picker: PeoplePicker; label?: string }) {
+export function LarkPeopleMenu({ picker, manager, account, label = t("ui-larkpeoplepicker.label") }: { picker: PeoplePicker; manager?: string; account?: number; label?: string }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   const { token, rows, active, loading } = picker;
@@ -150,9 +151,7 @@ export function LarkPeopleMenu({ picker, label = t("ui-larkpeoplepicker.label") 
             onClick={() => picker.pick(p)}
             className="relative z-10 flex h-9 w-full items-center gap-2.5 rounded-[6px] px-2 text-left"
           >
-            <span aria-hidden className="flex size-6 shrink-0 items-center justify-center rounded-full bg-field text-[11px] font-semibold text-ink-2">
-              {[...p.name][0] ?? "?"}
-            </span>
+            <LarkAvatar name={p.name} size={24} neutral avatarURL={p.avatar_url} avatar={p.avatar} account={account} manager={manager} />
             <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{p.name}</span>
           </button>
         ))}

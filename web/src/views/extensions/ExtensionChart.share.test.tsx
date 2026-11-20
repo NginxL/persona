@@ -53,6 +53,20 @@ describe("ExtensionChart 的单类目横向分段条（#5386）", () => {
     expect(html).toContain("900 kcal");
   });
 
+  it("keeps finite parts visible when their sum overflows", () => {
+    const huge: UIItem = {
+      ...oneDay,
+      series: [
+        { name: "a", points: [{ label: "今天", value: Number.MAX_VALUE }] },
+        { name: "b", points: [{ label: "今天", value: Number.MAX_VALUE }] },
+      ],
+    };
+    const html = renderToStaticMarkup(<ExtensionChart item={huge} compact />);
+    expect(html).toContain('data-share-segment="0"');
+    expect(html).toContain('data-share-segment="1"');
+    expect(html.match(/flex-grow:0\.5/g)).toHaveLength(2);
+  });
+
   it("routes several categories through the column chart, not the share bar", () => {
     const html = renderToStaticMarkup(<ExtensionChart item={twoDays} compact />);
     expect(html).not.toContain("data-share-bar");

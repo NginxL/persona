@@ -64,6 +64,23 @@ export interface Machine {
   trust?: "pending";
   /** What `error` is about, for words of our own: node_service_down / link_offline / never_connected / node_outdated. */
   error_code?: string;
+  /** Switching this ssh computer to Persona Link (#10662): set by a manager that can, for its ssh computers and for an
+   *  hour after a switch ended; absent from older hubs, which then offer nothing. */
+  link_switch?: MachineLinkSwitch;
+}
+
+/** Where switching an ssh computer to Persona Link stands (`proto.MachineLinkSwitch`): `available`, a switch can start
+ *  now, else `reason` says why not; `phase`, the current or last switch's ("" none), and a failed one's `error`, with
+ *  `rollback_unconfirmed` when the computer could not be shown to be back on SSH. Reasons and errors are codes the
+ *  apps put in their own words (lib/link-switch.ts). */
+export interface MachineLinkSwitch {
+  available: boolean;
+  reason?: string;
+  phase?: "" | "checking" | "installing" | "connecting" | "rolling_back" | "succeeded" | "failed";
+  error?: string;
+  rollback_unconfirmed?: boolean;
+  /** when `phase` last changed (the hub's clock) */
+  at?: string;
 }
 
 /** The hubs of this hub's interconnected group, from the signed-in hello (docs/archive/operations/plan-hub-mesh.md 2.6). */
@@ -140,6 +157,8 @@ export interface SessionCapabilities {
   read?: boolean;
   send?: boolean;
   interrupt?: boolean;
+  queue_edit?: boolean;
+  queue_send_now?: boolean;
   approve?: boolean;
   terminal?: boolean;
   attach?: boolean;
@@ -376,7 +395,8 @@ export interface Session {
    *  the turn ends, and the strip's actions leave them alone (#4342). */
   queued_relayed?: number;
   /** In a Persona chat, the owner's messages that could not go in and that the assistant keeps and sends again by
-   *  itself, oldest first (#10194, lib/undelivered.ts). Drawn as the owner's bubbles marked not delivered. */
+   *  itself, oldest first (#10194, lib/undelivered.ts); in an Agent's chat, the ones held while its computer was away
+   *  (#10661, `computer` set on each). Drawn as the owner's bubbles marked not delivered. */
   undelivered?: UndeliveredMessage[];
   subagents?: Subagent[];
   loop?: LoopInfo;
@@ -441,6 +461,8 @@ export interface Session {
   /** An assistant conversation moved out of the list (docs/assistant/assistant.md "Managing its own conversations"), or
    *  an archived agent (docs/protocol/protocol.md "Agent session archives": only the Archived list has those). */
   archived?: boolean;
+  /** Manager-owned visibility policy; recording and direct session access remain available. */
+  hidden_by_directory?: boolean;
   /** The user-defined labels of an assistant conversation (docs/assistant/assistant.md "Conversation tags"), newest
    *  write first's provenance aside; omitted when it carries none. An older hub never sends it. */
   tags?: string[];
@@ -669,7 +691,7 @@ export interface Item {
   seq: number;
   ts?: string;
   role: "user" | "assistant" | "system";
-  kind: "text" | "thinking" | "tool_use" | "tool_result" | "notice" | "image" | "fold" | "recap";
+  kind: "text" | "thinking" | "tool_use" | "tool_result" | "notice" | "image" | "fold" | "recap" | "visualization";
   text?: string;
   tool_use_id?: string;
   tool_name?: string;
@@ -680,9 +702,14 @@ export interface Item {
   full_size?: number;
   queued?: boolean;
   wake?: boolean;
+  narration?: boolean;
+  codex_heartbeat_quiet?: boolean;
   task?: TaskNote;
   fold?: { items: number; tools: number; thoughts: number; until?: string; through_seq: number; through_id?: string; images?: FoldImage[]; tasks?: FoldTaskSnapshot[]; latest_thinking?: Item; supervision_user?: boolean; changes?: FoldChange[] | null; usage?: TokenUsage[]; sources?: FoldSource[] };
   image?: { mime: string; data?: string; lazy?: boolean; size?: number; width?: number; height?: number };
+  /** A Codex visualize marker (kind "visualization"): a self-contained HTML fragment on the node, fetched through the
+   *  session visualization route. `mode` is "wide" or absent; the bytes are never carried here. */
+  visualization?: { path: string; mode?: string; title?: string };
   /** Sent by another Claude session (cross-session messaging), not typed by you: its name. */
   from?: string;
   /** The client_msg_id of the message this came from, as the hub tied it (every item of it: the text, its images, a
@@ -838,6 +865,13 @@ export interface SessionChildren {
   sides_unread?: number;
 }
 
+export const SESSION_REVIEW_FEATURE = "session_review";
+export const SESSION_REVIEW_TOOL = "persona_session_review";
+
+export function isSessionReview(ix: Pick<Interaction, "kind" | "tool_name">): boolean {
+  return ix.kind === "question" && ix.tool_name === SESSION_REVIEW_TOOL;
+}
+
 export interface Interaction {
   id: string;
   /** The manager it belongs to (docs/protocol/protocol.md "Per-manager routing"); none: the default one. */
@@ -856,7 +890,13 @@ export interface Interaction {
   tool_input?: Record<string, unknown>;
   /** The outgoing text the server lets the user edit before Allow, only for a Claude Code Lark send/reply card. */
   editable_text?: string;
+  /** Script asks opt into Markdown for their summary or question; absent and unknown values stay plain (#10857). */
+  format?: "markdown" | (string & {});
   summary?: string;
+  /** A finished independent session review's finding count, full report, and hidden reviewer (#1808). */
+  review_count?: number;
+  review_report?: string;
+  reviewer_session_id?: string;
   screen?: string;
   secret?: boolean;
   dialog?: ScreenDialog;
@@ -1048,4 +1088,9 @@ export interface UndeliveredMessage {
   attempts?: number;
   next_at?: string;
   error?: string;
+  /** A failed message that can only be deleted. */
+  delete_only?: boolean;
+  /** Held for an Agent while its computer was away (#10661): that computer's name. `error` is then the whole line to
+   *  show under the bubble, and Retry / Delete go to the session's held routes (lib/undelivered-actions.ts). */
+  computer?: string;
 }

@@ -139,7 +139,7 @@ struct TranslationChatPicker: View {
                     } label: {
                         HStack(spacing: Theme.Space.m) {
                             let conv = conversations.first { $0.id == c.id }
-                            LarkAvatarImage(name: c.name, url: conv?.avatar, isGroup: conv?.isGroup ?? true, size: Theme.Size.wellM)
+                            LarkAvatarImage(name: c.name, url: conv?.picture, account: conv?.account, size: Theme.Size.wellM)
                             Text(c.name).foregroundStyle(.primary).lineLimit(1)
                             Spacer(minLength: Theme.Space.s)
                             ThemedIcon(on ? Theme.Icon.successFilled : Theme.Icon.unchecked)

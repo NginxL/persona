@@ -3,7 +3,7 @@
 // (lib/launcher-models.ts), and what the pill says. The panel's own data and what a pick sends are built from these in
 // lib/session-panel.ts, which loads with the panel.
 //
-// A list read from the agent takes seconds the first time, so what was read is kept per computer and launcher for the
+// A list read from the agent takes seconds the first time, so what was read is kept per computer, launcher and host for the
 // page's life: the pill and a later opening show the last list at once, and an opening reads every list again behind it
 // (the session's own first, at most three at a time).
 import { useSyncExternalStore } from "react";
@@ -17,7 +17,7 @@ import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
   defaultModel, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
 } from "./launcher-models";
-import { canSwitchModel, isCurrentModel, sessionLauncher } from "./model-switch";
+import { canSwitchModel, isCurrentModel, namesWholeModel, rowModelIds, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
 import type { Launcher, Session } from "./types";
 import { chosenManager, defaultKnown, defaultManager, onDefaultManager, onManagerChoice } from "./manager-choice";
@@ -37,7 +37,7 @@ const lists = new Map<string, ModelList>();
 const machines = new Map<string, { launchers?: Launcher[]; loading?: boolean }>();
 const reads = new Map<string, { promise: Promise<void>; hidden: Set<string> }>();
 const machineReads = new Map<string, Promise<void>>();
-// Typed IDs belong to the launcher in both catalogs. Each read keeps the deletions it overlapped even after they finish.
+// Typed IDs belong to the launcher across hosts and purposes. Each read keeps the deletions it overlapped even after they finish.
 type ModelForget = { restore: Map<string, (now: LauncherModels) => LauncherModels>; promise: Promise<string> };
 const forgetting = new Map<string, Map<string, ModelForget>>();
 let version = 0;
@@ -53,8 +53,10 @@ const subscribe = (f: () => void) => {
 type CatalogScope = { owner: string; manager?: string };
 const catalogScope = (purpose?: "assistant"): CatalogScope => ({ owner: credentialOwner(),
   manager: (purpose === "assistant" ? chosenManager() : null) ?? (defaultKnown() ? defaultManager() : undefined) });
-const listKey = (mid: string, launcher: string, purpose?: "assistant", scope = catalogScope(purpose)) =>
-  JSON.stringify([scope.owner, scope.manager ?? "", mid, launcher, purpose ?? ""]);
+const launcherKeyParts = (mid: string, launcher: string, scope: CatalogScope) =>
+  [scope.owner, scope.manager ?? "", mid, launcher];
+const listKey = (mid: string, launcher: string, purpose?: "assistant", scope = catalogScope(purpose), host = "") =>
+  JSON.stringify([...launcherKeyParts(mid, launcher, scope), purpose ?? "", host]);
 const machineKey = (mid: string, scope = catalogScope()) => JSON.stringify([scope.owner, scope.manager ?? "", mid]);
 
 /** Changes when the assistant's catalog must be loaded again, including when the default manager becomes known. */
@@ -69,7 +71,8 @@ export function useModelLists(): number {
   return useSyncExternalStore(subscribe, () => version, () => version);
 }
 
-export const modelList = (mid: string, launcher: string, purpose?: "assistant"): ModelList => lists.get(listKey(mid, launcher, purpose)) ?? {};
+export const modelList = (mid: string, launcher: string, purpose?: "assistant", host?: string): ModelList =>
+  lists.get(listKey(mid, launcher, purpose, undefined, host)) ?? {};
 
 /** The launchers of `mid` as last read; undefined before the first answer. */
 export const machineLauncherList = (mid: string): Launcher[] | undefined => machines.get(machineKey(mid))?.launchers;
@@ -159,21 +162,21 @@ function slot(first: boolean): Promise<() => void> {
 }
 
 /** Reads a launcher's list: once (the pill), or `again` behind the one shown (an opening, Retry). */
-export function readModels(mid: string, launcher: string, o: { again?: boolean; first?: boolean; purpose?: "assistant" } = {}): Promise<void> {
+export function readModels(mid: string, launcher: string, o: { again?: boolean; first?: boolean; purpose?: "assistant"; host?: string } = {}): Promise<void> {
   const scope = catalogScope(o.purpose);
-  const key = listKey(mid, launcher, o.purpose, scope);
+  const key = listKey(mid, launcher, o.purpose, scope, o.host);
   const reading = reads.get(key);
   if (reading) return reading.promise;
   const had = lists.get(key);
   if (had?.list !== undefined && !o.again) return Promise.resolve();
   lists.set(key, { list: had?.list, loading: true });
   changed();
-  const sharedKey = listKey(mid, launcher, undefined, scope);
+  const sharedKey = JSON.stringify(launcherKeyParts(mid, launcher, scope));
   const hidden = new Set(forgetting.get(sharedKey)?.keys());
   const read = slot(Boolean(o.first)).then(async (done) => {
     try {
       if (scope.owner !== credentialOwner()) return;
-      const r = await launcherModels(mid, launcher, { purpose: o.purpose, manager: scope.manager });
+      const r = await launcherModels(mid, launcher, { purpose: o.purpose, host: o.host, manager: scope.manager });
       for (const id of hidden) {
         if (r?.models.some((m) => m.id === id && m.custom)) {
           forgetting.get(sharedKey)?.get(id)?.restore.set(key, withoutCustom(r, id).restore);
@@ -219,24 +222,24 @@ export function readAgentLauncherNames(mid: string): Promise<void> {
   return machineLauncherList(mid) ? Promise.resolve() : readLaunchers(mid);
 }
 
-/** An opening of the panel on computer `mid` for a session of launcher `own`: every list read again behind the one shown,
- *  the session's own first. */
-export function readForPanel(mid: string, own: string): void {
-  void readModels(mid, own, { again: true, first: true });
+/** Read the panel's lists again behind the ones shown, starting with the session's own launcher in its catalog host. */
+export function readForPanel(mid: string, own: string, host?: string): void {
+  void readModels(mid, own, { again: true, first: true, host });
   void readLaunchers(mid).then(() => {
     for (const l of machineLauncherList(mid) ?? []) if (l.name !== own) void readModels(mid, l.name, { again: true });
   });
 }
 
 /** Forgets an ID typed before (#1644): off the list at once, back where it was when the hub says no. "": done; else why not. */
-export async function forgetModel(mid: string, launcher: string, id: string, purpose?: "assistant"): Promise<string> {
+export async function forgetModel(mid: string, launcher: string, id: string, purpose?: "assistant", host?: string): Promise<string> {
   const scope = catalogScope(purpose);
-  const sharedKey = listKey(mid, launcher, undefined, scope);
+  const sharedKey = JSON.stringify(launcherKeyParts(mid, launcher, scope));
   const pending = forgetting.get(sharedKey) ?? new Map<string, ModelForget>();
   const existing = pending.get(id);
   if (existing) return existing.promise;
-  if (!lists.get(listKey(mid, launcher, purpose, scope))?.list) return "";
-  const keys = [sharedKey, listKey(mid, launcher, "assistant", scope)];
+  if (!lists.get(listKey(mid, launcher, purpose, scope, host))?.list) return "";
+  const prefix = sharedKey.slice(0, -1) + ",";
+  const keys = () => [...lists.keys()].filter((key) => key.startsWith(prefix));
   const mutation: ModelForget = {
     restore: new Map(),
     promise: Promise.resolve().then(async () => {
@@ -245,7 +248,7 @@ export async function forgetModel(mid: string, launcher: string, id: string, pur
         await forgetCustomModel(mid, launcher, id, { manager: scope.manager });
         return "";
       } catch (e) {
-        for (const key of keys) {
+        for (const key of keys()) {
           reads.get(key)?.hidden.delete(id);
           const now = lists.get(key);
           const restore = mutation.restore.get(key);
@@ -261,7 +264,7 @@ export async function forgetModel(mid: string, launcher: string, id: string, pur
   };
   pending.set(id, mutation);
   forgetting.set(sharedKey, pending);
-  for (const key of keys) {
+  for (const key of keys()) {
     const current = lists.get(key);
     if (current?.list) {
       const removed = withoutCustom(current.list, id);
@@ -275,6 +278,11 @@ export async function forgetModel(mid: string, launcher: string, id: string, pur
 }
 
 // ── the session's model, from what was read ──────────────────────────────────
+
+/** The catalog host for a session owned by the AGY companion. Its session has no terminal host. */
+export function sessionModelHost(s: Session): "agy" | undefined {
+  return s.source_kind === "runtime" && s.source_instance_id === "agy" ? "agy" : undefined;
+}
 
 /** The engine a session runs (AgentMark ids: claude, codex, agy…; one of Paseo's providers is that provider, grok…). */
 export const sessionEngine = (s: Session): string => agentId(sessionAgent(s).agent);
@@ -301,19 +309,28 @@ export function sessionSwitches(s: Session): { model: boolean; effort: boolean }
 }
 
 /** The row of `models` the session runs: the one its model names (an alias or what an alias stands for; the default entry
- *  only when no other row names it); with no model reported yet, the default entry, which is what runs then. */
+ *  only when no other row names it); with no model reported yet, the default entry, which is what runs then. An exact
+ *  match (any case) is preferred; a gateway's routed echo or other 1M spelling folds to its row only when nothing exact
+ *  does (isCurrentModel). */
 export function currentModelRow(models: AgentModel[], model: string | undefined): AgentModel | undefined {
   if (!model) return defaultModel(models);
-  const hits = models.filter((m) => isCurrentModel(m, model));
+  const c = model.toLowerCase();
+  const exact = models.filter((m) => rowModelIds(m).some((v) => v?.toLowerCase() === c));
+  const hits = exact.length ? exact : models.filter((m) => isCurrentModel(m, model));
   return hits.find((m) => !m.default) ?? hits[0];
 }
 
-/** A model ID said briefly where no list names it: Claude's as "opus 5.5", GPT's as their list would, a gateway's path
- *  without its vendor. */
+/** A model ID said briefly where no list names it: Claude's as "opus 5.5", GPT's as their list would; gateway paths keep
+ *  their routing prefix so the upstream channel stays visible (#10125). */
 export function modelLabel(id: string): string {
-  const short = id.split("/").pop() || id;
-  const claude = modelShort(short);
-  return claude !== short ? claude : modelName({ id: short });
+  const trimmed = id.trim();
+  const claude = modelShort(trimmed);
+  return claude !== trimmed ? claude : modelName({ id: trimmed });
+}
+
+export function pillModel(models: AgentModel[], active: string | undefined, fallback = active): string | undefined {
+  const row = currentModelRow(models, active);
+  return row && namesWholeModel(row, active) ? modelName(row) : fallback ? modelLabel(fallback) : undefined;
 }
 
 /** One setup as the pill draws it. */
@@ -371,8 +388,7 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
 }
 
 export function pillView(s: Session, e: ModelList): PillView {
-  const row = currentModelRow(e.list?.models ?? [], s.model);
-  const model = row ? modelName(row) : s.model ? modelLabel(s.model) : undefined;
+  const model = pillModel(e.list?.models ?? [], s.model);
   const out: PillView = { engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
   if (s.agent_label) out.engineLabel = s.agent_label;
   if (model) out.model = model;

@@ -1546,11 +1546,19 @@
     },
     {
       "name": "assistant_feed_permission_default",
-      "value": "デフォルト"
+      "value": "デフォルト権限"
+    },
+    {
+      "name": "assistant_feed_permission_acceptEdits",
+      "value": "編集を自動承認"
     },
     {
       "name": "assistant_feed_permission_plan",
-      "value": "読み取り専用"
+      "value": "計画モード"
+    },
+    {
+      "name": "assistant_feed_permission_auto",
+      "value": "自動レビュー"
     },
     {
       "name": "assistant_feed_persona_message",
@@ -4637,6 +4645,10 @@
       "value": "バックグラウンド待機"
     },
     {
+      "name": "agent_group_just_finished",
+      "value": "完了したばかり"
+    },
+    {
       "name": "agent_group_waiting",
       "value": "起動待ち"
     },
@@ -4699,6 +4711,34 @@
     {
       "name": "decrease",
       "value": "減らす"
+    },
+    {
+      "name": "agent_computer_holds",
+      "value": "{computer} はオフラインです。オンラインになるとメッセージを送信します。"
+    },
+    {
+      "name": "agent_computer_offline",
+      "value": "{computer} はオフラインです。再接続するとメッセージを送信できます。"
+    },
+    {
+      "name": "agent_stopped",
+      "value": "この Agent は停止しています。ターミナルで再開するとメッセージを送信できます。"
+    },
+    {
+      "name": "agent_delete_held_title",
+      "value": "この保留中のメッセージを削除しますか？"
+    },
+    {
+      "name": "agent_delivery_updating",
+      "value": "配信状況の更新を待っています。"
+    },
+    {
+      "name": "agent_delivery_failed",
+      "value": "{computer} にメッセージを届けられませんでした。"
+    },
+    {
+      "name": "agent_delivery_waiting",
+      "value": "{computer} を待っています。"
     }
   ]
 }

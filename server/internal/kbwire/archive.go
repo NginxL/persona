@@ -22,7 +22,23 @@ type SourceChat struct {
 	// Done: the owner marked it done.
 	Done      bool      `json:"done,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	// State is where the conversation stands at the source, as the source records it: ChatOpen, ChatMerged (a pull
+	// request merged) or ChatClosed; "" when the source has no such state or does not report it. It is a fact, not
+	// the owner's Done flag, and the selection does not read it. StateAt is when it got there (zero: unknown).
+	State     string    `json:"state,omitempty"`
+	StateAt   time.Time `json:"state_at,omitzero"`
+	SourceURL string    `json:"source_url,omitempty"` // stable source pointer, when the connector supplies one
 }
+
+// A conversation's State at its source.
+const (
+	ChatOpen   = "open"
+	ChatMerged = "merged"
+	ChatClosed = "closed"
+)
+
+// ChatEnded reports whether state is one a conversation ends in: merged or closed.
+func ChatEnded(state string) bool { return state == ChatMerged || state == ChatClosed }
 
 // SourceMessage is one message as a source returns it. ID is stable within its
 // source and chat; Engine.Ingest keeps the first durable version of each ID.

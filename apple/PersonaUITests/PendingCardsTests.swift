@@ -123,7 +123,7 @@ final class PendingCardsTests: XCTestCase {
             dismissIconAlert()
             sleep(2)
             XCTAssertFalse(app.buttons["批准并自动执行"].exists, "the conflicting legacy approval is absent (\(look))")
-            let mode = app.staticTexts["每步都问"].firstMatch
+            let mode = app.staticTexts["默认权限"].firstMatch
             XCTAssertTrue(mode.waitForExistence(timeout: 5), "the recorded mode is in the card (\(look))")
             for _ in 0..<3 where !mode.isHittable { app.scrollViews["pending-cards"].swipeUp() }
             XCTAssertTrue(mode.isHittable, "the recorded mode is visible (\(look))")

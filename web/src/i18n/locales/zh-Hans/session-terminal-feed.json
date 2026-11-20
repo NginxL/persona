@@ -16,7 +16,9 @@
   "switched_during_upload": "上传期间终端已切换，没有粘贴",
   "released_during_upload": "上传期间不再接管终端，没有粘贴",
   "watch_only_chosen": "只看：电脑上另一个程序在用这个终端",
-  "webgl_lost": "显卡渲染被中断，已改回默认渲染",
-  "webgl_unavailable": "这个浏览器用不了 WebGL，仍用默认渲染",
+  "webgl_lost": "显卡渲染已中断，此终端已改回标准渲染。新打开的终端也会使用标准渲染，可在「设置 › 实验室」中再次试用 WebGL。",
+  "webgl_lost_unsaved": "显卡渲染已中断，此终端已改回标准渲染。无法在这个浏览器中保存「标准」，新打开的终端可能仍会尝试 WebGL。",
+  "webgl_unavailable": "这个浏览器用不了 WebGL，此终端使用标准渲染。「设置 › 实验室」已改回标准。",
+  "webgl_unavailable_unsaved": "这个浏览器用不了 WebGL，此终端使用标准渲染。无法在这个浏览器中保存「标准」。",
   "older_failed": "没有读到更早的输出：{error}"
 }

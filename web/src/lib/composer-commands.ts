@@ -22,8 +22,22 @@ export function paneClaude(s: Session | undefined): boolean {
   return sessionCan(s, "send") && sessionCan(s, "terminal");
 }
 
-/** The agent commands the "/" list shows for `s`: /model where the model can switch, /permissions where the permission
- *  picker is (lib/permissions-command.ts), /clear for pane Claude while it
+/** Claude Code's own commands typed into its terminal (`/context`): not a runtime's session or the assistant, which take
+ *  no typed commands, nor another agent's terminal. With no row yet, as before. */
+export function claudeTerminal(s: Session | undefined): boolean {
+  if (!s) return true;
+  if (s.assistant || s.source_kind) return false;
+  return !s.agent || s.agent === "claude";
+}
+
+/** An agent's own `/compact`, typed into its terminal: any terminal agent, never a runtime's session or the assistant. */
+function takesTypedCommands(s: Session | undefined): boolean {
+  return !s || (!s.assistant && !s.source_kind);
+}
+
+/** The agent commands the "/" list shows for `s`: /model wherever the model can switch (the same rule as the model pill,
+ *  any runtime that says so included), /compact and /context only where something reads them as commands, /permissions
+ *  where the permission picker is (lib/permissions-command.ts), /clear for pane Claude while it
  *  neither works nor waits for you, /loop and /workflows (its Background tasks panel, #5421) for Claude Code Agents. The
  *  agent's own slash commands (`agent`) are labelled with its name, the source the palette shows on their row. */
 export function agentCommands<C extends { text: string; agent?: boolean; source?: string }>(all: C[], s: Session | undefined): C[] {
@@ -33,7 +47,9 @@ export function agentCommands<C extends { text: string; agent?: boolean; source?
   return all
     .filter((c) => {
       const word = c.text.trim();
-      if (word === "/model") return paneClaude(s) && canSwitchModel(s);
+      if (word === "/model") return canSwitchModel(s);
+      if (word === "/compact") return takesTypedCommands(s);
+      if (word === "/context") return claudeTerminal(s);
       if (word === PERMISSIONS_COMMAND) return canPickPermissions(s);
       if (word === "/clear") return paneClaude(s) && st !== "working" && st !== "needs_you";
       if (c.text === LOOP_TEXT) return hasLoop(s);

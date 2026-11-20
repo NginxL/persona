@@ -48,7 +48,7 @@
   "zshrc_title": "From {file} {count}",
   "zshrc_footer": "Functions and aliases that call claude / codex in each computer's login shell config (~/.zshrc, ~/.bashrc), synced each time you open this page. New ones show up on their own.",
   "path_title": "From PATH {count}",
-  "path_footer": "Wrapper scripts on each computer's PATH that start claude, and the runtimes' own launchers, synced each time you open this page.",
+  "path_footer": "Agent wrapper scripts on each computer's PATH and runtime-provided launchers, synced each time you open this page.",
   "hidden_title": "Hidden {count}",
   "hidden_footer": "Only hidden in Persona; the config file is unchanged. Open one to restore it.",
   "deleted": "Deleted {name}",
@@ -109,6 +109,7 @@
   "kind_cli": "Other (web / command line)",
   "kind_web": "Web",
   "role_answer": "Answer only",
+  "role_scoped": "Scoped access",
   "revoked_ago": "revoked {time}",
   "used_ago": "used {time}",
   "added_ago": "added {time}",
@@ -180,5 +181,13 @@
   "search_key_words": "API key, secret key",
   "device_tokens": "Device tokens",
   "pi_too": "pi too",
-  "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json"
+  "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json",
+  "show_botmux": "Show botmux sessions in Agents",
+  "show_botmux_hint": "Syncs across devices on this hub. Hiding sessions here keeps them available for tasks.",
+  "use_herdr_tab_name": "Use the herdr tab name as the session name",
+  "use_herdr_tab_name_hint": "Shows the tab name first and syncs this preference across devices on this hub.",
+  "herdr_tab_name_saving": "Saving session naming preference…",
+  "show_botmux_inventory": "A computer’s “Also show botmux sessions” switch controls which sessions reach the hub.",
+  "show_botmux_computers": "Open Computers",
+  "botmux_saving": "Saving…"
 }

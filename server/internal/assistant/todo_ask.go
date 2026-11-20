@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/todo/projection"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -65,10 +66,11 @@ const (
 // the routes, its view (todo_view_routes.go).
 type listedTodo struct {
 	Todo
-	Ask            *todoAsk                   `json:"ask,omitempty"`
-	DecisionReview *decisionReview            `json:"decision_review,omitempty"`
-	Orphaned       *TodoOrphan                `json:"orphaned,omitempty"`
-	View           *assistantwire.TodoSummary `json:"view,omitempty"`
+	PrerequisiteBlockers []string                   `json:"prerequisite_blockers,omitzero"`
+	Ask                  *todoAsk                   `json:"ask,omitempty"`
+	DecisionReview       *decisionReview            `json:"decision_review,omitempty"`
+	Orphaned             *TodoOrphan                `json:"orphaned,omitempty"`
+	View                 *assistantwire.TodoSummary `json:"view,omitempty"`
 }
 
 // todoAsks are the open asks by to-do id, in the request's language: the ones the briefing lists (not passed, not ended,
@@ -122,9 +124,10 @@ func (s *Service) askChanged(context.Context) {
 }
 
 // pushDecision pushes task id's decision that waits for the owner and recommends an option (a "decide" push): what is to
-// be decided and the option, in the words of its card, and what the notification's OK needs to take it (the to-do, the
-// round). True when the hub took it. None for a decision without a recommendation (nothing for OK to take), for a task
-// from a health conversation (the lock screen says nothing of those) or a muted one.
+// be decided and the option, in the words of its card, what the notification's OK needs to take it (the to-do, the
+// round), and how its push may answer it (the view's ask and lock-screen rule). True when the hub took it. None for a
+// decision without a recommendation (nothing for OK to take), for a task from a health conversation (the lock screen
+// says nothing of those) or a muted one.
 func (s *Service) pushDecision(ctx context.Context, id string) bool {
 	sent, _ := s.pushDecisionErr(ctx, id)
 	return sent
@@ -135,7 +138,8 @@ func (s *Service) pushDecision(ctx context.Context, id string) bool {
 func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) {
 	a, ok := s.askCopy(id)
 	t, found := s.todoNow(id)
-	if !ok || !found || !decideAsk(&a) || a.Recommend == "" || !a.AcceptedAt.IsZero() || t.Origin == "" {
+	if !ok || !found || !decideAsk(&a) || a.Recommend == "" || !a.AcceptedAt.IsZero() || t.Origin == "" ||
+		!a.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision) {
 		return false, nil
 	}
 	here := s.settings(ctx).MachineID
@@ -149,7 +153,10 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 		// A decision the owner must take now: P0 interrupts even with the hub's push tiering on, every time it is
 		// pushed (its reminders too); the hub keys it by to-do and round.
 		Level: assistantwire.LevelP0,
-		Todo:  &assistantwire.NotifyTodo{ID: id, AskedAt: a.AskedAt, Recommend: a.Recommend, Responses: ownerResponses}}
+		// The ask and how its push may answer it: the view's (projection), so a notification never offers what the
+		// to-do's row would not answer in place.
+		Todo: &assistantwire.NotifyTodo{ID: id, AskedAt: a.AskedAt, Recommend: a.Recommend, Responses: ownerResponses,
+			Ask: projection.DecisionAskID(a.AskedAt), Lockscreen: projection.Lockscreen(askRisk(&a))}}
 	for _, o := range a.Options {
 		n.Todo.Options = append(n.Todo.Options, o.Label)
 	}

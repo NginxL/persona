@@ -119,7 +119,7 @@ func TestRedirectUserAgent(t *testing.T) {
 				}))
 				defer second.Close()
 				transport := &countingTransport{}
-				c := NewWith(Config{API: api, BaseURL: first.URL, APIKey: "k", Model: "m", UserAgent: strPtr(custom)}, transport)
+				c := NewWith(Config{API: api, BaseURL: first.URL, APIKey: "k", Model: "m", UserAgent: strPtr(custom), Headers: map[string]string{"User-Agent": custom, "X-Custom-Header": "secret"}}, transport)
 				reply, err := c.Complete(context.Background(), "system", "hello", 8)
 				if err != nil || reply != "ok" {
 					t.Fatalf("reply = %q, error = %v", reply, err)

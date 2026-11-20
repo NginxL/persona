@@ -384,3 +384,28 @@ A second, independent activity while the phone records (docs/apple/recording.md,
 - `sips -c <height> <width> --cropOffset 0 0` is treated as a centered crop (offset 0 means omitted); to crop from the top use something like `--cropOffset 1 0`.
 - After a UI test locks the simulator, unlock it, or the next `xcodebuild test` reports "test runner hung before establishing connection".
 - The first shots after switching the interface language (`PERSONA_UI_LANGUAGE`) can show every text of the activity truncated ("3件作…", "169/1…") with room to spare; the next run draws it right (#3437, iOS 27.0 simulator). Shoot again before treating it as a layout bug.
+
+## Alarms and timers (AlarmKit)
+
+The alarms and timers the assistant sets on the iPhone (`phone_alarm_create`, `phone_timer_start`; `docs/apple/phone-tools.md`, #2278) are
+AlarmKit's: AlarmKit starts, updates and ends their Live Activity itself, and Persona's widget extension only draws it
+(`apple/PersonaWidgets/AlarmLiveActivity.swift`, an `ActivityConfiguration` for `AlarmAttributes<PersonaAlarmData>`). Without it a timer still
+rang but its countdown was not shown anywhere.
+
+- **Lock Screen**: the mark (timer, paused or alarm), the label the alarm was set with (`PersonaAlarmData.label`, else the alert's title), what it
+  is doing (Timer / Paused / Alarm) and the time: a running timer counts down by itself (`Text(timerInterval:)`, no updates), a paused one shows the
+  time left (`AlarmActivityTime.paused`), a ringing alarm the time it rings at. Under them Pause or Resume (a timer) and Stop.
+- **Dynamic Island**: compact, the mark and the time (at limited width only the mark, matching `RecordingLiveActivity`); expanded, the label and the same buttons; minimal, the mark. The watch's Smart Stack gets the
+  glance (mark, label, time). The alarm activity uses its own `IslandMetrics.alarm*` sizes so recording redesigns do not affect it.
+- **Buttons** are `LiveActivityIntent`s in `apple/LiveActivity/AlarmActivity.swift` (`PauseAlarmIntent`, `ResumeAlarmIntent`, `StopAlarmIntent`),
+  allowed without unlocking, that call `AlarmManager` in the app with the alarm's id; they only reach Persona's own alarms.
+- The tint is the one the app gave the alarm (`AlarmAttributes.tintColor`, the app's accent resolved once: a dynamic colour encodes to about 5.7 KB);
+  nothing is read from the App Group or the keychain. A timer's attributes still come to about 5.7 KB (each string carries its bundle and a sandbox
+  token, each colour an archived UIColor, about 0.5 KB apiece), and every byte of the label counts about seven times (three titles, each with a key and
+  a default value, and the metadata). An activity the app requests itself takes at most 4 KB of attributes (liveactivitiesd: "Request attribute size
+  … exceeds maximum size of 4096"), which only the DEBUG sample below does. AlarmKit's daemon (`mobiletimerd`) starts the real ones, and it holds
+  `com.apple.private.activitykit.allowOversizedPayloads`, which liveactivitiesd checks before that limit (read from the iOS 27.0 simulator runtime, #11058):
+  a real timer is not held to 4 KB. Whether a longer cap applies to it is not known; it needs a device or an authorized AlarmKit.
+- The activities live in their own `LiveActivityBundle` inside `PersonaWidgetsBundle` (a widget bundle's builder takes ten at most), with `AlarmLiveActivity` gated by `if #available(iOS 26.0, *)`.
+- **Screenshots**: `-showAlarmSample timer|paused` (DEBUG) starts a 25-minute "Focus" timer as the tool does on a device, and `PersonaUITests/AlarmLiveActivityShots`
+  (`PERSONA_ALARM_SAMPLE=timer|paused`) photographs the island and the Lock Screen. On the simulator (`#if targetEnvironment(simulator)`), `AlarmsTool.showSample` goes straight to ActivityKit using the tool's own `attributes(label:timer:only:)`, cut to the state it draws so it fits in 4 KB (#11058; `PhoneSystemToolsTests.theTimerSampleFitsInsideActivityKitsLimit`), so shots never depend on a system prompt; `TerminationActivities` ends only that sample activity on SIGTERM (leaving real AlarmKit timers alone). That it rings through silent mode needs a device.

@@ -48,7 +48,7 @@
   "zshrc_title": "{file} から {count}",
   "zshrc_footer": "各コンピューターのログインシェルの設定ファイル（~/.zshrc、~/.bashrc）にある claude / codex を呼び出す関数とエイリアスで、このページを開くたびに同期されます。追加したものは自動で表示されます。",
   "path_title": "PATH から {count}",
-  "path_footer": "各コンピューターの PATH 上にある claude を起動するラッパースクリプトと、ランタイム自身のランチャーで、このページを開くたびに同期されます。",
+  "path_footer": "各コンピューターの PATH 上にあるエージェントのラッパースクリプトと、ランタイムが提供するランチャーです。このページを開くたびに同期されます。",
   "hidden_title": "非表示 {count}",
   "hidden_footer": "Persona で非表示にしているだけで、設定ファイルは変更されていません。開くと元に戻せます。",
   "deleted": "{name}を削除しました",
@@ -107,6 +107,7 @@
   "kind_cli": "その他（Web / コマンドライン）",
   "kind_web": "Web",
   "role_answer": "回答のみ",
+  "role_scoped": "アクセス制限",
   "revoked_ago": "{time}に取り消し",
   "used_ago": "{time}に使用",
   "added_ago": "{time}に追加",
@@ -177,5 +178,13 @@
   "search_key_words": "API キー、シークレットキー",
   "device_tokens": "デバイスのトークン",
   "pi_too": "pi でも使用可",
-  "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます"
+  "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます",
+  "show_botmux": "Agents に botmux セッションを表示",
+  "show_botmux_hint": "このハブのデバイス間で同期します。非表示にしてもタスクには利用できます。",
+  "use_herdr_tab_name": "herdr のタブ名をセッション名として使う",
+  "use_herdr_tab_name_hint": "タブ名を優先して表示します。この設定は同じハブのデバイス間で同期されます。",
+  "herdr_tab_name_saving": "セッション名の設定を保存中…",
+  "show_botmux_inventory": "コンピュータの「botmux セッションも表示」スイッチで、ハブに届くセッションを設定します。",
+  "show_botmux_computers": "コンピュータを開く",
+  "botmux_saving": "保存中…"
 }

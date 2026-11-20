@@ -18,11 +18,14 @@ import (
 // reviewNode is the fake node's side of a review: the change git.review reports, the copy worktree.snapshot makes, and
 // what the manager asked of it.
 type reviewNode struct {
-	change    proto.GitReview
-	snapshots []map[string]any  // worktree.snapshot params
-	closed    []string          // session.close ids
-	removed   []map[string]any  // worktree.remove params
-	reads     map[string]string // session id → text its items carry
+	change     proto.GitReview
+	snapshots  []map[string]any  // worktree.snapshot params
+	onSnapshot func()            // optional failure injection after the copy exists
+	closed     []string          // session.close ids
+	stopped    []string          // session.stop ids
+	stopErr    error             // refuse session.stop until cleared
+	removed    []map[string]any  // worktree.remove params
+	reads      map[string]string // session id → text its items carry
 }
 
 const reviewCopy = "/wt/app/review-fix-login"
@@ -39,6 +42,9 @@ func withReviewNode(f *fakeHub, n *reviewNode) {
 		var a map[string]any
 		_ = json.Unmarshal(raw, &a)
 		n.snapshots = append(n.snapshots, a)
+		if n.onSnapshot != nil {
+			n.onSnapshot()
+		}
 		return proto.WorktreeSnapshot{Path: reviewCopy, Root: "/code/app", Head: "abc123"}, nil
 	}
 	f.nodes["session.close"] = func(_ string, raw json.RawMessage) (any, error) {
@@ -47,6 +53,17 @@ func withReviewNode(f *fakeHub, n *reviewNode) {
 		}
 		_ = json.Unmarshal(raw, &a)
 		n.closed = append(n.closed, a.SessionID)
+		return map[string]any{"ok": true}, nil
+	}
+	f.nodes[deviceSessionStop] = func(_ string, raw json.RawMessage) (any, error) {
+		var a struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(raw, &a)
+		n.stopped = append(n.stopped, a.SessionID)
+		if n.stopErr != nil {
+			return nil, n.stopErr
+		}
 		return map[string]any{"ok": true}, nil
 	}
 	f.nodes["worktree.remove"] = func(_ string, raw json.RawMessage) (any, error) {
@@ -80,6 +97,12 @@ func (n *reviewNode) cleaned(f *fakeHub) ([]string, []map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(n.closed), slices.Clone(n.removed)
+}
+
+func (n *reviewNode) stoppedOf(f *fakeHub) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(n.stopped)
 }
 
 func reviewChangeOf() proto.GitReview {
@@ -241,7 +264,7 @@ func TestReviewerHiddenFromTheSessionList(t *testing.T) {
 	if got := ids(s.publishList("box")); !slices.Equal(got, []string{"worker", "reviewer"}) {
 		t.Fatalf("before the link: %v", got)
 	}
-	if err := s.linkReviewer(ctx, todo.ID, "box", "reviewer", reviewCopy, "rv_1"); err != nil {
+	if err := s.linkReviewer(ctx, todo.ID, "box", "reviewer", reviewCopy, "claude", "rv_1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(s.publishList("box")); !slices.Equal(got, []string{"worker"}) {
@@ -272,7 +295,7 @@ func TestAutoReviewCleanWaitsForReview(t *testing.T) {
 	}
 	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) == 1 })
 	msg := f.notices()[0]
-	for _, want := range []string{"hub 判断做完了，等你验收", "独立评审（评审员只看了任务要求和改动", "没有阻断问题，1 条非阻断发现", "变量名可以更清楚"} {
+	for _, want := range []string{"待逐项复核，不代表完成", "独立评审（评审员只看了任务要求和改动", "没有阻断问题，1 条非阻断发现", "变量名可以更清楚"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the message lacks %q:\n%s", want, msg)
 		}

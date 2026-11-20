@@ -4,7 +4,8 @@
 //
 // Scenarios: login (any other name) · setup / setup-local / setup-remote · app (a lone hub, older computers, a restart
 // pending) · nopeers (a hub without the mesh API) · center (the center of a group: members, computers with several
-// paths, a service computer, one to pair again, one only a member has, an old ssh one) · member / member-offline (a
+// paths, a service computer, one to pair again, one only a member has, an old ssh one, a Linux ssh one to switch to
+// Persona Link: its name containing "fail" fails and rolls back) · member / member-offline (a
 // member hub, its center reachable or not; member-stale: the page still thinks the center is up, the hub knows better
 // and answers set-center with confirm_required) · empty (nothing but the hub's own machine). Adding computers works in every
 // signed-in scenario: a connector link containing "fail" fails to pair. Extensions: a built-in one, two installed (one
@@ -45,6 +46,25 @@ function fakeQr(n = 29): string[] {
   finder(0, n - 7);
   finder(n - 7, 0);
   return grid.map((row) => row.join(""));
+}
+
+// A switch to Persona Link (#10662) walking its phases on the machine itself, as the hub's list would report them; the
+// page polls faster while one runs. A computer whose name contains "fail" fails installing and is put back on ssh.
+function switchToLink(machine: AdminMachine) {
+  const fails = /fail/i.test(machine.name);
+  const at = (phase: NonNullable<AdminMachine["link_switch"]>["phase"], extra: Partial<NonNullable<AdminMachine["link_switch"]>> = {}) => {
+    machine.link_switch = { available: false, reason: "in_progress", phase, at: new Date().toISOString(), ...extra };
+  };
+  at("checking");
+  const steps: [number, () => void][] = fails
+    ? [[2500, () => at("installing")], [5000, () => at("rolling_back", { error: "transfer_failed" })], [8000, () => (machine.link_switch = { available: true, phase: "failed", error: "transfer_failed", at: new Date().toISOString() })]]
+    : [
+        [2500, () => at("installing")],
+        [5000, () => (at("connecting"), Object.assign(machine, { kind: "link", online: false, transport: undefined }))],
+        [8000, () => (Object.assign(machine, { online: true, transport: "link", link: { version: VERSION, since: new Date().toISOString() } }), (machine.link_switch = { available: false, phase: "succeeded", at: new Date().toISOString() }))],
+      ];
+  for (const [ms, step] of steps) setTimeout(step, ms);
+  return machine.link_switch;
 }
 
 export function installMock(scenario: string) {
@@ -103,6 +123,12 @@ export function installMock(scenario: string) {
           {
             id: "laptop", name: "旧笔记本", kind: "ssh", ssh_host: "laptop", online: true, transport: "ssh", node_version: "v1.3.9-4-gdef5678", node_mismatch: true, os: "darwin", state: "active", hub_id: SELF,
             paths: [{ via: "ssh", hub_id: SELF, id: "laptop", ok: true, rtt_ms: 15, active: true }],
+            link_switch: { available: false, reason: "unsupported_os" },
+          },
+          {
+            id: "build-box", name: "Build box", kind: "ssh", ssh_host: "build-box", online: true, transport: "ssh", node_version: VERSION, os: "linux", state: "active", hub_id: SELF,
+            paths: [{ via: "ssh", hub_id: SELF, id: "build-box", ok: true, rtt_ms: 6, active: true }],
+            link_switch: { available: true },
           },
         ]
       : member
@@ -522,6 +548,10 @@ export function installMock(scenario: string) {
         return json({ ok: true, name: machine.name });
       }
       if (m[2] === "/reconnect") return json({ ok: true });
+      if (m[2] === "/link-switch" && method === "POST") {
+        if (!machine.link_switch?.available) return fail(409, machine.link_switch?.reason || "unknown");
+        return json({ link_switch: switchToLink(machine) }, 202);
+      }
       if (m[2] === "/link-pair") return json({ pair_url: `persona://link?url=https%3A%2F%2Fhub.example.com%3A18662&machine=${id}&token=jp_mock`, expires_at: later(10), command: `persona-link pair 'persona://link?…&machine=${id}'` });
     }
     const mk = /^\/extensions\/-\/markets\/([^/?]+)(\/[a-z]+)?$/.exec(path);

@@ -11,6 +11,12 @@ const (
 	// A checkup report or lab result for the health space (dest=health, docs/assistant/health.md "Checkup reports"): it lands in the
 	// health directory's reports/ and stays, where the health conversations read it and the others are denied.
 	UploadDestHealth = "health"
+	// A file a task's Agent made and handed to its conversation (dest=file, docs/assistant/agent-work.md "Files a task
+	// hands over"): the manager copies it from the Agent's computer to the conversation's computer, under the node's
+	// uploads/files/<date>/. It is kept like the chat's images, not swept like a terminal paste, so a message that
+	// names it still opens later.
+	UploadDestFile     = "file"
+	MaxFileUploadBytes = MaxTerminalUploadBytes
 	// A file put into a folder the app is browsing (dest=dir&dir=…, docs/protocol/protocol.md "Changing files"): it keeps its own
 	// name, only folders in the home take it (node/writeguard.go), and it may be bigger.
 	UploadDestDir     = "dir"

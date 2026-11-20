@@ -3,7 +3,7 @@ import XCTest
 import PersonaWire
 
 /// Replays the shared fixture spec/fixtures/entries/cases.json (#3387) through `AssistantEntries.split`: the iPhone, iPad
-/// and Mac action bar splits the same input into Needs You / In Progress / shelved exactly as the web
+/// and Mac action bar splits the same input into Needs You / In Progress / shelved / Finished exactly as the web
 /// (`assistant-entries.test.ts`) and Android (`AssistantEntriesFixtureTest`) do.
 @MainActor
 final class AssistantEntriesFixtureTests: XCTestCase {
@@ -38,6 +38,9 @@ final class AssistantEntriesFixtureTests: XCTestCase {
         var activity: [String: Activity?]?
         /// The In Progress rows that say their supervisor is reviewing them; nil in a case with none.
         var supervisor_review: [String]?
+        /// The Finished rows (#10922), newest finished first, and the ones nobody opened yet; nil in a case with none.
+        var finished: [String]?
+        var finished_new: [String]?
     }
 
     private struct Activity: Decodable {
@@ -61,12 +64,15 @@ final class AssistantEntriesFixtureTests: XCTestCase {
             XCTAssertEqual(got.needsYou.map(\.id), c.expected.needs_you, "\(c.name): needs you")
             XCTAssertEqual(got.running.map(\.id), c.expected.running, "\(c.name): running")
             XCTAssertEqual(got.shelved.map(\.id), c.expected.shelved, "\(c.name): shelved")
+            XCTAssertEqual(got.finished.map(\.id), c.expected.finished ?? [], "\(c.name): finished")
+            XCTAssertEqual(got.finished.filter(\.fresh).map(\.id), c.expected.finished_new ?? [], "\(c.name): finished, new")
             // each thing once, and each count is its rows
-            let all = (got.needsYou + got.running + got.shelved).map(\.id)
+            let all = (got.needsYou + got.running + got.shelved).map(\.id) + got.finished.map(\.id)
             XCTAssertEqual(Set(all).count, all.count, "\(c.name): a thing in two places: \(all)")
             let content = ActionTrayContent(got)
             XCTAssertEqual(content.count(.needsYou), c.expected.needs_you.count, c.name)
             XCTAssertEqual(content.count(.running), c.expected.running.count, c.name)
+            XCTAssertEqual(content.count(.finished), (c.expected.finished ?? []).count, c.name)
             let reviewing = got.running.filter { row in
                 guard case .task(let id, let status, _) = row, let todo = i.todos.first(where: { $0.id == id }) else { return false }
                 return AssistantEntries.saysSupervisorReview(todo, status: status, now: now)

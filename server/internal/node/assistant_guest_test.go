@@ -147,6 +147,36 @@ func TestGuestRefusesOtherRuntimes(t *testing.T) {
 	}
 }
 
+// A fresh isolated guest never loads the owner's source settings, so malformed JSON there cannot block its start.
+func TestAssistantGuestStartDoesNotReadUnusedSourceSettings(t *testing.T) {
+	f := cliProfileTest(t)
+	f.n.home = os.Getenv("HOME")
+	settings := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte("not valid JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if dirs := f.n.claudeConfigDirs(); !slices.Contains(dirs, filepath.Dir(settings)) {
+		t.Fatalf("the fixture's source settings are not in scope: %v", dirs)
+	}
+	profile := filepath.Join(f.n.dir, "profiles", "claude")
+	if _, err := os.Stat(profile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the guest's profile is not fresh: %v", err)
+	}
+	id, err := f.n.assistantSend(withGuest(context.Background(), []string{"larkbridge_docs"}), "", t.TempDir(), "claude", "search", nil, "", "", cliExec())
+	if err != nil {
+		t.Fatalf("an isolated guest was blocked by a settings file it never loads: %v", err)
+	}
+	if f.proc(id) == nil {
+		t.Fatal("the guest did not start on the CLI")
+	}
+	if args := f.file("cli-argv"); !strings.Contains(args, "--session-id "+id) {
+		t.Fatalf("started session args = %s, want %q", args, id)
+	}
+}
+
 // Its directory holds only its instructions; a path out of the home is refused. Tool names are plain identifiers.
 func TestGuestPrepareAndTools(t *testing.T) {
 	n, _ := testNode(t)

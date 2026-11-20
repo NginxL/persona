@@ -43,7 +43,7 @@ import java.io.File
 import java.time.Instant
 
 /**
- * The Agents list's parity with iOS / the web (#3038): "Lark groups" / "Terminal" quick filters and the "botmux" switch, the three
+ * The Agents list's parity with iOS / the web (#3038): "Lark groups" / "Terminal" quick filters, the three
  * empty states (search, quick filter, none at all) and a herdr start that failed, with its reason on the row. Every
  * style in light and dark, written to `build/parity-shots/` (or `-Dpersona.shots=<dir>`).
  */
@@ -121,7 +121,7 @@ class AgentsParityShotsTest {
             }
             rule.waitForIdle()
             val expected = when (p) {
-                Page.List -> listOf("飞书群", "终端", "botmux")
+                Page.List -> listOf("飞书群", "终端")
                 Page.FilterEmpty -> listOf("没有需要你的会话", "看全部")
                 Page.SearchEmpty -> listOf("没有找到「deploy」")
                 Page.Herdr -> listOf("没启动：这台电脑上没装 herdr")

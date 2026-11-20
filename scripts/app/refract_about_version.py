@@ -157,8 +157,11 @@ def canonical_source_archive(checkout: Path, lock: dict, archive: Path) -> None:
         if name == "Sources/RefractCLI/Version.swift":
             data = packaging.version_source(data, lock["commit"])
         entries.append((name, 0o755 if mode == "100755" else 0o644, data))
-    archive.write_bytes(gzip.compress(packaging.deterministic_tar("refract-source-0.1.0", entries),
-                                    compresslevel=9, mtime=packaging.ARCHIVE_EPOCH))
+    compressed = bytearray(gzip.compress(packaging.deterministic_tar("refract-source-0.1.0", entries),
+                                        compresslevel=9, mtime=packaging.ARCHIVE_EPOCH))
+    # Python's zlib and GzipFile paths write different OS bytes; the reviewed lock uses Unix (3).
+    compressed[9] = 3
+    archive.write_bytes(compressed)
 
 
 def build_cli(work: Path, lock: dict) -> Path:

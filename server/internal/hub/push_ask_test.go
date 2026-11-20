@@ -43,12 +43,41 @@ func TestPushAskEligibility(t *testing.T) {
 		{"fields", func(ix *proto.Interaction) { ix.Fields = []proto.Field{{Key: "value", Label: "Value"}} }},
 		{"permission", func(ix *proto.Interaction) { ix.Kind = proto.IxPermission }},
 		{"health", func(ix *proto.Interaction) { ix.Cwd = "/home/example/.persona/health" }},
+		{"cannot be undone", func(ix *proto.Interaction) { ix.ToolName, ix.Reversible = "ask_user", new(false) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ix := pushAskCard("first", "second")
 			tc.edit(&ix)
 			if _, ok := interactionPayloadIn(i18n.En, ix, "computer")["ask"]; ok {
 				t.Fatal("ineligible card exposes ask")
+			}
+		})
+	}
+}
+
+// An ask_user card whose asker said going ahead cannot be undone is answered only after a look, as the to-do's view
+// says (open_only, #10465): its push offers no options, and its alert still says what it asks. One that said it can be
+// undone, or said nothing, keeps them.
+func TestPushAskCannotUndoOpensOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reversible *bool
+		options    bool
+	}{
+		{"cannot be undone", new(false), false},
+		{"can be undone", new(true), true},
+		{"said nothing", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ix := pushAskCard("Delete the old table", "Keep it")
+			ix.ToolName, ix.Reversible = "ask_user", tc.reversible
+			payload := interactionPayloadIn(i18n.En, ix, "computer")
+			if _, ok := payload["ask"]; ok != tc.options {
+				t.Fatalf("ask %v, want options %v", payload["ask"], tc.options)
+			}
+			body, _ := payload["aps"].(map[string]any)["alert"].(map[string]any)["body"].(string)
+			if !strings.Contains(body, "Which library?") || !strings.Contains(body, "Delete the old table") {
+				t.Fatalf("alert body %q", body)
 			}
 		})
 	}

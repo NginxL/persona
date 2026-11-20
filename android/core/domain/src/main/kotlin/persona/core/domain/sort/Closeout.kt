@@ -104,6 +104,20 @@ fun Closeout.line(): CoreText = when (status) {
     else -> CoreText.of(Key.CloseoutDone)
 }
 
+// Markdown work reports have a dedicated heading, three required facts and a terminating rule.
+private val WorkReport = Regex("""(?:^|\n)(### Persona (?:work report|工作报告|作業報告)\r?\n(?:\r?\n)?- Status: (?:done|not_done|blocked)\r?\n- Merged: (?:yes|no|n/a)\r?\n- Deployed: (?:yes|no|n/a)\r?\n(?:- (?:Did|Artifact|Delivery|Unblock|Verified|Missing|Waiting|Next): [^\r\n]+\r?\n)*(?:\r?\n)?---)(?=[\t \r\n]*(?:\n<oai-mem-citation>[\s\S]*?</oai-mem-citation>[\t \r\n]*)?$)""") // i18n-ignore: the report heading as Persona writes it in each language
+private val WorkReportFence = Regex("""^[\t ]*(`{3,}|~{3,})([^\r\n]*)""", RegexOption.MULTILINE)
+
+private fun insideWorkReportFence(before: String): Boolean {
+    var open = ""
+    for (match in WorkReportFence.findAll(before)) {
+        val fence = match.groupValues[1]
+        if (open.isEmpty()) open = fence
+        else if (fence.startsWith(open) && match.groupValues[2].isBlank()) open = ""
+    }
+    return open.isNotEmpty()
+}
+
 private val CloseoutBlock = Regex("<closeout\\b[^>]*>[\\s\\S]*?</closeout>")
 private val FenceBefore = Regex("(^|\\n)[ \\t]*(`{3,}|~{3,})[^\\n`]*\\n[ \\t]*$")
 private val FenceAfter = Regex("^[ \\t]*\\n[ \\t]*(`{3,}|~{3,})[ \\t]*(?=\\n|$)")
@@ -113,7 +127,16 @@ private val FenceAfter = Regex("^[ \\t]*\\n[ \\t]*(`{3,}|~{3,})[ \\t]*(?=\\n|$)"
  * it, so the reply does not say it again as raw text. Only the block goes, with the blank lines it leaves and a code
  * fence that held nothing else; text without a block comes back as it is.
  */
-fun stripCloseout(text: String): String {
+fun stripCloseout(text: String, complete: Boolean = true): String {
+    if (complete && text.contains("### Persona ")) {
+        WorkReport.find(text)?.let { report ->
+            val before = text.substring(0, report.range.first)
+            if (!insideWorkReportFence(before)) {
+                return listOf(before.trimEnd(), text.substring(report.range.last + 1).trimStart())
+                    .filter(String::isNotEmpty).joinToString("\n\n")
+            }
+        }
+    }
     val last = CloseoutBlock.findAll(text).lastOrNull() ?: return text
     var before = text.substring(0, last.range.first)
     var after = text.substring(last.range.last + 1)

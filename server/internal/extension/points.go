@@ -611,6 +611,9 @@ var Points = map[string]Point{
 		if u.Icon != "" && (u.Placement != "nav_page" || !slices.Contains(UIIcons, u.Icon)) {
 			return u.ID, fmt.Errorf("ui %s: only a nav_page has an icon, one of %s", u.ID, strings.Join(UIIcons, ", "))
 		}
+		if u.IconColor != "" && (u.Placement != "nav_page" || !slices.Contains(wire.Colors, u.IconColor)) {
+			return u.ID, fmt.Errorf("ui %s: only a nav_page has an icon_color, one of %s", u.ID, strings.Join(wire.Colors, ", "))
+		}
 		if g := u.Group; g != nil && (u.Placement != "nav_page" || !uiGroupID.MatchString(g.ID) || g.Title == "" || utf8.RuneCountInString(g.Title) > 40) {
 			return u.ID, fmt.Errorf("ui %s: only a nav_page names a group, its id a-z0-9- (at most 32) and its title 1 to 40 characters", u.ID)
 		}

@@ -1,4 +1,5 @@
 {
+  "retry_stale": "这件事已经不需要重试",
   "no_item": "没有这条收件箱内容。",
   "item_done": "这条内容已归档，没有发送任何内容。",
   "save_failed": "无法保存这条内容，请重试。",
@@ -30,6 +31,7 @@
   "mail_target_changed": "邮件回复目标已变化，请刷新后重试。",
   "mail_target_required": "请提供邮箱账号和邮件 UID。",
   "translation_empty": "模型没有返回译文，请重试。",
+  "translation_message_size": "翻译的回复需要包含 1–{max} 个字符。",
   "mail_unconfigured": "还没设置邮箱。",
   "not_processing": "这段对话不属于收件箱内容。",
   "translation_target": "不支持目标语言 {target}。",

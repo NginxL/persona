@@ -5,11 +5,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import persona.core.contracts.Interaction
+import persona.core.contracts.InteractionEvent
 import persona.core.contracts.InteractionResolvedEvent
 import persona.core.contracts.NotifyEvent
 import persona.core.contracts.Pong
@@ -17,6 +21,13 @@ import persona.core.contracts.ServerEvent
 
 /** A notification being handled holds up no other subscriber of the hub's events (#4038). */
 class NotificationEventsTest {
+    @Test fun currentInteractionSnapshotsReachNotificationDelivery() = runBlocking {
+        val update = InteractionEvent(Interaction("request", kind = "permission"))
+        val resolved = InteractionResolvedEvent(update.interaction.id)
+        val events = flowOf<ServerEvent>(update, Pong("chat"), resolved).notificationEvents().toList()
+        assertEquals(listOf(update, resolved), events)
+    }
+
     @Test fun aNotificationBeingHandledHoldsUpNoOtherLiveEvent() = runBlocking {
         // Like ConnectionRuntime's merged events: no buffer, so emit waits for every subscriber to take the event.
         val events = MutableSharedFlow<ServerEvent>()

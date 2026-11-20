@@ -15,6 +15,7 @@ fun Session.keepingDetails(old: Session?): Session {
     return copy(
         launcher = launcher ?: old.launcher,
         permissionMode = permissionMode ?: old.permissionMode,
+        bypassAvailable = if (permissionMode == null) old.bypassAvailable else bypassAvailable,
         effort = effort ?: old.effort,
         efforts = efforts.ifEmpty { old.efforts },
         ultracode = ultracode ?: old.ultracode,
@@ -34,5 +35,7 @@ fun Session.keepingDetails(old: Session?): Session {
         compaction = compaction ?: old.compaction,
         asks = asks ?: old.asks,
         pendingSwitch = pendingSwitch ?: old.pendingSwitch,
+        // A summary omits this detail; a complete row with an empty list clears it by returning above.
+        undelivered = undelivered ?: old.undelivered,
     )
 }

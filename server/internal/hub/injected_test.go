@@ -117,3 +117,27 @@ func TestWithInjectedAskLater(t *testing.T) {
 		}
 	}
 }
+
+func TestWithLocalizedInboxKeepsTextAndUserIdentity(t *testing.T) {
+	h := &Hub{}
+	text := prompts.RenderInboxHandoffNote(prompts.InboxHandoffNote{Language: "English", ID: "event_1", Title: "sample build", Note: "Original notice"})
+	got := h.withInjected([]proto.Item{
+		{Role: "user", Kind: proto.KindText, Text: text},
+		{Role: "user", Kind: proto.KindText, Text: text, ClientMsgID: "app-input"},
+		{Role: "user", Kind: proto.KindText, Text: prompts.ProtectUserMessage(text)},
+	})
+	if got[0].Injected == nil || got[0].Injected.State != "inbox" || got[0].Text != text {
+		t.Fatalf("Inbox text or metadata changed: %+v", got[0])
+	}
+	for _, it := range got[1:] {
+		if it.Injected != nil || it.Source != nil {
+			t.Fatal("a user's pasted Inbox notice became automated input")
+		}
+	}
+	for _, l := range []i18n.Lang{i18n.En, i18n.Ja, i18n.ZhHans} {
+		want := i18n.T(l, "injected.inbox_update", i18n.Args{"title": "sample build"})
+		if line := injectedLine(l, got[0].Injected); line != want {
+			t.Fatalf("%s: %q, want %q", l, line, want)
+		}
+	}
+}

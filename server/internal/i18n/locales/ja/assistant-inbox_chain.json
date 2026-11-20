@@ -1,4 +1,5 @@
 {
+  "retry_requested": "AI分身に再試行を依頼",
   "received_other": "新着メッセージ {count} 件",
   "received_from_other": "新着メッセージ {count} 件 · {sender}",
   "received_mail_other": "メール {count} 通",

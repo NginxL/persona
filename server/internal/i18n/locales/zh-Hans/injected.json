@@ -12,5 +12,7 @@
   "limit_continue": "用量额度重置了，Persona 让它接着做",
   "ask_answered": "你回答了：{title}",
   "ask_expired": "问题到时间了，卡片上没有回答",
-  "ask_closed": "问题卡片关掉了，没有回答"
+  "ask_closed": "问题卡片关掉了，没有回答",
+  "answer_again": "Persona 正在补问",
+  "answer_again_failed": "助手没有给出答复。你可以再发一次消息。"
 }

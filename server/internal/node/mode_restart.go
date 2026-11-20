@@ -28,8 +28,9 @@ import (
 //     while it restarts the row is listed as starting (switchShare.begin): messages and the user's Resume wait for it.
 //   - A draft in the box or a dialog in front puts it off (retried after modeRestartRetry, doubling); nothing is typed
 //     over what someone types at the computer.
-//   - Picking any other mode before it ran drops it; so does a restart that failed (the agent is resumed in the mode it
-//     had when the new start did not come up), and a pick older than modeRestartMaxAge.
+//   - Picking any other mode before it ran drops it (picking the mode it still runs in calls it off: cancelled, not
+//     replaced, #11089); so does a restart that failed (the agent is resumed in the mode it had when the new start did
+//     not come up), and a pick older than modeRestartMaxAge.
 //   - It belongs to the claude process it was picked for (#10296): the pick keeps that process' pid and start (the
 //     hooks', else its sessions/<pid>.json), and goes once that process has exited or the session runs in another one.
 //     A claude that resumes the conversation later, at the computer or by Persona's Resume, was never chosen for Allow
@@ -196,15 +197,20 @@ func (n *Node) queueModeRestart(id, mode string) error {
 	return nil
 }
 
-// dropModeRestart drops a restart session id waits for (another mode was picked).
-func (n *Node) dropModeRestart(id string) {
+// dropModeRestart drops a restart session id waits for, as a pick of another mode, picked, does. A pick of the mode the
+// session runs in now calls it off and changes nothing else (cancelled, #11089); any other replaces it.
+func (n *Node) dropModeRestart(id, picked string) {
 	mode := n.switches().restartMode(id)
 	if mode == "" {
 		return
 	}
+	reason := proto.ModeRestartReasonReplaced
+	if now, _ := n.modesOf(id); now == picked {
+		reason = proto.ModeRestartReasonCancelled
+	}
 	n.switches().setRestart(id, "", time.Time{}, 0, "")
-	n.logf("session %s: waiting restart in another permission mode dropped", id)
-	n.reportModeRestart(id, mode, proto.ModeRestartDropped, proto.ModeRestartReasonReplaced)
+	n.logf("session %s: waiting restart in permission mode %s dropped: %s picked (%s)", id, mode, picked, reason)
+	n.reportModeRestart(id, mode, proto.ModeRestartDropped, reason)
 	n.notifySessions()
 }
 

@@ -137,7 +137,7 @@ func (s *Service) threadMessage(ctx context.Context, ev feishubot.MessageEvent, 
 		notDelivered(routeErr)
 		return
 	}
-	content.Text = prompts.RenderTodoThreadReply(prompts.TodoThreadReply{Title: contextText(clip(oneLine(t.Title), 80)), Text: text, Recorded: recorded})
+	content.Text = prompts.RenderTodoThreadReply(prompts.TodoThreadReply{Language: answerLanguage(s.hello(ctx).Locale), Title: contextText(clip(oneLine(t.Title), 80)), Text: text, Recorded: recorded})
 	// A to-do that came from a question nobody answered (ask_todo.go): the reply is the owner's call, and goes to the
 	// conversation that asked (not to an Agent) as the answer; the to-do then closes.
 	asked := false

@@ -76,7 +76,7 @@ export interface AgentSearchHit {
 
 /** ⌘K's match for an Agent session: the list's operators narrow (plain words never filter, #4397), then what was typed
  *  ranks the name first, then the project and computer, then the rest (`AgentSearchHit.score`). */
-export function agentSearchHit(s: Session, query: string, ctx: EvalContext): AgentSearchHit {
+export function agentSearchHit(s: Session, query: string, ctx: EvalContext, preferTab = false): AgentSearchHit {
   const parsed = parseSearchQuery(query);
   const tokens = words(query);
   const operators = tokens.filter((w) => !parsed.terms.includes(w)).join(" ");
@@ -87,10 +87,10 @@ export function agentSearchHit(s: Session, query: string, ctx: EvalContext): Age
   const terms = parsed.terms.map((w) => w.toLowerCase());
   if (terms.length === 0) return { score: operators ? 30 : 1 };
   const text = parsed.text.toLowerCase();
-  const title = sessionTitle(s).toLowerCase();
+  const title = sessionTitle(s, preferTab).toLowerCase();
   if (title.startsWith(text)) return { score: 100 };
   if (title.includes(text)) return { score: 80 };
-  const place = [title, sessionProjectName(s), machineWithHub(s.machine_id, ctx.machines), s.machine_id, s.space_name, s.slot_name, baseName(s.cwd)]
+  const place = [title, s.title, sessionProjectName(s), machineWithHub(s.machine_id, ctx.machines), s.machine_id, s.space_name, s.slot_name, baseName(s.cwd)]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();

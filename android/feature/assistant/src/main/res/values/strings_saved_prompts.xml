@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_saved_prompts_in_chats">In Chats</string>
+    <string name="assistant_saved_prompts_title">Saved Prompts</string>
+    <string name="assistant_saved_prompts_entry">Reuse instructions from the / list in chats</string>
+    <string name="assistant_saved_prompts_new">New Prompt</string>
+    <string name="assistant_saved_prompts_edit">Edit Prompt</string>
+    <string name="assistant_saved_prompts_actions">Actions for /%1$s</string>
+    <string name="assistant_saved_prompts_up">Move Up</string>
+    <string name="assistant_saved_prompts_down">Move Down</string>
+    <string name="assistant_saved_prompts_empty">No Saved Prompts</string>
+    <string name="assistant_saved_prompts_use">Type / in a chat to put a saved prompt in the message box. The list is shared across your devices.</string>
+    <string name="assistant_saved_prompts_unavailable">Saved Prompts Unavailable</string>
+    <string name="assistant_saved_prompts_unavailable_detail">Update the hub to use saved prompts with this assistant.</string>
+    <string name="assistant_saved_prompts_load_failed">Couldn\'t load saved prompts</string>
+    <string name="assistant_saved_prompts_write_failed">Couldn\'t change saved prompts. %1$s</string>
+    <string name="assistant_saved_prompts_save_failed">Couldn\'t save the prompt. %1$s</string>
+    <string name="assistant_saved_prompts_delete_title">Delete “/%1$s”?</string>
+    <string name="assistant_saved_prompts_delete_detail">This removes the prompt from the / list on all your devices.</string>
+    <string name="assistant_saved_prompts_name">Name</string>
+    <string name="assistant_saved_prompts_name_hint">One word after / in a chat.</string>
+    <string name="assistant_saved_prompts_name_rule">Use 1–32 letters, digits, combining marks, hyphens, underscores or periods.</string>
+    <string name="assistant_saved_prompts_name_taken">Another prompt has this name.</string>
+    <string name="assistant_saved_prompts_text">Prompt Text</string>
+    <string name="assistant_saved_prompts_text_rule">Enter 1–8,000 characters. Line breaks and tabs are allowed.</string>
+    <string name="assistant_saved_prompts_text_count">%1$d of 8,000 characters</string>
+</resources>

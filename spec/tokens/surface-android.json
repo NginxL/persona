@@ -1,0 +1,41 @@
+{
+  "android": {
+    "homeSwitcherGlass": {
+      "lightTint": {
+        "$type": "color",
+        "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.4196078431372549 },
+        "$description": "Light tint of the Android home switcher"
+      },
+      "darkTint": {
+        "$type": "color",
+        "$value": { "colorSpace": "srgb", "components": [0.1411764705882353, 0.1411764705882353, 0.1568627450980392], "alpha": 0.5490196078431373 },
+        "$description": "Dark tint of the Android home switcher"
+      },
+      "edgeShadow": {
+        "$type": "color",
+        "$value": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.18 },
+        "$description": "Shadow along the curved glass edge"
+      },
+      "blur": {
+        "$type": "dimension",
+        "$value": { "value": 3, "unit": "px" },
+        "$description": "Shallow backdrop blur of the home switcher"
+      },
+      "refractionBand": {
+        "$type": "dimension",
+        "$value": { "value": 8, "unit": "px" },
+        "$description": "Width of the refraction band inside the curved edge"
+      },
+      "refractionDisplacement": {
+        "$type": "dimension",
+        "$value": { "value": 18, "unit": "px" },
+        "$description": "Maximum backdrop displacement at the curved edge"
+      },
+      "fallbackStroke": {
+        "$type": "dimension",
+        "$value": { "value": 0.75, "unit": "px" },
+        "$description": "Thickness of the home switcher's gradient edge in the reduced glass tiers"
+      }
+    }
+  }
+}

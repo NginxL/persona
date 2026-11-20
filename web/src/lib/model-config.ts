@@ -1,7 +1,8 @@
 import { t } from "../i18n";
 import { MANAGER_HEADER } from "./manager-choice";
 import { api, enc } from "./api";
-import type { ProviderAPI } from "./providers";
+import type { ProviderAPI, ProviderModel } from "./providers";
+import type { ModelCandidates } from "./model-candidates";
 
 export interface ModelBinding {
   provider?: string;
@@ -20,7 +21,14 @@ export interface ModelProvider {
   kind: "api" | "launcher" | "plugin";
   agent?: string;
   api?: ProviderAPI;
+  /** A current hub accepts purpose effort on this Chat connection; absent on older hubs. */
+  chat_effort?: boolean;
+  /** The connection's saved default, inherited when a purpose effort is unset. */
+  effort?: string;
   model?: string;
+  models?: ProviderModel[];
+  /** Legacy Chat tier aliases resolved to the stored model IDs whose capabilities apply. */
+  model_aliases?: Record<string, string>;
   machines?: string[];
   hidden?: boolean;
   has_key?: boolean;
@@ -49,6 +57,8 @@ export interface ModelPurpose {
   status?: string;
   fields?: string[];
   provider_ids?: string[];
+  /** Candidate model settings are offered by an extension's own purpose. */
+  candidates?: ModelCandidates;
   /** Main chat only: the runtimes it can run on (an older hub: none, no "Runtime" row). */
   runtimes?: string[];
   /** Main chat only (#4633): the profiles its new conversations can start in (an older hub: none, no row). */

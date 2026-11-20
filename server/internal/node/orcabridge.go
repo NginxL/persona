@@ -407,8 +407,20 @@ func (b *orcaBridge) ask(ctx context.Context, key, orca, persona string, p orcar
 		if res.Dismiss {
 			return // handed back to the computer: Orca's own window answers it
 		}
+		from := ""
+		b.mu.Lock()
+		if head := b.heads[orca]; head != nil && head.opts != nil {
+			for mode, theirs := range orcaModes {
+				if theirs == head.opts.PermissionMode {
+					from = mode
+				}
+			}
+		}
+		b.mu.Unlock()
 		if err := b.answer(ctx, orca, p, res); err != nil {
 			b.logf("orca bridge: answering %s in %s: %v", p.Body.Kind, orca, err)
+		} else if ix.Kind == proto.IxPlan && res.Approve != nil && *res.Approve && orcaModes[res.Mode] != "" && res.ModeActor != nil {
+			_ = b.peer.Notify(proto.EventModeSet, proto.ModeSetEvent{SessionID: persona, From: from, To: res.Mode, Actor: res.ModeActor})
 		}
 	}()
 }

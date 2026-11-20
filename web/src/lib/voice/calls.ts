@@ -5,7 +5,7 @@
 //
 // This is the first screen's part: the store, its hooks and what the page's buttons call. The call's own code (the
 // conversation, its audio, uplink and resampling: call-stack.ts) is a chunk of its own, imported when the page's first
-// call starts; until then the call's types are all this module takes from it.
+// call starts, together with the page's parts for it (`ui`); until then the call's types are all this module takes from it.
 import { useSyncExternalStore } from "react";
 import { reportBoundary } from "../error-reports";
 import { closeContexts, openContexts, type VoiceContexts } from "./audio-contexts";
@@ -61,11 +61,13 @@ function setCurrent(next: Current | null) {
   emit();
 }
 
-type Start = VoiceOwner & { extensionID: string; recent: VoiceLine[]; deps?: VoiceDeps };
+/** `ui`: the page's own code for a call (its bar, views/chat/voice/VoiceCall.tsx), loaded with the call's: the first call
+ *  is on only once both are in, so the bar draws at once in the composer's place. */
+type Start = VoiceOwner & { extensionID: string; recent: VoiceLine[]; deps?: VoiceDeps; ui?: () => Promise<unknown> };
 
-function loadStack(): Promise<CallStack> {
-  return (loading ??= import("./call-stack").then(
-    (m) => (stack = m),
+function loadStack(ui?: () => Promise<unknown>): Promise<CallStack> {
+  return (loading ??= Promise.all([import("./call-stack"), ui?.()]).then(
+    ([m]) => (stack = m),
     (e: unknown) => {
       loading = null;
       throw e;
@@ -116,7 +118,7 @@ export const voiceCalls = {
     dropPending();
     const mine: Pending = { start: o, contexts: o.deps ? undefined : openContexts(DEFAULT_OUTPUT_RATE), done: Promise.resolve(null) };
     pending = mine;
-    mine.done = loadStack().then(
+    mine.done = loadStack(o.ui).then(
       (s) => {
         if (pending !== mine) return null;
         pending = null;

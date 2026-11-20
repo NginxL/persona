@@ -1240,11 +1240,12 @@
     },
     {
       "name": "finished_tasks_in_neither",
-      "description": "Done, cancelled and accepted tasks are in neither entry; the board has them.",
+      "description": "Done, cancelled and accepted tasks are in neither entry. The ones the conversation handed out that finished in the last 24 hours are under Finished (#10922), newest finished first and the same moment by id; nobody opened them yet, so all three are new. The board has every finished task.",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
-        "issue #3387"
+        "issue #3387",
+        "issue #10922"
       ],
       "derived": true,
       "input": {
@@ -1351,7 +1352,227 @@
       "expected": {
         "needs_you": [],
         "running": [],
-        "shelved": []
+        "shelved": [],
+        "finished": [
+          "task:t-accepted",
+          "task:t-cancel",
+          "task:t-done"
+        ],
+        "finished_new": [
+          "task:t-accepted",
+          "task:t-cancel",
+          "task:t-done"
+        ]
+      }
+    },
+    {
+      "name": "finished_lists_the_last_day_seen_or_not",
+      "description": "Finished (#10922) lists the tasks handed out (by this or, in the main conversation, any conversation) that finished in the last 24 hours, seen or not, newest finished first. A task finished when the To-dos triage says: its close (t-new, t-seen, t-other, t-almost), its accepting review (t-accepted), else its last move for a finished turn the owner has already seen (t-read, which the To-dos page files under Done). Seeing a task changes only whether it is new (finished_new: the To-dos page's Just finished). Exactly 24 hours ago is out (t-day), one second less is in (t-almost); older ones (t-old), a to-do made by hand (t-by-hand) and an old failed start (t-failed) are not listed. Finished rows are not open work.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "web/src/lib/todo-triage.ts finishedAt",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "issue #10922"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-new",
+            "title": "Rename the settings tab",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:30:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:30:00Z"
+          },
+          {
+            "id": "t-seen",
+            "title": "Fix the export button",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T06:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T06:00:00Z",
+            "seen_at": "2026-11-10T07:00:00Z"
+          },
+          {
+            "id": "t-accepted",
+            "title": "Update the changelog",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T04:00:00Z",
+            "agents": [],
+            "seen_at": "2026-11-10T05:00:00Z",
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "accepted",
+              "reviews": [
+                {
+                  "verdict": "accepted",
+                  "note": "Looks good",
+                  "at": "2026-11-10T04:00:00Z"
+                }
+              ]
+            }
+          },
+          {
+            "id": "t-read",
+            "title": "Draft the release note",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T07:00:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-read",
+                "linked_at": "2026-11-10T06:00:00Z"
+              }
+            ],
+            "seen_at": "2026-11-10T07:30:00Z"
+          },
+          {
+            "id": "t-other",
+            "title": "Book the meeting room",
+            "origin": "side-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:45:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:45:00Z"
+          },
+          {
+            "id": "t-almost",
+            "title": "Clean up old branches",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-09T09:00:01Z",
+            "agents": [],
+            "done_at": "2026-11-09T09:00:01Z"
+          },
+          {
+            "id": "t-day",
+            "title": "Archive the old logs",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-09T09:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-09T09:00:00Z"
+          },
+          {
+            "id": "t-old",
+            "title": "Move the docs",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-08T08:00:00Z"
+          },
+          {
+            "id": "t-by-hand",
+            "title": "Buy printer paper",
+            "origin": "",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:40:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:40:00Z"
+          },
+          {
+            "id": "t-failed",
+            "title": "Rotate the keys",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "agents": [],
+            "start_error": "machine offline",
+            "done_at": "2026-11-08T08:00:00Z"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-read",
+            "title": "w-read",
+            "cwd": "/home/user/project",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T07:00:00Z",
+            "state_since": "2026-11-10T07:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [],
+        "shelved": [],
+        "finished": [
+          "task:t-other",
+          "task:t-new",
+          "task:t-read",
+          "task:t-seen",
+          "task:t-accepted",
+          "task:t-almost"
+        ],
+        "finished_new": [
+          "task:t-other",
+          "task:t-new",
+          "task:t-almost"
+        ]
+      }
+    },
+    {
+      "name": "finished_only_the_conversations_own",
+      "description": "Another conversation's Finished lists only the tasks it handed out (origin), as its other entries do (#10922); the main conversation's work is the main conversation's.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "issue #10922"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "side-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-mine",
+            "title": "Book the meeting room",
+            "origin": "side-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:00:00Z"
+          },
+          {
+            "id": "t-main",
+            "title": "Rename the settings tab",
+            "origin": "main-chat",
+            "created_at": "2026-11-08T07:00:00Z",
+            "updated_at": "2026-11-10T08:10:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:10:00Z"
+          }
+        ],
+        "sessions": [],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [],
+        "shelved": [],
+        "finished": [
+          "task:t-mine"
+        ],
+        "finished_new": [
+          "task:t-mine"
+        ]
       }
     },
     {
@@ -1508,7 +1729,7 @@
     },
     {
       "name": "superseded_failed_start_in_neither",
-      "description": "A task whose agent never started, in the same plan as a task that really finished (a review closed it): the work got done, so the failed start waits on nobody and is finished, in neither entry, as the To-dos page has it (#3713). Another failed start with nothing finished beside it still needs the user.",
+      "description": "A task whose agent never started, in the same plan as a task that really finished (a review closed it): the work got done, so the failed start waits on nobody and is finished, in neither entry and not under Finished, as the To-dos page has it (#3713); the task that finished is under Finished (#10922). Another failed start with nothing finished beside it still needs the user.",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "web/src/lib/todo-triage.ts supersededFailedStarts",
@@ -1563,7 +1784,13 @@
           "task:t-retry"
         ],
         "running": [],
-        "shelved": []
+        "shelved": [],
+        "finished": [
+          "task:t-done"
+        ],
+        "finished_new": [
+          "task:t-done"
+        ]
       }
     },
     {
@@ -2788,6 +3015,321 @@
           "task:t-alpha"
         ],
         "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_unfinished",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-invalid"
+        ],
+        "running": [],
+        "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_replacement",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              },
+              {
+                "machine_id": "box",
+                "session_id": "new",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          },
+          {
+            "machine_id": "box",
+            "session_id": "new",
+            "title": "Current attempt",
+            "cwd": "/code/app",
+            "status": "working",
+            "state": "working",
+            "updated_at": "2026-11-18T09:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [
+          "task:t-invalid"
+        ],
+        "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_parked",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ],
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "parked",
+              "updated_at": "2026-11-18T09:00:00Z",
+              "reviews": [],
+              "parked": {
+                "reason": "Waiting for review",
+                "waiting_on": "someone_else",
+                "count": 1,
+                "until": "2026-11-19T09:00:00Z"
+              }
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [
+          "task:t-invalid"
+        ],
+        "shelved": [],
+        "web_parked": [
+          "task:t-invalid"
+        ]
+      }
+    },
+    {
+      "name": "invalid_conversation_closed",
+      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T09:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T09:00:00Z"
+              }
+            ],
+            "done_at": "2026-11-18T09:00:00Z"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [],
+        "shelved": [],
+        "finished": [
+          "task:t-invalid"
+        ],
+        "finished_new": [
+          "task:t-invalid"
+        ]
+      }
+    },
+    {
+      "name": "Only open delivery holds assigned to the owner need their attention",
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T10:00:00Z",
+        "plans": {},
+        "feed": [],
+        "todos": [
+          {
+            "id": "approval",
+            "title": "Release the sample page",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "delivery": {
+              "state": "pr",
+              "gate": "Approve the release",
+              "unblock": "user",
+              "at": "2026-11-10T08:00:00Z"
+            }
+          },
+          {
+            "id": "upstream",
+            "title": "Check the sample change",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "delivery": {
+              "state": "pr",
+              "gate": "Wait for checks",
+              "unblock": "other",
+              "at": "2026-11-10T08:00:00Z"
+            }
+          },
+          {
+            "id": "closed",
+            "title": "An accepted release",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "delivery": {
+              "state": "pr",
+              "gate": "Approve the release",
+              "unblock": "user",
+              "at": "2026-11-10T08:00:00Z"
+            },
+            "done_at": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "sessions": [],
+        "interactions": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:approval"
+        ],
+        "running": [
+          "task:upstream"
+        ],
+        "shelved": [],
+        "finished": [
+          "task:closed"
+        ],
+        "finished_new": [
+          "task:closed"
+        ]
       }
     }
   ]

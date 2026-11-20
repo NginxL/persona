@@ -28,10 +28,18 @@ import (
 //   - shows it on the conversation's row (proto.Session.Undelivered), so every client draws it as the owner's
 //     message marked not delivered, not only the one that sent it;
 //   - sends it again by itself (undeliveredPass): with backoff, at once when the conversation is seen running again,
-//     in order, under the message's own client_msg_id. The node sends an id once (sendsafe.go sentLog), and a try
-//     whose outcome is in doubt is looked for in the conversation's latest turns before another (undeliveredLanded),
-//     so it goes in exactly once, across manager restarts too;
-//   - gives up after undeliveredGiveUp: the row then says failed and the owner picks Retry or Delete.
+//     in order, under the message's own client_msg_id. Each try's start (TriedAt) is saved before the try, and a try
+//     whose mark could not be saved is not made, so a manager stopped during a try finds the mark when it starts again;
+//   - never sends by itself again a try whose outcome is in doubt (no answer in time, the link dropped, the manager
+//     stopped during it, the hub's own first try unknown): the node's memory of ids (sendsafe.go sentLog) is gone after
+//     it restarts, and the transcript can be late or unreadable, so neither can say for sure it did not go in. Such a
+//     message is only looked for in the conversation's latest turns (undeliveredLook) for undeliveredLookFor: found,
+//     it went in; not found by then (the transcript unreadable, only pictures and no id to know them by, or not there),
+//     the row says failed, that it may have gone in, and the owner looks and picks Retry or Delete (#10669);
+//   - gives up after undeliveredGiveUp: the row then says failed and the owner picks Retry or Delete. The owner's Retry
+//     sends it even after a try in doubt, looking for that try first on every attempt (one that cannot reach the
+//     computer keeps the Retry and the look for later); a try of its own in doubt is again only looked for, still from
+//     the first try's time.
 // A newer owner message to a conversation with kept ones is kept behind them (CodeUndeliveredAhead), never sent first.
 
 // undeliveredKey is the setting the kept messages live in.
@@ -43,6 +51,17 @@ var undeliveredGiveUp = 24 * time.Hour
 // undeliveredBackoff is the wait before each try after a failed one; the last repeats.
 var undeliveredBackoff = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
 
+// undeliveredLookFor is how long a try whose outcome is in doubt is looked for before the owner is asked. The looks
+// follow the first backoff steps (15 s, 30 s, 1 min, then the end: at 15 s, 45 s, 1 min 45 s and 3 min), which covers
+// a transcript line a busy computer writes late or a read that fails once; the owner hears within minutes instead of
+// the message waiting for a day.
+var undeliveredLookFor = 3 * time.Minute
+
+// undeliveredWait is the wait after the n-th failed try (or look), n ≥ 1; the last step repeats.
+func undeliveredWait(n int) time.Duration {
+	return undeliveredBackoff[min(max(n-1, 0), len(undeliveredBackoff)-1)]
+}
+
 // undeliveredTick is how often the kept messages are looked at without anything else waking the loop.
 var undeliveredTick = 15 * time.Second
 
@@ -52,21 +71,42 @@ const undeliveredMaxBytes = 16 << 20
 
 // keptMessage is one owner message kept for its conversation.
 type keptMessage struct {
-	ID      string         `json:"id"` // its client_msg_id
-	Machine string         `json:"machine"`
-	Session string         `json:"session"`
-	Params  map[string]any `json:"params"` // the app's message as it came (text, images, launcher, model)
-	Human   bool           `json:"human,omitempty"`
-	Lang    string         `json:"lang,omitempty"`
-	At      time.Time      `json:"at"`
+	ID           string         `json:"id"` // its client_msg_id
+	Machine      string         `json:"machine"`
+	Session      string         `json:"session"`
+	Params       map[string]any `json:"params"` // the app's message as it came (text, images, launcher, model)
+	Human        bool           `json:"human,omitempty"`
+	CredentialID string         `json:"credential_id,omitempty"`
+	Lang         string         `json:"lang,omitempty"`
+	At           time.Time      `json:"at"`
 	// State is proto.UndeliveredWaiting or proto.UndeliveredFailed.
 	State    string    `json:"state"`
 	Attempts int       `json:"attempts,omitempty"`
 	NextAt   time.Time `json:"next_at"`
-	// TriedAt: when the latest try that may have gone in began (its outcome in doubt, or the manager stopped during it);
-	// zero when every try so far surely typed nothing.
+	// TriedAt: when the first try that may have gone in began (its outcome in doubt, or the manager stopped during it);
+	// zero when every try so far surely typed nothing. Saved before each try, and kept, never moved later, until the
+	// message goes in or the owner deletes it: every later look, the owner's Retry's included, looks from then. While
+	// it is set the message is only looked for, never sent again by itself (inDoubt), unless the owner's Retry says so
+	// (OwnerRetry).
 	TriedAt time.Time `json:"tried_at,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	// LookUntil: when the look for a try in doubt ends (zero: it begins at the next look, as for a try the manager
+	// stopped during); Looks: the looks made so far, for the wait before the next.
+	LookUntil time.Time `json:"look_until,omitempty"`
+	Looks     int       `json:"looks,omitempty"`
+	// OwnerRetry: the owner pressed Retry; tries are made even after one in doubt, each looking for it first, until one
+	// goes in or ends in doubt itself (tries that typed nothing keep it).
+	OwnerRetry bool `json:"owner_retry,omitempty"`
+	// WaitIdle: the latest try was refused because the conversation was at work while its task-follow-up role changed
+	// (assistantwire.CodeConversationBusy). A session list that shows it still working does not wake it; one that shows
+	// it settled does, so it goes in right after the work ends, on the new role.
+	WaitIdle  bool   `json:"wait_idle,omitempty"`
+	Error     string `json:"error,omitempty"`
+	SignedOut bool   `json:"signed_out,omitempty"`
+}
+
+// inDoubt: the latest try may have gone in and nobody said to send it again, so it is only looked for (undeliveredLook).
+func (k keptMessage) inDoubt() bool {
+	return !k.TriedAt.IsZero() && !k.OwnerRetry
 }
 
 func (k keptMessage) text() string {
@@ -79,13 +119,20 @@ func (k keptMessage) images() int {
 	return len(n)
 }
 
+func (k *keptMessage) failSignedOut() {
+	k.State, k.SignedOut = proto.UndeliveredFailed, true
+	k.Error = i18n.T(i18n.Lang(k.Lang), "undelivered.signed_out")
+}
+
 type undeliveredBook struct {
-	mu      sync.Mutex
-	loaded  bool
-	st      map[string][]keptMessage // by conversation, oldest first
-	sending map[string]bool          // conversations a pass is sending into
-	wake    chan struct{}
-	start   sync.Once
+	mu              sync.Mutex
+	loaded          bool
+	st              map[string][]keptMessage // by conversation, oldest first
+	sending         map[string]bool          // conversations a pass is sending into
+	revoked         map[string]bool          // credentials this manager was told were signed out
+	revocationDirty bool                     // the failed rows still need to be saved
+	wake            chan struct{}
+	start           sync.Once
 }
 
 func (s *Service) undeliveredLocked(ctx context.Context) bool {
@@ -134,7 +181,7 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 		return proto.UndeliveredMessage{}, err
 	}
 	params := map[string]any{}
-	for _, k := range []string{"text", "images", "launcher", "model", "effort", "client_msg_id"} {
+	for _, k := range []string{"text", "images", "launcher", "model", "effort", "client_msg_id", "public"} {
 		if v, ok := p.Params[k]; ok {
 			params[k] = v
 		}
@@ -156,19 +203,23 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 			return k.wire(), nil
 		}
 	}
-	k := keptMessage{ID: id, Machine: p.MachineID, Session: p.SessionID, Params: params, Human: p.Human, Lang: string(lang),
+	k := keptMessage{ID: id, Machine: p.MachineID, Session: p.SessionID, Params: params, Human: p.Human, Lang: string(lang), CredentialID: p.CredentialID,
 		At: now, State: proto.UndeliveredWaiting, Attempts: 1, NextAt: now.Add(undeliveredBackoff[0]),
-		Error: undeliveredReason(lang, p.Code)}
+		Error: undeliveredReason(lang, p.Code), WaitIdle: p.Code == assistantwire.CodeConversationBusy}
 	if p.Code == assistantwire.CodeUndeliveredAhead {
 		// never tried: it goes right after the ones ahead of it, and says so
 		k.Attempts, k.NextAt, k.Error = 0, now, i18n.T(lang, "assistant-undelivered.behind")
 	}
 	if p.Code == assistantwire.CodeDeliveryUnknown {
-		// The first attempt may have typed it. Always look before sending again, even if an older hub omitted the time.
-		k.TriedAt = p.TriedAt
+		// The first attempt may have typed it: only looked for, never sent again by itself (undeliveredLook), even if
+		// an older hub omitted the time.
+		k.TriedAt, k.LookUntil = p.TriedAt, now.Add(undeliveredLookFor)
 		if k.TriedAt.IsZero() {
 			k.TriedAt = now
 		}
+	}
+	if b.revoked[k.CredentialID] {
+		k.failSignedOut()
 	}
 	b.st[p.SessionID] = append(b.st[p.SessionID], k)
 	err := s.saveUndeliveredLocked()
@@ -188,16 +239,64 @@ func undeliveredReason(lang i18n.Lang, code string) string {
 	if code == "machine_offline" || code == "node_closed" {
 		return i18n.T(lang, "assistant-undelivered.computer_away")
 	}
+	if code == assistantwire.CodeConversationBusy {
+		return i18n.T(lang, "assistant-undelivered.busy")
+	}
 	return i18n.T(lang, "assistant-undelivered.not_started")
 }
 
 func (k keptMessage) wire() proto.UndeliveredMessage {
-	m := proto.UndeliveredMessage{ID: k.ID, Text: k.text(), Images: k.images(), At: k.At, State: k.State, Attempts: k.Attempts, Error: k.Error}
+	m := proto.UndeliveredMessage{ID: k.ID, Text: k.text(), Images: k.images(), At: k.At, State: k.State, Attempts: k.Attempts, Error: k.Error, DeleteOnly: k.SignedOut}
 	if k.State == proto.UndeliveredWaiting && !k.NextAt.IsZero() {
 		next := k.NextAt
 		m.NextAt = &next
 	}
 	return m
+}
+
+// undeliveredCredentialRevoked records the sender even if a concurrent request has yet to keep its message.
+func (s *Service) undeliveredCredentialRevoked(ctx context.Context, id string) {
+	b := &s.undelivered
+	b.mu.Lock()
+	b.recordRevocationLocked(id)
+	changed := s.undeliveredLocked(ctx) && s.failRevokedKeptLocked()
+	b.mu.Unlock()
+	if changed {
+		s.publish(context.WithoutCancel(ctx))
+	}
+	s.wakeUndelivered()
+}
+
+func (b *undeliveredBook) recordRevocationLocked(id string) {
+	if b.revoked == nil {
+		b.revoked = make(map[string]bool)
+	}
+	b.revoked[id] = true
+}
+
+// failRevokedKeptLocked fails the known revoked rows and retries any failed save. The book's lock is held.
+func (s *Service) failRevokedKeptLocked() bool {
+	b := &s.undelivered
+	if len(b.revoked) == 0 && !b.revocationDirty {
+		return false
+	}
+	changed := false
+	for _, q := range b.st {
+		for i := range q {
+			if b.revoked[q[i].CredentialID] && !q[i].SignedOut {
+				q[i].failSignedOut()
+				changed = true
+			}
+		}
+	}
+	if changed || b.revocationDirty {
+		err := s.saveUndeliveredLocked()
+		b.revocationDirty = err != nil
+		if err != nil {
+			s.logf("save kept messages from signed-out devices: %v", err)
+		}
+	}
+	return changed
 }
 
 // undeliveredViews are the kept messages by conversation, for the rows (snapshot); false while they could not be read.
@@ -319,7 +418,12 @@ func (s *Service) undeliveredSeen(d DeviceSessions) {
 			continue
 		}
 		for i := range q {
-			if q[i].State == proto.UndeliveredWaiting && q[i].Machine == d.MachineID && q[i].NextAt.After(now) {
+			// A try in doubt is only looked for, on its own steps (undeliveredLook).
+			// One refused while the conversation was at work waits until the list shows it settled.
+			if q[i].WaitIdle && row.Status == proto.StatusWorking {
+				continue
+			}
+			if q[i].State == proto.UndeliveredWaiting && !q[i].inDoubt() && q[i].Machine == d.MachineID && q[i].NextAt.After(now) {
 				q[i].NextAt, woke = now, true
 			}
 		}
@@ -339,6 +443,7 @@ func (s *Service) undeliveredPass(ctx context.Context, now time.Time) {
 		b.mu.Unlock()
 		return
 	}
+	changed := s.failRevokedKeptLocked()
 	var due []string
 	for id, q := range b.st {
 		if b.sending[id] {
@@ -358,6 +463,9 @@ func (s *Service) undeliveredPass(ctx context.Context, now time.Time) {
 		b.sending[id] = true
 	}
 	b.mu.Unlock()
+	if changed {
+		s.publish(context.WithoutCancel(ctx))
+	}
 	var wg sync.WaitGroup
 	for _, id := range due {
 		wg.Add(1)
@@ -372,7 +480,8 @@ func (s *Service) undeliveredPass(ctx context.Context, now time.Time) {
 	wg.Wait()
 }
 
-// undeliveredSend sends conversation id's waiting messages in order until one does not go in.
+// undeliveredSend sends conversation id's waiting messages in order until one does not go in. One whose latest try
+// is in doubt is only looked for (undeliveredLook).
 func (s *Service) undeliveredSend(ctx context.Context, id string) {
 	changed := false
 	defer func() {
@@ -380,8 +489,8 @@ func (s *Service) undeliveredSend(ctx context.Context, id string) {
 			s.publish(context.WithoutCancel(ctx))
 		}
 	}()
+	b := &s.undelivered
 	for ctx.Err() == nil {
-		b := &s.undelivered
 		b.mu.Lock()
 		var k keptMessage
 		found := false
@@ -395,43 +504,162 @@ func (s *Service) undeliveredSend(ctx context.Context, id string) {
 			b.mu.Unlock()
 			return
 		}
-		if time.Since(k.At) > undeliveredGiveUp {
-			s.updateKeptLocked(id, k.ID, func(m *keptMessage) { m.State = proto.UndeliveredFailed })
+		if k.inDoubt() {
 			b.mu.Unlock()
+			changed = true
+			if !s.undeliveredLook(ctx, id, k) {
+				return
+			}
+			continue // it went in, or the owner decides now: the next one may go
+		}
+		if time.Since(k.At) > undeliveredGiveUp {
+			err := s.updateKeptLocked(id, k.ID, func(m *keptMessage) { m.State = proto.UndeliveredFailed })
+			b.mu.Unlock()
+			if err != nil {
+				s.logf("undelivered: a kept message to %s is not marked given up: %v", short(id), err)
+				return // the next pass marks it
+			}
 			changed = true
 			continue // the next one has its own day
 		}
 		tried := time.Now().UTC()
-		s.updateKeptLocked(id, k.ID, func(m *keptMessage) { m.TriedAt = tried }) // a restart during the try looks first
+		// The mark that this try may go in is saved before it: a manager stopped during the try finds it and only looks.
+		// After a try in doubt (the owner's Retry) the mark keeps that try's time, so it is still the one looked for.
+		if err := s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+			if m.TriedAt.IsZero() {
+				m.TriedAt = tried
+			}
+			m.LookUntil, m.Looks, m.OwnerRetry = time.Time{}, 0, false
+		}); err != nil {
+			// Not saved: a try now could go in twice after a restart. None now; the next after a wait.
+			if m := s.keptLocked(id, k.ID); m != nil {
+				m.NextAt = tried.Add(undeliveredWait(m.Attempts))
+			}
+			b.mu.Unlock()
+			changed = true
+			s.logf("undelivered: not sending a kept message to %s, its try could not be marked: %v", short(id), err)
+			return
+		}
 		b.mu.Unlock()
-		err := s.deliverKept(ctx, k)
+		doubt, err := s.deliverKept(ctx, k)
 		b.mu.Lock()
+		m := s.keptLocked(id, k.ID)
+		var saveErr error
 		switch {
 		case err == nil:
 			s.dropKeptLocked(id, k.ID)
 			s.logf("undelivered: sent a kept message to %s after %d tries", short(id), k.Attempts)
+		case errors.Is(err, errKeptSignedOut):
+			b.recordRevocationLocked(k.CredentialID)
+			s.failRevokedKeptLocked()
+		case m != nil && m.SignedOut:
+			// The revocation event already settled this row while the try ran.
+		case errors.Is(err, errKeptCredentialCheck):
+			saveErr = s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+				m.TriedAt, m.OwnerRetry = k.TriedAt, k.OwnerRetry
+				m.LookUntil, m.Looks = k.LookUntil, k.Looks
+				m.NextAt = time.Now().UTC().Add(undeliveredWait(1))
+			})
+			s.logf("check kept message's device credential: %v", err)
+		case doubt:
+			// It may have gone in: from now on only looked for, never sent again by itself (undeliveredLook).
+			now := time.Now().UTC()
+			saveErr = s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+				m.Attempts++
+				m.LookUntil, m.Looks, m.NextAt = now.Add(undeliveredLookFor), 0, now.Add(undeliveredWait(1))
+				m.Error = undeliveredReason(i18n.Lang(m.Lang), keptErrCode(err))
+			})
+			s.logf("undelivered: a kept message to %s may have gone in (try %d): %v; looking for it", short(id), k.Attempts+1, err)
 		case undeliveredGone(err):
-			s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+			saveErr = s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
 				m.State, m.TriedAt, m.Error = proto.UndeliveredFailed, time.Time{}, i18n.T(i18n.Lang(m.Lang), "assistant-undelivered.gone")
 			})
-		default:
-			doubt := relayInDoubt(err)
-			s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+		default: // refused before anything was typed: tried again with backoff
+			saveErr = s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
 				m.Attempts++
-				m.NextAt = time.Now().UTC().Add(undeliveredBackoff[min(m.Attempts-1, len(undeliveredBackoff)-1)])
+				m.NextAt = time.Now().UTC().Add(undeliveredWait(m.Attempts))
 				m.Error = undeliveredReason(i18n.Lang(m.Lang), keptErrCode(err))
-				if !doubt {
-					m.TriedAt = time.Time{} // nothing typed: the next try need not look first
-				}
+				m.WaitIdle = keptErrCode(err) == assistantwire.CodeConversationBusy
+				// Nothing typed: the mark is as before the try. A first try's is cleared (the next need not look
+				// first); an owner's Retry after a try in doubt still has that try to look for, and stays a Retry.
+				m.TriedAt, m.OwnerRetry = k.TriedAt, k.OwnerRetry
 			})
 			s.logf("undelivered: %s still does not take a kept message (try %d): %v", short(id), k.Attempts+1, err)
 		}
 		b.mu.Unlock()
+		if saveErr != nil {
+			// The saved mark of the try stays, in memory too: the next pass only looks for it.
+			s.logf("undelivered: the outcome of a try to %s is not saved: %v", short(id), saveErr)
+		}
 		changed = true
-		if err != nil {
+		if err != nil && !errors.Is(err, errKeptSignedOut) {
 			return
 		}
 	}
+}
+
+var (
+	errKeptSignedOut       = errors.New("kept message's sending device was signed out")
+	errKeptCredentialCheck = errors.New("kept message's sending credential could not be checked")
+)
+
+// undeliveredLook looks for kept message k of conversation id, whose latest try may have gone in, in the
+// conversation's latest turns; it is never sent again by itself (#10669). Found, it went in and leaves the list. Not
+// found, it is looked for again on the next backoff step until undeliveredLookFor has passed, then the row says
+// failed, that it may already have gone in: the transcript could not be read, the node forgot the id and there are no
+// words to know it by (pictures only), or it is not there, and the owner looks at the conversation and picks Retry or
+// Delete. True when the conversation's next message may go.
+func (s *Service) undeliveredLook(ctx context.Context, id string, k keptMessage) bool {
+	landed := s.undeliveredLanded(k)
+	// A transcript read can still settle a prior try when the hub is unreachable.
+	var revoked bool
+	if !landed {
+		revoked, _ = s.keptCredentialRevoked(ctx, k.CredentialID)
+	}
+	b := &s.undelivered
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if landed {
+		s.dropKeptLocked(id, k.ID)
+		s.logf("undelivered: a kept message to %s whose try was in doubt is in the conversation, taken as delivered", short(id))
+		return true
+	}
+	if revoked {
+		b.recordRevocationLocked(k.CredentialID)
+		s.failRevokedKeptLocked()
+		return true
+	}
+	if m := s.keptLocked(id, k.ID); m == nil || m.SignedOut {
+		return true
+	}
+	now := time.Now().UTC()
+	failed, retried := false, false
+	err := s.updateKeptLocked(id, k.ID, func(m *keptMessage) {
+		if !m.inDoubt() {
+			retried = true // the owner's Retry came meanwhile: it goes now
+			return
+		}
+		if m.LookUntil.IsZero() {
+			m.LookUntil = now.Add(undeliveredLookFor) // the manager stopped during the try: the look begins now
+		}
+		if !now.Before(m.LookUntil) {
+			m.State, m.Error, failed = proto.UndeliveredFailed, i18n.T(i18n.Lang(m.Lang), "assistant-undelivered.may_have_gone_in"), true
+			return
+		}
+		m.Looks++
+		m.NextAt = now.Add(undeliveredWait(m.Looks + 1))
+		if m.NextAt.After(m.LookUntil) {
+			m.NextAt = m.LookUntil
+		}
+	})
+	switch {
+	case err != nil:
+		s.logf("undelivered: the look for a kept message to %s is not saved: %v", short(id), err)
+		return false
+	case failed:
+		s.logf("undelivered: a kept message to %s whose try was in doubt is not in the conversation; the owner decides", short(id))
+	}
+	return failed || retried
 }
 
 func keptErrCode(err error) string {
@@ -448,20 +676,35 @@ func undeliveredGone(err error) bool {
 	return code == "conversation_deleted" || code == CodeBadRequest || strings.Contains(err.Error(), "is gone")
 }
 
-// updateKeptLocked changes kept message mid of conversation sid and saves; b.mu is held.
-func (s *Service) updateKeptLocked(sid, mid string, f func(*keptMessage)) {
+// keptLocked is kept message mid of conversation sid, to change in memory only (nil: there is none); b.mu is held.
+func (s *Service) keptLocked(sid, mid string) *keptMessage {
 	q := s.undelivered.st[sid]
 	for i := range q {
 		if q[i].ID == mid {
-			f(&q[i])
-			if err := s.saveUndeliveredLocked(); err != nil {
-				s.logf("save undelivered messages: %v", err)
-			}
-			return
+			return &q[i]
 		}
 	}
+	return nil
 }
 
+// updateKeptLocked changes kept message mid of conversation sid and saves; b.mu is held. A change that could not be
+// saved is undone, in memory too, and the error returned: the manager goes on from what a restart would find.
+func (s *Service) updateKeptLocked(sid, mid string, f func(*keptMessage)) error {
+	m := s.keptLocked(sid, mid)
+	if m == nil {
+		return nil
+	}
+	was := *m
+	f(m)
+	if err := s.saveUndeliveredLocked(); err != nil {
+		*m = was
+		return err
+	}
+	return nil
+}
+
+// dropKeptLocked takes kept message mid of conversation sid off the list once it went in. A failed save is only
+// logged: the saved copy still carries the try's mark, so a manager that starts again only looks for it.
 func (s *Service) dropKeptLocked(sid, mid string) {
 	q := s.undelivered.st[sid]
 	if i := slices.IndexFunc(q, func(k keptMessage) bool { return k.ID == mid }); i >= 0 {
@@ -473,27 +716,57 @@ func (s *Service) dropKeptLocked(sid, mid string) {
 }
 
 // deliverKept sends kept message k as the owner sent it: SendParams again (what it runs on now, the live snapshot of
-// now), then the node's session.send under its own client_msg_id. A try that may have gone in before is looked for
-// first.
-func (s *Service) deliverKept(ctx context.Context, k keptMessage) error {
+// now), then the node's session.send under its own client_msg_id. A try that may have gone in before (the owner's
+// Retry after one in doubt) is looked for first. doubt: the send failed but may have gone in (no answer in time, the
+// link dropped, the manager stopping during it) and its line is not in the conversation yet; a failure before the
+// send, or a refusal, is no doubt.
+func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, err error) {
 	if !k.TriedAt.IsZero() && s.undeliveredLanded(k) {
-		return nil
+		return false, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Minute) // a cold start on a busy computer can take minutes
 	defer cancel()
+	revoked, err := s.keptCredentialRevoked(sctx, k.CredentialID)
+	if revoked {
+		return false, errKeptSignedOut
+	}
+	if err != nil {
+		return false, errors.Join(errKeptCredentialCheck, err)
+	}
 	params, err := s.messageParams(withLauncherNoteDiscarded(sctx), SendParams{MachineID: k.Machine, SessionID: k.Session,
 		Params: maps.Clone(k.Params), Lang: k.Lang, Human: k.Human}, true)
 	if err != nil {
-		return err
+		return false, err // nothing was sent
 	}
 	params["session_id"] = k.Session
 	params["client_msg_id"] = k.ID
+	s.undelivered.mu.Lock()
+	revoked = s.undelivered.revoked[k.CredentialID]
+	s.undelivered.mu.Unlock()
+	if revoked {
+		s.humanSent.voidSend(k.Session, k.ID)
+		return false, errKeptSignedOut
+	}
 	tried := time.Now()
 	err = s.call(sctx, k.Machine, DeviceSessionSend, params, nil)
-	if err != nil && relayInDoubt(err) && s.undeliveredLandedSince(k, tried) {
-		return nil
+	if err == nil || (!relayInDoubt(err) && sctx.Err() == nil) {
+		return false, err
 	}
-	return err
+	if s.undeliveredLandedSince(k, tried) {
+		return false, nil
+	}
+	return true, err
+}
+
+// keptCredentialRevoked combines the hub's answer with any revocation event received during the check.
+func (s *Service) keptCredentialRevoked(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	revoked, err := s.hub.CredentialRevoked(ctx, id)
+	s.undelivered.mu.Lock()
+	defer s.undelivered.mu.Unlock()
+	return s.undelivered.revoked[id] || (err == nil && revoked), err
 }
 
 // withLauncherNoteDiscarded: a resend has no app to tell that it ran on another launcher.
@@ -549,22 +822,37 @@ func (s *Service) undeliveredRoutes() {
 		}
 		b := &s.undelivered
 		b.mu.Lock()
-		found := false
+		found, signedOut := false, false
+		var err error
 		if s.undeliveredLocked(r.Context()) {
-			for _, k := range b.st[sid] {
-				if k.ID == mid {
-					found = true
-				}
+			if m := s.keptLocked(sid, mid); m != nil {
+				found, signedOut = true, m.SignedOut
 			}
-			now := time.Now().UTC()
-			s.updateKeptLocked(sid, mid, func(m *keptMessage) {
-				// A new day of tries from now; the line it may have written is still looked for first.
-				m.State, m.At, m.NextAt, m.Attempts = proto.UndeliveredWaiting, now, now, 0
-			})
+			if found && !signedOut {
+				now := time.Now().UTC()
+				err = s.updateKeptLocked(sid, mid, func(m *keptMessage) {
+					// A new day of tries from now, sent even after a try in doubt: the owner looked and said so.
+					// The line it may have written is still looked for first.
+					m.State, m.At, m.NextAt, m.Attempts, m.OwnerRetry = proto.UndeliveredWaiting, now, now, 0, true
+					m.LookUntil, m.Looks = time.Time{}, 0
+				})
+			}
 		}
 		b.mu.Unlock()
+		if signedOut {
+			apierr.Write(w, http.StatusConflict, i18n.Err("undelivered.signed_out"))
+			return
+		}
 		if !found {
+			if s.heldAction(w, r, sid, mid, true) {
+				return
+			}
 			apierr.Write(w, http.StatusNotFound, errors.New("no such message"))
+			return
+		}
+		if err != nil {
+			s.logf("undelivered: Retry of a kept message to %s is not saved: %v", short(sid), err)
+			apierr.Write(w, http.StatusInternalServerError, errors.New(i18n.T(s.lang(r.Context()), "assistant-undelivered.not_saved")))
 			return
 		}
 		s.publish(context.WithoutCancel(r.Context()))
@@ -586,10 +874,38 @@ func (s *Service) undeliveredRoutes() {
 			return
 		}
 		if !s.undeliveredDrop(sid, mid) {
+			if s.heldAction(w, r, sid, mid, false) {
+				return
+			}
 			apierr.Write(w, http.StatusNotFound, errors.New("no such message"))
 			return
 		}
 		s.publish(context.WithoutCancel(r.Context()))
 		apierr.WriteJSON(w, map[string]any{"ok": true})
 	})
+}
+
+// heldAction is Retry (retry) or Delete on message mid of session sid when none of the conversations keeps it: one an
+// Agent's computer's manager holds (internal/devices held.go, #10661). Older apps call these routes for every row's
+// undelivered message, whatever kind it is. Only a person's own app may change one (assistantwire.PersonHeader, set by
+// the hub): its delivery carries that person's provenance. False when no machine holds it, or another asks: the route
+// answers 404 as before.
+func (s *Service) heldAction(w http.ResponseWriter, r *http.Request, sid, mid string, retry bool) bool {
+	if s.devs == nil || r.Header.Get(assistantwire.PersonHeader) != "1" {
+		return false
+	}
+	act := s.devs.HeldDelete
+	if retry {
+		act = s.devs.HeldRetry
+	}
+	found, err := act(r.Context(), sid, mid)
+	switch {
+	case !found:
+		return false
+	case err != nil:
+		apierr.Call(w, err) // coded for the app: 409 while it is being sent
+	default:
+		apierr.WriteJSON(w, map[string]any{"ok": true})
+	}
+	return true
 }

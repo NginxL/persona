@@ -24,7 +24,7 @@ const T0 = Date.parse("2026-11-12T09:00:00Z");
 const at = (m: number) => new Date(T0 + m * 60_000).toISOString();
 const item = (seq: number, m: number): Item => ({ id: `i${seq}#0`, seq, role: "assistant", kind: "text", text: `at ${m}`, ts: at(m) });
 const noop = async () => {};
-const live = (items: Item[]): LiveTranscript => ({ items, hasMore: false, loading: false, loadingEarlier: false, loadEarlier: noop, expandFold: noop });
+const live = (items: Item[]): LiveTranscript => ({ items, hasMore: false, loading: false, loadingEarlier: false, loadEarlier: async () => undefined, expandFold: noop });
 const report = () => {};
 
 let host: HTMLDivElement;
@@ -56,6 +56,93 @@ describe("EarlierStretches", () => {
     const before = split.calls.filter((s) => s === "a").length;
     draw("a", history, [item(1, 1), item(2, 21), item(3, 22)]);
     expect(split.calls.filter((s) => s === "a").length).toBe(before + 1);
+  });
+
+  it("waits for an earlier engine's backoff and shares its next page", async () => {
+    vi.useFakeTimers();
+    const get = vi.fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ items: [item(1, 1)], has_more: false }));
+    vi.stubGlobal("fetch", get);
+    try {
+      let latest!: StretchesReport;
+      const history = [{ session_id: "a", agent: "claude", until: at(10) }];
+      await act(() => root.render(
+        <EarlierStretches mid="m" sid="b" scope="m/b" history={history} live={live([item(2, 11)])}
+          report={(_scope, report) => { latest = report; }} />,
+      ));
+      await act(async () => { await latest.loadEarlier(); });
+      const first = latest.loadEarlier({ waitForRetry: true });
+      const second = latest.loadEarlier({ waitForRetry: true });
+      expect(get).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      const page = await first;
+      expect(typeof page).toBe("symbol");
+      expect(await second).toBe(page);
+      expect(get).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // #11450: an earlier stretch whose computer can't find its history (404 not_found, with a reason or detail) ends
+  // there, as an empty page did: no error and no retry, and the older stretches still load.
+  it.each([
+    ["reason", { error: "Persona can't find its history", code: "not_found", reason: "no_transcript" }],
+    ["detail only", { error: "Persona can't find its history", code: "not_found", detail: "transcript for session b not found" }],
+  ])("ends an earlier stretch its computer can't find (%s) and loads the older ones", async (_kind, missing) => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const sid = /\/sessions\/m\/([^/]+)\/items\?/.exec(String(input))?.[1] ?? "";
+      asked.push(sid);
+      if (sid === "b") return Response.json(missing, { status: 404 });
+      return Response.json({ items: [item(1, 1)], has_more: false });
+    }));
+    try {
+      const reports: StretchesReport[] = [];
+      const history = [{ session_id: "a", agent: "claude", until: at(10) }, { session_id: "b", agent: "codex", until: at(20) }];
+      await act(() => root.render(
+        <EarlierStretches mid="m" sid="c" scope="m/c" history={history} live={live([item(2, 21)])} report={(_s, r) => { reports.push(r); }} />,
+      ));
+      for (let n = 0; n < 10 && reports.at(-1)?.hasMore; n++) {
+        await act(async () => { await reports.at(-1)?.loadEarlier(); });
+      }
+      expect(asked.filter((sid) => sid === "b")).toHaveLength(1);
+      expect(asked).toContain("a");
+      expect(reports.at(-1)?.hasMore).toBe(false);
+      expect(host.querySelector("[data-engine-stretch-error]")).toBeNull();
+      expect(host.querySelector('[data-engine-stretch="a"] [data-line]')).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // The hub's own 404 (a computer it does not know any more) says nothing about the stretch: it is retried as any
+  // failure, and the older stretches wait (#11450).
+  it("keeps retrying an earlier stretch on the hub's own 404", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const sid = /\/sessions\/m\/([^/]+)\/items\?/.exec(String(input))?.[1] ?? "";
+      asked.push(sid);
+      if (sid === "b") return Response.json({ error: "No such computer", code: "not_found" }, { status: 404 });
+      return Response.json({ items: [item(1, 1)], has_more: false });
+    }));
+    try {
+      const reports: StretchesReport[] = [];
+      const history = [{ session_id: "a", agent: "claude", until: at(10) }, { session_id: "b", agent: "codex", until: at(20) }];
+      await act(() => root.render(
+        <EarlierStretches mid="m" sid="c" scope="m/c" history={history} live={live([item(2, 21)])} report={(_s, r) => { reports.push(r); }} />,
+      ));
+      for (let n = 0; n < 3; n++) {
+        await act(async () => { await reports.at(-1)?.loadEarlier(); });
+      }
+      expect(asked).toEqual(["b"]);
+      expect(reports.at(-1)?.hasMore).toBe(true);
+      expect(host.querySelector("[data-engine-stretch-error]")).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   // #8160: an earlier stretch gets a divider over the first line of each day it covers, day-only keys, and a day split

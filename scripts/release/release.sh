@@ -45,11 +45,17 @@ AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH" -authenti
 
 mkdir -p "$OUT"
 cd apple
+# The whole project, whatever the shell exported: the switch that leaves the watch app and the share extension out is for
+# sim.sh's development builds only (apple/lean-dev-build.yml).
+unset PERSONA_LEAN_DEV_BUILD
 xcodegen generate -q
 cd ..
 
+# Package.resolved is a pinned superset that includes the opt-in Meta SDK. Do not let an optional overlay rewrite its
+# originHash or pins in the tracked worktree; with the pin already present, both configurations use the same resolved file.
 xcodebuild -project apple/Persona.xcodeproj -scheme Persona -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" -derivedDataPath "$OUT/DerivedData" \
+  -disableAutomaticPackageResolution \
   CURRENT_PROJECT_VERSION="$BUILD" "${AUTH[@]}" clean archive | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)"
 
 APP="$ARCHIVE/Products/Applications/Persona.app"

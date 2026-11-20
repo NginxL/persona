@@ -12,10 +12,13 @@ function splitRemote(remote: string) {
     if (!scp) return;
     remote = `ssh://git@${scp[1]}/${scp[2]}`;
   }
-  // Preserve raw path components: URL would silently erase dot traversal.
-  const match = /^(https?|ssh):\/\/([^/?#]+)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/.exec(remote);
+  // Preserve raw path components: URL would silently erase dot traversal. Schemes are case-insensitive, as in Go's
+  // url.Parse; normalize only the scheme so the raw path and its security checks stay untouched.
+  const match = /^(https?|ssh):\/\/([^/?#]+)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i.exec(remote);
   if (!match) return;
-  let [, scheme, authority, rawPath = "", query = "", fragment = ""] = match;
+  let [, rawScheme, authority, rawPath = "", query = "", fragment = ""] = match;
+  const originalScheme = rawScheme.toLowerCase();
+  let scheme = originalScheme;
   if (scheme === "ssh") {
     if (!authority.startsWith("git@") || query || fragment) return;
     authority = authority.slice(4);

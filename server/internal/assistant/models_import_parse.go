@@ -80,10 +80,9 @@ func addNote(notes *[]pasteNote, n pasteNote) {
 
 // Why a header of a paste is not a provider's header.
 const (
-	headerSkipCredential  = "credential"  // its name looks like a secret's
-	headerSkipProtocol    = "protocol"    // a request basic Claude Code or the manager sets itself
-	headerSkipUnsupported = "unsupported" // a direct API provider takes no headers
-	headerSkipUnsafe      = "unsafe"      // its value has a control character, a backslash or a $: no header line holds it as it is
+	headerSkipCredential = "credential" // its name looks like a secret's
+	headerSkipProtocol   = "protocol"   // a request basic Claude Code or the manager sets itself
+	headerSkipUnsafe     = "unsafe"     // its value has a control character, a backslash or a $: no header line holds it as it is
 )
 
 // skippedHeader is one header of a paste left out, and why.

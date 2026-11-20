@@ -146,7 +146,7 @@ class PlanCardConversationTest {
             // the number disc only when there are several tasks
             rule.onNodeWithText("1").assertIsDisplayed()
             rule.onNodeWithText("2").assertIsDisplayed()
-            for (chip in listOf("Work laptop", "shop", "Default model", "Can edit files", "Build server", "app", "Opus", "Read-only requested"))
+            for (chip in listOf("Work laptop", "shop", "Default model", "Auto accept edits", "Build server", "app", "Opus", "Read-only requested"))
                 rule.onNodeWithText(chip).assertIsDisplayed()
             rule.onNodeWithText("It only touches the docs folder").assertIsDisplayed()
             // the choice, then the three actions in iOS's order
@@ -201,6 +201,53 @@ class PlanCardConversationTest {
         PlanTask("Start on a launcher", machine = "mac", cwd = "/w/b", launcher = "claude-kimi"),
         PlanTask("Start on the default", machine = "mac", cwd = "/w/c"),
     ), "open", at(5))
+
+    private val tiered = JsonCodec.decodeFromString(TaskPlan.serializer(), """{
+        "id":"tiered","conversation":"main","state":"open","created_at":"2026-11-12T10:00:06Z",
+        "tasks":[
+            {"title":"Use a preset","machine":"mac","cwd":"/w/a","tier":"review"},
+            {"title":"Use a preset on a launcher","machine":"mac","cwd":"/w/b","launcher":"claude-kimi","tier":"review"},
+            {"title":"An explicit model wins","machine":"mac","cwd":"/w/c","launcher":"claude-kimi","tier":"review","model":"claude-opus-4-8[1m]"},
+            {"title":"Keep the default","machine":"mac","cwd":"/w/d"}
+        ]
+    }""")
+
+    private fun tierNamesTheModels() {
+        rule.onNodeWithText("Preset review").assertIsDisplayed()
+        rule.onNodeWithText("Claude Kimi · Preset review").assertIsDisplayed()
+        rule.onNodeWithText("Opus 4.8").assertIsDisplayed()
+        rule.onNodeWithText("Default model").assertIsDisplayed()
+        // Only the two tasks without an explicit model show their preset; the launcher does not replace it.
+        rule.onAllNodesWithText("Preset review", substring = true).assertCountEquals(2)
+    }
+
+    private fun everyStyleNamesTiers(style: AppStyle, largeText: Boolean = false) {
+        val dark = mutableStateOf(false)
+        if (style == AppStyle.Glass) show(style, dark, plans = listOf(tiered),
+            items = listOf(FeedItem("tiered-feed", "main", at(6), "plan", "tiered")))
+        else show(style, dark, plans = listOf(tiered), alone = tiered)
+        val colors = mutableListOf<Int>()
+        for (night in listOf(false, true)) {
+            dark.value = night; settle()
+            tierNamesTheModels()
+            val size = if (largeText) "-large" else ""
+            colors += capture("plan-tiers-${style.name.lowercase()}-${if (night) "dark" else "light"}$size")
+        }
+        assertNotEquals("dark capture must differ from light", colors[0], colors[1])
+    }
+
+    @Test fun glassNamesTiersWithLaunchersAndKeepsModelPrecedence() = everyStyleNamesTiers(AppStyle.Glass)
+    @Test fun briefNamesTiersWithLaunchersAndKeepsModelPrecedence() = everyStyleNamesTiers(AppStyle.Brief)
+    @Test fun boardNamesTiersWithLaunchersAndKeepsModelPrecedence() = everyStyleNamesTiers(AppStyle.Board)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi", fontScale = 2f)
+    @Test fun glassNamesTiersAtLargestText() = everyStyleNamesTiers(AppStyle.Glass, largeText = true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi", fontScale = 2f)
+    @Test fun briefNamesTiersAtLargestText() = everyStyleNamesTiers(AppStyle.Brief, largeText = true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi", fontScale = 2f)
+    @Test fun boardNamesTiersAtLargestText() = everyStyleNamesTiers(AppStyle.Board, largeText = true)
 
     private fun namesTheModels() {
         rule.onNodeWithText("Opus 4.8").assertIsDisplayed()

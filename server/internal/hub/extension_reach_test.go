@@ -115,7 +115,10 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 		{"names A: a merged list", "GET", "/api/v1/inbox", "", namesA},
 		{"names A: a paged list", "GET", "/api/v1/inbox/done", "", namesA},
 		{"names A by query: a manager route", "GET", "/api/v1/assistant?manager=assistant", "", nil},
+		{"names A: a naming preview", "POST", "/api/v1/assistant/workspace-naming/preview", `{"machine_id":"mb","layout":"root"}`, namesA},
+		{"names A by query: a naming preview", "POST", "/api/v1/assistant/workspace-naming/preview?manager=assistant", `{"machine_id":"mb","layout":"root"}`, nil},
 		{"names A: an inbox reply", "POST", "/api/v1/inbox/item-1/reply", `{"text":"x"}`, namesA},
+		{"names A: an inbox retry", "POST", "/api/v1/inbox/item-1/retry", "", namesA},
 		{"names A: the knowledge base", "GET", "/api/v1/kb/people", "", namesA},
 		{"names A: another extension's HTTP", "GET", "/api/v1/extensions/lark/things", "", namesA},
 		{"A's card choice", "POST", "/api/v1/interactions/ix_a/choose", `{"option":0,"rev":"old"}`, nil},
@@ -153,6 +156,8 @@ func TestAnExtensionsTokenActsOnlyAsItsManager(t *testing.T) {
 	for _, c := range []struct{ method, path, body string }{
 		{"GET", "/api/v1/assistant?manager=m-0b0b0b", ""},
 		{"GET", "/api/v1/assistant", ""},
+		{"POST", "/api/v1/assistant/workspace-naming/preview", `{"machine_id":"mb","layout":"root"}`},
+		{"POST", "/api/v1/assistant/workspace-naming/preview?manager=m-0b0b0b", `{"machine_id":"mb","layout":"root"}`},
 		{"GET", "/api/v1/inbox/done", ""},
 		{"POST", "/api/v1/notify", `{"title":"t","body":"b","machine_id":"mb","session_id":"b1"}`},
 	} {
@@ -175,10 +180,25 @@ func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
 		{"GET", "/repositories", ""},
 		{"PUT", "/repositories", `{}`},
 		{"PUT", "/repositories/repo-b/links", `{}`},
+		{"GET", "/workspace-rules", ""},
+		{"PUT", "/workspace-rules", `{"expected_revision":0,"workspace_rules":null}`},
+		{"POST", "/workspace-naming/preview", `{"machine_id":"mb","layout":"root","selected_repo_ids":["repo-b"]}`},
+		{"POST", "/workspace-naming/plans", `{"machine_id":"mb","layout":"root","selected_repo_ids":["repo-b"],"operation_id":"example-operation"}`},
+		{"GET", "/workspace-naming/plans/example-operation", ""},
 	} {
 		beforeA, beforeB := len(reached(a)), len(reached(b))
-		if code, out := extDo(t, url, route.method, "/api/v1/todos/todo-a"+route.suffix, route.body, nil); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
-			t.Errorf("%s %s: another manager's Todo: %d %s", route.method, route.suffix, code, clip(out, 200))
+		ownPath := "/api/v1/todos/todo-b" + route.suffix
+		for _, request := range []struct {
+			path   string
+			header map[string]string
+		}{
+			{"/api/v1/todos/todo-a" + route.suffix, nil},
+			{ownPath, map[string]string{ManagerHeader: assistantwire.AssistantID}},
+			{ownPath + "?manager=assistant", nil},
+		} {
+			if code, out := extDo(t, url, route.method, request.path, route.body, request.header); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+				t.Errorf("%s %s: another manager: %d %s", route.method, request.path, code, clip(out, 200))
+			}
 		}
 		if got := len(reached(a)); got != beforeA {
 			t.Errorf("%s %s: A was reached: %v", route.method, route.suffix, reached(a)[beforeA:])
@@ -187,7 +207,6 @@ func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
 			t.Errorf("%s %s: a foreign Todo reached B: %v", route.method, route.suffix, reached(b)[beforeB:])
 		}
 
-		ownPath := "/api/v1/todos/todo-b" + route.suffix
 		if code, out := extDo(t, url, route.method, ownPath, route.body, nil); code != http.StatusOK {
 			t.Errorf("%s %s: own Todo: %d %s", route.method, route.suffix, code, clip(out, 200))
 		}
@@ -201,21 +220,24 @@ func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
 	}
 }
 
-// The To-dos view's reads (todo_view.go): one to-do goes to its own manager (byTodo), another manager's is refused; the
-// places are asked of the extension's own manager alone (mergedAsk), and naming another is refused.
+// The To-dos view's reads (todo_view.go): one to-do and its timeline go to its own manager (byTodo), another manager's
+// are refused; the places are asked of the extension's own manager alone (mergedAsk), and naming another is refused.
 func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
 	h, url, a, b := reachHub(t)
 	h.noteTodoOwner("todo-a", assistantwire.AssistantID)
 	h.noteTodoOwner("todo-b", "m-0b0b0b")
 	beforeA, beforeB := len(reached(a)), len(reached(b))
-	if code, out := extDo(t, url, "GET", "/api/v1/todos/todo-a", "", nil); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
-		t.Errorf("another manager's to-do: %d %s", code, clip(out, 200))
+	for _, path := range []string{"/api/v1/todos/todo-a", "/api/v1/todos/todo-a/timeline"} {
+		if code, out := extDo(t, url, "GET", path, "", nil); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+			t.Errorf("another manager's to-do, %s: %d %s", path, code, clip(out, 200))
+		}
 	}
 	if code, out := extDo(t, url, "GET", "/api/v1/todos/places", "", map[string]string{ManagerHeader: assistantwire.AssistantID}); code != http.StatusForbidden ||
 		!strings.Contains(out, codeOtherManager) {
 		t.Errorf("another manager's places: %d %s", code, clip(out, 200))
 	}
-	for _, path := range []string{"/api/v1/todos/todo-b", "/api/v1/todos/places"} {
+	paths := []string{"/api/v1/todos/todo-b", "/api/v1/todos/todo-b/timeline", "/api/v1/todos/places"}
+	for _, path := range paths {
 		if code, out := extDo(t, url, "GET", path, "", nil); code != http.StatusOK {
 			t.Errorf("%s: %d %s", path, code, clip(out, 200))
 		}
@@ -224,8 +246,65 @@ func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
 		t.Errorf("A was reached: %v", got)
 	}
 	calls := reached(b)[beforeB:]
-	if len(calls) != 2 || !strings.Contains(calls[0], "/api/v1/todos/todo-b") || !strings.Contains(calls[1], "/api/v1/todos/places") {
-		t.Errorf("B got %v", calls)
+	if len(calls) != len(paths) {
+		t.Fatalf("B got %v", calls)
+	}
+	for i, path := range paths {
+		if !strings.Contains(calls[i], path) {
+			t.Errorf("B's call %d is %s, want %s", i, calls[i], path)
+		}
+	}
+}
+
+// The literal self-refresh route has no object id to route by. The authenticated extension token alone chooses its
+// manager; explicitly naming another manager is not an alternate path to that manager's markets.
+func TestExtensionSelfMarketRefreshStaysOnTokenManager(t *testing.T) {
+	_, url, a, b := reachHub(t)
+	beforeA, beforeB := len(reached(a)), len(reached(b))
+	// guardManager answers RPCs but does not take an HTTP relay. Stop after the dispatch this test is about; the real
+	// manager's immediate 202 and its background read are covered in extmgr.
+	const path = "/api/v1/extensions/-/self/market/refresh"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url+path, strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer "+extTokenPrefix+"bx-token")
+	req.Header.Set("Content-Type", "application/json")
+	answered := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			err = resp.Body.Close()
+		}
+		answered <- err
+	}()
+	eventually(t, 5*time.Second, "the token manager's self refresh", func() bool { return len(reached(b)) > beforeB })
+	cancel()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled self refresh did not return")
+	}
+	if got := reached(a)[beforeA:]; len(got) != 0 {
+		t.Fatalf("the other manager received the self refresh: %v", got)
+	}
+	calls := reached(b)[beforeB:]
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], extwire.MethodAccept+" ") {
+		t.Fatalf("the token owner's manager did not receive exactly one self refresh: %v", calls)
+	}
+	for _, tc := range []struct {
+		path   string
+		header map[string]string
+	}{
+		{"/api/v1/extensions/-/self/market/refresh", map[string]string{ManagerHeader: assistantwire.AssistantID}},
+		{"/api/v1/extensions/-/self/market/refresh?manager=" + assistantwire.AssistantID, nil},
+	} {
+		beforeA, beforeB = len(reached(a)), len(reached(b))
+		if code, out := extDo(t, url, http.MethodPost, tc.path, "", tc.header); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+			t.Fatalf("naming the other manager: %d %s", code, out)
+		}
+		if len(reached(a)) != beforeA || len(reached(b)) != beforeB {
+			t.Fatalf("a refused manager selector reached a manager: A %v, B %v", reached(a)[beforeA:], reached(b)[beforeB:])
+		}
 	}
 }
 
@@ -244,21 +323,22 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"POST /api/v1/inbox/merge": "manager", "POST /api/v1/inbox/merge/undo": "manager", "POST /api/v1/inbox/todo": "manager", "POST /api/v1/inbox/todo/undo": "manager",
 		"POST /api/v1/inbox/{id}/done": "manager", "POST /api/v1/inbox/{id}/draft": "manager", "POST /api/v1/inbox/{id}/reply": "manager",
 		"POST /api/v1/inbox/{id}/suggestion": "manager", "POST /api/v1/inbox/{id}/handoff": "manager", "POST /api/v1/inbox/{id}/doc/status": "manager",
-		"POST /api/v1/inbox/{id}/task-link/recheck": "manager",
-		"PUT /api/v1/inbox/{id}/parent":             "manager", "GET /api/v1/inbox/tree/{kind}/{id...}": "manager",
+		"POST /api/v1/inbox/{id}/task-link/recheck": "manager", "POST /api/v1/inbox/{id}/retry": "manager", // relayed like done (inboxRoutesRelayed)
+		"PUT /api/v1/inbox/{id}/parent": "manager", "GET /api/v1/inbox/tree/{kind}/{id...}": "manager",
 		"PUT /api/v1/inbox/{id}/folder": "manager", "GET /api/v1/inbox/folders": "manager", "PUT /api/v1/inbox/folders": "manager",
 		"POST /api/v1/inbox/mutes": "manager", "DELETE /api/v1/inbox/mutes/{id}": "manager", "POST /api/v1/inbox/policies": "manager",
 		"PATCH /api/v1/inbox/policies/{id}": "manager", "DELETE /api/v1/inbox/policies/{id}": "manager", "POST /api/v1/inbox/refresh": "manager",
-		"GET /api/v1/sessions/archived":                      "own+body",
-		"GET /api/v1/sessions":                               "own+body", // its machines; ?machine_id= another's: 403
-		"GET /api/v1/sessions/{mid}/{sid}/info":              "path",
-		"GET /api/v1/sessions/{mid}/{sid}/items":             "path",
-		"GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full":  "path",
-		"GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image": "path",
-		"GET /api/v1/sessions/{mid}/{sid}/screen":            "path",
-		"GET /api/v1/interactions":                           "own",
-		"GET /api/v1/interactions/history":                   "manager",
-		"GET /api/v1/agents":                                 "manager", "GET /api/v1/agents/sessions": "manager",
+		"GET /api/v1/sessions/archived":                              "own+body",
+		"GET /api/v1/sessions":                                       "own+body", // its machines; ?machine_id= another's: 403
+		"GET /api/v1/sessions/{mid}/{sid}/info":                      "path",
+		"GET /api/v1/sessions/{mid}/{sid}/items":                     "path",
+		"GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full":          "path",
+		"GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image":         "path",
+		"GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization": "path",
+		"GET /api/v1/sessions/{mid}/{sid}/screen":                    "path",
+		"GET /api/v1/interactions":                                   "own",
+		"GET /api/v1/interactions/history":                           "manager",
+		"GET /api/v1/agents":                                         "manager", "GET /api/v1/agents/sessions": "manager",
 		"GET /api/v1/agents/sessions/{id}": "manager", "GET /api/v1/agents/sessions/{id}/messages": "manager",
 		"GET /api/v1/agents/sessions/{id}/avatar": "manager",
 		"GET /api/v1/saved-agent-searches":        "manager",
@@ -294,20 +374,32 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/assistant/leaders":                    "manager",
 		"GET /api/v1/assistant/dispatch-policy":            "manager",
 		"PUT /api/v1/assistant/dispatch-policy":            "manager",
+		"GET /api/v1/assistant/dispatch-guard":             "manager",
+		"PUT /api/v1/assistant/dispatch-guard":             "manager",
 		"GET /api/v1/assistant/worker-presets":             "manager",
 		"GET /api/v1/assistant/start-defaults":             "manager",
 		"PUT /api/v1/assistant/start-defaults":             "manager",
 		"GET /api/v1/todos":                                "manager", "GET /api/v1/todos/{id}/decisions": "manager",
 		"GET /api/v1/todos/{id}": "manager", "GET /api/v1/todos/places": "manager", // TestTodoViewRoutesStayOnTheirManager
+		"GET /api/v1/todos/{id}/timeline":                     "manager", // TestTodoViewRoutesStayOnTheirManager
 		"GET /api/v1/todos/{id}/repositories":                 "manager", // associations stay with the todo's manager
 		"PUT /api/v1/todos/{id}/repositories":                 "manager",
 		"PUT /api/v1/todos/{id}/repositories/{repo_id}/links": "manager",
-		"POST /api/v1/todos":                                  "manager", "PATCH /api/v1/todos/{id}": "manager",
+		// The Todo's owner selects the manager; sample previews use the token's own manager.
+		// The manager checks machine_id before resolving a preview or saving a plan.
+		"GET /api/v1/todos/{id}/workspace-rules":                       "manager",
+		"PUT /api/v1/todos/{id}/workspace-rules":                       "manager",
+		"POST /api/v1/todos/{id}/workspace-naming/preview":             "manager",
+		"POST /api/v1/todos/{id}/workspace-naming/plans":               "manager",
+		"GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}": "manager",
+		"POST /api/v1/assistant/workspace-naming/preview":              "manager",
+		"POST /api/v1/todos":                                           "manager", "PATCH /api/v1/todos/{id}": "manager",
 		"POST /api/v1/todos/{id}/decisions":                 "manager",
 		"PUT /api/v1/todos/{id}/agents/{mid}/{sid}":         "path",
 		"DELETE /api/v1/todos/{id}/agents/{mid}/{sid}":      "path",
 		"PUT /api/v1/todos/{id}/spaces/{mid}/{space...}":    "path",
 		"DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}": "path",
+		"POST /api/v1/extensions/-/self/market/refresh":     "manager",
 		"/api/v1/extensions/{id}/":                          "manager",
 	}
 	for route := range extwire.RouteScopes {

@@ -54,7 +54,7 @@ object ChatWiringModule {
     }
 
     @Provides @Singleton
-    fun assistantWiring(owner: ChatDataOwner, services: AppServices, stacks: GroupStacks): AssistantAppWiring = object : AssistantAppWiring {
+    fun assistantWiring(owner: ChatDataOwner, services: AppServices, stacks: GroupStacks, conversations: AssistantConversations): AssistantAppWiring = object : AssistantAppWiring {
         @Composable
         override fun Host(navigator: Navigator, content: @Composable () -> Unit) {
             val wiring by owner.wiring.collectAsStateWithLifecycle()
@@ -76,7 +76,7 @@ object ChatWiringModule {
                 allMachines.filter { persona.core.contracts.GroupKeys.namespaceOf(it.id) == selectedNamespace }
             }
             val host = AssistantHostBindings(active.scope.path, active.assistantManagement, active.drafts,
-                active.coroutineScope, available, machines, active.mainSender) { key, options ->
+                active.coroutineScope, available, machines, conversations, active.mainSender) { key, options ->
                 ChatDestination(ChatRoute(key.machineId, key.sessionId,
                     kind = if (options.assistant) ConversationKind.Assistant else ConversationKind.Agent), navigator,
                     renderStyle = if (options.assistant) ChatRenderStyle.Assistant else ChatRenderStyle.Agent,
@@ -102,12 +102,14 @@ internal suspend fun createChatWiring(
     val composer = data.messages.connectComposer { transport ->
         HttpChatComposerService(data.scope, transport, connection, data.credentials.deviceToken,
             onRetryDelivery = data.messages::recordComposerDelivery,
-            onPairingExpired = { if (current()) connection.revoke() }, isCurrent = ::current)
+            onPairingExpired = { if (current()) connection.revoke() }, isCurrent = ::current,
+            onHeld = { session, held -> if (current()) repositories.sessions.showHeld(session, held) })
     }
     return ChatAppBindings(data.scope, data.coroutineScope, data.drafts, group,
         repositories.chats.trackActions(HttpChatActions(connection)), repositories.chats.trackComposer(composer),
         PersistentChatRecoveryService(HttpChatRecoveryService(connection), data.operations, HubChatTransport(connection)),
         RoutedAssistantManagement(data, connection, ::current), data.messages,
+        mainUploadTarget = { data.messages.prepareMainConversation() },
         draftVersions = { key -> combine(repositories.chats.observe(key), repositories.sessions.sessions) { chat, sessions ->
             val session = sessions.firstOrNull { it.key == key }
             DraftSessionVersion(chat.history, session?.let {
@@ -121,6 +123,8 @@ internal suspend fun createChatWiring(
         worktrees = { connection.route.value?.let { route -> persona.core.hub.HttpAgentCreationService(data.scope.path, route.endpoint.url,
             connection.token, connection.http.client, isCurrent = { current() && connection.route.value == route }) } },
         usage = { persona.core.hub.HttpMachineManagement(connection).usageWindows() },
+        // Recent targets of Forward live in the pairing's own preferences, erased with it (#3901).
+        forwardMemory = PreferencesForwardMemory(data.listPreferences),
         tasks = persona.core.domain.tasks.TasksStore(persona.core.hub.HttpTasksApi(connection), group, data.coroutineScope,
             repositories.snapshots.todoCache(), quickResults = quickResults))
 }

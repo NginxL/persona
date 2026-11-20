@@ -13,6 +13,8 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertTextEquals
@@ -46,14 +48,25 @@ import persona.core.hub.HubFailure
 import persona.core.navigation.ChatRoute
 import java.io.File
 
-/** A folder in the home whose hub renames and trashes (`file_edit` unless [edits] is off); records each change. */
+/** A folder in the home whose hub supports file changes unless [edits] is off. */
 internal class EditMachine : SessionFiles {
+    data class Move(val machine: String, val cwd: String, val path: String, val directory: String, val policy: SessionMoveConflictPolicy? = null)
     val root = "/Users/me/code/weather"
     val asked = mutableListOf<String>()
+    val moves = mutableListOf<Move>()
     var edits = true
     var failing: Exception? = null
-    override suspend fun directory(machineId: String, cwd: String, path: String) = SessionDirectory(root, listOf(
-        SessionFileEntry("Sources", dir = true), SessionFileEntry("README.md", size = 1536), SessionFileEntry("Package.swift", size = 1023)))
+    var moveConflictName: String? = null
+    var refuseReplacement = false
+    private var readmeMoved = false
+    override suspend fun directory(machineId: String, cwd: String, path: String) = SessionDirectory(path, when (path) {
+        root -> buildList {
+            add(SessionFileEntry("Sources", dir = true))
+            if (!readmeMoved) add(SessionFileEntry("README.md", size = 1536))
+            add(SessionFileEntry("Package.swift", size = 1023))
+        }
+        else -> emptyList()
+    })
     override suspend fun file(machineId: String, cwd: String, path: String) = SessionFileContent(path, FilesPaths.name(path), text = "")
     override suspend fun status(machineId: String, cwd: String) = SessionGitStatus(false)
     override suspend fun diff(machineId: String, cwd: String, path: String, staged: Boolean) = SessionGitDiff(path, "")
@@ -64,6 +77,15 @@ internal class EditMachine : SessionFiles {
         asked += "rename $path $name"
         failing?.let { throw it }
         return joinRemotePath(root, name)
+    }
+    override suspend fun move(machineId: String, cwd: String, path: String, directory: String, conflict: SessionMoveConflictPolicy?): SessionMovedFile {
+        moves += Move(machineId, cwd, path, directory, conflict)
+        if (moveConflictName != null && (conflict == null || (refuseReplacement && conflict == SessionMoveConflictPolicy.Replace))) {
+            throw HubFailure(HubError.Server, "taken", 409, "exists", body = """{"code":"exists","name":"$moveConflictName"}""")
+        }
+        readmeMoved = true
+        val name = if (conflict == SessionMoveConflictPolicy.KeepBoth) "README 2.md" else "README.md"
+        return SessionMovedFile(path, joinRemotePath(directory, name))
     }
     override suspend fun trash(machineId: String, cwd: String, paths: List<String>): List<SessionTrashedFile> {
         asked += "trash ${paths.joinToString()}"
@@ -86,8 +108,7 @@ internal class Toasts : AppFeedback {
 }
 
 /**
- * Rename and Move to Trash in the file browser (iOS FilesPane / FolderEdits): what the row's menu offers, what is sent, the
- * toast with Undo, a refusal in the user's words, and no entries where the hub can't.
+ * File changes in the browser: row eligibility, destination selection, conflicts, refresh and the Trash toast with Undo.
  */
 // The windows are 320dp wide: on this JVM a JDialog holding a JTextField never goes idle at 360dp and wider (the
 // machine and conversation rename dialogs too), so the rename dialog is driven, and drawn, at that width.
@@ -126,11 +147,87 @@ class FileEditsTest {
         tap("Rename")
     }
 
+    private fun pickMoveDestination() {
+        menu("README.md")
+        tap("Move…")
+        rule.onNodeWithText("Move “README.md”").assertExists()
+        rule.onNodeWithText("Move Here").assertIsNotEnabled()
+        rule.onNode(hasText("Sources") and hasAnyAncestor(hasTestTag("files-move-destination"))).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("${machine.root}/Sources").assertExists()
+        rule.onNodeWithText("No folders here").assertExists()
+        rule.onNodeWithText("Move Here").assertIsEnabled()
+    }
+
+    private fun moveRequest(policy: SessionMoveConflictPolicy? = null) =
+        EditMachine.Move("mac", machine.root, "${machine.root}/README.md", "${machine.root}/Sources", policy)
+
+    @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
+    @Test fun moveHereSendsOnePathAndRefreshesTheSourceFolder() {
+        show()
+        pickMoveDestination()
+        assertTrue(machine.moves.isEmpty())
+        tap("Move Here")
+        assertEquals(listOf(moveRequest()), machine.moves)
+        rule.onNodeWithText("README.md").assertDoesNotExist()
+        rule.onNodeWithText("Package.swift").assertExists()
+        assertEquals(Triple("Moved “README.md” to “Sources”", FeedbackStyle.Success, null), toasts.shown.single())
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
+    @Test fun theFolderBeingMovedCannotBeOpenedInThePicker() {
+        show()
+        menu("Sources")
+        tap("Move…")
+        rule.onNode(hasText("Sources") and hasAnyAncestor(hasTestTag("files-move-destination"))).assertIsNotEnabled()
+        rule.onNodeWithText("Move Here").assertIsNotEnabled()
+        tap("Cancel")
+        assertTrue(machine.moves.isEmpty())
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
+    @Test fun aMoveConflictOffersCancelOrTheUsersExplicitPolicy() {
+        machine.moveConflictName = "README.md"
+        show()
+        pickMoveDestination()
+        tap("Move Here")
+        rule.onNodeWithText("“README.md” already exists there").assertExists()
+        rule.onNodeWithText("Keep Both").assertIsEnabled()
+        rule.onNodeWithText("Replace").assertIsEnabled()
+        assertEquals(listOf(moveRequest()), machine.moves)
+
+        tap("Cancel")
+        rule.onNodeWithText("Keep Both").assertDoesNotExist()
+        rule.onNodeWithText("README.md").assertExists()
+        assertEquals(listOf(moveRequest()), machine.moves)
+        assertTrue(toasts.shown.isEmpty())
+
+        pickMoveDestination()
+        tap("Move Here")
+        tap("Keep Both")
+        assertEquals(listOf(moveRequest(), moveRequest(), moveRequest(SessionMoveConflictPolicy.KeepBoth)), machine.moves)
+        assertEquals("Moved “README 2.md” to “Sources”", toasts.shown.single().first)
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
+    @Test fun aRefusedReplacementReportsTheRefusalWithoutRetrying() {
+        machine.moveConflictName = "README.md"
+        machine.refuseReplacement = true
+        show()
+        pickMoveDestination()
+        tap("Move Here")
+        tap("Replace")
+        assertEquals(listOf(moveRequest(), moveRequest(SessionMoveConflictPolicy.Replace)), machine.moves)
+        rule.onNodeWithText("Replace").assertDoesNotExist()
+        rule.onNodeWithText("README.md").assertExists()
+        assertEquals(Triple("“README.md” already exists there", FeedbackStyle.Error, null), toasts.shown.single())
+    }
+
     @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
     @Test fun renameAndTrashWithUndo() {
         show()
         menu("README.md")
-        for (label in listOf("Insert path", "Copy path", "Rename", "Move to Trash")) assertTrue(label, rule.onAllNodes(hasText(label)).fetchSemanticsNodes().isNotEmpty())
+        for (label in listOf("Insert path", "Copy path", "Rename", "Move…", "Move to Trash")) assertTrue(label, rule.onAllNodes(hasText(label)).fetchSemanticsNodes().isNotEmpty())
         tap("Rename")
         rule.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("files-rename-field"))).assertTextEquals("README.md")
         rule.onNodeWithText("Name").assertExists()
@@ -181,12 +278,13 @@ class FileEditsTest {
     }
 
     @Config(sdk = [35], qualifiers = "en-w320dp-h800dp")
-    @Test fun aHubWithoutFileEditOffersNeither() {
+    @Test fun aHubWithoutFileEditOffersNoMutations() {
         machine.edits = false
         show()
         menu("README.md")
         rule.onNodeWithText("Copy path").assertExists()
         rule.onNodeWithText("Rename").assertDoesNotExist()
+        rule.onNodeWithText("Move…").assertDoesNotExist()
         rule.onNodeWithText("Move to Trash").assertDoesNotExist()
     }
 }

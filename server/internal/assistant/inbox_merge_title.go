@@ -64,6 +64,7 @@ func (s *Service) rewriteMergedTitle(ctx context.Context, id string) {
 	}
 	b.mu.Unlock()
 	hello := s.hello(ctx)
+	in.Language = answerLanguage(hello.Locale)
 	system := prompts.RenderInboxMergeTitle(prompts.InboxMergeTitle{Owner: hello.Owner, Language: answerLanguage(hello.Locale)})
 	var out struct {
 		Title string `json:"title"`

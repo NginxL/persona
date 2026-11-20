@@ -25,6 +25,7 @@ import (
 type updatingNode struct {
 	mu          sync.Mutex
 	machine     *Machine
+	peer        *rpc.Peer
 	data        []byte
 	expected    []byte
 	begin       int
@@ -150,6 +151,8 @@ func linkedDeployFixture(t *testing.T, kind string) (*Devices, *Machine, *updati
 	toHub, hubIn := io.Pipe()
 	m.peer = rpc.New("hub", nodeIn)
 	nodePeer := rpc.New("node", hubIn)
+	n.peer = nodePeer
+	m.peer.OnEvent = m.onEvent
 	nodePeer.OnRequest = n.handle
 	ctx, cancel := context.WithCancel(context.Background())
 	h.mu.Lock()
@@ -282,8 +285,12 @@ func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {
 					t.Fatal(err)
 				}
 				m.nodeUpdateConnected(context.Background(), m.peer, info)
-			} else if err := m.startDeploy(); err != nil {
-				t.Fatal(err)
+			} else {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				if err := h.Redeploy(ctx, m.cfg.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			waitMachine(t, m, 10*time.Second, func(s proto.Machine) bool { return !s.Deploying })
 			n.mu.Lock()
@@ -466,6 +473,51 @@ func TestLinkedDeployPersistsRejectedInstallation(t *testing.T) {
 	defer n.mu.Unlock()
 	if n.confirms != 0 || n.aborts != 1 {
 		t.Fatalf("confirms=%d aborts=%d", n.confirms, n.aborts)
+	}
+}
+
+func TestLinkedDeployPreflightFailureEndsConfirmation(t *testing.T) {
+	h, m, n, bin := linkedDeployFixture(t, kindLink)
+	h.opts.Store = newMemStore()
+	n.stayOld = true
+	run, err := m.startRPCDeploymentRun(nodePackage{Version: h.hubVersion(), path: bin}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	outcome := make(chan error, 1)
+	go func() { outcome <- m.waitDeploy(ctx, run) }()
+	waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return s.DeployPhase == "confirming" })
+	for _, failure := range []proto.NodeUpdatePreflightFailure{
+		{ID: "old-update", Error: "stale failure"},
+		{ID: "update-one", Error: "exit status 23"},
+	} {
+		if err := n.peer.NotifyContext(ctx, nodeproto.EventUpdatePreflightFailed, failure); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := waitMachine(t, m, 5*time.Second, func(s proto.Machine) bool { return !s.Deploying })
+	if s.DeployPhase != "" || s.DeployError != "exit status 23" || s.NodeVersion != "old-build" || !s.Online {
+		t.Fatalf("snapshot = %+v", s)
+	}
+	select {
+	case err := <-outcome:
+		if err == nil || err.Error() != "exit status 23" {
+			t.Fatalf("redeploy outcome = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("waiting for redeploy outcome: %v", ctx.Err())
+	}
+	var saved nodeDeployRecord
+	found, err := h.opts.Store.Setting(ctx, m.deployRecordKey(), &saved)
+	if err != nil || !found || saved.State != "failed" || saved.Error != s.DeployError || saved.Phase != "" {
+		t.Fatalf("record = %+v, found = %t, error = %v", saved, found, err)
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.commits != 1 || n.confirms != 0 || n.aborts != 0 {
+		t.Fatalf("commits = %d, confirms = %d, aborts = %d", n.commits, n.confirms, n.aborts)
 	}
 }
 

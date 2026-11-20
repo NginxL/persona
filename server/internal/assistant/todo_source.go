@@ -316,6 +316,7 @@ func (s *Service) sourceReportStep(id string, finalOnly bool) {
 	s.todos.runMu.Lock()
 	defer s.todos.runMu.Unlock()
 	if !s.reportable(id) {
+		s.forgetSourceWait(id)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -326,6 +327,7 @@ func (s *Service) sourceReportStep(id string, finalOnly bool) {
 	}
 	now := s.tposts.clock()
 	if t.DoneAt == nil || time.Since(*t.DoneAt) > sourceReportKeep { // reopened since, or too long ago
+		s.forgetSourceWait(id)
 		return
 	}
 	if !slices.Contains(sourceChannels, t.Source.Channel) {
@@ -392,6 +394,16 @@ func permanentReportError(err error) bool {
 	return !feishubot.Transient(err)
 }
 
+// sourceAnswerPoll is how often a closed todo's answer is read again while it is awaited: often
+// while an answer usually lands (sourceReportWait), then less often for background work that can
+// run up to channel.HeldMost.
+func sourceAnswerPoll(sinceDone time.Duration) time.Duration {
+	if sinceDone < sourceReportWait {
+		return 5 * time.Second
+	}
+	return 30 * time.Second
+}
+
 // prepareSourceReport previews delayed replies where the owner can cancel with "/noreply", then persists the
 // deadline and schedules delivery. A zero delay uses the same plan and send path without a preview.
 func (s *Service) prepareSourceReport(ctx context.Context, t Todo, st FeishuStatus, finalOnly bool) {
@@ -402,11 +414,13 @@ func (s *Service) prepareSourceReport(ctx context.Context, t Todo, st FeishuStat
 	}
 	var text string
 	if st.SourceReportFullReply && t.StartError == "" && !t.Cancelled() {
-		reply, pending := s.sourceFinalReply(ctx, t)
-		if pending && reply == "" && time.Since(*t.DoneAt) < sourceReportWait {
-			s.sourceReportSoon(t.ID, 5*time.Second)
+		reply, wait := s.sourceFinalReply(ctx, t)
+		since := time.Since(*t.DoneAt)
+		if remaining := wait - since; reply == "" && wait > 0 && remaining > 0 {
+			s.sourceReportSoon(t.ID, min(remaining, sourceAnswerPoll(since)))
 			return
 		}
+		s.forgetSourceWait(t.ID)
 		text = reply
 	}
 	fullReply := text != ""

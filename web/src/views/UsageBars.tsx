@@ -1,13 +1,14 @@
 // The sidebar's bottom (#2432, docs/server/usage-windows.md): the two fullest subscription accounts as thin bars; a click opens
 // a popover with every window of every account, its reset countdown, when it was sampled and whether use is ahead of or
 // behind an even pace. Hidden entirely while the hub has no data.
-import { useEffect, useRef, useState } from "react";
+import { type ComponentType, useEffect, useRef, useState } from "react";
 import { t as tr } from "../i18n";
-import { fullest, isWarn, liveAccounts, topAccounts, useUsageWindows, sourceNames, type UsageAccount } from "../lib/usage-windows";
+import { fullest, isWarn, liveAccounts, topAccounts, useUsageWindows, sourceNames, type UnconnectedProvider, type UsageAccount } from "../lib/usage-windows";
 import { cx } from "../ui/atoms";
 import { lazyOverlay } from "./LazyOverlay";
 
-const UsagePopover = lazyOverlay<{ accounts: UsageAccount[]; onClose: () => void }>(() => import("./UsagePopover").then((m) => m.UsagePopover));
+const UsagePopover = lazyOverlay<{ accounts: UsageAccount[]; unconnected?: readonly UnconnectedProvider[]; onClose: () => void }>(() => import("./UsagePopover").then((m) => m.UsagePopover));
+let LoadedUnconnected: ComponentType<{ accounts: UsageAccount[]; onChange: (next: readonly UnconnectedProvider[]) => void }> | undefined;
 
 const percent = (p: number) => Math.min(100, Math.max(0, p));
 const shown = (p: number) => `${Math.round(p)}%`;
@@ -23,8 +24,10 @@ export function Meter({ used, expected, label, tall }: { used: number; expected?
   );
 }
 
-/** The sidebar's strip. `accounts` as the hub gave them; renders nothing when none is live. */
-export function UsageBars({ accounts, now = Date.now() }: { accounts: UsageAccount[]; now?: number }) {
+const EMPTY_UNCONNECTED: readonly UnconnectedProvider[] = [];
+
+/** The sidebar's strip. `accounts` as the hub gave them; `unconnected` lists active providers without usage data yet. */
+export function UsageBars({ accounts, unconnected = EMPTY_UNCONNECTED, now = Date.now() }: { accounts: UsageAccount[]; unconnected?: readonly UnconnectedProvider[]; now?: number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const live = liveAccounts(accounts, now);
@@ -44,10 +47,10 @@ export function UsageBars({ accounts, now = Date.now() }: { accounts: UsageAccou
     };
   }, [open]);
 
-  if (!top.length) return null;
+  if (!top.length && !unconnected.length) return null;
   return (
     <div ref={ref} className="relative shrink-0 px-2.5 pb-2.5 pt-1" data-usage-bars>
-      {open && <UsagePopover accounts={live} onClose={() => setOpen(false)} />}
+      {open && <UsagePopover accounts={live} unconnected={unconnected} onClose={() => setOpen(false)} />}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -70,6 +73,12 @@ export function UsageBars({ accounts, now = Date.now() }: { accounts: UsageAccou
             </span>
           );
         })}
+        {unconnected.slice(0, 4 - top.length || 1).map((p) => (
+          <span key={`_${p.id}`} data-usage-unconnected={p.id} className="flex items-baseline gap-2 text-xs text-ink-3">
+            <span className="min-w-0 flex-1 truncate">{p.title}</span>
+            <span className="shrink-0">{tr("usage.not_connected")}</span>
+          </span>
+        ))}
       </button>
     </div>
   );
@@ -77,5 +86,23 @@ export function UsageBars({ accounts, now = Date.now() }: { accounts: UsageAccou
 
 /** The sidebar mounts. */
 export function SidebarUsage() {
-  return <UsageBars accounts={useUsageWindows()} />;
+  return <SidebarUsageInner accounts={useUsageWindows()} />;
+}
+
+function SidebarUsageInner({ accounts }: { accounts: UsageAccount[] }) {
+  const [, setLoaded] = useState(() => Boolean(LoadedUnconnected));
+  const [unconnected, setUnconnected] = useState(EMPTY_UNCONNECTED);
+  useEffect(() => {
+    if (LoadedUnconnected) return;
+    void import("./UsageUnconnected").then((m) => {
+      LoadedUnconnected = m.UsageUnconnected;
+      setLoaded(true);
+    });
+  }, []);
+  return (
+    <>
+      {LoadedUnconnected && <LoadedUnconnected accounts={accounts} onChange={setUnconnected} />}
+      <UsageBars accounts={accounts} unconnected={unconnected} />
+    </>
+  );
 }

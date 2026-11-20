@@ -16,6 +16,24 @@ import PersonaWire
         .init(sessions: sessions, machines: [], settings: settings)
     }
 
+    @Test func directoryHiddenSessionsLeaveEveryGroupingAndCanBeRevealed() throws {
+        let visible = try session("visible", state: "working")
+        var hidden = try session("hidden", state: "needs_you")
+        hidden.hiddenByDirectory = true
+        for grouping in ["repo", "space", "state", "recent", "app", "machine"] {
+            var settings = AgentListProjection.Settings()
+            settings.grouping = grouping
+            let normal = AgentListProjection.build(input([visible, hidden], settings: settings))
+            #expect(normal.base.map(\.key) == [visible.key])
+            #expect(normal.filterCounts[.needsYou] == 0)
+            settings.listQuery.includeHidden = true
+            let revealed = AgentListProjection.build(input([visible, hidden], settings: settings))
+            #expect(Set(revealed.base.map(\.key)) == [visible.key, hidden.key])
+        }
+        #expect(AgentsNeedsYou.waiting([visible, hidden]).isEmpty)
+        #expect(NextNeedsYou.next(after: nil, in: [hidden], muted: { _ in false }) == nil)
+    }
+
     @Test func theRepositoryTreeKeepsEveryRowAtLargeInventorySize() throws {
         let sessions = try (0..<8356).map { try session("fixture-\($0)") }
         let tree = RepoTree.build(sessions, machines: [])

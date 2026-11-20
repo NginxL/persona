@@ -6,8 +6,9 @@
 // none it can rely on, so this looks at the scripts the text is written in and, for Latin script, at common words.
 
 import { useEffect, useSyncExternalStore } from "react";
-import { api, enc } from "./api";
-import { itemHeaders } from "./manager-choice";
+import { t } from "../i18n";
+import { api, credentialOwner, enc, onCredentialChange } from "./api";
+import { itemHeaders, stampedHeaders } from "./manager-choice";
 
 // ── settings ─────────────────────────────────────────────
 
@@ -364,15 +365,15 @@ export function translateMail(account: string, uid: number, mailbox: string, tar
 }
 
 /** The Feishu chats to pick from: the pinned ones, then the recent ones. */
-export async function larkChatChoices(token: string): Promise<{ id: string; name: string; avatar?: string; is_group?: boolean }[]> {
-  type Conv = { id: string; name?: string; avatar?: string; is_group?: boolean };
+export async function larkChatChoices(token: string): Promise<{ id: string; name: string; avatar?: string; avatar_url?: string; is_group?: boolean }[]> {
+  type Conv = { id: string; name?: string; avatar?: string; avatar_url?: string; is_group?: boolean };
   const [pinned, recent] = await Promise.all([
     api<{ conversations?: Conv[] }>("/lark/pinned", { token }).catch(() => ({ conversations: [] as Conv[] })),
     api<{ conversations?: Conv[] }>(`/lark/conversations?scope=${enc("chats")}&limit=60`, { token }),
   ]);
   const out: Conv[] = [];
   for (const c of [...(pinned.conversations ?? []), ...(recent.conversations ?? [])]) if (!out.some((x) => x.id === c.id)) out.push(c);
-  return out.map((c) => ({ id: c.id, name: c.name || c.id, avatar: c.avatar, is_group: c.is_group }));
+  return out.map((c) => ({ id: c.id, name: c.name || c.id, avatar: c.avatar, avatar_url: c.avatar_url, is_group: c.is_group }));
 }
 
 /** Tests only. */
@@ -391,4 +392,51 @@ export function resetTranslateForTests() {
   foreignMemo.clear();
   if (flushing) clearTimeout(flushing);
   flushing = null;
+}
+
+// Completed replies are translated only on a click, separately from automatic Inbox translation.
+const translations = new Map<string, Promise<string>>();
+const KEPT = 200;
+let watchingReplyOwner = false;
+
+/** Only selected replies are sent. Pending and successful requests share a tab-local, owner-scoped cache. */
+export function translateReply(text: string, target: string, manager: string): Promise<string> {
+  if (!watchingReplyOwner) {
+    onCredentialChange(() => translations.clear());
+    watchingReplyOwner = true;
+  }
+  const key = JSON.stringify([credentialOwner(), manager, target, text]);
+  const cached = translations.get(key);
+  if (cached) {
+    translations.delete(key);
+    translations.set(key, cached);
+    return cached;
+  }
+  const request = api<{ text: string }>("/translate/message", {
+    method: "POST",
+    json: { text, target },
+    headers: stampedHeaders(manager),
+  }).then((reply) => {
+    if (!reply.text?.trim()) throw new Error(t("chat-messageactions.translation_failed"));
+    return reply.text;
+  }).catch((error: unknown) => {
+    if (translations.get(key) === request) translations.delete(key);
+    throw error;
+  });
+  translations.set(key, request);
+  if (translations.size > KEPT) translations.delete(translations.keys().next().value!);
+  return request;
+}
+
+/** Both intent-loaded code and a paged source can arrive after the reply or credential has gone. */
+export async function translateSelection(
+  source: string | (() => Promise<string>),
+  target: string,
+  manager: string,
+  active: () => boolean,
+): Promise<string | undefined> {
+  if (!active()) return;
+  const text = typeof source === "string" ? source : await source();
+  if (!active()) return;
+  return translateReply(text, target, manager);
 }

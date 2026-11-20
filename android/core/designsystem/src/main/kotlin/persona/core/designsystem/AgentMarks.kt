@@ -17,14 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import persona.core.designsystem.icons.PhIcons
 
@@ -41,6 +40,15 @@ enum class AgentMarkKind(@DrawableRes internal val drawable: Int, internal val t
     Claude(R.drawable.brand_claude, tinted = false, fit = 1f),
     Codex(R.drawable.brand_openai, tinted = true, fit = 1f),
     Trae(R.drawable.brand_trae, tinted = true, fit = 0.92f),
+    OpenCode(R.drawable.brand_opencode, tinted = true, fit = 0.88f),
+    Pi(R.drawable.brand_pi, tinted = true, fit = 0.88f),
+    Gemini(R.drawable.brand_gemini, tinted = true, fit = 1f),
+    Cursor(R.drawable.brand_cursor, tinted = true, fit = 0.92f),
+    Grok(R.drawable.brand_grok, tinted = true, fit = 1f),
+    Antigravity(R.drawable.brand_agy, tinted = true, fit = 1f),
+    Dsh(R.drawable.brand_dsh, tinted = true, fit = 1f),
+    Kimi(R.drawable.brand_kimi, tinted = true, fit = 0.88f),
+    Copilot(R.drawable.brand_copilot, tinted = true, fit = 1f),
 }
 
 /** The client an agent runs in: its desktop app, or its command line (the mark carries </>). */
@@ -79,11 +87,13 @@ fun JAgentMark(spec: AgentMarkSpec, modifier: Modifier = Modifier, size: Dp = Ma
             )
         } else {
             val tile = size * TileShare
+            // The initial is the mark artwork, so it fits its tile even at maximum text size.
+            val letterSize = with(LocalDensity.current) { (tile * LetterScale).toSp() }
             Box(Modifier.size(tile).clip(RoundedCornerShape(BadgeCorner)).background(palette.surfaceStrong), contentAlignment = Alignment.Center) {
                 Text(
                     spec.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?", color = palette.ink2, maxLines = 1,
                     style = PersonaTheme.type.label.copy(fontWeight = FontWeight.SemiBold,
-                        fontSize = TextUnit(tile.value * LetterScale, TextUnitType.Sp), lineHeight = TextUnit(tile.value * LetterScale, TextUnitType.Sp)),
+                        fontSize = letterSize, lineHeight = letterSize),
                 )
             }
         }

@@ -210,7 +210,7 @@ func sourceIn(r assistantwire.InboxRound, id string) (assistantwire.InboxSource,
 // inboxMail is the hub's mail on made-up data: one account, its latest messages, their full texts, what it sent, and
 // how often its messages were listed.
 type inboxMail struct {
-	Mail
+	inboxOnlyMail
 	mu    sync.Mutex
 	msgs  []mail.MailSummary
 	full  map[uint32]*mail.MailMessage

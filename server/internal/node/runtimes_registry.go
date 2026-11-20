@@ -21,7 +21,8 @@ type runtimeRegistry struct {
 	owner map[string]*runtimeConn
 	// watching: sessions the hub watches -> the last seq pushed for each, so a runtime that reconnects is asked to
 	// watch them again from where the phone is.
-	watching map[string]int
+	watching    map[string]int
+	lastHistory map[string]string // the history each watched cursor belongs to
 	// watchParents: the hub connection each watch belongs to, including a runtime-only watch before its transcript exists.
 	watchParents map[string]context.Context
 	// known: session id -> the runtime that listed it or said it has it, kept after it leaves the list. A runtime
@@ -47,7 +48,8 @@ type runtimeRegistry struct {
 	// started: sessions the hub started through a runtime (session.start), by session id: the runtime that started
 	// it and when. Another runtime that comes to run one (pi's companion starts sessions in pi-web) is told the hub
 	// drove it (runtime.driven), so its cards go to the phone first as the starter's would.
-	started map[string]startedSession
+	started     map[string]startedSession
+	compactions map[string]*runtimeCompaction
 }
 
 // startedSession is who started a session for the hub, and when (runtimeRegistry.started).
@@ -97,7 +99,7 @@ const maxKnown = 8192
 
 func newRuntimeRegistry() *runtimeRegistry {
 	return &runtimeRegistry{conns: map[int]*runtimeConn{}, owner: map[string]*runtimeConn{}, watching: map[string]int{},
-		watchParents: map[string]context.Context{}, known: map[string]knownSession{}, unclaimed: map[string]unclaimedID{}, warned: map[string]bool{}}
+		lastHistory: map[string]string{}, watchParents: map[string]context.Context{}, known: map[string]knownSession{}, unclaimed: map[string]unclaimedID{}, warned: map[string]bool{}}
 }
 
 // setHostOff replaces how launcher ownership excludes engine runtimes the serving node does not enable.
@@ -166,7 +168,7 @@ func shellLauncherNames() map[string]bool {
 // The ids in daemons.json (reserved) are the daemons' (daemons.go): a runtime on the socket may not take one, and a
 // daemon whose id a runtime on the socket already has stays out until that one leaves (it is dialed again). A daemon's
 // link says hello with the config's id and an instance of its own, so its next connection is its own again.
-func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved func(string) bool) (stale []*runtimeConn, err error) {
+func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved func(string) bool, preempt func(o *runtimeConn, hello runtimeHello) bool) (stale []*runtimeConn, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h.mu.Lock()
@@ -195,6 +197,10 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 			return nil, &rpc.Error{Code: "runtime_conflict",
 				Message: fmt.Sprintf("runtime id %q is in use by a runtime on this machine's socket", hello.Runtime)}
 		}
+		if preempt != nil && preempt(o, hello) {
+			stale = append(stale, o)
+			continue
+		}
 		if instance == "" || hello.Instance == "" {
 			continue
 		}
@@ -206,6 +212,7 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 	}
 	h.mu.Lock()
 	h.hello, h.ready = hello, true
+	h.assistantPIDs = nil
 	h.mu.Unlock()
 	return stale, nil
 }
@@ -234,6 +241,9 @@ func (b *runtimeRegistry) remember(h *runtimeConn, id string, now time.Time) {
 		sort.Slice(oldest, func(i, j int) bool { return b.known[oldest[i]].at.Before(b.known[oldest[j]].at) })
 		for _, k := range oldest[:len(oldest)-maxKnown*3/4] {
 			delete(b.known, k)
+			if compact := b.compactions[k]; compact != nil && compact.state.State != proto.CompactionRunning {
+				delete(b.compactions, k)
+			}
 		}
 	}
 }
@@ -366,6 +376,7 @@ func (b *runtimeRegistry) resetWatches() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.watching = map[string]int{}
+	b.lastHistory = map[string]string{}
 	b.watchParents = map[string]context.Context{}
 	for _, h := range b.conns {
 		h.mu.Lock()
@@ -394,6 +405,80 @@ func (b *runtimeRegistry) assistantIn(pids []int) *runtimeConn {
 	return nil
 }
 
+func (b *runtimeRegistry) clearAssistantPIDs() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, h := range b.conns {
+		h.mu.Lock()
+		h.assistantPIDs = nil
+		h.mu.Unlock()
+	}
+}
+
+func (b *runtimeRegistry) setAssistantPIDs(h *runtimeConn, reports map[string]int, isAssistant func(string) bool) {
+	h.mu.Lock()
+	pid := h.pid
+	ready := h.ready && h.hello.Caps.Assistant
+	h.mu.Unlock()
+	if !ready || pid <= 0 {
+		return
+	}
+	verified := make(map[string]int)
+	seen := make(map[int]string)
+	for id, worker := range reports {
+		if runtimeSessionID(id) && strictDescendant(worker, pid, parentPID) && isAssistant(id) {
+			if previous, duplicate := seen[worker]; duplicate {
+				delete(verified, previous)
+			} else {
+				seen[worker] = id
+				verified[id] = worker
+			}
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns[h.serial] != h {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ready && h.hello.Caps.Assistant && h.pid == pid {
+		h.assistantPIDs = verified
+	}
+}
+
+type runtimeAssistantWorker struct {
+	host            *runtimeConn
+	runtimePID, pid int
+	session         string
+}
+
+func (b *runtimeRegistry) assistantWorkers() []runtimeAssistantWorker {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var workers []runtimeAssistantWorker
+	for _, h := range b.conns {
+		if h.peer != nil {
+			select {
+			case <-h.peer.Done():
+				continue
+			default:
+			}
+		}
+		h.mu.Lock()
+		if h.ready && h.hello.Caps.Assistant && h.pid > 0 {
+			for id, worker := range h.assistantPIDs {
+				workers = append(workers, runtimeAssistantWorker{host: h, runtimePID: h.pid, pid: worker, session: id})
+			}
+		}
+		h.mu.Unlock()
+	}
+	return workers
+}
+
 func (b *runtimeRegistry) add(peer *rpc.Peer) *runtimeConn {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -408,6 +493,9 @@ func (b *runtimeRegistry) remove(h *runtimeConn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, h.serial)
+	h.mu.Lock()
+	h.assistantPIDs = nil
+	h.mu.Unlock()
 	b.leftUnlisted(id)
 	b.leftRows(h, id)
 	b.recomputeOwners()
@@ -485,6 +573,9 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 		if startedHere(s) {
 			b.remember(h, s.SessionID, now)
 		}
+		if compact := b.compactions[s.SessionID]; compact != nil && compact.runtime == h {
+			compact.observe(s)
+		}
 		if st, ok := b.started[s.SessionID]; ok && st.runtime != h.hello.Runtime && now.Sub(st.at) < drivenFor &&
 			s.Status != proto.StatusOffline && !h.drivenTold[s.SessionID] {
 			if h.drivenTold == nil {
@@ -529,7 +620,11 @@ func (b *runtimeRegistry) appendSessions(dst []proto.Session) []proto.Session {
 		h.mu.Lock()
 		for i := range h.sessions {
 			if b.owner[h.sessions[i].SessionID] == h {
-				dst = append(dst, h.sessions[i])
+				row := h.sessions[i]
+				if compact := b.compactions[row.SessionID]; compact != nil {
+					row.Compaction = compact.state
+				}
+				dst = append(dst, row)
 			}
 		}
 		h.mu.Unlock()
@@ -622,11 +717,14 @@ func (b *runtimeRegistry) launcherRuntime(name string) *runtimeConn {
 	return b.launcherOwners()[name]
 }
 
-func (b *runtimeRegistry) watch(h *runtimeConn, id string, since int, parent context.Context) runtimeWatchAttempt {
+func (b *runtimeRegistry) watch(h *runtimeConn, id string, since int, history string, parent context.Context) runtimeWatchAttempt {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if cur, ok := b.watching[id]; !ok || since > cur {
+	if cur, ok := b.watching[id]; !ok || since > cur || history != "" && history != b.lastHistory[id] {
 		b.watching[id] = since
+	}
+	if history != "" {
+		b.lastHistory[id] = history
 	}
 	if parent != nil {
 		b.watchParents[id] = parent
@@ -669,6 +767,7 @@ func (b *runtimeRegistry) unwatch(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.watching, id)
+	delete(b.lastHistory, id)
 	delete(b.watchParents, id)
 	for _, h := range b.conns {
 		h.mu.Lock()
@@ -701,7 +800,6 @@ func (b *runtimeRegistry) watchParent(id string) context.Context {
 	return parent
 }
 
-// pushed moves a watched session's seq forward (the items a runtime pushed reached the hub).
 // lastPushed is the last seq pushed for a watched session (0: not watched, or nothing yet).
 func (b *runtimeRegistry) lastPushed(id string) int {
 	b.mu.Lock()
@@ -709,11 +807,19 @@ func (b *runtimeRegistry) lastPushed(id string) int {
 	return b.watching[id]
 }
 
-func (b *runtimeRegistry) pushed(id string, seq int) {
+// pushed tracks the current history's cursor, including replacements that shorten it.
+func (b *runtimeRegistry) pushed(id string, seq int, history string, reset bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if cur, ok := b.watching[id]; ok && seq > cur {
+	cur, ok := b.watching[id]
+	if !ok {
+		return
+	}
+	if reset || history != "" && history != b.lastHistory[id] || seq > cur {
 		b.watching[id] = seq
+	}
+	if history != "" {
+		b.lastHistory[id] = history
 	}
 }
 

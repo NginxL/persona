@@ -444,6 +444,128 @@ func TestPhoneToolsDeviceRouting(t *testing.T) {
 	}
 }
 
+// phone.call attests the phone that actually executed the write, not another connected phone or an assumed iPhone.
+func TestPhoneCallResultAttribution(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool               string
+		deviceName, platform     string
+		otherName, otherPlatform string
+	}{
+		{"Android calendar", "phone_calendar_create_event", "Pixel 9", "android", "Work iPhone", "ios"},
+		{"iOS reminder", "phone_reminders_create", "Work iPhone", "ios", "Pixel 9", "android"},
+		{"unknown identity", "phone_calendar_create_event", "", "", "Work iPhone", "ios"},
+		{"missing device name", "phone_calendar_create_event", "", "android", "Work iPhone", "ios"},
+		{"missing platform", "phone_reminders_create", "Pixel 9", "", "Work iPhone", "ios"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHub(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			selected := &client{hub: h, device: "credential-selected", role: roleFull, out: make(chan []byte, 8)}
+			other := &client{hub: h, device: "credential-other", role: roleFull, out: make(chan []byte, 8)}
+			addTestClient(h, selected, other)
+
+			hello := map[string]any{"type": "client_hello"}
+			if tc.platform != "" {
+				hello["platform"] = tc.platform
+			}
+			data, _ := json.Marshal(hello)
+			h.onClientMessage(ctx, selected, data)
+			data, _ = json.Marshal(map[string]any{"type": "client_hello", "platform": tc.otherPlatform})
+			h.onClientMessage(ctx, other, data)
+
+			registration := map[string]any{
+				"type": "register_phone", "device_id": "selected-device",
+				"tools": []proto.Tool{{Name: tc.tool}},
+			}
+			if tc.deviceName != "" {
+				registration["device_name"] = tc.deviceName
+			}
+			data, _ = json.Marshal(registration)
+			h.onClientMessage(ctx, selected, data)
+			data, _ = json.Marshal(map[string]any{
+				"type": "register_phone", "device_id": "other-device", "device_name": tc.otherName,
+				"tools": []proto.Tool{{Name: "phone_device_info"}},
+			})
+			h.onClientMessage(ctx, other, data)
+
+			// Hellos acknowledge synchronously; discard those messages so the next outbound frame is the tool call.
+			drain := func(c *client) {
+				for {
+					select {
+					case <-c.out:
+					default:
+						return
+					}
+				}
+			}
+			drain(selected)
+			drain(other)
+
+			done := make(chan proto.ToolResult, 1)
+			go func() { done <- h.callPhone(ctx, tc.tool, json.RawMessage(`{}`)) }()
+			var call struct {
+				Type   string `json:"type"`
+				Name   string `json:"name"`
+				CallID string `json:"call_id"`
+			}
+			select {
+			case data = <-selected.out:
+				if err := json.Unmarshal(data, &call); err != nil || call.Type != "tool_call" || call.Name != tc.tool {
+					t.Fatalf("selected phone's tool call = %s, %v", data, err)
+				}
+			case <-ctx.Done():
+				t.Fatal("tool call was not routed to the selected phone")
+			}
+			select {
+			case data = <-other.out:
+				t.Fatalf("tool call also went to the other phone: %s", data)
+			default:
+			}
+
+			const payload = `{"id":"created-1","title":"Lunch"}`
+			data, _ = json.Marshal(map[string]any{
+				"type": "tool_result", "call_id": call.CallID,
+				"content": []proto.Content{{Type: "text", Text: payload}},
+			})
+			h.onClientMessage(ctx, selected, data)
+			var result proto.ToolResult
+			select {
+			case result = <-done:
+			case <-ctx.Done():
+				t.Fatal("tool result was not delivered")
+			}
+			if result.IsError || textOf(result) != payload {
+				t.Fatalf("existing result payload changed: %+v", result)
+			}
+			raw, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			for _, source := range []struct{ key, want string }{
+				{"source_device_name", tc.deviceName},
+				{"source_device_platform", tc.platform},
+			} {
+				value, present := envelope[source.key]
+				if source.want == "" {
+					if present {
+						t.Fatalf("%s = %s, want absent; result = %s", source.key, value, raw)
+					}
+					continue
+				}
+				var got string
+				if !present || json.Unmarshal(value, &got) != nil || got != source.want {
+					t.Fatalf("%s = %q (present %t), want %q; result = %s", source.key, got, present, source.want, raw)
+				}
+			}
+		})
+	}
+}
+
 // A write the user approves on the phone outlasts the plain call's wait: an approval that comes late still reaches the
 // agent, and a read still times out as before (#4427).
 func TestCallPhoneWaitsForApproval(t *testing.T) {

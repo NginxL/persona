@@ -4,8 +4,9 @@
 //
 // A request in pieces is two fields of a to-do, the hub's (docs/assistant/todos.md "Requests in pieces"): `part_of`, the
 // to-do whose request this one is a piece of (the request's root), and `after`, the pieces it waits for. The hub checks
-// them when they are written (the to-dos exist, one level, no cycle); this file still leaves out what a deleted or
-// unlisted to-do left behind. A queued piece is started on its own to-do (task_plan's todo_id), so its id never changes.
+// them when they are written (the to-dos exist, one level, no cycle); layout leaves out edges to missing to-dos.
+// `prerequisite_blockers`, when sent, gives the actual blockers even if a to-do is missing from the graph.
+// A queued piece is started on its own to-do (task_plan's todo_id), so its id never changes.
 //
 // Requests come from (1) a to-do others name as their parent; (2) the to-dos of one task plan (plan_id), the root being
 // the plan's words; an open plan not started yet shows its tasks as pieces waiting for Start; (3) a to-do with neither,
@@ -70,6 +71,11 @@ export type TreeRow =
   | { kind: "agent"; key: string; depth: number; agent: NodeAgent }
   | { kind: "more"; key: string; depth: number; count: number; parent?: string };
 
+interface GraphWait {
+  key: string;
+  title: string;
+}
+
 export interface GraphNode {
   key: string;
   title: string;
@@ -82,8 +88,8 @@ export interface GraphNode {
   row: number;
   /** The pieces it waits for (node keys), after the edges that would close a cycle were dropped. */
   after: string[];
-  /** Those of them not done yet. */
-  waitsFor: string[];
+  /** Actual blockers, with their title if known, otherwise their to-do ID. */
+  waitsFor: GraphWait[];
   /** An open plan's task: it waits for the owner's Start. */
   waitsStart: boolean;
   state: NodeState;
@@ -604,13 +610,22 @@ function agentRefs(todos: readonly Todo[]): Map<string, string> {
 /** The same words, spaces aside (trimmed, runs of white space as one). */
 export const sameWords = (a: string, b: string) => a.trim().replace(/\s+/g, " ") === b.trim().replace(/\s+/g, " ");
 
-function finish(req: Omit<GraphRequest, "edges" | "layers" | "rows" | "done" | "touched" | "finished" | "merged">, wants: Map<string, string[]>): GraphRequest {
+function finish(req: Omit<GraphRequest, "edges" | "layers" | "rows" | "done" | "touched" | "finished" | "merged">, wants: Map<string, string[]>, todosById: ReadonlyMap<string, Todo>): GraphRequest {
   const byKey = new Map(req.nodes.map((n) => [n.key, n]));
   // a piece is queued while something it waits for is not done, and nobody took it yet
   const { edges, layers, rows } = layOut(req.nodes, wants);
-  for (const n of req.nodes) {
-    n.waitsFor = n.after.filter((k) => { const t = byKey.get(k)?.todo; return !t || !isDoneTodo(t); });
-    if (n.todo && n.waitsFor.length && n.state === "ready") n.state = "queued";
+  for (const node of req.nodes) {
+    const blockers = node.todo?.prerequisite_blockers;
+    node.waitsFor = blockers !== undefined
+      ? [...new Set(blockers)].map((id) => {
+          const key = `todo:${id}`;
+          return { key, title: byKey.get(key)?.title || todosById.get(id)?.title || id };
+        })
+      : node.after.flatMap((key) => {
+          const prior = byKey.get(key)!;
+          return prior.todo && isDoneTodo(prior.todo) ? [] : [{ key, title: prior.title }];
+        });
+    if (node.todo && node.waitsFor.length && node.state === "ready") node.state = "queued";
   }
   // edges again: a piece that just became queued is drawn dashed
   for (const e of edges) e.dashed = byKey.get(e.to)?.state === "queued";
@@ -705,7 +720,7 @@ export function buildGraph({ todos: all, plans, data }: GraphInput): Graph {
       heading = requestHeading(g.members[0].title, ownerWords(g.members[0]));
       at = requestedAt(g.members[0]);
     }
-    out.push(finish({ key, kind: g.kind, ...heading, at, root: g.root, plan: g.plan, nodes }, wants));
+    out.push(finish({ key, kind: g.kind, ...heading, at, root: g.root, plan: g.plan, nodes }, wants, byId));
   }
   const active = out.filter((r) => !r.done).sort((a, b) => rank(a) - rank(b) || b.touched - a.touched || a.key.localeCompare(b.key));
   const done = out.filter((r) => r.done).sort((a, b) => b.finished - a.finished || a.key.localeCompare(b.key));
@@ -723,8 +738,8 @@ export interface QueueRow {
   title: string;
   request: GraphRequest;
   node: GraphNode;
-  /** The pieces it waits for (after), by node. */
-  waits: GraphNode[];
+  /** The blockers to name in the queue summary. */
+  waits: GraphWait[];
   since?: number;
 }
 
@@ -737,11 +752,10 @@ export function queuedRows(graph: Graph): QueueRow[] {
   const rows: QueueRow[] = [];
   for (const request of graph.active) {
     if (request.plan?.state === "open") continue;
-    const byKey = new Map(request.nodes.map((n) => [n.key, n]));
     for (const node of request.nodes) {
       const base = { key: node.key, title: node.title, request, node, since: node.since };
       if (node.state === "ready") rows.push({ ...base, kind: "ready", waits: [] });
-      else if (node.state === "queued") rows.push({ ...base, kind: "after", waits: node.waitsFor.map((k) => byKey.get(k)!).filter(Boolean) });
+      else if (node.state === "queued") rows.push({ ...base, kind: "after", waits: node.waitsFor });
     }
   }
   const active = new Map(graph.active.map((r, i) => [r.key, i]));

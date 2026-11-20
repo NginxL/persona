@@ -252,16 +252,7 @@ func (s *Service) externalPickerLaunchers(ctx context.Context, d Device, refresh
 	c.zshrcMu.Lock()
 	known := slices.Clone(c.zshrc[d.ID])
 	c.zshrcMu.Unlock()
-	res := machineLauncherListing{}
-	for _, l := range known {
-		res.Launchers = append(res.Launchers, proto.LauncherEnvelope(l))
-	}
-	list, _ := s.machineLaunchersFrom(ctx, d.ID, res)
-	discovered := make([]ConfiguredLauncher, 0, len(list))
-	for _, l := range list {
-		discovered = append(discovered, ConfiguredLauncher{Launcher: l})
-	}
-	return sessionLaunchers(discovered, s.hello(ctx).Models.Launchers[d.ID]), nil
+	return s.pickerLaunchersSeen(ctx, d.ID, known, true), nil
 }
 
 // externalTarget reads this computer's advertisement, without a global provider view or

@@ -7,6 +7,7 @@ import { api, ApiError, enc, errorText } from "../../lib/api";
 import { conversationPage } from "../../lib/conversation-page";
 import { shownManager, useChosenManager } from "../../lib/manager-choice";
 import { namedLauncher, providerIdNote, useProviderNames } from "../../lib/provider-names";
+import { machineLaunchers, type MachineLaunchers } from "../../lib/launcher-models";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { isAutoConversation } from "../../lib/conversation-origins";
 import {
@@ -42,9 +43,11 @@ function taskIcon(task: Task): IconName {
 const RUNS_SHOWN = 30;
 
 export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+  const manager = useChosenManager();
   const assistant = useStore((s) => s.assistant);
   const timezone = (assistant as { timezone?: string } | null)?.timezone;
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [launcherNames, setLauncherNames] = useState<Record<string, MachineLaunchers["launchers"]>>({});
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [error, setError] = useState("");
   const [runsError, setRunsError] = useState("");
@@ -57,6 +60,22 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const nowMs = useNow(30_000);
   const now = useMemo(() => new Date(nowMs), [nowMs]);
   const seq = useRef(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const machines = [...new Set((tasks ?? []).map((task) => task.execution?.machine_id).filter((id): id is string => !!id))];
+    setLauncherNames({});
+    // Each computer's catalog is authoritative as soon as it answers.
+    for (const id of machines) {
+      void machineLaunchers(id, { purpose: "task", manager: manager ?? undefined, signal: controller.signal }).then(
+        ({ launchers }) => {
+          if (!controller.signal.aborted) setLauncherNames((known) => ({ ...known, [id]: launchers }));
+        },
+        () => {}, // The row keeps the provider names while this catalog is unavailable.
+      );
+    }
+    return () => controller.abort();
+  }, [tasks, manager]);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -198,7 +217,7 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                 <SectionTitle>{t("assistant-routines.section_scheduled")}</SectionTitle>
                 <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                   {repeating.map((task) => (
-                    <TaskRow key={task.id} task={task} now={now} chats={chatsOf(task)} onOpen={() => setEditing(task)} onMenu={openRowMenu(task)} onToggle={(on) => void toggle(task, on)} />
+                    <TaskRow key={task.id} task={task} launchers={launcherNames[task.execution?.machine_id ?? ""]} now={now} chats={chatsOf(task)} onOpen={() => setEditing(task)} onMenu={openRowMenu(task)} onToggle={(on) => void toggle(task, on)} />
                   ))}
                 </div>
                 <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">
@@ -215,7 +234,7 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                 <SectionTitle>{t("assistant-routines.section_follow_ups")}</SectionTitle>
                 <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                   {oneOff.map((task) => (
-                    <TaskRow key={task.id} task={task} now={now} chats={chatsOf(task)} onOpen={() => setEditing(task)} onMenu={openRowMenu(task)} onToggle={(on) => void toggle(task, on)} />
+                    <TaskRow key={task.id} task={task} launchers={launcherNames[task.execution?.machine_id ?? ""]} now={now} chats={chatsOf(task)} onOpen={() => setEditing(task)} onMenu={openRowMenu(task)} onToggle={(on) => void toggle(task, on)} />
                   ))}
                 </div>
                 <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{noHover ? t("assistant-routines.follow_ups_footer") : t("assistant-routines.follow_ups_footer_pointer")}</p>
@@ -301,12 +320,12 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 /** One task: its mark, title, rule in words, next and last run, what it runs with when not the default, a switch. */
 type TaskChat = { sid: string; title?: string; at?: string };
 
-function TaskRow({ task, now, chats, onOpen, onMenu, onToggle }: { task: Task; now: Date; chats: TaskChat[]; onOpen: () => void; onMenu: (at: MenuAt) => void; onToggle: (on: boolean) => void }) {
-  // its launcher by the provider's display name, the startup ID in the line's tooltip (#5029): the current assistant's
-  // providers, as its tasks are
-  const names = useProviderNames(useChosenManager() ?? "");
+function TaskRow({ task, launchers, now, chats, onOpen, onMenu, onToggle }: { task: Task; launchers?: MachineLaunchers["launchers"]; now: Date; chats: TaskChat[]; onOpen: () => void; onMenu: (at: MenuAt) => void; onToggle: (on: boolean) => void }) {
+  const providers = useProviderNames(useChosenManager() ?? "");
+  const names = launchers ?? providers;
   const with_ = runsWith(task, names);
-  const launcherId = task.launcher ? providerIdNote(namedLauncher(task.launcher, names)) : "";
+  const launcher = task.execution?.launcher || task.launcher;
+  const launcherId = launcher ? providerIdNote(namedLauncher(launcher, names)) : "";
   const last = lastRunText(task, now);
   const next = nextText(task, now);
   const until = untilText(task, now);
@@ -350,7 +369,7 @@ function TaskRow({ task, now, chats, onOpen, onMenu, onToggle }: { task: Task; n
         {with_ && (
           <div className={cx("mt-0.5 flex items-center gap-1 truncate text-[11.5px]", with_.danger ? "font-medium text-red" : "text-ink-3")}>
             <Icon name={with_.danger ? "info" : "gear"} size={11} className="shrink-0" />
-            <span className="truncate" title={launcherId || undefined}>{with_.text}</span>
+            <span className="truncate" title={task.execution ? [with_.text, launcherId].filter(Boolean).join("\n") : launcherId || undefined}>{with_.text}</span>
           </div>
         )}
         {last && (

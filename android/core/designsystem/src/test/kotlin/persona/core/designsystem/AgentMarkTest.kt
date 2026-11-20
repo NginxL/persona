@@ -1,11 +1,18 @@
 package persona.core.designsystem
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -40,7 +47,7 @@ class AgentMarkTest {
         val traex = session("traex").agentMark!!
         assertNull(traex.kind)
         assertEquals("TRAEX", traex.name)
-        assertEquals("DSH", session("dsh", label = "DSH").agentMark?.name)
+        assertEquals(AgentMarkKind.Dsh, session("dsh", label = "DSH").agentMark?.kind)
     }
 
     /**
@@ -55,7 +62,7 @@ class AgentMarkTest {
         assertEquals(AgentMarkKind.Trae, paseo("Trae Agent", "my-agent").kind)
         assertEquals(AgentMarkKind.Claude, paseo("Claude Code (ACP)", "claude-acp").kind)
         val grok = paseo("My Grok", "grok")
-        assertNull(grok.kind)
+        assertEquals(AgentMarkKind.Grok, grok.kind)
         assertEquals("My Grok", grok.name)
         assertEquals("grok", paseo("Paseo", "grok").name)
         // Its Claude Code and Codex providers are those agents'.
@@ -67,7 +74,31 @@ class AgentMarkTest {
         assertEquals(listOf(AgentMarkKind.Claude, AgentMarkKind.Claude, AgentMarkKind.Codex, AgentMarkKind.Trae, AgentMarkKind.Trae, AgentMarkKind.Trae),
             listOf("claude", "Claude-Code", "codex", "TRAE CLI", "trae_cli", " traecli ").map(::knownAgentMark))
         assertEquals(listOf(null, null, null, null, null),
-            listOf(null, "", "traex", "grok", "-trae").map(::knownAgentMark))
+            listOf(null, "", "traex", "unknown harness", "-trae").map(::knownAgentMark))
+        assertEquals(listOf(AgentMarkKind.Grok, AgentMarkKind.Grok, AgentMarkKind.Antigravity, AgentMarkKind.Kimi, AgentMarkKind.Copilot),
+            listOf("Grok · Official", "Grok Build", "Google Antigravity", "Kimi CLI", "GitHub Copilot CLI").map(::knownAgentMark))
+        assertEquals(AgentMarkKind.OpenCode, session("opencode").agentMark?.kind)
+        assertEquals(AgentMarkKind.Pi, session("pi", label = "My pi profile").agentMark?.kind)
+        assertEquals(AgentMarkKind.Antigravity, Session(sessionId = "s", agent = "agy", launcher = "my-remote-launcher").agentMark?.kind)
+        assertEquals(AgentMarkKind.Grok, Session(sessionId = "s", agent = "grok", launcher = "claude").agentMark?.kind)
+    }
+
+    @Test fun decorativeInitialFitsTheSameTileAtMaximumTextSize() {
+        val fontScale = mutableFloatStateOf(1f)
+        rule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.floatValue)) {
+                PersonaTheme { JAgentMark(AgentMarkSpec(null, "studio-runtime", null)) }
+            }
+        }
+        fun initialWidth(): Float {
+            val result = mutableListOf<TextLayoutResult>()
+            val node = rule.onNodeWithText("S", useUnmergedTree = true).fetchSemanticsNode()
+            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(result)
+            return result.single().getBoundingBox(0).width
+        }
+        val normal = initialWidth()
+        rule.runOnIdle { fontScale.floatValue = 2f }
+        assertEquals(normal, initialWidth(), 1f)
     }
 
     @Test fun theClientComesFromAgentSurface() {

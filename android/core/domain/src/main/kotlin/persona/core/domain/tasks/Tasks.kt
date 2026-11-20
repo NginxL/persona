@@ -55,7 +55,7 @@ enum class TaskState(val label: CoreText, val rank: Int) {
             todo.doneAt != null && !todo.startError.isNullOrBlank() -> Failed
             todo.doneAt != null -> Done
             AgentState.NeedsYou in agents -> NeedsYou
-            interrupted -> Interrupted
+            interrupted && AgentState.Working !in agents && todo.supervision?.state != "parked" -> Interrupted
             AgentState.Unread in agents -> Unread
             AgentState.Working in agents -> Working
             agents.isNotEmpty() -> Followup
@@ -78,13 +78,15 @@ fun receiptTitle(item: FeedItem, todo: Todo?): String? = todo?.title?.trim()?.if
 /** Why the model service cut the agent off (#1516), in words, and whether "Continue" can help; null when it was not.
  *  [plain]: no model service error, [reason] being the hub's own sentence, said as it is: a turn with no output at all
  *  (turn_error_kind `no_output`, or `stopped` when Persona's Stop interrupted it with its conversation, #10187). */
-data class Interruption(val reason: CoreText, val canContinue: Boolean, val plain: Boolean = false) {
+data class Interruption(val reason: CoreText, val canContinue: Boolean, val invalid: Boolean = false, val plain: Boolean = false) {
     companion object {
         /** The hub's own kinds for a turn with no output (#10187): its turn_error is a sentence, not an API error. */
         private val silentKinds = setOf("no_output", "stopped")
 
         fun of(s: Session?): Interruption? {
             if (s?.interrupted != true) return null
+            val invalid = s.turnErrorKind == "unrecoverable" || s.turnErrorCode == "compaction_sealed" || ApiErrorInfo.unrecoverable(s.turnError)
+            if (invalid) return Interruption(CoreText.of(Key.ApiConversationInvalid), false, invalid = true)
             if (s.turnErrorKind in silentKinds) return Interruption(CoreText.plain(s.turnError.orEmpty().trim()), true, plain = true)
             val info = ApiErrorInfo.parse(s.turnError)
             return Interruption(info?.reason ?: CoreText.of(Key.ApiFailed), info?.needsAction != true)
@@ -127,9 +129,13 @@ sealed interface TaskNow {
  *
  * [itemId] is the id of the item the phone made, which Undo deletes. The phone's calendar ids are numbers, so a result
  * whose id is not one (an iPhone's event or reminder) still draws its card, without an Undo button.
+ *
+ * [sourceDeviceName] and [sourceDevicePlatform] are the hub-attested phone that created it, when known. Older results
+ * leave both null and make no source claim.
  */
 data class QuickResult(
     val reminder: Boolean, val callId: String, val itemId: Long?, val title: String, val time: String?, val place: String?,
+    val sourceDeviceName: String? = null, val sourceDevicePlatform: String? = null,
 ) {
     companion object {
         fun of(call: ToolCall): QuickResult? {
@@ -143,10 +149,12 @@ data class QuickResult(
             if (result.isError == true) return null
             val o = runCatching { JsonCodec.parseToJsonElement(result.text.orEmpty()) as? JsonObject }.getOrNull() ?: return null
             fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+            fun nonBlank(k: String) = s(k)?.trim()?.takeIf { it.isNotEmpty() }
             // No card without an id (iOS QuickResult.init), so an old or broken result says nothing it cannot back.
             val id = s("id")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             return QuickResult(reminder, call.use.id, id.toLongOrNull()?.takeIf { it > 0 },
-                s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"))
+                s("title").orEmpty(), s(if (reminder) "due" else "start"), s(if (reminder) "list" else "calendar"),
+                nonBlank("source_device_name"), nonBlank("source_device_platform"))
         }
     }
 }

@@ -22,7 +22,7 @@ class UnsentData internal constructor(
     val isEmpty: Boolean get() = messages.isEmpty() && drafts.isEmpty() && agentHandOffs.isEmpty()
 }
 
-private val settled = setOf(OutboxState.Cancelled.wire, OutboxState.Shown.wire)
+private val settled = setOf(OutboxState.Cancelled.wire, OutboxState.Shown.wire, OutboxState.Kept.wire, OutboxState.Held.wire)
 
 internal fun DraftRow.hasContent() = text.isNotEmpty() || attachments != "[]"
 

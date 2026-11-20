@@ -504,8 +504,9 @@ func (s *Session) skipBacklogLocked(ch *channel) {
 // dropFramesLocked drops frames to the buffer's end but keeps its whole non-frame messages after the new jump. A
 // handoff whose old reset may be unsafe uses the same boundary without losing decoder state the helper will not repeat.
 func (s *Session) dropFramesLocked(ch *channel, reason string) {
-	if ch.sentClose {
-		// The stream has ended and a close has gone out; retained messages must not move the end beyond it.
+	if ch.sentClose || ch.closeRoute != nil {
+		// The stream has ended and a close has gone out, even if another route still owes a copy; retained messages must
+		// not move the end beyond it.
 		s.dropBacklogLocked(ch)
 		return
 	}
@@ -706,11 +707,12 @@ func (s *Session) nextUDPLocked(t *transport) (udpJob, bool) {
 				shards: []udpResend{{off: last, block: uint16(len(blocks) - 1), index: uint16(b.Data - 1)}}}, true
 		}
 	}
-	if ch.eof && !ch.sentClose && (!ch.jumpValid || ch.jumpConfirmed) {
+	if ch.eof && !ch.sentClose && !ch.closeAcked && (!ch.jumpValid || ch.jumpConfirmed) {
 		// As on TCP, a final close follows the phone's confirmation; reset alone does not complete an earlier close.
 		// The helper's stream ended: the close goes on the flow's TLS connection, in order after what it sent.
 		if p := t.parent; p != nil && !p.dead {
 			ch.sentClose = true
+			ch.closeEnd, ch.closeRoute = end, p
 			p.ctl = append(p.ctl, frame(TypeClose, chanOffset(ch.id, end)))
 			s.cond.Broadcast()
 		}

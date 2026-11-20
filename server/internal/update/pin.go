@@ -60,6 +60,10 @@ func releaseBase(base, version string) string {
 	return (&url.URL{Scheme: "https", Host: "github.com", Path: repo + "/releases/download/v" + version}).String()
 }
 
+// ReleaseBase is the immutable GitHub release-tag base for a moving update source, or "" for other sources.
+// Managers use it to choose the release layout before trying the legacy versioned-directory download.
+func ReleaseBase(base, version string) string { return releaseBase(base, version) }
+
 // MovedError is a download that did not match the release checked because its source serves another release now
 // (Now): one published between the check and the download. It wraps the mismatch (IsMismatch).
 type MovedError struct {

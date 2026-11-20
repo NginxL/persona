@@ -47,7 +47,7 @@ func TestSupervisedDoneAfterTheUsersOwnCheck(t *testing.T) {
 	waitFor(t, "the message", func() bool { return len(f.notices()) == 1 })
 
 	n := entryLine(f.notices()[0])
-	if !strings.Contains(n, "hub 判断做完了，等你验收（已合并并部署）") || strings.Contains(n, "没做完") || strings.Contains(n, "没判断出来") {
+	if !strings.Contains(n, "待逐项复核，不代表完成（已合并并部署）") || strings.Contains(n, "没做完") || strings.Contains(n, "没判断出来") {
 		t.Fatalf("message:\n%s", n)
 	}
 	if v := todoNow(s, todo.ID).Supervision; v.State != reviewPending {
@@ -75,7 +75,7 @@ func TestSupervisedUnjudgedIsNotStoppedShort(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, fullReport, 0)
 	waitFor(t, "the review message", func() bool { return len(f.notices()) == 1 })
-	if n := f.notices()[0]; !strings.Contains(n, "hub 判断做完了，等你验收") {
+	if n := f.notices()[0]; !strings.Contains(n, "待逐项复核，不代表完成") {
 		t.Fatalf("after one failure:\n%s", n)
 	}
 	if v := todoNow(s, todo.ID).Supervision; v.State != reviewPending {
@@ -177,7 +177,7 @@ func TestAcceptedTaskFollowUpIsNotStoppedShort(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "README 也改好了", 0)
 	waitFor(t, "the review again", func() bool { return len(f.notices()) == 2 })
-	if n := f.notices()[1]; !strings.Contains(n, "hub 判断做完了，等你验收（README 也改好了）") {
+	if n := f.notices()[1]; !strings.Contains(n, "待逐项复核，不代表完成（README 也改好了）") {
 		t.Fatalf("message:\n%s", n)
 	}
 }

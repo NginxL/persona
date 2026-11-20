@@ -4,8 +4,9 @@
 import { t } from "../i18n";
 import type { Session } from "./types";
 
-/** The agents whose own mark is drawn (ui/AgentMark.tsx). A compatible CLI has none: it has no public mark, it draws the letter. */
-export const MARKED_AGENTS = ["claude", "codex", "opencode", "pi", "gemini", "cursor", "trae"] as const;
+const NAMED_AGENTS = ["claude", "codex", "opencode", "pi", "gemini", "cursor", "trae"] as const;
+/** The agents whose own mark is drawn (ui/AgentMark.tsx). */
+export const MARKED_AGENTS = [...NAMED_AGENTS, "grok", "agy", "dsh", "kimi", "copilot"] as const;
 export type MarkedAgent = (typeof MARKED_AGENTS)[number];
 
 /** Other names for the same program (the CLI's binary, the product's own name), by the lowercased `agent` string with
@@ -17,6 +18,21 @@ const ALIASES: Record<string, string> = {
   cursoragent: "cursor",
   piweb: "pi",
   traecli: "trae",
+};
+
+// Alternate product names for the artwork. Provider IDs still key filters and launchers.
+const MARK_ALIASES: Record<string, MarkedAgent> = {
+  grokbuild: "grok",
+  grokchat: "grok",
+  grokcli: "grok",
+  antigravity: "agy",
+  antigravitycli: "agy",
+  googleantigravity: "agy",
+  deepseekharness: "dsh",
+  kimicli: "kimi",
+  copilotcli: "copilot",
+  githubcopilot: "copilot",
+  githubcopilotcli: "copilot",
 };
 
 /** The agent a reported `agent` string names: lowercase, aliases folded in, "" (Claude Code reports nothing) is Claude. */
@@ -32,9 +48,16 @@ export function isMarked(id: string): id is MarkedAgent {
 /** The agent whose mark is drawn: the reported one, else the one its name says when the app has that mark (a runtime's
  *  provider named "Cursor" or "TRAE CLI", #8142). */
 export function markId(raw: string | undefined | null, label?: string): string {
-  const id = agentId(raw);
-  const named = label?.trim() ? agentId(label) : "";
-  return !isMarked(id) && isMarked(named) ? named : id;
+  const id = brandedId(agentId(raw));
+  if (isMarked(id)) return id;
+  const product = label?.split("·", 1)[0]?.trim();
+  const named = product ? brandedId(agentId(product)) : "";
+  return isMarked(named) ? named : id;
+}
+
+function brandedId(id: string): string {
+  const key = id.replace(/[\s._-]/g, "");
+  return Object.hasOwn(MARK_ALIASES, key) ? MARK_ALIASES[key] : id;
 }
 
 /** The id Paseo reports as the agent of each provider the app has no id for (Grok, Kimi, Cursor…: the bridge's
@@ -51,7 +74,7 @@ export function providerAgent(agent: string | undefined | null, provider: string
 /** What the agent is called: the product's name for the ones the app knows, else the runtime's own label, else the string as reported. */
 export function agentName(raw: string | undefined | null, label?: string): string {
   const id = agentId(raw);
-  if (isMarked(id) || id === "traex" || id === "omp") return t(`agent-mark.${id}`); // spec/fixtures/agent-names
+  if ((NAMED_AGENTS as readonly string[]).includes(id) || id === "traex" || id === "omp") return t(`agent-mark.${id}`); // spec/fixtures/agent-names
   return label?.trim() || (raw ?? "").trim() || t("agent-mark.unknown");
 }
 

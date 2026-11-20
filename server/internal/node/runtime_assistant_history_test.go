@@ -65,6 +65,9 @@ func TestRuntimeAssistantHistorySurvivesRediscovery(t *testing.T) {
 			if s.Status != proto.StatusWorking || s.Model != "native-model" || s.PermissionMode != "native-mode" || s.Effort != "high" || !s.BypassAvailable {
 				t.Errorf("runtime state changed for %s: %+v", id, s)
 			}
+			if s.RequestedModel != nil {
+				t.Errorf("%s has a Persona-requested model, but the runtime owns its model selection", id)
+			}
 			if s.Compaction == nil || s.Compaction.State != "running" {
 				t.Errorf("runtime compaction changed for %s: %+v", id, s.Compaction)
 			}

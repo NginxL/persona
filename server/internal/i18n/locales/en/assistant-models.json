@@ -17,7 +17,7 @@
   "name_kb_moments": "Moments links",
   "name_kb_topics": "Knowledge points by topic",
   "name_assistant_title": "Chat titles",
-  "name_assistant_route": "New chat routing",
+  "name_assistant_route": "New agent supervision",
   "name_agent_title": "Agent tab names",
   "name_todo_title": "Todo titles",
   "name_meeting_title": "Meeting titles",
@@ -38,7 +38,7 @@
   "desc_inbox_judge": "Judges whether the AI twin should take up an Inbox item.",
   "desc_agent_triage": "Reads why an agent stopped: finished, waiting on something, or needing you.",
   "desc_inbox_draft": "Drafts a reply for you to review and send.",
-  "desc_translate": "Translates text and mail.",
+  "desc_translate": "Translates text and mail on its own model, using a low-cost default.",
   "desc_kb_compress": "Compresses long chats and tags them for the knowledge base.",
   "desc_kb_project": "Rewrites a project's file in the knowledge base from what was learned since.",
   "desc_kb_dedupe": "Finds knowledge-base projects that are the same one.",
@@ -46,7 +46,7 @@
   "desc_kb_moments": "Links Moments posts to what the knowledge base already holds.",
   "desc_kb_topics": "Groups knowledge points by topic.",
   "desc_assistant_title": "Names a chat with Persona.",
-  "desc_assistant_route": "Decides whether a new chat belongs to a direction or is a quick chat.",
+  "desc_assistant_route": "Suggests which direction should supervise a new agent.",
   "desc_agent_title": "Names an agent's tab from what it is working on.",
   "desc_todo_title": "Names a task's to-do.",
   "desc_meeting_title": "Names a meeting or note from what is said while it records.",
@@ -145,5 +145,8 @@
   "err_candidates_extension_only": "Only an extension’s purpose has candidate models",
   "err_candidates_invalid": "Candidate models: choose “extension”, “off” or “custom”, and list each provider and model once, only for “custom”",
   "err_candidates_count": "Candidate models: list 1 to {most}",
-  "err_candidates_not_callable": "{provider} can’t be called directly, so it can’t be a candidate. Choose a direct API provider or a provider with an address and a key"
+  "err_candidates_not_callable": "{provider} can’t be called directly, so it can’t be a candidate. Choose a direct API provider or a provider with an address and a key",
+  "candidate_not_offered": "no provider in Settings › Model providers offers it",
+  "candidate_not_direct": "{provider} cannot be called directly",
+  "candidate_provider_gone": "the provider {provider} is gone or cannot be called directly"
 }

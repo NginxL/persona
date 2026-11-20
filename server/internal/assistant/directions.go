@@ -53,9 +53,16 @@ type direction struct {
 	NameBy string `json:"name_by,omitempty"`
 	// Progress: the leader's latest own summary (leader_progress, #3679).
 	Progress *leaderProgress `json:"progress,omitempty"`
-	// Notes: what the owner wrote for this direction (#10086, direction_notes.go), "" none; NotesAt when.
-	Notes   string     `json:"notes,omitempty"`
-	NotesAt *time.Time `json:"notes_at,omitempty"`
+	// Notes: what the owner wrote for this direction (#10086, direction_notes.go), "" none; NotesAt when, at
+	// millisecond precision (older records: finer). NotesLastAt: the last NotesAt issued, kept when the notes are
+	// cleared, so a later save never issues it again (nil on older records: NotesAt is).
+	Notes       string     `json:"notes,omitempty"`
+	NotesAt     *time.Time `json:"notes_at,omitempty"`
+	NotesLastAt *time.Time `json:"notes_last_at,omitempty"`
+	// NotesInEffect: the notes block the conversation was last given (notesInEffect, #11392): set by a send that found
+	// it idle (its leader's block, or "" once it is no leader) and, before any did, by the first notes save while it
+	// leads (the block of the notes before that save); nil while unknown.
+	NotesInEffect *string `json:"notes_in_effect,omitempty"`
 }
 
 type leaderTold struct {
@@ -119,6 +126,22 @@ type directionBook struct {
 	m      map[string]*direction // by leader conversation id
 	armed  bool                  // a compare is scheduled
 	after  func(d time.Duration, f func())
+	now    func() time.Time // tests: the clock notes are saved and the owner's messages are aged by (nil: time.Now)
+	// inflight: by conversation, the moves of its notes block in effect and the owner's messages whose outcomes are
+	// not yet known (direction_notes.go notesSendOutcome); ownerSeen: the owner's latest message ids it gave parameters
+	// for (notesOwnerCarry); namedOn: one more than the newest connection to the hub on which a notice named its
+	// message (hubConnOf; 0 none), so its notices name their messages (notesOwnerOutcome). In memory only.
+	inflight  map[string]*notesFlight
+	ownerSeen map[string][]string
+	namedOn   uint64
+}
+
+// clock is now on b's clock; b.mu is held.
+func (b *directionBook) clock() time.Time {
+	if b.now != nil {
+		return b.now()
+	}
+	return time.Now()
 }
 
 // directionsLocked reads the book once; b.mu is held. A failed read leaves it unloaded: nothing is told or saved over it.
@@ -321,10 +344,10 @@ type leaderView struct {
 	assistantwire.LeaderChangedEvent
 	// Progress: the leader's latest own summary (leader_progress), nil before its first.
 	Progress *leaderProgress `json:"progress,omitempty"`
-	// Notes: what the owner wrote for the direction (direction_notes.go), NotesAt when; the leader and the
-	// direction's new Agents are given them.
+	// Notes: what the owner wrote for the direction (direction_notes.go), NotesAt when (null with no notes: the
+	// value a save sends back as notes_at, #11392); the leader and the direction's new Agents are given them.
 	Notes   string     `json:"notes,omitempty"`
-	NotesAt *time.Time `json:"notes_at,omitempty"`
+	NotesAt *time.Time `json:"notes_at"`
 	By      string     `json:"by"`
 	At      time.Time  `json:"at"`
 	EndedAt *time.Time `json:"ended_at,omitempty"`

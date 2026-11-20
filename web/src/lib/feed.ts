@@ -41,7 +41,12 @@ export interface PlanTask {
   why?: string;
   /** The reasoning effort the assistant chose for its Agent (task_plan's `effort`); absent: the launcher's default. */
   effort?: string;
+  /** The to-do the task runs on; cleared on an older plan once a later one continues that to-do (#11854). */
   todo_id?: string;
+  /** The to-do this task carries on in (task_plan's `continues`) or runs on instead of a new one (`todo_id`, kept as
+   *  `reuse_todo`): both stay when `todo_id` is cleared. */
+  continues?: string;
+  reuse_todo?: string;
   error?: string;
   /** The failed start's coded refusal and its details (as a session's start_error_code / start_error_args). */
   error_code?: string;

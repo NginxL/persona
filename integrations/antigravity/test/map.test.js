@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { MCP_SERVER_NAMES } from '../../runtime-sdk/lib/compat.js'
+import { page } from '../../runtime-sdk/index.js'
 import {
   agyModeToPersona,
   cleanGenericOutput,
@@ -163,6 +167,202 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(items[4].kind, 'tool_result')
     assert.equal(items[4].tool_use_id, items[3].tool_use_id)
     assert.equal(items[4].text.trim(), 'total 0')
+  })
+
+  it('uses native indices for files and client messages after projected steps move', () => {
+    const brainDir = mkdtempSync(join(tmpdir(), 'agy-native-index-'))
+    try {
+      const output = join(brainDir, '.system_generated', 'steps', '8', 'output.txt')
+      mkdirSync(dirname(output), { recursive: true })
+      writeFileSync(output, 'complete native output')
+      const { items } = stepsToItems([
+        { step_index: 8, native_step_index: 7, type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'hello' },
+        { step_index: 9, native_step_index: 8, type: 'GENERIC', content: 'truncated', truncated_fields: ['content'] },
+      ], { full: true, brainDir, clientMsgIdFor: (index) => `client-${index}` })
+      assert.equal(items[0].client_msg_id, 'client-7')
+      assert.equal(items[1].text, 'complete native output')
+    } finally {
+      rmSync(brainDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a delivered reply and attachment outside a later native wake on pages and catch-up', () => {
+    const steps = readFileSync(new URL('./fixtures/autonomous-wake.jsonl', import.meta.url), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    const prior = stepsToItems(steps.slice(0, 3), { full: true })
+    const pending = stepsToItems(steps.slice(0, 5), { full: true })
+    const all = stepsToItems(steps, { full: true })
+    assert.deepEqual(pending.items, prior.items, 'a notification alone is not a visible wake')
+    assert.equal(pending.toSeq, 5)
+    assert.deepEqual(all.items.slice(0, 2), prior.items)
+    assert.match(prior.items[1].text, /file: \/synthetic\/chart\.png/)
+    const catchUp = page(all.items, { after_seq: pending.toSeq }, { toSeq: all.toSeq })
+    assert.deepEqual(catchUp.items.map((item) => [item.seq, item.kind, item.wake]), [
+      [6, 'notice', true], [6, 'text', undefined], [8, 'text', undefined], [9, 'text', undefined],
+    ])
+    assert.equal(catchUp.items[0].id, prior.items[1].id.replace(/#\d+$/, '#-1'))
+    assert.deepEqual(stepsToItems(steps).items.map((item) => item.id), all.items.map((item) => item.id))
+    assert.doesNotMatch(JSON.stringify(all.items), /Synthetic|housekeeping|second notification/)
+    const checkpoint = { step_index: 4, type: 'CHECKPOINT', created_at: steps[4].created_at }
+    const compacted = [...steps.slice(0, 4), checkpoint]
+    assert.deepEqual(stepsToItems(compacted).items.slice(-1).map(item => [item.kind, item.text, item.wake]), [['notice', '上下文已压缩', undefined]])
+    const afterCheckpoint = stepsToItems([...compacted, steps[5]])
+    assert.deepEqual(afterCheckpoint.items.slice(-2).map(item => item.id), catchUp.items.slice(0, 2).map(item => item.id))
+    const emptyPlanner = { step_index: 5, type: 'PLANNER_RESPONSE', status: 'RUNNING' }
+    assert.deepEqual(stepsToItems([...compacted, emptyPlanner, ...steps.slice(7)]).items.filter(item => item.wake), [])
+  })
+
+  it('does not let a call that never got a result shift the results of later calls', () => {
+    const at = '2026-11-05T10:00:00Z'
+    const step = (step_index, type, extra = {}) => ({ step_index, type, source: type === 'USER_INPUT' ? 'USER_EXPLICIT' : 'MODEL', status: 'DONE', created_at: at, ...extra })
+    const call = (name) => ({ name, args: {} })
+    const { items } = stepsToItems([
+      step(0, 'USER_INPUT', { content: 'go' }),
+      step(1, 'PLANNER_RESPONSE', { tool_calls: [call('view_file'), call('run_command')] }),
+      step(2, 'GENERIC', { content: 'first' }), // the second call was interrupted: no result
+      step(3, 'USER_INPUT', { content: 'again' }),
+      step(4, 'PLANNER_RESPONSE', { tool_calls: [call('view_file')] }),
+      step(5, 'GENERIC', { content: 'second' }),
+      step(6, 'PLANNER_RESPONSE', { thinking: 'more', tool_calls: [call('view_file'), call('grep_search')] }),
+      step(7, 'SYSTEM_MESSAGE', { content: 'a background task finished' }),
+      step(8, 'GENERIC', { content: 'third' }),
+      step(9, 'GENERIC', { content: 'fourth' }),
+    ])
+    const uses = items.filter((item) => item.kind === 'tool_use')
+    const results = new Map(items.filter((item) => item.kind === 'tool_result').map((item) => [item.tool_use_id, item.text]))
+    assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)), ['first', undefined, 'second', 'third', 'fourth'])
+  })
+
+  it('opts into lazy tool media without changing Read metadata, user attachments, or turn pagination', () => {
+    const inline = { mime_type: 'image/gif', data: 'R0lGODlh' }
+    const steps = [
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:00Z',
+        content: '<USER_REQUEST>\nCheck this screenshot\n\n<attached_images>\n/tmp/user-upload.png\n</attached_images>\n</USER_REQUEST>',
+        media: [{ mime_type: 'image/png', uri: '/tmp/user-upload.png' }],
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:01Z',
+        tool_calls: [
+          { name: 'read_file', args: { Path: '/work/shots/ui.png' } },
+          { name: 'view_file', args: { AbsolutePath: '/work/shots/detail.jpg' } },
+          { name: 'run_command', args: { CommandLine: 'capture-screen' } },
+        ],
+      },
+      {
+        step_index: 2,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:02Z',
+        content: 'Read image /work/shots/ui.png',
+        media: [
+          { mime_type: 'image/png', uri: '/work/shots/ui.png' },
+          { mime_type: 'application/pdf', uri: '/work/spec.pdf' },
+          inline,
+          { mime_type: 'image/png' },
+        ],
+      },
+      {
+        step_index: 3,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:03Z',
+        content: '',
+        media: [{ mime_type: 'image/jpeg', uri: '/work/shots/detail.jpg' }],
+      },
+      {
+        step_index: 4,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:04Z',
+        content: 'captured',
+        media: [{ mime_type: 'image/webp', uri: 'steps/4/capture.webp' }],
+      },
+      {
+        step_index: 5,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-19T10:00:05Z',
+        content: 'All screenshots look aligned.',
+      },
+    ]
+
+    for (const full of [false, true]) {
+      const { items, toSeq, lastText } = stepsToItems(steps, { full })
+      assert.equal(toSeq, 6)
+      assert.equal(lastText, 'All screenshots look aligned.')
+      assert.equal(items.some((it) => it.kind === 'image'), false, `full=${full}: must not emit image items`)
+      assert.equal(items.some((it) => 'lazy' in it || Boolean(it.image?.lazy)), false, `full=${full}: must not emit lazy image placeholders`)
+
+      const userItems = items.filter((it) => it.role === 'user' && it.kind !== 'tool_result')
+      assert.equal(userItems.length, 1)
+      assert.equal(userItems[0].kind, 'text')
+      assert.equal(userItems[0].text, 'Check this screenshot\n\n<attached_images>\n/tmp/user-upload.png\n</attached_images>')
+
+      const uses = items.filter((it) => it.kind === 'tool_use')
+      const results = items.filter((it) => it.kind === 'tool_result')
+      assert.equal(uses.length, 3)
+      assert.equal(results.length, 3)
+      assert.equal(uses[0].tool_name, 'Read')
+      assert.deepEqual(uses[0].tool_input, { file_path: '/work/shots/ui.png' })
+      assert.equal(uses[1].tool_name, 'Read')
+      assert.deepEqual(uses[1].tool_input, { file_path: '/work/shots/detail.jpg' })
+      assert.equal(uses[2].tool_name, 'Bash')
+      assert.deepEqual(
+        results.map((r) => [r.tool_use_id, r.is_error, r.text]),
+        [
+          [uses[0].tool_use_id, false, 'Read image /work/shots/ui.png'],
+          [uses[1].tool_use_id, false, ''],
+          [uses[2].tool_use_id, false, 'captured'],
+        ],
+      )
+
+      // Turn pagination must stay intact: tool results with step.media must not look like extra user turns.
+      const paged = page(items, { turns: 1 }, { history: 'h', toSeq })
+      assert.equal(paged.has_more, false, `full=${full}: single turn must not be split by tool media`)
+      assert.equal(paged.items[0].id, userItems[0].id)
+
+      const mapped = stepsToItems(steps, { full, includeMedia: true })
+      const images = mapped.items.filter((item) => item.kind === 'image')
+      const expected = [[0, 0, 'png'], [0, 2, 'gif'], [1, 0, 'jpeg'], [2, 0, 'webp']]
+      assert.deepEqual(images, expected.map(([resultIndex, mediaIndex, format]) => {
+        const { id, seq, tool_use_id, ts } = results[resultIndex]
+        return { id: id.replace(/#0$/, `#media${mediaIndex}`), seq, role: 'assistant', kind: 'image', tool_use_id, ts,
+          image: { mime: `image/${format}`, data: '', lazy: true } }
+      }))
+      assert.equal(mapped.media, undefined)
+      assert.equal(stepsToItems(steps, { includeMedia: true, mediaItemId: images[1].id }).media, inline)
+      assert.equal(stepsToItems(steps, { mediaItemId: images[1].id }).media, undefined)
+      const withMedia = page(mapped.items, { turns: 1 }, { history: 'h', toSeq: mapped.toSeq })
+      assert.deepEqual({ ...withMedia, items: withMedia.items.filter((item) => item.kind !== 'image') }, paged)
+    }
+
+    // Photo-only user uploads carried via <attached_images> still produce the user text item without lazy image items.
+    const photoOnly = stepsToItems([
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-19T10:01:00Z',
+        content: '<USER_REQUEST>\n<attached_images>\n/tmp/only-photo.png\n</attached_images>\n</USER_REQUEST>',
+        media: [{ mime_type: 'image/png', uri: '/tmp/only-photo.png' }],
+      },
+    ], { includeMedia: true })
+    assert.equal(photoOnly.items.length, 1)
+    assert.equal(photoOnly.items[0].kind, 'text')
+    assert.equal(photoOnly.items[0].text, '<attached_images>\n/tmp/only-photo.png\n</attached_images>')
   })
 
   it('maps modes between Persona and Antigravity ACP', () => {

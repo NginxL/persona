@@ -90,6 +90,8 @@ data class SettingsServices(
     val agentsDisplay: persona.core.domain.sort.AgentListDisplaySettings? = null,
     /** Settings › Standing Authorizations on the paired hub; null in demo mode. */
     val standing: StandingAuthorizationsSource? = null,
+    /** Device-local Developing Persona records; never scoped to or synchronized with a hub. */
+    val developing: DevelopingDiagnostics? = null,
 )
 
 fun EntryProviderScope<NavKey>.settingsEntries(navigator: Navigator, services: SettingsServices? = null) {

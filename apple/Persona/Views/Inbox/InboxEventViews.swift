@@ -1027,7 +1027,7 @@ struct InboxSourcePage: View {
         case .document:
             InboxDocDetailView(item: item)
         case .connector:
-            InboxConnectorDetailView(item: item)
+            InboxConnectorDetailView(item: item, manager: model.itemManager(item.manager))
         case .moment:
             if let moment = item.moment {
                 LarkMomentsPostView(postID: moment.postID, pushed: true, manager: model.linkManager(item.manager))
@@ -1046,7 +1046,7 @@ struct InboxSourcePage: View {
     /// The mail the link names, else the thread's newest.
     private var mail: MailSummary? {
         guard let uid = route.uid, let m = item.mail else { return item.mailSummary }
-        return MailSummary(accountID: m.accountID, mailbox: m.mailbox, uid: uid, messageID: uid == m.uids.last ? m.messageID : nil,
+        return MailSummary(accountID: m.accountID, mailbox: m.sourceMailbox ?? "INBOX", uid: uid, messageID: uid == m.uids.last ? m.messageID : nil,
                            subject: item.title, from: m.from, date: item.updatedAt, snippet: item.preview, seen: true)
     }
 }

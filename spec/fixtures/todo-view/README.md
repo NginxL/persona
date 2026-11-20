@@ -246,10 +246,10 @@ Where the proposal and today's code leave a choice open, these cases make it; ch
   on another manager, or the card ended while the session still says it waits) asks a `question`, `open`.
 - **A run's ask is safe exactly when a notification may answer its card.** Choosing one of the answers offered is what
   a row or a push can do without the run's page, and the hub's push offers them for one question with options, no
-  fields and nothing private (`proto.Interaction.OneTapQuestion`, which the push and the view share); a plan, a tool
-  approval, a form or a secret needs a look at what the run wants, and so do several questions, a question to answer
-  in words, a dialog on the screen and a card whose asker says going ahead cannot be undone, the card's twin of a
-  decision that cannot be undone. What a tool would do is not read yet.
+  fields, nothing private and no asker who said going ahead cannot be undone, the card's twin of a decision that
+  cannot be undone (`proto.Interaction.OneTapQuestion`, which the push and the view share); a plan, a tool approval, a
+  form or a secret needs a look at what the run wants, and so do several questions, a question to answer in words and
+  a dialog on the screen. What a tool would do is not read yet.
 - **The decision's risk is the manager's, read off the list.** The list hides a deadline once it was handled and does
   not carry whether taking a decision at its deadline can be undone, so the rule cannot be worked out from the row; the
   manager writes it on the listed ask (`risk`), one rule for the list, the view and every place that answers it.

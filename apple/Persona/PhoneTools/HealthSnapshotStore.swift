@@ -160,7 +160,10 @@ actor HealthSnapshotStore: HealthSnapshotStoring {
     }
 
     func cachedIfFresh(now: Date) -> HealthSnapshot? {
-        guard let lastRefresh, now.timeIntervalSince(lastRefresh) < Self.refreshInterval else { return nil }
+        // HealthTool saves the refresh's end time as the snapshot's asOf.
+        guard let refreshed = lastRefresh ?? load()?.asOf else { return nil }
+        let age = now.timeIntervalSince(refreshed)
+        guard age >= 0, age < Self.refreshInterval else { return nil }
         return cached ?? load()
     }
 

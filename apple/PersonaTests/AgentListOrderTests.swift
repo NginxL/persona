@@ -45,6 +45,45 @@ import PersonaWire
         #expect(o.ordered(list).map(\.sessionID) == ["c", "b", "a", "d"])
     }
 
+    @Test func justFinishedRankPrecedenceFoldsAndHeldPlace() throws {
+        var done = session("done", "idle")
+        done.work = try JSON.decoder.decode(WorkState.self, from: Data(#"{"phase":"done","just_finished":true}"#.utf8))
+        let index = AgentListOrder.stateKeys.firstIndex(of: "just_finished")
+        #expect(index == 5 && order().rank(done) == index)
+        #expect(order().stays(done))
+        #expect(try !order().isQuiet(#require(SpaceGroup.build([done]).first)))
+        let muted = order(muted: ["done"])
+        #expect(muted.rank(done) == AgentListOrder.stateKeys.firstIndex(of: "idle"))
+        #expect(!muted.stays(done))
+        #expect(try muted.isQuiet(#require(SpaceGroup.build([done]).first)))
+        var settings = AgentListProjection.Settings(grouping: "repo")
+        func repository(_ settings: AgentListProjection.Settings) throws -> AgentListProjection.Repository {
+            let result = AgentListProjection.build(.init(sessions: [done], machines: [], settings: settings))
+            return try #require(result.repositories.values.first)
+        }
+        let activeRepo = try repository(settings)
+        #expect(!activeRepo.quiet && activeRepo.unread == [done.key])
+        settings.preferences[done.group] = .init(pins: Pins(), mutes: Pins())
+        settings.preferences[done.group]?.mutes.sessions = ["m/done"]
+        let mutedRepo = try repository(settings)
+        #expect(mutedRepo.quiet && mutedRepo.unread.isEmpty)
+        var waiting = done
+        waiting.listWaiting = true
+        #expect(order().rank(waiting) == AgentListOrder.stateKeys.firstIndex(of: "waiting"))
+        #expect(!waiting.showsJustFinished(muted: false))
+        let held = AgentListOrder(isPinned: { _ in false }, isMuted: { _ in false }, held: done.key, heldJustFinished: true)
+        done.markLocallySeen()
+        #expect(held.rank(done) == index && held.stays(done))
+        var mutedWhileOpen = held
+        mutedWhileOpen.isMuted = { _ in true }
+        #expect(!mutedWhileOpen.stays(done))
+        #expect(try mutedWhileOpen.isQuiet(#require(SpaceGroup.build([done]).first)))
+        #expect(mutedWhileOpen.rank(done) == AgentListOrder.stateKeys.firstIndex(of: "idle"))
+        #expect(!order().stays(done) && order().rank(done) == AgentListOrder.stateKeys.firstIndex(of: "idle"))
+        done.state = .working
+        #expect(held.rank(done) == AgentListOrder.stateKeys.firstIndex(of: "working"))
+    }
+
     @Test func sameRankNewestFirstThenById() {
         let list = [session("b", "unread", updated: 5), session("a", "unread", updated: 5), session("c", "unread", updated: 9)]
         #expect(order().ordered(list).map(\.sessionID) == ["c", "a", "b"])

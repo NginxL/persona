@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"maps"
 	"path/filepath"
 	"sort"
@@ -17,10 +18,11 @@ import (
 
 var launcherCache struct {
 	sync.Mutex
-	at       time.Time
-	list     []proto.Launcher
-	fetch    sync.Mutex // one login shell at a time
-	fetching bool       // a background refresh (cachedLaunchers) is running
+	at         time.Time
+	list       []proto.Launcher
+	generation uint64     // incremented whenever a discovery publishes a new list
+	fetch      sync.Mutex // one login shell at a time
+	fetching   bool       // a background refresh (cachedLaunchers) is running
 	// codex: how each Codex launcher runs (codex_start.go), its words as the shell would run them.
 	codex map[string][]string
 	// settings: the --settings a claude alias brings itself, as its words give it (launcher_settings.go).
@@ -87,33 +89,84 @@ func launcherOutput(out string) string {
 	return out
 }
 
+// launcherFetchObserverKey carries a test-only entered signal. It runs after the caller snapshots the cache generation
+// and before it queues for the shell lock, so a concurrency test does not need a fixed sleep to establish that order.
+type launcherFetchObserverKey struct{}
+
 // launchers lists the launchers of this machine's login shell: the `_claude_launchers` helper's (claude wrapper
 // functions), then every alias that runs claude (`alias dmcc="ANTHROPIC_BASE_URL=… claude …"`), by name. A name
-// the helper lists is not repeated; none at all: plain claude.
-func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
+// the helper lists is not repeated; none at all: plain claude. refresh true bypasses and replaces the one-minute
+// cache; the manager uses it only while recovering a specific Assistant launcher missing from the cached snapshot.
+func (n *Node) launchers(ctx context.Context, refresh ...bool) ([]proto.Launcher, error) {
+	forced := len(refresh) > 0 && refresh[0]
+	launcherCache.Lock()
+	observed := launcherCache.generation
+	launcherCache.Unlock()
+	if entered, _ := ctx.Value(launcherFetchObserverKey{}).(func()); entered != nil {
+		entered()
+	}
 	launcherCache.fetch.Lock()
 	defer launcherCache.fetch.Unlock()
 	launcherCache.Lock()
-	if time.Since(launcherCache.at) < time.Minute && launcherCache.list != nil {
+	// A detached discovery may have finished while this call waited for the shell lock. Its newly published list is the
+	// freshest possible answer, even for a forced refresh; running another shell now could hide that recovery again.
+	if launcherCache.list != nil && ((!forced && time.Since(launcherCache.at) < time.Minute) ||
+		(forced && launcherCache.generation != observed)) {
 		list := launcherCache.list
 		launcherCache.Unlock()
 		return list, nil
 	}
 	launcherCache.Unlock()
+	// Only the discovery that already started outlives its RPC caller. A canceled caller that merely queued for the
+	// shell lock must not start another detached shell after the active discovery fails without publishing a list.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Not cut short when the caller gives up (the hub waits a few seconds per machine): a slow rc file still finishes
 	// and the next ask within the minute gets the list from the cache.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer cancel()
-	out, err := loginShell(ctx, launcherScript).Output()
-	if err != nil && len(out) == 0 {
-		return nil, fmt.Errorf("list launchers: %w", err)
+	// Within those 20 s for good (#10952): something the rc file leaves running in the background (or the script's
+	// children when the cap kills the shell) holds the output's pipe open, and Output() alone waited for it, past the
+	// hub's 30 s on every ask while this lock held each one behind it. The shell's output so far is the list.
+	cmd := loginShell(ctx, launcherScript)
+	killGroupOnCancel(cmd)
+	began := time.Now()
+	out, err := cmd.Output()
+	text := string(out)
+	if !strings.Contains(text, launcherBegin) {
+		// The shell ended before the script ran (the 20 s cap on a slow rc file, an rc file that exits): what it printed
+		// is the rc files' own, and says nothing of the launchers. Ordinary reads may keep the last good list, but a
+		// forced recovery refresh must report the failed read rather than presenting that stale list as fresh evidence.
+		failed := fmt.Errorf("list launchers: the login shell ended before listing them after %v: %v",
+			time.Since(began).Round(time.Millisecond), err)
+		if forced {
+			return nil, failed
+		}
+		return lastLaunchers(failed)
 	}
-	list, codex, settings, scripts := mergeLaunchers(string(out))
+	// Once discovery began, partial framed output remains useful when the 20-second cap cuts off the shell. Without
+	// that begin marker there is no evidence that any of the output came from launcherScript.
+	list, codex, settings, scripts := mergeLaunchers(text)
 	launcherCache.Lock()
 	launcherCache.at, launcherCache.list, launcherCache.codex, launcherCache.settings = time.Now(), list, codex, settings
 	launcherCache.scripts = scripts
+	launcherCache.generation++
 	launcherCache.Unlock()
 	return list, nil
+}
+
+// lastLaunchers answers a failed read of the login shell (launchers): the last list, kept for another minute so the
+// next try is not on every ask while a slow shell stays slow; the error only when there has been no list yet.
+func lastLaunchers(failed error) ([]proto.Launcher, error) {
+	launcherCache.Lock()
+	defer launcherCache.Unlock()
+	if launcherCache.list == nil {
+		return nil, failed
+	}
+	log.Printf("node: %v; keeping the last %d launchers", failed, len(launcherCache.list))
+	launcherCache.at = time.Now()
+	return launcherCache.list, nil
 }
 
 // mergeLaunchers is launcherScript's output as the launcher list: the helper's, then the aliases it does not name,
@@ -223,7 +276,41 @@ func (n *Node) inferLauncher(id string) string {
 	if !ok {
 		return ""
 	}
-	return matchLauncher(n.cachedLaunchers(), env.BaseURL, env.Model)
+	if name := matchLauncher(n.cachedLaunchers(), env.BaseURL, env.Model); name != "" {
+		return name
+	}
+	return matchLauncher(n.managedInferLaunchers(), env.BaseURL, env.Model)
+}
+
+// managedInferLaunchers returns the cached Claude managed-launcher projection so a terminal session started manually
+// with `personad launch <name>` can infer its managed launcher when the endpoint/model match is unambiguous.
+func (n *Node) managedInferLaunchers() []proto.Launcher {
+	if n == nil {
+		return nil
+	}
+	n.managed.mu.Lock()
+	if n.managed.infer == nil && len(n.managed.byID) > 0 {
+		n.managed.infer = buildManagedInferLaunchers(n.managed.byID)
+	}
+	out := n.managed.infer
+	n.managed.mu.Unlock()
+	return out
+}
+
+func buildManagedInferLaunchers(byID map[string]proto.ManagedLauncher) []proto.Launcher {
+	if len(byID) == 0 {
+		return nil
+	}
+	out := make([]proto.Launcher, 0, len(byID))
+	for _, l := range byID {
+		if a := l.AgentType(); a != "" && a != "claude" {
+			continue
+		}
+		pm, _ := providerModel(l, l.Model)
+		out = append(out, proto.Launcher{Name: l.Name, BaseURL: managedBaseURL(l), Model: sdkModel(l.Model, pm)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // matchLauncher picks the launcher that exports this base URL and model. Several launchers can share one endpoint
@@ -240,7 +327,7 @@ func matchLauncher(list []proto.Launcher, baseURL, model string) string {
 			continue
 		}
 		byURL = append(byURL, l.Name)
-		if model != "" && l.Model == model {
+		if model != "" && (l.Model == model || l.Model != "" && proto.TrimModelWindow(l.Model) == proto.TrimModelWindow(model)) {
 			byBoth = append(byBoth, l.Name)
 		}
 	}

@@ -30,7 +30,7 @@ internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: In
  * The title menu's items in iOS's order and sections (#4339 C18): while the hub is out of reach Connection details,
  * then Knowledge, Details (the assistant's own page, iOS's profile), Voice chat (Android's, while the hub runs a voice
  * extension) and Back to main chat (off the main conversation); the copies (the directory and the info always, the
- * session ID and diagnostics with a conversation open); the main conversation's Compact context, Clear context (#5100,
+ * session ID and diagnostics with a conversation open); Compact context, the main conversation's Clear context (#5100,
  * between them as on the web) and New main chat; Session
  * info and, while it works, Interrupt. The per-conversation launcher and model are #5055's pill and panel, not menu items,
  * and the menu's heading names them ([AssistantCopyText.menuTitle]); Screen is not done: Android has no live screen. Each

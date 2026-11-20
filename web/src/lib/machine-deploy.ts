@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import type { Machine } from "./types";
+import type { Machine, MachineLinkSwitch } from "./types";
 
 const PHASES = {
   waiting_idle: { label: t("lib-machine-deploy.waiting_idle"), message: t("lib-machine-deploy.waiting_idle_message") },
@@ -7,6 +7,19 @@ const PHASES = {
   restarting: { label: t("lib-machine-deploy.restarting"), message: t("lib-machine-deploy.restarting_message") },
   confirming: { label: t("lib-machine-deploy.confirming"), message: t("lib-machine-deploy.confirming_message") },
 } satisfies Record<NonNullable<Machine["deploy_phase"]>, { label: string; message: string }>;
+
+/** A switch to Persona Link is under way (#10662, lib/link-switch.ts): the computer may be offline and of kind link
+ *  meanwhile, as expected. Here, not there, because the first screen reads it. */
+export function linkSwitchRunning(s?: MachineLinkSwitch | null): boolean {
+  const p = s?.phase;
+  return p === "checking" || p === "installing" || p === "connecting" || p === "rolling_back";
+}
+
+/** Offline on purpose: an update restarting its node, or a switch to Persona Link reconnecting it (#10662). Pure, so
+ *  the machine alerts read it without counting as a deployment read (lib/machine-alerts.ts). */
+export function disconnectExpected(m: Machine): boolean {
+  return !m.online && ((!m.deploy_error && (m.deploy_phase === "restarting" || m.deploy_phase === "confirming")) || linkSwitchRunning(m.link_switch));
+}
 
 /** Older hubs can deploy SSH nodes, but never advertised an update path for linked nodes. */
 export function machineDeployment(m: Machine) {
@@ -25,7 +38,7 @@ export function machineDeployment(m: Machine) {
   return {
     visible: !!(m.node_mismatch || busy || m.deploy_error),
     busy,
-    expectedDisconnect: !m.online && !m.deploy_error && (m.deploy_phase === "restarting" || m.deploy_phase === "confirming"),
+    expectedDisconnect: disconnectExpected(m),
     supported,
     canDeploy: canDeploy && !busy,
     label: busy ? phase?.label || t("lib-machine-deploy.deploying") : t("lib-machine-deploy.redeploy"),

@@ -638,6 +638,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 					continue
 				}
 				s.Cwd, s.Model, s.LastText, s.UpdatedAt, s.Rev = m.cwd, m.model, snippet(m.lastText), lastUsed(m, st), st.Size()
+				if m.codex && m.lastText != "" {
+					s.Asks, s.AsksRead = m.asks, true
+				}
 				s.AgentSurface = m.surface
 				s.Effort = m.effort
 				m.turnErr.set(&s)

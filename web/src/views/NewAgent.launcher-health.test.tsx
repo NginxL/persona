@@ -61,6 +61,10 @@ async function open(key: string) {
 
 async function openPanel() {
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
+  await flush();
+  // These caller tests inspect model actions; disclose the catalog first.
+  for (const header of document.body.querySelectorAll<HTMLButtonElement>('[data-panel-launcher][aria-expanded="false"]')) act(() => header.click());
   await flush();
 }
 
@@ -108,9 +112,9 @@ describe("New agent's launcher health", () => {
     expect(fix("work_gw")).toBeDefined();
     const off = row("model:work_gw\ndefault");
     expect(off.getAttribute("aria-disabled")).toBe("true");
-    expect(off.getAttribute("aria-selected")).toBe("false");
+    expect(off.getAttribute("aria-pressed")).toBe("false");
     expect(off.title).toBe("这台电脑的终端里用不了");
-    expect(row("model:claude\ndefault").getAttribute("aria-selected")).toBe("true");
+    expect(row("model:claude\ndefault").getAttribute("aria-pressed")).toBe("true");
     expect(row("model:claude\ndefault").getAttribute("aria-disabled")).toBeNull();
     expect(q('[data-testid="launcher-blocked-help"]')).toBeNull();
   });
@@ -186,7 +190,7 @@ describe("New agent's launcher health", () => {
     await openPanel();
     // the row that runs, lit with why (it stays reachable for its flyout, as the panel's running row always is)
     const runs = row("model:work_gw\ndefault");
-    expect(runs.getAttribute("aria-selected")).toBe("true");
+    expect(runs.getAttribute("aria-pressed")).toBe("true");
     expect(runs.title).toBe("这台电脑的终端里用不了");
     expect(fix("work_gw")).toBeDefined();
     act(() => pill().click());
@@ -218,7 +222,7 @@ describe("New agent's launcher health", () => {
     await openPanel();
     // still the choice, with the warning: it is Model settings' to change
     const follow = q("[data-follow-row]")!;
-    expect(follow.getAttribute("aria-selected")).toBe("true");
+    expect(follow.getAttribute("aria-pressed")).toBe("true");
     expect(follow.getAttribute("aria-disabled")).toBeNull();
     expect(follow.querySelector("[title]")!.getAttribute("title")).toContain("这台电脑的终端里用不了");
     act(() => pill().click());

@@ -24,6 +24,7 @@
   "result": "Result",
   "error": "Error",
   "image": "Image",
+  "visualization": "Visualization",
   "cut_unknown": "Some text was not included.",
   "cut": "{n} more characters not included",
   "partial": "Some messages could not be read. Earliest retained message: {from}."

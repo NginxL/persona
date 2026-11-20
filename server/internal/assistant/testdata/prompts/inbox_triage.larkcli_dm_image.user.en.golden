@@ -1,9 +1,11 @@
-类型：通过 lark-cli 收到的 Lark 私聊，另一方是人
-每行一条消息：开头是消息时间（月-日 时:分），然后是发送人和内容。「—— 新消息 ——」之前是更早的聊天记录，只作背景，按它之后的新消息判断；没有这一行时都是新消息。
+Type: Lark direct message received through lark-cli; the other party is a person
 
-本次新消息：[Image: img_example_new_screenshot]
+If the chat has sections, judge new activity under “Current messages (new activity):” and use “Background history (context only, not new requests):” for context. In the older format, treat only messages after “—— 新消息 ——” as new.
 
-会话上下文（含较早消息）：
+
+Newest message: [Image: img_example_new_screenshot]
+
+Conversation context (including earlier messages):
 Example peer（@了我）: @Example owner can you check the filter?
 Example owner: Here is the report.
 Example peer: Thanks, I can see it.

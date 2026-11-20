@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -19,11 +20,13 @@ import (
 // sends them).
 type ownConfig struct {
 	Assistant *struct {
-		Owner          *string `json:"owner"`
-		Notes          *string `json:"notes"`
-		Machine        *string `json:"machine"`
-		Launcher       *string `json:"launcher"`
-		MemoryDreaming bool    `json:"memory_dreaming"`
+		Owner                   *string `json:"owner"`
+		Notes                   *string `json:"notes"`
+		Machine                 *string `json:"machine"`
+		Launcher                *string `json:"launcher"`
+		MemoryDreaming          bool    `json:"memory_dreaming"`
+		CompleteAgentlessTodos  bool    `json:"complete_agentless_todos"`
+		SupervisionBatchMinutes *int    `json:"supervision_batch_minutes"`
 	} `json:"assistant"`
 	Agents *assistantwire.AgentsConfig `json:"agents"`
 	KB     *struct {
@@ -66,8 +69,15 @@ func readOwnConfig(file string) (ownConfig, error) {
 		}
 		return c, err
 	}
-	err = json.Unmarshal(b, &c)
-	return c, err
+	if err := json.Unmarshal(b, &c); err != nil {
+		return c, err
+	}
+	if a := c.Assistant; a != nil && a.SupervisionBatchMinutes != nil {
+		if minutes := *a.SupervisionBatchMinutes; minutes < 0 || minutes > maxSupervisionBatchMinutes {
+			return c, fmt.Errorf("assistant.supervision_batch_minutes must be between 0 and %d", maxSupervisionBatchMinutes)
+		}
+	}
+	return c, nil
 }
 
 // validatePlacement rejects a configured assistant machine that the hub classifies as work.
@@ -82,6 +92,10 @@ func (c ownConfig) validatePlacement(h Hello) error {
 func (c ownConfig) over(h Hello) Hello {
 	if a := c.Assistant; a != nil {
 		h.Assistant.MemoryDreaming = a.MemoryDreaming
+		h.Assistant.CompleteAgentlessTodos = a.CompleteAgentlessTodos
+		if a.SupervisionBatchMinutes != nil {
+			h.Assistant.SupervisionBatchMinutes = a.SupervisionBatchMinutes
+		}
 		if a.Owner != nil {
 			h.Owner = strings.TrimSpace(*a.Owner)
 		}

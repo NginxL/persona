@@ -33,6 +33,51 @@ class AgentCreationServiceTest {
         }
     }
 
+    /**
+     * New Agent's Agent presets (#2225): the active profile and its tiers survive the launcher-list read. The wire-shaped
+     * round trip keeps this runtime-red on a client which does not decode them yet, instead of naming future Kotlin types.
+     */
+    @Test fun newAgentTiersAndTheirActiveProfileDecodeAndOlderHubsHaveNone() = runBlocking {
+        MockWebServer().use { server ->
+            val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())
+            val tiers = """[{"name":"quick","launcher":"claude"},{"name":"review","launcher":"fast","model":"m-review","effort":"high","description":"Design and code review"}]"""
+            val profile = """{"id":"performance","name":"Performance"}"""
+            server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"},{"name":"fast"}],"tiers":$tiers,"tiers_profile":$profile}"""))
+            val offered = Json(JsonCodec) { encodeDefaults = true }.encodeToJsonElement(
+                AssistantLaunchers.serializer(), service.launcherList("computer")).jsonObject
+            assertEquals("/api/v1/machines/computer/launchers", server.takeRequest().path)
+            assertEquals(JsonCodec.parseToJsonElement(tiers), offered["tiers"])
+            assertEquals(JsonCodec.parseToJsonElement(profile), offered["tiers_profile"])
+
+            // An older hub has no tiers and loses none of the launchers it already had.
+            server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude"}]}"""))
+            val older = Json(JsonCodec) { encodeDefaults = true }.encodeToJsonElement(
+                AssistantLaunchers.serializer(), service.launcherList("computer")).jsonObject
+            assertTrue(older["tiers"] == null || older["tiers"]?.jsonArray?.isEmpty() == true)
+            assertNull(older["tiers_profile"])
+            assertEquals("claude", older["launchers"]?.jsonArray?.single()?.jsonObject?.get("name")?.jsonPrimitive?.content)
+        }
+    }
+
+    /** A preset is only a way to fill the existing start fields; tier itself is never a sessions field (#2225). */
+    @Test fun presetChoicesPostTheUnchangedSessionShapeWithoutTier() = runBlocking {
+        MockWebServer().use { server ->
+            val service = HttpAgentCreationService("hub/pairing", server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"session":{"machine_id":"computer","session_id":"created"}}"""))
+            service.start(AgentStartRequest("computer", "/code", "fast", model = "m-review", effort = "high"),
+                "00000000-0000-4000-8000-000000000222")
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/sessions", request.path)
+            val body = JsonCodec.parseToJsonElement(request.body.readUtf8()).jsonObject
+            assertEquals(setOf("machine_id", "cwd", "launcher", "effort", "model"), body.keys)
+            assertEquals("fast", body["launcher"]?.jsonPrimitive?.content)
+            assertEquals("m-review", body["model"]?.jsonPrimitive?.content)
+            assertEquals("high", body["effort"]?.jsonPrimitive?.content)
+            assertFalse("tier" in body)
+        }
+    }
+
     @Test fun launcherTypesMatchWebPrecedenceRegardlessOfKeyOrder() {
         for (fields in listOf(
             """"agent":"codex","agent_type":"claude"""",

@@ -170,7 +170,7 @@ func (s *Service) fleetInputsInto(kept map[string][]proto.Session) ([]fleetInput
 		list := lists[i]
 		for j := range list {
 			sess := &list[j]
-			if sess.Quiet { // a quiet task's agent: the main conversation tells about it (#1731)
+			if sess.Quiet || sess.HiddenByDirectory() { // a quiet task's agent: the main conversation tells about it (#1731)
 				continue
 			}
 			agents = append(agents, fleetInput{
@@ -180,7 +180,7 @@ func (s *Service) fleetInputsInto(kept map[string][]proto.Session) ([]fleetInput
 			})
 		}
 	}
-	ixs, told := s.pendingCards()
+	ixs, told := s.visiblePendingCards()
 	return agents, ixs, told
 }
 

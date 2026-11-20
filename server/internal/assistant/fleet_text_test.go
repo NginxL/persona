@@ -3,6 +3,7 @@ package assistant
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -175,5 +176,40 @@ func TestClaudeLiveTextInEachLanguage(t *testing.T) {
 	localizeSession(i18n.En, &other)
 	if other.ReadOnlyReason != "仅查看：这个子 Agent 由父 Agent 驱动" {
 		t.Errorf("a reason the hub does not know was rewritten: %q", other.ReadOnlyReason)
+	}
+}
+
+// A computer-only dialog also tells the owner how to make it answerable from the phone next time (#5965).
+func TestClaudeComputerAttentionSuggestsTmuxOrPersona(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		lang i18n.Lang
+		want []string
+	}{
+		{"en", i18n.En, []string{"next time", "start claude", "tmux", "persona", "phone"}},
+		{"zh-Hans", i18n.ZhHans, []string{"下次", "启动 claude", "tmux", "persona", "手机"}},
+		{"ja", i18n.Ja, []string{"次回", "claudeを起動", "tmux", "persona", "スマホ"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := proto.Session{AttentionReason: proto.AttentionClaudeComputer}
+			localizeSession(c.lang, &s)
+			got := strings.ToLower(s.AttentionReason)
+			for _, want := range c.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("attention reason %q does not mention %q", s.AttentionReason, want)
+				}
+			}
+		})
+	}
+
+	// An older node still sends the sentence used before #5965; a new hub localizes it to the same guidance.
+	for _, lang := range []i18n.Lang{i18n.En, i18n.Ja} {
+		legacy := proto.Session{AttentionReason: proto.AttentionClaudeComputerBefore5965}
+		current := proto.Session{AttentionReason: proto.AttentionClaudeComputer}
+		localizeSession(lang, &legacy)
+		localizeSession(lang, &current)
+		if legacy.AttentionReason != current.AttentionReason {
+			t.Errorf("%s: legacy attention %q, want the localized current guidance %q", lang, legacy.AttentionReason, current.AttentionReason)
+		}
 	}
 }

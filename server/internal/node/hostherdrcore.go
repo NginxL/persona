@@ -99,7 +99,19 @@ func (h *herdrCoreHost) terminals(ctx context.Context) ([]herdrcore.Terminal, er
 			out = append(out, t)
 		}
 	}
+	agentForegrounds(out)
 	return out, nil
+}
+
+// get is terminal.get, with the agent in front where herdr-core names a program above it (agentForegrounds).
+func (h *herdrCoreHost) get(ctx context.Context, terminal string) (*herdrcore.Terminal, error) {
+	t, err := h.c.Get(ctx, terminal)
+	if err != nil {
+		return nil, err
+	}
+	one := []herdrcore.Terminal{*t}
+	agentForegrounds(one)
+	return &one[0], nil
 }
 
 func (h *herdrCoreHost) Snapshot(ctx context.Context) (*host.Layout, error) {
@@ -164,10 +176,8 @@ func (h *herdrCoreHost) snapshot(ctx context.Context, requireDoc bool) (*host.La
 			l.Spaces = append(l.Spaces, host.Space{ID: a.WorkspaceID, Label: label, Number: len(l.Spaces) + 1})
 		}
 		l.Panes = append(l.Panes, a)
-		if a.Agent != "" {
-			l.Agents = append(l.Agents, a)
-		}
 	}
+	l.Agents = withAgentParents(l.Panes)
 	fillSpaceDirectories(l.Spaces, l.Panes)
 	return l, nil
 }
@@ -186,17 +196,50 @@ func (h *herdrCoreHost) Agents(ctx context.Context) ([]host.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []host.Agent
+	panes := make([]host.Agent, 0, len(terms))
 	for _, t := range terms {
-		if a := fromTerminal(t); a.Agent != "" {
-			out = append(out, a)
+		panes = append(panes, fromTerminal(t))
+	}
+	return withAgentParents(panes), nil
+}
+
+// withAgentParents keeps the panes that run an agent, each linked to the nearest agent that started it.
+func withAgentParents(panes []host.Agent) []host.Agent {
+	byAddress := make(map[string]host.Agent, len(panes))
+	for _, p := range panes {
+		byAddress[host.ParsePane(p.PaneID).ID] = p
+	}
+	var out []host.Agent
+	for _, p := range panes {
+		if p.Agent != "" {
+			out = append(out, withAgentParent(p, byAddress))
 		}
 	}
-	return out, nil
+	return out
+}
+
+// withAgentParent points a terminal's parent at the nearest ancestor terminal that runs an agent: a sub-agent started
+// through a shell or script still belongs to the agent that started the chain. A parent on another machine or with no
+// agent above it links nothing.
+func withAgentParent(a host.Agent, byAddress map[string]host.Agent) host.Agent {
+	seen := map[string]bool{}
+	for p := host.ParsePane(a.ParentPaneID).ID; p != "" && !seen[p]; p = host.ParsePane(byAddress[p].ParentPaneID).ID {
+		seen[p] = true
+		parent, ok := byAddress[p]
+		if !ok {
+			break
+		}
+		if parent.Agent != "" {
+			a.ParentPaneID = parent.PaneID
+			return a
+		}
+	}
+	a.ParentPaneID = ""
+	return a
 }
 
 func (h *herdrCoreHost) Agent(ctx context.Context, pane host.PaneRef) (*host.Agent, error) {
-	t, err := h.c.Get(ctx, pane.ID)
+	t, err := h.get(ctx, pane.ID)
 	if err != nil {
 		return nil, hcErr(err)
 	}
@@ -239,7 +282,7 @@ func (h *herdrCoreHost) SendKeys(ctx context.Context, pane host.PaneRef, keys ..
 // state stays on the terminal and the shell under it would run the text as a command, so that is refused with nothing
 // typed.
 func (h *herdrCoreHost) Prompt(ctx context.Context, pane host.PaneRef, text string) error {
-	t, err := h.c.Get(ctx, pane.ID)
+	t, err := h.get(ctx, pane.ID)
 	if err != nil {
 		return inputErr(err)
 	}
@@ -285,7 +328,7 @@ func (h *herdrCoreHost) Close(ctx context.Context, pane host.PaneRef, _, _ strin
 // PaneProcesses: the terminal's foreground process (claude's own pid, which names its sessions/<pid>.json), then its
 // first process.
 func (h *herdrCoreHost) PaneProcesses(ctx context.Context, pane host.PaneRef) ([]int, error) {
-	t, err := h.c.Get(ctx, pane.ID)
+	t, err := h.get(ctx, pane.ID)
 	if err != nil {
 		return nil, hcErr(err)
 	}
@@ -331,6 +374,9 @@ func fromTerminal(t herdrcore.Terminal) host.Agent {
 		WorkspaceID: t.Labels[herdrSpaceLabel], TabID: t.Labels[herdrTabLabel],
 		Title: stripSpinner(t.Title), RawTitle: t.Title,
 	}
+	if t.Parent != "" {
+		a.ParentPaneID = host.PaneRef{Kind: host.HerdrCore, ID: t.Parent}.String()
+	}
 	if a.WorkspaceID == "" {
 		a.WorkspaceID, a.TabID = dirSpace+t.Cwd, ""
 	}
@@ -356,11 +402,19 @@ func fromTerminal(t herdrcore.Terminal) host.Agent {
 		return a
 	}
 	if len(t.Foreground.Argv) > 0 {
-		if k := filepath.Base(t.Foreground.Argv[0]); k == "claude" || k == "codex" {
+		if k := hcAgentProgram(t.Foreground.Argv[0]); k != "" {
 			a.Agent, a.AgentStatus = k, proto.StatusUnknown
 		}
 	}
 	return a
+}
+
+// hcAgentProgram is the agent a program name or path is ("claude", "codex", also as claude.exe), else "".
+func hcAgentProgram(name string) string {
+	if k := strings.TrimSuffix(filepath.Base(name), ".exe"); k == "claude" || k == "codex" {
+		return k
+	}
+	return ""
 }
 
 // shells are the programs a terminal returns to when its agent exits.
@@ -369,8 +423,13 @@ var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "fish": true
 
 // isShell: the foreground program is a shell (a login shell's name starts with "-").
 func isShell(fg *herdrcore.Foreground) bool {
-	return shellProgram(fg.Name) || len(fg.Argv) > 0 && shellProgram(fg.Argv[0])
+	return hcShell(fg.Name) || len(fg.Argv) > 0 && hcShell(fg.Argv[0])
 }
+
+// hcShell: a program herdr-core runs as a terminal's shell. Besides shellProgram's, Windows PowerShell under any of
+// its Windows names (`powershell.exe`, a full path to it), which herdr-core opens by default on Windows; the start
+// then takes the PowerShell handoff (windowsPaneShellDecision).
+func hcShell(name string) bool { return shellProgram(name) || windowsPowerShellProgram(name) }
 
 // shellProgram: a program name or path ("-zsh", "/bin/bash") is a shell's.
 func shellProgram(name string) bool { return shells[strings.TrimPrefix(filepath.Base(name), "-")] }

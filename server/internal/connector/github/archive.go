@@ -32,6 +32,12 @@ type archiveCursor struct {
 	Boundary map[string]bool      `json:"boundary,omitempty"`
 	Scan     *archiveBoundaryScan `json:"scan,omitempty"`
 	Partial  *archivePartial      `json:"partial,omitempty"`
+	// States: per thread that ended, the state the chat was last sent with (archive_state.go; none: open), forgotten
+	// with Threads. Rechecked: the threads a cursor from before states knew were queued once in Recheck, for one read
+	// each.
+	States    map[string]string `json:"states,omitempty"`
+	Rechecked bool              `json:"rechecked,omitempty"`
+	Recheck   []string          `json:"recheck,omitempty"`
 }
 
 type archivePartial struct {
@@ -70,6 +76,21 @@ func (c *Connector) Changes(ctx context.Context, cursor string, limit int) ([]co
 	me := c.Status(ctx).Account
 	var batches []connector.ChatBatch
 	processed := 0
+	// Threads known from before states were reported get theirs first, one read each (archive_state.go).
+	archiveRecheckQueue(&cur)
+	if len(cur.Recheck) > 0 {
+		chats, lines, n, limited, err := c.archiveRecheck(ctx, &cur, limit)
+		for i, sc := range chats {
+			batches = append(batches, connector.ChatBatch{Chat: sc, Messages: lines[i]})
+		}
+		if err != nil {
+			return batches, encode(cur), false, err
+		}
+		if len(cur.Recheck) > 0 { // the limit reached, or a rate limit: the next call goes on, or the next poll
+			return batches, encode(cur), !limited && !c.ratesLow(), nil
+		}
+		processed = n // the reads count against this call's limit
+	}
 	// A partial thread must finish even if search reorders it out of the first page or its update time moves.
 	var resumed string
 	var resumedAt time.Time
@@ -80,18 +101,21 @@ func (c *Connector) Changes(ctx context.Context, cursor string, limit int) ([]co
 			return false, err
 		}
 		processed++
+		cur.Rechecked = true // a thread read from here on has its state sent: none to queue for a recheck
 		if !upTo.IsZero() {
 			cur.Threads[thread] = upTo
 		}
-		if len(msgs) > 0 {
-			kind := "issue"
-			if it.PullRequest != nil {
-				kind = "pr"
+		// A merge, close or reopen adds no comment: the state goes with the chat, and a change adds its line
+		// (archive_state.go). A thread read in part waits for its whole read.
+		if whole {
+			if line, ok := archiveStateLine(it, cur.States[thread]); ok {
+				msgs = append(msgs, line)
+				sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].At.Before(msgs[j].At) })
 			}
-			owner, name, _ := strings.Cut(it.repo(), "/")
-			batches = append(batches, connector.ChatBatch{Chat: kb.SourceChat{
-				ID:   fmt.Sprintf("%s-%s-%d", owner, name, it.Number),
-				Name: fmt.Sprintf("%s#%d %s", name, it.Number, it.Title), Kind: kind, UpdatedAt: it.UpdatedAt}, Messages: msgs})
+			noteArchiveState(&cur, thread, it)
+		}
+		if len(msgs) > 0 {
+			batches = append(batches, connector.ChatBatch{Chat: archiveChat(it), Messages: msgs})
 		}
 		if !whole {
 			at := it.UpdatedAt
@@ -297,9 +321,15 @@ func (c *Connector) Changes(ctx context.Context, cursor string, limit int) ([]co
 			delete(cur.Threads, t)
 		}
 	}
+	for t := range cur.States {
+		if _, ok := cur.Threads[t]; !ok {
+			delete(cur.States, t)
+		}
+	}
 	if !more {
 		cur.Boundary = nil // a later poll must still revisit this second for new thread messages
 	}
+	cur.Rechecked = true // every thread from here on has its state sent when it is read
 	return batches, encode(cur), more, nil
 }
 

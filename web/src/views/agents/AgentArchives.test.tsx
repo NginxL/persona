@@ -168,6 +168,21 @@ describe("the row menu", () => {
     expect(serving.map((i) => [i.key, Boolean(i.disabled)])).toEqual([["archive", false], ["close", false]]);
   });
 
+  it("removes an untouched Persona start from the Hub list even when its computer cannot close it", () => {
+    const leftover: Session = { ...live, started_by_persona: true, status: "unknown", state: "unknown", updated_at: "0001-01-01T00:00:00Z" };
+    const actions = (s: Session) => keys(s, hub.features).map((item) => item.key);
+    expect(actions(leftover)).toEqual(["archive", "delete"]);
+    expect(actions({ ...leftover, updated_at: undefined })).toContain("delete");
+    expect(actions({ ...live, status: "offline", state: "offline", start_error: "missing launcher" })).toContain("delete");
+    for (const changes of [
+      { updated_at: "2026-11-20T03:00:00Z" }, { started_by_persona: false }, { starting: true },
+      { last_text: "A previous exchange" }, { rev: 3 }, { source_kind: "codex_history" },
+      { awaiting_first_message: true }, { status: "working", state: "working" }, { pending_interactions: 1 },
+      { capabilities: { read: true, send: true, terminal: true } }, { assistant: true }, { archived: true },
+      { undelivered: [{ id: "send", text: "later", at: "2026-11-20T03:00:00Z", state: "waiting", computer: "Studio" }] },
+    ] satisfies Partial<Session>[]) expect(actions({ ...leftover, ...changes })).not.toContain("delete");
+  });
+
   it("opens the one Close… dialog for the row", async () => {
     const { onOpenCloseAgent } = await import("../../lib/close-agent");
     const opened: Session[] = [];

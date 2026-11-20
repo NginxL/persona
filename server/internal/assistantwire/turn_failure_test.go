@@ -2,6 +2,16 @@ package assistantwire
 
 import "testing"
 
+func TestSealedCompactionIsAFailedTurnNotAnAnswer(t *testing.T) {
+	text := "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account"
+	if !CutOff(text) || !ErrorOnlyText(text) {
+		t.Fatal("raw account-sealed compaction was treated as an answer")
+	}
+	if CutOff("I investigated the error: " + text) {
+		t.Fatal("a reply discussing a sealed compaction was treated as an error")
+	}
+}
+
 // A failed turn's words that say an endpoint refused Claude Code's tool search (#10365), and nothing else: the node
 // resends such a turn once with every tool loaded, and the hub gives what is left its own code.
 func TestToolSearchRefusedText(t *testing.T) {

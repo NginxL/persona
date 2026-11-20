@@ -3,11 +3,13 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"net/http"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devices"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -39,6 +41,9 @@ type Devices interface {
 	// Summary is List's entry for the machine id names (Canonical(id)'s), false when List has none: one machine,
 	// without building the others.
 	Summary(id string) (devices.Summary, bool)
+	// Shown is whether a machine's list is its node's and until when it is shown as before while its node is away
+	// (devices.Shown); false when there is no such machine.
+	Shown(id string) (devices.Shown, bool)
 	// MachineResources returns the retained system and latest sample, including a stale sample's timestamp.
 	MachineResources(id string) (*proto.Machine, *proto.MetricSample, *bool)
 	Canonical(id string) string
@@ -59,6 +64,8 @@ type Devices interface {
 	// subscription accounts of each upstream provider are schedulable now and when the nearest one recovers.
 	// Read-only, from the manager's in-memory caches; the zero value when no pool is configured.
 	CapacitySnapshot(ctx context.Context) proto.CapacitySnapshot
+	// GatewayRetryAt uses a bound, complete gateway inventory with fresh account observations. Zero means no hold.
+	GatewayRetryAt(source, provider string, now time.Time) time.Time
 	// Follow has the node send the manager a session's items and text as they are made (on), or stop.
 	Follow(ctx context.Context, machine, session string, on bool) error
 	// SetAttention hands over Persona Link's "Needs you" summary (fleet_attention.go) on every look; it goes on to the
@@ -68,6 +75,14 @@ type Devices interface {
 	// confirmed it handed card's notification to Notification Center: false at once while there is none
 	// (notifyInteraction).
 	LinkRang(ctx context.Context, card string, within time.Duration) bool
+	// HeldMessages are the owner's messages held for machine's Agents while it was away (internal/devices held.go,
+	// #10661), by session id, oldest first, worded in lang for their rows; nil when there are none.
+	HeldMessages(machine string, lang i18n.Lang) map[string][]proto.UndeliveredMessage
+	// HeldRetry and HeldDelete are Retry and Delete on held message msg of session sid, whatever its machine: the
+	// assistant's undelivered routes, which older apps call for every row, end there for one they do not keep.
+	// found is false when no machine holds such a message; err is an *rpc.Error coded for the app otherwise.
+	HeldRetry(ctx context.Context, sid, msg string) (found bool, err error)
+	HeldDelete(ctx context.Context, sid, msg string) (found bool, err error)
 }
 
 // localDeviceCall is a device.call the manager answers itself: a node's method on a machine it has. The hub still
@@ -77,6 +92,9 @@ func (b *BusHub) localDeviceCall(ctx context.Context, p DeviceCall) (json.RawMes
 	d := b.opts.Devices
 	if d == nil || p.Device == assistantwire.DeviceAll || assistantwire.HubDeviceMethods[p.Method] || !d.Has(p.Device) {
 		return nil, false, nil
+	}
+	if p.Method == DeviceSessionModes && devicewire.ModeActorOf(ctx) == nil {
+		ctx = devicewire.WithModeActor(ctx, devicewire.AssistantModeActor())
 	}
 	out, err := d.CallNode(ctx, p.Device, p.Method, p.Params)
 	return out, true, err

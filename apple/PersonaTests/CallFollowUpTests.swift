@@ -144,6 +144,64 @@ struct CallFollowUpTests {
         capture.error = nil
     }
 
+    /// A replay is refused while a call is on, before its tape, recording state or audio opens. Without a call the same
+    /// tape really plays its fixture audio and End lets the session and the replayed recording go (#10693).
+    @Test func aMeetingReplayRefusesOnACallAndPlaysWithoutOne() async throws {
+        let capture = RecordingCapture.shared
+        let replay = MeetingReplay.shared
+        guard capture.state == .idle, !replay.running else {
+            print("MeetingReplayCallGate: SKIPPED because the shared recorder is occupied")
+            return
+        }
+        print("MeetingReplayCallGate: precondition held")
+        let gate = capture.callGate
+        var restored = false
+        defer {
+            if !restored { capture.callGate = gate; capture.error = nil }
+        }
+        let restoreGate = {
+            capture.callGate = gate
+            capture.error = nil
+            restored = true
+        }
+        var tape = MeetingTape(title: "Replay call gate", startedAt: .now)
+        tape.endedAfter = 30
+        let audio = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "Fixtures/meeting-tape/audio.m4a")
+
+        capture.callGate = { "End the call first" }
+        let startedOnCall = replay.play(tape, audioFile: audio)
+        let refused = !startedOnCall && replay.audio == nil && capture.state == .idle && capture.recordingID == nil
+        if startedOnCall {
+            _ = capture.stop()
+            restoreGate()
+            await Self.waitUntil { !replay.running }
+            replay.clearEnded()
+        }
+        try #require(refused, "a live call did not refuse the replay cleanly")
+        print("MeetingReplayCallGate: live-call refusal passed")
+
+        capture.callGate = { nil }
+        let started = replay.play(tape, audioFile: audio)
+        var played = false
+        var stopped = false
+        if started {
+            await Self.waitUntil { replay.audio?.isPlaying == true }
+            played = replay.audio?.isPlaying == true
+            _ = capture.stop()
+            // stopWithoutMicrophone resets the replay's recorder synchronously; another suite may use it after the await.
+            stopped = capture.state == .idle && capture.recordingID == nil
+            restoreGate()
+            await Self.waitUntil { !replay.running }
+        }
+        let cleaned = stopped && !replay.running && replay.audio == nil && capture.recordingID != MeetingReplay.id
+        replay.clearEnded()
+        try #require(started, "ordinary replay did not start")
+        try #require(played, "ordinary replay audio did not play")
+        try #require(stopped, "ordinary replay did not stop its recording")
+        try #require(cleaned, "ordinary replay did not finish cleanly")
+        print("MeetingReplayCallGate: ordinary playback and cleanup passed")
+    }
+
     /// The gate's words, while the call manager says a call is on.
     @Test func theGateSaysWhyWhileACallIsOn() {
         let live = LiveCallGate.isLive

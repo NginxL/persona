@@ -187,14 +187,14 @@ struct AutoConversationsView: View {
                 }
             }
         }
-        .confirmationDialog(
+        .accessibleConfirmationDialog(
             leaderConfirm.map { session in
                 model.assistantLeaders.contains(session.sessionID)
                     ? String(localized: "Unpin Confirmation Title [Leader Actions 6214]")
                     : String(localized: "Pin Confirmation Title [Leader Actions 6214]")
             } ?? "",
             isPresented: Binding(get: { leaderConfirm != nil }, set: { if !$0 { leaderConfirm = nil } }),
-            titleVisibility: .visible, presenting: leaderConfirm) { session in
+            titleVisibility: .visible, hasCancel: true, presenting: leaderConfirm) { session in
             let lead = model.assistantLeaders.contains(session.sessionID)
             Button(lead ? String(localized: "Unpin [Assistant Sidebar b7c40e]")
                        : String(localized: "Pin [Assistant Sidebar 6d1f2a]")) {

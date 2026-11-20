@@ -106,6 +106,42 @@ class DiagnosticsStateTest {
             persona.core.hub.HubFailure(it.kind, "HTTP 404", 404) }, "code"))
     }
 
+    @Test fun cutShortTlsHandshakesStayOnTheNetworkStepInsteadOfSecurityCertificate() {
+        val eofHandshake = javax.net.ssl.SSLHandshakeException("Remote host terminated the handshake").apply {
+            initCause(java.io.EOFException("SSL peer shut down incorrectly"))
+        }
+        val resetHandshake = javax.net.ssl.SSLHandshakeException("Read error").apply {
+            initCause(java.net.SocketException("Connection reset"))
+        }
+        val timeoutHandshake = javax.net.ssl.SSLHandshakeException("Handshake timed out").apply {
+            initCause(java.net.SocketTimeoutException("Read timed out"))
+        }
+        val closedHandshake = javax.net.ssl.SSLHandshakeException("Connection closed by peer")
+
+        for (cut in listOf(eofHandshake, resetHandshake, closedHandshake)) {
+            val wrapped = PairingException(PairingFailure.Unknown).apply {
+                initCause(persona.core.hub.HubFailure.from(cut))
+            }
+            assertEquals(cut.message, PairingAttemptStep.Network, pairingStep(wrapped, PairingStage.Probe))
+            assertEquals(cut.message, PairingAttemptStep.Network, pairingStep(cut, PairingStage.Probe))
+            assertEquals(cut.message, PairingFailure.Unknown, pairingFailure(cut))
+        }
+        val wrappedTimeout = PairingException(PairingFailure.Timeout).apply {
+            initCause(persona.core.hub.HubFailure.from(timeoutHandshake))
+        }
+        assertEquals(PairingAttemptStep.Network, pairingStep(wrappedTimeout, PairingStage.Probe))
+        assertEquals(PairingFailure.Timeout, pairingFailure(timeoutHandshake))
+
+        val certRejected = javax.net.ssl.SSLHandshakeException("Handshake failed").apply {
+            initCause(java.security.cert.CertificateException("Hub SPKI mismatch"))
+        }
+        val peerUnverified = javax.net.ssl.SSLPeerUnverifiedException("Hostname not verified")
+        assertEquals(PairingAttemptStep.Tls, pairingStep(certRejected, PairingStage.Probe))
+        assertEquals(PairingAttemptStep.Tls, pairingStep(peerUnverified, PairingStage.Probe))
+        assertEquals(PairingFailure.Certificate, pairingFailure(certRejected))
+        assertEquals(PairingFailure.Certificate, pairingFailure(peerUnverified))
+    }
+
     private class LiveConnection : HubConnection, ConnectionDiagnosticsSource {
         override val state = MutableStateFlow(ConnectionState.Online)
         override val events = MutableSharedFlow<ServerEvent>()

@@ -74,6 +74,12 @@ func (d *mirrorDevices) Summary(id string) (devices.Summary, bool) {
 	return devices.Summary{}, false
 }
 
+// Shown: a test machine's list is always its node's, and none is shown as before.
+func (d *mirrorDevices) Shown(id string) (devices.Shown, bool) {
+	_, ok := d.Summary(id)
+	return devices.Shown{Listed: ok}, ok
+}
+
 func (d *mirrorDevices) MachineResources(string) (*proto.Machine, *proto.MetricSample, *bool) {
 	return nil, nil, nil
 }
@@ -136,9 +142,16 @@ func (d *mirrorDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot
 	return proto.CapacitySnapshot{}
 }
 
+func (d *mirrorDevices) GatewayRetryAt(string, string, time.Time) time.Time { return time.Time{} }
+
 func (d *mirrorDevices) SetAttention(link.Attention) {}
 
 func (d *mirrorDevices) LinkRang(context.Context, string, time.Duration) bool { return false }
+func (d *mirrorDevices) HeldMessages(string, i18n.Lang) map[string][]proto.UndeliveredMessage {
+	return nil
+}
+func (d *mirrorDevices) HeldRetry(context.Context, string, string) (bool, error)  { return false, nil }
+func (d *mirrorDevices) HeldDelete(context.Context, string, string) (bool, error) { return false, nil }
 
 // mirrors are the tests' hubs' mirror devices.
 var mirrors sync.Map // *Hub → *mirrorDevices

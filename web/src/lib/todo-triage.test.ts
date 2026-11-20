@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Session } from "./types";
+import type { Interaction, Session } from "./types";
 import { makeSessionLookup, shownStatus, todoStatus, todoStatusLabel, type Todo } from "./todos";
 import { checkCount, checklist, reviewBadge, type Supervision } from "./supervision";
-import { FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos, waitingForMerge } from "./todo-triage";
+import { finishedAt, FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos, waitingForMerge } from "./todo-triage";
 import { resetRestoredCache, restoreTodo } from "./todo-restore";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -54,6 +54,25 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
   it("a decision for the owner is Waiting on you", () => {
     expect(at(todo("t", { agents: [agent("idle")], supervision: { supervisor: "c", state: "needs_user" } })).rule).toBe("owner_decides");
     expect(at(todo("t", { ask: { outcome: "decide", verdict: "v", asked_at: hoursAgo(1) } })).section).toBe("waiting");
+  });
+
+  it("a parked task's exact pending interaction is Waiting on you until that card resolves", () => {
+    const ix = { id: "ix-owner", machine_id: "m", session_id: "worker", kind: "question", created_at: hoursAgo(1) } as Interaction;
+    const td = todo("linked", {
+      agents: [{ ...agent("worker"), released_at: hoursAgo(0) }],
+      supervision: {
+        supervisor: "conv", state: "parked",
+        parked: { reason: "Owner permission", waiting_on: "external_event", until: hoursAgo(-4), count: 1,
+          evidence: { kind: "external_event", target: "Read-only permission", wake: "The owner answers", interaction_id: ix.id } },
+      },
+    });
+    const authoritative = { ...td, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0,
+      asks: [{ id: "run:worker", kind: "question", home: "run", interaction: ix.id }] } } as Todo;
+    expect(triage(authoritative, makeSessionLookup([session("worker", "idle")]), NOW)).toMatchObject({ section: "waiting", rule: "agent_asks" });
+    expect(triage(authoritative, makeSessionLookup([session("worker", "idle")], [ix]), NOW)).toMatchObject({ section: "waiting", rule: "agent_asks" });
+    // A stale owner-ask view must not survive the current pending list saying the card resolved.
+    expect(triage(authoritative, makeSessionLookup([session("worker", "idle")], []), NOW)).toMatchObject({ section: "parked", rule: "parked" });
+    expect(triage(td, makeSessionLookup([session("worker", "idle")]), NOW)).toMatchObject({ section: "parked", rule: "parked" });
   });
 
   it.each([false, true])("keeps a stopped parked task unfinished (seen: %s)", (seen) => {
@@ -208,6 +227,20 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     const pr_status = { url: "https://example.com/pull/7", state: "open" as const, draft: false, review: "required" as const, checks: "none" as const, conflicts: false, checked_at: new Date(NOW).toISOString() };
     expect(triage(todo("decision", { pr_url: pr_status.url, pr_status, supervision: { supervisor: "c", state: "needs_user" } }), lookup, NOW).section).toBe("waiting");
     expect(triage(todo("active", { pr_url: pr_status.url, pr_status, agents: [agent("run")] }), lookup, NOW).section).toBe("working");
+  });
+
+  it("says when a finished to-do finished: the moment its rule reads, else its last move (#10922)", () => {
+    const when = (td: Todo, superseded = false) => finishedAt(td, triage(td, lookup, NOW, 0, superseded));
+    // closed: its close, however late it moved after (an agent's session, a seen mark is no move)
+    expect(when(todo("t", { done_at: hoursAgo(3), updated_at: hoursAgo(1), seen_at: hoursAgo(0.5) }))).toBe(Date.parse(hoursAgo(3)));
+    // accepted: its accepting review; deployed: its deploy, else its last move
+    expect(when(todo("t", { agents: [agent("idle")], supervision: acceptedReopened() }))).toBe(Date.parse(hoursAgo(5)));
+    expect(when(todo("t", { delivery: { state: "live", at: hoursAgo(2) } }))).toBe(Date.parse(hoursAgo(2)));
+    expect(when(todo("t", { delivery: { state: "live" }, updated_at: hoursAgo(6) }))).toBe(Date.parse(hoursAgo(6)));
+    // a finished turn the owner saw (Done, rule 9a): its last move, here its Agent's
+    expect(when(todo("t", { agents: [agent("unseen")], updated_at: hoursAgo(3), seen_at: hoursAgo(0.5) }))).toBe(Date.parse(hoursAgo(1)));
+    // a failed start a related to-do finished: its close
+    expect(when(todo("f", { start_error: "x", done_at: hoursAgo(2) }), true)).toBe(Date.parse(hoursAgo(2)));
   });
 
   it("a task with no move for 48 hours is Shelved; a newer move of its agent keeps it", () => {

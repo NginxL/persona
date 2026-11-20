@@ -34,9 +34,8 @@ func (h *Manager) readInbox(ctx context.Context, round inboxRound) assistantwire
 	return r
 }
 
-// readMail is each mail account's latest inbox page, read up to inboxMailParallel accounts at once and kept in the
-// accounts' order; an account that can't be read is left out and named in Failed with why (the manager keeps what it
-// had and the apps say it is behind). nil without mail or when the accounts can't be listed.
+// readMail reads the latest page of every eligible mailbox, up to inboxMailParallel accounts at once, in account
+// order. An unreadable folder is left out and its account named in Failed. nil when mail is off or listing fails.
 func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 	// Add to Inbox off (#5307): no mail round, so the manager keeps the mail items it has; search, replies and the
 	// knowledge base go on.
@@ -67,8 +66,10 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 	for i, acc := range read {
 		if acc != nil {
 			out.Accounts = append(out.Accounts, *acc)
-			h.inboxReads.note("mail:"+accounts[i].ID, now, "")
-			continue
+			if errs[i] == nil {
+				h.inboxReads.note("mail:"+accounts[i].ID, now, "")
+				continue
+			}
 		}
 		code := mailReadErrorOf(errs[i])
 		if code != assistantwire.ReadTimeout {
@@ -91,19 +92,43 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 	return out
 }
 
-// readMailAccount is one account's latest inbox page; nil and why when it can't be read.
+// readMailAccount keeps INBOX on the original wire field so an older assistant only processes that mailbox.
+// A failed folder's page is left out. Other pages can be applied while the account reports that it is behind.
 func (h *Manager) readMailAccount(ctx context.Context, a mail.MailAccount) (*assistantwire.InboxMailAccount, error) {
-	res, err := h.mail.ListMessages(ctx, mail.ListOptions{AccountID: a.ID, Limit: 40})
-	if err != nil {
-		h.logf("inbox: mail %s: %v", a.Email, err)
-		return nil, err
+	boxes, firstErr := h.mail.IntakeMailboxes(ctx, a.ID)
+	if firstErr != nil {
+		boxes = []string{"INBOX"}
 	}
 	acc := &assistantwire.InboxMailAccount{ID: a.ID, Email: a.Email, Messages: []assistantwire.InboxMailSummary{}}
-	for _, m := range res.Messages {
-		acc.Messages = append(acc.Messages, assistantwire.InboxMailSummary{Mailbox: m.Mailbox, UID: m.UID, MessageID: m.MessageID,
-			Subject: m.Subject, From: mailAddress(m.From), To: mailAddresses(m.To), Date: m.Date, Snippet: m.Snippet, Seen: m.Seen, Answered: m.Answered})
+	for _, box := range boxes {
+		res, err := h.mail.ListMessages(ctx, mail.ListOptions{AccountID: a.ID, Mailbox: box, Limit: 40})
+		if err != nil {
+			if box == "INBOX" {
+				acc.InboxUnavailable = true
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		msgs := make([]assistantwire.InboxMailSummary, 0, len(res.Messages))
+		for _, m := range res.Messages {
+			msgs = append(msgs, assistantwire.InboxMailSummary{Mailbox: box, UID: m.UID, MessageID: m.MessageID,
+				Subject: m.Subject, From: mailAddress(m.From), To: mailAddresses(m.To), Date: m.Date, Snippet: m.Snippet, Seen: m.Seen, Answered: m.Answered})
+		}
+		if box == "INBOX" {
+			acc.UIDValidity, acc.Messages = res.UIDValidity, msgs
+		} else {
+			acc.Folders = append(acc.Folders, assistantwire.InboxMailFolder{Name: box, UIDValidity: res.UIDValidity, Messages: msgs})
+		}
 	}
-	return acc, nil
+	if firstErr != nil {
+		h.logf("inbox: mail %s: %v", a.Email, firstErr)
+	}
+	if acc.InboxUnavailable && len(acc.Folders) == 0 {
+		return nil, firstErr
+	}
+	return acc, firstErr
 }
 
 // mailHealth is each mail account's status by id as mail settings show it ("error": its server refuses the login;

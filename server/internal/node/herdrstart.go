@@ -215,7 +215,8 @@ func herdrBinary(ctx context.Context, bin string) string {
 // the locale, where herdr's socket, session and config are (so it listens where the node looks and reads the config
 // file herdr.WorktreesDir reads), and where Persona's data directory is (PERSONA_HOME, and the older name the node
 // still reads): every pane inherits it, and `personad launch` and the hooks find the node's socket in that directory.
-// Nothing else — no ANTHROPIC_*, no proxies, no PATH: the login shell sets its own.
+// Nothing else — no ANTHROPIC_*, no proxies, no PATH: the login shell sets its own, on the system's directories and
+// the tool directories (herdrToolDirs).
 var herdrServerKeep = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 	"XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME", "HERDR_SOCKET_PATH", "HERDR_SESSION",
 	"HERDR_CONFIG_PATH"},
@@ -228,8 +229,10 @@ func personaHomeNames() []string {
 }
 
 // herdrServerEnv is the environment the login shell starts with: the kept variables of environ, the shell, a
-// terminal type and the system PATH (the login shell's profile builds on it).
-func herdrServerEnv(environ []string, shell string) []string {
+// terminal type and the system PATH with tools after it (herdrToolDirs: the version managers' shims, which the rc file
+// that activates mise is not read for, and hub.json's machines[].extra_path; #10127). The login shell's profile
+// builds on it.
+func herdrServerEnv(environ []string, shell string, tools []string) []string {
 	keep := map[string]bool{}
 	for _, k := range herdrServerKeep {
 		keep[k] = true
@@ -241,7 +244,7 @@ func herdrServerEnv(environ []string, shell string) []string {
 			out = append(out, kv)
 		}
 	}
-	return append(out, "SHELL="+shell, "TERM=xterm-256color", "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+	return append(out, "SHELL="+shell, "TERM=xterm-256color", "PATH="+withDirsAfter("/usr/bin:/bin:/usr/sbin:/sbin", tools))
 }
 
 // withHerdrSession names the herdr session of the node's data directory in the server's environment (herdr.Session:

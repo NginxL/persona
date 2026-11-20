@@ -9,6 +9,7 @@ ci_rust_toolchain
 cd "$CI_ROOT/native/app-core"
 ci_run 'Rust formatting' 300 cargo fmt --all --check
 ci_run 'Rust lints' 1200 cargo clippy --locked --all-targets -- -D warnings
+ci_run 'Sync driver fixtures and negative checks' 300 cargo test --locked -p persona-core --test sync_driver
 ci_run 'Rust tests and shared fixtures' 1200 cargo test --locked
 ci_run 'Generated codecs up to date' 900 cargo run --locked --quiet -p persona-core-typegen -- --check
 # The NAPI binding exists only behind the `ohos` feature, which the host build above never compiles. Checking it for

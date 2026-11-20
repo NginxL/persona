@@ -9,9 +9,10 @@ internal data class ListFixture(val name: String, val operation: String, val inp
     override fun toString() = name
 }
 
-internal fun listFixtures(domain: String): List<Array<Any>> {
+/** The list cases in [path], spelled out as "spec/fixtures/<domain>" so the build declares that domain as an input. */
+internal fun listFixtures(path: String): List<Array<Any>> {
     val root = System.getProperty("persona.repo.root") ?: error("persona.repo.root is required")
-    val directory = File(root, "spec/fixtures/$domain")
+    val directory = File(root, path)
     check(directory.isDirectory) { "Missing fixtures: $directory" }
     val files = directory.listFiles { file -> file.extension == "json" }!!.sortedBy { it.name }
     check(files.isNotEmpty()) { "No fixtures: $directory" }

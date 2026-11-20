@@ -387,6 +387,18 @@ type hookEvents struct {
 	got []map[string]any
 }
 
+// record is a manager's OnEvent that keeps the hook.event notifications.
+func (h *hookEvents) record(event string, params json.RawMessage) {
+	if event != "hook.event" {
+		return
+	}
+	var p map[string]any
+	_ = json.Unmarshal(params, &p)
+	h.mu.Lock()
+	h.got = append(h.got, p)
+	h.mu.Unlock()
+}
+
 func (h *hookEvents) all() []map[string]any {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -401,16 +413,7 @@ func hookHub(t *testing.T, n *Node) *hookEvents {
 	n.peer = rpc.New("n", n2hW)
 	hub := rpc.New("h", h2nW)
 	rec := &hookEvents{}
-	hub.OnEvent = func(event string, params json.RawMessage) {
-		if event != "hook.event" {
-			return
-		}
-		var p map[string]any
-		_ = json.Unmarshal(params, &p)
-		rec.mu.Lock()
-		rec.got = append(rec.got, p)
-		rec.mu.Unlock()
-	}
+	hub.OnEvent = rec.record
 	go func() { _ = hub.Serve(ctx, n2hR) }()
 	go func() { _ = n.peer.Serve(ctx, h2nR) }()
 	t.Cleanup(func() { cancel(); _ = n2hW.Close(); _ = h2nW.Close() })

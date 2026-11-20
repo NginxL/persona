@@ -2,9 +2,22 @@ name: Persona
 # Meta glasses (docs/apple/meta-glasses.md): the Wearables SDK, its keys and the glasses' Bluetooth and network strings are
 # merged in only when config.json app.meta_wearables.enabled is true (PERSONA_META_WEARABLES=YES, set by env).
 include:
-  # Where the iPhone app's entitlements file is (#9290): apart from this file, so siri-calls.yml below can sign with a
-  # generated copy instead. Always merged in.
+  # The default entitlements path lives apart from this file so later includes can select generated opt-in copies.
+  # XcodeGen derives CODE_SIGN_ENTITLEMENTS from the selected target entitlements path, not a target build setting.
   - path: app-entitlements.yml
+  # The watch app and the share extension the iPhone app embeds (watch-and-share.yml), then the switch that leaves them
+  # out of a development build (lean-dev-build.yml, PERSONA_LEAN_DEV_BUILD=YES, which only scripts/app/sim.sh sets;
+  # docs/operations/testing.md "Development builds"). Unset, as in CI, release and the UI tests, the project is whole.
+  # These two stay before every other include: the switch replaces the dependencies merged before it.
+  - path: watch-and-share.yml
+  - path: lean-dev-build.yml
+    enable: ${PERSONA_LEAN_DEV_BUILD}
+  - path: carplay-voice-entitlements.yml
+    enable: ${PERSONA_CARPLAY_VOICE}
+  - path: health-background-delivery-entitlements.yml
+    enable: ${PERSONA_HEALTH_BACKGROUND_DELIVERY}
+  - path: homekit-entitlements.yml
+    enable: ${PERSONA_HOMEKIT}
   - path: meta-wearables.yml
     enable: ${PERSONA_META_WEARABLES}
   # "Call Persona using Persona" through SiriKit (docs/apple/siri.md「Calling Persona」): the Intents extension and the Siri
@@ -99,10 +112,9 @@ targets:
       - sdk: LiveCommunicationKit.framework
         weak: true
       - package: PersonaWire
-      - target: PersonaWatch
+      # The watch app and the share extension are in watch-and-share.yml, which a development build can leave out.
       - target: PersonaWidgets
       - target: PersonaNotify
-      - target: PersonaShare
       - package: MarkdownUI
       - package: BeautifulUI
       - package: PersonaSSH
@@ -111,8 +123,8 @@ targets:
       - package: MarqueeGlow
       - package: PersonaScreenKit
       - package: PersonaInputKit
-    # The file XcodeGen writes these to (and signs with): Persona/Resources/Persona.entitlements, set in
-    # app-entitlements.yml.
+    # app-entitlements.yml or a later opt-in include selects the file. XcodeGen writes these properties there and derives
+    # CODE_SIGN_ENTITLEMENTS from the same path.
     entitlements:
       properties:
         aps-environment: development
@@ -136,11 +148,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID)
         PRODUCT_MODULE_NAME: Persona
         PRODUCT_NAME: Persona
-        # Meant to sign with the opt-in entitlements scripts/persona_config.py xcconfig writes (PERSONA_APP_ENTITLEMENTS:
-        # CarPlay voice, HomeKit, HealthKit background delivery). XcodeGen 2.46 derives CODE_SIGN_ENTITLEMENTS from the
-        # entitlements path instead and ignores this, so those opt-ins don't reach the signature today (#9526). The SiriKit
-        # opt-in avoids it with apple/app-entitlements.yml + apple/siri-calls.yml.
-        CODE_SIGN_ENTITLEMENTS: $(PERSONA_APP_ENTITLEMENTS:default=Persona/Resources/Persona.entitlements)
         # iPhone and iPad (2026-10-31: on iPad it ran as a phone-sized window). Wide layouts come from the size class
         # (SplitNavigation), as on an open iPhone Duo.
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -157,14 +164,18 @@ targets:
         # (scripts/persona_config.py, docs/operations/network.md「Connecting to hub through an in-app tunnel」); empty otherwise.
         "SWIFT_INCLUDE_PATHS[sdk=iphoneos*]": "$(inherited) $(PERSONA_TUNNEL_INCLUDE)"
         "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) $(PERSONA_TUNNEL_LDFLAGS)"
-    # Which commit a build is (Settings › About › Build): stamped into the built Info.plist on every build, before signing;
-    # "+" when the working tree had changes not committed.
+    # Which commit a build is (Settings › About › Build): stamped into the built Info.plist on every Release build,
+    # before signing; "+" when the working tree had changes not committed. Release only (#10713): editing the plist on
+    # every build made every task that reads it, the app's signature among them, run again on every build. A Debug build
+    # has no stamp (About shows Unknown) and an unchanged one redoes nothing; one that must name its commit (the README's
+    # captures, scripts/assets/make_readme_assets.py) passes the build setting PERSONA_STAMP_COMMIT=YES.
     postBuildScripts:
       - name: Stamp the commit
         basedOnDependencyAnalysis: false
         # Its input, so it runs after the Info.plist is written (ran before it once, and the stamp was lost).
         inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
         script: |
+          [ "$CONFIGURATION" = Release ] || [ "$PERSONA_STAMP_COMMIT" = YES ] || exit 0
           sha=$(git -C "$SRCROOT/.." rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
           git -C "$SRCROOT/.." diff --quiet HEAD -- 2>/dev/null || sha="$sha+"
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
@@ -289,11 +300,13 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Release only, as the iPhone app's.
     postBuildScripts:
       - name: Stamp the commit
         basedOnDependencyAnalysis: false
         inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
         script: |
+          [ "$CONFIGURATION" = Release ] || [ "$PERSONA_STAMP_COMMIT" = YES ] || exit 0
           sha=$(git -C "$SRCROOT/.." rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
           git -C "$SRCROOT/.." diff --quiet HEAD -- 2>/dev/null || sha="$sha+"
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
@@ -664,6 +677,9 @@ targets:
     sources:
       - path: PersonaTests
         excludes: ["*.json", "*.py"] # Static checks and TokenBaseline.json are read from the source tree, not the bundle
+      # The same shared source as #9694's Android consumer, compiled only into this iOS test bundle (#11069).
+      # Persona's production target, route and handwritten About row do not include it.
+      - path: ../android/refract/about/AboutVersionRow.swift
     dependencies:
       - package: PersonaWire
       - target: Persona
@@ -680,6 +696,37 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Persona.app/Persona"
         BUNDLE_LOADER: "$(TEST_HOST)"
+  # A separate test-only SwiftUI process for the shared About row's real accessibility tree (#11150).
+  # Neither target is embedded in or linked to Persona; its host has no Hub, route or production dependency.
+  AboutVersionAccessibilityHost:
+    type: application
+    platform: iOS
+    sources:
+      - path: AboutVersionAccessibilityHost
+      - path: PersonaTests/AboutVersionRefractSupport.swift
+      - path: ../android/refract/about/AboutVersionRow.swift
+      - path: Shared/Localization/Localizable.xcstrings
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).about-accessibility-host
+        PRODUCT_NAME: AboutVersionAccessibilityHost
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+  AboutVersionAccessibilityUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AboutVersionAccessibilityUITests
+    dependencies:
+      - target: AboutVersionAccessibilityHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERSONA_BUNDLE_ID).about-accessibility-uitests
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AboutVersionAccessibilityHost
   # UI tests drive the real app in the simulator against the configured hub (scripts/app/ui-test.sh); not in the
   # default test run, which must work offline.
   PersonaUITests:
@@ -709,6 +756,31 @@ schemes:
       # The tests' expectations and the pixel / layout baselines are the Chinese UI (docs/apple/ios.md「Interface language」).
       language: zh-Hans
       region: CN
+  # Only the app and unit-test bundle: visual evidence never builds PersonaUITests.
+  AboutVersionVisualTests:
+    build:
+      targets:
+        Persona: all
+        PersonaTests: [test]
+    run:
+      config: Debug
+    test:
+      targets: [PersonaTests]
+      language: en
+      region: US
+      environmentVariables:
+        PERSONA_SHOTS: /tmp/persona-agent-11150-scheme-shots
+  AboutVersionAccessibilityHost:
+    build:
+      targets:
+        AboutVersionAccessibilityHost: all
+        AboutVersionAccessibilityUITests: [test]
+    run:
+      config: Debug
+    test:
+      targets: [AboutVersionAccessibilityUITests]
+      language: en
+      region: US
   PersonaWatch:
     build:
       targets:

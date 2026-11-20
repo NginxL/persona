@@ -326,6 +326,20 @@
             "width": {}
           },
           "additionalProperties": false
+        },
+        {
+          "$ref": "view.schema.json#/$defs/GraphComponent",
+          "properties": {
+            "type": {},
+            "key": {},
+            "nodes": {},
+            "edges": {},
+            "layout": {},
+            "direction": {},
+            "selected": {},
+            "folded": {}
+          },
+          "additionalProperties": false
         }
       ],
       "x-discriminator": "type",

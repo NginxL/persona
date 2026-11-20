@@ -6,7 +6,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatActionsContext, type ChatActions } from "./chat-actions";
-import { MessageActions, sideBarFits } from "./MessageActions";
+import { MessageActions } from "./MessageActions";
+import { placeSideBar } from "./ReplyBar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const chat: ChatActions = { draftKey: "m/s", canCompose: true, speaker: "Persona", title: "Persona", images: () => [] };
@@ -49,19 +50,19 @@ const bar = () => host.querySelector<HTMLElement>("[data-side-bar]")!;
 const copy = () => host.querySelector<HTMLButtonElement>('[data-side-bar] button[aria-label="复制消息"]')!;
 
 describe("your bubble's hover bar", () => {
-  it("stays beside a bubble with room to its left", () => {
+  it("stays beside a bubble with room to its left", async () => {
     rowLeft = 400;
     draw();
-    act(() => copy().focus());
+    await act(async () => { copy().focus(); await vi.dynamicImportSettled(); });
     expect(bar().getAttribute("data-side-bar")).toBe("beside");
     expect(bar().className).toContain("right-full");
   });
 
-  it("moves under a bubble with no room to its left when Tab reaches it, keeping the focus", () => {
+  it("moves under a bubble with no room to its left when Tab reaches it, keeping the focus", async () => {
     rowLeft = 60;
     draw();
     expect(bar().getAttribute("data-side-bar")).toBe("beside");
-    act(() => copy().focus());
+    await act(async () => { copy().focus(); await vi.dynamicImportSettled(); });
     expect(bar().getAttribute("data-side-bar")).toBe("below");
     expect(bar().className).toContain("top-full");
     expect(document.activeElement).toBe(copy());
@@ -70,15 +71,21 @@ describe("your bubble's hover bar", () => {
     expect(bar().className).toContain("focus-within:pointer-events-auto");
   });
 
-  it("is placed again when the pointer comes", () => {
+  it("is placed again when the pointer comes", async () => {
     rowLeft = 60;
     draw();
     const row = host.querySelector<HTMLElement>(".group\\/msg")!;
-    act(() => row.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+    await act(async () => {
+      row.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+      await vi.dynamicImportSettled();
+    });
     expect(bar().getAttribute("data-side-bar")).toBe("below");
     rowLeft = 500;
     act(() => row.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse" })));
-    act(() => row.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+    await act(async () => {
+      row.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+      await vi.dynamicImportSettled();
+    });
     expect(bar().getAttribute("data-side-bar")).toBe("beside");
   });
 
@@ -87,11 +94,18 @@ describe("your bubble's hover bar", () => {
     const side = document.createElement("div");
     side.setAttribute("data-side-bar", "");
     row.classList.add("group/msg");
+    row.append(side);
     document.body.append(row);
+    const place = vi.fn();
     rowLeft = BAR + 6;
-    expect(sideBarFits(row, side)).toBe(true);
+    placeSideBar(row, side, place);
+    expect(place).toHaveBeenLastCalledWith(false);
     rowLeft = BAR + 5;
-    expect(sideBarFits(row, side)).toBe(false);
+    placeSideBar(row, side, place);
+    expect(place).toHaveBeenLastCalledWith(true);
     row.remove();
+    place.mockClear();
+    placeSideBar(row, side, place);
+    expect(place).not.toHaveBeenCalled();
   });
 });

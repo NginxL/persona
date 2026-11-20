@@ -173,10 +173,11 @@ func (h *Hub) serveLinkStream(w http.ResponseWriter, r *http.Request) {
 // relayLinkConn takes Persona Link's connection and hands it to the manager: 503 assistant_offline while there is none
 // (Persona Link tries again).
 func (h *Hub) relayLinkConn(w http.ResponseWriter, r *http.Request, a devicewire.Accept, opts *websocket.AcceptOptions, limit int64) {
-	// Right after the hub started (its listeners come up before the manager does) the link waits for the manager a
-	// little, within what Persona Link gives a handshake; otherwise it is told to come back.
-	if owner := h.machineOwner(a.MachineID); owner == devicesOwner && !h.awaitManager(r.Context(), linkManagerWait) ||
-		owner != devicesOwner && h.busConnOf(owner) == nil {
+	// Right after the hub started (its listeners come up before the managers do) an absent manager's link waits for
+	// that manager a little, within what Persona Link gives a handshake. A connected non-carrier manager takes it as
+	// before; the carrier keeps its existing wait for its first report.
+	owner := h.machineOwner(a.MachineID)
+	if (owner == devicesOwner || h.busConnOf(owner) == nil) && !h.awaitManagerFor(r.Context(), owner, linkManagerWait) {
 		writeErrCode(w, http.StatusServiceUnavailable, "assistant_offline", errAssistantOffline)
 		return
 	}

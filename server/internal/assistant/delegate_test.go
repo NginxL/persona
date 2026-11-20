@@ -147,7 +147,7 @@ func TestDelegateLeavesSomeAsTheyAre(t *testing.T) {
 
 // The assistant's answer to one of the manager's cards reaches the agent saying it is the assistant's, and why.
 func TestDelegatedAnswerToTheAgent(t *testing.T) {
-	golden(t, "agent_answer.delegated", renderDelegatedAnswer([]agentAnswerItem{{"用哪个方案？", "用 D4"}}, "D4 是 Agent 推荐的，和任务不冲突"))
+	golden(t, "agent_answer.delegated", renderDelegatedAnswer([]agentAnswerItem{{"用哪个方案？", "用 D4"}}, "D4 是 Agent 推荐的，和任务不冲突", ""))
 }
 
 // "Answering questions" is a category of its own: by default on the triage's connection with Opus when that connection serves Claude

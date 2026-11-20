@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -351,6 +352,60 @@ func TestStartEntersAnInertFirstMessageLeftInTheBox(t *testing.T) {
 		call("agent.prompt", map[string]any{"target": "w1:p2", "text": "<U+0007>fix the flaky test"}),
 		sendKeys("w1:p2", "enter"),
 	})
+}
+
+// A start carries image bytes to the target machine, not a path on the sender's. The node saves those exact bytes and
+// gives Claude the same attachment and path lines as an ordinary image message (#11084).
+func TestStartDecodesImageAttachments(t *testing.T) {
+	n, f, home := herdrNode(t)
+	withSubmitGrace(t, 60*time.Millisecond)
+	withFirstPromptWaits(t, 500*time.Millisecond, 3*time.Second)
+	cwd := mkdir(t, filepath.Join(home, "proj"))
+	empty, emptyANSI := screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi")
+	startPane(t, f, empty, emptyANSI)
+	raw := []byte("synthetic image bytes")
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	var sent string
+	f.after(func(c herdrCall) {
+		if c.Method != "agent.prompt" {
+			return
+		}
+		sent = str(c.Params["text"])
+		line, err := json.Marshal(map[string]any{
+			"type": "user", "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "cwd": cwd,
+			"message": map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": encoded}},
+				map[string]any{"type": "text", "text": sent},
+			}},
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		appendTranscript(t, home, cwd, startedID(f), string(line))
+	})
+	if _, err := request(t, n, "session.start", map[string]any{
+		"cwd": cwd, "workspace_id": "w1", "prompt": "Inspect this screenshot",
+		"images": []map[string]any{{"mime": "image/png", "data": encoded}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.firstWait.Wait()
+	if !strings.Contains(sent, "Inspect this screenshot\n\n<attached_images>\n") {
+		t.Fatalf("start prompt has no attachment block: %q", sent)
+	}
+	rest := strings.SplitN(sent, "<attached_images>\n", 2)[1]
+	path := strings.SplitN(rest, "\n", 2)[0]
+	if !filepath.IsAbs(path) {
+		t.Fatalf("attachment is not a target-side absolute path: %q", path)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("saved image = %q, %v; want the transmitted bytes", got, err)
+	}
+	if !strings.Contains(sent, "path:"+path) {
+		t.Fatalf("Claude's prompt lacks the image's path line: %q", sent)
+	}
 }
 
 // A first message that never reaches the transcript is typed firstPromptTries times; then the session is listed as

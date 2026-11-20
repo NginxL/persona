@@ -39,6 +39,9 @@ func TestABuiltinIsReadThroughItsSubscription(t *testing.T) {
 	if item(v, "v.open") != nil || item(v, "d.to_inbox").Control == nil {
 		t.Fatal("off: a row to the subscription, or no Inbox switch")
 	}
+	if st := section(v, "status"); st == nil || st.Footer == "" {
+		t.Fatalf("off: the status footer (reads since the hub started): %+v", st)
+	}
 	if gh := draw(t, f, env, state{P: pageBuiltin, C: "github"}); section(gh, "via") != nil {
 		t.Fatal("a source without a default subscription has the switch")
 	}
@@ -55,6 +58,9 @@ func TestABuiltinIsReadThroughItsSubscription(t *testing.T) {
 	}
 	if in := item(v, "d.to_inbox"); in.Control != nil || in.Value != "Through its subscription" || item(v, "f.inbox") != nil {
 		t.Fatalf("the Inbox while on: %+v", in)
+	}
+	if st := section(v, "status"); st == nil || st.Footer != "" { // its reads are the subscription's, kept (#11762)
+		t.Fatalf("on: the status footer says reads count from the hub's start: %+v", st)
 	}
 	handle(t, f, env, state{P: pageBuiltin, C: "imessage"}, "builtin_via", map[string]string{"via": "false"})
 	if strings.Join(b.migrated, ",") != "imessage=on,imessage=off" {

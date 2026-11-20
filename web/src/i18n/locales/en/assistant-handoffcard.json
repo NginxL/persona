@@ -3,9 +3,9 @@
   "summary": "Summary",
   "sent": "Replied as you",
   "self_replied": "You replied at the source",
-  "filed_not_sent": "Handled; this reply wasn't sent",
+  "filed_not_sent": "Handled",
   "conclusion_filed": "Conclusion · handled",
-  "replaced": "No longer current; nothing was sent",
+  "replaced": "No longer the current suggestion",
   "reply_as_you": "Reply to {title} as you",
   "conclusion": "Conclusion",
   "later_line": "Waiting in your Inbox: {title}",
@@ -13,5 +13,15 @@
   "wrap_up_ask": "Let's wrap this up: write the final summary and reply back to this Inbox item.",
   "wrap_up_failed": "Couldn't ask to wrap up: {error}",
   "wrap_up_to_send": "To send",
-  "wrap_up_to_confirm": "To confirm"
+  "wrap_up_to_confirm": "To confirm",
+  "failed": "Reply not sent",
+  "sending": "Sending reply…",
+  "uncertain": "Delivery not confirmed",
+  "uncertain_hint": "Check the source before sending again to avoid a duplicate reply.",
+  "sending_hint": "This reply is being sent. Wait for its result before trying again.",
+  "retry_hint": "Retry sends the same reply you confirmed before.",
+  "failed_hint": "Open the Inbox or the source to see what needs attention.",
+  "retry": "Retry",
+  "current_suggestion": "Current suggestion",
+  "retry_after": "The source suggests retrying after {seconds} seconds."
 }

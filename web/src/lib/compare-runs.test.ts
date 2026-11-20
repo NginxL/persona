@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  addGroup, compareMenu, compareRunsKey, getGroup, groupOfSession, loadGroups, MAX_GROUPS, resetGroupsCache, runBranches, runSession, runStatus, updateRun,
+  addGroup, compareMenu, compareRunsKey, getGroup, groupOfSession, loadGroups, MAX_GROUPS, resetGroupsCache, runBranches, runSession, runStatus, subscribeGroups, updateRun,
   type CompareGroup, type RunContext,
 } from "./compare-runs";
 import type { AgentLaunch } from "./new-agent";
@@ -54,6 +54,27 @@ describe("the list in this browser", () => {
     updateRun(`g${MAX_GROUPS + 2}`, 2, { error: undefined });
     resetGroupsCache();
     expect(getGroup(`g${MAX_GROUPS + 2}`)?.runs[1]).toEqual({ n: 2, branch: "persona/task-2", phase: "failed" });
+  });
+
+  it("keeps agy's native-effort flag when another tab updates a comparison", () => {
+    const spec = { launcher: "agy", launcherDefaultEffort: true };
+    addGroup(group({ spec }));
+    const key = compareRunsKey();
+    const updated = JSON.parse(localStorage.getItem(key)!) as CompareGroup[];
+    expect(updated[0].spec).toEqual(spec);
+    updated[0].runs[0].phase = "worktree";
+    const newValue = JSON.stringify(updated);
+    const unsubscribe = subscribeGroups(() => undefined);
+    try {
+      localStorage.setItem(key, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key, newValue }));
+      expect(getGroup("g1")?.runs[0].phase).toBe("worktree");
+      expect(getGroup("g1")?.spec).toEqual(spec);
+      updateRun("g1", 1, { phase: "launched" });
+      expect(loadGroups()[0].spec).toEqual(spec);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("finds the comparison a session is a run of, by its id or by its worktree", () => {

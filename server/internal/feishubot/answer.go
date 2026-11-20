@@ -56,8 +56,8 @@ const (
 	answerMaxBytes    = 24000 // JSON bytes of a card's answer (Feishu takes about 30 KB)
 	answerMaxCell     = 300   // runes per table cell
 	answerMaxTitle    = 50    // runes of the header's title
-	answerMaxLinks    = 4     // link buttons
-	answerMaxLabel    = 14    // runes of a link button's label
+	answerMaxLinks    = 6     // links (linkRow shows the first as buttons, the rest in a "more" menu)
+	answerMaxLabel    = 20    // runes of a link button's label
 
 	answerMaxComponents = 180 // per card; margin for the panel, notes and buttons added after packing
 )
@@ -104,12 +104,18 @@ var (
 // RenderAnswer lays out answer (GitHub Markdown) as cards of about budget runes each, at most maxParts of them.
 // There is always one part, empty for an empty answer.
 func RenderAnswer(answer string, budget, maxParts int) Answer {
+	return RenderAnswerWith(answer, budget, maxParts, nil)
+}
+
+// RenderAnswerWith is RenderAnswer with label naming the button of a bare address in the answer (what it opens: "Open
+// the conversation"); nil, or "" from it, names it by its host. A link written with words keeps them.
+func RenderAnswerWith(answer string, budget, maxParts int, label func(*url.URL) string) Answer {
 	lines := strings.Split(strings.ReplaceAll(answer, "\r\n", "\n"), "\n")
 	var (
 		title, status string
 		blocks        []answerBlock
 		prose         []string
-		links         []Button
+		links         []linkItem
 		seenURL       = map[string]bool{}
 		started       bool
 		fence         string
@@ -125,10 +131,10 @@ func RenderAnswer(answer string, budget, maxParts int) Answer {
 	addLinks := func(line string) {
 		line = inlineRe.ReplaceAllString(line, "")
 		for _, m := range answerLinkRe.FindAllStringSubmatch(line, -1) {
-			links = addLink(links, seenURL, m[2], m[1])
+			links = addLink(links, seenURL, m[2], m[1], label)
 		}
 		for _, u := range answerURLRe.FindAllString(answerLinkRe.ReplaceAllString(line, ""), -1) {
-			links = addLink(links, seenURL, trimURL(u), "")
+			links = addLink(links, seenURL, trimURL(u), "", label)
 		}
 	}
 	for i := 0; i < len(lines); i++ {
@@ -219,7 +225,7 @@ func RenderAnswer(answer string, budget, maxParts int) Answer {
 	}
 	if len(links) > 0 {
 		last := &parts[len(parts)-1]
-		last.els = append(last.els, buttonRow(links))
+		last.els = append(last.els, linkRow(links))
 	}
 	out.Parts = parts
 	return out
@@ -605,18 +611,25 @@ func lineStatus(t string) string {
 	return ""
 }
 
-// addLink adds a button opening u (http(s) only, each address once, at most answerMaxLinks).
-func addLink(bs []Button, seen map[string]bool, u, label string) []Button {
+// addLink adds a link opening u (http(s) only, each address once, at most answerMaxLinks); one without words of its
+// own is named by name, else by its host.
+func addLink(links []linkItem, seen map[string]bool, u, label string, name func(*url.URL) string) []linkItem {
 	p, err := url.Parse(u)
-	if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" || seen[u] || len(bs) >= answerMaxLinks {
-		return bs
+	if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" || seen[u] || len(links) >= answerMaxLinks {
+		return links
 	}
 	seen[u] = true
 	label = strings.TrimSpace(strings.Trim(stripBold(label), "`"))
 	if label == "" || strings.HasPrefix(label, "http") {
-		label = p.Host
+		label = ""
+		if name != nil {
+			label = strings.TrimSpace(name(p))
+		}
+		if label == "" {
+			label = p.Host
+		}
 	}
-	return append(bs, LinkBtn(clipRunes(label, answerMaxLabel), u))
+	return append(links, linkItem{clipRunes(label, answerMaxLabel), u, u})
 }
 
 func orSpace(s string) string {

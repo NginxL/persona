@@ -81,6 +81,10 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityDirectionSessions: the manager files sessions under a direction and reads one direction
+	// (PUT /api/v1/assistant/sessions/{mid}/{sid}/direction, GET /api/v1/assistant/directions/{id}, and the tree's
+	// additive sessions; #11391). The hub lists direction_sessions only while the default manager names it.
+	CapabilityDirectionSessions = "direction_sessions"
 	// CapabilityAssistantStartServiceTier: the manager forwards a new conversation's native service_tier to the node,
 	// which acknowledges it before the first turn (#6240). The hub lists the feature only for the default manager and
 	// refuses an explicit tier sent to a manager that does not name this capability.
@@ -101,6 +105,20 @@ const (
 	// counts (#10226, TodoPlaces). The hub lists the todo_places feature only while every manager whose to-dos it
 	// merges names it.
 	CapabilityTodoPlaces = "todo_places"
+	// CapabilityTodoAsks: the manager answers POST /api/v1/todos/{id}/asks/{ask}/answer, one route for every answer to a
+	// to-do's own asks, named by the ask ids of its view (#10465, TodoAskAnswer). The hub lists the todo_asks feature
+	// only while every manager whose to-dos it merges names it; until then clients answer through the accept,
+	// decision-dismiss and retry routes. It gates the route alone: the to-do count unit rides on its own payload.
+	CapabilityTodoAsks = "todo_asks"
+	// CapabilityTodoTimeline: the manager answers GET /api/v1/todos/{id}/timeline, a to-do's conversation grouped into
+	// rounds (#10465, TodoTimeline), and GET /api/v1/todos/{id} carries the rounds the paper shows, how many there are,
+	// the to-do's results and what changed since the owner looked (TodoItemDetail). The hub lists the todo_timeline
+	// feature only while every manager whose to-dos it merges names it; until then clients draw none of them.
+	CapabilityTodoTimeline = "todo_timeline"
+	// CapabilityTodoImages: the manager creates to-dos with images and serves their private bytes (#11084). The hub
+	// lists todo_images only while every manager whose to-dos it merges names it, so an older manager never receives an
+	// image create it would silently drop. Existing image metadata and byte reads remain available on capable managers.
+	CapabilityTodoImages = "todo_images"
 )
 
 // BodyStream is where MethodHTTPStreamed's body comes from: the relay the hub holds with ID (devicewire.RelayPath
@@ -153,6 +171,10 @@ const (
 	EventConversationSent = "session.assistant_sent"
 )
 
+// DispatchGuardTools are the assistant tools an opt-in dispatch guard may hide and refuse for an explicitly named
+// conversation. List filtering and call admission use the same names, so a hidden tool is not left callable.
+var DispatchGuardTools = []string{"task_plan", "agent_start", "conversation_new", "conversation_send"}
+
 // Error codes that cross the bus where a Go error would lose its kind (rpc.Error.Code).
 const (
 	CodeNoDevice         = "no_device"         // ErrNoDevice
@@ -173,6 +195,13 @@ const (
 	// conversation (Data: conversation_agent, launcher, launcher_agent, delivered "none"): the hub answers 409, nothing
 	// was sent, and the conversation keeps its agent (docs/assistant/assistant.md, #4662).
 	CodeLauncherOtherKind = "launcher_other_kind"
+	// CodeConversationBusy: an assistant conversation is at work (a turn, background tasks) and its task-follow-up role
+	// changed, so the message would need a new process with the new role while the old one still works. Nothing was
+	// sent. The hub keeps an owner's message with an id (MethodKeepUndelivered); the manager sends it again once the
+	// conversation is idle, resolving the role again, so it starts on the new role and the old one never gets it.
+	CodeConversationBusy = "busy"
+	// CodeSupervisionRuntime means the runtime cannot receive separate supervision instructions. Nothing was sent.
+	CodeSupervisionRuntime = "assistant_supervision_runtime"
 	// CodeBodyIncomplete: MethodHTTPStreamed's body did not arrive whole (the relay was not there, broke or carried
 	// another size). Nothing ran: the hub sends the request again as MethodHTTP.
 	CodeBodyIncomplete = "body_incomplete"
@@ -183,20 +212,27 @@ const (
 // HandoffApprover is set by the hub on a card's answer from a device that may approve a hand-off card; Human on a new
 // conversation a person's own app opens.
 type HTTPRequest struct {
+	// ModeActor is authenticated display provenance, never supplied by HTTP headers or a request body.
+	ModeActor *devicewire.Actor `json:"mode_actor,omitempty"`
 	// OwnerAnswer is the hub's verified full-device provenance for a relayed card answer.
 	// It never comes from HTTP headers or the resolution body.
 	OwnerAnswer     bool                       `json:"owner_answer,omitempty"`
 	Caller          *devicewire.Caller         `json:"caller,omitempty"`
 	ShareAuthority  *devicewire.ShareAuthority `json:"share_authority,omitempty"`
 	HandoffApprover *HandoffApprover           `json:"handoff_approver,omitempty"`
+	// ClarificationProof is the hub-issued opaque, one-time proof for this exact
+	// authenticated question. Older managers ignore it and keep unmarked delivery.
+	ClarificationProof string `json:"clarification_proof,omitempty"`
 	// Human is the hub's word that a person's own app opens this conversation (POST /api/v1/assistant/conversations
 	// with a full device's credential, decided as for SendParams.Human): its first message counts as theirs
 	// (WithHumanStart). Set by the hub on that route only, never from the request; an older hub never sends it.
-	Human  bool                `json:"human,omitempty"`
-	Method string              `json:"method"`
-	Path   string              `json:"path"`
-	Query  string              `json:"query,omitempty"`
-	Header map[string][]string `json:"header,omitempty"`
+	Human bool `json:"human,omitempty"`
+	// ReplyInput marks a legacy authenticated app start for missing-reply recovery, as in SendParams.
+	ReplyInput bool                `json:"reply_input,omitempty"`
+	Method     string              `json:"method"`
+	Path       string              `json:"path"`
+	Query      string              `json:"query,omitempty"`
+	Header     map[string][]string `json:"header,omitempty"`
 	// BodyStream is set on MethodHTTPStreamed only, in place of Body: where the body comes from.
 	BodyStream *BodyStream `json:"body_stream,omitempty"`
 	// Body stays the last field: hub/bus_forward.go httpParams appends it to the rest as written.
@@ -238,12 +274,15 @@ var Routes = []string{
 	"GET /api/v1/assistant/leaders",
 	"GET /api/v1/assistant/dispatch-policy",
 	"PUT /api/v1/assistant/dispatch-policy",
+	"GET /api/v1/assistant/dispatch-guard",
+	"PUT /api/v1/assistant/dispatch-guard",
 	"GET /api/v1/assistant/worker-presets",
 	"GET /api/v1/assistant/start-defaults",
 	"PUT /api/v1/assistant/start-defaults",
 	"GET /api/v1/assistant/availability",
 	"GET /api/v1/assistant/directions/tree",
 	"GET /api/v1/assistant/directions/offers",
+	"GET /api/v1/assistant/directions/{id}",
 	"DELETE /api/v1/assistant/directions/offers/{id}",
 	"POST /api/v1/assistant/directions/{id}/start",
 	"POST /api/v1/assistant/directions/{id}/make",
@@ -252,6 +291,7 @@ var Routes = []string{
 	"POST /api/v1/assistant/agents/{mid}/{sid}/supervisor",
 	"PUT /api/v1/assistant/directions/{id}/name",
 	"PUT /api/v1/assistant/directions/{id}/notes",
+	"PUT /api/v1/assistant/sessions/{mid}/{sid}/direction",
 	"GET /api/v1/assistant/conversations/{id}/feed",
 	"POST /api/v1/assistant/feed/{id}/dismiss",
 	"POST /api/v1/assistant/feed/{id}/undo-dismiss",
@@ -293,13 +333,27 @@ var Routes = []string{
 	"POST /api/v1/task-plans/{id}/start",
 	"POST /api/v1/task-plans/{id}/workspace-preview",
 	"POST /api/v1/task-plans/{id}/dismiss",
+	"DELETE /api/v1/todos/{id}/terminal-cleanup",
 	"GET /api/v1/task-trust",
 	"DELETE /api/v1/task-trust",
 	// The todos (the assistant's todos.go, docs/assistant/todos.md).
 	"GET /api/v1/todos",
-	"GET /api/v1/todos/places", // the To-dos places and counts (todo_view_routes.go, #10226); the literal wins over {id}
-	"GET /api/v1/todos/{id}",   // one to-do as the list has it, with its view
+	"GET /api/v1/todos/places",              // the To-dos places and counts (todo_view_routes.go, #10226); the literal wins over {id}
+	"GET /api/v1/todos/{id}",                // one to-do as the list has it, with its view
+	"GET /api/v1/todos/{id}/images/{image}", // one attached picture's exact bytes (todo_images.go, #11084)
 	"GET /api/v1/todos/{id}/repositories",
+	"GET /api/v1/todos/{id}/backend-workspace",
+	"GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}",
+	"POST /api/v1/todos/{id}/backend-workspace/prepare",
+	"POST /api/v1/todos/{id}/backend-workspace/start",
+	"POST /api/v1/todos/{id}/backend-workspace/cancel",
+	"POST /api/v1/todos/{id}/backend-workspace/cleanup",
+	"GET /api/v1/todos/{id}/workspace-rules",
+	"PUT /api/v1/todos/{id}/workspace-rules",
+	"POST /api/v1/todos/{id}/workspace-naming/preview",
+	"POST /api/v1/todos/{id}/workspace-naming/plans",
+	"GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}",
+	"POST /api/v1/assistant/workspace-naming/preview",
 	"PUT /api/v1/todos/{id}/repositories",
 	"PUT /api/v1/todos/{id}/repositories/{repo_id}/links",
 	"POST /api/v1/todos",
@@ -310,6 +364,7 @@ var Routes = []string{
 	"PUT /api/v1/todos/{id}/agents/{mid}/{sid}",
 	"DELETE /api/v1/todos/{id}/agents/{mid}/{sid}",
 	"GET /api/v1/todos/{id}/decisions",
+	"GET /api/v1/todos/{id}/timeline", // its conversation's rounds (todo_timeline.go, #10465)
 	"POST /api/v1/todos/{id}/decisions",
 	"PATCH /api/v1/todos/{id}/decisions/{did}",
 	"PUT /api/v1/todos/{id}/thread",
@@ -322,6 +377,8 @@ var Routes = []string{
 	"POST /api/v1/todos/{id}/accept",
 	"POST /api/v1/todos/{id}/decision-dismiss",
 	"POST /api/v1/todos/{id}/decision-undo-dismiss",
+	// Any answer to a to-do's own ask, by the id its view lists (todo_asks_routes.go, #10465).
+	"POST /api/v1/todos/{id}/asks/{ask}/answer",
 	"POST /api/v1/later/{id}/handled", // a question that can wait, marked handled (later.go)
 	"POST /api/v1/todos/{id}/done-check",
 	"POST /api/v1/todos/{id}/retry",

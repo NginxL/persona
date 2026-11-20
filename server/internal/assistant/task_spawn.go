@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,25 +45,36 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	// Unknown permission is read-only, never the owner's writable default. Codex does not expose PermissionMode, so
 	// the persisted assignment supplies it when this is that assignment's original Agent.
 	mode := parent.PermissionMode
-	if mode == "" {
-		mode = "plan"
-		assigned := false
-		for _, agent := range t.Agents {
-			if agent.MachineID == machine && agent.SessionID == session && agent.active() &&
-				(agent.Source == "manual" || agent.Source == sourceLeader || agent.Source == sourceWorker) {
-				assigned = true
-			}
-		}
-		if p, i, err := s.currentPlanAssignment(ctx, t); assigned && err == nil {
-			task := p.Tasks[i]
-			if task.Machine == machine && task.Permission != "" {
-				mode = task.Permission
-			}
+	assigned := false
+	for _, agent := range t.Agents {
+		if agent.MachineID == machine && agent.SessionID == session && agent.active() &&
+			(agent.Source == "manual" || agent.Source == sourceLeader || agent.Source == sourceWorker) {
+			assigned = true
 		}
 	}
-	child := PlanTask{TodoID: t.ID, Title: a.Title, Prompt: a.Prompt, Machine: machine, Cwd: parent.Cwd,
-		Launcher: parent.Launcher, Model: parent.Model, Effort: parent.Effort, Permission: mode, Readonly: mode == "plan",
-		preservePermission: true}
+	var assignment *PlanTask
+	if assigned {
+		if p, i, err := s.currentPlanAssignment(ctx, t); err == nil && p.Tasks[i].Machine == machine {
+			assignment = &p.Tasks[i]
+		}
+	}
+	if mode == "" {
+		mode = "plan"
+		if assignment != nil && assignment.Permission != "" {
+			mode = assignment.Permission
+		}
+	}
+	project := t.Project
+	if project == "" {
+		if _, d, ok := s.directionForTodo(ctx, t); ok {
+			project = d.Project
+		}
+	}
+	child := PlanTask{TodoID: t.ID, Project: project, Supervisor: t.Supervision.Supervisor,
+		Title: a.Title, Prompt: a.Prompt, Machine: machine, Cwd: parent.Cwd,
+		Launcher: parent.Launcher, Model: s.taskSpawnModel(ctx, machine, parent, assignment), Effort: parent.Effort,
+		Permission: mode, Readonly: mode == "plan", preservePermission: true,
+		launcherDefaultModel: parent.RequestedModel != nil && *parent.RequestedModel == ""}
 	// A caller disconnecting must not abandon a start before its ownership is recorded.
 	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
@@ -79,7 +91,7 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	if !active || current.ID != t.ID {
 		err = errors.New("the caller's task changed or closed during the start")
 	} else {
-		err = s.linkTodoAgentWithSource(startCtx, t.ID, mid, sid, a.Title, child.Cwd, "", "", "spawned", machine+"/"+session)
+		err = s.linkTodoAgentWithSource(startCtx, t.ID, mid, sid, a.Title, child.Cwd, child.startedAgent, "", "spawned", machine+"/"+session)
 	}
 	if err != nil {
 		stopCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
@@ -94,6 +106,48 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	out, _ := json.Marshal(map[string]string{"machine_id": mid, "session_id": sid, "todo_id": t.ID,
 		"supervisor": t.Supervision.Supervisor, "parent": machine + "/" + session})
 	return string(out), nil
+}
+
+// An assignment identifies its own Agent's model. Other managed sessions report the exact launch argument,
+// including an empty value for the launcher's default. Only older or observed sessions need a catalog lookup.
+func (s *Service) taskSpawnModel(ctx context.Context, machine string, parent proto.Session, assignment *PlanTask) string {
+	if assignment != nil && assignment.Model != "" && s.startLauncher(ctx, assignment.Launcher) == parent.Launcher {
+		return assignment.Model
+	}
+	if parent.RequestedModel != nil {
+		return *parent.RequestedModel
+	}
+	if !proto.ValidModelID(parent.Model) {
+		return parent.Model
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if parent.Host != "" {
+		ctx = context.WithValue(ctx, launcherModelHostKey{}, parent.Host)
+	}
+	catalog, err := s.launcherModelRows(ctx, machine, parent.Launcher, false)
+	if err != nil {
+		return parent.Model
+	}
+	// Use the launcher's original rows: the picker folds rows that run the same model. An exact ID always
+	// wins, and separate routes or context windows with the same reported resolution are ambiguous.
+	match := ""
+	for _, row := range catalog.Models {
+		if row.ID == parent.Model || row.ResolvedOffered && row.Resolved == parent.Model || slices.Contains(row.Aliases, parent.Model) {
+			return parent.Model
+		}
+		if row.Resolved != parent.Model || !proto.ValidModelID(row.ID) || row.ID == "default" || slices.Contains(unfoldedAliases, strings.TrimSuffix(strings.ToLower(row.ID), "[1m]")) {
+			continue
+		}
+		if match != "" && match != row.ID {
+			return parent.Model
+		}
+		match = row.ID
+	}
+	if match == "" || s.declaredSpawnModel(ctx, machine, parent) {
+		return parent.Model
+	}
+	return match
 }
 
 func (s *Service) spawnTask(ctx context.Context, machine, session string) (Todo, bool) {

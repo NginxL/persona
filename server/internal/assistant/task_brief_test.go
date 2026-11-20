@@ -15,7 +15,12 @@ import (
 // owner's message said in it at asked.
 func briefService(t testing.TB, said string) (*Service, *fakeHub, time.Time) {
 	t.Helper()
-	s, f := newQuietService(t)
+	return briefServiceOn(t, nil, said)
+}
+
+func briefServiceOn(t testing.TB, st Store, said string) (*Service, *fakeHub, time.Time) {
+	t.Helper()
+	s, f := newQuietServiceOn(t, st)
 	s.briefsOptional = false
 	asked := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
 	f.setItems(proto.Item{ID: "m1", Seq: 1, TS: asked, Role: "user", Kind: proto.KindText, Text: said})
@@ -62,8 +67,8 @@ func todoByTitle(s *Service, title string) (Todo, bool) {
 	return Todo{}, false
 }
 
-// task_plan refuses a writable task without criteria and an expected time, and a read-only one without a goal and an
-// expected time; the refusal says what is missing, and nothing is planned.
+// task_plan refuses a writable task without criteria and a read-only one without a goal. Missing time is automatic;
+// a negative override is still invalid. Refusals name what is missing and plan nothing.
 func TestTaskPlanRequiresABrief(t *testing.T) {
 	s, _, _ := briefService(t, "please fix the login crash")
 	for _, c := range []struct {
@@ -71,11 +76,10 @@ func TestTaskPlanRequiresABrief(t *testing.T) {
 		over map[string]any
 		want []string
 	}{
-		{"writable, nothing", map[string]any{"readonly": false, "done_when": nil, "expect_minutes": nil}, []string{"a writable task needs", "done_when", "expect_minutes"}},
+		{"writable, nothing", map[string]any{"readonly": false, "done_when": nil, "expect_minutes": nil}, []string{"a writable task needs", "done_when"}},
 		{"writable, blank criteria", map[string]any{"readonly": false, "done_when": []string{" ", ""}}, []string{"done_when"}},
-		{"writable, no time", map[string]any{"readonly": false, "expect_minutes": 0}, []string{"expect_minutes"}},
+		{"negative time", map[string]any{"expect_minutes": -1}, []string{"expect_minutes"}},
 		{"read-only, no goal", map[string]any{"goal": nil, "done_when": nil}, []string{"a read-only task needs", "goal"}},
-		{"read-only, no time", map[string]any{"expect_minutes": nil}, []string{"expect_minutes"}},
 		{"continues without why", map[string]any{"continues": "todo_x"}, []string{"continues_why"}},
 	} {
 		got, isErr := tool(t, s, "task_plan", briefTask(c.over))
@@ -89,10 +93,10 @@ func TestTaskPlanRequiresABrief(t *testing.T) {
 		}
 	}
 	if strings.Contains(func() string {
-		got, _ := tool(t, s, "task_plan", briefTask(map[string]any{"readonly": false, "expect_minutes": 0}))
+		got, _ := tool(t, s, "task_plan", briefTask(map[string]any{"readonly": false, "expect_minutes": -1}))
 		return got
 	}(), "done_when (") {
-		t.Fatal("a refusal for the time alone must not ask for criteria that were given")
+		t.Fatal("a refusal for an invalid time must not ask for criteria that were given")
 	}
 	s.todos.mu.RLock()
 	n := len(s.todos.todos)
@@ -100,7 +104,7 @@ func TestTaskPlanRequiresABrief(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("%d to-dos were made by refused plans", n)
 	}
-	// A read-only task needs no criteria; a writable one with criteria and a time is planned (its card waits).
+	// A read-only task needs no criteria; a writable one with criteria is planned with an automatic estimate (its card waits).
 	if got, isErr := tool(t, s, "task_plan", briefTask(map[string]any{"done_when": nil})); isErr {
 		t.Fatalf("read-only with a goal and a time: %s", got)
 	}
@@ -360,9 +364,9 @@ func TestTaskScopeIsLogged(t *testing.T) {
 		t.Fatalf("task_scope: %s", got)
 	}
 	b, _ := s.briefOfTodo(todo.ID)
-	if len(b.DoneWhen) != 2 || len(b.Criteria) != 1 || b.ExpectMinutes != 30 || b.ExpectNow != 90 || len(b.Log) != 1 ||
-		b.Log[0].Kind != briefEventScope || strings.Join(b.Log[0].Dropped, "|") != "a test covers landscape" || b.Log[0].By != "conv1" ||
-		!b.ClockAt.Equal(b.Log[0].At) {
+	if len(b.DoneWhen) != 2 || len(b.Criteria) != 1 || b.ExpectMinutes != 30 || b.ExpectNow != 90 || len(b.Log) != 2 ||
+		b.Log[1].Kind != briefEventScope || strings.Join(b.Log[1].Dropped, "|") != "a test covers landscape" || b.Log[1].By != "conv1" ||
+		!b.ClockAt.Equal(b.Log[1].At) {
 		t.Fatalf("brief = %+v", b)
 	}
 	if v := onlyTodo(s).Supervision; strings.Join(v.DoneWhen, "|") != "PR merged to main" || v.ExpectMinutes != 90 {
@@ -374,7 +378,7 @@ func TestTaskScopeIsLogged(t *testing.T) {
 	if got, isErr := tool(t, s, "task_scope", risky); !isErr || !strings.Contains(got, "only the owner may allow") || !strings.Contains(got, "ask_user") {
 		t.Fatalf("a risky change after a supervision message: %s", got)
 	}
-	if b, _ := s.briefOfTodo(todo.ID); len(b.Log) != 1 || len(b.Criteria) != 1 {
+	if b, _ := s.briefOfTodo(todo.ID); len(b.Log) != 2 || len(b.Criteria) != 1 {
 		t.Fatalf("the refused change was applied: %+v", b)
 	}
 	// The owner says yes: the turn their message starts may add the step, and the message stays on the entry.
@@ -483,7 +487,7 @@ func TestBriefClockRaisesOverdueOnce(t *testing.T) {
 		t.Fatal("raised a second time for the same clock")
 	}
 	b, _ = s.briefOfTodo(todo.ID)
-	if b.Overdue == nil || len(b.Log) != 1 || b.Log[0].Kind != briefEventOverdue {
+	if b.Overdue == nil || len(b.Log) != 2 || b.Log[1].Kind != briefEventOverdue {
 		t.Fatalf("brief = %+v", b)
 	}
 	if open, _ := s.briefDigest(ctx, late, late.Add(-time.Hour), time.UTC); len(open) != 1 || !open[0].Overdue {
@@ -630,7 +634,7 @@ func TestContinuationUsesAuthorizedScope(t *testing.T) {
 		t.Fatalf("replacement: %d starts, %d to-dos, prompt %q", starts, todoCount(s), replacement)
 	}
 	if !strings.Contains(fresh, original) || brief.Request == nil || brief.Request.Text != "keep the recurring check enabled" ||
-		len(brief.Log) != 1 || len(brief.Log[0].Dropped) != 1 || brief.Log[0].Dropped[0] != original {
+		len(brief.Log) != 2 || len(brief.Log[1].Dropped) != 1 || brief.Log[1].Dropped[0] != original {
 		t.Fatalf("original assignment or scope history lost: %+v", brief)
 	}
 	t.Logf("synthetic full prompts (runes/bytes): fresh %d/%d, re-scoped continuation %d/%d",

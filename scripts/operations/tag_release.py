@@ -14,6 +14,7 @@ publication command. Use --once for one scheduler tick; --watch polls forever.
 """
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import gzip
 import hashlib
@@ -27,8 +28,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
-from windows_release import check_windows_archives
+from windows_release import check_windows_artifacts
 
 TAG = re.compile(r"v[0-9A-Za-z][0-9A-Za-z._-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -217,6 +219,13 @@ def scan_gzip(path, token, out=None):
     return digest.hexdigest(), found
 
 
+def carries_update_url(data, update_url):
+    """The exact URL, not a prefix of a longer feed path, query or fragment."""
+    continuation = rb"[A-Za-z0-9._~:/?#@!$&()*+,;=%-]"
+    return re.search(rb"(?<!" + continuation + rb")" + re.escape(update_url.encode()) +
+                     rb"(?!" + continuation + rb")", data) is not None
+
+
 def drop_missing_helpers(assets, state_dir):
     """Helpers (persona-iphone-bridge, docs/extensions/iphone-bridge.md "Releases") are optional: a receipt whose
     latest.json lists one it does not carry (a private upload command that names its files and predates them) goes up
@@ -255,14 +264,20 @@ def drop_missing_helpers(assets, state_dir):
     return [dict(item, path=str(path)) if item["name"] == "latest.json" else item for item in assets]
 
 
-def check_release_manifest(assets):
+def check_release_manifest(assets, repository=None, expected_version=None):
     """A receipt with latest.json (the hub's) is what every release hub installs from once it is uploaded: latest.json
     must describe the downloads uploaded with it, each must be its build, and the personad among them that runs here
-    must say its version and build. v0.2.1's latest.json said another build than its binaries, written by a later run
-    than theirs, and every hub refused it after downloading (#4522)."""
+    must say its version and build. For a GitHub tag publication, that binary must also carry the Release installer's
+    update URL. v0.2.1's latest.json said another build than its binaries, written by a later run than theirs (#4522)."""
     by_name = {item["name"]: Path(item["path"]) for item in assets}
     if "latest.json" not in by_name:
         return
+    update_url = ("https://github.com/%s/releases/latest/download" % repository) if repository else None
+    if update_url and "install.sh" in by_name:
+        installer = by_name["install.sh"].read_text()
+        match = re.search(r'^DL="\$\{PERSONA_DL:-([^"\r\n]+)\}"$', installer, re.M)
+        if match is None or match.group(1).rstrip("/") != update_url:
+            raise ConfigError("install.sh uses another update URL than the Release's GitHub download base")
     try:
         manifest = json.loads(by_name["latest.json"].read_text())
     except (OSError, ValueError) as error:
@@ -270,6 +285,8 @@ def check_release_manifest(assets):
     version, build = manifest.get("version"), manifest.get("build")
     if not isinstance(version, str) or not version or not isinstance(build, int) or not re.fullmatch(r"[0-9]{12}", str(build)):
         raise ConfigError("latest.json has no version or build number")
+    if expected_version is not None and version != expected_version:
+        raise ConfigError("latest.json reports version %s, not the Release tag's %s" % (version, expected_version))
     listed = [("personad", plat, item) for plat, item in (manifest.get("files") or {}).items()]
     for group in ("programs", "nodes"):
         for program, platforms in (manifest.get(group) or {}).items():
@@ -303,12 +320,19 @@ def check_release_manifest(assets):
             if run is None:
                 if not stamped and (program, plat) not in helpers:
                     raise ConfigError("%s is not build %d: latest.json was written for another build than it" % (name, build))
+                if program == "personad" and update_url:
+                    with gzip.open(path, "rb") as stream:
+                        data = stream.read()
+                    if not carries_update_url(data, update_url):
+                        raise ConfigError("%s carries another compiled update URL; the Release installer uses %s" % (name, update_url))
                 continue
             run.chmod(0o755)
             said = subprocess.run([str(run), "version", "-v"], capture_output=True, text=True, timeout=60).stdout.strip()
             want = "%s\nchannel release, build %d" % (version, build)
             if said != want:
                 raise ConfigError("%s says %r, not %r: latest.json was written for another build than it" % (name, said, want))
+            if update_url and not carries_update_url(run.read_bytes(), update_url):
+                raise ConfigError("%s carries another compiled update URL; the Release installer uses %s" % (name, update_url))
             ran = True
     if not ran:
         raise ConfigError("latest.json has no personad that runs on this machine (%s) to check it with" % here)
@@ -388,6 +412,18 @@ def verify_remote_assets(repository, tag, assets, listed, gh="gh", missing=False
             raise ConfigError("uploaded asset digest verification failed: " + item["name"])
 
 
+def release_build(repository, tag, gh="gh"):
+    """One UTC-minute build identity shared by every publisher of this exact Release."""
+    data = json.loads(subprocess.check_output(
+        [gh, "release", "view", tag, "--repo", repository, "--json", "createdAt"], text=True, timeout=60))
+    value = data.get("createdAt") if isinstance(data, dict) else None
+    try:
+        created = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as error:
+        raise ConfigError("GitHub Release has no valid UTC creation timestamp") from error
+    return int(created.astimezone(timezone.utc).strftime("%Y%m%d%H%M"))
+
+
 def is_beta_tag(tag):
     return bool(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*", tag))
 
@@ -440,6 +476,61 @@ def upload(repository, tag, assets, gh="gh"):
     verify_remote_assets(repository, tag, assets, listed, gh, missing=True)
 
 
+def check_tag_feed(url, version, build):
+    """The immutable tag's served manifest must name this release before its stable Latest pointer can move."""
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            body = response.read((4 << 20) + 1)
+        if len(body) > 4 << 20:
+            raise ConfigError("latest.json is too large")
+        manifest = json.loads(body)
+    except (OSError, ValueError) as error:
+        raise ConfigError("Release latest.json does not read: " + str(error)) from error
+    if not isinstance(manifest, dict) or manifest.get("version") != version or manifest.get("build") != build:
+        raise ConfigError("Release latest.json reports another version or build")
+
+
+def stable_version(tag):
+    match = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def promote_latest(repository, tag, assets, platform, gh="gh"):
+    """Only the complete, verified stable hub receipt owns the Latest pointer."""
+    if platform != "hub" or not any(item["name"] == "latest.json" for item in assets):
+        return
+    details = json.loads(subprocess.check_output(
+        [gh, "release", "view", tag, "--repo", repository, "--json", "isPrerelease"], text=True, timeout=60))
+    if details.get("isPrerelease") is True:
+        return
+    if details.get("isPrerelease") is not False:
+        raise ConfigError("GitHub did not say whether this Release is a prerelease")
+    candidate = stable_version(tag)
+    if candidate is None:
+        raise ConfigError("stable Latest promotion requires a vX.Y.Z tag")
+    releases = json.loads(subprocess.check_output(
+        [gh, "release", "list", "--repo", repository, "--exclude-drafts", "--exclude-pre-releases",
+         "--limit", "1000", "--json", "tagName"], text=True, timeout=60))
+    versions = [stable_version(item.get("tagName", "")) for item in releases if isinstance(item, dict)] \
+        if isinstance(releases, list) else []
+    versions = [version for version in versions if version is not None]
+    if candidate not in versions:
+        raise ConfigError("GitHub's stable Release list does not contain the exact tag")
+    if max(versions) > candidate:
+        print("Not moving Latest back to older stable Release " + tag, flush=True)
+        return
+    latest = next(Path(item["path"]) for item in assets if item["name"] == "latest.json")
+    manifest = json.loads(latest.read_text())
+    version, build = manifest.get("version"), manifest.get("build")
+    if version != tag[1:]:
+        raise ConfigError("latest.json reports another version than the Release tag")
+    # releases/latest/download still names the previous release here. Check the immutable tag asset whose bytes were
+    # just verified, then make that same tag Latest as the final publication action.
+    url = "https://github.com/%s/releases/download/%s/latest.json" % (repository, tag)
+    check_tag_feed(url, version, build)
+    subprocess.run([gh, "release", "edit", tag, "--repo", repository, "--latest"], check=True, timeout=60)
+
+
 def write_state(path, state):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_suffix(".tmp")
@@ -460,6 +551,167 @@ def check_beta_manifest(assets, version):
         raise ConfigError("beta latest.json must carry this beta version/channel")
 
 
+def ci_signing_conclusion(repository, tag, gh="gh", commit=None):
+    """The signing job's conclusion, or None when this tag's workflow has no such job."""
+    runs = json.loads(subprocess.check_output(
+        [gh, "run", "list", "--workflow", "release.yml", "--branch", tag, "--json", "databaseId,status,headSha", "--limit", "1"],
+        text=True, timeout=60))
+    if not runs:
+        return None
+    run = runs[0]
+    if commit is not None and run.get("headSha") != commit:
+        raise ConfigError("Darwin signing workflow is for another source commit")
+    run_id = run["databaseId"]
+    for _ in range(360):
+        data = json.loads(subprocess.check_output(
+            [gh, "api", "repos/%s/actions/runs/%s/jobs" % (repository, run_id), "--paginate"], text=True, timeout=60))
+        job = next((item for item in data.get("jobs", []) if item.get("name") == "Sign Darwin command-line programs"), None)
+        if job is None:
+            status = json.loads(subprocess.check_output(
+                [gh, "run", "view", str(run_id), "--repo", repository, "--json", "status,headSha"], text=True, timeout=60))
+            if commit is not None and status.get("headSha") != commit:
+                raise ConfigError("Darwin signing workflow is for another source commit")
+            if status.get("status") != "completed":
+                time.sleep(10)
+                continue
+            return None
+        conclusion = job.get("conclusion")
+        if conclusion in ("success", "skipped"):
+            return conclusion
+        if conclusion is not None:
+            raise ConfigError("Darwin signing job failed: " + str(conclusion))
+        time.sleep(10)
+    raise ConfigError("Darwin signing job did not complete")
+
+
+def manifest_descriptors(node):
+    if isinstance(node, dict):
+        if isinstance(node.get("name"), str) and isinstance(node.get("sha256"), str):
+            yield node
+        else:
+            for value in node.values():
+                yield from manifest_descriptors(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from manifest_descriptors(value)
+
+
+def merge_ci_windows(manifest, assets, directory):
+    """Keep the locally verified Windows bytes/reports beside CI's other files, with one coherent manifest."""
+    local_path = next((Path(item["path"]) for item in assets if item["name"] == "latest.json"), None)
+    if local_path is None:
+        raise ConfigError("the local hub receipt has no latest.json for Windows verification")
+    local_manifest = json.loads(local_path.read_text())
+    if any(item["name"].endswith(".exe.gz") for item in manifest_descriptors(manifest)) \
+            and local_manifest.get("build") != manifest.get("build"):
+        raise ConfigError("Windows verification requires the same CI and local build number")
+    local_windows = {item["name"]: item for item in manifest_descriptors(local_manifest)
+                     if item["name"].endswith(".exe.gz")}
+
+    def replace(node):
+        if isinstance(node, dict):
+            name = node.get("name")
+            if isinstance(name, str) and name.endswith(".exe.gz"):
+                if name not in local_windows:
+                    raise ConfigError("local receipt has no verified Windows artifact for " + name)
+                return local_windows[name]
+            return {key: replace(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [replace(value) for value in node]
+        return node
+
+    merged = replace(manifest)
+    (directory / "latest.json").write_text(json.dumps(merged, indent=2) + "\n")
+    lines = ["%s  %s\n" % (item["sha256"], item["name"]) for item in manifest_descriptors(merged)]
+    (directory / "SHA256SUMS").write_text("".join(sorted(lines, key=lambda line: line.split(" ", 1)[1])))
+
+
+def final_hub_manifest_exists(repository, tag, gh):
+    data = json.loads(subprocess.check_output(
+        [gh, "release", "view", tag, "--repo", repository, "--json", "assets"], text=True, timeout=60))
+    assets = data.get("assets") if isinstance(data, dict) else None
+    if not isinstance(assets, list):
+        raise ConfigError("GitHub returned no Release asset list")
+    return any(isinstance(item, dict) and item.get("name") in {"latest.json", "SHA256SUMS"} for item in assets)
+
+
+def use_ci_hub_artifacts(config, tag, commit, assets, gh="gh"):
+    """When signing is enabled, use its complete CI artifact set instead of an independently built private set."""
+    if config["platform"] != "hub":
+        return assets
+    conclusion = ci_signing_conclusion(config["repository"], tag, gh, commit=commit)
+    if conclusion != "success":
+        return assets
+    if final_hub_manifest_exists(config["repository"], tag, gh):
+        return assets
+    directory = Path(tempfile.mkdtemp(prefix="ci-artifacts-", dir=config["state_dir"]))
+    remote = json.loads(subprocess.check_output(
+        [gh, "release", "view", tag, "--repo", config["repository"], "--json", "assets"], text=True, timeout=60))
+    digests = {item.get("name"): item.get("digest") for item in remote.get("assets", []) if isinstance(item, dict)}
+    if "ci-SHA256SUMS" not in digests:
+        raise ConfigError("CI SHA256SUMS is missing")
+
+    def download(name):
+        path = directory / name
+        subprocess.run([gh, "release", "download", tag, "--repo", config["repository"],
+                        "--pattern", name, "--dir", str(directory)], check=True, timeout=300)
+        expected = digests.get(name)
+        if not isinstance(expected, str) or hashlib.sha256(path.read_bytes()).hexdigest() != expected.removeprefix("sha256:"):
+            raise ConfigError("downloaded CI asset digest differs: " + name)
+        return path
+
+    manifest_path = download("ci-latest.json")
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("commit") != commit:
+        raise ConfigError("CI latest.json is for another source commit")
+    names = {"VERSION", "install.sh", "ci-SHA256SUMS"}
+    for item in manifest_descriptors(manifest):
+        if not item["name"].endswith(".exe.gz"):
+            names.add(item["name"])
+    downloaded = {"ci-latest.json": manifest_path}
+    downloaded.update({name: download(name) for name in sorted(names)})
+    merge_ci_windows(manifest, assets, directory)
+    downloaded["latest.json"] = directory / "latest.json"
+    downloaded["SHA256SUMS"] = directory / "SHA256SUMS"
+    result = [dict(item, path=str(downloaded[item["name"]])) if item["name"] in downloaded else item for item in assets]
+    present = {item["name"] for item in result}
+    result += [{"path": str(path), "name": name} for name, path in downloaded.items()
+               if name not in present and name != "ci-latest.json"]
+    return result
+
+
+def validate_assets(config, tag, assets):
+    """Repeat the deterministic receipt checks on initial publication and on every uploaded-state resume."""
+    if config["platform"] == "hub" and any(item["name"] == "latest.json" for item in assets) \
+            and "-" not in tag and stable_version(tag) is None:
+        raise ConfigError("stable Latest promotion requires a vX.Y.Z tag")
+    try:
+        check_windows_artifacts(assets, tag[1:])
+    except ValueError as error:
+        raise ConfigError(str(error)) from error
+    if is_beta_tag(tag):
+        # A platform receipt is independent: Android has its signed APK and index, iOS only its store receipt.
+        # Only the hub worker has latest.json; if present it can never point beta at a stable or another version.
+        check_beta_manifest(assets, tag[1:])
+    check_release_manifest(assets, config["repository"], tag[1:])
+    check_android_index(assets, tag[1:])
+
+
+def finish_publication(config, tag, commit, platform, assets):
+    validate_assets(config, tag, assets)
+    upload(config["repository"], tag, assets)
+    # Once remote digests verify, retain the exact receipt. A transient feed/promotion failure must not rebuild new
+    # binaries under the same Release asset names on the next tick.
+    checkpoint = [dict(item, sha256=hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()) for item in assets]
+    state = config["state_dir"] / "state.json"
+    write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "uploaded",
+                        "store_verified": True, "assets": checkpoint})
+    promote_latest(config["repository"], tag, assets, platform)
+    write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "complete", "assets": assets})
+    print("Published " + platform + " " + tag, flush=True)
+    return 0
+
+
 def publish_once(config, tag, commit):
     platform = config["platform"]
     state = config["state_dir"] / "state.json"
@@ -468,36 +720,34 @@ def publish_once(config, tag, commit):
         if previous.get("tag") == tag and previous.get("commit") == commit and previous.get("phase") == "complete":
             print("Already published " + platform + " " + tag, flush=True)
             return 0
+        if previous.get("tag") == tag and previous.get("commit") == commit and previous.get("phase") == "uploaded":
+            assets = read_receipt(state, commit)
+            return finish_publication(config, tag, commit, platform, assets)
     prepare_worktree(config, commit)
     fields = {key: str(config[key]) for key in ("repo", "worktree", "state_dir")}
     fields.update(tag=tag, commit=commit, version=tag[1:])
     write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "publishing"})
     command = [item.format(**fields) for item in config["command"]]
     env = dict(os.environ, PERSONA_RELEASE_TAG=tag, PERSONA_RELEASE_COMMIT=commit,
-               PERSONA_RELEASE_VERSION=tag[1:], PERSONA_RELEASE_REPOSITORY=config["repository"],
+               PERSONA_RELEASE_VERSION=tag[1:], PERSONA_RELEASE_BUILD=str(release_build(config["repository"], tag)),
+               PERSONA_RELEASE_REPOSITORY=config["repository"],
                PERSONA_RELEASE_PLATFORM=platform, PERSONA_RELEASE_WORKTREE=str(config["worktree"]))
     subprocess.run(command, cwd=config["worktree"], env=env, check=True)
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
     assets = drop_missing_helpers(assets, config["state_dir"])
-    try:
-        check_windows_archives(assets, tag[1:])
-    except ValueError as error:
-        raise ConfigError(str(error)) from error
-    if is_beta_tag(tag):
-        # A platform receipt is independent: Android has its signed APK and index, iOS only its store receipt.
-        # Only the hub worker has latest.json; if present it can never point beta at a stable or another version.
-        check_beta_manifest(assets, tag[1:])
-    check_release_manifest(assets)
-    check_android_index(assets, tag[1:])
-    upload(config["repository"], tag, assets)
-    write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "complete", "assets": assets})
-    print("Published " + platform + " " + tag, flush=True)
-    return 0
+    assets = use_ci_hub_artifacts(config, tag, commit, assets)
+    return finish_publication(config, tag, commit, platform, assets)
 
 
 def invoke_agent(config, tag, commit):
     if "agent" not in config:
         return publish_once(config, tag, commit)
+    state = config["state_dir"] / "state.json"
+    if state.exists():
+        previous = json.loads(state.read_text())
+        if previous.get("tag") == tag and previous.get("commit") == commit and previous.get("phase") == "uploaded":
+            assets = read_receipt(state, commit)
+            return finish_publication(config, tag, commit, config["platform"], assets)
     # Prepare the source before the Agent starts, and retain this process's lock
     # across both its decision and the deterministic publication command.
     prepare_worktree(config, commit)

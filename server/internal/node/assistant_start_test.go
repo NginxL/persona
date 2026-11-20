@@ -19,6 +19,23 @@ func fakeClaudeHome(t *testing.T, script string) {
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("no zsh")
 	}
+	fakeClaudeHomeFiles(t, script)
+}
+
+// fakeClaudeHomeBash uses the assistant's production bash fallback for a regression that must execute without zsh.
+func fakeClaudeHomeBash(t *testing.T, script string) {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Fatalf("no bash: %v", err)
+	}
+	fakeClaudeHomeFiles(t, script)
+	// Only here: the launcher profile probe dates every shell file it reads (assistant_profile_probe.go), and the
+	// zsh fixtures settle only ~/.zshrc, so a fresh ~/.bashrc beside it would read as a profile still being edited.
+	_ = os.WriteFile(filepath.Join(os.Getenv("HOME"), ".bashrc"), nil, 0o600)
+}
+
+func fakeClaudeHomeFiles(t *testing.T, script string) {
+	t.Helper()
 	home := t.TempDir()
 	bin := filepath.Join(home, "bin")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
@@ -71,7 +88,11 @@ func TestAssistantSendFailsWhenTheLauncherDoesNotStart(t *testing.T) {
 
 // One that starts answers as before, as soon as its first line comes out.
 func TestAssistantSendReturnsOnceTheProcessStarted(t *testing.T) {
-	fakeClaudeHome(t, "read line\necho '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
+	fakeClaudeHome(t, `case " $* " in *" auth status "*) echo '{"loggedIn":true}'; exit 0 ;; esac
+read line
+echo '{"type":"system","subtype":"init"}'
+sleep 30
+`)
 	n := codexTestNode(t)
 	withFakeHub(t, n)
 	start := time.Now()

@@ -51,6 +51,21 @@ func TestClaudeModelListReadsInitialize(t *testing.T) {
 	}
 }
 
+// With "model": "default" in its settings, Claude Code's list names default twice (#9998): one row of it reaches the apps.
+func TestClaudeModelListKeepsOneRowPerID(t *testing.T) {
+	out := `{"type":"control_response","response":{"subtype":"success","request_id":"persona-models","response":{"models":[` +
+		`{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)"},` +
+		`{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus"},` +
+		`{"value":"default","resolvedModel":"default","displayName":"default","description":"Custom model"}]}}}`
+	got, err := claudeModelList(io.Discard, strings.NewReader(out+"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "default" || got[0].Name != "Default (recommended)" || got[1].ID != "opus" {
+		t.Fatalf("got %+v, want default (the first one) and opus", got)
+	}
+}
+
 func TestClaudeModelListErrors(t *testing.T) {
 	for name, out := range map[string]string{
 		"refused":   `{"type":"control_response","response":{"subtype":"error","request_id":"persona-models","error":"Not logged in"}}`,

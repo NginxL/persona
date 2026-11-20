@@ -234,7 +234,7 @@ func (e *Engine) PruneProjectAliases() int {
 	}
 	removed := 0
 	for _, p := range projects {
-		if !p.Live() || len(p.Aliases) == 0 || p.fieldLocked("aliases") {
+		if !p.Live() || p.referenceOnly() || len(p.Aliases) == 0 || p.fieldLocked("aliases") {
 			continue
 		}
 		own, seen, counted := normName(p.Name), map[string]bool{}, 0
@@ -278,7 +278,11 @@ func (e *Engine) knownProjects() []prompts.KnownProject {
 		}
 		// With its one line: names alone made the model start a second project for the same work under the name
 		// of the group it was reading (2026-11-01, two work groups about the same project).
-		out = append(out, prompts.KnownProject{Name: p.Name, Aliases: p.Aliases, OneLine: p.OneLine, Pinned: p.Pinned})
+		known := prompts.KnownProject{Name: p.Name, Aliases: p.Aliases}
+		if !p.referenceOnly() {
+			known.OneLine, known.Pinned = p.OneLine, p.Pinned
+		}
+		out = append(out, known)
 	}
 	return out
 }
@@ -289,6 +293,8 @@ func (e *Engine) evolveProject(name, kind string, aliases []string, myRole strin
 	if name == "" {
 		return ""
 	}
+	e.Store.applyMu.Lock()
+	defer e.Store.applyMu.Unlock()
 	p := e.FindProject(name)
 	if p == nil {
 		for _, a := range aliases {
@@ -308,6 +314,18 @@ func (e *Engine) evolveProject(name, kind string, aliases []string, myRole strin
 		}
 		p = &Project{Slug: slug, Name: name, Kind: "short", Status: "active", Created: now}
 	}
+	if p.referenceOnly() {
+		if strings.TrimSpace(update) != "" || myRole != "" {
+			e.logf("project %s: %v: skipped compression detail", p.Slug, ErrReferenceOnly)
+		}
+		if !slices.Contains(p.Chats, c.ID) {
+			p.Chats = append(p.Chats, c.ID)
+			if err := e.Store.PutProject(p); err != nil {
+				e.logf("project %s: %v", p.Slug, err)
+			}
+		}
+		return p.Slug
+	}
 	if kind == "short" || kind == "long" {
 		if p.Kind == "" || p.Kind == "short" {
 			p.Kind = kind // long wins: a mission does not become a feature
@@ -321,10 +339,13 @@ func (e *Engine) evolveProject(name, kind string, aliases []string, myRole strin
 	people := e.externalPeople(c.People)
 	p.People = addUnique(p.People, people...)
 	if strings.TrimSpace(update) != "" {
-		_ = e.Store.AppendLog(p.Slug, now, c.Name, update)
-		p.Dirty = true
-		if p.Status == "done" {
-			p.Status = "active"
+		if err := e.Store.AppendLog(p.Slug, now, c.Name, update); err != nil {
+			e.logf("project %s: %v", p.Slug, err)
+		} else {
+			p.Dirty = true
+			if p.Status == "done" {
+				p.Status = "active"
+			}
 		}
 	}
 	_ = e.Store.PutProject(p)

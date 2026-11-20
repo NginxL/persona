@@ -96,6 +96,12 @@
     <string name="settings_pairing_scan_title">Scan pairing QR code</string>
     <string name="settings_pairing_scan_hint">Fit the QR code the hub showed when it was installed,\nor the one from Connect a new device on a signed-in device,\nin the frame</string>
     <string name="settings_pairing_scan_manual">Can\'t scan? Enter manually</string>
+    <string name="settings_pairing_scan_photo">Choose from Photos</string>
+    <string name="settings_pairing_scan_camera_unavailable">Camera is unavailable. Choose a photo of the QR code instead.</string>
+    <string name="settings_pairing_scan_photo_reading">Reading QR code…</string>
+    <string name="settings_pairing_scan_photo_unreadable">The QR code in this photo couldn\'t be read. Try another one.</string>
+    <string name="settings_pairing_scan_photo_none">No QR code was found in this photo. Try another one.</string>
+    <string name="settings_pairing_scan_photo_multiple">This photo contains more than one QR code. Choose a photo with one QR code.</string>
 
     <!-- Hubs -->
     <string name="settings_hubs_title">Hubs</string>

@@ -1,5 +1,5 @@
 import type { LocalStore } from '../platform/LocalStore';
-import { Wire } from './Wire';
+import { ResourceRow, Wire } from './Wire';
 
 export class ChatDraft {
   text: string = '';
@@ -41,6 +41,40 @@ export class ChatDraftStore {
   private decodeDraft(raw: string): ChatDraft {
     const data = raw ? Wire.record(JSON.parse(raw) as Object) : Wire.payload([], []), draft = new ChatDraft();
     draft.text = Wire.text(data, 'text'); draft.context = Wire.text(data, 'context'); draft.revision = Wire.text(data, 'revision'); return draft;
+  }
+  async readSessionSnapshot(scope: string): Promise<string> {
+    const key = 'snapshot:' + scope; return this.transaction(key, (): Promise<string> => this.local.get(key));
+  }
+  async saveSessionSnapshot(scope: string, sessions: ResourceRow[], conversations: ResourceRow[], heldActions: Record<string, Object>[], current: () => boolean): Promise<void> {
+    const key = 'snapshot:' + scope, value = JSON.stringify({ sessions: sessions, conversations: conversations, heldActions: heldActions });
+    await this.transaction(key, async (epoch: number): Promise<void> => {
+      if (current()) await this.local.put(key, value, epoch);
+    });
+  }
+  // Commit a definite held receipt before retiring its outbox copy, even if the owner switched chats or managers.
+  async cacheHeldMessage(scope: string, target: string, owner: ResourceRow, id: string, held: Record<string, Object> | undefined, paired: () => boolean,
+    action?: Record<string, Object>): Promise<void> {
+    const key = 'snapshot:' + scope, original = Wire.record(JSON.parse(JSON.stringify(owner)) as Object);
+    await this.transaction(key, async (epoch: number): Promise<void> => {
+      const raw = await this.local.get(key), snapshot = raw ? Wire.record(JSON.parse(raw) as Object) : Wire.payload([], []);
+      if (!paired()) return;
+      const actions = Wire.rows(snapshot, 'heldActions');
+      const same = (item: Record<string, Object>): boolean => Wire.text(item, 'target') === target && Wire.text(item, 'id') === id;
+      if (action) snapshot['heldActions'] = actions.filter((item: Record<string, Object>) => !same(item)).concat([action]);
+      else if (actions.some((item: Record<string, Object>) => same(item) && Wire.bool(item, 'deleted'))) return;
+      const sessions = Wire.rows(snapshot, 'sessions');
+      let saved = sessions.find((row: Record<string, Object>) => Wire.text(row, 'machine') === owner.machine &&
+        (Wire.text(row, 'session') || Wire.text(row, 'id')) === (owner.session || owner.id));
+      if (!saved && (held || (action && !Wire.bool(action, 'deleted')))) { saved = original; sessions.push(saved); }
+      if (saved) {
+        const data = Wire.parse(Wire.text(saved, 'raw', '{}')), entries = Wire.rows(data, 'undelivered');
+        if (action && Wire.bool(action, 'deleted')) data['undelivered'] = entries.filter((item: Record<string, Object>) => Wire.text(item, 'id') !== id);
+        else if (held && !entries.some((item: Record<string, Object>) => Wire.text(item, 'id') === id)) data['undelivered'] = entries.concat([held]);
+        saved['raw'] = JSON.stringify(data);
+      }
+      snapshot['sessions'] = sessions;
+      await this.local.put(key, JSON.stringify(snapshot), epoch);
+    });
   }
   async read(target: string): Promise<ChatDraft> {
     const key = 'draft:' + target; return this.transaction(key, async (): Promise<ChatDraft> => this.decodeDraft(await this.local.get(key)));

@@ -6,9 +6,8 @@ import (
 )
 
 // Subscription rate-limit windows (#2432, docs/server/usage-windows.md): how much of an account's 5-hour and weekly allowance
-// is used. A node reads them from the agents' own local files (Codex's rollouts, a Claude Code status line drop) and
-// answers usage.windows; the hub merges the machines' answers into one list per account. Nothing here carries a
-// credential: the account has no id the agent's vendor knows, only the windows it was seen with.
+// is used. A node reads them from Codex app-server or from local files and answers usage.windows. The usage manager
+// groups the machines' answers. No credential or raw upstream account ID crosses this boundary.
 
 // UsageWindow is one rate-limit window of one account.
 type UsageWindow struct {
@@ -25,7 +24,7 @@ type UsageWindow struct {
 
 // UsageAccount is one subscription account as one source saw it (a node's answer) or as the hub merged it.
 type UsageAccount struct {
-	// ID is set by the hub: a short digest of the provider and the windows' identity, stable while the windows are.
+	// ID is the manager's opaque row key. For Codex it identifies an account or an unidentified source across resets.
 	ID       string `json:"id,omitempty"`
 	Provider string `json:"provider"`       // codex | claude
 	Name     string `json:"name"`           // "Codex Pro", "Claude"
@@ -42,7 +41,7 @@ type UsageAccount struct {
 	// fade however long ago it last heard from the hub, and no client hard-codes the thresholds.
 	StaleAt *time.Time `json:"stale_at,omitempty"`
 
-	// Where the numbers came from (#2595), set by the hub. Local: an agent's own files on one of the machines
+	// Where the numbers came from (#2595), set by the hub. Local: read on one of the machines
 	// (docs/server/usage-windows.md); Sources: the names of the account-pool gateways that reported it
 	// (docs/server/usage-windows.md "Account pool gateways"). An account both saw lists both.
 	Local   bool     `json:"local,omitempty"`
@@ -58,18 +57,27 @@ type UsageAccount struct {
 	// Ref is the account's identity at its gateway ("<source id>:<account id>"), when the source has one. Hub-internal:
 	// it is never sent out. Two samples with refs from one source but different accounts are never merged.
 	Ref string `json:"-"`
-	// Origin is where this sample was read (#1904): "<machine id>/<n>" for the n-th account of a machine's answer, the
-	// gateway's Ref, or "<source id>#<n>" for a gateway account without one. Hub-internal, never sent out: it only tells
-	// apart, in a stable order, accounts that nothing else does.
+	// CodexAccountKey is the node's digest of the upstream account ID, used only by the usage manager.
+	CodexAccountKey string `json:"-"`
+	// Origin distinguishes unidentified sources. On a machine it uses the machine ID and source digest or legacy
+	// answer position. On a gateway it uses the reference or a gateway-scoped position. It stays in the usage manager.
 	Origin string `json:"-"`
+}
+
+// UsageNodeAccount carries internal grouping keys on the node RPC only. Embedding preserves the flat account shape
+// older managers and nodes use. The public usage endpoint returns UsageAccount without these keys.
+type UsageNodeAccount struct {
+	UsageAccount
+	AccountKey string `json:"account_key,omitempty"` // digest of the Codex ID from this usage snapshot
+	SourceKey  string `json:"source_key,omitempty"`  // digest of the Codex home, scoped to the reporting machine
 }
 
 // UsageSnapshot is what a node answers to usage.windows.
 type UsageSnapshot struct {
 	// Enabled false: hub.json machines[].usage_windows is false for this machine; nothing is read.
-	Enabled     bool           `json:"enabled"`
-	CollectedAt time.Time      `json:"collected_at"`
-	Accounts    []UsageAccount `json:"accounts"`
+	Enabled     bool               `json:"enabled"`
+	CollectedAt time.Time          `json:"collected_at"`
+	Accounts    []UsageNodeAccount `json:"accounts"`
 }
 
 // WindowLabel names a window by its length: 300 → "5h", 10080 → "7d", 45 → "45m"; 0 or less → "".

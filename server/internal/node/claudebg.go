@@ -189,6 +189,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 				s.Capabilities = &proto.SessionCapabilities{Read: true}
 			}
 			s.Capabilities.Terminal = true
+			s.Capabilities.Send = true         // the owner's message can be typed here even with no inbox (#5965)
+			s.Capabilities.PluginInput = false // this pane, not the plugin, carries the owner's input
+			s.ReadOnlyReason = ""
 			livePanes[pane] = true // its dialog read is kept while the claude lives (forgetDialogs)
 			// Its own status file says waiting when a dialog has the keyboard, but a build that does not: a resting
 			// claude's screen is read, as for a pane (dialogstatus.go).
@@ -222,7 +225,7 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool, livePane
 		if s.Title == "" {
 			s.Title = c.Name
 		}
-		setContext(&s, m)
+		n.setSessionContext(&s, m)
 		s.ModelFallback = m.modelFallback
 		s.Activity, s.ActivityAt = m.activityOf()
 		s.PermissionMode, s.Effort = n.currentModes(id, m)
@@ -292,12 +295,13 @@ func (n *Node) outsideClaude(id string) (claudeProc, bool) {
 	return claudeProc{}, false
 }
 
-// sendOutside sends text to a session a claude outside Persona's panes has open, through its peer inbox; handled
-// false when no such claude has it, or it has no inbox (an older Claude Code): the caller goes on as before, and
-// start refuses it as open elsewhere (openElsewhereRefusal). Nothing else is tried: a second claude --resume would
-// write the same transcript. A send counts once the session wrote that it took the message (peerTaken); one it did
-// not take in time — held for the person at the computer, dropped as a duplicate — is reported as not confirmed
-// (delivered unknown), so the app neither shows it as sent nor resends it by itself.
+// sendOutside sends text to a session a claude outside Persona's panes has open, through its peer inbox. A verified
+// owner's ordinary message to a claude in tmux is left for send's usual pane path instead; anyone else's message there
+// still needs the inbox and is refused without one, never typed. With no pane and no inbox, handled is false and the
+// caller refuses the session as open elsewhere (openElsewhereRefusal). Nothing starts a second claude --resume on the
+// same transcript. A send counts once the session wrote that it took the message (peerTaken); one it did not take in
+// time — held for the person at the computer, dropped as a duplicate — is reported as not confirmed (delivered
+// unknown), so the app neither shows it as sent nor resends it by itself.
 func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.Image) (handled bool, err error) {
 	return n.sendOutsidePriority(ctx, id, text, images, "")
 }
@@ -309,8 +313,19 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 	if !ok {
 		return false, nil
 	}
+	pane := outsidePane(c)
+	if pane != "" && strings.HasPrefix(strings.TrimSpace(text), "/") {
+		// Keep the inbox's command refusal on the tmux route too: exitAgent knows only Persona's own agents.
+		return true, refusal(peerCommand, peerCommandMsg, nil)
+	}
+	if forced == "" && pane != "" && ownerDeliveryOf(ctx) != nil {
+		return false, nil // the owner's own words go through send's ordinary tmux-pane checks and confirmation (#5965)
+	}
 	p, has := peerOf(c)
 	if !has {
+		if pane != "" {
+			return true, refusal(peerUnsupported, peerNoInboxMsg, nil) // nobody else's words may be typed into the pane
+		}
 		return false, nil
 	}
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
@@ -354,6 +369,7 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 		}
 	}
 	p.fromMode = n.peerAttest(ctx, c, id)
+	_, p.source = ctx.Value(sourceDeliveryKey{}).(string)
 	err = peerSendAt(ctx, p, id, text, priority)
 	var pe *errPeer
 	if asPeer(err, &pe) {
@@ -391,40 +407,65 @@ func (n *Node) sendOutsidePriority(ctx context.Context, id, text string, images 
 // only where that evidence is reliable (#9607):
 //   - the owner's own message (ownerInputExact), card answer or Stop (the Devices manager's owner-control RPC): it goes in as the session's own user's words, the one authorization the node acts on. The
 //     person who owns the session is the one its permission prompts and held messages wait on, and what they type at its
-//     terminal goes in whatever its mode. bypass when the session's own transcript says bypassPermissions now
-//     (peerSessionClass); nothing otherwise (a session that prompts takes a message that states none; plan may be
-//     either class). A stale record can only make the session hold the message, never take more than its owner could.
-//   - anything else (supervision, another Agent's message, non-owner answers and stops): nothing. The node cannot bind such
-//     words to the permission mode they were written in, so a bypass session holds them for approval at the computer.
+//     terminal goes in whatever its mode. bypass when live receiver evidence puts the session in that class
+//     (peerSessionClassAt); nothing otherwise (a session that prompts takes a message that states none). Uncertain
+//     evidence can only make the session hold the message, never take more than its owner could.
+//   - an Agent message on the source-permission delivery RPC: the source node captured its class when the words were produced, bound to the source process and call. It never becomes owner input.
+//   - anything without reliable source evidence (including older peers and non-owner controls): nothing.
 func (n *Node) peerAttest(ctx context.Context, c claudeProc, id string) string {
-	if ownerDeliveryOf(ctx) != nil && peerSessionClass(n, c, id) == peerModeBypass {
-		return peerModeBypass
-	}
-	return ""
-}
-
-// peerSessionClass is the from-mode class session id runs in, from the transcript in claude c's own config directory
-// (not another profile's copy of the session): bypass when its latest mode is bypassPermissions, prompting for a mode
-// that prompts, "" when it cannot be told (plan, which Claude Code counts as bypass when bypass is available to the
-// session; no transcript or no mode yet). A mode changed since the transcript last said is not seen: such a message
-// is held there, which the send reports as such.
-func peerSessionClass(n *Node, c claudeProc, id string) string {
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(c.dir), "projects", "*", id+".jsonl"))
-	var path string
-	var newest os.FileInfo
-	for _, m := range matches {
-		if st, err := os.Stat(m); err == nil && (newest == nil || st.ModTime().After(newest.ModTime())) {
-			path, newest = m, st
+	if ownerDeliveryOf(ctx) != nil {
+		if peerSessionClassAt(ctx, n, c, id) == peerModeBypass {
+			return peerModeBypass
 		}
-	}
-	if newest == nil {
 		return ""
 	}
-	switch n.metaNow(path, newest).mode {
+	mode, _ := ctx.Value(sourceDeliveryKey{}).(string)
+	return mode
+}
+
+// peerSessionClass is the classifier without a send context. Keep its signature for callers that only inspect a class.
+func peerSessionClass(n *Node, c claudeProc, id string) string {
+	return peerSessionClassAt(context.Background(), n, c, id)
+}
+
+// peerSessionClassAt is the from-mode class session id runs in. A readable external tmux footer is the freshest mode:
+// shift+tab changes it before Claude writes the transcript. A visible composer without a recognized mode is prompting:
+// bypass and plan keep their indicators when a draft or dialog hides default's hint. Without live evidence, read the newest
+// transcript copy in claude c's own config directory (not another profile's copy), bypassing the ordinary metadata cache.
+// Plan needs one more fact: process arguments say whether bypass is available to that session. No mode, or plan without
+// that evidence, is "".
+func peerSessionClassAt(ctx context.Context, n *Node, c claudeProc, id string) string {
+	mode := ""
+	if pane := outsidePane(c); pane != "" {
+		if text, err := n.readPane(ctx, pane, "visible", 60); err == nil {
+			mode = tuiMode(text)
+			if mode == "" && tuiPromptingScreen(text) {
+				return peerModePrompting
+			}
+		}
+	}
+	if mode == "" {
+		matches, _ := filepath.Glob(filepath.Join(filepath.Dir(c.dir), "projects", "*", id+".jsonl"))
+		var path string
+		var newest os.FileInfo
+		for _, m := range matches {
+			if st, err := os.Stat(m); err == nil && (newest == nil || st.ModTime().After(newest.ModTime())) {
+				path, newest = m, st
+			}
+		}
+		if newest != nil {
+			mode = n.metaNow(path, newest).mode
+		}
+	}
+	switch mode {
 	case "bypassPermissions":
 		return peerModeBypass
 	case "default", "acceptEdits", "auto", "dontAsk":
 		return peerModePrompting
+	case "plan":
+		if claudeCanBypass(c.pid) {
+			return peerModeBypass
+		}
 	}
 	return ""
 }

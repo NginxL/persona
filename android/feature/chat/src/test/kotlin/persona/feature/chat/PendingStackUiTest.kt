@@ -6,6 +6,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -67,10 +68,11 @@ class PendingStackUiTest {
     private val plan = Interaction("plan", machineId = key.machineId, sessionId = key.sessionId, kind = "plan", createdAt = "2026-11-12T01:05:00Z",
         summary = "Retry the import once", plan = "1. Catch the restart error\n2. Retry once")
     private val sent = mutableListOf<String>()
+    private val answers = mutableListOf<Pair<String, Resolution>>()
 
     private fun settle() { Snapshot.sendApplyNotifications(); rule.waitForIdle() }
 
-    private fun agentChat(requests: List<Interaction>) {
+    private fun agentChat(requests: List<Interaction>, dark: Boolean = false) {
         val sessions = object : SessionsRepository {
             override val machines = MutableStateFlow(listOf(Machine(key.machineId, "Computer A", online = true)))
             override val sessions = MutableStateFlow(listOf(Session(key.machineId, key.sessionId, title = "Fix the importer retry",
@@ -90,10 +92,10 @@ class PendingStackUiTest {
         val interactions = object : InteractionCenter {
             override val pending = MutableStateFlow(requests)
             override suspend fun refresh() = Unit
-            override suspend fun resolve(id: String, resolution: Resolution) = Unit
+            override suspend fun resolve(id: String, resolution: Resolution) { answers += id to resolution }
         }
         rule.setContent {
-            PersonaTheme(reduceMotion = true) {
+            PersonaTheme(darkTheme = dark, reduceMotion = true) {
                 Box(Modifier.fillMaxSize()) {
                     ChatScreen(key, chats, sender, interactions, sessions, onBack = {}, chrome = ChatChromeBindings(renamer = renamer))
                 }
@@ -115,6 +117,25 @@ class PendingStackUiTest {
         // the card is still there, unanswered
         rule.onNodeWithTag("pending-card-perm").assertExists()
     }
+
+    private fun assertPreparedCardAnswers(dark: Boolean) {
+        // The original window has ended; this is the replacement snapshot with the server's current lifetime.
+        val retained = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"prepared","machine_id":"${key.machineId}","session_id":"${key.sessionId}",""" +
+                """"kind":"permission","tool_name":"Bash","expires_at":"${java.time.Instant.now().plusSeconds(3_600)}",""" +
+                """"can_clarify":true}""",
+        )
+        agentChat(listOf(retained), dark = dark)
+        val inCard = hasAnyAncestor(hasTestTag("pending-card-prepared"))
+        rule.onNode(hasText("Allow") and inCard).assertIsEnabled().performClick()
+        settle()
+        assertEquals(listOf(retained.id to Resolution(allow = true)), answers)
+    }
+
+    @Test fun aPreparedCardStillAnswersAfterItsOriginalWindow() = assertPreparedCardAnswers(dark = false)
+
+    @Config(fontScale = 2f)
+    @Test fun aPreparedCardStillAnswersWithLargeTextInDarkMode() = assertPreparedCardAnswers(dark = true)
 
     /** Past half the page they scroll under "3 pending": the session's requests, the number its Agents row says
      *  ("3 need your decision", one count per card of the session). */

@@ -455,9 +455,9 @@ private struct StandingRevokeConfirmation: ViewModifier {
     var revoke: (StandingAuthorization) -> Void
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(String(localized: "Revoke this authorization?"),
+        content.accessibleConfirmationDialog(String(localized: "Revoke this authorization?"),
                                    isPresented: Binding(get: { grant != nil }, set: { if !$0 { grant = nil } }),
-                                   titleVisibility: .visible, presenting: grant) { grant in
+                                   titleVisibility: .visible, hasCancel: true, presenting: grant) { grant in
             Button(String(localized: "Revoke Authorization"), role: .destructive) { revoke(grant) }
                 .accessibilityIdentifier("standing.confirm")
             Button(String(localized: "Cancel"), role: .cancel) {}

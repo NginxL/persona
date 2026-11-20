@@ -29,7 +29,12 @@ func (f *fakeHub) noticesTo(id string) []string {
 // task_plan: its agent s1 on box at work.
 func newLeaderService(t *testing.T) (*Service, *fakeHub, Todo) {
 	t.Helper()
-	s, f := newQuietService(t)
+	return newLeaderServiceOn(t, nil)
+}
+
+func newLeaderServiceOn(t *testing.T, st Store) (*Service, *fakeHub, Todo) {
+	t.Helper()
+	s, f := newQuietServiceOn(t, st)
 	f.judge = `{"verdict":"done","reason":"PR 已合并"}`
 	f.known["lead1"] = true
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
@@ -71,7 +76,7 @@ func TestLeaderSupervisesItsTasks(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
 	waitFor(t, "the leader's message", func() bool { return len(f.noticesTo("lead1")) == 1 })
 	n := f.noticesTo("lead1")[0]
-	for _, want := range []string{"📋 督办", "你是这些任务的 leader 对话", "signal=review", "hub 判断做完了，等你验收", "pull/7"} {
+	for _, want := range []string{"📋 督办", "你是这些任务的 leader 对话", "signal=review", "待逐项复核，不代表完成", "pull/7"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the leader's message lacks %q:\n%s", want, n)
 		}
@@ -231,7 +236,10 @@ func TestDigestTo(t *testing.T) {
 		{"no leaders: the supervisor conversation itself", none, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
 		{"leader's task waits for the user", leaders, superviseSignal{Todo: waits, Kind: sigIdle}, "conv1"},
 		{"leader's escalation", leaders, superviseSignal{Todo: waits, Kind: sigEscalated}, "conv1"},
-		{"leader's failed start", leaders, superviseSignal{Todo: leads, Kind: sigFailed}, "conv1"},
+		{"leader's failed start", leaders, superviseSignal{Todo: leads, Kind: sigFailed}, "lead1"},
+		{"failed start while needs_user", leaders, superviseSignal{Todo: waits, Kind: sigFailed}, "conv1"},
+		{"main's failed start", leaders, superviseSignal{Todo: mains, Kind: sigFailed}, "conv1"},
+		{"a removed leader's failed start", none, superviseSignal{Todo: leads, Kind: sigFailed}, "conv1"},
 		{"gone", leaders, superviseSignal{Todo: "nope", Kind: sigReview}, "conv1"},
 	} {
 		if got := s.digestTo(c.cfg, c.g); got != c.want {

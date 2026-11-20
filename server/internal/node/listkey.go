@@ -118,6 +118,14 @@ func listKeySized(list []proto.Session, size int) string {
 			w.quote(s.PermissionMode, '/')
 			w.quote(s.Effort, '\n')
 		}
+		if s.PendingEffort != nil {
+			w.b.WriteString("pending-effort:")
+			w.quote(*s.PendingEffort, '/')
+			w.str(strconv.FormatBool(s.EffortChangeFailed), '\n')
+		}
+		if s.OffLauncher { // the scan of running claudes flips it with no turn of the agent (offlauncher.go)
+			w.b.WriteString("off-launcher\n")
+		}
 		w.b.WriteString("source:")
 		w.str(s.SourceKind, '/')
 		w.str(s.SourceThreadID, '/')
@@ -263,6 +271,9 @@ func (w *keyWriter) caps(c *proto.SessionCapabilities) {
 	}
 	if c.PluginInput {
 		w.b.WriteString(" plugin_input=true")
+	}
+	if c.SupervisionPolicy {
+		w.b.WriteString(" supervision_policy=true")
 	}
 	w.b.WriteByte('}')
 }

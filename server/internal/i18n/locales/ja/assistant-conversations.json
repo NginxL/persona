@@ -2,5 +2,10 @@
   "archive_main": "メインチャットはアーカイブできません",
   "archive_background_supervisor": "バックグラウンド監督のチャットはアーカイブできません",
   "background_supervisor": "バックグラウンド監督",
-  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで"
+  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで",
+  "notice_delivery_refused": "このチャットが、タスクまたはチャットに関する Persona からの更新を受け取りませんでした。届いておらず、自動では再送しません。",
+  "relay_delivery_failed": "メッセージを届けられませんでした",
+  "supervision_delivery_failed": "このチャットではタスクのフォローアップ指示を受け取れません。タスクを開いて最新の状態と報告を確認し、Claude Code または Codex の監督チャットでフォローアップしてください。",
+  "supervision_delivery_refused": "このチャットがタスクのフォローアップメッセージを受け取らなかったため、自動では再送しません。タスクを開いて最新の状態と報告を確認してください。",
+  "supervision_reviewer_required": "このタスクを始める前に、Claude Code または Codex の監督チャットを選んでください。"
 }

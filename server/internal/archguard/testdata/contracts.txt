@@ -13,5 +13,6 @@ internal/kbwire
 internal/nodeproto
 internal/proto
 internal/relayproto
+internal/repositorywire
 internal/rpc
 github.com/nwverse/persona/sdk/go/wire

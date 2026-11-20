@@ -160,7 +160,8 @@ func (e *Engine) TagItems(ctx context.Context, max int) (more bool, err error) {
 		batch := todo[:min(tagItemsBatch, len(todo))]
 		todo = todo[len(batch):]
 		byID := map[string]*Item{}
-		in := prompts.KBItemsInput{Projects: e.knownProjects(), Tags: e.TopTags(40)}
+		owner := e.knowledgeOwner()
+		in := prompts.KBItemsInput{Language: owner.Language, Projects: e.knownProjects(), Tags: e.TopTags(40)}
 		for _, it := range batch {
 			key := it.Kind + "/" + it.ID
 			byID[key] = it
@@ -176,7 +177,7 @@ func (e *Engine) TagItems(ctx context.Context, max int) (more bool, err error) {
 		}
 		var out itemTags
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		err := e.modelFor("kb.items").JSONMax(cctx, prompts.RenderKBItems(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBItemsInput(in), 6000, &out)
+		err := e.modelFor("kb.items").JSONMax(cctx, prompts.RenderKBItems(owner), prompts.RenderKBItemsInput(in), 6000, &out)
 		cancel()
 		if err != nil {
 			if deferred(ctx, err) {
@@ -494,10 +495,10 @@ func (e *Engine) List(kind, tag string) []Entry {
 	}
 	switch kind {
 	case KindProject:
+		catalog := e.projectSourceLookup()
 		for _, p := range e.Store.Projects() {
 			if has(p.Tags) && p.Live() {
-				out = append(out, Entry{Kind: kind, ID: p.Slug, Name: p.Name, OneLine: p.OneLine, Importance: p.Importance,
-					Relevance: p.Relevance, Tags: p.Tags, Updated: p.Updated, Extra: p.Kind + " · " + p.Status})
+				out = append(out, e.projectEntry(p, catalog))
 			}
 		}
 	case KindChat:
@@ -553,15 +554,34 @@ func recordingEntry(r *Recording) Entry {
 
 // Prompt is a short Markdown digest of the most important projects and chats, for the assistant's live snapshot.
 func (e *Engine) Prompt(projects, chats int) string {
-	var d prompts.KBDigest
+	d := prompts.KBDigest{Language: e.knowledgeOwner().Language}
+	// What has ended stays out (#9427): a done project, one whose chats have all ended at their source though it is not
+	// finished yet, and a chat that ended there (a pull request merged or closed).
 	for _, p := range e.List(KindProject, "") {
-		if len(d.Projects) >= projects || strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
+		if len(d.Projects) >= projects {
+			break
+		}
+		if strings.HasSuffix(p.Extra, "done") || strings.HasSuffix(p.Extra, "ignored") {
 			continue
+		}
+		if pr, ok := e.Store.Project(p.ID); ok {
+			if ended, _ := e.projectEnded(pr); ended {
+				continue
+			}
+		}
+		if p.ProjectMode == referenceOnly || p.Freshness != nil && p.Freshness.Fields["one_line"].NeedsReview {
+			p.OneLine = ""
 		}
 		d.Projects = append(d.Projects, digestEntry(p))
 	}
 	for _, c := range e.List(KindChat, "") {
-		if len(d.Chats) >= chats || c.Importance == "P3" {
+		if len(d.Chats) >= chats {
+			break
+		}
+		if c.Importance == "P3" {
+			continue
+		}
+		if ch, ok := e.Store.Chat(c.ID); ok && ch.Ended() {
 			continue
 		}
 		d.Chats = append(d.Chats, digestEntry(c))

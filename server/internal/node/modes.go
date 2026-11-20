@@ -85,7 +85,10 @@ type sessionModes struct {
 	// App: the effort the phone set for the next turn of a chat of the Codex App (codex_desktop_effort.go); nil none.
 	App *codexAppPick
 	// Model: the model the app switched a Claude Code session to, shown until its transcript shows another (model_switch.go).
-	Model     *pendingModel
+	Model *pendingModel
+	// Awaited: a model switch typed into Claude Code and not confirmed in time, taken up as Model once Claude Code's
+	// own record of it shows in the transcript (model_switch.go).
+	Awaited   *awaitedModel
 	Ultracode *ultracodeState // independent, session-only workflow switch (ultracode.go)
 }
 
@@ -100,15 +103,17 @@ func validModes(mode, effort string) error {
 }
 
 // validModesFor validates a start's mode / effort against the launcher it runs on: a Codex start takes Codex's own
-// effort list (ultra included, proto.CodexEffortLevels), everything else keeps Claude Code's. Permission modes stay
-// Claude's for both.
+// effort list (ultra included, proto.CodexEffortLevels), and agy takes native levels without Claude's auto.
 func validModesFor(launcher, mode, effort string) error {
 	if mode != "" && !slices.Contains(permissionModes, mode) {
 		return fmt.Errorf("unknown permission mode %q", mode)
 	}
 	levels := effortLevels
-	if launcherAgentType(launcher) == "codex" {
+	switch launcherAgentType(launcher) {
+	case "codex":
 		levels = append([]string{effortAuto}, proto.CodexEffortLevels...)
+	case agyAgent:
+		levels = proto.EffortLevels
 	}
 	if effort != "" && !slices.Contains(levels, effort) {
 		return fmt.Errorf("unknown effort level %q", effort)
@@ -182,6 +187,10 @@ func (n *Node) persistModes(id, mode, effort string) {
 
 // currentModes is the session's mode and effort: from its transcript, or what the app set since.
 func (n *Node) currentModes(id string, m quickMeta) (mode, effort string) {
+	return n.currentModesWithEffort(id, m, terminalEffort{})
+}
+
+func (n *Node) currentModesWithEffort(id string, m quickMeta, confirmed terminalEffort) (mode, effort string) {
 	mode, effort = m.mode, m.effort
 	if mode != "" && !slices.Contains(permissionModes, mode) && n.isAssistantSession(id) {
 		mode = modeFromCodex(mode, m.sandbox) // a Codex rollout records its approval policy and sandbox
@@ -206,8 +215,11 @@ func (n *Node) currentModes(id string, m quickMeta) (mode, effort string) {
 			mode = set.Mode
 		}
 		if set.Effort != "" && set.EffortAt.After(m.effortAt) {
-			effort = set.Effort
+			effort, m.effortAt = set.Effort, set.EffortAt
 		}
+	}
+	if confirmed.at.After(m.effortAt) {
+		effort = confirmed.value
 	}
 	return mode, effort
 }
@@ -235,11 +247,24 @@ func (n *Node) modesOf(id string) (mode, effort string) {
 			m = n.meta(p, st)
 		}
 	}
+	n.mu.Lock()
+	a := n.agents[id]
+	n.mu.Unlock()
+	if a.Agent == "claude" && a.PaneID != "" {
+		_, confirmed := n.switches().terminalEfforts(id)
+		if confirmed.pane == a.PaneID {
+			return n.currentModesWithEffort(id, m, confirmed)
+		}
+	}
 	return n.currentModes(id, m)
 }
 
 // setModes changes a running session's permission mode and / or effort level ("" leaves one as it is).
 func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
+	return n.updateModes(ctx, id, mode, effort, nil)
+}
+
+func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending *bool) error {
 	if !n.isAssistantSession(id) {
 		if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
 			return err
@@ -265,14 +290,36 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 		if p != nil && p.alive() && p.agent == "claude" {
 			p.settingsMu.Lock()
 			defer p.settingsMu.Unlock()
+			p.mu.Lock()
+			effortRestart := p.effortNeedsRestartLocked(effort) // an interactive process's effort (assistant_tui.go)
+			p.mu.Unlock()
+			if effortRestart && !p.needsRestartFor(mode) {
+				n.noteModes(id, mode, effort)
+				n.persistModes(id, mode, effort)
+				p.mu.Lock()
+				active := p.busy || len(p.tasks) > 0
+				p.mu.Unlock()
+				if !active {
+					n.stopAssistant(id)
+				}
+				n.notifySessions()
+				return nil // an active one restarts with it at the next idle message
+			}
 			if p.needsRestartFor(mode) {
-				// bypassPermissions requires a new process. Record the choice while holding the same
-				// lock as ordinary changes, so an older ACK cannot overwrite it.
+				// bypassPermissions requires a new process, as does any mode for interactive Claude Code. Record the
+				// choice while holding the same lock as ordinary changes, so an older ACK cannot overwrite it.
 				n.noteModes(id, mode, "")
 				n.persistModes(id, mode, "")
 				p.mu.Lock()
 				active := p.busy || len(p.tasks) > 0
+				tui := p.tui && p.tuiNote == ""
 				p.mu.Unlock()
+				if active && tui {
+					n.noteModes(id, "", effort)
+					n.persistModes(id, "", effort)
+					n.notifySessions()
+					return nil // both wait for the restart at the next idle message
+				}
 				if !active {
 					n.stopAssistant(id)
 					n.noteModes(id, "", effort)
@@ -289,7 +336,7 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 		if n.runtimeAssistant(id) {
 			if h, _, _ := n.runtimes.belongs(id); h != nil {
 				cctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
-				_ = h.peer.Call(cctx, "session.modes", map[string]any{"session_id": id, "permission_mode": mode, "effort": effort}, nil)
+				_ = h.peer.Call(cctx, "session.modes", map[string]any{"session_id": id, "permission_mode": mode, "effort": effort, "assistant": true}, nil)
 				cancel()
 			}
 		}
@@ -324,36 +371,35 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 				}
 			}
 		} else {
-			n.dropModeRestart(id)
+			n.dropModeRestart(id, mode)
 		}
 	}
+	if effort != "" {
+		unlock, err := n.inputTurn(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	unlockModes := n.switches().modesInput.lock(id)
+	defer unlockModes()
 	pane, err := n.paneFor(ctx, id)
 	if err != nil {
 		return n.noPaneForModes(id)
 	}
-	// The /effort picker makes herdr report the agent as blocked; the hub would turn that into a "needs you" push.
-	n.mu.Lock()
-	n.driving[id] = true
-	n.mu.Unlock()
-	defer func() {
-		n.mu.Lock()
-		delete(n.driving, id)
-		n.mu.Unlock()
-	}()
 	if mode != "" {
-		if err := n.tuiSetMode(ctx, pane, mode); err != nil {
+		stopDriving := n.driveModes(id)
+		err := n.tuiSetMode(ctx, pane, mode)
+		stopDriving()
+		if err != nil {
 			return err
 		}
 		n.noteModes(id, mode, "")
 	}
 	if effort != "" {
-		if a, ok := n.agent(id); ok && (a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked) {
-			return fmt.Errorf("Agent 正在工作，这一轮结束后再改思考强度")
-		}
-		if err := n.tuiSetEffort(ctx, pane, effort); err != nil {
+		if err := n.setTerminalEffort(ctx, id, pane, effort, pending); err != nil {
 			return err
 		}
-		n.noteModes(id, "", effort)
 	}
 	n.notifySessions()
 	return nil
@@ -369,20 +415,55 @@ func (n *Node) noPaneForModes(id string) error {
 	return refusal(proto.CodeModesNotRunning, i18n.T(i18n.Default, "rpc-errors.modes_not_running"), nil)
 }
 
-// tuiMode reads the permission mode off the TUI's footer: the lines under the input box's bottom rule.
-func tuiMode(screen string) string {
-	lines := strings.Split(screen, "\n")
-	rule := -1
+// tuiFooterLines returns the lines under a real input box's bottom rule, or nil when no composer is visible. Two
+// rules alone are not enough: question and permission dialogs draw them too, and their hints are not permission modes.
+func tuiFooterLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	end := -1
 	for i := len(lines) - 1; i >= 0; i-- {
 		if strings.HasPrefix(strings.TrimSpace(lines[i]), "──") {
-			rule = i
+			end = i
 			break
 		}
 	}
-	if rule < 0 {
-		return ""
+	if end < 1 {
+		return nil
 	}
-	for _, l := range lines[rule+1:] {
+	start := -1
+	for i := end - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "──") {
+			start = i
+			break
+		}
+	}
+	if start < 0 || start+1 >= end {
+		return nil
+	}
+	prompt := strings.TrimSpace(lines[start+1])
+	if !strings.HasPrefix(prompt, "❯") && !strings.HasPrefix(prompt, "!") {
+		return nil
+	}
+	if screen.ParseDialog(text) != nil {
+		return nil
+	}
+	return lines[end+1:]
+}
+
+// tuiComposerVisible reports whether the input box's bottom rule is visible, even when a draft or dialog hides the
+// idle hint that would identify a specific mode.
+func tuiComposerVisible(screen string) bool {
+	return tuiFooterLines(screen) != nil
+}
+
+// tuiPromptingScreen reports a visible composer without a recognized bypass or plan mode. Other screens, including a
+// status panel that exposes no current mode, do not override transcript evidence.
+func tuiPromptingScreen(text string) bool {
+	return tuiComposerVisible(text)
+}
+
+// tuiMode reads the permission mode off the TUI's footer: the lines under the input box's bottom rule.
+func tuiMode(screen string) string {
+	for _, l := range tuiFooterLines(screen) {
 		switch {
 		case strings.Contains(l, "accept edits on"):
 			return "acceptEdits"
@@ -390,6 +471,8 @@ func tuiMode(screen string) string {
 			return "plan"
 		case strings.Contains(l, "auto mode on"):
 			return "auto"
+		case strings.Contains(l, "don't ask"):
+			return "dontAsk"
 		case strings.Contains(l, "bypass permissions on"):
 			return "bypassPermissions"
 		case strings.Contains(l, "manual mode on"), strings.Contains(l, "? for shortcuts"):
@@ -627,7 +710,7 @@ func (n *Node) setAssistantModes(ctx context.Context, p *assistantProc, mode, ef
 		if field == "effort" {
 			want, previous = effort, p.effort
 		}
-		restart := field == "mode" && p.needsRestartForLocked(want)
+		restart := field == "mode" && p.needsRestartForLocked(want) || field == "effort" && p.effortNeedsRestartLocked(want)
 		p.mu.Unlock()
 		if want == "" || restart {
 			continue

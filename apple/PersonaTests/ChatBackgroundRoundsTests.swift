@@ -11,6 +11,12 @@ import PersonaWire
         Item(id: "synthetic-\(seq)#0", seq: seq, role: role, kind: kind, text: text)
     }
 
+    private func narration(_ seq: Int) -> Item {
+        var value = item(seq, text: "Checking synthetic evidence")
+        value.narration = true
+        return value
+    }
+
     /// A supervising conversation's message, marked with its source.
     private func relayed(_ seq: Int = 1) -> Item {
         var value = item(seq, role: "user", text: "Synthetic supervisor message")
@@ -26,10 +32,10 @@ import PersonaWire
         return value
     }
 
-    private func build(_ items: [Item], background: Bool = true, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
+    private func build(_ items: [Item], background: Bool = true, main: Bool = true, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
         let blocks = ChatStore.rebuild(items, settled: nil).blocks
         let live = active ? blocks.last.flatMap { if case .turn(let t) = $0 { t.id } else { nil } } : nil
-        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, openSupervision: open, active: active)
+        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, main: main, openSupervision: open, active: active)
             .build(blocks, live: live)
     }
 
@@ -52,7 +58,7 @@ import PersonaWire
     // MARK: Folding
 
     @Test func supervisorRoundFoldsAndOpensToItsMessage() throws {
-        let items = [relayed(), item(2)]
+        let items = [relayed(), narration(2)]
         let lines = build(items)
         #expect(lines.count == 1)
         let fold = try #require(folded(lines))
@@ -66,9 +72,19 @@ import PersonaWire
         #expect(opened.contains { if case .row(.assistant(let i)) = $0.content { i.id == items[1].id } else { false } })
     }
 
+    @Test func mainRelayReplyStaysFoldedAndInspectable() throws {
+        let items = [relayed(), item(2, text: "The delegated check finished")]
+        let lines = build(items)
+        let fold = try #require(folded(lines))
+        guard case .supervision(_, let trace, _, _) = fold.line.content else { return }
+        #expect(trace.contains { $0.holds(items[1].id) })
+        // A leader conversation keeps the previous visible-reply fallback.
+        #expect(folded(build(items, main: false)) == nil)
+    }
+
     @Test(arguments: ["daily", "once"])
     func scheduledAndFollowUpRoundsFoldAndHideTheirPrompt(state: String) throws {
-        let items = [scheduled(state: state), item(2)]
+        let items = [scheduled(state: state), narration(2)]
         #expect(MessageSource.of(items[0])?.kind == (state == "daily" ? "patrol" : "followup"))
         let lines = build(items)
         let fold = try #require(folded(lines))
@@ -77,7 +93,13 @@ import PersonaWire
         #expect(!opened.contains { if case .supervisionInput = $0.content { true } else { false } })
         let input = try #require(opened.first { if case .row(.user) = $0.content { true } else { false } })
         #expect(input.hidesPrompt)
-        // A visible round (it told the user something) hides the prompt too.
+        // A final result is visible and the scheduled prompt stays hidden.
+        let reply = item(2, text: "The examples are ready.")
+        let completed = build([scheduled(state: state), reply])
+        #expect(folded(completed) == nil)
+        #expect(completed.last?.holds(reply.id) == true)
+        #expect(completed.first?.hidesPrompt == true)
+        // Explicit notification keeps the prompt hidden too.
         var notify = item(3, kind: .toolUse)
         notify.toolName = "mcp__persona__notify_user"
         notify.toolUseID = "synthetic-notify"
@@ -97,13 +119,13 @@ import PersonaWire
     }
 
     @Test func roundThatAskedTheUserStaysShown() {
-        let lines = build([relayed()] + askUser(2) + [item(4)])
+        let lines = build([relayed()] + askUser(2))
         #expect(folded(lines) == nil)
         #expect(lines.contains { if case .row(.user) = $0.content { true } else { false } })
         // Only a successful call counts: a failed one leaves the round folded.
         var failed = askUser(2)
         failed[1].isError = true
-        #expect(folded(build([relayed()] + failed + [item(4)])) != nil)
+        #expect(folded(build([relayed()] + failed)) != nil)
     }
 
     /// Persona continuing the user's own work keeps the answer shown: a usage-limit continuation, a wake-up, an
@@ -126,7 +148,7 @@ import PersonaWire
         var next = item(3, role: "user", text: "A genuine queued message")
         next.queued = true
         next.clientMsgID = "synthetic-sent-by-app"
-        let items = [relayed(), item(2), next, item(4)]
+        let items = [relayed(), narration(2), next, item(4)]
         // The store keeps the queued message in the same turn; the lines cut it out of the round.
         #expect(ChatStore.rebuild(items, settled: nil).blocks.count == 1)
         let lines = build(items)
@@ -138,7 +160,7 @@ import PersonaWire
     }
 
     @Test func recapsInsideStayInside() throws {
-        let lines = build([scheduled(state: "daily"), item(2), item(3, kind: .recap), item(4)])
+        let lines = build([scheduled(state: "daily"), narration(2), item(3, kind: .recap), narration(4)])
         #expect(lines.count == 1)
         guard case .supervision(_, let trace, _, _) = try #require(folded(lines)).line.content else { return }
         #expect(trace.contains { if case .row(.recap) = $0.content { true } else { false } })
@@ -178,8 +200,8 @@ import PersonaWire
         // The gate on for a leader id drives the same builder option; a relayed round and a patrol round fold while the
         // owner's own exchange stays a normal line.
         var owner = item(5, role: "user", text: "A real request"); owner.clientMsgID = "owner-1"
-        let items = [relayed(1), item(2), scheduled(3, state: "daily"), item(4), owner, item(6)]
-        let lines = build(items, background: true)
+        let items = [relayed(1), narration(2), scheduled(3, state: "daily"), narration(4), owner, item(6)]
+        let lines = build(items, background: true, main: false)
         let folds = lines.compactMap { line -> MessageSource? in if case .supervision(_, _, _, let source) = line.content { return source } else { return nil } }
         #expect(folds.map(\.kind) == ["conversation", "patrol"])
         // the owner's exchange stays outside the folded rounds
@@ -189,13 +211,13 @@ import PersonaWire
         #expect(open.allSatisfy { line in if case .supervision = line.content { false } else { true } })
     }
 
-    @Test func supervisionRoundsAreUnchanged() throws {
+    @Test func quietSupervisionRoundsStillOpenToTheirInput() throws {
         var input = item(1, role: "user", text: "Synthetic supervision input")
         input.injected = Injected(kind: "system", state: "supervise", line: "Synthetic supervision", level: "triage")
-        let lines = build([input, item(2)])
+        let lines = build([input, narration(2)])
         let fold = try #require(folded(lines))
         #expect(fold.source == nil)
-        #expect(build([input, item(2)], open: [fold.line.id]).contains { if case .supervisionInput = $0.content { true } else { false } })
+        #expect(build([input, narration(2)], open: [fold.line.id]).contains { if case .supervisionInput = $0.content { true } else { false } })
     }
 
     // MARK: Needs You

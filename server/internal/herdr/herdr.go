@@ -264,6 +264,10 @@ func (c *Client) rpcOnce(ctx context.Context, method string, params any, out any
 		return fmt.Errorf("%w: %v", errNoSocket, err)
 	}
 	defer conn.Close()
+	return c.rpcConn(ctx, conn, method, params, out)
+}
+
+func (c *Client) rpcConn(ctx context.Context, conn net.Conn, method string, params any, out any) error {
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
@@ -397,10 +401,13 @@ func IsBlocked(err error) bool {
 	return errors.As(err, &he) && he.Code == "agent_blocked"
 }
 
-// AgentSession is what an agent integration reported about its session ({kind: "id", value: <session id>}).
+// AgentSession is what an agent integration reported about its session. Source identifies the reporting integration,
+// Agent names the agent, and Kind describes Value (for example, kind "id" carries a session ID).
 type AgentSession struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
+	Source string `json:"source"`
+	Agent  string `json:"agent"`
+	Kind   string `json:"kind"`
+	Value  string `json:"value"`
 }
 
 type Agent struct {
@@ -467,18 +474,29 @@ func (a Agent) SessionID() string {
 	return ""
 }
 
+// Version is the running server's version (ServerVersion), else the CLI's (`herdr --version`).
 func (c *Client) Version(ctx context.Context) string {
-	var pong struct {
-		Version string `json:"version"`
-	}
-	if c.rpc(ctx, "ping", nil, &pong) == nil && pong.Version != "" {
-		return pong.Version
+	if v := c.ServerVersion(ctx); v != "" {
+		return v
 	}
 	out, err := exec.CommandContext(ctx, c.Bin, "--version").Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "herdr"))
+}
+
+// ServerVersion is the version the server on c's socket answers ping with ("0.9.5"), "" when it does not answer or
+// names none. It never falls back to the CLI's: a binary upgraded in place says the new version while the server that
+// was started from the old one still runs.
+func (c *Client) ServerVersion(ctx context.Context) string {
+	var pong struct {
+		Version string `json:"version"`
+	}
+	if c.rpc(ctx, "ping", nil, &pong) != nil {
+		return ""
+	}
+	return pong.Version
 }
 
 func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
@@ -680,6 +698,26 @@ func (c *Client) TabClose(ctx context.Context, tab string) error {
 
 func (c *Client) PaneClose(ctx context.Context, pane string) error {
 	return c.call(ctx, "pane.close", map[string]any{"pane_id": pane}, nil, "pane", "close", pane)
+}
+
+// PaneCloseIf pins the close connection before the final check. A server
+// replacement between the check and the write cannot receive the close.
+// Attempted is true once the request may have reached the original server.
+func (c *Client) PaneCloseIf(ctx context.Context, pane string, check func() bool) (attempted bool, err error) {
+	if c.Socket == "" {
+		return false, errNoSocket
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeoutOf("session.snapshot")+timeoutOf("pane.close"))
+	defer cancel()
+	conn, err := dialSocket(ctx, c.Socket)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	if !check() || ctx.Err() != nil {
+		return false, nil
+	}
+	return true, c.rpcConn(ctx, conn, "pane.close", map[string]any{"pane_id": pane}, nil)
 }
 
 // PaneSplit splits a pane (direction "right" or "down") without moving the computer's focus, the new pane starting
@@ -895,7 +933,8 @@ func (c *Client) PaneReportMetadata(ctx context.Context, paneID, source string, 
 // authority an older node left for source without clearing another integration's (such as herdr:pi). Only when herdr
 // rejects the session report with resume_not_accepted (an agent process herdr does not detect natively, such as a
 // compatible CLI) does it claim the pane with pane.report_agent first. herdr types argv into the restored pane's
-// shell, quoting elements that need it; no element may contain an apostrophe. Older herdr ignores resume_argv.
+// shell, quoting elements that need it; no element may contain an apostrophe. herdr before 0.9.2 answers ok and drops
+// resume_argv: callers check ServerVersion first (node/herdrresume.go herdrDropsResume).
 func (c *Client) PaneReportResume(ctx context.Context, pane, source, agent, sessionID string, argv []string) error {
 	seq := ReportSeq()
 	_ = c.rpc(ctx, "pane.clear_agent_authority", map[string]any{

@@ -49,6 +49,9 @@ func (s *Service) toolModelProfile(ctx context.Context, self, name string, args 
 }
 
 func (s *Service) applyStartTier(ctx context.Context, params map[string]any) error {
+	if _, err := validateStartSpeed(params); err != nil {
+		return err
+	}
 	tier, _ := params["tier"].(string)
 	delete(params, "tier") // node runtimes need only the resolved fields
 	if tier == "" {
@@ -61,8 +64,11 @@ func (s *Service) applyStartTier(ctx context.Context, params map[string]any) err
 	launcher, _ := params["launcher"].(string)
 	model, _ := params["model"].(string)
 	effort, _ := params["effort"].(string)
-	layTier(t, &launcher, &model, &effort)
-	params["launcher"], params["model"], params["effort"] = launcher, model, effort
+	speed, _ := params["speed"].(string)
+	if layTier(t, &launcher, &model, &effort) && speed == "" && (model == "" || model == t.Model) {
+		speed = t.Speed
+	}
+	params["launcher"], params["model"], params["effort"], params["speed"] = launcher, model, effort, speed
 	return nil
 }
 
@@ -81,13 +87,14 @@ func layTier(t ModelTier, launcher, model, effort *string) bool {
 }
 
 func (s *Service) applyTaskTier(ctx context.Context, t *PlanTask) error {
-	p := map[string]any{"tier": t.Tier, "launcher": t.Launcher, "model": t.Model, "effort": t.Effort}
+	p := map[string]any{"tier": t.Tier, "launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed}
 	if err := s.applyStartTier(ctx, p); err != nil {
 		return err
 	}
 	t.Launcher, _ = p["launcher"].(string)
 	t.Model, _ = p["model"].(string)
 	t.Effort, _ = p["effort"].(string)
+	t.Speed, _ = p["speed"].(string)
 	return nil
 }
 
@@ -108,7 +115,7 @@ func (s *Service) modelProfileContext(ctx context.Context) *prompts.SnapshotProf
 	out := &prompts.SnapshotProfile{ID: p.ID, Name: p.Name}
 	for _, name := range slices.Sorted(maps.Keys(p.Tiers)) {
 		t := p.Tiers[name]
-		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Description: t.Description})
+		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed, Description: t.Description})
 	}
 	return out
 }

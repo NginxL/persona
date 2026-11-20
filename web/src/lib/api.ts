@@ -94,6 +94,13 @@ export class ApiError extends Error {
   }
 }
 
+/** A computer's 404 not_found about a session's history (#11450): it carries the computer's `reason`, or its words in
+ * `detail`. The hub's own 404 (an unknown computer, a missing route) carries neither, and may answer otherwise later. */
+export function sessionHistoryNotFound(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 404 && e.code === "not_found" &&
+    (typeof e.body.reason === "string" || typeof e.body.detail === "string");
+}
+
 let onUnauthorized: () => void = () => {};
 /** What a 401 does from now on; returns what it did before, for a caller that sets it only for a while. */
 export function handleUnauthorized(fn: () => void): () => void {
@@ -112,6 +119,8 @@ export const CLIENT_VERSION = "1";
 /** What this page can render beyond the basics (client_hello `features`). `persona_card_ring`: it draws ```persona-card
  *  rings (lib/assistant-view.ts); a client without it gets each ring as a stacked bar (the hub's card_compat.go). */
 /** `managers`: the hub pushes {"type":"managers"} when its roster changes (Settings › Managers, lib/managers.ts). */
+/** `agent_message_hold`: it shows a message the hub holds for an Agent whose computer is away (lib/undelivered.ts,
+ *  #10661); each message send declares it too (lib/message-send.ts). */
 /**
  * The pong timeout (seconds) this page asks the hub for in client_hello. The hub's default of 15 s is tight on a
  * high-latency public link whose outbound path changes now and then: a ping or its pong lost across a switch closed
@@ -119,7 +128,7 @@ export const CLIENT_VERSION = "1";
  * limit, so a dead link is still dropped. Only the timeout is asked for: the 20 s interval stays the hub's.
  */
 export const CLIENT_PONG_TIMEOUT = 45;
-export const CLIENT_FEATURES = ["elicitation", "extension_operations", "extension_auth", "managers", "extension_ui_stream_v1", "persona_contracts_v1", "persona_card_ring"];
+export const CLIENT_FEATURES = ["elicitation", "extension_operations", "extension_auth", "managers", "extension_ui_stream_v1", "persona_contracts_v1", "persona_card_ring", "closeout.markdown.v1", "agent_message_hold"];
 
 // A read the hub has not answered by then fails instead of loading forever (#4492): a restarting hub, a stuck node or a
 // half-dead network. Longer than the hub's own cut-offs for asking a computer (30–40 s), so when the hub has an error
@@ -142,7 +151,7 @@ export class HubTimeoutError extends Error {
   }
 }
 
-type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void; readBlob?: (response: Response, signal?: AbortSignal | null) => Promise<Blob> };
+type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void; readBlob?: (response: Response, signal?: AbortSignal | null) => Promise<Blob>; allowHtmlResponse?: boolean };
 
 /** `tokenOwner`: explicit credentials opt into 401 recovery only while both the token and credential generation are current.
  *  `isAuthContextCurrent`: an optional additional lifetime fence for a request scoped to a view or manager.
@@ -203,7 +212,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 async function request<T>(path: string, init: ApiOptions, binary = false): Promise<T> {
-  const { onResponse, isAuthContextCurrent, readBlob, ...fetchOptions } = init;
+  const { onResponse, isAuthContextCurrent, readBlob, allowHtmlResponse, ...fetchOptions } = init;
   const owner = init.token === undefined ? credentialOwner() : init.tokenOwner;
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${init.token ?? getToken()}`);
@@ -234,7 +243,9 @@ async function request<T>(path: string, init: ApiOptions, binary = false): Promi
   // A 304 answers a request that sent a validator (If-None-Match): the caller keeps what it has. It is neither the
   // sign-in layer's redirect nor an error.
   const notModified = res.status === 304 && headers.has("If-None-Match");
-  if (!notModified && intercepted(res)) {
+  // The session visualization route is the one /api route whose own answer is a text/html fragment (#10321): its
+  // callers opt out of the sign-in-page guard, which otherwise assumes the hub only ever answers /api with JSON.
+  if (!notModified && !allowHtmlResponse && intercepted(res)) {
     requestCrumb(method, path, res.status);
     // Retired requests cannot reload a replacement view or credential; an unowned pairing probe can still sign in.
     if ((isAuthContextCurrent?.() ?? true)
@@ -287,6 +298,13 @@ export function imageURL(mid: string, sid: string, itemID: string) {
 /** An item whole, when the page carries it cut (Item.full_size): `GET …/items/{id}/full`. */
 export function fullItem(mid: string, sid: string, itemID: string): Promise<Item> {
   return api<Item>(`${sessionPath(mid, sid)}/items/${enc(itemID)}/full`);
+}
+
+/** A Codex visualization item's self-contained HTML fragment: `GET …/items/{id}/visualization`, read as text.
+ *  The route legitimately answers text/html, so the edge sign-in-page guard is explicitly opted out. */
+export async function visualizationHTML(mid: string, sid: string, itemID: string): Promise<string> {
+  const blob = await apiBlob(`${sessionPath(mid, sid)}/items/${enc(itemID)}/visualization`, { allowHtmlResponse: true });
+  return blob.text();
 }
 
 /** A machine file's bytes by Range (docs/protocol/protocol.md "File preview"): `<video>` / `<audio>` seek through it, a viewer

@@ -8,7 +8,7 @@
 
 | 文件 | 接口或事件 | 导出方式 |
 | --- | --- | --- |
-| [connection.json](connection.json) | WS `hello`、`revs`；GET `/api/v1/health` | 调用 `Hub.hello`、`Hub.health`；revs 使用实际信封结构和 `client.sendJSON` |
+| [connection.json](connection.json) | WS `hello`、`revs`；GET `/api/v1/health` | Calls `Hub.hello` and `Hub.health`, then puts the fixed `wireFeatures` in place of the hub's feature list; revs uses the real envelope and `client.sendJSON` |
 | [sessions.json](sessions.json) | GET `/api/v1/sessions`；WS `sessions` | `proto.Session` 经 `agentState`、`fillStateMarks` 后，用列表及事件的 map 结构发送 |
 | [machines.json](machines.json) | GET `/api/v1/machines`；WS `machines` | 调用 `Machine.snapshot`，再经 `writeJSON` 或 `sendJSON` |
 | [machines-concern.json](machines-concern.json) | Anonymous machines for Android concern-grid tests | `writeJSON` encodes the machine input |
@@ -24,7 +24,9 @@
 
 `wireNode` 通过内存管道提供固定的 `session.items` RPC 响应；hub 仍执行真实的分页包装、图片处理和补发逻辑。所有样本都没有启动完整 hub、node、herdr，不监听端口，也不访问数据库。
 
-时间固定为 `2026-01-02T03:04:05Z`，零时间用 Go 原值；`hello.client_id` 是唯一在生产构造函数返回后替换的随机字段。标识、域名、路径、消息正文均为占位数据；示例核数、内存容量等也是编造输入，不代表实测结果。
+时间固定为 `2026-01-02T03:04:05Z`，零时间用 Go 原值。标识、域名、路径、消息正文均为占位数据；示例核数、内存容量等也是编造输入，不代表实测结果。
+
+The export replaces two values after the production builders return: `hello.client_id`, which is random, and the feature list of `hello` and `/health`, which becomes the fixed `wireFeatures` (rules below).
 
 ## 规则与用例
 
@@ -32,7 +34,7 @@
 
 | 规则 | 来源 | 覆盖用例 |
 | --- | --- | --- |
-| hello 与 health 从当前 `proto.Features` 导出能力列表。 | `server/internal/hub/hello.go`：`hello`、`health`；`apple/Shared/LiveConnection.swift`：`ServerEvent.decode` | `hello_features`、`health_features` |
+| hello and a trusted health carry the hub's feature list under `features`. The samples carry a fixed list instead (`wireFeatures` in `wire_samples_test.go`): a few long-lived flags the clients read and one no client knows, `example_unknown_feature`, which decoders keep reading past. Adding or removing a feature flag changes no sample; `TestHelloAndHealthCarryTheHubsFeatures` checks that both carry exactly the hub's `features()`, `proto.Features` first and in order (#11022). | `server/internal/hub/hello.go`：`hello`、`health`；`server/internal/hub/hello_features_test.go`；`apple/Shared/LiveConnection.swift`：`ServerEvent.decode` | `hello_features`、`health_features` |
 | revs 是会话标识到整数版本号的映射。 | `apple/PersonaTests/SyncEventTests.swift`：`decodesRevs` | `revs_changed_sessions` |
 | 会话列表保留模式、队列、后台任务、子任务和循环信息，事件用信封中的机器标识设置会话归属。 | `server/internal/proto/session.go`：`Session`；`apple/Shared/Models.swift`：`Session.init(from:)`；`ServerEvent.decode` | `sessions_list`、`sessions_event` |
 | 完整会话行携带等待下一条消息的服务商切换（`pending_switch`）和 Persona 对话自己选的模型（`model_pick`）；摘要行保留 `model_pick`，省略启动器和 `pending_switch`，客户端用此前完整行里的值。 | `server/internal/proto/session.go`：`PendingSwitch`、`ModelPick`；`server/internal/hub/sessions_list.go`：`runtimeSummary`；`android/core/domain/src/main/kotlin/persona/core/domain/models/SummaryRows.kt` | `sessions_model_switch`、`sessions_summary_model_pick` |
@@ -58,6 +60,7 @@
 | 助手代答的问题撤回时另带 answered_by、reason 和按问题文字的 answers；改答事件 interaction_reanswered 只带改了的问题，放在 resolution.answers。 | `server/internal/hub/fleet_link.go`：`EventFleetResolved`；`server/internal/assistant/fleet_delegate.go`：`reanswer`；`Hub.relayBroadcastFrom`；`ServerEvent.decode`；`docs/protocol/protocol.md`「WebSocket `/api/v1/ws`」 | `interaction_resolved_assistant`、`interaction_reanswered` |
 | Fleet 保留驼峰键名，时间使用 Unix 秒数字。 | `server/internal/hub/liveactivity.go`：`FleetState`、`buildFleet`；`apple/Shared/FleetState.swift` | `fleet_snapshot`、`fleet_event` |
 | 收件箱列表统一承载飞书和邮件，移除 context 等内部字段并保留草拟回复。 | `server/internal/assistant/inbox.go`：`InboxItem.listed`；`apple/Shared/InboxModels.swift`：`InboxItem` | `inbox_list` |
+| One made-up item carries every block an Inbox item has, as the list shows it: the item's bookkeeping and each block's internal fields are left out, and `TestListedKeys` pins which keys those are. A move of the item type keeps this case byte for byte (`docs/plans/plan-inbox-vertical-slice.md`, S8). | `server/internal/assistant/inbox.go`：`InboxItem.listed`；`server/internal/assistant/inbox_listed_keys_test.go`：`TestListedKeys` | `inbox_every_block` |
 | 回答记录保留一行摘要，`items` 成对保存完整问答并保留换行；旧记录没有 `items`。 | `server/internal/assistant/answered.go`：`answeredBody`、`answeredItems`；`apple/Shared/Tasks.swift`：`FeedItem` | `feed_answered_items` |
 | 401 保留字符串 error，409 的 code、delivered、draft、clearable 与 error 平铺。 | `Hub.auth`、`callErr`；`apple/Shared/APIClient.swift`：`APIError.fields(in:)`；`docs/protocol/protocol.md`「Sending messages」 | `unauthorized`、`conflict_input_draft`、`conflict_dialog_open`、`conflict_prompt_changed` |
 | 未知事件忽略，未知键忽略，旧 hello 缺 features 时返回空数组。 | `apple/Shared/LiveConnection.swift`：`ServerEvent.decode`、`Envelope` | `unknown_event_ignored`、`hello_unknown_field`、`hello_missing_features` |
@@ -117,6 +120,8 @@ go test -count=1 -p 1 ./internal/hub -run '^TestWireSamples$' -update
 ## iOS 只读对照
 
 本次全部 47 个用例已由临时 Swift 程序读取 input，调用上表中的真实解码实现并逐项核对 expected；没有只凭单测断言而未执行对照的用例。未修改 `ios/`，也没有启动 App 或联网。之后加入的 `interaction_resolved_assistant`、`interaction_reanswered` 两例没有经过临时程序，期望按 `apple/PersonaTests/DelegateTests.swift` 的 `theResolvedEventCarriesTheAssistantsAnswer` 填写（同样的键和形状）。
+
+`inbox_every_block` (#11650) did not go through the temporary program either: its expectations name only fields that `apple/Shared/InboxModels.swift` and Android's `WireFixturesTest` both decode, and the Android test was run on it.
 
 完整编译 `ChatStore.swift`、`LiveConnection.swift` 时，当前沙箱不允许 Observation 宏插件启动。临时程序因此直接引用四个纯模型文件，并把其他文件中需要的完整声明按边界原样摘取到 `/tmp/wire-swift/Referenced.swift`；没有修改声明内的解码逻辑。摘取范围是：
 

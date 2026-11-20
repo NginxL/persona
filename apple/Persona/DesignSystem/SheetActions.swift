@@ -166,7 +166,7 @@ private struct SheetCancel: ViewModifier {
                 }
             }
             // On the content, not on the bar's button: the bar is hosted apart from the page.
-            .confirmationDialog("Discard Unsaved Changes?", isPresented: $asking, titleVisibility: .visible) {
+            .accessibleConfirmationDialog("Discard Unsaved Changes?", isPresented: $asking, titleVisibility: .visible, hasCancel: true) {
                 Button("Discard Changes", role: .destructive, action: cancel)
                 Button("Keep Editing", role: .cancel) {}
             } message: {

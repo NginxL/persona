@@ -4,22 +4,30 @@ import persona.core.designsystem.text
 import persona.core.domain.sort.workLine
 import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -31,6 +39,7 @@ import androidx.compose.ui.text.withStyle
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.icons.PersonaIcons
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,6 +55,7 @@ import com.mikepenz.markdown.model.State as MarkdownState
 import com.mikepenz.markdown.model.parseMarkdown
 import com.mikepenz.markdown.compose.components.CurrentComponentsBridge
 import persona.core.contracts.AgentState
+import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.navigation.AppTab
@@ -54,6 +64,7 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
@@ -61,6 +72,7 @@ import java.time.OffsetDateTime
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 
 /** Timeline lines shown before "Show all", related entries of one kind before "All" (as iOS and the old app). */
 private const val LOG_SHOWN = 6
@@ -79,6 +91,7 @@ internal fun KnowledgeScreen(model: KnowledgeViewModel, navigator: Navigator) {
     JListPage(stringResource(R.string.knowledge_title), onBack = if (LocalIsSidebarRoot.current) null else navigator::back, largeTitle = true,
         refreshing = page.loading && shown, onRefresh = model::refresh,
         actions = {
+            JIconButton(PersonaIcons.knowledgeMap, stringResource(R.string.knowledge_map_open), { navigator.navigate(KnowledgeMapRoute(owner)) })
             if (!search) JIconButton(PhIcons.FunnelSimple, page.filter.tag?.let { stringResource(R.string.knowledge_filter_tag_current, it) }
                 ?: stringResource(R.string.knowledge_filter_tag), { tagMenu = true },
                 badge = page.filter.tag != null)
@@ -114,7 +127,7 @@ private fun KindChips(kind: KnowledgeKind, count: Int?, onPick: (KnowledgeKind) 
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.xs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
-        KnowledgeKind.entries.forEach { option ->
+        KnowledgeKind.entries.filter { it != KnowledgeKind.Recordings }.forEach { option ->
             val on = option == kind
             JChip(option.label(), selected = on, onClick = { onPick(option) }, count = if (on) count else null)
         }
@@ -202,21 +215,69 @@ private fun KnowledgeRow(
     trailing: @Composable () -> Unit = {},
     extra: @Composable ColumnScope.() -> Unit = {},
 ) {
-    JCard(Modifier.padding(bottom = Tokens.Space.m), onClick = onClick) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                Text(name, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f))
-                trailing()
+    val imported = entry.imported
+    val notes = imported?.let { importedNotesTitle(it.source) }
+    JCard(Modifier.padding(bottom = Tokens.Space.m).then(
+        if (notes == null) Modifier else Modifier.semantics { stateDescription = notes }), onClick = onClick) {
+        if (imported == null) {
+            // Unmatched rows keep the layout and accessibility they had before #9994.
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                KnowledgeRowContent(entry, metadata, name, trailing, extra)
             }
-            if (metadata) EntryMetadata(entry)
-            entry.oneLine?.takeIf { it.isNotBlank() && metadata }?.let {
-                Text(it, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        } else Row(verticalAlignment = Alignment.Top) {
+            KnowledgeImportedAvatar(entry)
+            Spacer(Modifier.width(Tokens.Space.m))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                KnowledgeRowContent(entry, metadata, name, trailing, extra)
             }
-            extra()
         }
     }
 }
+
+@Composable
+private fun ColumnScope.KnowledgeRowContent(
+    entry: KnowledgeEntry,
+    metadata: Boolean,
+    name: String,
+    trailing: @Composable () -> Unit,
+    extra: @Composable ColumnScope.() -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        Text(name, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f))
+        trailing()
+    }
+    if (metadata) EntryMetadata(entry)
+    entry.oneLine?.takeIf { it.isNotBlank() && metadata }?.let {
+        Text(it, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    }
+    extra()
+}
+
+/** Only a recording that stands for an imported meeting gets this new avatar: its connector's brand on the light logo
+ * backing, or a gray link for a connector without a brand. The row's state description names the notes for TalkBack. */
+@Composable
+private fun KnowledgeImportedAvatar(entry: KnowledgeEntry) {
+    val imported = entry.imported ?: return
+    val brand = connectorBrand(imported.source.orEmpty())
+    val palette = PersonaTheme.palette
+    Box(Modifier.testTag("knowledge-imported-avatar-${entry.id}")) {
+        JAvatar(entry.name, icon = PersonaIcons.recording)
+        Box(
+            Modifier.align(Alignment.BottomEnd).offset(Tokens.Space.xs, Tokens.Space.xs).size(Tokens.Size.badge)
+                .clip(CircleShape).background(if (brand == null) palette.ink3 else palette.catalogLogoBackground)
+                .border(Tokens.Size.lineMedium, palette.background, CircleShape).clearAndSetSemantics {},
+            contentAlignment = Alignment.Center,
+        ) {
+            if (brand != null) JBrandMark(brand, Tokens.Size.markS, contentDescription = null)
+            else JIcon(PersonaIcons.link, null, size = Tokens.Size.markXS, tint = palette.onMediaBackdrop, decorative = true)
+        }
+    }
+}
+
+@Composable
+private fun importedNotesTitle(source: String?): String = stringResource(
+    if (connectorBrand(source.orEmpty()) == null) R.string.knowledge_imported_original else R.string.knowledge_imported_lark)
 
 /** Importance in its tone (P0 needs you, P1 is busy), the project's kind and status, relevance, the first tags. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -265,12 +326,22 @@ internal fun KnowledgeDetailScreen(
     val sending by model.sending.collectAsStateWithLifecycle()
     val tagging by model.tagging.collectAsStateWithLifecycle()
     val minutesWork by model.minutesWork.collectAsStateWithLifecycle()
+    val meetingWork by model.meetingHandoffWork.collectAsStateWithLifecycle()
+    val handoffSheet by model.meetingHandoffSheet.collectAsStateWithLifecycle()
+    val sessionFlow = remember(model) { model.sessions?.sessions ?: flowOf(emptyList<Session>()) }
+    val machineFlow = remember(model) { model.sessions?.machines ?: flowOf(emptyList<Machine>()) }
+    val sessionRows by sessionFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val machineRows by machineFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val meetingTargets = remember(sessionRows, machineRows, model.namespace) {
+        meetingHandoffTargets(sessionRows, machineRows, model.namespace)
+    }
     val listState = rememberLazyListState()
     val scrolls = rememberCoroutineScope()
     var allLog by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     var recent by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     var openLinks by rememberSaveable(page.scope?.path) { mutableStateOf(listOf<String>()) }
     var editing by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
+    var openPoint by remember(page.scope) { mutableStateOf<Pair<TopicPoint, List<String>>?>(null) }
     val defaultQuestion = stringResource(R.string.knowledge_question_default)
     var question by rememberSaveable(page.scope?.path) { mutableStateOf(defaultQuestion) }
     var linkMessage by remember(page.scope) { mutableStateOf<String?>(null) }
@@ -310,6 +381,10 @@ internal fun KnowledgeDetailScreen(
     val copyText = rememberCopy()
     val detail = page.detail
     val entry = detail?.entry()
+    val canHand = detail?.let { meetingHandoffEligible(it, meetingTargets) } == true
+    val latestHandoff = newerMeetingHandoff(meetingWork.made, latestMeetingHandoff(detail?.meta, model.namespace))
+    val handoffOpen = handoffSheet != null
+    fun showHandoff(again: MeetingHandoff?) { model.showMeetingHandoff(again) }
     val kindName = KnowledgeKind.fromWire(detail?.kind.orEmpty())?.label().orEmpty()
     fun startAgent(detail: KnowledgeDetail) {
         val start = agentStart(detail, kindName)
@@ -323,6 +398,7 @@ internal fun KnowledgeDetailScreen(
         JListPage(entry?.name ?: stringResource(R.string.knowledge_detail_title), onBack = navigator::back,
             refreshing = page.loading && detail != null, onRefresh = model::refresh, state = listState,
             actions = {
+                if (canHand) JIconButton(PersonaIcons.handToAI, stringResource(R.string.knowledge_handoff_title), { showHandoff(null) })
                 JIconButton(PhIcons.Hash, stringResource(R.string.knowledge_tag_action), { model.dismissTagError(); editing = true }, enabled = detail != null)
                 JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.knowledge_refresh_detail), model::refresh, enabled = !page.loading)
             }) {
@@ -354,10 +430,26 @@ internal fun KnowledgeDetailScreen(
                             linkMessage?.let { JNotice(it) }
                         }
                     }
+                    latestHandoff?.let { handoff ->
+                        item("meeting-handoff", contentType = "meeting-handoff") {
+                            MeetingHandoffRow(handoff, navigator,
+                                modifier = if (handoffOpen) Modifier.clearAndSetSemantics {} else Modifier,
+                                onRetry = if (canHand) { { showHandoff(handoff) } } else null)
+                        }
+                    }
                     agents(page.agents, navigator)
+                    if (detail.kind == KnowledgeKind.Topics.wire) topicPoints(detail, entry.name) { point, crumbs -> openPoint = point to crumbs }
                     val recording = entry.isRecording
                     val facts = if (recording) RecordingFacts.of(detail.meta) else null
                     facts?.let { recordingFacts(it) }
+                    detail.importedMeeting?.let { imported ->
+                        item("imported-notes", contentType = "row") {
+                            JGroupItem(GroupPosition.Single) {
+                                JRow(importedNotesTitle(imported.source), modifier = Modifier.testTag("knowledge-imported-notes"),
+                                    leadingIcon = PersonaIcons.link, onClick = { currentOpenLink(imported.url) })
+                            }
+                        }
+                    }
                     timeline(timeline(detail.log), allLog) { allLog = !allLog }
                     val profileText = profile(detail.summary, entry.oneLine)
                     // A card like the other sections (and iOS): bare text sat at the card edge, left of every heading.
@@ -421,7 +513,15 @@ internal fun KnowledgeDetailScreen(
             }
         }
     }
+    openPoint?.let { (point, crumbs) ->
+        PointSheet(point, crumbs, detail?.links.orEmpty(), { source -> openPoint = null; navigator.open(source, model.owner) }, { openPoint = null })
+    }
     if (editing && entry != null) KnowledgeTagEditor(entry, tagging, onSave = model::saveTags, onDismiss = { editing = false })
+    if (handoffOpen && detail != null && meetingTargets.isNotEmpty()) {
+        MeetingHandoffSheet(meetingTargets, machineRows, meetingHandoffTranscriptOffered(detail), handoffSheet?.again, meetingWork,
+            onSend = model::handOff,
+            onDismiss = model::dismissMeetingHandoff)
+    }
 }
 
 /** "Agents on this project": the hub's live sessions in the project's code directories; a tap opens the conversation. */
@@ -611,7 +711,7 @@ private fun LazyListScope.dirs(dirs: List<String>) {
 }
 
 @Composable
-private fun Note(text: String) {
+internal fun Note(text: String) {
     Text(text, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3,
         modifier = Modifier.padding(horizontal = rowPadding).padding(top = Tokens.Space.s, bottom = Tokens.Space.xs))
 }
@@ -655,18 +755,18 @@ private fun KnowledgeMarkdown(text: String) {
 }
 
 /** [entry]'s page, kept [manager]'s (the assistant whose knowledge base listed it, or the entry's page it was linked from). */
-private fun Navigator.open(entry: KnowledgeEntry, manager: String?) {
+internal fun Navigator.open(entry: KnowledgeEntry, manager: String?) {
     KnowledgeKind.fromWire(entry.kind)?.let { navigate(KnowledgeDetailRoute(it, entry.id, manager)) }
 }
 
 @Composable
-private fun KnowledgeFailure(title: Int, message: Int, retry: (() -> Unit)?) {
+internal fun KnowledgeFailure(title: Int, message: Int, retry: (() -> Unit)?) {
     val disabled = message == R.string.knowledge_disabled_text
     RetryState(stringResource(if (disabled) R.string.knowledge_disabled_title else title),
         stringResource(message), retry.takeUnless { disabled })
 }
 
-@Composable private fun RetryState(title: String, message: String, retry: (() -> Unit)?) {
+@Composable internal fun RetryState(title: String, message: String, retry: (() -> Unit)?) {
     JEmptyState(title, message, action = retry?.let { { JButton(stringResource(R.string.knowledge_retry), it, kind = JButtonKind.Secondary) } })
 }
 
@@ -678,6 +778,8 @@ private val KnowledgeKind.words: KindWords
     get() = when (this) {
         KnowledgeKind.Projects -> KindWords(R.string.knowledge_kind_projects, R.string.knowledge_empty_projects,
             R.string.knowledge_empty_tag_projects, R.string.knowledge_linked_projects)
+        KnowledgeKind.Topics -> KindWords(R.string.knowledge_kind_topics, R.string.knowledge_empty_topics,
+            R.string.knowledge_empty_tag_topics, R.string.knowledge_linked_topics, icon = PersonaIcons.topic)
         KnowledgeKind.Chats -> KindWords(R.string.knowledge_kind_chats, R.string.knowledge_empty_chats,
             R.string.knowledge_empty_tag_chats, R.string.knowledge_linked_chats)
         KnowledgeKind.People -> KindWords(R.string.knowledge_kind_people, R.string.knowledge_empty_people,

@@ -17,7 +17,7 @@
   "name_kb_moments": "公司圈关联",
   "name_kb_topics": "按主题整理知识点",
   "name_assistant_title": "对话标题",
-  "name_assistant_route": "新对话归属",
+  "name_assistant_route": "新 Agent 的督办方向",
   "name_agent_title": "Agent 标签名",
   "name_todo_title": "待办标题",
   "name_meeting_title": "会议标题",
@@ -38,7 +38,7 @@
   "desc_inbox_judge": "判断收件箱里的一件事要不要交给 AI 分身处理。",
   "desc_agent_triage": "判断 Agent 为什么停下：做完了、在等别的事，还是需要你。",
   "desc_inbox_draft": "草拟一条回复，由你看过再发。",
-  "desc_translate": "翻译文本和邮件。",
+  "desc_translate": "使用独立的低成本默认模型翻译文本和邮件。",
   "desc_kb_compress": "把长会话压缩并打标，存进知识库。",
   "desc_kb_project": "根据新了解到的内容重写知识库里的项目档案。",
   "desc_kb_dedupe": "找出知识库里其实是同一个的项目。",
@@ -46,7 +46,7 @@
   "desc_kb_moments": "把公司圈的帖子和知识库里已有的内容关联起来。",
   "desc_kb_topics": "按主题整理知识点。",
   "desc_assistant_title": "给和 Persona 的对话起标题。",
-  "desc_assistant_route": "判断新对话属于某个方向，还是一次快速对话。",
+  "desc_assistant_route": "建议由哪个方向督办新 Agent。",
   "desc_agent_title": "根据 Agent 在做的事给它的标签起名。",
   "desc_todo_title": "给任务的待办起标题。",
   "desc_meeting_title": "录音进行中，根据说过的内容给会议或笔记起标题。",
@@ -145,5 +145,8 @@
   "err_candidates_extension_only": "只有扩展的用途才有候选模型",
   "err_candidates_invalid": "候选模型：请选择“extension”“off”或“custom”，只有“custom”时才列出供应商和模型，每项只出现一次",
   "err_candidates_count": "候选模型：请列出 1 到 {most} 个",
-  "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商"
+  "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商",
+  "candidate_not_offered": "设置中的模型供应商均未提供此模型",
+  "candidate_not_direct": "无法直接调用供应商 {provider}",
+  "candidate_provider_gone": "供应商 {provider} 已移除或无法直接调用"
 }

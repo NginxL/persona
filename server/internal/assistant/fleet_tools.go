@@ -142,6 +142,9 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 			}
 		}
 		tools := s.mcpTools(ctx, assistant)
+		if assistant {
+			tools = s.guardTools(ctx, machine, session, tools)
+		}
 		if !assistant {
 			tools = append(tools, s.leaderTools(ctx, machine, session)...)
 			tools = append(tools, s.spawnTools(ctx, machine, session)...)
@@ -253,9 +256,53 @@ func (s *Service) mcpCallWithOrigin(ctx context.Context, machine, session, name 
 		if err := s.appCall(ctx, assistantwire.AppPhone, assistantwire.PhoneCall, params, &res); err != nil {
 			return proto.TextResult(err.Error(), true)
 		}
-		return res
+		return phoneCreateResultWithSource(name, res)
 	}
 	return proto.TextResult("unknown tool "+name, true)
+}
+
+// phoneCreateResultWithSource carries the hub's executing-device attribution into the JSON that quick-result cards
+// parse. Payload source claims are removed before attested values are added. Failures, malformed responses and
+// unrelated tools keep their original content; legacy and queued payloads without source claims stay byte-identical.
+func phoneCreateResultWithSource(tool string, res proto.ToolResult) proto.ToolResult {
+	if tool != "phone_calendar_create_event" && tool != "phone_reminders_create" || res.IsError {
+		return res
+	}
+	sourceName := strings.TrimSpace(res.SourceDeviceName)
+	sourcePlatform := strings.TrimSpace(res.SourceDevicePlatform)
+	res.SourceDeviceName, res.SourceDevicePlatform = sourceName, sourcePlatform
+	res.Content = slices.Clone(res.Content)
+	for i, content := range res.Content {
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(content.Text), &payload); err != nil || payload == nil {
+			continue
+		}
+		var state string
+		queued := payload["state"] != nil && json.Unmarshal(payload["state"], &state) == nil && state == "queued"
+		_, hasName := payload["source_device_name"]
+		_, hasPlatform := payload["source_device_platform"]
+		if (queued || sourceName == "" && sourcePlatform == "") && !hasName && !hasPlatform {
+			continue
+		}
+		delete(payload, "source_device_name")
+		delete(payload, "source_device_platform")
+		if !queued {
+			if sourceName != "" {
+				raw, _ := json.Marshal(sourceName)
+				payload["source_device_name"] = raw
+			}
+			if sourcePlatform != "" {
+				raw, _ := json.Marshal(sourcePlatform)
+				payload["source_device_platform"] = raw
+			}
+		}
+		text, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		res.Content[i].Text = string(text)
+	}
+	return res
 }
 
 // mailAttachment answers a node's mail.attachment: the bytes of the attachment mail_save_attachment saves on that

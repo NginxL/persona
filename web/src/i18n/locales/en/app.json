@@ -23,7 +23,6 @@
   "connecting": "Connecting…",
   "retry": "Retry",
   "tab_gone": "This tab no longer exists",
-  "open_sidebar": "Open sidebar",
   "joining": "Connecting to Persona…",
   "session_choices_one": "{count} session has an id starting with {sid}. Choose one to open",
   "session_choices_other": "{count} sessions have an id starting with {sid}. Choose one to open",

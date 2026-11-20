@@ -39,6 +39,15 @@ class SessionDetailTest {
         assertEquals(held.queued, merged.queued)
         assertEquals(held.efforts, merged.efforts)
     }
+    @Test fun summaryKeepsUndeliveredUntilACompleteRowClearsIt() {
+        val kept = UndeliveredMessage("kept", "words", at = "2026-11-17T10:00:00Z", state = "waiting")
+        val held = Session("demo", "task", undelivered = listOf(kept))
+        val summary = Session("demo", "task", waiting = false)
+        assertEquals(listOf(kept), sessionWithDetail(summary, held, null).undelivered)
+        val complete = Session("demo", "task")
+        assertTrue(sessionWithDetail(summary, held, null, complete).undelivered.isNullOrEmpty())
+    }
+
     @Test fun infoHydratesOneSummaryAndDoesNotCrossSessionKeys() {
         val summary = Session("demo", "task", waiting = false)
         val old = Session("demo", "different", queued = listOf("unrelated"))
@@ -48,6 +57,14 @@ class SessionDetailTest {
         assertEquals("new-model", merged.model)
         assertNull(merged.queued)
     }
+    @Test fun summaryCarriesBothQueuedRestartEdges() {
+        val summary = Session("demo", "task", waiting = false)
+        val queued = sessionWithDetail(summary.copy(bypassPending = true), summary, null)
+        assertTrue(queued.bypassPending)
+        // A later authoritative false clears the edge too, so the outcome is read without another session lookup.
+        assertFalse(sessionWithDetail(summary, queued, null).bypassPending)
+    }
+
     @Test fun legacyCompleteRowCanClearOldDetail() {
         val old = Session("demo", "task", queued = listOf("old"))
         val complete = Session("demo", "task", queued = emptyList())

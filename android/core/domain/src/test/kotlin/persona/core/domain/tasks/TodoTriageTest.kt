@@ -90,6 +90,23 @@ class TodoTriageTest {
         seenAt = seenAt, startError = startError, planId = planId,
     )
 
+    /** The web's "says when a finished to-do finished" (#10922): the moment its rule reads, else its last move. */
+    @Test
+    fun finishedAtIsTheMomentItsRuleReadsElseItsLastMove() {
+        fun finished(td: Todo, superseded: Boolean = false) = td.finishedAt(td.triage(lookup, now, zone = zone, superseded = superseded))
+        fun ms(at: String) = Instant.parse(at).toEpochMilli()
+        // closed: its close, however late it moved after (a seen mark is no move)
+        assertEquals(ms(hoursAgo(3)), finished(todo("t", doneAt = hoursAgo(3)).copy(seenAt = minutesAgo(30))))
+        // accepted: its accepting review; deployed: its deploy, else its last move
+        assertEquals(ms(hoursAgo(5)), finished(todo("t", agents = listOf(agent("idle")), supervision = acceptedReopened())))
+        assertEquals(ms(hoursAgo(2)), finished(todo("t", delivery = TodoDelivery(state = "live", at = hoursAgo(2)))))
+        assertEquals(ms(hoursAgo(6)), finished(todo("t", updated = 6, delivery = TodoDelivery(state = "live"))))
+        // a finished turn the owner saw (Done, rule 9a): its last move, here its Agent's an hour ago
+        assertEquals(ms(hoursAgo(1)), finished(todo("t", updated = 3, agents = listOf(agent("unseen"))).copy(seenAt = minutesAgo(30))))
+        // a failed start a related to-do finished: its close
+        assertEquals(ms(hoursAgo(2)), finished(todo("f", startError = "x", doneAt = hoursAgo(2)), superseded = true))
+    }
+
     @Test
     fun r1ConcernKeepsFailedStartWaitingAndRunningRules() {
         val failed = at(todo("failed", startError = "no launcher").withKind("concern"))

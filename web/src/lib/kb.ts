@@ -93,6 +93,8 @@ export interface KBDetail {
   log?: string[] | null;
   recent?: string;
   links?: KBEntry[] | null;
+  /** The links the user removed by hand (meta.excluded), named as links are: Persona leaves them out until allowed again. */
+  removed?: KBEntry[] | null;
   moments?: KBMomentRef[] | null;
   /** recordings: the transcript, seconds from the start (docs/protocol/protocol.md "Recording sync"). */
   segments?: KBSegment[] | null;
@@ -429,6 +431,12 @@ export interface KBUpdate {
   remove_people?: string[];
   remove_chats?: string[];
   remove_projects?: string[];
+  /** With a removal: also lock the whole lists on both entries; false keeps out only the removed link. */
+  lock_lists?: boolean;
+  /** Links the user removed that Persona may make again on its own; nothing is linked. */
+  allow_people?: string[];
+  allow_chats?: string[];
+  allow_projects?: string[];
   /** Omitted preserves confirmed facts; an explicit empty string clears them. */
   pinned?: string;
   importance?: string;

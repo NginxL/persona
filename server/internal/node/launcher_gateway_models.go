@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -184,11 +185,22 @@ func gatewayClient(env map[string]string) *http.Client {
 // withGatewayModels adds the gateway's models to a /model list, after it, leaving out those it already has (by id,
 // or as an alias resolves, with or without [1m]): the CLI lists them itself when its cache was this gateway's.
 func withGatewayModels(list, gateway []proto.AgentModel) []proto.AgentModel {
+	if len(gateway) == 0 {
+		return list
+	}
+	offered := make(map[string]bool, len(gateway))
+	for _, m := range gateway {
+		offered[m.ID] = true
+	}
+	list = slices.Clone(list)
 	seen := map[string]bool{}
-	for _, m := range list {
+	for i, m := range list {
 		seen[strings.TrimSuffix(m.ID, oneMillionSuffix)] = true
 		if m.Resolved != "" {
 			seen[strings.TrimSuffix(m.Resolved, oneMillionSuffix)] = true
+			if m.ID != m.Resolved && offered[m.Resolved] {
+				list[i].ResolvedOffered = true
+			}
 		}
 	}
 	for _, m := range gateway {

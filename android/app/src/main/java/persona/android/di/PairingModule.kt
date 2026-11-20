@@ -48,7 +48,7 @@ object PairingModule {
         channels = channels, feishuBot = feishuBot, hubUpdates = hubUpdates, managers = managers, sent = sent,
         hubs = runtime.hubGroups, tunnels = runtime.hubTunnels, addHub = platform.adding, connectors = connectors,
         translation = translation, triage = triage, knowledgeSelection = knowledgeSelection, capsule = capsule, pairingAttempts = attempts, readiness = readiness,
-        standing = standing,
+        standing = standing, developing = (application as PersonaApp).developingPersona,
         appUpdateStore = persona.feature.settings.AppUpdateStore(application, updates, devices.binding),
         desktops = (application as PersonaApp).desktops, clearCacheFiles = { files -> persona.core.data.CacheClearing.delete(files) })
 }

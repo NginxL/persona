@@ -21,7 +21,7 @@ import (
 // fields differ from them (a field added, renamed, retyped or retagged by a change that did not update this file),
 // appendSession leaves every session to the reflect encoder: the session is sent whole, only slower, until its line
 // here and this hash are brought up to date. TestSessionWireMatchesReflect fails meanwhile and prints the new hash.
-const sessionWireLayout = 0x3b11d3e1bfabc8cc
+const sessionWireLayout = 0xa548ea53b5d22fc9
 
 var sessionWireCurrent = sessionLayout() == sessionWireLayout && hierarchyLayout() == hierarchyWireLayout
 
@@ -41,7 +41,7 @@ const (
 
 // hierarchyWireLayout is the layout hash of SessionHierarchy and SessionChildren, whose members appendSession writes
 // on the row: while either differs, appendSession leaves every session to the reflect encoder, as for sessionWireLayout.
-const hierarchyWireLayout = 0x6b086a44c528e38b
+const hierarchyWireLayout = 0x5c86aa0f845c6013
 
 // hierarchyLayout hashes SessionHierarchy's fields, then SessionChildren's.
 func hierarchyLayout() uint64 {
@@ -127,8 +127,16 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.str(`"agent_surface":`, s.AgentSurface, true)
 	w.str(`"launcher":`, s.Launcher, true)
 	w.str(`"model":`, s.Model, true)
+	if s.RequestedModel != nil {
+		w.str(`"requested_model":`, *s.RequestedModel, false)
+	}
 	w.str(`"permission_mode":`, s.PermissionMode, true)
 	w.str(`"effort":`, s.Effort, true)
+	if s.PendingEffort != nil {
+		w.str(`"pending_effort":`, *s.PendingEffort, false)
+	}
+	w.boolean(`"effort_change_failed":`, s.EffortChangeFailed, true)
+	w.boolean(`"off_launcher":`, s.OffLauncher, true)
 	if s.Ultracode != nil {
 		w.boolean(`"ultracode":`, *s.Ultracode, false)
 	}
@@ -273,6 +281,7 @@ func appendSession(b []byte, s *Session) ([]byte, bool) {
 	w.strs(`"also_open_in":`, s.AlsoOpenIn)
 	w.str(`"host":`, s.Host, true)
 	if h := s.Hierarchy; h != nil { // sessionWire's hierarchy members, keys of the row itself (compatibility.go)
+		w.boolean(`"hidden_by_directory":`, h.HiddenByDirectory, true)
 		if h.CompletedTodo != nil {
 			w.value(`"completed_todo":`, h.CompletedTodo)
 		}

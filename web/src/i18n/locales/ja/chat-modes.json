@@ -9,6 +9,7 @@
   "restart_dropped": "取り消しました。「{to}」では再起動しません",
   "restart_dropped_why": "取り消しました。「{to}」では再起動しません：{why}",
   "why_replaced": "別の切り替えに置き換えられました",
+  "why_cancelled": "セッションは現在のモードのままです",
   "why_process_exited": "元のプロセスが終了しました",
   "why_process_replaced": "セッションが別のプロセスに変わりました",
   "why_process_unknown": "どのプロセスを再起動するか分かりませんでした",

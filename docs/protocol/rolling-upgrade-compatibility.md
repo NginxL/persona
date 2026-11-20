@@ -140,6 +140,67 @@ chosen by a `runtime` in the main chat's model binding. Each pair keeps working:
 | Session rows | `runtime` and `runtime_fallback` are no longer produced, and the hub drops them from an older node's report. Clients read their absence as the CLI. |
 | The runtime package | The Agent SDK runtime package (`persona-agent-sdk-runtime`, under its older `jarvis-` name too) is no longer carried. An older node that looks for it finds none and runs the CLI, its existing fallback. Copies already unpacked under a node's `runtime-packages/` are unused and not cleaned up. |
 
+### Node connection lanes (#10660)
+
+A manager and a node built since #10660 frame their connection on four lanes (protocol.md "Lanes"); any older end
+keeps JSON lines, byte for byte. The switch is asked for on the connection itself, so what sits between the two ends
+does not take part:
+
+| Pair | What happens |
+| --- | --- |
+| New manager, new node | `node.info` announces `node_lanes_v1`; the manager sends `rpc.lanes`, the node answers and frames its output after the answer, the manager frames its own after one marker line. Logged as `lanes=on` on the "connected" line. |
+| New manager, older node | No `node_lanes_v1` (and a node from before the handshake never counts as having it): the manager never asks. Lines, as before. |
+| Older manager, new node | The manager never sends `rpc.lanes`; the node announces a capability the manager ignores and writes lines as before. |
+| A node that announces lanes and refuses | It answers `rpc.lanes` with an error (`lanes_refused`, or `unknown method`); the manager logs "staying with lines" and goes on with lines. |
+| An older relay in between | `node --stdio` relaying to a resident node, Persona Link and its hub relay (`spliceWS`), tailcat, ssh and a member hub copy bytes without reading them; frames pass through all of them, older versions included. A `node --stdio` that serves the connection itself is the node: its own version decides. |
+| A manager that stopped waiting | The node's answer switches the manager's input whenever it is read, and its output follows: an answer after the handshake's wait ran out still frames both directions. |
+| Lines in flight during the switch | Each side switches its output under its writer's lock right after its announcing line, and its input right after the other side's: nothing written before is read as frames, nothing after as lines (`TestLanesUpgradeWithTrafficInFlight`). |
+
+Nothing is stored: every new connection negotiates again, so a node or manager rolled back mid-session simply connects
+with lines next time.
+
+### Resuming node connections (#10663)
+
+A framed connection between a manager and a resident node built since #10663 survives its transport ending for a
+while (protocol.md "Resuming"); anything older drops it as before. Resuming is asked for with `rpc.lanes` and happens
+on a new transport, through the same relays:
+
+| Pair | What happens |
+| --- | --- |
+| New manager, new resident node | `node.info` announces `node_resume_v1`; the manager adds `"resume":1` to `rpc.lanes` and the node's answer grants it with a token. Logged as `lanes=on resume=on`. A dropped transport is taken back with `rpc.resume` on a new one. |
+| New manager, a node without a resident node (`node --stdio` serving the connection itself) | It ends with its transport, so it does not announce `node_resume_v1`: the manager does not ask, and a drop reconnects as before. |
+| New manager, older node | No `node_resume_v1`: lanes as in #10660, a drop reconnects. |
+| Older manager, new resident node | The manager's `rpc.lanes` does not ask for resuming, so the node grants none and keeps nothing; a new transport's first line is the manager's handshake, which replaces the connection as before. The node reads that first line before serving, which an older manager writes at once too. |
+| A token the node does not have | A node restarted (a new process), or a token already used: `rpc.resume` is answered `resume_refused`, the transport closed, and the manager connects anew. A token asked with again because the answer was lost is still taken until the new transport carries a byte. |
+| A drop past the window, or while the node restarts | The manager closes its peer and connects anew after its 30 s; the node's kept connection ends at its own window's end (60 s), or when a new connection replaces it. |
+| An older relay in between | Relays copy bytes; the resume goes over a new transport through them like any connection. |
+
+Nothing is stored: tokens live in each process's memory, so a restarted manager or node connects anew.
+
+### Direction session filings (#11463, #11490)
+
+Since #11463 the assistant manager's filing book (settings `assistant.direction_sessions`) keeps three fields per entry
+that a manager from before does not know: `parent` (a Codex sub-agent session's parent, for placement rule 1),
+`was` (the entry the write replaced, for its Undo) and `removed_at` (an entry taken out, kept seven days for its
+Undo). Every manager answers the filing route and keeps its own book: the hub relays a write to the manager the request
+names, else to the default one (`server/internal/hub/assistant_link.go`), so a rollback of any manager meets them in
+the book that manager keeps:
+
+| Case | What happens |
+| --- | --- |
+| A new manager reads a book an older one wrote | Its entries have none of the three fields: the Undo of their last write is only `null` (taking the entry out), and a sub-agent session its computer no longer lists is placed by its filing, as before. Nothing is lost. |
+| An older manager (rolled back) reads a book a new one wrote | It reads an entry taken out (`removed_at`) as a filing: the session shows filed in that direction again and counts toward its 50. It ignores `was` and `parent`. |
+| That older manager writes the book once | It saves every entry without `removed_at`, `was` and `parent`. Rolled forward again, the entries taken out before are filings for good (the owner takes them out again), no write before the rollback can be undone exactly, and a not-listed sub-agent session is placed by its filing until it is listed again. |
+| Answers of an older manager | The write's `previous` is the opener of a chat a leader opened, or `""`, never `null`; a `null` direction is taken as `""` (on its own); every write, `null` and `""` included, needs the session listed on its computer (404 `session_not_found` otherwise), and an Undo into an ended or full direction is refused (409 `direction_ended`, `direction_full`); a session whose computer could not be read is `offline`, one whose computer has given no list `not_listed`, and the read has no `sessions_unavailable`. Both versions name `direction_sessions`, so clients reach the same routes and get the older values. |
+
+What an operator can do: rolling forward again before the older manager's first write to the book loses nothing, as
+it reads the extra fields without saving. After such a write, a copy of the setting that holds the book
+(`assistant.direction_sessions`), taken before the rollback, is the only way to get the entries taken out and the
+`was` of each entry back. A manager from before #11515 also leaves the sessions placed under directions out of the
+profile's `keep`: a quiet one leaves its computer's list again and its automatic archive goes on, while the book stays
+as it was. Rolling forward lists again the ones that only dropped out of a computer's list; one the older manager's
+automatic archive took stays archived until the owner restores it, as nothing restores an archive by itself.
+
 ### Launcher default models (#4663)
 
 A launcher with no explicit model has an empty `model` on the wire; display text is never a model ID. Older nodes and
@@ -185,6 +246,24 @@ hello; the hub lists the feature only while every manager that carries Agents na
 | New hub and managers, an older web bundle | Until it reloads it folds by `folded_under` alone: a side is drawn as a child card in its parent's chat and left out of the rows; its parent shows the side's working or needs-you state, not its unseen result (`sides_unread`). |
 | New hub and managers, an older Android app | The same: it folds rows by `folded_under`, so a side is one of its parent's child sessions until the app is updated. |
 | New hub and managers, an older iOS app | From #8010 on it folds rows by `folded_under` too, so a side is one of its parent's child sessions until the app is updated; an app from before #8010 folds by its own child fields, which a side lacks (no `parent_session_id`), and the side stays a plain row of its own. |
+
+### Screen Link close confirmation (#10006)
+
+Screen Link `close_ack` is message type 14 with the same channel and 64-bit final offset as the `close` it confirms. It is
+additive and needs no feature negotiation: a new phone sends it after every `close`, including a repeated close for an
+already ended channel, and an old node skips the unknown type. A final-data `ack` is not a close confirmation, because
+it can cross with a close the phone has not processed. A new node accepts `close_ack` only for the outstanding close's
+channel and exact final offset; duplicate, stale and unknown-channel confirmations are ignored.
+
+| Pair | Behavior |
+| --- | --- |
+| New node, new phone | An unconfirmed close is offered again on a different surviving route. Confirmation stops another copy; a late valid confirmation also cancels a copy not sent yet. |
+| New node, old phone | No `close_ack` arrives. A route change can offer the close again, which the old phone already accepts idempotently. An unconfirmed video close stays recoverable while it has a route; with no route it finishes as before. |
+| Old node, new phone | The old node skips type 14. The phone's data, reset and close behavior is otherwise unchanged. |
+| Old node, old phone | Unchanged. |
+
+RFB keeps its existing completion rule in every combination: the local close finishes the channel and session at the
+next watchdog tick without waiting for `close_ack`.
 
 ## Apple 端交接
 

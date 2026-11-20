@@ -47,6 +47,7 @@ func ReadTurn(ctx context.Context, src ItemSource, r *Run) (Reading, error) {
 	}
 	named := len(r.MsgIDs) > 0 || r.Probe != ""
 	var kept []proto.Item
+	unrelated := false
 	// A Head run's first message is the first thing after its base: everything from there on is kept, and its named
 	// messages must be in too before it answers.
 	found := !named || r.Head
@@ -55,6 +56,11 @@ func ReadTurn(ctx context.Context, src ItemSource, r *Run) (Reading, error) {
 		items, more, to, err := src.ItemsAfter(ctx, after)
 		if err != nil {
 			return Reading{Last: r.Base}, err
+		}
+		if r.Held && !named {
+			// Check every page before the retained-item window can trim away the user item. A wake earlier in the
+			// backlog does not make a later ordinary user's answer this run's answer.
+			unrelated = unrelated || UnrelatedHeldTurn(items)
 		}
 		switch {
 		case !found:
@@ -84,6 +90,9 @@ func ReadTurn(ctx context.Context, src ItemSource, r *Run) (Reading, error) {
 		if _, in := later.Find(kept, holds); !in {
 			return Reading{Last: after}, nil // a message folded in is not in the conversation yet
 		}
+	}
+	if r.Held && !named && unrelated {
+		return Reading{Found: true, Last: after, Unrelated: true}, nil
 	}
 	if named && found && !slices.ContainsFunc(kept, func(it proto.Item) bool { return it.Role == "assistant" }) {
 		// Its message is in, nothing after it yet: its turn has not answered (the session's status can come before its
@@ -160,6 +169,18 @@ func RunAnswer(r *Run, items []proto.Item) ([]proto.Item, bool) {
 		out = append(out, Answer(p)...)
 	}
 	return out, true
+}
+
+// UnrelatedHeldTurn reports whether items contain ordinary user input. A held run already answered its only channel
+// message, so any such input after its base belongs to another turn, even when a background wake appears earlier.
+// Background notices and tool results are not ordinary user input.
+func UnrelatedHeldTurn(items []proto.Item) bool {
+	for _, it := range items {
+		if it.Role == "user" && (it.Kind == proto.KindText || it.Kind == proto.KindImage) {
+			return true
+		}
+	}
+	return false
 }
 
 // endsInWords: the last of items that says anything is the assistant's text (a turn that ended with its answer).

@@ -1,5 +1,8 @@
 #if DEBUG && os(iOS)
 import ActivityKit
+#if canImport(AlarmKit)
+import AlarmKit
+#endif
 import Foundation
 
 /// UI tests end the app with SIGTERM, between tests and when a run's test runner exits. A Live Activity it had up (a
@@ -37,6 +40,13 @@ enum TerminationActivities {
         for a in Activity<RecordingActivityAttributes>.activities { ends.append(end(a)) }
         for a in Activity<PersonaActivityAttributes>.activities { ends.append(end(a)) }
         for a in Activity<LegacyFleetActivityAttributes>.activities { ends.append(end(a)) }
+        #if canImport(AlarmKit)
+        if #available(iOS 26.0, *), let sampleID = AlarmsTool.sampleActivityID {
+            for a in Activity<AlarmAttributes<PersonaAlarmData>>.activities where a.id == sampleID {
+                ends.append(end(a))
+            }
+        }
+        #endif
         guard !ends.isEmpty else { return }
         let all = ends
         await withTaskGroup(of: Void.self) { group in

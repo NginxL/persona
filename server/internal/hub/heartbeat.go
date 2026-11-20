@@ -73,6 +73,12 @@ func (c *client) writeWS(ctx context.Context, conn wsWriter, keepAlive func(hear
 			keepAlive(hb)
 			c.helloAck(hb)
 		case b := <-c.out:
+			if c.role == roleScoped {
+				b = c.scopedSocketFrame(b)
+				if b == nil {
+					continue
+				}
+			}
 			if c.dropped.Load() {
 				// queue lost a message and dropSlow is closing the client: writing what was queued after it would move
 				// the client's event_seq (or since_seq, after_seq) past the loss, so a resume would skip it. Keep

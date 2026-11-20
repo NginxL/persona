@@ -24,13 +24,13 @@ func TestAssistantStaysOnTheFallbackThatAnswered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cliWait(t, "the refusal to move to the fallback", func() bool { return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 3 })
+	cliWait(t, "the refusal to move to the fallback", func() bool { return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 2 })
 	f.idle(t, id)
 	starts := strings.Count(f.file("cli-argv"), "\n")
 	if _, err := f.n.assistantSend(context.Background(), id, cwd, "claude", "next message", nil, "", "", configured); err != nil {
 		t.Fatal(err)
 	}
-	cliWait(t, "the next message to be answered", func() bool { return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 4 })
+	cliWait(t, "the next message to be answered", func() bool { return strings.Count(f.file("user.jsonl"), `"type":"user"`) == 3 })
 	f.idle(t, id)
 	if got := strings.Count(f.file("cli-argv"), "\n"); got != starts {
 		t.Fatalf("the next message restarted the conversation (%d starts, was %d): %s", got, starts, f.file("cli-argv"))
@@ -60,9 +60,12 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 		t.Fatalf("another launcher was held: %+v", got)
 	}
 	n := hold()
-	if got := n.heldFallback(id, "claude", modelExecution{Model: "other-model", Fingerprint: "fp2"}); got.Model != "other-model" {
+	other := modelExecution{Model: "other-model", Fingerprint: "fp2"}
+	got := n.heldFallback(id, "claude", other)
+	if got.Model != "other-model" {
 		t.Fatalf("a model the user picked was overridden: %+v", got)
 	}
+	n.commitModelChoice(id, got)
 	if got := n.heldFallback(id, "claude", from); got.Model != "primary-model" {
 		t.Fatalf("the hold outlived another pick: %+v", got)
 	}
@@ -92,6 +95,20 @@ func TestAssistantFallbackHoldBounds(t *testing.T) {
 	n.mu.Unlock()
 	if r.retried["primary-model"] {
 		t.Fatal("a refusal long after the last fallback skipped the same-model retry")
+	}
+}
+
+// A model fallback changes execution, not the current message's audience (#11130).
+func TestAssistantFallbackKeepsPublicMessage(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	n := assistantNode(t)
+	from := modelExecution{Model: "primary-model", Fingerprint: "fp"}
+	n.mu.Lock()
+	n.holdFallback(id, "claude", from, modelExecution{Model: "fallback-model", Fingerprint: "fp"})
+	n.mu.Unlock()
+	got := n.heldFallback(id, "claude", modelExecution{Model: "primary-model", Fingerprint: "fp", Public: true})
+	if got.Model != "fallback-model" || !got.Public {
+		t.Fatalf("the fallback lost the public marker: %+v", got)
 	}
 }
 

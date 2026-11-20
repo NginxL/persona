@@ -47,6 +47,13 @@ func (s *downStore) Setting(ctx context.Context, key string, out any) (bool, err
 	return s.memStore.Setting(ctx, key, out)
 }
 
+func (s *downStore) SettingsPrefix(ctx context.Context, prefix string) (map[string]json.RawMessage, error) {
+	if s.down() {
+		return nil, errors.New("database unavailable")
+	}
+	return s.memStore.SettingsPrefix(ctx, prefix)
+}
+
 func (s *downStore) PutSetting(ctx context.Context, key string, v any) error {
 	if s.down() {
 		return errors.New("database unavailable")
@@ -193,7 +200,7 @@ func TestModelConfigurationPreservesLegacyBaselines(t *testing.T) {
 	f.hello.Assistant.Launcher = "conversation"
 	s := newTestService(t, f)
 	ctx := context.Background()
-	for id, want := range map[string]string{"inbox.triage": "triage", "inbox.judge": "triage", "translate": "knowledge", "kb.compress": "knowledge", "assistant.title": "knowledge"} {
+	for id, want := range map[string]string{"inbox.triage": "triage", "inbox.judge": "triage", "translate": "triage", "kb.compress": "knowledge", "assistant.title": "knowledge"} {
 		b, err := s.resolveModel(ctx, id)
 		if err != nil || b.Model != want {
 			t.Errorf("%s: %+v %v", id, b, err)
@@ -436,8 +443,8 @@ func TestAPIModelPurposesFallBackToAKeyedConnection(t *testing.T) {
 	if p := purposeOf(t, s, "kb"); p.InheritedFrom != "自动选择：claude-gw（hub 上能直接调用的接入）" {
 		t.Fatalf("fallback not labelled: %+v", p)
 	}
-	if p := purposeOf(t, s, "translate"); p.InheritedFrom != "信息处理" {
-		t.Fatalf("child no longer inherits its parent: %+v", p)
+	if p := purposeOf(t, s, "translate"); p.CategoryID != "translate" || p.Parent != "" {
+		t.Fatalf("translation is not an independent category: %+v", p)
 	}
 
 	// A direct API provider comes before a launcher; nothing is written as an override.
@@ -479,7 +486,7 @@ func TestTriageModelInUseByPlugins(t *testing.T) {
 	}
 }
 
-func TestFourModelCategoriesCatalog(t *testing.T) {
+func TestSixModelCategoriesCatalog(t *testing.T) {
 	s, _, _ := modelService(t)
 	setTasks(s, Task{ID: "one", Title: "不应出现在模型配置里的任务", Enabled: true})
 	r := modelRequest(s, "GET", "", "")
@@ -511,7 +518,7 @@ func TestFourModelCategoriesCatalog(t *testing.T) {
 			t.Fatalf("category missing scope or editor: %+v", p)
 		}
 	}
-	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", purposeAgent, purposeLarkAgent, purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes}
+	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", "translate", purposeAgent, purposeLarkAgent, purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes}
 	if !reflect.DeepEqual(ids, want) || !reflect.DeepEqual(ids, modelConfigIDs) {
 		t.Fatalf("catalog is not the ordered categories, the AI twin, Lark /agent, the background supervisor and the two meeting purposes: %v", ids)
 	}

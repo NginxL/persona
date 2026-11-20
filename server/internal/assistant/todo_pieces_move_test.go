@@ -216,7 +216,7 @@ func TestTodoPiecesMoveAfterTheWaitIsTaken(t *testing.T) {
 		z := mustTodo(t, s, "Clean the flat")
 
 		// A task started on x that would move it: the link is left out, as for any link that no longer holds.
-		if out := s.startPieces(context.Background(), PlanTask{PartOf: r2.ID}, x); out.PartOf != r.ID {
+		if out, err := s.startPieces(context.Background(), PlanTask{PartOf: r2.ID}, x); err != nil || out.PartOf != r.ID {
 			t.Fatalf("a start moved a piece that is waited for: %+v", out)
 		}
 		pieceRefused(t, s, "conv1", "todo_update", map[string]any{"id": x.ID, "part_of": r2.ID}, fmt.Sprintf("%q waits for this to-do", y.ID))

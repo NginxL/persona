@@ -6,12 +6,13 @@ import kotlinx.serialization.json.*
 
 internal data class AnswerFixture(val name: String, val input: JsonObject, val expected: JsonObject)
 
-internal fun fixtures(domain: String): List<AnswerFixture> {
+/** The cases in [path], spelled out as "spec/fixtures/<domain>" so the build declares that domain as the tests' input. */
+internal fun fixtures(path: String): List<AnswerFixture> {
     val root = File(System.getProperty("persona.repo.root") ?: error("persona.repo.root is required"))
-    val directory = File(root, "spec/fixtures/$domain")
-    check(directory.isDirectory) { "Missing fixtures: $domain" }
+    val directory = File(root, path)
+    check(directory.isDirectory) { "Missing fixtures: $path" }
     val files = directory.listFiles { file -> file.extension == "json" }!!.sortedBy { it.name }
-    check(files.isNotEmpty()) { "Empty fixtures: $domain" }
+    check(files.isNotEmpty()) { "Empty fixtures: $path" }
     return files.flatMap { file ->
         val json = JsonCodec.parseToJsonElement(file.readText()).jsonObject
         check(json.getValue("schema_version").jsonPrimitive.int == 1)

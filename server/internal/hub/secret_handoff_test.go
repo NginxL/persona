@@ -118,22 +118,23 @@ func handoffBusHubWithCapabilities(t *testing.T, capabilities []string) (*Hub, *
 func TestAssistantSendsSayWhetherAPersonSentThem(t *testing.T) {
 	h, m := handoffBusHub(t)
 	for _, c := range []struct {
-		name  string
-		who   *principal
-		human bool
+		name       string
+		who        *principal
+		human      bool
+		replyInput bool
 	}{
-		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true},
-		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper"}, false},
-		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false},
-		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false},
-		{"the hub's own token", &principal{Role: roleFull}, false},
-		{"no credential", nil, false},
+		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true, false},
+		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper"}, false, false},
+		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false, false},
+		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false, false},
+		{"the hub's own token", &principal{Role: roleFull}, false, true},
+		{"no credential", nil, false, false},
 	} {
 		ctx := context.Background()
 		if c.who != nil {
 			ctx = context.WithValue(ctx, principalKey{}, *c.who)
 		}
-		if _, err := h.asstOf("").SendParams(ctx, "box", "s1", map[string]any{"client_msg_id": "c1", "human": true}); err != nil {
+		if _, err := h.asstOf("").SendParams(ctx, "box", "s1", map[string]any{"client_msg_id": "c1", "human": true, "reply_input": true}); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		m.mu.Lock()
@@ -141,6 +142,9 @@ func TestAssistantSendsSayWhetherAPersonSentThem(t *testing.T) {
 		m.mu.Unlock()
 		if got.Human != c.human {
 			t.Fatalf("%s: human %v, want %v", c.name, got.Human, c.human)
+		}
+		if got.ReplyInput != c.replyInput {
+			t.Fatalf("%s: reply input %v, want %v", c.name, got.ReplyInput, c.replyInput)
 		}
 	}
 }
@@ -152,18 +156,19 @@ func TestAConversationsFirstMessageIsAPersonsOnlyFromAFullDevice(t *testing.T) {
 	h, m := handoffBusHub(t)
 	start := h.startConversationOnce()
 	for _, c := range []struct {
-		name  string
-		who   *principal
-		human bool
+		name       string
+		who        *principal
+		human      bool
+		replyInput bool
 	}{
-		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true},
-		{"the hub's own token", &principal{Role: roleFull}, false},
-		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper", Manager: assistantwire.AssistantID}, false},
-		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false},
-		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false},
-		{"no credential", nil, false},
+		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true, false},
+		{"the hub's own token", &principal{Role: roleFull}, false, true},
+		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper", Manager: assistantwire.AssistantID}, false, false},
+		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false, false},
+		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false, false},
+		{"no credential", nil, false, false},
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations", strings.NewReader(`{"prompt":"fix CI","human":true}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations", strings.NewReader(`{"prompt":"fix CI","human":true,"reply_input":true}`))
 		req.Header.Set("X-Persona-Human", "1")
 		if c.who != nil {
 			req = req.WithContext(context.WithValue(req.Context(), principalKey{}, *c.who))
@@ -171,12 +176,15 @@ func TestAConversationsFirstMessageIsAPersonsOnlyFromAFullDevice(t *testing.T) {
 		w := httptest.NewRecorder()
 		start(w, req)
 		relayed, _, _ := m.took()
-		if c.human && (w.Code != http.StatusOK || len(relayed) != 1) {
+		if (c.human || c.replyInput) && (w.Code != http.StatusOK || len(relayed) != 1) {
 			t.Fatalf("%s: %d, relayed %d", c.name, w.Code, len(relayed))
 		}
 		for _, r := range relayed {
 			if r.Human != c.human {
 				t.Fatalf("%s: human %v, want %v", c.name, r.Human, c.human)
+			}
+			if r.ReplyInput != c.replyInput {
+				t.Fatalf("%s: reply input %v, want %v", c.name, r.ReplyInput, c.replyInput)
 			}
 		}
 	}
@@ -184,7 +192,7 @@ func TestAConversationsFirstMessageIsAPersonsOnlyFromAFullDevice(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations/s1/compact", strings.NewReader(`{}`))
 	req = req.WithContext(context.WithValue(req.Context(), principalKey{}, principal{ID: "d1", Role: roleFull}))
 	h.forwardSend(httptest.NewRecorder(), req, assistantwire.AssistantID)
-	if relayed, _, _ := m.took(); len(relayed) != 1 || relayed[0].Human {
+	if relayed, _, _ := m.took(); len(relayed) != 1 || relayed[0].Human || relayed[0].ReplyInput {
 		t.Fatalf("another request was marked: %+v", relayed)
 	}
 }

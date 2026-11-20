@@ -13,7 +13,7 @@ func TestIdleCompactionRPCPreservesConversationOrigin(t *testing.T) {
 		main               bool
 	}{
 		{"main", "user", proto.ModeBypass, true},
-		{"inbox", originInbox, proto.ModePlan, false},
+		{"inbox", originInbox, "default", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := cliTest(t)

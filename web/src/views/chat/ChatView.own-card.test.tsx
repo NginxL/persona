@@ -45,6 +45,12 @@ const question = {
   created_at: "2020-01-01T00:01:00Z",
 } as Interaction;
 
+// A worker folded under the chat (#5120) asks too: its cards do not hold the chat's turn (lib/turn-asks.ts).
+const workerBash = { ...bash, id: "ix_worker_bash", session_id: "w1", session_title: "Worker", folded_under: "c1", folded_as: "worker" } as Interaction;
+const workerQuestion = { ...question, id: "ix_worker_question", session_id: "w1", session_title: "Worker", folded_under: "c1", folded_as: "worker" } as Interaction;
+
+const withWorker = () => upsertSession({ machine_id: "hub", session_id: "w1", title: "Worker", status: "working", state: "needs_you", agent: "claude", folded_under: "c1", folded_as: "worker" } as Session);
+
 let host: HTMLDivElement;
 let root: Root;
 let fetcher: ReturnType<typeof vi.fn>;
@@ -184,54 +190,58 @@ describe("a Persona conversation's own approval card (#4883)", () => {
     expect(button(t("chat-interactions.deny"))).toBeDefined();
   });
 
-  it("is still counted in Needs you, whose row leads to the card instead of drawing it twice", async () => {
+  it("a worker's card is still counted in Needs you, whose row leads to the card instead of drawing it twice", async () => {
+    withWorker();
+    Object.assign(getState(), { interactions: [workerBash], answered: {} });
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
     await flush();
     const needs = host.querySelector<HTMLButtonElement>('[data-tray-entry="needs"]')!;
     expect(needs.textContent).toContain("1");
     act(() => needs.click());
-    const row = host.querySelector<HTMLButtonElement>(`[data-own-ask="${bash.id}"]`);
+    const row = host.querySelector<HTMLButtonElement>(`[data-own-ask="${workerBash.id}"]`);
     expect(row).not.toBeNull();
-    expect(host.querySelectorAll(`[data-card="${bash.id}"]`).length).toBe(1);
+    expect(host.querySelectorAll(`[data-card="${workerBash.id}"]`).length).toBe(1);
     act(() => row!.click());
     expect(host.querySelector("[data-tray-list]")).toBeNull();
-    expect(card()).not.toBeNull();
+    expect(card(workerBash.id)).not.toBeNull();
   });
 
-  it("cycles to the next unanswered question or approval card, expanding the existing stack and wrapping (#10347)", async () => {
-    Object.assign(getState(), { interactions: [bash, question], answered: {} });
+  it("cycles to the next unanswered card of a session folded under it, expanding the existing stack and wrapping (#10347)", async () => {
+    withWorker();
+    Object.assign(getState(), { interactions: [workerBash, workerQuestion], answered: {} });
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
     await flush();
     expect(nextOwn()?.textContent).toBe(`${t("assistant-tasks.next_unanswered")}2`);
-    expect(card(question.id)).toBeNull();
+    expect(card(workerQuestion.id)).toBeNull();
     revealed.length = 0; // the card slot's initial landing is not a shortcut navigation
 
     act(() => nextOwn()!.click());
     await flush();
-    expect(revealed).toEqual([bash.id]);
+    expect(revealed).toEqual([workerBash.id]);
 
     act(() => nextOwn()!.click());
     await flush();
-    expect(card(question.id)).not.toBeNull();
-    expect(revealed).toEqual([bash.id, question.id]);
+    expect(card(workerQuestion.id)).not.toBeNull();
+    expect(revealed).toEqual([workerBash.id, workerQuestion.id]);
     // The expanded cards must not shrink the closed action bar to zero and cover the next click (real-browser evidence).
     expect(tray()?.classList.contains("shrink-0")).toBe(true);
 
     act(() => nextOwn()!.click());
     await flush();
-    expect(revealed).toEqual([bash.id, question.id, bash.id]);
+    expect(revealed).toEqual([workerBash.id, workerQuestion.id, workerBash.id]);
     expect(host.querySelectorAll("[data-card]")).toHaveLength(2);
   });
 
   it("reduces the next-unanswered count as either kind of card is answered, then hides it", async () => {
-    Object.assign(getState(), { interactions: [bash, question], answered: {} });
+    withWorker();
+    Object.assign(getState(), { interactions: [workerBash, workerQuestion], answered: {} });
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
     await flush();
     act(() => button(t("chat-interactions.allow"))!.click());
     await flush();
     expect(nextOwn()?.textContent).toBe(`${t("assistant-tasks.next_unanswered")}1`);
 
-    const choice = [...card(question.id)!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Use mock"));
+    const choice = [...card(workerQuestion.id)!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Use mock"));
     act(() => choice!.click());
     await flush();
     expect(getState().interactions).toEqual([]);
@@ -269,5 +279,61 @@ describe("a Persona conversation's own approval card (#4883)", () => {
     expect(zh.permission_kicker).toBe("在等你批准");
     expect(en.permission_kicker).toBe("Waiting for your approval");
     expect(ja.permission_kicker).toBe("承認を待っています");
+  });
+});
+
+// An approval the chat's own turn waits on is never folded behind a capsule (#11794): the chat cannot go on until it is
+// answered, so it stands open above Needs you / In progress, every one of them, and Needs you does not count it again.
+// A worker's or side session's card does not hold the turn and stays folded in the stack and behind Needs you.
+describe("cards the chat's own turn waits on", () => {
+  const above = () => host.querySelector("[data-turn-asks]");
+  const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("stand open above the capsules, all of them, outside Needs you", async () => {
+    Object.assign(getState(), { interactions: [bash, question], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    // both are drawn at once: no position chip, no "N pending" line folds the second away
+    expect(above()?.contains(card(bash.id))).toBe(true);
+    expect(above()?.contains(card(question.id))).toBe(true);
+    expect(host.querySelector("[data-chat-cards-position]")).toBeNull();
+    expect(host.querySelector("[data-chat-cards-fold]")).toBeNull();
+    // above the capsules, and the tray is closed
+    const needs = host.querySelector<HTMLButtonElement>('[data-tray-entry="needs"]')!;
+    expect(before(above()!, needs)).toBe(true);
+    expect(tray()?.contains(above())).toBe(false);
+    expect(host.querySelector("[data-tray-list]")).toBeNull();
+    // the cards give up their height and scroll in their own box; the capsules under them never shrink out of view
+    expect(above()?.className).toContain("overflow-y-auto");
+    expect(tray()?.classList.contains("shrink-0")).toBe(true);
+    // answerable in place, and not counted or listed behind the capsule as well
+    expect(card(bash.id)!.querySelector("button")).not.toBeNull();
+    expect(needs.textContent).toBe(t("assistant-tasks.tray_needs_you"));
+    expect(nextOwn()).toBeNull();
+    act(() => needs.click());
+    expect(host.querySelector(`[data-own-ask="${bash.id}"]`)).toBeNull();
+    expect(host.querySelectorAll(`[data-card="${bash.id}"]`)).toHaveLength(1);
+  });
+
+  it("leave the other cards folded as before", async () => {
+    withWorker();
+    Object.assign(getState(), { interactions: [workerBash, workerQuestion, bash], answered: {} });
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    expect(above()?.contains(card(bash.id))).toBe(true);
+    expect(above()?.querySelectorAll("[data-card]")).toHaveLength(1);
+    // the worker's two: the first in the stack with its position chip, the second folded behind it
+    expect(card(workerBash.id)).not.toBeNull();
+    expect(above()?.contains(card(workerBash.id))).toBe(false);
+    expect(card(workerQuestion.id)).toBeNull();
+    expect(host.querySelector("[data-chat-cards-position]")?.textContent).toContain("2");
+    // and behind Needs you: counted there, with a row each
+    const needs = host.querySelector<HTMLButtonElement>('[data-tray-entry="needs"]')!;
+    expect(needs.textContent).toContain("2");
+    expect(nextOwn()?.textContent).toBe(`${t("assistant-tasks.next_unanswered")}2`);
+    act(() => needs.click());
+    expect(host.querySelector(`[data-own-ask="${workerBash.id}"]`)).not.toBeNull();
+    expect(host.querySelector(`[data-own-ask="${workerQuestion.id}"]`)).not.toBeNull();
+    expect(host.querySelector(`[data-own-ask="${bash.id}"]`)).toBeNull();
   });
 });

@@ -1,6 +1,12 @@
 package persona.feature.inbox
 
 import android.graphics.Canvas
+import android.graphics.BitmapFactory
+import androidx.compose.ui.platform.LocalWindowInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import persona.core.contracts.api.ReplyImageSource
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -35,7 +41,7 @@ internal fun safeMailHtml(
     }
     val body = Jsoup.clean(html, allowed)
     val csp = if (allowImages) {
-        "default-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
+        "default-src 'none'; img-src https://mail-images.invalid data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
     } else {
         "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
     }
@@ -51,8 +57,24 @@ internal fun safeMailHtml(
 
 internal fun mailPlainText(html: String): String = Jsoup.parse(html).text()
 
+/** Only image locations minted for this sanitized document can reach its paired reader. */
+internal fun mailImageDocument(document: String): Pair<String, Map<String, String>> {
+    if (!document.contains("<img", ignoreCase = true)) return document to emptyMap()
+    val parsed = Jsoup.parse(document)
+    val urls = mutableMapOf<String, String>()
+    parsed.select("img[src]").forEach { tag ->
+        val url = tag.attr("src")
+        if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
+            val id = "https://mail-images.invalid/" + urls.size
+            urls[id] = url
+            tag.attr("src", id)
+        }
+    }
+    return parsed.outerHtml() to urls
+}
+
 @Composable
-internal fun MailHtml(html: String, allowImages: Boolean = false, onLink: (String) -> Unit) {
+internal fun MailHtml(html: String, allowImages: Boolean = false, images: ReplyImageSource? = null, onLink: (String) -> Unit) {
     val colors = PersonaTheme.palette
     fun css(value: androidx.compose.ui.graphics.Color) = "#%06x".format(value.toArgb() and 0xffffff)
     val document = remember(html, colors.ink, colors.surfaceOpaque, colors.accent, allowImages) {
@@ -60,7 +82,12 @@ internal fun MailHtml(html: String, allowImages: Boolean = false, onLink: (Strin
     }
     var height by remember(document) { mutableIntStateOf(1) }
     val openLink by rememberUpdatedState(onLink)
-    key(document, allowImages) {
+    // WebView only sees private document identifiers. A redirect or another subresource can never opt itself in.
+    val sources = remember(document) { mailImageDocument(document) }
+    val scope = rememberCoroutineScope()
+    val width = LocalWindowInfo.current.containerSize.width
+    val imageSize = ReplyImageSource.sizeFor(width.toFloat())
+    key(document, allowImages, images, imageSize) {
         AndroidView(
             modifier = Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).height(height.dp),
             factory = { context ->
@@ -89,13 +116,19 @@ internal fun MailHtml(html: String, allowImages: Boolean = false, onLink: (Strin
                             if (request != null) {
                                 val scheme = request.url.scheme.orEmpty().lowercase()
                                 if (scheme in setOf("data", "about")) return null
-                                if (allowImages && scheme in setOf("http", "https")) {
-                                    val accept = request.requestHeaders["Accept"].orEmpty()
-                                    val path = request.url.path.orEmpty().lowercase()
-                                    val isImage = accept.startsWith("image/") ||
-                                        listOf(".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico")
-                                            .any { path.endsWith(it) }
-                                    if (isImage) return null
+                                val url = sources.second[request.url.toString()]
+                                if (allowImages && !request.isForMainFrame && url != null && images != null) {
+                                    // shouldInterceptRequest runs off the UI thread. Cancel the fetch with this mail page.
+                                    return try {
+                                        val bytes = runBlocking { scope.async(Dispatchers.IO) {
+                                            runCatching { images.load(url, imageSize, allowDirect = true) }
+                                        }.await().getOrThrow() }
+                                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                                        WebResourceResponse(bounds.outMimeType ?: "application/octet-stream", null, ByteArrayInputStream(bytes))
+                                    } catch (_: Exception) {
+                                        WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                                    }
                                 }
                             }
                             return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
@@ -116,7 +149,7 @@ internal fun MailHtml(html: String, allowImages: Boolean = false, onLink: (Strin
                             return true
                         }
                     }
-                    loadDataWithBaseURL(null, document, "text/html", "utf-8", null)
+                    loadDataWithBaseURL(null, sources.first, "text/html", "utf-8", null)
                 }
             },
             onRelease = { it.stopLoading(); it.destroy() },

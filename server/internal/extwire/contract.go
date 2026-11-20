@@ -29,6 +29,9 @@ const (
 	// writing the defaults task Agents start with (GET /api/v1/assistant/worker-presets, GET/PUT
 	// /api/v1/assistant/start-defaults).
 	ScopeAssistantStartDefaults = "assistant.start_defaults"
+	// ScopeDispatchGuard: reading and writing the explicit-target dispatch guard and narrowing the affected
+	// conversations' tool lists (GET/PUT /api/v1/assistant/dispatch-guard). Granted by name only.
+	ScopeDispatchGuard = "dispatch.guard"
 	// ScopeAgentsPermissionMode: changing the permission mode of a conversation the extension opened itself, and of no
 	// other (the hub checks who opened it: hub/extension_modes.go).
 	ScopeAgentsPermissionMode = "agents.permission_mode"
@@ -44,6 +47,9 @@ const (
 	// ScopeTranscription: handing the extension's own audio to the transcription the owner chose for meetings
 	// (transcription.start / audio / finish / cancel), never a key and never anyone else's audio (#8485).
 	ScopeTranscription = "transcription"
+	// ScopeMarketRefreshOwn: asking for a background read of only the marketplace the calling extension was installed
+	// from. It is never inherited through an all-scope token; the manifest must name it and the owner must approve it.
+	ScopeMarketRefreshOwn = "market.refresh_own"
 	// ScopeCallPrefix and an extension's id: calling that extension's own HTTP (/api/v1/extensions/<id>/…).
 	ScopeCallPrefix = "extensions.call:"
 )

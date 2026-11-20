@@ -25,6 +25,8 @@ var startPrimitives = []string{"startOn", "start", "startConversationOn", "start
 // startWrappers pass a start on: their callers are the entry points.
 var startWrappers = map[string]string{
 	"startTaskAgent": "a planned task's agent start (tasks_placement.go), called by runPlanTaskStart",
+	// the same start into a prepared backend workspace (#11687), called only by startTaskAgent: startPlan's ledger
+	"startBackendTask": "a planned task's agent start in its backend workspace (tasks_backend_launch.go), called by startTaskAgent",
 }
 
 // supervisedStarts are the entry points that give their work a ledger, and the function that does it: it must call
@@ -46,26 +48,28 @@ var supervisedStarts = map[string]string{
 // startOptOuts are the start paths that stay unsupervised on purpose, with why. Each is the user's own conversation or
 // Agent, the supervisor itself, or work some other part of the hub already follows.
 var startOptOuts = map[string]string{
-	"botSendIn":        "a Lark message opening a conversation: the user's own conversation",
-	"channelForward":   "a channel's message opening a conversation: the user's own conversation",
-	"request":          "the hub bus's assistant.start: an app opening a conversation for the user",
-	"startRoutes":      "the apps' POST /api/v1/sessions: the user started it by hand (assistant.agent_tasks makes it a task when on)",
-	"botStartAgent":    "the Lark bot's start card: the user started the Agent by hand in the chat",
-	"justMeSend":       "a meeting's Just me turn in the main conversation: the main conversation is the supervisor",
-	"sendHandoff":      "the inbox's hand-off into the main conversation: the main conversation is the supervisor",
-	"followupSend":     "a meeting follow-up conversation: the meeting page owns it and the user reads it there",
-	"startInboxAgent":  "an inbox event's agent: its result is the draft in the inbox, which the user reviews",
-	"runTask":          "a scheduled task's own conversation: its runs report through notify_user, and the schedule follows them",
-	"runAutoReview":    "an independent reviewer of a supervised task: the review is part of that task's supervision",
-	"startRepairAgent": "a launcher repair Agent: the launcher health checks follow it (launcher_repair.go)",
-	"startBackground":  "the background supervisor's own conversation: it is the supervisor of the tasks no leader supervises (supervise_background.go)",
+	"botSendIn":            "a Lark message opening a conversation: the user's own conversation",
+	"channelForward":       "a channel's message opening a conversation: the user's own conversation",
+	"request":              "the hub bus's assistant.start: an app opening a conversation for the user",
+	"startRoutes":          "the apps' POST /api/v1/sessions: the user started it by hand (assistant.agent_tasks makes it a task when on)",
+	"botStartAgent":        "the Lark bot's start card: the user started the Agent by hand in the chat",
+	"justMeSend":           "a meeting's Just me turn in the main conversation: the main conversation is the supervisor",
+	"sendHandoff":          "the inbox's hand-off into the main conversation: the main conversation is the supervisor",
+	"followupSend":         "a meeting follow-up conversation: the meeting page owns it and the user reads it there",
+	"startInboxAgent":      "an inbox event's agent: its result is the draft in the inbox, which the user reviews",
+	"runTask":              "a scheduled task's own conversation: its runs report through notify_user, and the schedule follows them",
+	"runAutoReview":        "an independent reviewer of a supervised task: the review is part of that task's supervision",
+	"startSessionReview":   "an explicit independent reviewer: its source session's owner asked for it and answers its result card",
+	"deliverSessionReview": "the owner chose Send on a finished review card: an explicit message or resume of the source session",
+	"startRepairAgent":     "a launcher repair Agent: the launcher health checks follow it (launcher_repair.go)",
+	"startBackground":      "the background supervisor's own conversation: it is the supervisor of the tasks no leader supervises (supervise_background.go)",
 }
 
 // supervisionCalls make or keep a ledger.
 var supervisionCalls = []string{"superviseTodo", "supervisePlanTask", "updateSupervision", "adoptAgent", "adoptAgentAs", "quietAgentTask", "ensureSupervisor"}
 
 func TestEveryStartPathIsSupervisedOrOptedOut(t *testing.T) {
-	funcs := parsePackageFuncs(t)
+	funcs := parsePackageFuncs(t, ".")
 	entries := startEntries(funcs)
 	var missing []string
 	for _, name := range entries {
@@ -105,9 +109,11 @@ func TestEveryStartPathIsSupervisedOrOptedOut(t *testing.T) {
 // pkgFunc is a function of the package as parsed: its file, the names it calls (the Service's methods, s.x; a local
 // function value called start is no start), and every identifier in it.
 type pkgFunc struct {
-	file   string
-	calls  map[string]bool
-	idents map[string]bool
+	file                   string
+	calls                  map[string]bool
+	idents                 map[string]bool
+	hasCall                bool
+	startOutsideComparison bool
 }
 
 func (f pkgFunc) callsAny(names []string) bool {
@@ -117,9 +123,9 @@ func (f pkgFunc) callsAny(names []string) bool {
 func (f pkgFunc) mentions(ident string) bool { return f.idents[ident] }
 
 // parsePackageFuncs reads the package's own files (no tests); a method and a function of one name are merged.
-func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
+func parsePackageFuncs(t *testing.T, dir string) map[string]pkgFunc {
 	t.Helper()
-	paths, err := filepath.Glob("*.go")
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,9 +152,10 @@ func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
 			if !ok {
 				f = pkgFunc{file: path, calls: map[string]bool{}, idents: map[string]bool{}}
 			}
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
+			ast.PreorderStack(fd.Body, nil, func(n ast.Node, parents []ast.Node) bool {
 				switch x := n.(type) {
 				case *ast.CallExpr:
+					f.hasCall = true
 					switch fn := x.Fun.(type) {
 					case *ast.SelectorExpr: // the Service's own methods only (s.start, not a timer's or a process's)
 						if recv, ok := fn.X.(*ast.Ident); ok && recv.Name == "s" {
@@ -157,6 +164,12 @@ func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
 					}
 				case *ast.Ident:
 					f.idents[x.Name] = true
+					if x.Name == "DeviceSessionStart" {
+						expr, comparison := parents[len(parents)-1].(*ast.BinaryExpr)
+						if !comparison || (expr.Op != token.EQL && expr.Op != token.NEQ) {
+							f.startOutsideComparison = true
+						}
+					}
 				}
 				return true
 			})
@@ -178,7 +191,9 @@ func startEntries(funcs map[string]pkgFunc) []string {
 		if slices.Contains(startPrimitives, name) || startWrappers[name] != "" {
 			continue // a primitive or a wrapper is no entry of its own: its callers are
 		}
-		if f.mentions("DeviceSessionStart") || f.callsAny(starts) {
+		// A pure method-name comparison (tracksNodeWrite) sends nothing. Keep a
+		// comparison followed by a dynamic call and every other use of the method.
+		if (f.mentions("DeviceSessionStart") && (f.hasCall || f.startOutsideComparison)) || f.callsAny(starts) {
 			seen[name] = true
 		}
 	}
@@ -188,4 +203,32 @@ func startEntries(funcs map[string]pkgFunc) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A method-name classifier is not a start. Passing, forwarding, or checking a
+// method before invoking it must still expose that entry to the supervision guard.
+func TestStartPathsDistinguishMethodChecksFromWrites(t *testing.T) {
+	dir := t.TempDir()
+	const src = `package example
+func classifies(m string) bool { return m == DeviceSessionStart || m != DeviceSessionSend }
+func direct() { call(DeviceSessionStart) }
+func forwarded() string { return DeviceSessionStart }
+func checked(m string) { if m == DeviceSessionStart { call(m) } }
+func countsAsAResume(s *Service) { s.start() }
+`
+	if err := os.WriteFile(filepath.Join(dir, "starts.go"), []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := startEntries(parsePackageFuncs(t, dir))
+	if want := []string{"checked", "countsAsAResume", "direct", "forwarded"}; !slices.Equal(got, want) {
+		t.Errorf("start entries = %v, want %v", got, want)
+	}
+}
+
+func TestRetiredLeaderReworkUsesSupervisedResume(t *testing.T) {
+	funcs := parsePackageFuncs(t, ".")
+	if !funcs["sendTaskInput"].calls["resumeStoppedTaskAgent"] ||
+		!funcs["resumeStoppedTaskAgent"].calls["resumeAndSend"] || supervisedStarts["resumeAndSend"] != "resumeAndSend" {
+		t.Fatal("rework must resume the retired leader through the supervised agent resume")
+	}
 }

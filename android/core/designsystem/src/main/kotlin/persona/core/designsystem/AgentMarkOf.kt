@@ -21,24 +21,41 @@ val Session.agentMark: AgentMarkSpec?
             isCodex -> AgentMarkSpec(AgentMarkKind.Codex, "Codex", surface)
             agent?.lowercase() in TRAE -> AgentMarkSpec(AgentMarkKind.Trae, "TRAE", surface)
             isClaude -> AgentMarkSpec(AgentMarkKind.Claude, "Claude Code", surface)
-            else -> AgentMarkSpec(knownAgentMark(launcher) ?: knownAgentMark(agentLabelHint), agentLabel, surface)
+            else -> AgentMarkSpec(knownAgentMark(agent) ?: knownAgentMark(launcher) ?: knownAgentMark(agentLabelHint), agentLabel, surface)
         }
     }
 
 /**
  * The mark the design system has for an agent named [name] (an agent's id, a launcher's name, a provider's label), by
- * its first word in any case: "claude", "codex", "TRAE CLI", "trae-cli", "traecli"; null when it has none, and the
- * agent's letter is drawn. The same names as the web's `MARKED_AGENTS` that Android has a mark for.
+ * its product name or an alias. Older labels such as "Claude Code (ACP)" keep their first-word lookup.
  */
 fun knownAgentMark(name: String?): AgentMarkKind? {
-    val word = name?.trim()?.lowercase()?.takeWhile(Char::isLetterOrDigit)?.takeIf(String::isNotEmpty) ?: return null
-    return MARKS[word]
+    val product = name?.substringBefore('·')?.trim()?.lowercase() ?: return null
+    if (product.firstOrNull()?.isLetterOrDigit() != true) return null
+    val key = product.filterNot { it.isWhitespace() || it in ".-_" }
+    return MARKS[key] ?: LEGACY_MARKS[product.takeWhile(Char::isLetterOrDigit)]
 }
 
 private val TRAE = setOf("trae", "trae-cli", "traecli")
 
-private val MARKS = mapOf(
+private val LEGACY_MARKS = mapOf(
     "claude" to AgentMarkKind.Claude, "claudecode" to AgentMarkKind.Claude,
     "codex" to AgentMarkKind.Codex,
     "trae" to AgentMarkKind.Trae, "traecli" to AgentMarkKind.Trae,
+)
+
+private val MARKS = LEGACY_MARKS + mapOf(
+    "codexcli" to AgentMarkKind.Codex, "traeagent" to AgentMarkKind.Trae,
+    "opencode" to AgentMarkKind.OpenCode,
+    "pi" to AgentMarkKind.Pi, "piweb" to AgentMarkKind.Pi,
+    "gemini" to AgentMarkKind.Gemini, "geminicli" to AgentMarkKind.Gemini,
+    "cursor" to AgentMarkKind.Cursor, "cursoragent" to AgentMarkKind.Cursor,
+    "grok" to AgentMarkKind.Grok, "grokbuild" to AgentMarkKind.Grok,
+    "grokchat" to AgentMarkKind.Grok, "grokcli" to AgentMarkKind.Grok,
+    "agy" to AgentMarkKind.Antigravity, "antigravity" to AgentMarkKind.Antigravity,
+    "antigravitycli" to AgentMarkKind.Antigravity, "googleantigravity" to AgentMarkKind.Antigravity,
+    "dsh" to AgentMarkKind.Dsh, "deepseekharness" to AgentMarkKind.Dsh,
+    "kimi" to AgentMarkKind.Kimi, "kimicli" to AgentMarkKind.Kimi,
+    "copilot" to AgentMarkKind.Copilot, "copilotcli" to AgentMarkKind.Copilot,
+    "githubcopilot" to AgentMarkKind.Copilot, "githubcopilotcli" to AgentMarkKind.Copilot,
 )

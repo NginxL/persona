@@ -9,7 +9,9 @@ import { Choice, DigitHint } from "./Choice";
 import { DelegatedCard } from "./Delegated";
 import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-archives";
+import { isSessionReview } from "../../lib/types";
 import type { Interaction } from "../../lib/types";
+import type { TurnAsk } from "../../lib/turn-asks";
 import { defaults, elicitationDraft, elicitationResolution, elicitationSource, fields, numberInputMode, saveElicitationDraft, urlHost, urlTarget, validate, type ElicitationAction, type Field, type Values } from "../../lib/elicitation";
 import { answerLines } from "../../lib/answered";
 import { answerBlock, interactionCanAnswer, sessionTitle } from "../../lib/format";
@@ -34,7 +36,7 @@ import { href, onLinkClick, type Route } from "../../lib/router";
 import { t } from "../../i18n";
 import { StatusMark } from "../../ui/StatusMark";
 import { useVoiceAsking } from "../../lib/voice/calls";
-import { composing } from "../../lib/send-history";
+import { useComposition } from "../../lib/ime";
 import { ErrorNotice } from "../../ui/ErrorNotice";
 import { reportBoundary } from "../../lib/error-reports";
 import { isChunkError } from "../PageBoundary";
@@ -123,7 +125,7 @@ const StackCount = createContext(0);
  *  which opens them all; opened, "Show first only" in the same place, which folds them back. */
 const QueueSlot = createContext<{ position: number; total: number; open: boolean; onToggle: () => void } | null>(null);
 
-export function Card({ title, kicker, onDismiss, busy, children, footer, looking = false, cardKeys, tapGuard }: { title: string; kicker: string; onDismiss?: () => void; busy?: boolean; children: React.ReactNode; footer: React.ReactNode; looking?: boolean; cardKeys?: CardKeys; tapGuard?: { ref: RefObject<HTMLDivElement | null> } }) {
+export function Card({ title, titleContent, kicker, onDismiss, busy, children, footer, looking = false, cardKeys, tapGuard }: { title: string; titleContent?: React.ReactNode; kicker: string; onDismiss?: () => void; busy?: boolean; children: React.ReactNode; footer: React.ReactNode; looking?: boolean; cardKeys?: CardKeys; tapGuard?: { ref: RefObject<HTMLDivElement | null> } }) {
   const asked = useContext(AskedByVoice);
   const sending = useContext(SendingAnswer);
   const from = useContext(AskedFrom);
@@ -168,7 +170,7 @@ export function Card({ title, kicker, onDismiss, busy, children, footer, looking
                 </span>
               )}
             </div>
-            <div ref={head} className="text-[13.5px] font-medium text-ink">{title}</div>
+            <div ref={head} className="text-[13.5px] font-medium text-ink">{titleContent ?? title}</div>
           </div>
           {stack > 1 && (
             <span data-chat-cards-count className="flex shrink-0 items-center gap-1 text-xs whitespace-nowrap text-ink-2">
@@ -298,7 +300,10 @@ function ToolLoopCard({ ix }: { ix: Interaction }) {
   );
 }
 
+const SessionReviewCard = lazyPage(() => import("./SessionReviewCard").then((m) => m.SessionReviewCard));
+
 function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean }) {
+  const ime = useComposition();
   const qs = ix.questions ?? [];
   const localOnly = ix.tool_name === "persona_triage" && !canApprove;
   const [qi, setQi] = useState(0);
@@ -378,6 +383,7 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
     <Card
       kicker={q.header || t("chat-interactions.question")}
       title={q.question}
+      titleContent={ix.format === "markdown" ? <Markdown text={q.question} small compact /> : undefined}
       looking={looking}
       cardKeys={keys}
       tapGuard={tapGuard}
@@ -452,7 +458,8 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
               setCustom((c) => ({ ...c, [qi]: e.target.value }));
               if (e.target.value) setPicked((p) => ({ ...p, [qi]: [] }));
             }}
-            onKeyDown={(e) => e.key === "Enter" && !composing(e.nativeEvent) && (last ? all && void send() : answered(qi) && setQi(qi + 1))}
+            {...ime.handlers}
+            onKeyDown={(e) => e.key === "Enter" && !ime.busy(e.nativeEvent) && (last ? all && void send() : answered(qi) && setQi(qi + 1))}
             placeholder={t("chat-interactions.custom_placeholder")}
             aria-label={t("chat-interactions.custom_answer")}
             // focused in a box that scrolls, it lands clear of the card's sticky answer row below and of a sticky title
@@ -472,6 +479,7 @@ const MODES = [
 ];
 
 function PlanCard({ ix }: { ix: Interaction }) {
+  const ime = useComposition();
   const [feedback, setFeedback] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -505,7 +513,8 @@ function PlanCard({ ix }: { ix: Interaction }) {
               autoFocus
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !composing(e.nativeEvent) && feedback.trim() && go({ approve: false, feedback: feedback.trim() })}
+              {...ime.handlers}
+              onKeyDown={(e) => e.key === "Enter" && !ime.busy(e.nativeEvent) && feedback.trim() && go({ approve: false, feedback: feedback.trim() })}
               placeholder={t("chat-interactions.feedback_placeholder")}
               className="h-8 min-w-0 flex-1 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none placeholder:text-ink-3"
             />
@@ -819,6 +828,7 @@ function ScreenCard({ ix }: { ix: Interaction }) {
 }
 
 function PlainScreenCard({ ix }: { ix: Interaction }) {
+  const ime = useComposition();
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const el = input.current;
@@ -900,7 +910,8 @@ function PlainScreenCard({ ix }: { ix: Interaction }) {
                   autoFocus
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !composing(e.nativeEvent) && text.trim() && go({ option: o.key, text }, o.key)}
+                  {...ime.handlers}
+                  onKeyDown={(e) => e.key === "Enter" && !ime.busy(e.nativeEvent) && text.trim() && go({ option: o.key, text }, o.key)}
                   placeholder={o.label}
                   className="h-8 min-w-0 flex-1 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none placeholder:text-ink-3"
                 />
@@ -1374,10 +1385,11 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
   const child = useChildRow(ix.machine_id, ix.session_id);
   const block = useStore(() => answerBlock(ix, child ?? getSession(ix.machine_id, ix.session_id)));
   const canApprove = block === null;
-  const managerWork = ix.kind === "question" && ix.tool_name === "persona_triage";
+  const managerWork = ix.kind === "question" && (ix.tool_name === "persona_triage" || isSessionReview(ix));
   // an answer still on its way (the hub away, apiOp retrying) holds the card, also after leaving the chat and coming back
   const { pending, line } = usePendingLine(ix);
-  const card = ix.kind === "question" && ix.tool_name === "persona_tool_loop" ? <ToolLoopCard key={ix.id} ix={ix} />
+  const card = isSessionReview(ix) ? <SessionReviewCard key={ix.id} ix={ix} />
+    : ix.kind === "question" && ix.tool_name === "persona_tool_loop" ? <ToolLoopCard key={ix.id} ix={ix} />
     : ix.kind === "question" ? <QuestionCard ix={ix} canApprove={canApprove} />
     : ix.kind === "plan" ? <PlanCard ix={ix} />
     : isSecretRun(ix) ? <SecretRunCard key={ix.id} ix={ix} />
@@ -1410,6 +1422,14 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
       </AskedByVoice.Provider>
     </div>
   );
+}
+
+/** The cards a Persona chat's own turn waits on (lib/turn-asks.ts): each open in full, in the order they came, above the
+ *  dock's capsules. Never folded behind a position chip, a "N pending" line or the Needs you tray: the chat cannot go on
+ *  until one is answered. Takes only `TurnAsk`s, so no other card can be drawn here. */
+export function TurnCards({ asks }: { asks: readonly TurnAsk[] }) {
+  // their own box, which gives up its height first and scrolls (as the stack's does): the capsules under them stay in view
+  return asks.length > 0 && <div data-turn-asks data-scroll-box className="-m-1 flex min-h-0 shrink flex-col gap-2 overflow-y-auto overscroll-contain p-1 empty:hidden">{asks.map((ix) => <InteractionCard key={ix.id} ix={ix} />)}</div>;
 }
 
 /**

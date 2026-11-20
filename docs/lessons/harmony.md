@@ -1,5 +1,11 @@
 # HarmonyOS client lessons
 
+## Preserve the Hub name across socket family selection
+
+A DNS name can resolve exclusively to IPv6. On API 26, select the TCP family from the resolved numeric peer.
+Pass the logical name when upgrading that connected socket to TLS so SNI and certificate checks keep the Hub identity.
+Verify both the literal and the name against the same IPv6-only listener, including the Host header on child streams.
+
 ## Native controls need actual device evidence
 
 API 26 Select can retain a selected index without displaying its text when value is omitted. Bind both selection
@@ -95,3 +101,10 @@ Use native Scroll content and a separate confirmation footer for a large-text tr
 A transmission setting is machine-wide, even when its sheet is transient. Share the in-flight write barrier with retained views, invalidate their old read authorization, and wait before reopening or reading settings. A sequence number alone can suppress a late write result while a faster GET has already revived an old enabled value. Preserve an acknowledged terminal transfer against a later failed status read.
 
 A Builder argument containing an already-computed name or replaceable settings object can retain its original value. Keep the source/target branch stable and read the current traced settings and label inside native Text/Toggle attributes and callbacks. Verify both the list row and its named switch after a live rename. Shared-state admission must observe its published mirror before a plain Map gate can return early; otherwise clearing an in-flight write may leave the native Send button disabled even though a direct model call is ready.
+
+## Transcript pages belong to one history
+
+Replacing a transcript file can reuse the same session and sequence numbers. The node reports the new `history`
+on paged items. If an earlier-page read first sees the change, discard the old snapshot before requesting the
+replacement's latest page. Fold ranges have no history field, so keep the request's owner through delivery.
+Exercise both orders in which the page and the replacement WebSocket batch can arrive.

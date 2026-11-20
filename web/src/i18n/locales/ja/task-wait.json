@@ -1,4 +1,6 @@
 {
+  "kind_todo_handoff": "結果待ち",
+  "handoff_deadline": "結果の期限 {time}",
   "kind_person_reply": "返信待ち",
   "kind_merge_review": "レビュー・マージ待ち",
   "kind_external_event": "外部の変更待ち",
@@ -18,7 +20,10 @@
   "contact_unknown": "送信済みの依頼の記録なし",
   "wake": "待っている変化：{wake}",
   "wake_unknown": "再開条件の記録なし",
-  "source": "参照元 {number}",
+  "source_pr": "PR #{number}",
+  "source_issue": "issue #{number}",
+  "source_comment": "#{number} のコメント",
+  "source_lark": "Lark の会話",
   "request": "依頼内容：{request}",
   "fallback": "再確認の予定：{time}",
   "evidence_note": "担当の記録です。この画面では根拠の検証やイベント監視は行いません。",

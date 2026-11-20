@@ -11,6 +11,7 @@ import {
   previewProblems, previewSocketURL, safeExternal, toPage, type PickedElement, type PreviewMessage, type PreviewOption, type PreviewServers,
 } from "../../lib/preview";
 import { sessionCan } from "../../lib/format";
+import { hasFinePointer } from "../../lib/viewport";
 import { navigate } from "../../lib/router";
 import { useStore } from "../../lib/store";
 import { Button, cx, Dialog, IconButton, Menu, Spinner, toast, useMenu } from "../../ui/atoms";
@@ -425,6 +426,7 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const keys = useRef<HTMLTextAreaElement>(null);
+  const addressField = useRef<HTMLInputElement>(null);
   const sock = useRef<WebSocket | null>(null);
   const [conn, setConn] = useState<Conn>({ kind: "connecting" });
   const [page, setPage] = useState({ url: "", title: "", loading: true, back: false, forward: false });
@@ -636,6 +638,8 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
     moved.current = null;
     if (m) send({ t: "mouse", type: "move", x: m.x, y: m.y, buttons: m.buttons, mods: m.mods, button: m.buttons & 1 ? "left" : "none" });
   };
+  // The keys field is a real editable: focusing it raises a phone's keyboard, which shrinks the panel and so the page.
+  // On a touch screen only a tap that lands on the page focuses it (onPointerUp); a scroll, a pick or Go does not.
   const focusKeys = () => keys.current?.focus({ preventScroll: true });
 
   useEffect(() => {
@@ -654,9 +658,9 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (conn.kind !== "open") return;
     e.preventDefault();
-    focusKeys();
-    e.currentTarget.setPointerCapture(e.pointerId);
     const touch = e.pointerType === "touch";
+    if (!touch) focusKeys();
+    e.currentTarget.setPointerCapture(e.pointerId);
     pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY, scrolled: false, touch };
     // a finger may be starting to scroll: its press is sent when it lifts without having moved
     if (!touch) send({ t: "mouse", type: "down", ...where(e), button: buttonName(e.button), buttons: e.buttons, clicks: e.detail || 1, mods: modsOf(e) });
@@ -693,6 +697,8 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
         send({ t: "mouse", type: "move", ...at });
         send({ t: "mouse", type: "down", ...at, button: "left", buttons: 1, clicks: 1, mods: 0 });
         send({ t: "mouse", type: "up", ...at, button: "left", clicks: 1, mods: 0 });
+        // a tap may have landed in a field of the page (a pick types nothing)
+        if (!picking) focusKeys();
       }
       return;
     }
@@ -728,7 +734,8 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
   const togglePick = (on: boolean) => {
     setPicking(on);
     send({ t: "pick", on });
-    if (on) focusKeys();
+    // for Esc; a touch screen cancels with the bar's button instead of a keyboard
+    if (on && hasFinePointer()) focusKeys();
   };
   const shoot = (full: boolean) => {
     const id = ++shotSeq.current;
@@ -740,7 +747,9 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
     if (!v) return;
     setEditing(false);
     send({ t: "nav", url: v });
-    focusKeys();
+    // a touch screen puts its keyboard away instead
+    if (hasFinePointer()) focusKeys();
+    else addressField.current?.blur();
   };
   const shotMenu = useMenu();
 
@@ -767,6 +776,7 @@ function PreviewView({ mid, sid, cwd, port, path, machineName, onPath, onGone }:
           }}
         >
           <input
+            ref={addressField}
             value={address}
             onFocus={(e) => {
               setEditing(true);

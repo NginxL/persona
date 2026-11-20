@@ -114,7 +114,7 @@ describe("a card answering from the keyboard", () => {
 
   it("Esc goes back to the composer and answers nothing", async () => {
     const composer = document.createElement("main");
-    composer.innerHTML = '<div data-chat-dock><textarea></textarea></div>';
+    composer.innerHTML = '<div data-chat-dock><textarea data-composer-input></textarea></div>';
     document.body.append(composer);
     act(() => root.render(<InteractionCard ix={permission} />));
     act(() => cardRoot().focus());

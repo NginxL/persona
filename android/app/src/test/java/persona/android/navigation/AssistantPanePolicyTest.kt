@@ -35,6 +35,7 @@ import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.MailRoute
 import persona.feature.knowledge.KnowledgeDetailRoute
+import persona.feature.knowledge.KnowledgeKindRoute
 import persona.feature.knowledge.KnowledgeRoute
 
 class AssistantPanePolicyTest {
@@ -76,6 +77,7 @@ class AssistantPanePolicyTest {
             EngineRoute("machine"),
             LauncherRoute("machine", "launcher"),
             KnowledgeRoute,
+            KnowledgeKindRoute(KnowledgeKind.People),
             KnowledgeDetailRoute(KnowledgeKind.Projects, "project"),
             TodosRoute,
             TodoDetailRoute("todo"),
@@ -85,6 +87,7 @@ class AssistantPanePolicyTest {
         assertSingleRightStack(listOf(AssistantRoute, InboxRoute, MailRoute("item")))
         assertSingleRightStack(listOf(AssistantRoute, MachinesRoute, MachineDetailRoute("machine")))
         assertSingleRightStack(listOf(AssistantRoute, KnowledgeRoute, KnowledgeDetailRoute(KnowledgeKind.Projects, "project")))
+        assertSingleRightStack(listOf(AssistantRoute, KnowledgeKindRoute(KnowledgeKind.People), KnowledgeDetailRoute(KnowledgeKind.People, "person")))
         assertSingleRightStack(listOf(AssistantRoute, TodosRoute, TodoDetailRoute("todo")))
     }
 
@@ -94,6 +97,7 @@ class AssistantPanePolicyTest {
             InboxRoute,
             TodosRoute,
             KnowledgeRoute,
+            KnowledgeKindRoute(KnowledgeKind.Recordings),
             MachinesRoute,
             TodoDetailRoute("todo"),
             ExtensionUiRoute("extension", "page", "Page"),

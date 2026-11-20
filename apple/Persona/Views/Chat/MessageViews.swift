@@ -190,7 +190,30 @@ struct MaxWidthLayout: Layout {
 
 extension EnvironmentValues {
     /// Opens a path mentioned in the conversation on the session's machine (set by ChatView).
-    @Entry var openFile: ((String) -> Void)? = nil
+    @Entry var openFile: FileOpener? = nil
+}
+
+/// `\.openFile`, one object for the chat's life (`ChatActions`). Handed down as a closure, SwiftUI reported it changed each
+/// time it looked: every message and work step that reads it ran its body again whenever SwiftUI looked at its inputs again,
+/// which the chat's list does for its rows as it leaves the window and comes back (three or four times on each switch
+/// between the open iPhone Duo's tabs, #10303).
+@MainActor final class FileOpener {
+    let open: (String) -> Void
+
+    init(_ open: @escaping (String) -> Void) {
+        self.open = open
+    }
+
+    func callAsFunction(_ path: String) { open(path) }
+}
+
+/// `\.loadImage`, one object for the chat's life, as `FileOpener`.
+@MainActor final class ImageLoader {
+    let load: @Sendable (String) async -> ImagePayload?
+
+    init(_ load: @escaping @Sendable (String) async -> ImagePayload?) {
+        self.load = load
+    }
 }
 
 extension EnvironmentValues {
@@ -199,7 +222,7 @@ extension EnvironmentValues {
     /// Puts an (edited) image into this chat's composer as an attachment for the next message (set by ChatView).
     @Entry var attachImage: ((UIImage) -> Void)? = nil
     /// Loads an image file on the session's machine (photos sent from the phone are saved there; set by ChatView).
-    @Entry var loadImage: (@Sendable (String) async -> ImagePayload?)? = nil
+    @Entry var loadImage: ImageLoader? = nil
     /// Fetches the whole text of an item the page cut (`Item.fullSize`), by item id (set by ChatView).
     @Entry var loadFullText: ((String) async throws -> String)? = nil
     /// Opens the full-screen image viewer from the chat page (set by ChatView). A viewer presented by the row it was
@@ -260,7 +283,7 @@ struct UserBubble: View, Equatable {
         VStack(alignment: .trailing, spacing: Theme.Space.sm) {
             if quotes.isEmpty, !parsed.refs.isEmpty { ContextGroup(refs: parsed.refs, key: item.id) }
             if !images.isEmpty, let loadImage {
-                AttachedImages(paths: images, load: loadImage)
+                AttachedImages(paths: images, load: loadImage.load)
             }
             if !d.attached.isEmpty { AttachedFileCards(files: d.attached) }
             if !shown.isEmpty || !quotes.isEmpty {
@@ -273,7 +296,7 @@ struct UserBubble: View, Equatable {
                         }
                 }
             }
-            if let openFile { FileChips(paths: d.chips, open: openFile) }
+            if let openFile { FileChips(paths: d.chips, open: openFile.open) }
             // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it; an extension opened the conversation
             // with it: 「来自 飞书 /agent」.
             if ChannelSource.possible(item.clientMsgID) {
@@ -479,14 +502,22 @@ struct PendingBubble: View {
 /// offers Delete. Given up: why, with Retry and Delete. Shown on every device, from the chat's row.
 struct UndeliveredBubble: View {
     var message: UndeliveredMessage
+    var canManage: Bool
+    var retryDisabled = false
     var retry: () -> Void
     var discard: () -> Void
+    @State private var confirmingDelete = false
     @Environment(\.rowMemoScope) private var memoScope
     @Environment(\.chatPin) private var pin
+
+    private func requestDelete() {
+        if message.heldForComputer { confirmingDelete = true } else { discard() }
+    }
 
     var body: some View {
         let parsed = ContextRef.parse(message.text)
         let shown = AttachedFile.parse(parsed.rest).rest
+        let heldStatus = message.heldStatus
         let reason = message.error ?? String(localized: "The assistant could not start")
         VStack(alignment: .trailing, spacing: Theme.Space.sm) {
             let files = AttachedFile.parse(message.text).files
@@ -494,24 +525,33 @@ struct UndeliveredBubble: View {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 Spacer(minLength: 40)
                 Menu {
-                    if message.gaveUp {
+                    if message.canRetry {
                         Button(action: retry) { Label("Retry", systemImage: Theme.Icon.retry) }
+                            .disabled(retryDisabled)
                     }
-                    Button(role: .destructive, action: discard) { Label("Delete", systemImage: Theme.Icon.delete) }
+                    Button(role: .destructive, action: requestDelete) { Label("Delete", systemImage: Theme.Icon.delete) }
                 } label: {
-                    if message.gaveUp {
-                        ThemedIcon(Theme.Icon.errorFilled).font(Theme.Font.body).foregroundStyle(Theme.danger)
-                    } else {
-                        ThemedIcon(Theme.Icon.time).font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
-                            .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
-                            .contentShape(.rect)
+                    Group {
+                        if message.gaveUp {
+                            ThemedIcon(Theme.Icon.errorFilled).font(Theme.Font.body).foregroundStyle(Theme.danger)
+                        } else {
+                            ThemedIcon(Theme.Icon.time).font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
+                                .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                        }
                     }
+                    .frame(minWidth: message.heldForComputer ? Theme.Size.tapTarget : nil,
+                           minHeight: message.heldForComputer ? Theme.Size.tapTarget : nil)
+                    .contentShape(.rect)
                 }
-                .accessibilityLabel(message.gaveUp ? Text("Not delivered. Retry or delete.") : Text("Not delivered yet. It will be sent automatically."))
+                .disabled(!canManage)
+                .accessibilityLabel(heldStatus != nil || message.deleteOnly == true ? Text(verbatim: heldStatus ?? reason) :
+                    message.gaveUp ? Text("Not delivered. Retry or delete.") : Text("Not delivered yet. It will be sent automatically."))
                 // The menu's items as actions too (VoiceOver's Actions rotor, the Runtime CLI), as on PendingBubble.
                 .accessibilityActions {
-                    if message.gaveUp { Button("Retry", action: retry) }
-                    Button("Delete", action: discard)
+                    if canManage {
+                        if message.canRetry && !retryDisabled { Button("Retry", action: retry) }
+                        Button("Delete", action: requestDelete)
+                    }
                 }
                 let split = MessageComments.inBubble(shown)
                 let fold = BubbleFoldKey(id: "undelivered-" + message.id)
@@ -523,7 +563,11 @@ struct UndeliveredBubble: View {
                     }
             }
             Group {
-                if message.gaveUp {
+                if let heldStatus {
+                    Text(verbatim: heldStatus).foregroundStyle(message.gaveUp ? Theme.danger : Theme.cautionText)
+                } else if message.deleteOnly == true {
+                    Text(verbatim: reason).foregroundStyle(Theme.danger)
+                } else if message.gaveUp {
                     Text("Not delivered: \(reason)").foregroundStyle(Theme.danger)
                 } else {
                     Text("Not delivered: \(reason). It will be sent automatically.").foregroundStyle(Theme.cautionText)
@@ -538,7 +582,11 @@ struct UndeliveredBubble: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
         // Copy, and Delete, from the long-press bar as on a message only on this phone (#6427).
         .messageActionBar(id: "undelivered-" + message.id, text: shown, isUser: true, date: message.at, pending: true,
-                          delete: MessageBarDelete(title: String(localized: "Delete"), run: discard))
+                          delete: canManage ? MessageBarDelete(title: String(localized: "Delete"), run: requestDelete) : nil)
+        .alert("Delete this held message?", isPresented: $confirmingDelete) {
+            Button("Delete", role: .destructive, action: discard)
+            Button("Cancel", role: .cancel) {}
+        }
         .transition(.opacity)
     }
 }
@@ -707,8 +755,8 @@ struct AssistantText: View, Equatable {
                 .messageLongPress(id: item.id, card: !boxed) { answer(d) }
             if let openFile {
                 // Documents as cards with their first page (#1543), the rest as chips.
-                FileChips(paths: d.chips, open: openFile)
-                DocumentCards(paths: d.files.filter(DocumentCards.isDocument), open: openFile)
+                FileChips(paths: d.chips, open: openFile.open)
+                DocumentCards(paths: d.files.filter(DocumentCards.isDocument), open: openFile.open)
             }
             PortChips(text: item.text ?? "")
         }
@@ -890,6 +938,7 @@ nonisolated enum ModeChangeWords {
     static func why(_ code: String?) -> String? {
         switch code {
         case "replaced": String(localized: "another switch took its place")
+        case "cancelled": String(localized: "the session stays in its current mode") // the mode it runs in picked again (#11089)
         case "process_exited": String(localized: "the process it was picked for has exited")
         case "process_replaced": String(localized: "the session runs in another process now")
         case "process_unknown": String(localized: "it couldn't tell which process to restart")

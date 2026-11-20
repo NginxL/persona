@@ -157,7 +157,7 @@ function DimensionChoices({ dimension, options, selected, toggle, loading }: {
   </fieldset>;
 }
 
-function WorkSessionRow({ session, name, active, onSelect, now, depth }: {
+export function WorkSessionRow({ session, name, active, onSelect, now, depth }: {
   session: WorkSession; name: string; active: boolean; onSelect?: WorkSessionBrowserProps["onSelect"]; now: number; depth: number;
 }) {
   const [expanded, setExpanded] = useState(false);

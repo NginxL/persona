@@ -46,6 +46,10 @@ type Machine struct {
 	// to reinstall (#10566).
 	DeployNoPackage bool   `json:"deploy_no_package,omitempty"`
 	DeployPhase     string `json:"deploy_phase,omitempty"`
+	// LinkSwitch: switching this ssh computer to Persona Link (#10662, docs/operations/link.md "Switching from SSH").
+	// Set by a manager that can, for each ssh computer it connects itself and for a little while after a switch ended;
+	// nil from an older manager (the apps then offer nothing).
+	LinkSwitch *MachineLinkSwitch `json:"link_switch,omitempty"`
 	// System: OS and hardware, from the node's last connection (kept across hub restarts).
 	System *System `json:"system,omitempty"`
 	// Link: kind link, while the computer's persona-link is connected (docs/operations/link.md).
@@ -113,6 +117,60 @@ type MachinePath struct {
 	RTTMS  int    `json:"rtt_ms,omitempty"`
 	Active bool   `json:"active,omitempty"`
 }
+
+// MachineLinkSwitch is where switching an ssh computer to Persona Link stands. Available: a switch can start now;
+// otherwise Reason says why not (a LinkSwitchReason* code, the apps' own words). Phase is the current or last switch's
+// (LinkSwitchPhase*, "" none); a failed one says why in Error (a code) and RollbackUnconfirmed when the computer could
+// not be shown to be back on ssh as before.
+type MachineLinkSwitch struct {
+	Available           bool      `json:"available"`
+	Reason              string    `json:"reason,omitempty"`
+	Phase               string    `json:"phase,omitempty"`
+	Error               string    `json:"error,omitempty"`
+	RollbackUnconfirmed bool      `json:"rollback_unconfirmed,omitempty"`
+	At                  time.Time `json:"at,omitzero"` // when Phase last changed
+}
+
+// MachineLinkSwitch phases, in order; a switch ends succeeded or failed.
+const (
+	LinkSwitchPhaseChecking    = "checking"     // looking at the computer over ssh, nothing changed yet
+	LinkSwitchPhaseInstalling  = "installing"   // sending Persona Link, switching the connection, installing and pairing
+	LinkSwitchPhaseConnecting  = "connecting"   // waiting for the computer to connect through Persona Link
+	LinkSwitchPhaseRollingBack = "rolling_back" // undoing what this switch did, back to ssh
+	LinkSwitchPhaseSucceeded   = "succeeded"
+	LinkSwitchPhaseFailed      = "failed"
+)
+
+// MachineLinkSwitch reasons (why not available) and errors (why a switch failed). The apps say each in their own
+// words; an unknown one is LinkSwitchReasonUnknown's.
+const (
+	LinkSwitchReasonOffline         = "offline"          // the computer is not connected over ssh now
+	LinkSwitchReasonUnsupportedOS   = "unsupported_os"   // only Linux computers switch from here (amd64, arm64)
+	LinkSwitchReasonLinkUnavailable = "link_unavailable" // the hub takes no Persona Link (no TLS port or https address)
+	LinkSwitchReasonHubOld          = "hub_old"          // the hub cannot switch computers (an older build)
+	LinkSwitchReasonPending         = "pending"          // the user has not confirmed the computer
+	LinkSwitchReasonCustomNode      = "custom_node"      // remote_bin or the node's data directory is not the default
+	LinkSwitchReasonBusy            = "busy"             // a node update or another switch is running
+	LinkSwitchReasonInProgress      = "in_progress"      // a switch of this computer is running (a second start)
+	LinkSwitchReasonNoSystemd       = "no_systemd"       // no systemd user services on the computer
+	LinkSwitchReasonLingerOff       = "linger_off"       // its services stop when the user signs out (loginctl enable-linger)
+	LinkSwitchReasonExistingLink    = "existing_link"    // Persona Link is installed or paired on it already
+	LinkSwitchReasonNoNode          = "no_node"          // no node program on the computer to run as a service
+	LinkSwitchReasonNoPackage       = "no_package"       // the hub has no Persona Link build for its platform
+	LinkSwitchReasonTransferFailed  = "transfer_failed"  // sending Persona Link over ssh failed
+	LinkSwitchReasonInstallFailed   = "install_failed"   // installing or pairing on the computer failed
+	LinkSwitchReasonLinkTimeout     = "link_timeout"     // it did not connect through Persona Link in time
+	LinkSwitchReasonConfigChanged   = "config_changed"   // its entry changed meanwhile
+	LinkSwitchReasonInterrupted     = "interrupted"      // the manager restarted during the switch
+	LinkSwitchReasonUnknown         = "unknown"
+
+	// LinkSwitchReasonUnsafePermissions: the home folder, ~/.persona or its bin is not the user's own, or may be written by
+	// other users (others, or a group other than the user's own private group), who could swap the program the switch runs.
+	LinkSwitchReasonUnsafePermissions = "unsafe_permissions"
+	// LinkSwitchReasonHubUnanswered: undoing a failed switch needed the hub, which did not answer within the manager's
+	// bound (or does not know the call): the computer may still be set to Persona Link.
+	LinkSwitchReasonHubUnanswered = "hub_unanswered"
+)
 
 // MachineLink is a live persona-link: its build, the hub URL it went to and since when.
 type MachineLink struct {

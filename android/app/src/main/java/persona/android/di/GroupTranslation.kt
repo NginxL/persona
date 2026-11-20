@@ -125,6 +125,9 @@ internal fun DraftRepository.inGroup(names: GroupNames): DraftRepository {
         override suspend fun save(key: DraftKey, text: String, expectedVersion: Long,
             attachments: List<DraftAttachment>, sessionVersion: DraftSessionVersion?) =
             names.draft(source.save(names.rawDraftKey(key), text, expectedVersion, attachments, sessionVersion))
+        override suspend fun save(key: DraftKey, text: String, expectedVersion: Long,
+            attachments: List<DraftAttachment>, sessionVersion: DraftSessionVersion?, hasPickedSavedPrompt: Boolean) =
+            names.draft(source.save(names.rawDraftKey(key), text, expectedVersion, attachments, sessionVersion, hasPickedSavedPrompt))
     }
 }
 
@@ -172,6 +175,10 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun verify(session: Session, action: ChatAction) = source.verify(names.rawSession(session), action)
         override suspend fun editQueue(session: Session, keep: List<Int>) = source.editQueue(names.rawSession(session), keep)
         override suspend fun sendQueuedNow(session: Session) = source.sendQueuedNow(names.rawSession(session))
+        override suspend fun retryUndelivered(session: Session, messageId: String) =
+            source.retryUndelivered(names.rawSession(session), messageId)
+        override suspend fun deleteUndelivered(session: Session, messageId: String) =
+            source.deleteUndelivered(names.rawSession(session), messageId)
         override suspend fun info(session: Session) = source.info(names.rawSession(session))
         override suspend fun completeRow(session: Session) = source.completeRow(names.rawSession(session))?.let(names::session)
         override suspend fun childRows(session: Session) = source.childRows(names.rawSession(session)).map(names::session)
@@ -351,10 +358,12 @@ internal fun AssistantConversations.inGroup(names: GroupNames, scope: CoroutineS
             AssistantSnapshot(snapshot.mainSession?.let(names::key), snapshot.conversations.map(names::session), snapshot.manager, snapshot.managerId,
                 snapshot.leaders, snapshot.directionNames,
                 directionTree = snapshot.directionTree?.mapMachines(names::machineId),
-                backgroundSupervisor = snapshot.backgroundSupervisor)
+                backgroundSupervisor = snapshot.backgroundSupervisor, recentTaskChats = snapshot.recentTaskChats)
         }
         override val pinned = source.pinned.mapIn(scope) { keys -> keys.mapTo(LinkedHashSet(), names::key) }
         override suspend fun refresh() = source.refresh()
+        override suspend fun updateRecentTaskChats(value: Boolean?) = source.updateRecentTaskChats(value)
+        override suspend fun recentTaskChatsUpdater() = source.recentTaskChatsUpdater()
         override suspend fun startConversation() = names.key(source.startConversation())
         override suspend fun startConversation(launcher: String) = names.key(source.startConversation(launcher))
         override suspend fun startConversation(pick: persona.core.contracts.ModelPick) = names.key(source.startConversation(pick))
@@ -467,6 +476,8 @@ internal fun SessionFiles.inGroup(names: GroupNames): SessionFiles {
         override fun editsFiles(machineId: String) = source.editsFiles(names.rawMachine(machineId))
         override suspend fun rename(machineId: String, cwd: String, path: String, name: String) =
             source.rename(names.rawMachine(machineId), cwd, path, name)
+        override suspend fun move(machineId: String, cwd: String, path: String, directory: String, conflict: SessionMoveConflictPolicy?) =
+            source.move(names.rawMachine(machineId), cwd, path, directory, conflict)
         override suspend fun trash(machineId: String, cwd: String, paths: List<String>) = source.trash(names.rawMachine(machineId), cwd, paths)
         override suspend fun restore(machineId: String, trashIds: List<String>) = source.restore(names.rawMachine(machineId), trashIds)
     }

@@ -184,7 +184,7 @@ func TestMissingFieldPanics(t *testing.T) {
 func TestSmallPrompts(t *testing.T) {
 	for got, want := range map[string]string{
 		RenderReadonlyTaskPlanExit():           "This task is read-only. Stay in plan mode; do not request implementation approval. Return your findings and report completion to your supervisor with report_to_supervisor.",
-		RenderReadonlyTaskConstraint():         "本任务只读：不改项目文件、不提交、不对外写入",
+		RenderReadonlyTaskConstraint(""):       "本任务只读：不改项目文件、不提交、不对外写入",
 		RenderPlanFirstTaskConstraint():        "Before you change anything, write a short plan: the steps you will take and how you will check each one. Work through them in order, and before you finish, check every acceptance criterion yourself and fix what does not hold.",
 		RenderQuestionCancelled():              "The user closed this question without answering. Continue without an answer; do not repeat this question.",
 		RenderQuestionUserSpoke():              "The user did not pick an option: they wrote a new message in this conversation instead. It is delivered when you end this turn, so end the turn now and do not call ask_user again in it. Read their message then: it may be the answer; if you still need one, ask again after reading it.",
@@ -197,6 +197,45 @@ func TestSmallPrompts(t *testing.T) {
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}
+
+// Working agents stay count-only in the Agents heading, with no top-level working or workflow rows; a task opened from
+// chat still renders its own running workflow (#11261).
+func TestSnapshotWorkingAndWorkflowsStayCounts(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	got := RenderSnapshot(Snapshot{
+		Now:  now,
+		Zone: "UTC",
+		Working: []SnapshotAgent{
+			{Label: "无关后台编译任务", Machine: "box-1", Session: "w1111111", Ultracode: "on",
+				Plan: &SnapshotAgentPlan{Done: 1, Total: 3, Current: "跑构建"}},
+			{Label: "无关后台巡检任务", Machine: "box-2", Session: "w2222222"},
+		},
+		Tasks: []SnapshotTask{{
+			ID: "todo_42", Title: "整理接口文档", State: "在做", Machine: "box-1", Session: "t3333333",
+			Last:      "在等子工作流",
+			Workflows: []SnapshotWorkflow{{Name: "doc-audit", Phase: "Verify", PhaseIndex: 2, Phases: 2, Done: 3, Started: 4, For: "5 分钟"}},
+		}},
+	})
+	for _, want := range []string{
+		"- Agents：需要你 0 个，完成未看 0 个，工作中 2 个（详情用 agents_list）",
+		"整理接口文档（todo_42）：在做，box-1 session_id=t3333333：在等子工作流；后台 workflow 在跑（在等它的结果，没做完）：「doc-audit」阶段 Verify（2/2），3/4 个 agent 完成，已跑 5 分钟",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"  - 工作中：",
+		"  - 后台 workflow 在跑（这些 Agent",
+		"无关后台编译任务",
+		"无关后台巡检任务",
+		"跑构建",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("top-level working/workflow detail leaked into snapshot (%q):\n%s", unwanted, got)
 		}
 	}
 }
@@ -249,6 +288,93 @@ func TestMCPToolSchemasHaveNoEmptyEnum(t *testing.T) {
 	}) {
 		t.Fatalf("emptySchemaEnums(sample) = %v", got)
 	}
+}
+
+// Strict JSON Schema model providers reject properties whose type is only implied by enum, const, nested structure
+// or a composition. A reference is the explicit exception: its target is checked in $defs. Check every embedded tool,
+// including tools offered only in specialized conversations.
+func TestMCPToolSchemasDeclarePropertyTypes(t *testing.T) {
+	for _, name := range ToolNames() {
+		var schema any
+		if err := json.Unmarshal(Tool(name).InputSchema, &schema); err != nil {
+			t.Fatalf("%s: bad JSON schema: %v", name, err)
+		}
+		for _, bad := range missingSchemaTypes(schema, name, false) {
+			t.Errorf("%s", bad)
+		}
+	}
+	var sample any
+	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"bad":{"enum":["x"]},"nested":{"oneOf":[{"properties":{"kind":{"const":"x"}}}]}}}`), &sample)
+	if got := missingSchemaTypes(sample, "sample", false); !slices.Equal(got, []string{
+		"sample.properties.bad: type is not defined",
+		"sample.properties.nested: type is not defined",
+		"sample.properties.nested.oneOf[0]: type is not defined",
+		"sample.properties.nested.oneOf[0].properties.kind: type is not defined",
+	}) {
+		t.Fatalf("missingSchemaTypes(sample) = %v", got)
+	}
+}
+
+func missingSchemaTypes(node any, path string, requireType bool) []string {
+	obj, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	_, hasType := obj["type"]
+	_, hasProperties := obj["properties"]
+	_, hasItems := obj["items"]
+	_, hasEnum := obj["enum"]
+	_, hasConst := obj["const"]
+	_, hasRef := obj["$ref"]
+	if !hasType && (requireType || hasProperties || hasItems || hasEnum || hasConst) &&
+		(!hasRef || hasProperties || hasItems || hasEnum || hasConst) {
+		out = append(out, path+": type is not defined")
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v := obj[k]
+		switch k {
+		case "enum", "const":
+			continue
+		case "properties", "$defs", "definitions", "patternProperties", "dependentSchemas":
+			children, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			childKeys := make([]string, 0, len(children))
+			for ck := range children {
+				childKeys = append(childKeys, ck)
+			}
+			slices.Sort(childKeys)
+			for _, ck := range childKeys {
+				out = append(out, missingSchemaTypes(children[ck], path+"."+k+"."+ck, k == "properties")...)
+			}
+		case "items":
+			switch items := v.(type) {
+			case []any:
+				for i, item := range items {
+					out = append(out, missingSchemaTypes(item, fmt.Sprintf("%s.items[%d]", path, i), true)...)
+				}
+			default:
+				out = append(out, missingSchemaTypes(items, path+".items", true)...)
+			}
+		default:
+			switch v := v.(type) {
+			case map[string]any:
+				out = append(out, missingSchemaTypes(v, path+"."+k, false)...)
+			case []any:
+				for i, item := range v {
+					out = append(out, missingSchemaTypes(item, fmt.Sprintf("%s.%s[%d]", path, k, i), false)...)
+				}
+			}
+		}
+	}
+	return out
 }
 
 func emptySchemaEnums(node any, path string) []string {
@@ -446,27 +572,16 @@ func TestSnapshotCalendarSaysFinishedMeetingsAreNotListed(t *testing.T) {
 func TestAgentTriageLineLanguageAndIDs(t *testing.T) {
 	zh := RenderAgentTriage(AgentTriage{})
 	en := RenderAgentTriage(AgentTriage{Language: "English"})
-	if strings.Contains(zh, "用English写") || !strings.Contains(en, "，用English写。") {
-		t.Fatalf("line language: zh has it %v, en has it %v", strings.Contains(zh, "用English写"), strings.Contains(en, "，用English写。"))
-	}
-	for _, s := range []string{zh, en} {
-		if !strings.Contains(s, "pane id、session id、批次号") {
-			t.Fatal("the line rule must keep internal ids out")
-		}
+	if !strings.Contains(zh, "pane id、session id、批次号") || !strings.Contains(en, "in English") || !strings.Contains(en, "internal pane/session/batch/todo_") {
+		t.Fatal("triage lost language or internal-ID rules")
 	}
 }
 
-// The Progress row's paraphrase of a report follows the work line's rule (#3181): the user's language, a length,
-// no subject and no internal ids.
 func TestAgentReportLineLanguageAndIDs(t *testing.T) {
 	zh := RenderAgentReportLine(AgentReportLine{Max: 30})
 	en := RenderAgentReportLine(AgentReportLine{Language: "English", Max: 60})
-	if strings.Contains(zh, "用English写") || !strings.Contains(zh, "不超过 30 个字，") || !strings.Contains(en, "用English写，不超过 60 个字符，") {
-		t.Fatalf("line language and length:\n%s\n---\n%s", zh, en)
-	}
-	for _, s := range []string{zh, en} {
-		if !strings.Contains(s, "不要写「Agent」「它」这类主语") || !strings.Contains(s, "pane id、session id、批次号") {
-			t.Fatal("the line rule must keep the subject and internal ids out")
-		}
+	if !strings.Contains(zh, "不超过 30 个字，") || !strings.Contains(zh, "不要写「Agent」「它」这类主语") ||
+		!strings.Contains(en, "Write in English, at most 60 characters") || !strings.Contains(en, "internal pane/session/batch/todo_") || !strings.Contains(en, "subjects such as") {
+		t.Fatal("report line lost language, length, subject or internal-ID rules")
 	}
 }

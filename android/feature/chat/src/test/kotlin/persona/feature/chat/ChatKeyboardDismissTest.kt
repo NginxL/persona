@@ -1,9 +1,18 @@
 package persona.feature.chat
 
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ResolveInfo
+import android.speech.RecognizerIntent
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,13 +23,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -29,13 +44,16 @@ import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -47,20 +65,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import persona.core.chatlist.ChatList
 import persona.core.chatlist.ChatListEffects
 import persona.core.chatlist.ChatListState
 import persona.core.chatlist.rememberChatListState
 import persona.core.contracts.Item
+import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.ComposerFrame
 import persona.core.designsystem.HomeChrome
+import persona.core.designsystem.JModelPill
 import persona.core.designsystem.JPage
 import persona.core.designsystem.LocalHomeChrome
+import persona.core.designsystem.ModelPillContent
 import persona.core.designsystem.NavItem
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
 
 /**
@@ -285,5 +308,100 @@ class ChatKeyboardDismissTest {
         assertEquals("a", composer.value.text)
         assertTrue(composer.focused)
         rule.onNodeWithTag("suggestion").assertExists()
+    }
+
+    @Test fun compactAgentComposerCanHideTheKeyboardWithoutLosingTheDraft() {
+        lateinit var composer: ChatComposerState
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                composer = rememberChatComposerState()
+                probe.Around {
+                    ChatComposer(SessionKey("box", "s1"), composer, working = false, sending = false, canClear = false,
+                        service = null, onSend = {}, onCommand = {}, onNotice = {}, useShellSurface = true)
+                }
+            }
+        }
+        val hide = rule.onNodeWithContentDescription("收起键盘")
+        hide.assertDoesNotExist()
+        rule.onNodeWithTag("composer-expand").assertDoesNotExist()
+        rule.onNode(hasSetTextAction()).performTouchInput { click() }
+        rule.onNodeWithTag("composer-expand").assertExists()
+        rule.onNode(hasSetTextAction()).performTextInput("Draft")
+        probe.reset()
+        hide.performClick()
+        rule.runOnIdle {
+            assertEquals(listOf(false), probe.focusClears)
+            assertEquals(1, probe.hides)
+            assertEquals("Draft", composer.value.text)
+        }
+    }
+
+    @Test fun narrowCompactAgentComposerKeepsThePrimaryActionsTappable() {
+        // This phone has a voice-input activity only, so the last tap opens its screen.
+        org.robolectric.shadows.ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(false)
+        val voice = ResolveInfo().apply {
+            activityInfo = ActivityInfo().apply { packageName = "com.example.voice"; name = "Voice" }
+        }
+        shadowOf(ApplicationProvider.getApplicationContext<Context>().packageManager)
+            .addResolveInfoForIntent(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), voice)
+        val session = Session(machineId = "box", sessionId = "s1", title = "Review", permissionMode = "default")
+        val composer = ChatComposerState()
+        lateinit var activity: Activity
+        var sends = 0
+        var modelOpens = 0
+        var composerWidth by mutableStateOf(320.dp)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                activity = LocalActivityResultRegistryOwner.current as Activity
+                val resources = LocalResources.current
+                val scope = rememberCoroutineScope()
+                val chrome = remember { ChatChromeState(resources, null, scope, refresh = {}, onClosed = {}) }
+                Box(Modifier.width(composerWidth).testTag("narrow-composer")) {
+                    ChatComposer(session.key, composer, working = false, sending = false, canClear = false,
+                        service = null, onSend = { sends++ }, onCommand = {}, onNotice = {}, useShellSurface = true,
+                        leading = { HeaderModeButton(session, chrome, online = true) {} },
+                        modelPill = { width ->
+                            JModelPill(ModelPillContent(provider = "Provider", model = "Model", effort = "High"),
+                                spoken = "Model", onClick = { modelOpens++ }, width = width)
+                        })
+                }
+            }
+        }
+
+        val field = rule.onNode(hasSetTextAction())
+        val send = rule.onNodeWithContentDescription("发送")
+        val dictate = rule.onNodeWithContentDescription("听写")
+        val hide = rule.onNodeWithContentDescription("收起键盘")
+        val model = rule.onNodeWithContentDescription("Model")
+        field.performTouchInput { click() }
+        field.performTextInput("Draft")
+
+        val viewport = rule.onNodeWithTag("narrow-composer").getBoundsInRoot()
+        assertEquals(320.dp, viewport.right - viewport.left)
+        listOf(rule.onNodeWithContentDescription("添加附件和快捷指令"), hide, rule.onNodeWithTag("chat-mode"), dictate, send)
+            .forEach { action ->
+                val bounds = action.assertIsDisplayed().assertIsEnabled().assertHasClickAction().getBoundsInRoot()
+                assertEquals(action.getUnclippedBoundsInRoot(), bounds)
+                assertEquals(Tokens.MinTouch.android, bounds.right - bounds.left)
+                assertTrue(bounds.left >= viewport.left && bounds.right <= viewport.right)
+            }
+        model.assertDoesNotExist()
+        send.performTouchInput { click() }
+        rule.runOnIdle { assertEquals(1, sends) }
+
+        // The model action comes back as soon as the toolbar can give it the full touch target.
+        rule.runOnIdle { composerWidth = 324.dp }
+        model.assertIsDisplayed().performTouchInput { click() }
+        rule.runOnIdle {
+            assertEquals(1, modelOpens)
+            assertEquals("Draft", composer.value.text)
+            composerWidth = 320.dp
+        }
+
+        model.assertDoesNotExist()
+        dictate.performTouchInput { click() }
+        rule.runOnIdle {
+            assertEquals(RecognizerIntent.ACTION_RECOGNIZE_SPEECH, shadowOf(activity).nextStartedActivityForResult?.intent?.action)
+        }
     }
 }

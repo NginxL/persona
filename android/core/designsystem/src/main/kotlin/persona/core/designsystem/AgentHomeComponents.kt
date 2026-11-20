@@ -23,17 +23,29 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 
 /**
- * The Agents page's surface: under By Repository on the Glass home, the repository page's gray, with each repository a
- * card on it ([LocalRepoCard], iOS's grouped card): the system page's white in light, a step lighter than the page in dark.
+ * The Glass Agents home uses the iPhone's grouped page colors on a phone. On larger windows the repository list has
+ * the workspace tint. Each repository draws its own card ([LocalRepoCard]).
  */
 @Composable
 fun JAgentHomeSurface(repository: Boolean, content: @Composable () -> Unit) {
     val palette = PersonaTheme.palette
     val home = LocalHomeChrome.current != null && PersonaTheme.style == AppStyle.Glass && repository
-    val page = if (palette.dark) HomeTokens.repositoryDark else HomeTokens.repositoryLight
+    val window = LocalWindowLayout.current
+    val compact = !window.expanded && !window.tabletop
+    val page = when {
+        compact && palette.dark -> palette.background
+        compact -> Tokens.Semantic.Glass.Light.card
+        palette.dark -> HomeTokens.repositoryDark
+        else -> HomeTokens.repositoryLight
+    }
+    val repoCard = when {
+        compact && palette.dark -> palette.surfaceOpaque
+        palette.dark -> palette.sunken.compositeOver(page)
+        else -> palette.background
+    }
     CompositionLocalProvider(
         LocalPalette provides if (home) palette.copy(background = page) else palette,
-        LocalRepoCard provides if (home) { if (palette.dark) palette.sunken.compositeOver(page) else palette.background } else null,
+        LocalRepoCard provides repoCard.takeIf { home },
     ) { content() }
 }
 

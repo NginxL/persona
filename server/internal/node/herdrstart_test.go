@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -315,7 +316,7 @@ func TestHerdrServerEnvIsClean(t *testing.T) {
 		"CLAUDE_CONFIG_DIR=/Users/me/.claude-work", "HTTPS_PROXY=http://proxy.example.com:8080", "http_proxy=http://p",
 		"ALL_PROXY=socks5://p", "NO_PROXY=localhost", "PATH=/Users/me/.persona/bin:/usr/bin", "HERDR_PANE_ID=w1:p1",
 		"HERDR_ENV=1", "TERM_PROGRAM=herdr", "SHELL=/bin/bash", "NODE_OPTIONS=--x"}
-	got := herdrServerEnv(environ, "/bin/zsh")
+	got := herdrServerEnv(environ, "/bin/zsh", nil)
 	want := []string{"HOME=/Users/me", "USER=me", "LOGNAME=me", "TMPDIR=/tmp/me/", "LANG=zh_CN.UTF-8",
 		"XDG_CONFIG_HOME=/Users/me/.config", "HERDR_SOCKET_PATH=/Users/me/.config/herdr/herdr.sock",
 		"HERDR_CONFIG_PATH=/Users/me/herdr.toml", "SHELL=/bin/zsh", "TERM=xterm-256color", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
@@ -340,7 +341,7 @@ func TestHerdrServerEnvKeepsTheDataDirectory(t *testing.T) {
 	for _, name := range []string{"PERSONA_HOME", "JARVIS_HOME"} { // the second is the older name the node still reads
 		t.Run(name, func(t *testing.T) {
 			environ := []string{"HOME=/Users/me", name + "=" + custom, "ANTHROPIC_API_KEY=sk-test"}
-			got := herdrServerEnv(environ, "/bin/sh")
+			got := herdrServerEnv(environ, "/bin/sh", nil)
 			if !slices.Contains(got, name+"="+custom) {
 				t.Fatalf("%s is not in the server's environment: %q", name, got)
 			}
@@ -404,7 +405,7 @@ func TestHerdrServerOfACustomDataDirIsItsOwn(t *testing.T) {
 		t.Fatalf("default alive %v, custom alive %v", herdrAlive(context.Background(), def.Socket), herdrAlive(context.Background(), a.Socket))
 	}
 	// What the server of the custom directory starts with.
-	env := withHerdrSession(herdrServerEnv(append(os.Environ(), "ANTHROPIC_API_KEY=sk-test"), "/bin/sh"), a.Session)
+	env := withHerdrSession(herdrServerEnv(append(os.Environ(), "ANTHROPIC_API_KEY=sk-test"), "/bin/sh", nil), a.Session)
 	if !slices.Contains(env, "HERDR_SESSION="+a.Session) || slices.Contains(env, "ANTHROPIC_API_KEY=sk-test") {
 		t.Fatalf("server env %q", env)
 	}
@@ -629,6 +630,49 @@ func TestPersonaClaudeResumeFollowsANewHerdrServer(t *testing.T) {
 	waitReports(n, "w1:p2")
 	if got := f.trace("pane.report_agent_session"); len(got) != 1 {
 		t.Fatalf("reported again: %v", got)
+	}
+}
+
+// herdr before 0.9.2 answers ok to a resume command and keeps none (#11792: a power cut restarted a 0.9.1 server,
+// which resumed four Persona Agents with its bare `claude --resume <id>`, off their launcher, while the node took
+// every report as held and said nothing). On such a server the node reports nothing, says once per server why, and
+// gives the command once the pane's server is a new one that keeps it (an upgrade).
+func TestResumeCommandOnAHerdrThatDropsIt(t *testing.T) {
+	n, f, home := herdrNode(t)
+	var logs syncBuffer
+	n.logger = log.New(&logs, "", 0)
+	f.reply("ping", map[string]any{"version": "0.9.1"})
+	launch := n.hosts.Get(host.Herdr).(*herdrHost)
+	spec := claudeLaunch{Launcher: "work_claude", Settings: filepath.Join(personaDir(home), "claude-settings.json")}
+	n.holdResume(context.Background(), launch, "w1:p2", startID, spec)
+	n.holdResume(context.Background(), launch, "w1:p3", sidB, spec)
+	if got := f.trace("pane.report_agent_session", "pane.clear_agent_authority", "pane.report_agent"); len(got) != 0 {
+		t.Fatalf("reported to a herdr that drops it: %v", got)
+	}
+	if got := strings.Count(logs.String(), "herdr 0.9.1 drops resume commands"); got != 1 {
+		t.Fatalf("warned %d times, want once for the server:\n%s", got, logs.String())
+	}
+	n.mu.Lock()
+	server := n.launches["w1:p2"].Server
+	n.mu.Unlock()
+	if server == "" || server != launch.c.ServerID() {
+		t.Fatalf("not settled against this server: %q", server)
+	}
+
+	// The upgrade (a live handoff, a restart on the new binary): a new server that keeps the command.
+	f.reply("ping", map[string]any{"version": "0.9.5"})
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(f.sock, later, later); err != nil {
+		t.Fatal(err)
+	}
+	f.reply("session.snapshot", snapshot(nil, nil, []any{claudeAgent(startID, proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, "")}, nil))
+	listSessions(t, n)
+	waitCalls(t, f, "pane.report_agent_session", 1)
+	waitReports(n, "w1:p2")
+	reports := f.trace("pane.report_agent_session")
+	if len(reports) != 1 || !strings.Contains(reports[0], `"pane_id":"w1:p2"`) ||
+		!strings.Contains(reports[0], `"eval",`+jsonPrefix(resumeCmd("work_claude", "--resume "+startID, personaDir(home)))) {
+		t.Fatalf("reports %v", reports)
 	}
 }
 

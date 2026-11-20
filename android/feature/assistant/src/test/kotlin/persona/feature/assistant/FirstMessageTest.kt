@@ -44,7 +44,10 @@ class FirstMessageTest {
     }
 
     @Before fun setup() = AssistantManagerChoice.choose("hub", null, "assistant")
-    @After fun cleanup() = AssistantManagerChoice.reset()
+    @After fun cleanup() {
+        AssistantManagerChoice.reset()
+        persona.feature.chat.ForwardPlacements.home = emptyList()
+    }
 
     private inner class Hub : AssistantRepository, MessageSender, MainConversationSender {
         override val assistant = MutableStateFlow(AssistantSnapshot(mainSession = main, conversations = listOf(
@@ -55,9 +58,13 @@ class FirstMessageTest {
         val sent = mutableListOf<Pair<SessionKey, String>>()
         var gate: CompletableDeferred<Unit>? = null
         var refuse = false
+        var failSend = false
         override suspend fun refresh() = Unit
         override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = Unit
-        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) { sent += session to text }
+        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) {
+            if (failSend) { failSend = false; throw IOException("outbox closed") }
+            sent += session to text
+        }
         suspend fun start(): SessionKey {
             gate?.await()
             if (refuse) { refuse = false; throw IOException("offline") }
@@ -137,6 +144,49 @@ class FirstMessageTest {
         assertEquals(listOf(SessionKey("mac", "new-1") to "Plan a weekend in the mountains"), hub.sent)
         rule.onNodeWithText("chat:new-1").assertExists()
         assertNull(kept())
+    }
+
+    // The conversation starts, then the message never reaches the outbox: the bubble already took the forward off the
+    // composer, so putting it back would send it twice — once from Resend, once with the next message.
+    @Test fun aForwardWhoseFirstSendFailsStaysOnItsBubbleOnly() {
+        val resources = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources
+        val ref = persona.feature.chat.ForwardMessage.ref("Original reply",
+            persona.feature.chat.ForwardMessage.Source(SessionKey("mac", "source"), "a#1",
+                persona.feature.chat.ForwardMessage.Role.Agent, "Claude", "Project"), resources)
+        persona.feature.chat.ForwardPlacements.home = listOf(ref)
+        val hub = mount(Hub().apply { failSend = true })
+        rule.onNodeWithContentDescription("Send").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("assistant-first-failed").assertExists()
+        rule.onNodeWithText("Forwarded from Claude · Project").assertExists()
+        assertTrue("The failed bubble owns the only forward", persona.feature.chat.ForwardPlacements.home.isEmpty())
+
+        rule.onNodeWithText("Resend").performClick()
+        rule.waitUntil(5_000) { hub.sent.isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue("Retry leaves no forward for a later chat", persona.feature.chat.ForwardPlacements.home.isEmpty())
+    }
+
+    @Test fun aForwardedFailureKeepsItsCardWithoutPlacingItAgain() {
+        val resources = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources
+        val ref = persona.feature.chat.ForwardMessage.ref("Original reply",
+            persona.feature.chat.ForwardMessage.Source(SessionKey("mac", "source"), "a#1",
+                persona.feature.chat.ForwardMessage.Role.Agent, "Claude", "Project"), resources)
+        persona.feature.chat.ForwardPlacements.home = listOf(ref)
+        val hub = mount(Hub().apply { refuse = true })
+        rule.onNodeWithContentDescription("Send").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("assistant-first-failed").assertExists()
+        rule.onNodeWithText("Forwarded from Claude · Project").assertExists()
+        rule.onNodeWithText("Original reply").assertExists()
+        assertTrue("The failed bubble owns the only forward", persona.feature.chat.ForwardPlacements.home.isEmpty())
+
+        rule.onNodeWithText("Resend").performClick()
+        rule.waitUntil(5_000) { hub.sent.isNotEmpty() }
+        rule.waitForIdle()
+        assertEquals(listOf(SessionKey("mac", "new-1") to
+            persona.feature.chat.forwardMessage("", listOf(ref), resources).trim()), hub.sent)
+        assertTrue("Retry leaves no forward for a later chat", persona.feature.chat.ForwardPlacements.home.isEmpty())
     }
 
     @Test fun aKeptFailureComesBackWithThePage() {

@@ -66,13 +66,15 @@ export interface CalendarSlot {
 /** An entry's colors: its state's, red once overdue (before the state: what is late is what to see first). */
 function look(e: CalendarEntry): { bar: string; ground: string; text: string } {
   if (e.overdue) return { bar: "bg-red", ground: "bg-red/10", text: "text-red" };
-  switch (TODO_STATUS_INFO[e.status].tone) {
+  switch (e.tone ?? TODO_STATUS_INFO[e.status].tone) {
     case "red":
       return { bar: "bg-red", ground: "bg-red/10", text: "text-red" };
     case "green":
       return { bar: "bg-green", ground: "bg-green-tint", text: "text-green" };
     case "amber":
       return { bar: "bg-orange", ground: "bg-orange-tint", text: "text-orange" };
+    case "attention":
+      return { bar: "bg-attention", ground: "bg-field", text: "text-attention" };
     default:
       return { bar: "bg-ink-3", ground: "bg-hover", text: "text-ink-3" };
   }

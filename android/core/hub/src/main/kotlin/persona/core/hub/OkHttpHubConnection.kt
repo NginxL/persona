@@ -9,6 +9,7 @@ import persona.core.contracts.api.*
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.*
@@ -171,6 +172,7 @@ class OkHttpHubConnection(
     @Volatile private var network = initialNetwork
     @Volatile private var foreground = true
     @Volatile private var socket: WebSocket? = null
+    private var socketDrop: (() -> Unit)? = null
     @Volatile private var mailbox: Channel<Signal>? = null
     /** Completed by [onWake] to cut a retry backoff short: the user is looking at hub content right now. */
     @Volatile private var retryWait: CompletableDeferred<Unit>? = null
@@ -646,6 +648,10 @@ class OkHttpHubConnection(
         }
         _heartbeat.value = Heartbeat(20, 15)
         _currentHello.value = null
+        val dropRecorded = AtomicBoolean()
+        fun recordDrop() {
+            if (dropRecorded.compareAndSet(false, true)) persona.core.contracts.DevProbe.socket("dropped")
+        }
         val owner = ownerOf(selected)
         resumed = false
         val resumeFrom = resumePoint
@@ -655,6 +661,7 @@ class OkHttpHubConnection(
             authorized(socketUrl(selected.endpoint.baseUrl(), resumeFrom), owner).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    persona.core.contracts.DevProbe.socket("connected")
                     received()
                     val fingerprint = response.handshake?.peerCertificates?.firstOrNull()?.publicKey?.encoded?.let {
                         Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(it))
@@ -665,11 +672,21 @@ class OkHttpHubConnection(
                     messages.trySend(Signal.Open)
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    persona.core.contracts.DevProbe.frame {
+                        val type = runCatching {
+                            JsonCodec.parseToJsonElement(text).jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: "unknown"
+                        }.getOrDefault("unknown")
+                        frame(type, text.toByteArray(Charsets.UTF_8).size.toLong())
+                    }
                     received()
                     messages.trySend(Signal.Text(text))
                 }
-                override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) { received() }
+                override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                    persona.core.contracts.DevProbe.frame("binary", bytes.size.toLong())
+                    received()
+                }
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    recordDrop()
                     synchronized(lock) {
                         ended = true
                         if (socket === webSocket) _currentHello.value = null
@@ -679,7 +696,9 @@ class OkHttpHubConnection(
                     webSocket.close(code, null)
                     messages.trySend(Signal.Failed(HubFailure(HubError.Transport, "WebSocket closed ($code): $reason")))
                 }
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { recordDrop() }
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    recordDrop()
                     synchronized(lock) {
                         ended = true
                         if (socket === webSocket) _currentHello.value = null
@@ -689,6 +708,7 @@ class OkHttpHubConnection(
                 }
             },
         )
+        socketDrop = ::recordDrop
         socket = ws
         mailbox = messages
         _weakNetwork.value = false
@@ -958,6 +978,9 @@ class OkHttpHubConnection(
             recheck.cancel()
             syncing?.cancel()
             pingJob?.cancel()
+            // OkHttp's failure callback is asynchronous and the outer close also shuts down its dispatcher. Record
+            // this terminal socket locally before cancellation; the listener's later callback shares the same guard.
+            recordDrop()
             ws.cancel()
             messages.close()
             activity.close()
@@ -976,7 +999,7 @@ class OkHttpHubConnection(
         // The language the app shows (docs/protocol/i18n.md "Protocol"): this socket's notices, and the user's language.
         put("locale", persona.core.contracts.ClientLanguage.tag)
         putJsonArray("features") {
-            (setOf("endpoints", "ws_notify", "app_ping", "elicitation", ProtocolCompatibility.CAPABILITY) + config.clientFeatures).forEach { add(it) }
+            (setOf("endpoints", "ws_notify", "app_ping", "elicitation", persona.core.contracts.api.AgentMessageHoldFeature, ProtocolCompatibility.CAPABILITY) + config.clientFeatures).forEach { add(it) }
         }
         if ("heartbeat" in features) {
             putJsonObject("heartbeat") {
@@ -1210,6 +1233,10 @@ class OkHttpHubConnection(
         synchronized(lock) {
             if (closed) return
             closed = true
+            // Record this socket's terminal event before its callback dispatcher is stopped. Otherwise the first drop
+            // can be delivered after a later diagnostics sink is installed, attributing an old socket to a new owner.
+            socketDrop?.invoke()
+            socketDrop = null
             runner?.cancel()
             socket?.cancel()
             socket = null

@@ -392,7 +392,7 @@ class MessageSelectionTest {
     @Test fun selectInTheMenuSelectsInPlaceAndOpensNoReader() {
         show {
             Reply("a", "长按它，再点选择。")
-            MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {}, onHandToPersona = null, onNotice = {})
+            MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {}, onForward = null, onNotice = {})
         }
         rule.onNodeWithTag("a").performTouchInput { longClick() }
         rule.waitForIdle()

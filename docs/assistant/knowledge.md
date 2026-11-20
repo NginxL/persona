@@ -142,6 +142,7 @@ Exclusions are case-insensitive. Directory paths are relative to the configured 
     meta.json               # Name, type (short requirement / long mission), status, members, related chats / docs / meetings / Agent directories
     summary.md              # Goal, current state, next steps, risks, my role
     log.md                  # Timeline: append an entry for each update (date · source · one line)
+    memory.jsonl            # Typed worker outcomes, decisions with reasons, and pitfalls; provenance/time/supersession (not searched)
     .topics.json            # How far the knowledge points curation read the timeline ("Topics"; bookkeeping, not searched; a chat has one too)
   topics/<slug>/            # One directory per topic of knowledge points ("Topics" below, #3783)
     meta.json               # Name, one line, aliases, how many points, the projects and chats they came from, tags
@@ -223,13 +224,13 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
 1. **Archive**: every 2 minutes (5 seconds after a Lark live event), inspect the 100 recently active chats in Lark's Messages list, reading only when the list timestamp is newer than the last archive.
    Fetch incrementally by cursor (`afterPosition`); a newly seen chat starts with its latest 100 messages. Append to that day's `messages/*.md` (dates and times in the user's timezone, see "Time zones" below).
    Download images / files / rich-text images to `attachments/<date>/` (up to 20 MB each), leaving `[附件](相对路径)` ("attachment; relative path") in the line; record Lark document links in `docs/`.
-   Topic groups read only the newest topic page. Every 6 minutes, read each email account's Inbox messages with UID above the last one (40 per page, at most 5 pages per round; with multiple pages, take the newest first, then fill the middle page by page and continue next time if unfinished),
-   reading at most 10 full bodies per round (summaries for the rest), into `mail-<account>-<other address>` chats. Cursors are in `cursors/mail.json` (per-account UIDs, plus `<account>#v` for UIDVALIDITY,
+   Topic groups read only the newest topic page. Every 6 minutes, read new messages in each account's INBOX and eligible folders (the same selection as the assistant Inbox; 40 per page, at most 5 pages per folder per round; with multiple pages, take the newest first, then fill the middle page by page and continue next time if unfinished),
+   reading at most 10 full bodies per round (summaries for the rest), into `mail-<account>-<other address>` chats. Cursors are in `cursors/mail.json` (per-mailbox UIDs, plus `<key>#v` for UIDVALIDITY,
    `#t` for the latest archived message time, `#f` / `#h` for unfilled gaps; on UIDVALIDITY change, restart from the newest page and only take messages later than `#t`; before 2026-11-03 it was `mail-cursors.json`, used as fallback when the new file is absent).
-   The existing decimal receipt IDs remain in use until a change between two known, nonzero validity values is observed.
-   After that, `<account>#e` records an identity epoch, and IDs include the epoch, last known validity and UID.
+   INBOX keeps its account-only cursor key and its existing decimal receipt IDs until a change between two known, nonzero validity values is observed. Other folders use the account plus `:m:` and the unpadded base64url of the exact folder name as the cursor key. Their receipt IDs include that key, so one correspondent can have messages with the same UID in different folders.
+   After that, `<key>#e` records an identity epoch, and IDs include the epoch, last known validity and UID.
    A retry keeps the same identity if ingestion succeeded before checkpoint publication; a further known change before publication gets a different identity.
-   Each account's inbox has its own cursor and epoch. An absent prior validity or a zero response cannot establish that a change occurred, so it does not start an epoch or reset the cursor.
+   Each folder has its own cursor and epoch. An absent prior validity or a zero response cannot establish that a change occurred, so it does not start an epoch or reset the cursor.
    A cursor already advanced by an older version cannot reconstruct mail previously skipped by a UID collision. A rollback to an older writer is not identity-safe: it ignores the epoch and emits decimal IDs, and may advance the validity without recording the change. Do not run mixed-version archive writers against the same data.
    The existing later-than-`#t` filter and newest-page restart still limit recovery: same-second or older messages and an oversized renumbered tail are not guaranteed to be archived.
    Connectors (`docs/plans/plan-connectors.md`, implementing `connector.Archive`) read chats with new messages "since last time" by cursor every 10 minutes,
@@ -238,6 +239,7 @@ assistant is not connected, the knowledge base closes once no lane runs; a lane 
    - **GitHub**: only PRs / issues involving me (`involves:@me`, last 30 days initially), not entire repositories.
    - One PR / issue per chat, `github-<owner>-<repo>-<number>` (`kind` is `pr` / `issue`), in this order: description (starts with `【标题】`, "[Title]"); comments; reviews (`（review）批准了`, "(review) approved"); inline comments ("(file:line)…").
    - Bots are marked `(bot)`. Each entry is at most 4000 characters. Skip the round when the request quota is low.
+   - Every chat carries the thread's state (`open`, `merged`, `closed`), and a merge, close or reopen adds one line (`（状态）已合并`, "(state) merged"), though no one commented ("Chat state and finished projects").
 2. **Compress**: once a chat has 50 new messages or has been quiet for 10 minutes, send the old `summary.md` + new messages (up to 24,000 bytes, keeping the latest and cut at a message or line start, or inside a long line at a whole character when the next start would drop more than half of them) to a small model,
    producing a new summary (fixed sections: what this is / progress / to-dos and unresolved issues / about me), one line, tags, mentioned projects and people; write `summary.md` and `meta.json`.
    At most 8 chats per round, most relevant first. Direct-chat / email tags propagate to the other person; a person's `summary.md` is assembled from metadata and direct-chat context without a model call.
@@ -489,7 +491,9 @@ The driver runs in its own goroutine (`kbHistoryLoop`, never inside the knowledg
 6. the connector archives into the knowledge base now and declares `history` (`connectors.archives`).
 
 Sources run one at a time, in the order `kb.history.sources` lists them. Everything is on disk, so a redeploy at any time loses nothing: a restart takes the lock again, backs up,
-and goes on from each chat's state and at the pace it had (a rest or pause under way is waited out first; "Pacing").
+and goes on from each chat's state and at the pace it had (a rest or pause under way is waited out first; "Pacing"). A shutdown is no stop either: a write or save of the
+import's own that fails once the run's context has ended (whatever the error says) ends the run without saving the page's state, and the next start reads that page again,
+which adds nothing twice; one that fails while the run goes on still stops (`write_failed`, `state_save_failed`, `anchors_save_failed`, `plan_save_failed`; #10975).
 
 #### Plans (`history/plan-<source>.json`)
 
@@ -737,6 +741,25 @@ The model may mistake product names in notification emails (each App Store app, 
 and prompts (`server/internal/prompts/kb/`, `docs/assistant/prompts.md`) explicitly exclude notifications, marketing and billing. At startup the manager marks projects sourced only from these chats and never manually tagged as `ignored`:
 no more updates, snapshots or prompts; the app groups them under **Not projects**. Changing their status in tags restores them.
 
+## Chat state and finished projects
+
+A pull request merged or closed adds no message, so the archive alone never learned it: chats and projects stayed at "waiting for review" long after the work was done, and the
+live snapshot kept repeating them (#9427). State is the source's fact, so it comes from the source, never from a model reading comments.
+
+- **The chat's state.** A connector may report a chat's `state` (`open`, `merged`, `closed`) and `state_at` with any batch (`kbwire.SourceChat`, the extension schema's
+  `ConnectorArchiveChat`). `Ingest` keeps them in the chat's `meta.json` (`state`, `state_at`), also from a batch without new lines, and only for a chat it already has.
+  A change marks the chat's projects dirty, so they are rewritten. It is not the owner's `done` flag, and the selection does not read it.
+- **GitHub** (`connector/github/archive_state.go`) sends every thread it reads with its state. A change since the state it last sent (the cursor keeps the ended ones per thread,
+  forgotten with the thread after 90 days) adds one system line, merged at the merge time, closed at the close time, reopened at the thread's update. The line's ID is the state and
+  its time (`state-merged-<unix>`), so a replay or a cursor that starts over adds it once. The line is what compression reads, so the chat's summary follows. A cursor from before
+  states were sent reads each thread it knows once (`recheck`, one request each, paused while the quota is low), so pull requests merged before then are recorded too.
+- **Project rewrites** list each linked chat's state as a fact next to its summary (`prompts/kb/project_input.md`). A rewrite no longer moves a `done` project back to active
+  or paused; news still revives it (`evolveProject`), as before.
+- **Finished projects.** After the rewrites, each knowledge-base round finishes, without a model (`kb.FinishProjects`), a project that is `active` or `paused`, not `long`,
+  whose `status` is not locked, that has no unfinished to-do filed under it, that links at least one chat with every linked chat `merged` or `closed`, and to which nothing happened for
+  3 days (a linked chat's last message or state change, a timeline entry). Its status becomes `done`, as if set by a rewrite; the user can set it back, which locks it.
+- **The snapshot** (`kb.Engine.Prompt`) leaves out ended chats, and projects whose linked chats have all ended, besides `done` and `ignored` projects.
+
 ## Deleting a project
 
 A project can be deleted from the knowledge list on the web (#4412) and on the iPhone and iPad (#7077: a project row's swipe or context menu); both ask first and then offer Undo. The delete is soft (`kb/project_trash.go`):
@@ -783,14 +806,14 @@ chat's progress, each Agent's last words, to-do conclusions) and chat summaries,
   events (`kb.changed` with kind `topics`) like the other kinds, through the app API, the assistant's `kb_list` / `kb_get` / `kb_search` and the extension `kb.*` RPC. `kb.recent`
   does not include them by default (it is what came in, and topics are derived). The web shows them under Knowledge › Topics and in the knowledge map (`docs/web/web.md`); the iPhone
   and iPad too (#7251: Knowledge › Topics, a topic's points by subtopic, a point in a sheet, and the map as an outline, with a detail
-  column where there is room; `docs/design/DESIGN_SYSTEM.md` "Knowledge map outline"). The Android app does not show the kind yet and skips it.
+  column where there is room; `docs/design/DESIGN_SYSTEM.md` "Knowledge map outline"). The Android app shows them too (#7678: Knowledge › Topics, a topic's points by subtopic, a point in a sheet, and the map as an outline; `docs/android/android.md` "Inbox AI drafting and handoff; knowledge base categories, entries and tagging"), without the web's graph canvas.
 - **Deleting a source** removes the points that came only from it ("Deleting a connector's saved knowledge" above).
 
 ## Who uses it
 
 - **Persona (main chat and other chats)**: CLAUDE.md describes the layout and requires "keep context flowing"; MCP tools `kb_search` (full text) / `kb_list` (sorted list) /
   `kb_get` (profile + last 7 days' messages) / `kb_update` (create projects, edit profiles, tag, link, add timeline entries; manual tags lock and are not overwritten by compression);
-  live snapshots include the 6 most important projects and 8 chats. These four tools belong to the assistant (parameter defaults, limits and model-facing copy in `assistant/tools_apps.go`),
+  live snapshots include the 6 most important projects and 8 chats that have not ended ("Chat state and finished projects"). These four tools belong to the assistant (parameter defaults, limits and model-facing copy in `assistant/tools_apps.go`),
   and since 2026-11-04 so does the knowledge base, so they call the engine directly (formerly bus calls to hub `kb.search` / `kb.list` / `kb.get` / `kb.update`).
 - **What `kb_get` hands the model** (#7316, `assistant/kb_get_fit.go`): a project's people (every member of each group chat linked to it, thousands for a large one)
   are folded to 20, ranked as the detail's links are (importance, relevance, last seen), with a line giving the total and the meta.json that has them all. Any result
@@ -848,7 +871,7 @@ Metadata of all six entity types can include `pinned` (user-confirmed facts) and
 - Historical associations and summaries remain on disk; linked-entity rosters and project deduplication member counts omit ignored/self accounts without deleting those records. `kb.list` for people omits ignored accounts before ranking and pagination, so totals and offsets count only listed people; self accounts remain listed. Ignored accounts can still be explicitly read by ID with `kb.get` and corrected with `kb.update`. This does not synchronize `self` into the separate encrypted `kb.owner` record.
 - Manual writes lock fields touched by default, including person `note` and `status`, summaries, project descriptions and associations. Background writes reread current protected fields at write time so corrections made during a model call cannot be overwritten by stale objects.
 - `lock: false` adds no locks in this update, letting extensions choose continued background maintenance; it does not remove existing locks. Legacy `locked` tag protection remains effective.
-- `remove_people`, `remove_chats`, `remove_projects`, `remove_aliases` remove associations or project aliases, not entities. A batch adds first then removes, so removal wins; existing reverse associations are removed too. `remove_aliases` applies to projects.
+- `remove_people`, `remove_chats`, `remove_projects`, `remove_aliases` remove associations or project aliases, not entities. A batch adds first then removes, so removal wins; existing reverse associations are removed too. `remove_aliases` applies to projects. The user's removals also keep that one link out of automatic writes ("Removed links" below).
 - Automatic deduplication skips manually protected projects and associations. Explicit merging retains existing merge precedence, updates locked reverse associations and concatenates both pinned values; the source remains a merged record with its original protected metadata readable.
 
 For example, remove a project member while recording a confirmed fact:
@@ -858,6 +881,18 @@ For example, remove a project member while recording a confirmed fact:
 ```
 
 This is not a cross-file transaction and adds neither `If-Match` nor a revision log. Write failures return errors; do not automatically retry a failure as a new user confirmation.
+
+### Removed links (#10333)
+
+Removing one wrong person or chat used to lock the **whole** list on both entries, so a project stopped picking up new people and chats for good. Now a removal by the user keeps out just that link (`kb/exclude.go`):
+
+- **Recorded on both entries**: the user's `remove_people` / `remove_chats` / `remove_projects` (app, assistant `kb_update`, HTTP `PUT`, `kb.update` without an extension) add the id to the entry's `excluded` under the list it left, and the entry's own id to the other one's, for example `"excluded": {"people": ["alice"], "chats": ["team-chat"]}` on project `billing-migration` and `"excluded": {"projects": ["billing-migration"]}` on `alice` and `team-chat`. Items are named as in the project's `items` (`docs/<id>`). Only ids of existing entries are recorded.
+- **Automatic writes** (compression, project linking, connectors, history import, merges: every `putEntity` without `manual`) leave excluded ids out of the list they write and keep `excluded` as it is on disk; everything else in the list is added and removed as before. Linking a chat by hand brings its people except the ones the user took off the project.
+- **Extensions** cannot make an excluded link: `kb.update` drops it from `people` / `chats` / `projects`, applies the rest, and names it in `ignored`. An extension's own removals exclude nothing.
+- **Linking again by hand** lifts the exclusion on both entries. `allow_people` / `allow_chats` / `allow_projects` (user paths only: HTTP `PUT` and `kb_update`) lift it without linking, so Persona may link it again on its own. They follow the kind's lists (projects: people, chats; chats: people, projects; people: chats, projects; docs, meetings, events and recordings: projects); others land in `ignored`.
+- **Whole-list lock**: `lock_lists: true` also locks the lists a removal touches, on both entries (`locked_fields`), as before. `lock_lists: false` keeps out only the removed link. Unset, a removal locks as `lock` says (unset or `true` locks): what older clients asked for, so they keep getting it. The web and assistant `kb_update` send `false` unless the user asks for the lock. Existing `locked_fields` keep their meaning; nothing is migrated.
+- **Detail**: `GET /api/v1/kb/{kind}/{id}` (and `kb.get`) adds `removed`, the excluded links named as `links` are, for the app to list with Allow again.
+- **Merges** keep what the user removed from either project off the kept one, both ways, unless the kept project links it; the merge record (`merge.excluded`) lets an unmerge give it back. Forgetting a source drops its ids from `excluded` too.
 
 ### Who holds a field (#6100)
 
@@ -874,6 +909,63 @@ Now every locked field has a holder, and writes follow **the user > an extension
 - The answer carries `before`: each written field's previous value (`summary` the old text), so the extension can keep its own undo log; undo is another `kb.update` with those values, plus `unlock` when the field was free before.
 - **Without extensions nothing changes**: no write adds `provenance`; the user's writes only remove entries that exist. The legacy `hub_api` HTTP `PUT` from an extension token still counts as the user.
 
+### Project freshness and reference-only sources
+
+A project's `updated` time records its latest project change. Its `freshness` records what the saved `summary` and
+`one_line` cover. HTTP project list and detail and RPC `kb.list` and `kb.get` use the same projection. The
+`personad mcp` tools `kb_list` and `kb_get` show **Needs review** and the field's review reason, responsible party,
+timeline positions and uncovered count. Detail includes the source revisions behind those positions.
+
+- `freshness.fields.summary` and `freshness.fields.one_line` describe the value actually saved. `writer` and `source`
+  identify a recorded write. `review_by` names the current maintainer, either `persona`, `user` or `ext:<id>`. A
+  legacy lock still belongs to the user under the lock contract. It supplies no historical writer or evidence cutoff.
+- `cutoff.timeline_from` and `cutoff.timeline_through` are byte offsets into the project's `log.md`, with an
+  exclusive end. `cutoff.sources` names the other inputs and their opaque revisions. A rewrite reads at most the
+  latest 40 timeline entries, the first eight linked chat summaries and delivery states, up to five linked Moments
+  posts, and pinned facts. The cutoff describes that input window. `timeline_truncated` marks earlier entries
+  outside it. Raw chat messages waiting for compression are also outside the recorded coverage.
+- `freshness.timeline_end` and `freshness.evidence` describe the current evidence positions in that scope.
+  `uncovered_evidence_count` counts newer timeline entries and current source revisions absent from the field's
+  cutoff. An uncompressed chat contributes one pending source revision. Where no cutoff is recorded, the count
+  describes retained evidence whose coverage is unknown. If the recorded timeline was replaced or cannot be read,
+  the count can be absent. Byte offsets include late-arriving entries with an older source timestamp.
+- A successful rewrite advances coverage only for the nonempty outputs it saves. A lock, omitted output, failed
+  model call, or metadata edit leaves the previous evidence record alone. The review gap is visible even when the
+  project is no longer `dirty`. A changed summary edited through `kb_update` or HTTP has a recorded writer and
+  unknown cutoff. A previously saved `one_line` keeps its own cutoff and shows `summary_edited` until refreshed.
+  The existing pipeline can refresh an unlocked one-line field. A locked line retains its text, cutoff and maintainer.
+
+When the authoritative knowledge lives elsewhere, set `project_mode: "reference-only"` through the owner's HTTP PUT
+or `kb_update`. Add external HTTP(S) pointers with `source_urls`, alongside a name, aliases or routing fields.
+`source_urls` replaces the list, an empty list clears it, and omitting it preserves it. The list accepts up to 30
+URLs of at most 2048 bytes each, without embedded credentials. This example is a body for
+`PUT /api/v1/kb/projects/garden`.
+
+```json
+{
+  "project_mode": "reference-only",
+  "source_urls": ["https://example.org/garden"],
+  "aliases": ["Garden guide"]
+}
+```
+
+- Reference-only projects remain available for routing by name, alias, source and linked entities. The pipeline
+  skips project rewrites and records skipped derived timeline writes in its logs without the payload. The policy
+  also blocks project worker-memory writes. Independently configured source archives keep their own data and
+  retention settings.
+- Writes carrying `summary`, `log`, `goal`, `my_role`, `note` or `pinned` are refused as a whole, naming the
+  fields, on the user and extension paths. A request that enables reference-only cannot carry those fields either.
+  Extensions cannot change the source settings. Merges and unmerges involving a reference-only project are refused.
+- Existing project text, history and locks stay on disk and remain readable. The mode marks that text as retained
+  history. To resume local detail writes, send `project_mode: "full"` in a separate request first. Previously
+  skipped writes are not replayed.
+- `sources` projects canonical identities without merging projects or moving history. A GitHub issue or pull
+  request is identified by the lowercased repository and its number, regardless of a comment anchor or issue / PR
+  URL spelling. Local references stay available in `refs`. `delivery_state` and `delivery_at` come from the
+  current archive observation. `environment_verification: "unverified"` means the Hub has no independent
+  deployment or acceptance evidence in this contract. A merged PR is a delivery fact, and verification still
+  requires evidence from the target environment.
+
 ### Fields each kind takes
 
 Every write path (`kb.update`, HTTP `PUT`, the assistant's `kb_update`) takes only the fields the entry's kind uses (`kb/fields.go`). Everything else is taken out of the update before it applies, so it is neither written, nor locked, nor attributed. The answer names it in `ignored: [{field, reason}]` (the assistant's tool says "Not saved: …"); fields used are written as before. Any kind takes `importance`, `relevance`, `tags`, `pinned` and `lock`, and in addition:
@@ -886,6 +978,10 @@ Every write path (`kb.update`, HTTP `PUT`, the assistant's `kb_update`) takes on
 | docs, meetings, events | `note`, `projects` / `remove_projects` |
 | topics | `name`, `note`, `aliases` / `remove_aliases` (`summary` is refused: it is written from the points) |
 | recordings | `projects` / `remove_projects` |
+
+The user's paths (HTTP `PUT`, `kb_update`) also take `lock_lists` and the kind's `allow_*` lists ("Removed links" above).
+For projects the owner can also send `project_mode` and `source_urls` ("Project freshness and reference-only sources").
+These settings are unavailable to extensions. `one_line` has no public write field. Unknown keys are rejected.
 
 A person's `summary` and `log` used to be dropped without a word (and `summary` was even locked, for nothing): summary.md is written from what is known of the person. What an extension knows of them goes in its `profile`.
 
@@ -961,7 +1057,7 @@ and a disabled knowledge base (`kb.enabled: false`) returns 503 as before.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/v1/kb/{kind}?tag=` | Sorted list (`items`) and common tags (`tags`); kind is projects / chats / people / docs / meetings / events / recordings / topics (topics: the most points first, `extra` is the count; docs, meetings and events: `extra` is the link and `source` the connector that supplied it, #8872) |
-| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages, a topic's `points`); projects also include `agents` |
+| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages, a topic's `points`, the links the user removed as `removed`); projects also include `agents` |
 | `PUT /api/v1/kb/{kind}/{id}` | Edit (fields as in `kb_update`); create a project if absent |
 | `DELETE /api/v1/kb/projects/{id}` | Soft-delete a project ("Deleting a project" above); returns its trash entry (`id`, `kind`, `slug`, `name`, `deleted_at`, `unlinked`); 404 for unknown or merged projects |
 | `GET /api/v1/kb-trash` | Deleted projects, newest first (`items`: trash entries) |

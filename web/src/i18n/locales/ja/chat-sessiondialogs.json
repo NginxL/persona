@@ -7,6 +7,8 @@
   "rename": "名前を変更",
   "tab_name": "herdr のタブ名",
   "session_name": "セッション名",
+  "name": "名前",
+  "rename_hint_unified": "herdr のタブ名を変更します。CLI がセッション名の変更に対応している場合は、そちらも変更します。",
   "rename_hint_assistant": "Personaでのこのチャットのタイトルだけを変更します。",
   "rename_hint_agent": "タブ名はherdrに同期されます。セッション名はClaudeの/renameで変更され、コンピューターのclaude --resumeでも表示されます。",
   "space_renamed": "スペースの名前を変更しました",

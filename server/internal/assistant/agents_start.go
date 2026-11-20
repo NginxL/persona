@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -49,7 +50,12 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 	if launcher, _ := params["launcher"].(string); proto.IsExternalLauncher(launcher) {
 		return nil, badRequest(i18n.Err("external-adapter.purpose_unsupported"), s.appLang(ctx, p.Lang))
 	}
-	if resume, _ := params["resume_session_id"].(string); resume == "" {
+	if resume, _ := params["resume_session_id"].(string); resume != "" {
+		if err := checkStartSpeed(params, startAgent{}, resume); err != nil {
+			return nil, badRequest(err, s.appLang(ctx, p.Lang))
+		}
+		clearStandardSpeed(params)
+	} else {
 		own := pickOf(params)
 		if err := s.applyStartTier(ctx, params); err != nil {
 			return nil, badRequest(err, s.appLang(ctx, p.Lang))
@@ -63,11 +69,18 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 		// Held to what the computer has (#2640): a launcher picked that it lacks is refused, a default it lacks gives
 		// way to one it has.
 		if m, ok := s.device(ctx, p.MachineID); ok {
-			note, _, err := s.fitLauncher(ctx, m, own, params)
+			note, agent, err := s.fitLauncher(ctx, m, own, params)
 			if err != nil {
 				return nil, badRequest(err, s.appLang(ctx, p.Lang))
 			}
+			if err := checkStartSpeed(params, agent, ""); err != nil {
+				return nil, badRequest(err, s.appLang(ctx, p.Lang))
+			}
 			leaveLauncherNote(ctx, note) // the app says so (agents_bus.go launcher_note, #4661)
+			// AGY returns a session only after startup, including for a launcher resolved from Model settings.
+			if declared, _ := params["agent_type"].(string); declared == "" && agent.agent == "agy" {
+				params["agent_type"] = agent.agent
+			}
 		}
 		if name, _ := params["launcher"].(string); name != "" {
 			if err := s.launcherScopeErr(ctx, p.MachineID, name); err != nil {
@@ -75,6 +88,8 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 			}
 		}
 	}
+	delete(params, "launcher_default_effort")
+	clearStandardSpeed(params)
 	s.setPlanThen(ctx, p.MachineID, params)
 	if name, _ := params["tab_name"].(string); strings.TrimSpace(name) == "" && p.NameFrom != "" {
 		if name := s.tabName(ctx, p.NameFrom); name != "" {
@@ -96,6 +111,10 @@ func (s *Service) AgentResumeParams(ctx context.Context, p AgentResumeParams) (m
 	if launcher, _ := params["launcher"].(string); proto.IsExternalLauncher(launcher) {
 		return nil, badRequest(i18n.Err("external-adapter.purpose_unsupported"), s.requestCtxLang(ctx))
 	}
+	if err := checkStartSpeed(params, startAgent{}, p.SessionID); err != nil {
+		return nil, badRequest(err, s.requestCtxLang(ctx))
+	}
+	clearStandardSpeed(params)
 	q := map[string]any{}
 	if err := s.applyModel(ctx, "agent.new", q); err != nil {
 		s.logf("resume %s: 新建 Agent's launcher not applied: %v", p.SessionID, err)
@@ -144,6 +163,21 @@ func (s *Service) tabName(ctx context.Context, prompt string) string {
 		s.logf("tab name: nothing usable in %q", clip(oneLine(text), 80))
 	}
 	return name
+}
+
+// nameStartedAgent records the dispatched Agent's initial Persona title. Use the actual tab label when the host
+// made the requested name unique. A later CLI or Persona rename can replace it.
+func (s *Service) nameStartedAgent(ctx context.Context, machine string, c proto.Session, requested string) string {
+	if requested == "" || c.SessionID == "" {
+		return requested
+	}
+	title := cmp.Or(c.HerdrTabName(), requested)
+	if err := s.putInitialAgentTitle(ctx, machine, c.SessionID, title); err != nil {
+		s.logf("dispatch: save session title for %q/%q: %v", machine, c.SessionID, err)
+	} else {
+		s.publishSessions(machine)
+	}
+	return title
 }
 
 // tabSlug keeps what a tab name may be: lowercase ASCII letters and digits, single hyphens, at most 24 characters.

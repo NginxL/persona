@@ -629,6 +629,8 @@ func (h *Hub) managerRoutes(api *http.ServeMux) {
 			writeErrCode(w, http.StatusServiceUnavailable, "owners_unknown", err)
 		case errors.Is(err, errKeeperAway): // the manager that keeps it, or the one it goes to, is away (machines_kept.go)
 			writeErrCode(w, http.StatusServiceUnavailable, "assistant_offline", err)
+		case errors.Is(err, errLinkSwitchInProgress): // 409 link_switch_in_progress (link_switch.go)
+			writeAddMachineErr(w, err)
 		case err != nil:
 			writeErr(w, http.StatusInternalServerError, err)
 		default:
@@ -702,6 +704,12 @@ func (h *Hub) managerRoutes(api *http.ServeMux) {
 		// are done; the ones after find it gone (ownership_moves.go).
 		drop := r.URL.Query().Get("drop_machines") == "1"
 		err := h.removingManager(func() error {
+			// Not while one of its computers switches, and none begins until it is removed (link_switch.go).
+			release, err := h.holdManagerLinkSwitch(r.Context(), id)
+			if err != nil {
+				return err
+			}
+			defer release()
 			// What it keeps in its own list is in its manager.json only (machines_kept.go): moved away first, or
 			// dropped on purpose. Checked with the moves held off, from a record that was read.
 			if keeps, known := h.keepsAnyKnown(r.Context(), id); !drop && (keeps || !known) {
@@ -721,6 +729,9 @@ func (h *Hub) managerRoutes(api *http.ServeMux) {
 			return nil
 		})
 		switch {
+		case errors.Is(err, errLinkSwitchInProgress): // 409 link_switch_in_progress
+			writeAddMachineErr(w, err)
+			return
 		case errors.Is(err, errKeepsMachines):
 			writeErrCode(w, http.StatusConflict, "keeps_machines", i18n.Err("hub-admin_machines.keeps_machines"))
 			return

@@ -73,7 +73,7 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     tap(head(outer()));
     await loaded();
     expect(inner()).toHaveLength(2);
-    expect(inner().map(title)).toEqual(["已工作 5s", "已工作 7s"]);
+    expect(inner().map(title)).toEqual(["运行 1 条命令", "运行 2 条命令"]);
     expect(inner().map((g) => head(g).getAttribute("aria-expanded"))).toEqual(["true", "true"]);
     expect(rows().join(" ")).toContain("echo 3");
     expect(rows().join(" ")).toContain("echo 9");
@@ -130,9 +130,10 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     tap(head(outer()));
     await loaded();
     const [first, second, going] = inner();
-    expect([title(first), title(second)]).toEqual(["已工作 5s", "已工作 7s"]);
+    expect([title(first), title(second)]).toEqual(["运行 1 条命令", "运行 2 条命令"]);
     expect(going.dataset.workGroup).toBe("live");
-    expect(title(going)).toMatch(/^正在工作…\d/);
+    expect(title(going)).toBe("运行 1 条命令");
+    expect([first, second, going].map(g => head(g).getAttribute("aria-expanded"))).toEqual(["false", "false", "true"]);
     expect(rows().join(" ")).toContain("echo 13");
   });
 
@@ -219,7 +220,7 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     draw(seg([tool(1), words(2, "First."), thought(3, ""), words(4, "Second."), tool(5), thought(6, " "), tool(7), words(9, "Done.")]), false, style);
     tap(head(outer()));
     await loaded();
-    expect(inner().map(title)).toEqual(["已工作 2s", "已工作 5s"]);
+    expect(inner().map(title)).toEqual(["运行 1 条命令", "运行 2 条命令"]);
     const blocks = [...outer().querySelectorAll("[data-action-row]")].map((r) => r.parentElement);
     expect(blocks[1]).toBe(blocks[2]);
   });
@@ -230,6 +231,7 @@ describe.each(["agents", "assistant"] as const)("%s: the timeline", (style) => {
     draw(seg(steps), true, style);
     tap(head(outer()));
     expect(inner().map((g) => g.dataset.workGroup)).toEqual(["done", "done"]);
+    for (const g of inner()) tap(head(g));
     expect(status()).toEqual(["进行中", "完成"]);
     draw(seg([...steps, words(9, "Done.")]), false, style);
     if (head(outer()).getAttribute("aria-expanded") === "false") tap(head(outer()));

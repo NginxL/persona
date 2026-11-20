@@ -980,8 +980,9 @@ room holds at a moment.
 for the made-up `MeetingTapeSample`), with `-showMeetingReplaySpeed 1|2|4` (0.25 to 16) and `-showMeetingReplayEnd YES`
 (the meeting ends by itself at the tape's end; otherwise it goes on, silent, until End). Open the Recordings page
 (`-openShellPage recordings`) and the room comes up: a made-up room meeting (`ReplayedMeeting.id`), Persona answering on
-screen, started with the live view and the highlights, records itself with no microphone (`RecordingCapture.beginReplay`:
-only while nothing else records) while the tape's events reach the room's stores when the tape's clock passes their `t`:
+screen, started with the live view and the highlights, records itself with no microphone (`RecordingCapture.beginReplay`,
+gated by `MeetingReplay.canStart` while nothing else records and no system call is live) while the tape's events reach
+the room's stores when the tape's clock passes their `t`:
 the captions and lines into `MeetingTranscription` as hub transcription has them, the room, the topics and the
 highlights into `MeetingConversation`.
 

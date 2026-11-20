@@ -26,6 +26,8 @@
   "change_briefing_waits": "早晚报停滞清单：{before} → {after}",
   "title_interject_background": "插话时把手头的命令转到后台",
   "change_interject_background": "「插话时把手头的命令转到后台」：{before} → {after}",
+  "title_claude_interactive": "用交互式 Claude Code 运行 Claude 对话",
+  "change_claude_interactive": "「用交互式 Claude Code 运行 Claude 对话」：{before} → {after}",
   "title_load_all_tools": "一开始就加载 Persona 的全部工具",
   "change_load_all_tools": "「一开始就加载 Persona 的全部工具」：{before} → {after}",
   "title_agent_tasks": "Persona 启动的每个 Agent 都归入一个有人跟进的任务",
@@ -88,5 +90,10 @@
   "idle_auto_compact_unchanged": "空闲对话整理设置未变化。",
   "idle_auto_compact_saved": "空闲对话整理设置已保存。",
   "change_idle_auto_compact_minutes": "自动压缩前的静默时长：{before} → {after} 分钟",
-  "change_idle_auto_compact_tokens": "自动压缩的上下文大小：{before} → {after} token"
+  "change_idle_auto_compact_tokens": "自动压缩的上下文大小：{before} → {after} token",
+  "title_supervision_batch_minutes": "普通督办按接收方攒批",
+  "change_supervision_batch_minutes": "普通督办按接收方攒批：{before} → {after} 分钟（0 保持现有节奏）",
+  "bad_supervision_batch_minutes": "请输入 0 至 1440 的整数分钟。",
+  "supervision_batch_minutes_unchanged": "普通督办攒批间隔未变化。",
+  "supervision_batch_minutes_saved": "普通督办攒批间隔已保存为 {value} 分钟。"
 }

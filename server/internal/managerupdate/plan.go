@@ -25,6 +25,10 @@ type Plan struct {
 	Schema              int       `json:"schema"`
 	RunID               string    `json:"run_id"`
 	ManagerID           string    `json:"manager_id"`
+	Unassigned          bool      `json:"unassigned,omitempty"`
+	Main                string    `json:"main,omitempty"`
+	MachineID           string    `json:"machine_id,omitempty"`
+	MachineUID          string    `json:"machine_uid,omitempty"`
 	Dir                 string    `json:"dir"`
 	Binary              string    `json:"binary"`
 	Unit                string    `json:"unit"`
@@ -116,6 +120,13 @@ func (p Plan) validateIdentity() error {
 	if p.Schema != 1 || !idPattern.MatchString(p.ManagerID) || p.ManagerID == "assistant" || p.UID < 0 {
 		return errors.New("invalid schema or independent manager identity")
 	}
+	if p.Unassigned {
+		if p.Main != "" || p.MachineID != "" || p.MachineUID != "" {
+			return errors.New("unassigned inventory identity cannot contain a main, machine or UID")
+		}
+	} else if (p.Main != "" || p.MachineID != "" || p.MachineUID != "") && (p.Main == "" || p.MachineID == "" || p.MachineUID == "") {
+		return errors.New("populated inventory identity must include main, machine and UID together")
+	}
 	for _, s := range []string{p.PreviousSHA256, p.ConfigSHA256, p.PlistSHA256} {
 		if !shaPattern.MatchString(s) {
 			return errors.New("invalid identity SHA256")
@@ -133,6 +144,9 @@ func (p Plan) validateIdentity() error {
 func (p Plan) validateShape() error {
 	if err := p.validateIdentity(); err != nil {
 		return err
+	}
+	if p.Unassigned || p.Main != "" || p.MachineID != "" || p.MachineUID != "" {
+		return errors.New("inventory identity is not an activation plan")
 	}
 	if !runPattern.MatchString(p.RunID) || !sourcePattern.MatchString(p.Source) || p.Version == "" || p.Size <= 0 {
 		return errors.New("invalid release identity")

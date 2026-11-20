@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.Machine
 import persona.core.contracts.PaseoAgent
 import persona.core.contracts.api.AgentLauncher
+import persona.core.contracts.api.PickerTier
 import persona.core.designsystem.*
 import persona.core.designsystem.dense
 import persona.feature.chat.UltracodeQuotaLines
@@ -31,7 +32,12 @@ import persona.feature.chat.rememberUltracodeQuota
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.models.AgentModelPanel
+import persona.feature.chat.ForwardComposerCards
+import persona.feature.chat.ForwardMessage
 import java.net.URI
+
+/** A blocked launcher picked directly, or through the Agent preset whose whole setup Try anyway applies. */
+private data class NewAgentBlockedChoice(val launcher: AgentLauncher, val tier: PickerTier? = null)
 
 @Composable
 internal fun NewAgentDialog(
@@ -44,7 +50,7 @@ internal fun NewAgentDialog(
 ) {
     val state by model.state.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
-    var helping by remember { mutableStateOf<persona.core.contracts.api.AgentLauncher?>(null) }
+    var helping by remember { mutableStateOf<NewAgentBlockedChoice?>(null) }
     // Outside the list: the model list stays open whatever the form below it scrolls away.
     var picking by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -57,8 +63,11 @@ internal fun NewAgentDialog(
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Column(Modifier.fillMaxSize().imePadding()) {
                 LazyColumn(Modifier.weight(1f), list, contentPadding = PaddingValues(bottom = 16.dp.dense), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-                    newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it }, pickers,
-                        onOpenProvider = onOpenProvider?.let { open -> { name: String -> onDismiss(); open(name) } })
+                    newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt,
+                        onBlocked = { helping = NewAgentBlockedChoice(it) },
+                        onTierBlocked = { tier, launcher -> helping = NewAgentBlockedChoice(launcher, tier) }, pickers,
+                        onOpenProvider = onOpenProvider?.let { open -> { name: String -> onDismiss(); open(name) } },
+                        presetHelpFor = helping?.tier?.launcher)
                 }
                 NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(top = 8.dp.dense))
             }
@@ -69,17 +78,20 @@ internal fun NewAgentDialog(
     }
 }
 
-/** The help of the blocked launcher chosen ([launcher]); Try Anyway picks it after all. */
+/** The help of the blocked launcher chosen directly or through [NewAgentBlockedChoice.tier]; Try Anyway applies that choice. */
 @Composable
 private fun LauncherHelp(
-    launcher: persona.core.contracts.api.AgentLauncher?, state: NewAgentState, model: NewAgentViewModel,
+    choice: NewAgentBlockedChoice?, state: NewAgentState, model: NewAgentViewModel,
     onAddProvider: (() -> Unit)?, onDismiss: () -> Unit,
 ) {
-    val block = launcher?.block ?: return
+    val launcher = choice?.launcher ?: return
+    val block = launcher.block ?: return
     // ponytail: a provider added in Settings goes to the primary group's hub; other groups' computers only get the words.
     val adds = onAddProvider.takeIf { persona.core.contracts.GroupKeys.namespaceOf(state.machineId) == null }
     LauncherBlockedSheet(launcher, block, adds, onTryAnyway = {
-        model.selection(state.selection.copy(launcher = launcher.name))
+        val tier = choice.tier
+        if (tier != null) model.pickTier(tier, allowBlocked = true)
+        else model.selection(state.selection.copy(launcher = launcher.name))
         onDismiss()
     }, onDismiss = onDismiss)
 }
@@ -100,7 +112,7 @@ internal fun NewAgentPage(
 ) {
     val state by model.state.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
-    var helping by remember { mutableStateOf<persona.core.contracts.api.AgentLauncher?>(null) }
+    var helping by remember { mutableStateOf<NewAgentBlockedChoice?>(null) }
     var picking by remember(initialModelQuery) { mutableStateOf(initialModelQuery != null) }
     val list = rememberLazyListState()
     val prompt = rememberPromptFocus(state, list)
@@ -112,8 +124,10 @@ internal fun NewAgentPage(
         JListPage(title = stringResource(R.string.agents_action_new_session), onBack = close, largeTitle = false, state = list, bottomBar = {
             NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s))
         }) {
-            newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it }, pickers,
-                onOpenProvider = onOpenProvider)
+            newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt,
+                onBlocked = { helping = NewAgentBlockedChoice(it) },
+                onTierBlocked = { tier, launcher -> helping = NewAgentBlockedChoice(launcher, tier) }, pickers,
+                onOpenProvider = onOpenProvider, presetHelpFor = helping?.tier?.launcher)
         }
         NewAgentToast(model, Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
@@ -143,10 +157,13 @@ private fun rememberPromptFocus(state: NewAgentState, list: LazyListState): Focu
 private fun LazyListScope.newAgentItems(
     state: NewAgentState, model: NewAgentViewModel, machines: List<Machine>, query: String, onQuery: (String) -> Unit, close: () -> Unit,
     onModels: () -> Unit, prompt: FocusRequester, onBlocked: (persona.core.contracts.api.AgentLauncher) -> Unit,
+    onTierBlocked: (PickerTier, AgentLauncher) -> Unit,
     /** The add menu's pickers (#2321); null where the form takes no attachments. */
     pickers: NewAgentPickers? = null,
     /** A provider's page in Settings (#8109); null where there is none to open. */
     onOpenProvider: ((String) -> Unit)? = null,
+    /** A preset help sheet owns its launcher's health reason; hide the duplicates behind it only while it is open. */
+    presetHelpFor: String? = null,
 ) {
     val editable = !state.locked && !state.loading
     if (state.loading) item("loading") { JLinearProgress(null) }
@@ -249,6 +266,46 @@ private fun LazyListScope.newAgentItems(
                 style = PersonaTheme.type.codeSmall, color = PersonaTheme.palette.ink2)
         }
     } }
+    if (state.tiers.isNotEmpty()) {
+        item("presets-title") {
+            JSectionHeader(stringResource(R.string.agents_new_presets))
+            state.profile?.name?.takeIf(String::isNotBlank)?.let {
+                Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+            }
+        }
+        itemsIndexed(state.tiers, key = { _, tier -> "preset:${tier.name}" }) { index, tier ->
+            val launcher = state.launchers.firstOrNull { it.name == tier.launcher }
+            val block = launcher?.block
+            val selected = state.pickedTier?.name == tier.name
+            val details = listOfNotNull(
+                launcher?.title ?: tier.launcher,
+                tier.model?.takeIf(String::isNotBlank),
+                tier.effort?.takeIf(String::isNotBlank),
+                block?.takeUnless { presetHelpFor == tier.launcher }?.let { stringResource(it.reason) },
+            ).joinToString("\n")
+            JGroupItem(GroupPosition.of(index, state.tiers.size)) {
+                JRow(tier.name, Modifier.alpha(if (block != null && !selected) 0.5f else 1f),
+                    subtitle = details.takeIf(String::isNotEmpty), subtitleLines = Int.MAX_VALUE,
+                    leading = { JRadio(selected, null, enabled = editable) }, enabled = editable,
+                    onClick = {
+                        if (block != null && launcher != null && !selected) onTierBlocked(tier, launcher)
+                        else model.pickTier(tier, allowBlocked = block != null)
+                    }, chevron = false)
+                tier.description?.takeIf(String::isNotBlank)?.let { description ->
+                    Text(description, Modifier.padding(horizontal = rowPadding).padding(bottom = Tokens.Space.s),
+                        style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+                }
+            }
+        }
+        if (state.presetLeftOut.isNotEmpty()) item("preset-compatibility") {
+            Text(stringResource(R.string.agents_new_preset_left_out), style = PersonaTheme.type.caption,
+                color = PersonaTheme.palette.cautionText)
+            state.presetLeftOut.forEach {
+                Text(it.resolve(), Modifier.testTag("newAgent.presetLeftOut"), style = PersonaTheme.type.callout,
+                    color = PersonaTheme.palette.cautionText)
+            }
+        }
+    }
     item("agent-types-title") { JSectionHeader(stringResource(R.string.agents_new_agent_type)) }
     val types = state.launchers.map { it.agentType }.distinct()
     val selectedType = state.agentType.takeIf { state.following || state.selection.launcher.isNotEmpty() }
@@ -287,7 +344,7 @@ private fun LazyListScope.newAgentItems(
         val host = launcher.baseUrl?.let { runCatching { URI(it).host }.getOrNull() }
         // Blocked on this computer (#4530, iOS): listed grayed with why; choosing it opens its help instead of picking it.
         val block = launcher.block
-        val reason = block?.let { stringResource(it.reason) }
+        val reason = block?.takeUnless { presetHelpFor == launcher.name }?.let { stringResource(it.reason) }
         JGroupItem(GroupPosition.of(head + index, rows)) {
             // By its own name where it has one (a runtime's provider, Paseo's "Grok", #8261), as the web's pickers name it.
             JRow(launcher.title, Modifier.alpha(if (block != null && state.selection.launcher != launcher.name) 0.5f else 1f),
@@ -354,6 +411,15 @@ private fun LazyListScope.newAgentItems(
             UltracodeQuotaLines(quota, blocked == null, Modifier.padding(horizontal = rowPadding).padding(bottom = Tokens.Space.m))
         }
     }
+    // A forwarded message (#3901) goes before the first message: its card over it.
+    usableForward(state.context)?.let { context ->
+        item("forward") {
+            val refs = remember(context) { ForwardMessage.readAll(context) }
+            ForwardComposerCards(refs, singleLines = 4, onRemove = if (state.locked) null else ({ removed ->
+                model.forwardContext((refs - removed.toSet()).takeIf { it.isNotEmpty() }?.joinToString("\n") { it.xml() })
+            }))
+        }
+    }
     item("prompt") {
         JTextField(state.prompt, model::prompt, enabled = !state.locked,
             label = stringResource(when {
@@ -385,6 +451,8 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
         if (state.pending != null) PendingBadge(if (state.starting) PendingStatus.Verifying else PendingStatus.Unconfirmed)
         state.error?.let { Text(it.resolve(), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout) }
         if (!online) Text(stringResource(R.string.agents_new_offline_footer), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout)
+        if (state.presetNeedsModels) Text(stringResource(R.string.agents_new_preset_loading),
+            Modifier.testTag("newAgent.presetLoading"), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout)
         // What the attachments hold Start back for (iOS `notReadyReason`): uploads still going, a failed one, a launcher that takes none.
         if (state.pending == null && !state.browsing) state.attachmentsHold?.let {
             Text(it.resolve(), Modifier.testTag("newAgent.attachHold"), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout)
@@ -393,7 +461,7 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
             JButton(stringResource(R.string.agents_new_use_directory), { model.closeBrowser(use = true) }, enabled = state.browser != null && !state.loading, modifier = Modifier.fillMaxWidth())
         } else {
             JButton(stringResource(if (state.pending != null) R.string.agents_new_retry_check else R.string.agents_new_start), model::submit, loading = state.starting,
-                enabled = online && !state.starting && !state.loading && state.initialized && (state.pending != null || startable(state, machines)),
+                enabled = online && !state.starting && !state.loading && !state.presetNeedsModels && state.initialized && (state.pending != null || startable(state, machines)),
                 modifier = Modifier.fillMaxWidth())
         }
     }
@@ -401,9 +469,9 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
 
 /** A folder, a launcher or the configuration to follow, an online machine, a first message when required, and attachments ready to go. */
 internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
-    state.selection.cwd.isNotBlank() && (state.selection.launcher.isNotBlank() || state.following) &&
-        machines.any { it.id == state.machineId && it.online } && (!state.promptRequired || state.prompt.isNotBlank()) &&
-        state.attachmentsHold == null
+    !state.presetNeedsModels && state.selection.cwd.isNotBlank() && (state.selection.launcher.isNotBlank() || state.following) &&
+        machines.any { it.id == state.machineId && it.online } &&
+        (!state.promptRequired || state.prompt.isNotBlank() || usableForward(state.context) != null) && state.attachmentsHold == null
 
 internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
 

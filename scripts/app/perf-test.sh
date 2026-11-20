@@ -81,6 +81,8 @@ log "simulator $UDID, default navigation, $ITER iterations, results in $OUT"
 
 # 1. The optimized build (no simulator lock: it only compiles).
 if [ "${PERF_SKIP_BUILD:-0}" != 1 ]; then
+  # The app as it ships, with the watch app and the share extension, whatever the shell exported (apple/lean-dev-build.yml).
+  unset PERSONA_LEAN_DEV_BUILD
   (cd apple && xcodegen generate -q) || { verdict "failed xcodegen"; exit 1; }
   log "building (optimized, $DD)…"
   "${SLOT[@]}" timeout 3600 xcodebuild build-for-testing -project apple/Persona.xcodeproj -scheme Persona \

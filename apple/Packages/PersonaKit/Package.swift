@@ -5,7 +5,7 @@ import PackageDescription
 // booting a simulator (docs/operations/testing.md「PersonaKit」). The apps import it; the watch and widgets do not (yet).
 let package = Package(
     name: "PersonaKit",
-    platforms: [.iOS(.v18), .macOS(.v26), .visionOS(.v26)],
+    platforms: [.iOS(.v18), .macOS(.v15), .visionOS(.v26)],
     products: [
         .library(name: "PersonaKit", targets: ["PersonaKit"]),
     ],

@@ -11,7 +11,8 @@ internal fun settingsFormerEntryAliases(resources: Resources, page: SettingsPage
         SettingsPage.AgentSettings -> listOf(R.string.settings_row_claude, R.string.settings_row_codex, R.string.settings_row_agy, R.string.settings_triage_title)
         SettingsPage.NotificationBackground -> listOf(R.string.settings_ready_notifications, R.string.settings_capsule_title,
             R.string.settings_row_background, R.string.settings_desktops_banner, R.string.settings_desktops_mute)
-        SettingsPage.About -> listOf(R.string.settings_section_about, R.string.settings_about_persona, R.string.settings_update_check)
+        SettingsPage.About -> listOf(R.string.settings_section_about, R.string.settings_about_persona, R.string.settings_update_check,
+            R.string.settings_developing_title, R.string.settings_developing_export)
         SettingsPage.Diagnostics -> listOf(R.string.settings_diag_title, R.string.settings_hub_address, R.string.settings_row_pairing)
         SettingsPage.Connectors -> listOf(R.string.settings_row_mail, R.string.settings_phone_data_title, R.string.settings_sent_title, R.string.settings_row_lark)
         else -> emptyList()

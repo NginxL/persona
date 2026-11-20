@@ -137,7 +137,7 @@ func (h *Manager) feishuChannel(ctx context.Context) channel.View {
 		{ID: "pushes", On: f.Pushes}, {ID: "sync", On: f.Sync}, {ID: "agents", On: f.Agents},
 		{ID: "reports", On: f.Reports}, {ID: "board", On: f.Board}, {ID: "only_conclusions", On: f.OnlyConclusions},
 		{ID: "report_steps", On: f.ReportSteps}, {ID: "answer_new_card", On: f.AnswerNewCard},
-		{ID: "workbench", On: f.Workbench},
+		{ID: "topic_cot", On: f.TopicCot}, {ID: "workbench", On: f.Workbench},
 	}
 	for i := range out.Features {
 		id := out.Features[i].ID
@@ -249,8 +249,12 @@ func (h *Manager) marketChannels(have []channel.View) []channel.View {
 		// asked for every few seconds while agents work, and building the whole catalog for it was 4.4 ms and
 		// 1.1 MB a time with the official market's entries (#3197).
 		var items []CatalogItem
+		channelKinds := map[string]channel.Kind{}
 		for i := range s.index.Extensions {
 			e := &s.index.Extensions[i]
+			for _, contribution := range e.Parsed.Channels() {
+				channelKinds[contribution.ID] = contribution.Kind
+			}
 			if len(e.Parsed.Contributes["channel"]) == 0 || len(e.Parsed.Items("channel")) == 0 {
 				continue
 			}
@@ -267,8 +271,12 @@ func (h *Manager) marketChannels(have []channel.View) []channel.View {
 				if seen[id] {
 					continue
 				}
+				kind, known := channelKinds[id]
+				if !known {
+					kind = channel.KindIM
+				}
 				seen[id] = true
-				out = append(out, channel.View{ID: id, Name: it.Name, Kind: channel.KindIM, Source: channel.SourceMarket, Plugin: it.ID, Market: it.Market,
+				out = append(out, channel.View{ID: id, Name: it.Name, Kind: kind, Source: channel.SourceMarket, Plugin: it.ID, Market: it.Market,
 					State: channel.StateNotInstalled, Bind: channel.BindNone, Description: it.Description})
 			}
 		}
@@ -385,6 +393,8 @@ func (h *Manager) configureFeishu(ctx context.Context, enabled *bool, features m
 				f.ReportSteps = on
 			case "answer_new_card":
 				f.AnswerNewCard = on
+			case "topic_cot":
+				f.TopicCot = on
 			default:
 				return errors.New(i18n.T(h.botLang(ctx), "hub-channels.no_feature", i18n.Args{"feature": id}))
 			}

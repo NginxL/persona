@@ -17,9 +17,9 @@ import { handoffFrom } from "../../lib/handoff";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { applyCompleteSessions, refreshTodos, reset } from "../../lib/store";
-import type { Todo } from "../../lib/todos";
+import type { Todo, TodoAgent } from "../../lib/todos";
 import type { Session } from "../../lib/types";
-import { lastActive, shortSessionId } from "./Handoff";
+import { handoffAgents, lastActive, shortSessionId, TASK_LINE_SLACK_MS } from "./Handoff";
 import { AssistantActionBar, FeedLineView } from "./Tasks";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -103,6 +103,8 @@ describe("hand-off cards", () => {
     expect(cards()[0]!.querySelector('[data-handoff-wake="resumed"]')?.textContent).toBe(t("assistant-tasks.handoff_wake_resumed"));
   });
 
+  // Anchored at its line's time (#11854): the first Agents linked from then on. Before #11854 this held because the
+  // card kept the to-do's earliest Agents whatever line it was under; now it holds because the line is the earlier one.
   it("draws the Agents the hand-off went to, not one a later message started (that one has its own card)", async () => {
     const next: Session = { ...agent, session_id: "next-agent", title: "Next Agent" };
     const todo = linked("example-task", "Example task", [agent, next]);
@@ -140,6 +142,99 @@ describe("hand-off cards", () => {
     expect(removed!.textContent).toContain(t("assistant-tasks.handoff_gone"));
   });
 
+  describe("a to-do continued by later plans (#11854)", () => {
+    // three plans on one to-do: the first made it, the next two continued it; each continuation released the Agent
+    // before and cleared the older plan's todo_id, as the hub does (tasks_start.go)
+    const hour = (h: number, m = 0) => `2026-11-10T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`;
+    const session = (id: string, title: string, state: "working" | "idle"): Session => ({ ...agent, session_id: id, title, state, status: state } as Session);
+    const first = session("first-agent", "First Agent", "idle");
+    const second = session("second-agent", "Second Agent", "idle");
+    const third = session("third-agent", "Third Agent", "working");
+    const row = (s: Session, linkedAt: string, releasedAt?: string): TodoAgent => ({ machine_id: s.machine_id, session_id: s.session_id, title: s.title, linked_at: linkedAt, released_at: releasedAt });
+    const todoWith = (agents: TodoAgent[]): Todo => ({ id: "continued-task", title: "Continued task", origin: conversation, plan_id: "plan-a", created_at: hour(8), updated_at: hour(12), agents });
+    const plan = (id: string, at: string, task: Partial<TaskPlan["tasks"][number]>): FeedItem => {
+      getFeedState().plans[id] = { id, conversation, state: "started", created_at: at, tasks: [{ title: "Continued task", prompt: "p", cwd: "/example", machine: "example-computer", ...task }] };
+      return { id: `${id}-event`, conversation, at, kind: "plan", ref: id };
+    };
+    const plans = () => ({
+      a: plan("plan-a", hour(8), {}),
+      b: plan("plan-b", hour(9), { continues: "continued-task" }),
+      c: plan("plan-c", hour(12), { continues: "continued-task", todo_id: "continued-task" }),
+    });
+    const ids = () => cards().map((c) => c.getAttribute("data-handoff-card"));
+
+    it("the newest plan's card is the running Agent it started, and opens it, not the first stopped one", async () => {
+      const { c } = plans();
+      const todo = todoWith([row(third, hour(12, 1)), row(second, hour(9, 1), hour(12)), row(first, hour(8, 1), hour(9))]);
+      await show(c, [todo], [first, second, third]);
+      expect(ids()).toEqual([`example-computer/third-agent`]);
+      const [card] = cards();
+      expect(card!.textContent).toContain("Third Agent");
+      expect(card!.querySelector('[data-handoff-state="working"]')).not.toBeNull();
+      act(() => card!.click());
+      expect(getPanel()).toEqual({ kind: "agent", mid: "example-computer", sid: "third-agent" });
+    });
+
+    it("cards under the earlier plans keep the Agents those plans started, the first one included (its todo_id was cleared)", async () => {
+      const { a, b } = plans();
+      const todo = todoWith([row(third, hour(12, 1)), row(second, hour(9, 1), hour(12)), row(first, hour(8, 1), hour(9))]);
+      await show(b, [todo], [first, second, third]);
+      expect(ids()).toEqual([`example-computer/second-agent`]);
+      act(() => root.render(<StrictMode><div data-chat-scroll><FeedLineView item={a} simplified /></div></StrictMode>));
+      await settle();
+      expect(ids()).toEqual([`example-computer/first-agent`]);
+    });
+
+    it("before the newest plan's Agent is linked its card says starting, never an older Agent", async () => {
+      const { c } = plans();
+      await show(c, [todoWith([row(second, hour(9, 1), hour(12)), row(first, hour(8, 1), hour(9))])], [first, second]);
+      expect(ids()).toEqual(["todo:continued-task"]);
+      expect(cards()[0]!.textContent).toContain(t("assistant-tasks.starting_agent"));
+      expect(cards()[0]!.textContent).not.toContain("Second Agent");
+    });
+
+    it("with every Agent stopped, the newest plan's card is the Agent it started, the latest", async () => {
+      const { c } = plans();
+      const todo = todoWith([row(third, hour(12, 1), hour(13)), row(second, hour(9, 1), hour(12)), row(first, hour(8, 1), hour(9))]);
+      await show(c, [todo], [first, second, { ...third, state: "idle", status: "idle" } as Session]);
+      expect(ids()).toEqual([`example-computer/third-agent`]);
+    });
+
+    it("several Agents the newest plan started together each get a card; the released older ones none", async () => {
+      const { c } = plans();
+      const fourth = session("fourth-agent", "Fourth Agent", "working");
+      const todo = todoWith([row(fourth, hour(12, 2)), row(third, hour(12, 1)), row(second, hour(9, 1), hour(12)), row(first, hour(8, 1), hour(9))]);
+      await show(c, [todo], [first, second, third, fourth]);
+      // in the hub's order (formatTodo: the newest linked first)
+      expect(ids()).toEqual([`example-computer/fourth-agent`, `example-computer/third-agent`]);
+    });
+
+    // continued in quick succession: the previous Agent was linked 10 seconds before the newest plan's line, within a
+    // task line's look-behind (TASK_LINE_SLACK_MS); a plan line takes none, so it is never the plan's own
+    describe("when the previous Agent was linked just before the newest plan's line", () => {
+      const justBefore = (releasedAt?: string) => row(second, "2026-11-10T11:59:50Z", releasedAt);
+
+      it("its card says starting until the plan's Agent is linked, not the previous one", async () => {
+        const { c } = plans();
+        await show(c, [todoWith([justBefore("2026-11-10T12:00:20Z"), row(first, hour(8, 1), hour(9))])], [first, second]);
+        expect(ids()).toEqual(["todo:continued-task"]);
+        expect(cards()[0]!.textContent).toContain(t("assistant-tasks.starting_agent"));
+      });
+
+      it("then it is only the plan's Agent, linked soon after", async () => {
+        const { c } = plans();
+        await show(c, [todoWith([row(third, hour(12, 1)), justBefore("2026-11-10T12:00:20Z"), row(first, hour(8, 1), hour(9))])], [first, second, third]);
+        expect(ids()).toEqual([`example-computer/third-agent`]);
+      });
+
+      it("or linked more than two minutes later", async () => {
+        const { c } = plans();
+        await show(c, [todoWith([row(third, hour(12, 5)), justBefore("2026-11-10T12:00:20Z"), row(first, hour(8, 1), hour(9))])], [first, second, third]);
+        expect(ids()).toEqual([`example-computer/third-agent`]);
+      });
+    });
+  });
+
   it("a message that started a new Agent for its task has that Agent's card under it", async () => {
     const next: Session = { ...agent, session_id: "next-agent", title: "Next Agent" };
     await show({ id: "routed-event", conversation, at, kind: "routed", ref: "example-task", body: { text: "Go on", new_agent: "next-agent", new_agent_machine: "example-computer" } },
@@ -167,5 +262,34 @@ describe("the card's words", () => {
     expect(lastActive({ activity_at: new Date(now - 10_000).toISOString() }, now)).toBe(t("assistant-tasks.handoff_active_now"));
     expect(lastActive({ updated_at: new Date(now - 5 * 60_000).toISOString() }, now)).toMatch(/5/);
     expect(lastActive({}, now)).toBeUndefined();
+  });
+});
+
+describe("which Agents a card stands for (#11854)", () => {
+  const row = (id: string, linkedAt: string, extra: Partial<TodoAgent> = {}): TodoAgent => ({ machine_id: "example-computer", session_id: id, linked_at: linkedAt, ...extra });
+  const names = (agents: TodoAgent[]) => agents.map((a) => a.session_id);
+
+  it("without an anchor: the newest batch still linked, not the first", () => {
+    const agents = [row("old", "2026-11-10T08:00:00Z", { released_at: "2026-11-10T09:00:00Z" }), row("new", "2026-11-10T12:00:00Z"), row("new-too", "2026-11-10T12:01:00Z")];
+    expect(names(handoffAgents(agents))).toEqual(["new", "new-too"]);
+  });
+
+  it("without an anchor and with every Agent released: the one released last", () => {
+    const agents = [row("first", "2026-11-10T08:00:00Z", { released_at: "2026-11-10T09:00:00Z" }), row("last", "2026-11-10T09:00:00Z", { released_at: "2026-11-10T12:00:00Z" })];
+    expect(names(handoffAgents(agents))).toEqual(["last"]);
+  });
+
+  it("anchored: the first Agents linked since, skipping ones that failed to start; none yet unless it may fall back", () => {
+    const agents = [row("old", "2026-11-10T08:00:00Z", { released_at: "2026-11-10T09:00:00Z" }), row("failed", "2026-11-10T09:00:30Z", { start_error: "x" }), row("retry", "2026-11-10T09:05:00Z")];
+    expect(names(handoffAgents(agents, "2026-11-10T09:00:00Z"))).toEqual(["retry"]);
+    expect(names(handoffAgents(agents.slice(0, 1), "2026-11-10T09:00:00Z", false))).toEqual([]);
+    expect(names(handoffAgents(agents.slice(0, 1), "2026-11-10T09:00:00Z"))).toEqual(["old"]);
+  });
+
+  it("looks behind its anchor only as far as asked: a task line's 30 seconds, a plan line's none", () => {
+    const agents = [row("previous", "2026-11-10T11:59:50Z"), row("planned", "2026-11-10T12:03:00Z")];
+    expect(names(handoffAgents(agents, "2026-11-10T12:00:00Z", false, TASK_LINE_SLACK_MS))).toEqual(["previous"]);
+    expect(names(handoffAgents(agents, "2026-11-10T12:00:00Z", false))).toEqual(["planned"]);
+    expect(names(handoffAgents(agents.slice(0, 1), "2026-11-10T12:00:00Z", false))).toEqual([]);
   });
 });

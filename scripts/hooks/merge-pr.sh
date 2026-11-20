@@ -62,6 +62,13 @@ trap 'rm -rf "$tmp"' EXIT
 # One snapshot, so every field comes from the same moment. The squash message is passed to the merge instead of being
 # left to GitHub, which would take the title and body as they are when it merges, edits after the scan included.
 gh pr view "$pr" --json headRefOid,headRefName,isCrossRepository,baseRefName,title,body > "$tmp/pr.json"
+# A release PR is not mergeable on privacy checks alone: all its platform jobs must have verified the proposed
+# merge result. Ordinary PRs retain the existing exact-head/privacy path.
+if [[ "$(python3 -c 'import json; print(json.load(open("'"$tmp"'/pr.json"))["title"])')" == release:* ]]; then
+  python3 "$root/scripts/operations/release_merge_gate.py" "$pr" \
+    "$(python3 -c 'import json; print(json.load(open("'"$tmp"'/pr.json"))["headRefOid"])')" \
+    "$(python3 -c 'import json; print(json.load(open("'"$tmp"'/pr.json"))["title"])')"
+fi
 python3 - "$tmp" "$pr" <<'PY'
 import json, re, sys
 tmp, pr = sys.argv[1:]

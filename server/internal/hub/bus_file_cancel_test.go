@@ -128,7 +128,7 @@ func TestBusFileCallFallsBackOnlyForOldManager(t *testing.T) {
 					return map[string]any{"ok": true}, nil
 				})
 				h.devices.mu.Lock()
-				h.devices.upOpen = true
+				h.devices.upOpen = map[string]bool{devicesOwner: true}
 				h.devices.mu.Unlock()
 				var out map[string]any
 				err := (&busNode{h: h, id: "m1"}).Call(context.Background(), tc.method, map[string]any{}, &out)

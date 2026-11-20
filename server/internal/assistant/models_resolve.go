@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -17,6 +18,10 @@ import (
 func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBinding, string, error) {
 	l := s.requestCtxLang(ctx)
 	if p.Parent != "" {
+		if isTaskPurpose(p.ID) && p.Parent == "assistant" {
+			b, err := s.taskModelBaseline(ctx, p.MachineID)
+			return b, p.Parent, err
+		}
 		b, err := s.resolveModel(ctx, p.Parent)
 		return b, p.Parent, err
 	}
@@ -26,6 +31,26 @@ func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBindi
 			b = s.delegateBaseline(ctx, b)
 		}
 		return b, "inbox.triage", err // inheritedLabel names the connection and the model
+	}
+	if p.ID == "translate" {
+		b, err := s.resolveModel(ctx, "inbox.triage")
+		if err != nil {
+			return b, "inbox.triage", err
+		}
+		c, err := s.apiConfig(ctx, b)
+		if err == nil && messagesAPI(c.API) && strings.HasPrefix(c.Model, "claude-") {
+			b.Model = translationHaikuModel
+			if name, ok := strings.CutPrefix(b.Provider, "launcher."); ok {
+				for _, launcher := range s.storedLaunchers(ctx) {
+					if launcher.Name == name && launcher.HaikuModel != "" {
+						b.Model = launcher.HaikuModel
+						break
+					}
+				}
+			}
+			b.Effort = "off"
+		}
+		return b, "inbox.triage", nil
 	}
 	if p.Kind == "api" {
 		provider := "legacy.ai"
@@ -54,6 +79,8 @@ func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBindi
 	}
 	return ModelBinding{Provider: p.ID}, mc(l, "source_extension_default"), nil
 }
+
+const translationHaikuModel = "claude-haiku-5-5"
 
 // delegateModel is what "Answering agents' questions" runs on unless the user picks another (2026-11-05, the user's call): it decides for the
 // user whether an agent's question is theirs, a cheap triage model is not up to that.
@@ -94,9 +121,9 @@ func inheritedLabel(l i18n.Lang, p ModelPurpose, base ModelBinding, from string,
 		}
 	}
 	switch {
-	case p.ID == "agent.delegate" && (p.Override.Model != "" || model == ""):
+	case (p.ID == "agent.delegate" || p.ID == purposeTranslate) && (p.Override.Model != "" || model == ""):
 		return mc(l, "source_delegate_connection", i18n.Args{"provider": name}) // the model is the user's pick, or the connection's own
-	case p.ID == "agent.delegate":
+	case p.ID == "agent.delegate" || p.ID == purposeTranslate:
 		return mc(l, "source_delegate_default", i18n.Args{"provider": name, "model": model})
 	case ownModelRecord(p.ID), isExtensionPurpose(p.ID):
 		return purposeName(l, p.Parent)
@@ -134,9 +161,7 @@ func messagesAPI(api string) bool { return api == "" || api == "messages" }
 // fallbackAPIProvider names the managed connection an unconfigured API use runs on: the first direct API provider,
 // else the first keyed launcher speaking Messages. Other launcher protocols cannot serve these uses. Hidden ones and
 // ones without an address, a default model or a key are skipped. "" when there is none.
-func (s *Service) fallbackAPIProvider(ctx context.Context) string {
-	stored := s.storedLaunchers(ctx)
-	hidden := s.hiddenLaunchers(ctx)
+func fallbackAPIProviderFrom(stored []storedLauncher, hidden []string) string {
 	usable := func(l storedLauncher) bool {
 		return !proto.IsExternalLauncher(l.Name) && !slices.Contains(hidden, l.Name) && l.BaseURL != "" && l.Model != "" && l.KeySealed != ""
 	}
@@ -151,6 +176,10 @@ func (s *Service) fallbackAPIProvider(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func (s *Service) fallbackAPIProvider(ctx context.Context) string {
+	return fallbackAPIProviderFrom(s.storedLaunchers(ctx), s.hiddenLaunchers(ctx))
 }
 
 // mergeModel puts over's choices on base: another provider starts from nothing (its model and effort are its own).
@@ -292,9 +321,21 @@ func (s *Service) apiConfig(ctx context.Context, b ModelBinding) (ai.Config, err
 					if err != nil {
 						return c, i18n.Err("assistant-models_probe.err_open_headers")
 					}
+					if err := checkHeaders(headers); err != nil {
+						return c, err
+					}
+					if l.Kind != "api" && !l.CustomHeadersSupported() {
+						return c, errRuntimeHeaders
+					}
 					for _, header := range parseHeaders(headers) {
+						name := http.CanonicalHeaderKey(header[0])
+						if c.Headers == nil {
+							c.Headers = map[string]string{}
+						}
+						c.Headers[name] = header[1]
 						if strings.EqualFold(header[0], "User-Agent") {
-							c.UserAgent = &header[1]
+							value := header[1]
+							c.UserAgent = &value
 						}
 					}
 				}

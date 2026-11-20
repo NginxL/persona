@@ -284,6 +284,96 @@ func TestModelCandidatesUserSwitchesOffOrReplaces(t *testing.T) {
 	}
 }
 
+func TestExtensionCandidateEditorReadsExactChoices(t *testing.T) {
+	s, _, _ := extensionModelService(t, "kb answer")
+	candidateGateways(t, s, map[string]string{"unit-model": "ok"})
+	// These are managed connections, but none can serve a direct candidate.
+	providers := s.storedLaunchers(t.Context())
+	providers = append(providers,
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "no-key", Kind: "api", BaseURL: "https://unused.invalid"}},
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "no-address", Kind: "api"}, KeySealed: providers[0].KeySealed},
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "cli-only", Agent: "codex"}},
+	)
+	putLaunchers(t, s, providers...)
+	const id = "extension.kb-curator"
+	if _, err := completeAs(s, "kb-curator", `{"messages":[{"role":"user","content":"hello"}],"models":["unit-model"]}`); err != nil {
+		t.Fatal(err)
+	}
+	res := modelRequest(s, "PATCH", id, `{"revision":0,"candidates":{"mode":"custom","custom":[{"provider":"launcher.gw-unit-model","model":""},{"provider":"launcher.gw-unit-model","model":"other-unit-model"}]}}`)
+	if res.Code != 200 {
+		t.Fatal(res.Code, res.Body.String())
+	}
+	read := modelRequest(s, "GET", id, "")
+	var wire struct {
+		Purpose struct {
+			ProviderIDs []string `json:"provider_ids"`
+			Candidates  struct {
+				Direct    []string         `json:"direct_provider_ids"`
+				Custom    []map[string]any `json:"custom"`
+				Requested []struct {
+					Models []map[string]any `json:"models"`
+				} `json:"requested"`
+			} `json:"candidates"`
+		} `json:"purpose"`
+	}
+	if read.Code != 200 || json.Unmarshal(read.Body.Bytes(), &wire) != nil {
+		t.Fatal(read.Code, read.Body.String())
+	}
+	c := wire.Purpose.Candidates
+	if !slices.Equal(c.Direct, []string{"launcher.gw-unit-model"}) || !slices.Contains(wire.Purpose.ProviderIDs, c.Direct[0]) {
+		t.Errorf("direct providers: %v, purpose: %v", c.Direct, wire.Purpose.ProviderIDs)
+	}
+	if len(c.Custom) != 2 || c.Custom[0]["model"] != "other-unit-model" || c.Custom[1]["model"] != "other-unit-model" || c.Custom[0]["configured_model"] != "" || c.Custom[1]["configured_model"] != "other-unit-model" {
+		t.Errorf("wire lost the difference between following the provider and an explicit pick: %v", c.Custom)
+	}
+	if len(c.Requested) != 1 || len(c.Requested[0].Models) != 1 {
+		t.Fatalf("requested: %v", c.Requested)
+	}
+	if _, exists := c.Requested[0].Models[0]["configured_model"]; exists {
+		t.Error("an extension request has no user-configured model")
+	}
+
+	// A saved provider can become unavailable. Its row stays editable, and clients can distinguish an empty
+	// callable list from an older hub that never sent the field.
+	putLaunchers(t, s, providers[1:]...)
+	wire.Purpose.Candidates.Direct = nil
+	read = modelRequest(s, "GET", id, "")
+	if read.Code != 200 || json.Unmarshal(read.Body.Bytes(), &wire) != nil {
+		t.Fatal(read.Code, read.Body.String())
+	}
+	c = wire.Purpose.Candidates
+	if c.Direct == nil || len(c.Direct) != 0 {
+		t.Errorf("expected an explicit empty direct provider list, got %#v", c.Direct)
+	}
+	if len(c.Custom) != 2 || c.Custom[0]["provider"] != "launcher.gw-unit-model" || c.Custom[0]["configured_model"] != "" || c.Custom[0]["available"] != false {
+		t.Errorf("missing provider lost its saved row: %v", c.Custom)
+	}
+	for _, tc := range []struct{ lang, missing, unoffered string }{
+		{"en", "the provider gw-unit-model is gone or cannot be called directly", "no provider in Settings › Model providers offers it"},
+		{"zh-Hans", "供应商 gw-unit-model 已移除或无法直接调用", "设置中的模型供应商均未提供此模型"},
+		{"ja", "プロバイダー gw-unit-model は削除されたか、直接呼び出せません", "設定済みのモデルプロバイダーはこのモデルを提供していません"},
+	} {
+		t.Run(tc.lang, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/model-config/purposes/"+id, nil)
+			req.Header.Set("Accept-Language", tc.lang)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, withRequestLang(req))
+			var out struct{ Purpose ModelPurpose }
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out.Purpose.Candidates == nil {
+				t.Fatal(rec.Code, rec.Body.String())
+			}
+			rows := out.Purpose.Candidates
+			if len(rows.Custom) != 2 || len(rows.Requested) != 1 || len(rows.Requested[0].Models) != 1 {
+				t.Fatal(rows)
+			}
+			custom, requested := rows.Custom[0], rows.Requested[0].Models[0]
+			if custom.Problem != tc.missing || requested.Problem != tc.unoffered || requested.Model != "unit-model" || custom.Provider != "launcher.gw-unit-model" {
+				t.Errorf("candidate reasons or identifiers: custom=%+v requested=%+v", custom, requested)
+			}
+		})
+	}
+}
+
 // One candidate at a time (how an extension that counts failures itself calls): its failure is its own code and data,
 // as a call without candidates gives, never model_candidates_failed.
 func TestModelSingleCandidateFailsWithItsOwnCode(t *testing.T) {

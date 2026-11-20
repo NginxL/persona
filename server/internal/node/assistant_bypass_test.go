@@ -623,7 +623,7 @@ func assertAssistantBypassClassification(t *testing.T, command string, cards int
 			}
 			n.larkCfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
 			// Seed metadata without starting the CLI or executing the classified commands.
-			n.larkRisks = map[string]string{"\x00docs +fetch": "read", "\x00docs +create": "write"}
+			n.larkRisks = map[string]string{"\x00docs +fetch": "read", "\x00docs +create": "write", "\x00im messages get": larkCLIMissing}
 			n.noteModes(testThread, proto.ModeBypass, "")
 			fh.answer = func(proto.Interaction) proto.Resolution { no := false; return proto.Resolution{Allow: &no} }
 			decision, want := "", "allow"
@@ -657,6 +657,134 @@ func assertAssistantBypassClassification(t *testing.T, command string, cards int
 			t.Logf("classification only: %s decision=%s cards=%d; want %s/%d", adapter, decision, len(fh.interactions()), want, cards)
 			if decision != want || len(fh.interactions()) != cards {
 				t.Fatalf("decision=%s cards=%d; want %s/%d", decision, len(fh.interactions()), want, cards)
+			}
+		})
+	}
+}
+
+func TestAssistantBypassRespectsConfiguredAllowRules(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		command   string
+		gateRules []proto.LarkRule
+		cliRules  []proto.LarkRule
+		health    bool
+		healthCwd bool
+		want      string
+		cards     int
+	}{
+		{
+			name:    "configured conversation send allow",
+			command: `ex POST /conversations/allowed_chat/messages '{"text":"hi"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/conversations/allowed_chat/messages", Action: "allow"},
+			},
+			want:  "allow",
+			cards: 0,
+		},
+		{
+			name:    "configured message replies allow",
+			command: `ex POST /messages/msg_123/replies '{"text":"reply"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/messages/*/replies", Action: "allow"},
+			},
+			want:  "allow",
+			cards: 0,
+		},
+		{
+			name:    "configured CLI send allow",
+			command: `lark-cli im +messages-send --as user --text hello`,
+			cliRules: []proto.LarkRule{
+				{Method: "CLI", Path: "/im/+messages-send", Action: "allow"},
+			},
+			want:  "allow",
+			cards: 0,
+		},
+		{
+			name:    "unlisted conversation still confirms",
+			command: `ex POST /conversations/other_chat/messages '{"text":"hi"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/conversations/allowed_chat/messages", Action: "allow"},
+			},
+			want:  "deny",
+			cards: 1,
+		},
+		{
+			name:    "unlisted deletion still confirms",
+			command: `ex POST /messages/msg_123/recall '{}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/messages/*/replies", Action: "allow"},
+			},
+			want:  "deny",
+			cards: 1,
+		},
+		{
+			name:    "health session overrides configured allow",
+			command: `ex POST /conversations/allowed_chat/messages '{"text":"hi"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/conversations/allowed_chat/messages", Action: "allow"},
+			},
+			health: true,
+			want:   "deny",
+			cards:  1,
+		},
+		{
+			name:    "health execution directory overrides configured allow",
+			command: `ex POST /conversations/allowed_chat/messages '{"text":"hi"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/conversations/allowed_chat/messages", Action: "allow"},
+			},
+			healthCwd: true,
+			want:      "deny",
+			cards:     1,
+		},
+		{
+			name:    "explicit deny before allow still denies without card",
+			command: `ex POST /conversations/allowed_chat/messages '{"text":"hi"}'`,
+			gateRules: []proto.LarkRule{
+				{Method: "POST", Path: "/conversations/allowed_chat/messages", Action: "deny"},
+				{Method: "POST", Path: "/conversations/*/messages", Action: "allow"},
+			},
+			want:  "deny",
+			cards: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := codexTestNode(t)
+			fh := withFakeHub(t, n)
+			const sid = "22222222-2222-4222-8222-222222222222"
+			cfg := olCfg(tc.gateRules...)
+			cfg.Rules = tc.cliRules
+			cfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
+			n.mu.Lock()
+			n.larkCfg, n.larkCfgAt = cfg, time.Now().Add(time.Hour)
+			n.procs[sid] = &assistantProc{id: sid, agent: "claude", exited: make(chan struct{})}
+			n.mu.Unlock()
+			n.persistModes(sid, proto.ModeBypass, "")
+			if tc.health {
+				n.gates().markHealth(sid)
+			}
+			fh.mu.Lock()
+			fh.answer = func(proto.Interaction) proto.Resolution {
+				no := false
+				return proto.Resolution{Allow: &no}
+			}
+			fh.mu.Unlock()
+			cwd := t.TempDir()
+			if tc.healthCwd {
+				cwd = "/home/me/.persona/health"
+			}
+			decision, reason, err := n.larkCheck(context.Background(), sid, cwd, tc.command,
+				proto.Interaction{SessionID: sid, Cwd: "/home/me/.persona/assistant", ExpiresAt: time.Now().Add(time.Minute)})
+			if err != nil || decision != tc.want || len(fh.interactions()) != tc.cards {
+				t.Fatalf("decision=%q reason=%q err=%v cards=%d, want %q/%d", decision, reason, err, len(fh.interactions()), tc.want, tc.cards)
+			}
+			if tc.cards > 0 {
+				for _, card := range fh.interactions() {
+					if len(card.AlwaysKeys) != 0 {
+						t.Fatalf("hard boundary offers Always: %v", card.AlwaysKeys)
+					}
+				}
 			}
 		})
 	}

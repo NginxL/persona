@@ -4,13 +4,12 @@ import (
 	"context"
 	"slices"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
-// A mail round reads each account's latest INBOX page (extmgr readMailAccount) and applyMail settles the threads on
+// A mail round reads each eligible mailbox's latest page (extmgr readMailAccount) and applyMail settles the threads on
 // it. An open item whose mail is on no page any more (archived or deleted in the mail client, or pushed off by newer
 // mail) would never be looked at again: neither read elsewhere nor past the window would file it, and the open side of
 // the list would only grow (#5993). settleMailOffPage gives those items the same rules:
@@ -35,7 +34,7 @@ type mailOffPageAsk struct {
 // settleMailOffPage settles account a's open mail items off the page a round just applied (applyMail), at now.
 func (s *Service) settleMailOffPage(ctx context.Context, a assistantwire.InboxMailAccount, now time.Time) []*InboxItem {
 	b := &s.inbox
-	changed, asks := b.mailOffPage(a, a.Messages, now)
+	changed, asks := b.mailOffPage(a, now)
 	if len(asks) == 0 {
 		return changed
 	}
@@ -84,18 +83,25 @@ func (s *Service) settleMailOffPage(ctx context.Context, a assistantwire.InboxMa
 	return changed
 }
 
-// mailOffPage is account a's open, unread mail items with no mail on the page msgs (by thread or by mail), under
+// mailOffPage is account a's open, unread mail items with no mail on their folder's page (by thread or by mail), under
 // b.mu: those past the window are read elsewhere at once (changed), the others are what to ask the hub about, the
 // longest unasked first, as many as fit in one ask.
-func (b *inboxBook) mailOffPage(a assistantwire.InboxMailAccount, msgs []assistantwire.InboxMailSummary, now time.Time) ([]*InboxItem, []mailOffPageAsk) {
+func (b *inboxBook) mailOffPage(a assistantwire.InboxMailAccount, now time.Time) ([]*InboxItem, []mailOffPageAsk) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	defer b.settleRound()
-	threads := map[string]bool{}
-	onPage := map[string]bool{}
-	for _, m := range msgs {
-		threads[mailThread(m.Subject, m.From.Email)] = true
-		onPage[m.Mailbox+"\x00"+strconv.FormatUint(uint64(m.UID), 10)] = true
+	type page struct {
+		threads map[string]bool
+		uids    map[uint32]bool
+	}
+	pages := map[string]page{}
+	for f := range a.Mailboxes() {
+		p := page{threads: map[string]bool{}, uids: map[uint32]bool{}}
+		for _, m := range f.Messages {
+			p.threads[mailThread(m.Subject, m.From.Email)] = true
+			p.uids[m.UID] = true
+		}
+		pages[assistantwire.MailFolderKey(a.ID, f.Name)] = p
 	}
 	for id := range b.mailAsked { // asked about before, and settled since
 		if it := b.items[id]; it == nil || !it.open() || it.Read {
@@ -105,11 +111,12 @@ func (b *inboxBook) mailOffPage(a assistantwire.InboxMailAccount, msgs []assista
 	var changed []*InboxItem
 	var asks []mailOffPageAsk
 	for _, it := range b.items {
-		if it.Mail == nil || it.Mail.AccountID != a.ID || !it.open() || it.Read || len(it.Mail.UIDs) == 0 || threads[it.Mail.Thread] ||
-			slices.ContainsFunc(it.Mail.UIDs, func(uid uint32) bool {
-				return onPage[it.Mail.Mailbox+"\x00"+strconv.FormatUint(uint64(uid), 10)]
-			}) {
-			continue // the page's (applyMail)
+		if it.Mail == nil || it.Mail.AccountID != a.ID || !it.open() || it.Read || len(it.Mail.UIDs) == 0 {
+			continue
+		}
+		p, ok := pages[it.Mail.folderKey()]
+		if !ok || p.threads[it.Mail.Thread] || slices.ContainsFunc(it.Mail.UIDs, func(uid uint32) bool { return p.uids[uid] }) {
+			continue // skip unreadable folders and mail already settled on its own page
 		}
 		if now.Sub(it.UpdatedAt) > inboxWindow {
 			b.mailReadElsewhere(it, now)

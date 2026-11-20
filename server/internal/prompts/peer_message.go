@@ -9,7 +9,8 @@ import (
 // through that session's peer inbox (node/claudepeer.go): Claude Code shows it to the model as one from "another
 // Claude session", so it says whose it is and that the answer belongs in the session (agents/peer_message).
 type PeerMessage struct {
-	Text string // what the user wrote
+	Language string // Owner language; empty keeps the legacy wrapper.
+	Text     string // what the user wrote
 }
 
 func RenderPeerMessage(m PeerMessage) string { return render("agents/peer_message", m) }
@@ -19,11 +20,15 @@ func RenderPeerMessage(m PeerMessage) string { return render("agents/peer_messag
 // (agents/peer_stop). The session's transcript shows it as the stop it is (transcript/peer.go).
 func PeerStop() string { return render("agents/peer_stop", nil) }
 
-// peerMessageHead is what agents/peer_message puts before the user's words, rendered on first use: rendering it in a
+// peerMessageHeads are what agents/peer_message puts before the user's words, rendered on first use: rendering them in a
 // package variable would parse every template whenever personad starts, a hook too (#1308).
-var peerMessageHead = sync.OnceValue(func() string {
-	head, _, _ := strings.Cut(render("agents/peer_message", PeerMessage{Text: "\x00"}), "\x00")
-	return head
+var peerMessageHeads = sync.OnceValue(func() []string {
+	var heads []string
+	for _, language := range []string{"", "English", "日本語"} {
+		head, _, _ := strings.Cut(render("agents/peer_message", PeerMessage{Language: language, Text: "\x00"}), "\x00")
+		heads = append(heads, head)
+	}
+	return append(heads, olderPeerMessageHeads...)
 })
 
 // olderPeerMessageHeads are the heads agents/peer_message rendered before, still stripped: transcripts keep them, and
@@ -38,7 +43,7 @@ var olderPeerMessageHeads = []string{
 // PeerMessageBody is the user's words in a rendered peer message (what the session's transcript records as the
 // message's body), from the current template or an older one; ok false when s is not one.
 func PeerMessageBody(s string) (body string, ok bool) {
-	for _, head := range append([]string{peerMessageHead()}, olderPeerMessageHeads...) {
+	for _, head := range peerMessageHeads() {
 		if body, ok = strings.CutPrefix(s, head); ok {
 			return body, true
 		}

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,10 +14,12 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/taskworkspace"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -30,14 +33,14 @@ import (
 // toolNames are the tools only assistant conversations get; their descriptions and schemas are in prompts/mcp
 // (docs/assistant/prompts.md).
 var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "schedule_followup", "schedule_routine", "schedule_state_set", "delete_routine", "list_followups",
-	"cancel_followup", "list_places", "save_place", "machines_list", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_transfer", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
+	"cancel_followup", "list_places", "save_place", "machines_list", "machine_redeploy", "agents_list", "agent_read", "agent_send", "agent_switch", "agents_switch", "agent_interrupt", "agent_start", "agent_supervise", "agent_transfer", "agent_archive", "agent_unarchive", "agent_autoname", "agent_autoname_receipt", "interaction_answer", "ask_escalate", "inbox_suggest", "inbox_draft",
 	"inbox_folders", "inbox_move", "inbox_post", "kb_search", "kb_list", "kb_get", "kb_update", "kb_history_plan", "kb_history_status", "kb_history_stop", "kb_history_resume", "persona_settings", "secret_run", "skill_import",
 	"model_profiles_list", "model_profile_get", "model_profile_switch", "model_profile_rollback",
 	"repositories_list", "repository_get", "repository_add", "view_show", "view_update", "view_get",
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
 	"conversation_tags_set",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
-	"todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
+	"todo_workspace", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
 	"direction_name", "leader_progress"}
 
 // Tools are the assistant's tools (assistant.tools).
@@ -65,6 +68,9 @@ func (s *Service) Tool(ctx context.Context, call ToolCall) proto.ToolResult {
 		return proto.TextResult(err.Error(), true)
 	}
 	call.Name = compat.Tool(call.Name)
+	if err := s.guardRefusal(ctx, call.MachineID, call.SessionID, call.Name); err != nil {
+		return proto.TextResult(err.Error(), true)
+	}
 	if res, refused := s.inboxModelRefusal(ctx, call.MachineID, call.SessionID, "", call.Name); refused {
 		return res
 	}
@@ -167,6 +173,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 		}
 		return res, err
+	case "todo_workspace":
+		return s.toolTodoWorkspace(ctx, machine, self, args)
 	case "todo_repository_links_add":
 		return s.toolTodoRepositoryLinksAdd(ctx, machine, self, name, args)
 	case "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set":
@@ -311,6 +319,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return "Cancelled.", nil
 	case "machines_list":
 		return s.toolMachinesList(ctx)
+	case "machine_redeploy":
+		return s.toolMachineRedeploy(ctx, machine, args)
 	case "agents_list":
 		var a struct{ State, Machine, Query string }
 		_ = json.Unmarshal(args, &a)
@@ -324,6 +334,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		_ = json.Unmarshal(args, &a)
 		return s.toolAgentRead(ctx, a.Machine, a.SessionID, a.Turns)
 	case "agent_send":
+		wait, waitErr := agentWaitDuration(args)
+		if waitErr != nil {
+			return "", waitErr
+		}
 		var a struct {
 			Machine   string `json:"machine"`
 			SessionID string `json:"session_id"`
@@ -333,8 +347,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			DismissNotice bool `json:"dismiss_notice"`
 			// Task: new work handed to this agent becomes a supervised task of the main conversation (agent_control.go),
 			// read from RawTask by givenTask (nil: a reply).
-			Task    *sendTask       `json:"-"`
-			RawTask json.RawMessage `json:"task"`
+			Task    *sendTask           `json:"-"`
+			RawTask json.RawMessage     `json:"task"`
+			Handoff *taskHandoffRequest `json:"handoff"`
 			// Attachments: the user's pictures and files, by their paths on this conversation's computer (#2437).
 			Attachments []string `json:"attachments"`
 			// Resume: resume a stopped agent with its context, as the user's Resume does, with ResumeWhy said to the
@@ -342,7 +357,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			Resume    bool   `json:"resume"`
 			ResumeWhy string `json:"resume_why"`
 		}
-		_ = json.Unmarshal(args, &a)
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
 		a.Task = givenTask(a.RawTask)
 		am, c, err := s.findAgent(ctx, a.Machine, a.SessionID)
 		if err != nil {
@@ -357,6 +374,16 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		if strings.TrimSpace(a.Text) == "" {
 			return "", fmt.Errorf("text is empty")
+		}
+		var handoff *preparedHandoff
+		if a.Handoff != nil {
+			if a.Task != nil || a.Resume || c.Status == proto.StatusOffline || stoppedAgent(c) || exitText(a.Text) {
+				return "", fmt.Errorf("a handoff needs an existing running Agent and a work message")
+			}
+			handoff, err = s.prepareTaskHandoff(ctx, self, am.ID, c.SessionID, *a.Handoff)
+			if err != nil {
+				return "", err
+			}
 		}
 		resume := ""
 		if stoppedAgent(c) { // read-only (#4754): a message does not start it; only a resume asked for does (#8099)
@@ -415,12 +442,27 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if a.Task != nil {
 			text, err = s.withStandingAuthorizations(ctx, am.ID, c.Cwd, text)
 			if err != nil {
-				return "", task.sendFailed(ctx, s, err)
+				return "", task.sendFailed(ctx, s, rpc.NotSent(err))
 			}
+		}
+		if handoff != nil {
+			wire, _ := json.Marshal(taskHandoffReceipt{TodoID: handoff.origin, ID: handoff.ID, Head: handoff.Head, Check: handoff.Target.Check})
+			text = prompts.RenderTodoHandoff(prompts.TodoHandoff{Text: text, ReceiptJSON: string(wire), Until: handoff.until.Format(time.RFC3339)})
 		}
 		// The user's attachments, copied to the agent's computer when it is another one: the text ends with them, the
 		// pictures in the <attached_images> block a picture sent straight to the agent ends with (#2437).
 		params := sendParams(c.SessionID, text, a.DismissNotice)
+		inputID := ""
+		if handoff != nil {
+			inputID = handoff.ID
+			params["client_msg_id"] = inputID
+		} else if wait > 0 {
+			inputID = "wait_" + randomHex(16)
+			params["client_msg_id"] = inputID
+		}
+		finish := func(receipt string) string {
+			return s.waitAgentReply(ctx, receipt, inputID, wait, fixedWaitTarget(am.ID, c.SessionID))
+		}
 		var handed handedAttachments
 		if mentioned := s.mentionedAttachments(ctx, machine, self, a.Text, atts); len(atts)+len(mentioned) > 0 {
 			handed = s.handAttachments(ctx, machine, am.ID, atts, mentioned)
@@ -429,7 +471,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		sending, _ := params["text"].(string)
 		// A resume goes through the user's Resume's node call, the text as its first message (agent_resume.go).
 		if resume != "" {
-			return s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task)
+			receipt, err := s.resumeAndSend(ctx, self, am, c, params, resume, a.Text, handed.said(), task)
+			if err != nil {
+				return "", err
+			}
+			return finish(receipt), nil
 		}
 		if c.Status != proto.StatusOffline {
 			// A running agent takes it at once. A send of more for an accepted task holds a turn of the agent that
@@ -441,30 +487,52 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if err != nil {
 				return "", task.sendFailed(ctx, s, err)
 			}
-			if !note.reopens() {
+			if !note.reopens() && handoff == nil {
 				lctx = ctx
 			}
-			var sent struct {
-				Queued bool `json:"queued"` // the runtime holds it behind the turn under way (#8097)
+			// A nearly full Claude Code or Codex agent is compacted with its own /compact before the text goes in, by
+			// its node as it delivers, which checks again then (#11137): that takes minutes, so the wait is not the live
+			// send's. Any other send goes exactly as before.
+			if contextFull(c) && compactable(c) {
+				params["compact_if_full"] = true
+				var ccancel context.CancelFunc
+				lctx, ccancel = context.WithTimeout(context.WithoutCancel(ctx), compactSendWait)
+				defer ccancel()
 			}
-			err = s.call(lctx, am.ID, DeviceSessionSend, params, &sent)
+			var sent agentSendReply
+			if handoff != nil {
+				err = s.sendTaskHandoff(lctx, handoff, params, &sent)
+			} else {
+				err = s.call(lctx, am.ID, DeviceSessionSend, params, &sent)
+			}
 			note.sent(lctx, err) // an unknown answer counts for the agent's next turn: it may still arrive
 			if err == nil {
 				s.progressMade(am.ID, c.SessionID, time.Now()) // the supervisor told it something: a new stretch (supervise_progress.go)
 			}
 			if err != nil {
-				if note.reopens() && sendUnknown(err) {
-					// Its own wait ran out, or the link dropped, while the node may still type it in: the model reads
-					// the agent before it sends the text twice.
-					err = fmt.Errorf("%w (it may still arrive; check with agent_read before sending again)", err)
+				if errCode(err) == proto.CodeCompactFailed && !sendUnknown(err) {
+					return "", task.sendFailed(ctx, s, compactFailed(c, am, err, false))
 				}
 				return "", task.sendFailed(ctx, s, err)
 			}
-			if sent.Queued {
-				return fmt.Sprintf("Queued for %s on %s: it is in the middle of a turn and reads the message once what it is doing now ends.",
-					agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
+			if handoff != nil {
+				return finish(fmt.Sprintf("Handoff %s confirmed for %s. It is waiting for %s to report the result.",
+					handoff.ID, handoff.origin, handoff.Target.Title) + handed.said()), nil
 			}
-			return fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
+			if sent.CompactAfterTurn {
+				return finish(fmt.Sprintf("Queued for %s on %s: it is in the middle of a turn and its context is nearly full, so once "+
+					"the turn ends it is compacted with its own /compact and then reads the message.", agentLabel(c), am.Name) +
+					handed.said() + task.sent(ctx, s, a.Text)), nil
+			}
+			if sent.Compacted {
+				return finish(fmt.Sprintf("Sent to %s on %s after compacting its nearly full context with its own /compact.",
+					agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text)), nil
+			}
+			if sent.Queued {
+				return finish(fmt.Sprintf("Queued for %s on %s: it is in the middle of a turn and reads the message once what it is doing now ends.",
+					agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text)), nil
+			}
+			return finish(fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text)), nil
 		}
 		// Not running and not read-only: a branch nothing has started yet (node fork.go), or a node from before #4754
 		// that still resumes a stopped agent. Its node starts it first, which can take minutes and goes on if this call
@@ -480,7 +548,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if err != nil {
 			return "", task.sendFailed(sctx, s, err)
 		}
-		return fmt.Sprintf("Resumed %s on %s (same session, directory and launcher) and sent.", agentLabel(c), am.Name) + handed.said() + task.sent(sctx, s, a.Text), nil
+		return finish(fmt.Sprintf("Resumed %s on %s (same session, directory and launcher) and sent.", agentLabel(c), am.Name) + handed.said() + task.sent(sctx, s, a.Text)), nil
 	case "agent_switch": // moves a running agent to another launcher and goes on with it (agent_switch.go, #5973)
 		return s.toolAgentSwitch(ctx, machine, self, args)
 	case "agents_switch": // moves many running agents to another launcher at once (agents_switch.go, #6008)
@@ -498,6 +566,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "agent_autoname_receipt":
 		return s.toolAgentAutonameReceipt(ctx, machine, self, args) // agent_naming_receipt.go
 	case "agent_start":
+		wait, waitErr := agentWaitDuration(args)
+		if waitErr != nil {
+			return "", waitErr
+		}
 		var a struct {
 			Machine  string `json:"machine"`
 			Cwd      string `json:"cwd"`
@@ -505,6 +577,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			Launcher string `json:"launcher"`
 			Model    string `json:"model"`
 			Effort   string `json:"effort"`
+			Speed    string `json:"speed"`
 			Tier     string `json:"tier"`
 			Worktree struct {
 				Branch string `json:"branch"`
@@ -536,7 +609,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
 		a.Cwd = proto.ExpandHome(a.Cwd, am.Home)
-		own := startPick{launcher: strings.TrimSpace(a.Launcher), effort: strings.TrimSpace(a.Effort)} // before the tier
+		own := startPick{launcher: strings.TrimSpace(a.Launcher), effort: strings.TrimSpace(a.Effort), speed: strings.TrimSpace(a.Speed)} // before the tier
 		// The tier is resolved first (an unknown one asks and starts nothing), then Model Settings' Agents laid over it as
 		// the start lays it: what runs is said on the card (a hand-off from the health space asks) and in the answer.
 		tier, runs := strings.TrimSpace(a.Tier), ""
@@ -545,21 +618,26 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
+			model := a.Model
 			if !layTier(t, &a.Launcher, &a.Model, &a.Effort) {
 				tier = "" // a launcher of its own: the tier gives it nothing
 			} else {
-				picks := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort}
+				if a.Speed == "" && (model == "" || model == t.Model) {
+					a.Speed = t.Speed
+				}
+				picks := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed}
 				if s.applyModel(ctx, "agent.new", picks) == nil { // one that can't run is the start's to say
 					l, _ := picks["launcher"].(string)
 					m, _ := picks["model"].(string)
 					e, _ := picks["effort"].(string)
-					runs = ModelTier{Launcher: l, Model: m, Effort: e}.runs()
+					v, _ := picks["speed"].(string)
+					runs = ModelTier{Launcher: l, Model: m, Effort: e, Speed: v}.runs()
 				}
 			}
 		}
 		// What it runs on this computer, before the user is asked (#2640, launcher_fit.go): a launcher named here that
 		// the computer lacks starts nothing; a default it lacks gives way to one it has, and the card and answer say so.
-		run := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort}
+		run := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed}
 		if err := s.applyModel(ctx, "agent.new", run); err != nil {
 			return "", err
 		}
@@ -567,10 +645,15 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
+		a.Speed, _ = run["speed"].(string)
+		if err := checkStartSpeed(run, fit, ""); err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
 		if swapped != "" {
 			a.Launcher, _ = run["launcher"].(string)
 			a.Model, _ = run["model"].(string)
 			a.Effort, _ = run["effort"].(string)
+			a.Speed, _ = run["speed"].(string)
 			tier, runs = "", "" // the tier's launcher is not what runs
 		}
 		// traex, omp…: no effort (launcher_modes.go). One this call names is refused before the user is asked, rather
@@ -599,6 +682,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			where += i18n.T(s.lang(ctx), "assistant-tools.with_tier", i18n.Args{"tier": tier, "runs": runs})
 		case a.Model != "":
 			where += i18n.T(s.lang(ctx), "assistant-tools.with_model", i18n.Args{"model": a.Model})
+		case proto.FasterSpeed(a.Speed):
+			where += " · " + a.Speed
 		}
 		if a.Ultracode {
 			where += " · ultracode"
@@ -619,9 +704,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 		defer cancel()
 		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
-		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "tab_name": s.tabName(sctx, a.Prompt)}
-		prompt := s.withCloseoutBrief(sctx, a.Prompt, false)
-		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, self, prompt)
+		title := s.tabName(sctx, a.Prompt)
+		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "tab_name": title, "title": title}
+		prompt := s.withProjectContext(sctx, am.ID, a.Cwd, self, a.Prompt)
 		if a.Ultracode {
 			params["ultracode"] = true
 		}
@@ -639,6 +724,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if _, fit, err = s.fitLauncher(ctx, am, own, params); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
+		}
+		params["prompt"] = s.withCloseoutBrief(sctx, am.ID, prompt, false)
+		if err := checkStartSpeed(params, fit, ""); err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
 		}
 		// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
 		if fit.allowAll() {
@@ -720,6 +809,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
 		defer release()
+		clearStandardSpeed(params)
 		s.setPlanThen(ctx, am.ID, params)
 		var values *handoffValues
 		if hand != nil {
@@ -735,6 +825,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 				values.wipe() // no retry can need them again
 			}
 			note += hand.granted(approvedBy)
+		}
+		inputID := ""
+		if wait > 0 {
+			inputID = "wait_" + randomHex(16)
+			params["client_msg_id"] = inputID
 		}
 		err = s.call(sctx, am.ID, DeviceSessionStart, params, &res)
 		if reason, refused := s.ultracodeRefusal(ctx, err, params); refused {
@@ -756,20 +851,24 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if startResultUnknown(err) {
 				// The node may already have the session and a running agent although the answer never came back:
 				// do not report failure (the model would start it again, duplicating the run).
-				return s.startedWithoutAnswer(ctx, self, am, picked, a.Cwd, a.Prompt, params["tab_name"], note, expectID, knownIDs), nil
+				return s.startedWithoutAnswer(ctx, self, am, picked, fit.snapshot, a.Cwd, a.Prompt, params["tab_name"], note, expectID, knownIDs), nil
 			}
 			return "", err
 		}
+		s.nameStartedAgent(sctx, am.ID, res.Session, title)
 		s.recordStartSuccess(ctx, am.ID, ranLauncher(launcher, res.Instead, res.Session))
 		if said := s.startInsteadNote(ctx, am, res.Instead, res.Session); said != "" {
 			note += " Note: " + said + "." // the engine ran another of the same kind, its default model, a lower effort (#8140)
 		}
-		s.inboxAgentStarted(ctx, self, am.ID, res.Session.SessionID, a.Prompt) // an inbox event's conversation: its chain
-		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID); ok {
-			return fmt.Sprintf("Started on %s in %s: session %s, a task of this conversation (its card is in the conversation; "+
-				"%s).%s", am.Name, a.Cwd, res.Session.SessionID, told, note), nil
+		finish := func(receipt string) string {
+			return s.waitAgentReply(ctx, receipt, inputID, wait, fixedWaitTarget(am.ID, res.Session.SessionID))
 		}
-		return fmt.Sprintf("Started on %s in %s: session %s. It shows up in the app's Agents tab.%s", am.Name, a.Cwd, res.Session.SessionID, note), nil
+		s.inboxAgentStarted(ctx, self, am.ID, res.Session.SessionID, a.Prompt) // an inbox event's conversation: its chain
+		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID, cmp.Or(res.Session.Agent, fit.snapshot)); ok {
+			return finish(fmt.Sprintf("Started on %s in %s: session %s, a task of this conversation (its card is in the conversation; "+
+				"%s).%s", am.Name, a.Cwd, res.Session.SessionID, told, note)), nil
+		}
+		return finish(fmt.Sprintf("Started on %s in %s: session %s. It shows up in the app's Agents tab.%s", am.Name, a.Cwd, res.Session.SessionID, note)), nil
 	}
 	return "", fmt.Errorf("unknown tool %s", name)
 }
@@ -795,32 +894,84 @@ var agentStartAdoptRetry = 200 * time.Millisecond
 // missing one or a request the node refused is definite and stays an error; rpc.ErrDropped answers the same words
 // as rpc.ErrClosed (a relay passes them through), so the rpc.Error message form counts too.
 func startResultUnknown(err error) bool {
+	if p, ok := errors.AsType[*taskworkspace.Problem](err); ok {
+		return p.Code == "operation_unknown"
+	}
 	var re *rpc.Error
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, rpc.ErrClosed) || errors.As(err, &re) && re.Message == rpc.ErrClosed.Error()
 }
 
-// sendUnknown: a session.send or session.start that failed though its text may have reached the agent: its answer
-// never came back (startResultUnknown), or the node's error says the text may have arrived or did (nodeMayHaveTaken).
-// Not when the manager's own connection says it never went out (rpc.ErrNotSent: the caller's wait ran out, or the
-// connection closed, before it was written, or the node's not-started refusals outlasted the retries).
+// sendUnknown reports whether a failed node write may have taken effect. An explicit delivery result takes
+// precedence over the transport's words. An uncoded error relayed across the bus keeps only its message.
 func sendUnknown(err error) bool {
-	return (startResultUnknown(err) || nodeMayHaveTaken(err)) && !errors.Is(err, rpc.ErrNotSent)
+	if _, ok := errors.AsType[*completedNodeWriteError](err); ok {
+		return true // a later validation error describes a different operation
+	}
+	if err == nil || errors.Is(err, rpc.ErrNotSent) {
+		return false
+	}
+	switch nodeDelivered(err) {
+	case "none":
+		return false
+	case "unknown", "yes":
+		return true
+	}
+	var re *rpc.Error
+	if errors.As(err, &re) {
+		if re.Code != "" {
+			return re.Code == devicewire.CodeDeadline || re.Code == devicewire.CodeNodeClosed
+		}
+		return noSendAnswer(re.Message)
+	}
+	return startResultUnknown(err) || noSendAnswer(err.Error())
 }
 
-// nodeMayHaveTaken: err is the node's, and its delivered says the text may have arrived ("unknown": typing failed part
-// way, or a Claude's inbox read it but the session has not confirmed it yet, peer_unconfirmed) or did ("yes"). A refusal
-// says "none" (nothing was typed); an error that says neither is read by its kind alone (startResultUnknown).
+// Only the transport's complete, canonical message substitutes for a lost Go error type.
+func noSendAnswer(message string) bool {
+	return message == context.DeadlineExceeded.Error() || message == context.Canceled.Error() || message == rpc.ErrClosed.Error()
+}
+
+// A node already answered a write successfully, but the manager could not validate or decode the answer.
+// Keep the original error for diagnostics without turning it into permission to send again.
+type completedNodeWriteError struct{ error }
+
+func (e *completedNodeWriteError) Unwrap() error { return e.error }
+
+func tracksNodeWrite(method string) bool {
+	return method == DeviceSessionSend || method == DeviceSessionStart || method == devicewire.MethodCloseTaskTerminal
+}
+
+func beforeNodeWrite(method string, err error) error {
+	if tracksNodeWrite(method) {
+		return rpc.NotSent(err)
+	}
+	return err
+}
+
+func afterNodeWrite(method string, err error) error {
+	if err != nil && tracksNodeWrite(method) {
+		return &completedNodeWriteError{err}
+	}
+	return err
+}
+
+// nodeMayHaveTaken counts only a delivery the node itself marked as possible or confirmed.
 func nodeMayHaveTaken(err error) bool {
+	d := nodeDelivered(err)
+	return d == "unknown" || d == "yes"
+}
+
+func nodeDelivered(err error) string {
 	var re *rpc.Error
 	if !errors.As(err, &re) || len(re.Data) == 0 {
-		return false
+		return ""
 	}
 	var d struct {
 		Delivered string `json:"delivered"`
 	}
 	_ = json.Unmarshal(re.Data, &d)
-	return d.Delivered == "unknown" || d.Delivered == "yes"
+	return d.Delivered
 }
 
 // liveSendWait bounds a send to an agent that runs when the send may reopen its accepted task (agent_send), and the
@@ -832,9 +983,9 @@ var liveSendWait = 90 * time.Second
 // text: check the Agents list first and never start a second copy. A failed pre-start list disables only the
 // heuristic, not an exact expectID match. expectID is the session id the hub asked this start to use
 // (session_adopt.go).
-func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
+func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, launcherKind, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
 	if sess, ok := s.adoptStartedSession(ctx, m, launcher, cwd, expectID, knownIDs); ok {
-		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID); ok {
+		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID, cmp.Or(sess.Agent, launcherKind)); ok {
 			return fmt.Sprintf("Started on %s in %s: session %s (the start took longer than the wait; the session was "+
 				"confirmed from the machine's own list), a task of this conversation (its card is in the conversation; "+
 				"%s).%s",
@@ -1114,6 +1265,9 @@ func (s *Service) Action(ctx context.Context, a Action) (ActionResult, error) {
 			return ActionResult{}, err
 		}
 	}
+	if mine, err := s.sessionReviewAction(ctx, a.InteractionID, r); mine {
+		return ActionResult{OK: err == nil}, err
+	}
 	if mine, err := s.toolLoopAnswer(ctx, a.InteractionID, r); mine {
 		return ActionResult{OK: err == nil}, err
 	}
@@ -1204,6 +1358,9 @@ func (s *Service) findAgent(ctx context.Context, machine, id string) (Device, pr
 		}
 		list, _ := s.sessions(ctx, m.ID)
 		for _, c := range list {
+			if c.HiddenByDirectory() {
+				continue
+			}
 			if c.SessionID == id || strings.HasPrefix(c.SessionID, id) {
 				if found != nil {
 					return Device{}, proto.Session{}, fmt.Errorf("session_id %s is ambiguous; use the full id and machine", id)
@@ -1267,7 +1424,7 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		}
 		list, muted, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant || c.FoldedUnder() != "" {
+			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" {
 				continue
 			}
 			c.State = c.FoldedState()
@@ -1336,6 +1493,10 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		}
 		if c.Launcher != "" && c.SourceKind == "" && !c.Assistant { // what agent_switch moves it from (agent_switch.go)
 			fmt.Fprintf(&b, " · launcher=%s", c.Launcher)
+			if c.OffLauncher { // its claude was resumed without Persona's command (#11792)
+				fmt.Fprintf(&b, " (off_launcher: started on it, but its claude now runs without Persona's start command, "+
+					"e.g. herdr's bare resume after a restart, so not on %s; agent_switch to %s brings it back)", c.Launcher, c.Launcher)
+			}
 		}
 		if to := s.queuedSwitchOf(r.m.ID, c.SessionID); to != "" { // agents_switch queued it for the end of its turn
 			fmt.Fprintf(&b, " · switch_queued=%s", to)

@@ -1,6 +1,7 @@
+import { decisionSourceLabel } from "./todo-decision-label";
 import { describe, expect, it } from "vitest";
 import type { Session } from "./types";
-import { decisionSourceLabel, makeSessionLookup, supersedeCandidates, type Todo, type TodoDecision } from "./todos";
+import { makeSessionLookup, supersedeCandidates, type Todo, type TodoDecision } from "./todos";
 
 const dec = (id: string, patch: Partial<TodoDecision> = {}): TodoDecision => ({
   id, todo_id: "todo_1", question: `q-${id}`, choice: `c-${id}`, reason: "", source: "manual", source_machine: "",

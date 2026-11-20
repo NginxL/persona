@@ -16,6 +16,7 @@
   ],
   "reviewer": {
     "command": "claude",
+    "concurrency": 16,
     "timeout_seconds": 900
   },
   "poll_seconds": 60,

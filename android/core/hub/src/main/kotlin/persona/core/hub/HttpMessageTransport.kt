@@ -68,6 +68,18 @@ class HttpMessageTransport(
                 val body = saved?.get("body")?.jsonPrimitive?.contentOrNull
                 if (status != null && body != null) {
                     val result = decodeResult(request.session, status, String(Base64.getDecoder().decode(body), Charsets.UTF_8))
+                    if (result == MessageTransportResult.Held) {
+                        // A failed follow-up read does not undo the manager's receipt. Only an exact
+                        // transcript echo can promote it to Agent delivery.
+                        val shown = try {
+                            transcriptEvidence(request, createdAt, false)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            null
+                        }
+                        return shown ?: MessageEvidence.Receipt(result)
+                    }
                     if (result != MessageTransportResult.Accepted) return MessageEvidence.Receipt(result)
                     // A successful receipt still needs the transcript to replace the local bubble: an item tagged with
                     // this id, or (older hubs; Claude Code keeps its own id for the message) one with its words.
@@ -93,6 +105,12 @@ class HttpMessageTransport(
         if (reply?.get("state")?.jsonPrimitive?.contentOrNull in setOf("pending", "unknown"))
             return MessageTransportResult.NoReceipt
         if (status in 200..299) {
+            if (reply?.get("delivered")?.jsonPrimitive?.contentOrNull == "later") {
+                val kept = reply?.get("undelivered") as? JsonObject
+                // An offline Agent names its computer. Assistant conversations do not; a bare replay stays Held as upstream.
+                return if (kept == null || kept["computer"] != null) MessageTransportResult.Held
+                    else MessageTransportResult.Kept
+            }
             onAccepted(target, reply)
             return MessageTransportResult.Accepted
         }

@@ -168,13 +168,32 @@ func (n *Node) persistModelRecovery(id string) {
 
 // recordRecoverySwitch marks that recovery moved id from its configured model to the model that answers now. The
 // marker accumulates every model the chain tried and keeps the first failure's reason, reset time and probe identity.
-func (n *Node) recordRecoverySwitch(id, launcher, from, probeFrom, to, reason string, resets *time.Time, tried []string) {
+func (n *Node) recordRecoverySwitch(id, launcher, from, probeFrom, to, reason string, resets *time.Time, tried []string, original ...modelExecution) {
 	if !n.recoveryProtected(id) {
 		return
 	}
 	prev := n.modelRecovery(id)
-	r := &proto.ModelRecovery{From: from, ProbeFrom: probeFrom, To: to, Reason: reason, At: time.Now().UTC(), Tried: append([]string{}, tried...)}
+	var choice *proto.ModelRecoveryChoice
+	if len(original) > 0 {
+		e := original[0]
+		choice = &proto.ModelRecoveryChoice{Effort: e.Effort, UseEffort: e.UseEffort, Fingerprint: e.Fingerprint, Launcher: launcher}
+	} else {
+		n.mu.Lock()
+		if current := n.recoveries[id]; current != nil {
+			e := current.from
+			choice = &proto.ModelRecoveryChoice{Effort: e.Effort, UseEffort: e.UseEffort, Fingerprint: e.Fingerprint, Launcher: launcher}
+		}
+		n.mu.Unlock()
+	}
+	r := &proto.ModelRecovery{From: from, ProbeFrom: probeFrom, To: to, Reason: reason, At: time.Now().UTC(), Tried: append([]string{}, tried...), Choice: choice}
 	if prev != nil && prev.From == from {
+		if prev.Choice != nil && choice != nil && !prev.ChainExhausted {
+			e := modelExecution{Model: prev.From, Effort: prev.Choice.Effort, UseEffort: prev.Choice.UseEffort, Fingerprint: prev.Choice.Fingerprint}
+			current := modelExecution{Model: from, Effort: choice.Effort, UseEffort: choice.UseEffort, Fingerprint: choice.Fingerprint}
+			if prev.Choice.Launcher == launcher && sameModelChoice(e, current) {
+				r.Choice = prev.Choice // the first configured execution identity wins throughout one recovery chain
+			}
+		}
 		if prev.ProbeFrom != "" {
 			r.ProbeFrom = prev.ProbeFrom // the first configured identity wins throughout one recovery chain
 		}
@@ -199,6 +218,7 @@ func (n *Node) recordRecoveryExhausted(id, reason string, resets *time.Time, tri
 	r := &proto.ModelRecovery{Reason: reason, At: time.Now().UTC(), Tried: append([]string{}, tried...), ChainExhausted: true}
 	if prev != nil {
 		r.From, r.ProbeFrom, r.To = prev.From, prev.ProbeFrom, prev.To
+		r.Choice = prev.Choice
 	}
 	if resets != nil {
 		r.ResetsAt = resets
@@ -295,21 +315,27 @@ func (n *Node) returnToConfiguredAt(ctx context.Context, id string, at time.Time
 // askedModel is the request before heldFallback, so an empty or literal default remains distinguishable from a concrete
 // model. ProbeFrom is deliberately never copied into the execution.
 func (n *Node) applyModelRecoveryReturn(ctx context.Context, id, askedModel string, execution modelExecution, holdExpired bool) modelExecution {
+	if execution.NewModelChoice {
+		// An explicit choice wins even when it names marker.To. Its old marker and hold are committed only after delivery.
+		return execution
+	}
 	marker := n.modelRecovery(id)
 	if !modelRecoverySwitched(marker) || !n.recoveryProtected(id) {
 		return execution
 	}
 	if askedModel != marker.From && askedModel != marker.To {
-		// A newer explicit model choice wins over an automatic return. End the old marker without rewriting the request.
+		// Compatibility for callers that do not carry full-choice provenance. End the old marker without rewriting the request.
 		n.clearModelRecovery(id)
 		return execution
 	}
-	// Only an existing hold that expired for this exact request counts as natural expiry. Its two-hour sticky record
-	// must still skip a wasted same-model retry. A confirmed recovery/reset releases all recovery bookkeeping.
-	backViaHold := holdExpired && askedModel == marker.From && execution.Model == marker.From
 	now := time.Now()
+	// An existing hold that expired for this exact request counts as natural expiry. So does an aged persisted record
+	// whose original full identity still matches: age must not turn it into a cold fallback.
+	naturalExpiry := holdExpired && askedModel == marker.From && execution.Model == marker.From ||
+		!marker.At.IsZero() && now.Sub(marker.At) >= assistantRefusalSticky && askedModel == marker.From && execution.Model == marker.From
+	// Its two-hour sticky record must still skip a wasted same-model retry. A confirmed recovery/reset releases all recovery bookkeeping.
 	confirmed := marker.Returning || marker.ResetsAt != nil && now.After(*marker.ResetsAt)
-	if !confirmed && !backViaHold {
+	if !confirmed && !naturalExpiry {
 		confirmed = n.returnToConfiguredAt(ctx, id, now)
 	}
 	switch {
@@ -317,7 +343,7 @@ func (n *Node) applyModelRecoveryReturn(ctx context.Context, id, askedModel stri
 		// Confirmed recovery is stronger than simultaneous natural expiry: release the hold and unavailable record too.
 		execution.Model = marker.From
 		n.releaseModelRecovery(id, marker.From)
-	case backViaHold:
+	case naturalExpiry:
 		execution.Model = marker.From
 		n.clearModelRecovery(id)
 	default:
@@ -353,10 +379,24 @@ func (n *Node) releaseModelRecoveryLocked(id, configured string) (dropped bool) 
 		}
 	}
 	delete(n.fallbacks, id)
+	launcher := ""
+	if marker != nil && marker.Choice != nil {
+		launcher = marker.Choice.Launcher
+	}
+	if launcher == "" {
+		if st, ok := n.state.get(id); ok {
+			launcher = st.Launcher
+		}
+	}
 	probeFrom := modelRecoveryProbeFrom(marker)
 	for k := range n.unavailable {
-		if _, model, ok := strings.Cut(k, "\x00"); ok &&
-			(model == configured || marker != nil && (model == marker.From || model == probeFrom)) {
+		l, model, ok := strings.Cut(k, "\x00")
+		// Only this conversation's original launcher supplied the availability evidence. A same-named model on another
+		// launcher, or on an unidentified one, keeps its own unavailable record.
+		if !ok || l != launcher {
+			continue
+		}
+		if model == configured || marker != nil && (model == marker.From || model == probeFrom) {
 			delete(n.unavailable, k)
 		}
 	}
@@ -418,15 +458,13 @@ func probeGateway(ctx context.Context, base, key, model, headers string) bool {
 	if err != nil {
 		return false
 	}
+	for name, value := range piHeaders(headers) {
+		req.Header.Set(name, value)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("Authorization", "Bearer "+key)
-	for _, line := range strings.Split(headers, "\n") {
-		if name, value, ok := strings.Cut(strings.TrimSpace(line), ":"); ok && strings.EqualFold(strings.TrimSpace(name), "User-Agent") {
-			req.Header.Set("User-Agent", strings.TrimSpace(value))
-		}
-	}
 	modelhttp.SetDefaultUserAgent(req.Header)
 	modelhttp.SetOpenCodeSession(req.Header, req.URL.String(), modelhttp.OpenCodeSessionHeaderValue(headers))
 	resp, err := modelProbeHTTPClient.Do(req)

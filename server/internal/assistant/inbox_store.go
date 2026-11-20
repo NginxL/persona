@@ -120,6 +120,13 @@ func (s *Service) loadInbox(ctx context.Context) bool {
 // pass for it, and what rows from before arrivals and chains lack.
 func (b *inboxBook) stored(it *InboxItem) {
 	b.larkRequestAccount(it)
+	for _, a := range it.SuggestionAttempts {
+		if a != nil && a.Status == suggestionSending {
+			// No process-local sender survived loading this row. The original identity stays reserved, but its
+			// delivery must be checked in the source rather than retried under a new caller UUID.
+			a.Status, a.Retryable, a.active = suggestionUnknown, false, false
+		}
+	}
 	if it.ArrivedOf == "" { // stored before arrivals were stamped
 		it.ArrivedOf, it.ArrivedAt = it.Last, it.UpdatedAt
 	}

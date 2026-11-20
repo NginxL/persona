@@ -2,7 +2,8 @@
 // (GET /api/v1/launchers/presets: its built-in providers, then the extensions'), a compatible gateway typed by hand last.
 // A preset needs only ② the key: it is tested on its own (POST /launchers/test with the preset) and saved with
 // assign, and (3) says what now runs on it. The gateway goes (2) "Connect" (a display name in any language, address, auth, key, the
-// startup ID under "More options" where the hub makes one up, #5029; once address and key are in it fetches the models
+// startup ID under "More options" where the hub makes one up, #5029; optional request headers sit beside the checks,
+// and once address and key are in it fetches the models
 // and tests one by itself, and "Test connection" and "Fetch models" stay for doing it by hand; where the hub finds the
 // sign-in method, #5329, that check finds it, a line names it and the choice waits under "More options") (3) "Choose models"
 // (context window, thinking levels, the default; an ID typed by hand is looked up in the hub's catalog) and, for Claude Code, its tiers
@@ -54,6 +55,8 @@ import {
   connectProblems,
   firstConnectProblem,
   formProblems,
+  headerRuntimeHint,
+  headersProblem,
   hostOf,
   mergeDiscovered,
   legacyChatClears,
@@ -324,7 +327,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
   };
 
   const set = <K extends keyof ProviderForm>(k: K) => (v: ProviderForm[K]) => setF((x) => ({ ...x, [k]: v }));
-  const problems = formProblems(f, isNew, !!old?.has_key, autoName);
+  const problems = formProblems(f, isNew, !!old?.has_key, autoName, !!old?.has_headers);
   const fieldProblems = connectProblems(f, isNew, !!old?.has_key, autoName);
   // what a field says under it once Next was pressed (the display name's and a typed startup ID's say it as typed)
   const shownProblem = (k: ConnectField) => (tried ? fieldProblems[k] || undefined : undefined);
@@ -740,6 +743,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
                 </select>
               </Labelled>
             )}
+            <RequestHeaders f={f} setF={setF} hadHeaders={!!old?.has_headers} savedNames={old?.header_names} error={f.headers_touched ? headersProblem(f.headers) : ""} />
             <div className="flex flex-col gap-2 rounded-card bg-inset p-3 shadow-hairline">
                 <div className="flex flex-wrap items-center gap-2">
                   <input value={probeModel} onChange={(e) => setProbeModel(e.target.value)} placeholder={testModel(f) || t("settings-providerwizard.test_model")} aria-label={t("settings-providerwizard.test_model")} autoComplete="off" spellCheck={false}
@@ -787,7 +791,7 @@ export function ProviderWizard({ existing, onClose, onSaved, draft = null, link 
             {hasTiers(f) && <ClaudeTiers f={f} setF={setF} saved={!!old} open={tiersOpen} onToggle={() => setTiersOpen((o) => !o)} />}
             <Disclosure title={t("settings-providerwizard.advanced")} open={advanced} onToggle={() => setAdvanced((o) => !o)}
               badge={advanced ? undefined : hasTiers(f) ? t("settings-providerwizard.advanced_badge_claude") : t("settings-providerwizard.advanced_badge")}>
-              <Advanced f={f} setF={setF} set={set} hadHeaders={!!old?.has_headers} hadEnv={!!old?.has_env} />
+              <Advanced f={f} setF={setF} set={set} hadEnv={!!old?.has_env} />
             </Disclosure>
           </div>
         )}
@@ -1276,11 +1280,45 @@ function ModelRow({ m, showEffort, isDefault, onChange, onDefault }: { m: FormMo
   );
 }
 
-function Advanced({ f, setF, set, hadHeaders, hadEnv }: {
+function RequestHeaders({ f, setF, hadHeaders, savedNames, error }: {
+  f: ProviderForm;
+  setF: React.Dispatch<React.SetStateAction<ProviderForm>>;
+  hadHeaders: boolean;
+  savedNames?: string[];
+  error?: string;
+}) {
+  const names = hadHeaders && !f.headers_touched && savedNames?.length ? t("settings-providerwizard.headers_names", { names: savedNames.join(", ") }) : "";
+  return (
+    <SecretField
+      field="headers"
+      label={t("settings-providerwizard.headers")}
+      multiline
+      value={f.headers}
+      onChange={(v) => setF((x) => ({ ...x, headers: v, headers_touched: true }))}
+      placeholder={hadHeaders && !f.headers_touched ? t("settings-providerwizard.headers_set") : t("settings-providerwizard.headers_placeholder")}
+      error={error || undefined}
+      hint={
+        <span className="flex flex-col gap-1">
+          <span>{t(`settings-providerwizard.${headerRuntimeHint(f)}`)}</span>
+          <span>{t("settings-providerwizard.headers_hint")}</span>
+          {names && <span>{names}</span>}
+          {hadHeaders && !f.headers_touched ? (
+            <button type="button" onClick={() => setF((x) => ({ ...x, headers: "", headers_touched: true }))} className="touch-hit self-start text-red hover:underline">
+              {t("settings-providerwizard.headers_clear")}
+            </button>
+          ) : f.headers_touched && hadHeaders && !f.headers.trim() ? (
+            <span>{t("settings-providerwizard.headers_cleared")}</span>
+          ) : null}
+        </span>
+      }
+    />
+  );
+}
+
+function Advanced({ f, setF, set, hadEnv }: {
   f: ProviderForm;
   setF: React.Dispatch<React.SetStateAction<ProviderForm>>;
   set: <K extends keyof ProviderForm>(k: K) => (v: ProviderForm[K]) => void;
-  hadHeaders: boolean;
   hadEnv: boolean;
 }) {
   const list = useId();
@@ -1335,24 +1373,6 @@ function Advanced({ f, setF, set, hadHeaders, hadEnv }: {
           </div>
         </>
       )}
-      <SecretField
-        label={t("settings-providerwizard.headers")}
-        multiline
-        value={f.headers}
-        onChange={(v) => setF((x) => ({ ...x, headers: v, headers_touched: true }))}
-        placeholder={hadHeaders && !f.headers_touched ? t("settings-providerwizard.headers_set") : t("settings-providerwizard.headers_placeholder")}
-        hint={
-          hadHeaders && !f.headers_touched ? (
-            <button type="button" onClick={() => setF((x) => ({ ...x, headers: "", headers_touched: true }))} className="touch-hit text-red hover:underline">
-              {t("settings-providerwizard.headers_clear")}
-            </button>
-          ) : f.headers_touched && hadHeaders && !f.headers.trim() ? (
-            t("settings-providerwizard.headers_cleared")
-          ) : (
-            t("settings-providerwizard.headers_hint")
-          )
-        }
-      />
       <SecretField
         label={t("settings-providerwizard.env")}
         multiline

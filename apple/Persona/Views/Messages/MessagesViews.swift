@@ -89,7 +89,7 @@ struct MessagesConnectorView: View {
                                        : String(localized: "You can see every conversation here (read straight from that Mac; viewing doesn't mark anything as read). Persona is read-only and never sends messages for you."))
             }
         }
-        .confirmationDialog("Delete messages stored on the hub?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete messages stored on the hub?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { Task { await deleteData() } }
         } message: {
             Text("Messages conversations and people in the knowledge base, and Messages items in the Inbox, will be deleted. Messages on that Mac aren't affected.")

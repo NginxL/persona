@@ -302,8 +302,14 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 		r.cancel()
 		return nil, err
 	}
-	// Known from now on: its chat loads empty (startingSession) and its watch waits for the transcript.
-	n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, StartedAt: now})
+	// Known from now on: its chat loads empty while it starts (startingSession) and its watch waits for the transcript.
+	initial := sessionState{Launcher: launcher, Cwd: cwd, StartedAt: now}
+	if execution.taskSpace != nil {
+		initial.TaskID = execution.taskSpace.task
+		initial.WorkspaceID = execution.taskSpace.id
+		initial.WorkspaceLabel = execution.taskSpace.label
+	}
+	n.state.put(id, initial)
 	n.noteModes(id, mode, effort)
 	return n.runAsyncStart(ctx, id, r), nil
 }
@@ -312,6 +318,9 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 // startWait, cancelled with the record).
 func (n *Node) newStartRec(id string, spec *startSpec, at time.Time) (*startRec, context.Context) {
 	ctx, cancel := context.WithTimeout(withStartHost(context.Background(), spec.kind), n.startWait())
+	if spec.execution.taskSpace != nil {
+		ctx = context.WithValue(ctx, taskSpaceKey{}, spec.execution.taskSpace)
+	}
 	return &startRec{done: make(chan struct{}), cancel: cancel, spec: spec, session: proto.Session{
 		SessionID: id, Cwd: spec.cwd, Launcher: spec.launcher, Agent: "claude", Status: proto.StatusIdle, Starting: true,
 		StartedByPersona: true, PermissionMode: spec.mode, Effort: spec.effort, UpdatedAt: at, WorkspaceID: spec.workspaceID,

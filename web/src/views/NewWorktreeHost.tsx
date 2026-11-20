@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { lazyPage } from "../lib/lazy-page";
-import { onOpenNewWorktree, type WorktreeRequest } from "../lib/worktree";
+import { onOpenNewWorktree, type WorktreeRequest } from "../lib/worktree-request";
 import { Button, Dialog, Loading } from "../ui/atoms";
 import { OverlayBoundary } from "./LazyOverlay";
 

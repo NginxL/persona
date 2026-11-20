@@ -59,16 +59,22 @@ describe("ModeChangeDivider", () => {
     expect(modeChangeLabel(change(1))).toBe("Phone 把权限模式从「默认权限」改成了「允许编辑」");
     expect(modeChangeLabel(change(1, { from: "" }))).toBe("Phone 把权限模式改成了「允许编辑」");
     expect(modeChangeLabel(change(1, { actor_kind: "hub", device_name: "" }))).toBe("hub 把权限模式从「默认权限」改成了「允许编辑」");
+    expect(modeChangeLabel(change(1, { actor_kind: "assistant", device_name: "Persona", from: "default", to: "plan" }))).toBe("Persona 把权限模式从「默认权限」改成了「计划模式」");
+    expect(modeChangeLabel(change(1, { actor_kind: "device", device_name: "Phone", from: "plan", to: "acceptEdits", applied: "" }))).toBe("Phone 把权限模式从「计划模式」改成了「允许编辑」");
     const outcome = (kind: ModeChange["kind"], reason?: string) => modeChangeLabel({ kind, to: "bypassPermissions", reason, at: at(1) });
     expect(outcome("restart_done")).toBe("已重启，切到了「完全访问」");
     expect(outcome("restart_done", "already_in")).toBe("已经是「完全访问」了，不用重启");
     expect(outcome("restart_dropped", "process_replaced")).toBe("已取消，不会重启到「完全访问」：会话换了进程");
     expect(outcome("restart_dropped", "process_exited")).toBe("已取消，不会重启到「完全访问」：原进程已经退出");
     expect(outcome("restart_dropped", "replaced")).toBe("已取消，不会重启到「完全访问」：被另一次切换取代");
+    // the mode it runs in picked again (#11089): called off, not replaced
+    expect(outcome("restart_dropped", "cancelled")).toBe("已取消，不会重启到「完全访问」：会话保持当前模式");
     expect(outcome("restart_failed", "start_failed")).toBe("没能重启到「完全访问」：新进程没起来，会话按原来的模式继续");
     // no reason, or English words from before the codes: no colon
     expect(outcome("restart_failed")).toBe("没能重启到「完全访问」");
     expect(outcome("restart_dropped", "claude 4101, the process it was picked for, has exited")).toBe("已取消，不会重启到「完全访问」");
+    // a code this app does not know yet (a newer node): the plain line
+    expect(outcome("restart_dropped", "some_later_code")).toBe("已取消，不会重启到「完全访问」");
   });
 
   it("is a separator, not a control", () => {

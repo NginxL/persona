@@ -104,6 +104,14 @@ func BenchmarkT(b *testing.B) {
 	}
 }
 
+// Quoted source text counts punctuation and whitespace as part of the data.
+func TestFillKeepsVerbatimSource(t *testing.T) {
+	got := fill("{sender}: {quote}. ({reason}).", Args{"sender": Verbatim("A. "), "quote": Verbatim("原文。"), "reason": "Ready."})
+	if want := "A. : 原文。. (Ready)."; got != want {
+		t.Fatalf("source or sentence interpolation: got %q, want %q", got, want)
+	}
+}
+
 // A whole sentence filled into a longer one (a node refusal as the reason) keeps one full stop, not "。），" (#6822).
 func TestFillDropsAFilledSentencesFullStop(t *testing.T) {
 	for _, c := range []struct{ in, v, want string }{

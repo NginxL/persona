@@ -857,10 +857,10 @@ describe("the / palette", () => {
     const held = new Promise<void>((_, reject) => { chunk.fail = reject; });
     void held.catch(() => {}); // every consumer still receives the rejection
     vi.resetModules();
-    vi.doMock("./AssistantComposerPanel", async () => {
+    vi.doMock("./SlashSkillView", async () => {
       chunk.calls++;
       await held;
-      return vi.importActual<typeof import("./AssistantComposerPanel")>("./AssistantComposerPanel");
+      return vi.importActual<typeof import("./SlashSkillView")>("./SlashSkillView");
     });
     try {
       const { initI18n } = await import("../../i18n");
@@ -899,7 +899,7 @@ describe("the / palette", () => {
       await vi.waitFor(() => expect(box().value).toBe("/beta"));
       expect(palette()).toBeNull();
     } finally {
-      vi.doUnmock("./AssistantComposerPanel");
+      vi.doUnmock("./SlashSkillView");
     }
   }, 20_000);
 });

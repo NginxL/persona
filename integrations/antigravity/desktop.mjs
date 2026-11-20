@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+import { parseArgs } from 'node:util'
+import { createDesktopRuntime } from './lib/desktop.js'
+
+const { values } = parseArgs({ options: { socket: { type: 'string' }, 'desktop-dir': { type: 'string' } } })
+const runtime = createDesktopRuntime({ dir: values['desktop-dir'], socketPath: values.socket, log: console.error })
+await runtime.start()
+const keepAlive = setInterval(() => {}, 1 << 30)
+for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
+  clearInterval(keepAlive)
+  runtime.stop()
+})

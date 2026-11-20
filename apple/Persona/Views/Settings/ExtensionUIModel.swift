@@ -32,16 +32,18 @@ nonisolated extension ExtensionUIContext {
     /// hub goes on turning newer components into ones it has always drawn.
     static let pageVersion = 4
     static let cardVersion = version
-    #else
-    /// The UI version a whole page of the app draws (`ExtensionPageView`): 4's code hosting (#2961), 5's code review
-    /// (#3136), 6's pictures, controls, row actions, charts, tiles, fields and styles (#827), 7's section keys (nothing
-    /// to draw) and 8's columns layout, section icons, links and rows side by side (#9158, `ExtensionColumns.swift`).
-    static let pageVersion = 8
+    #elseif os(iOS)
+    /// The UI version a whole page of the app draws (`ExtensionPageView`): 8's columns (#9158), 9's gauge rings
+    /// (`ExtensionTiles.swift`) and 10's native graph canvas (`ExtensionGraph.swift`, #9727).
+    static let pageVersion = 10
 
-    /// The UI version the app's cards and sections draw (the Settings home's cards, a launcher's or a computer's
-    /// sections, an Inbox item's, the assistant's `persona-view`): 8 too, version 4–5's code components read-only
-    /// (`ExtensionCodeSummary`), a columns view as a stack. Widgets, the watch and the system extensions keep
-    /// `version` (Shared, 3): they draw none of it.
+    /// The UI version the app's cards and sections draw: the same components, with code components read-only and a
+    /// graph as a still preview which opens full screen. Widgets, the watch and the system extensions keep `version`
+    /// (Shared, 3): they draw none of it.
+    static let cardVersion = 10
+    #else
+    /// Other older surfaces keep the version they can actually draw.
+    static let pageVersion = 8
     static let cardVersion = 8
     #endif
 
@@ -104,6 +106,7 @@ nonisolated extension ExtensionComponent {
         case .image(let c): c.key
         case .grid(let c): c.key
         case .carousel(let c): c.key
+        case .graph(let c): c.key
         case .unknown: nil
         }
     }
@@ -300,6 +303,11 @@ extension APIClient {
     /// A refresh held back while busy is retried once the current operation ends; starting a request does not change the task key.
     private(set) var completedOperations = 0
     var group: String { deps.api()?.group ?? "" }
+    /// The page identity beneath a graph's component key. The graph hashes this before using it as a persistence key.
+    var graphPersistenceNamespace: String {
+        [deps.api()?.config.url.absoluteString ?? "", group, selectedManager ?? "", plugin, ui,
+         context.launcher ?? "", context.machine ?? "", context.item ?? "", initialState ?? ""].joined(separator: "\n")
+    }
 
     func invalidate() {
         invalidationVersion += 1

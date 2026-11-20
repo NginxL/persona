@@ -80,6 +80,41 @@ class AgentsPaginationScreenTest {
         }
     }
 
+    @Test fun pagedRowsAndCountsUseTheSameHubVisibilityAfterRefresh() {
+        var show = false
+        val api = object : AgentDisplayApi {
+            override suspend fun read() = AgentsDisplaySettings(show, true)
+            override suspend fun migrateHidden(): AgentsDisplaySettings = error("No legacy key")
+        }
+        val hello = MutableStateFlow<SocketHello?>(SocketHello(1, Hello(protocol = 1, serverVersion = "fixture")))
+        val pairs = AgentsDisplayHubs { kotlinx.coroutines.flow.flowOf(listOf(AgentsDisplayHub("fixture", null, true, hello, api))) }
+        val repository = object : SessionsRepository {
+            val lark = Session("demo", "group", title = "Chat topic", paneId = "botmux:1", cwd = "/demo", state = "working")
+            override val sessions = MutableStateFlow(listOf(lark, lark.copy(sessionId = "terminal", paneId = "w1:p1")))
+            override val machines = MutableStateFlow(listOf(Machine("demo", "Example computer")))
+            override val listStatus = MutableStateFlow(SessionListStatus(paged = true, loaded = true))
+            override suspend fun refresh() = Unit
+            override suspend fun setListFilter(filter: SessionListFilter) {
+                val hidden = null in filter.hiddenBotmuxHubs
+                val total = if (hidden) 12 else 20
+                val counts = SessionListCounts(total, machine = mapOf("demo" to total), state = mapOf("working" to total),
+                    paneSource = if (hidden) mapOf("terminal" to 12) else mapOf("terminal" to 12, "feishu" to 8), revision = "fixture")
+                listStatus.value = SessionListStatus(paged = true, loaded = true, hasMore = true, counts = counts,
+                    machineCounts = counts, filter = filter, total = total)
+            }
+        }
+        val model = model(repository, display = pairs)
+        rule.setContent { PersonaTheme(reduceMotion = true) { AgentsScreen(model, Nowhere, AgentsMetadata()) } }
+        rule.waitUntil(5_000) { model.page.value.allCount == 12 && model.page.value.sessions.size == 1 }
+        assertEquals(0, model.page.value.list.counts[AgentQuickFilter.Feishu])
+        assertEquals(12, model.page.value.machineTotal)
+        rule.runOnIdle { show = true; model.refresh() }
+        rule.waitUntil(5_000) { model.page.value.allCount == 20 && model.page.value.sessions.size == 2 }
+        assertEquals(8, model.page.value.list.counts[AgentQuickFilter.Feishu])
+        assertEquals(20, model.page.value.list.counts[AgentQuickFilter.Working])
+        assertEquals(20, model.page.value.machineTotal)
+    }
+
     @Test fun firstFiftyVirtualizedThenScrollLoadsNextPageAndServerFilters() {
         val repository = PagedRepository()
         val model = model(repository)
@@ -335,7 +370,8 @@ class AgentsPaginationScreenTest {
         }
     }
 
-    private fun model(repository: SessionsRepository, listContext: CoroutineContext = EmptyCoroutineContext) = AgentsViewModel(repository, object : InteractionCenter {
+    private fun model(repository: SessionsRepository, listContext: CoroutineContext = EmptyCoroutineContext,
+        display: AgentsDisplayHubs = AgentsDisplayHubs { kotlinx.coroutines.flow.flowOf(emptyList()) }) = AgentsViewModel(repository, object : InteractionCenter {
         override val pending = MutableStateFlow<List<Interaction>>(emptyList())
         override suspend fun refresh() = Unit
         override suspend fun resolve(id: String, resolution: Resolution) = Unit
@@ -356,7 +392,7 @@ class AgentsPaginationScreenTest {
         override suspend fun togglePin(path: String, space: Boolean) = Unit
         override suspend fun toggleMute(path: String, space: Boolean) = Unit
         override suspend fun markSeen(session: SessionKey, version: String) = Unit
-    }), listContext = listContext).also { models += it }
+    }, display), listContext = listContext).also { models += it }
 
     private class FailedTransport : ChatTransport {
         var pageReads = 0

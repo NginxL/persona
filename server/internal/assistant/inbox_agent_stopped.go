@@ -82,26 +82,35 @@ func (s *Service) recordInboxAgentStops(ctx context.Context, sess proto.Session)
 	b.mu.Lock()
 	for _, it := range b.items {
 		linked, duplicate := inboxAgentStopDuplicate(it, sess)
-		if !it.open() || !linked || duplicate {
+		a := it.Agent
+		if !it.open() || !linked || a != nil && a.savingRetry {
+			continue
+		}
+		latest := inboxLatestAgentLink(it)
+		current := latest != nil && latest.MachineID == sess.MachineID && latest.SessionID == sess.SessionID
+		retry := agentCfg.Enabled && current && a != nil && a.hasRetryNote() && it.Handling != nil && it.Handling.State == HandlingAgent
+		if duplicate && !retry {
 			continue
 		}
 		w := beginWrite(it)
 		reuseSlot := inboxConversationRunning(it)
-		latest := inboxLatestAgentLink(it)
-		current := latest != nil && latest.MachineID == sess.MachineID && latest.SessionID == sess.SessionID
-		turnAt := sess.UpdatedAt.UTC()
-		key := "assistant-inbox_chain.agent_stopped"
-		if failed {
-			key += "_failed"
+		if !duplicate {
+			turnAt := sess.UpdatedAt.UTC()
+			key := "assistant-inbox_chain.agent_stopped"
+			if failed {
+				key += "_failed"
+			}
+			b.chainAdd(it, InboxChainEntry{Kind: ChainAgentStopped, At: inboxAgentStopDisplayTime(it, sess, now), TurnAt: &turnAt,
+				Text: i18n.T(b.userLang(), key), Detail: detail, Via: ViaAgent,
+				Link: &InboxChainLink{Type: LinkSession, MachineID: sess.MachineID, SessionID: sess.SessionID}})
 		}
-		b.chainAdd(it, InboxChainEntry{Kind: ChainAgentStopped, At: inboxAgentStopDisplayTime(it, sess, now), TurnAt: &turnAt,
-			Text: i18n.T(b.userLang(), key), Detail: detail, Via: ViaAgent,
-			Link: &InboxChainLink{Type: LinkSession, MachineID: sess.MachineID, SessionID: sess.SessionID}})
-
-		a := it.Agent
-		if agentCfg.Enabled && a != nil && a.SessionID != "" {
-			note := inboxNote{Name: prompts.NoteAgentStopped, Text: detail, Failed: failed,
-				Machine: sess.MachineID, Session: sess.SessionID}
+		note := inboxNote{Name: prompts.NoteAgentStopped, Text: detail, Failed: failed,
+			Machine: sess.MachineID, Session: sess.SessionID}
+		if retry {
+			b.tell(it, note, false, now)
+			b.wakeInboxRetry(it, now)
+			deliver[w] = true
+		} else if agentCfg.Enabled && a != nil && a.SessionID != "" && !(current && it.Handling != nil && it.Handling.State == HandlingFailed) {
 			if current {
 				// A stopped current Agent is never a state to restore; an earlier waiting restoration point stays intact.
 				// HandlingAgent or waiting remains visible until admission, so a held stop consumes no looking slot.

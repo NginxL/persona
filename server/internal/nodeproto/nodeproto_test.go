@@ -40,3 +40,22 @@ func TestContractImportsNothing(t *testing.T) {
 		}
 	}
 }
+
+// The lane table is one list per lane: no name on two, none twice, and the node_lanes_v1 capability announced with it.
+func TestLaneTable(t *testing.T) {
+	seen := map[string]string{}
+	for lane, names := range map[string][]string{"control": ControlLane, "bulk": BulkLane} {
+		for _, n := range names {
+			if n == "" {
+				t.Fatalf("%s: an empty name", lane)
+			}
+			if other, ok := seen[n]; ok {
+				t.Fatalf("%s is on %s and %s", n, other, lane)
+			}
+			seen[n] = lane
+		}
+	}
+	if !slices.Contains(Announced, NodeLanes) {
+		t.Fatalf("%s is not announced", NodeLanes)
+	}
+}

@@ -54,7 +54,7 @@ func TestChatProviderUpdateProtocolGuard(t *testing.T) {
 func TestChatProviderTransportGuard(t *testing.T) {
 	s, hub, _ := modelService(t)
 	mux := http.Handler(s)
-	for _, field := range []string{`"headers":"X-Example: value"`, `"proxy":"http://proxy.example.com"`, `"no_proxy":"example.com"`} {
+	for _, field := range []string{`"proxy":"http://proxy.example.com"`, `"no_proxy":"example.com"`} {
 		create := `{"name":"chat","kind":"api","api":"chat","base_url":"https://api.example.com","model":"m",` + field + `}`
 		if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", create); code != 400 || !strings.Contains(body, "Chat Completions") {
 			t.Fatalf("create %s: %d %s", field, code, body)
@@ -79,14 +79,14 @@ func TestChatProviderTransportGuard(t *testing.T) {
 	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", `{"name":"chat","kind":"api","api":"chat","base_url":"https://api.example.com","model":"m"}`); code != 200 {
 		t.Fatalf("create: %d %s", code, body)
 	}
-	for _, field := range []string{`"headers":"X-Example: value"`, `"proxy":"http://proxy.example.com"`, `"no_proxy":"example.com"`} {
+	for _, field := range []string{`"proxy":"http://proxy.example.com"`, `"no_proxy":"example.com"`} {
 		update := `{"kind":"api","api":"chat","base_url":"https://api.example.com","model":"m",` + field + `}`
 		if code, body := launcherCall(t, mux, "PUT", "/api/v1/launchers/chat", update); code != 400 {
 			t.Fatalf("update %s: %d %s", field, code, body)
 		}
 	}
 	hub.presets = []LauncherPreset{{ID: "team/chat", Kind: "api", API: "chat", BaseURL: "https://api.example.com", Model: "m"}}
-	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", `{"name":"preset","preset":"team/chat","headers":"X-Example: value"}`); code != 400 {
+	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", `{"name":"preset","preset":"team/chat","proxy":"http://proxy.example.com"}`); code != 400 {
 		t.Fatalf("preset: %d %s", code, body)
 	}
 	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", `{"name":"messages","kind":"launcher","api":"messages","base_url":"https://api.example.com","model":"m","headers":"X-Example: value","proxy":"http://proxy.example.com","no_proxy":"example.com"}`); code != 200 {
@@ -175,6 +175,11 @@ func TestChatProviderAndPurposeAcceptEffort(t *testing.T) {
 	if got := s.storedLaunchers(context.Background())[0].Effort; got != "high" {
 		t.Fatalf("saved default effort = %q", got)
 	}
+	if !slices.ContainsFunc(s.modelProviders(context.Background()), func(p ModelProvider) bool {
+		return p.ID == "launcher.chat" && p.ChatEffort
+	}) {
+		t.Fatal("Chat provider does not advertise purpose effort support")
+	}
 	update := `{"kind":"api","api":"chat","base_url":"https://api.example.com","model":"m","effort":"max"}`
 	if code, body := launcherCall(t, mux, "PUT", "/api/v1/launchers/chat", update); code != 200 {
 		t.Fatalf("edit default effort: %d %s", code, body)
@@ -208,6 +213,31 @@ func TestChatProviderAndPurposeAcceptEffort(t *testing.T) {
 	}
 }
 
+func TestChatModelProviderIncludesStoredCapabilities(t *testing.T) {
+	s, mux := launcherTestService(t)
+	create := `{"name":"chat","kind":"api","api":"chat","base_url":"https://api.example.com","model":"m","effort":"high","models":[{"id":"m","no_effort":true}]}`
+	if code, body := launcherCall(t, mux, "POST", "/api/v1/launchers", create); code != 200 {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	providers := s.modelProviders(context.Background())
+	i := slices.IndexFunc(providers, func(p ModelProvider) bool { return p.ID == "launcher.chat" })
+	if i < 0 || len(providers[i].Models) != 1 || !providers[i].Models[0].NoEffort || providers[i].Effort != "high" {
+		t.Fatalf("stored capabilities or default effort missing from model configuration: %+v", providers)
+	}
+}
+
+func TestChatModelProviderIncludesTierAliases(t *testing.T) {
+	s, _ := launcherTestService(t)
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{
+		Name: "old", Kind: "api", API: "chat", BaseURL: "https://api.example.com", Model: "sonnet", SonnetModel: "gw/sonnet",
+	}})
+	providers := s.modelProviders(context.Background())
+	i := slices.IndexFunc(providers, func(p ModelProvider) bool { return p.ID == "launcher.old" })
+	if i < 0 || providers[i].ModelAliases["sonnet"] != "gw/sonnet" {
+		t.Fatalf("Chat tier alias missing from model configuration: %+v", providers)
+	}
+}
+
 func TestChatProbeRejectsUnsupportedTransport(t *testing.T) {
 	for _, operation := range []string{"test", "discover"} {
 		for _, tc := range []struct {
@@ -215,14 +245,9 @@ func TestChatProbeRejectsUnsupportedTransport(t *testing.T) {
 			kind                                                string
 			storedProxy, overrideHeaders, allowed, direct       bool
 		}{
-			{name: "request headers", api: "chat", inputHeaders: "X-Example: value", overrideHeaders: true, direct: true},
-			{name: "stored headers", api: "chat", storedHeaders: "X-Example: value"},
 			{name: "stored proxy", api: "chat", storedProxy: true},
-			{name: "override adds headers", api: "chat", inputHeaders: "X-Example: value", overrideHeaders: true},
 			{name: "clear headers", api: "chat", storedHeaders: "X-Example: value", overrideHeaders: true, allowed: true},
 			{name: "messages launcher headers and proxy", kind: "launcher", api: "messages", storedHeaders: "X-Example: value", storedProxy: true, allowed: true},
-			{name: "override protocol to chat", api: "messages", apiOverride: "chat", storedHeaders: "X-Example: value"},
-			{name: "override protocol to messages", api: "chat", apiOverride: "messages", storedHeaders: "X-Example: value"},
 		} {
 			t.Run(operation+"/"+tc.name, func(t *testing.T) {
 				var calls atomic.Int32

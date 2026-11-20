@@ -55,9 +55,19 @@ these races: use real JNI with independently controlled worker completion, frame
 
 ## Verify intermittent test failures with the whole module
 
+A WebSocket listener's terminal callback is asynchronous; closing the owning `OkHttpClient` can stop its dispatcher before that callback records a drop. Record the terminal diagnostics event through the socket's own atomic guard in `close()` before cancelling the socket, not only in a later coroutine finally or callback. Keep `onClosing` / `onFailure` / the runner cleanup on the same guard so a socket still contributes exactly one drop. Test that `close()` records it before returning and keep an advertised endpoint list identical to the initial configuration when a topology change is not the behavior under test (#11548).
+
+Do not assert a process-wide diagnostics sink has zero drops immediately before calling `close()`: cancelling the socket lets its runner cleanup record the legitimate drop before that assertion evaluates. This is not a spontaneous disconnect or a timeout. Assert the connected count, the synchronous drop after close and exactly one drop in total, and isolate each test's sink so it does not attribute another test's connection to the current one.
+
+Do not run Linux and macOS Gradle processes against the same checkout's `build/` directories at once. The other process can replace compiled classes and test reports while tests run, producing unrelated `NoClassDefFoundError` failures and undeletable reports. Stop those runs, remove only the affected disposable outputs and use an isolated `GRADLE_USER_HOME` when shared caches are also suspect.
+
 An intermittent test is not verified by repeatedly running only its own class. In the hand-off recording tests, background work wrote the reply journal on `Dispatchers.IO` while the test deleted its directory, and the race appeared only under whole-module concurrency; `advanceUntilIdle()` drains the test scheduler but not those IO threads, so `cancelAndJoin()` the repository's scope before cleanup and run the whole module.
 
 Buffered hand-off evidence is acknowledged before its recording runs, leaving the journal delivered but unrecorded until that request completes. Coalesce the buffered operation IDs with the same recovery pass's journal scan, not with a permanent attempted tombstone: a later reconnect or process owner must still retry. If a disconnect during startup IO starts another recovery generation, watch hub state from transport acquisition rather than subscribing after the blocking write. Hold the journal mutex to force a failed buffered record before the scan, and use the following reply-recovery lookup as the completion barrier (#9868).
+
+## Robolectric photo decoding needs real bitmap support and a main-looper resume
+
+`ImageDecoder`'s Robolectric shadow is not a real PNG decoder. For behavior tests of a production photo path, use `BitmapFactory` and a file-backed test `ContentProvider`, not a mocked decoder result. When production decodes on `Dispatchers.IO`, Compose `waitUntil` alone may never run the continuation queued on Android's main looper: pump `shadowOf(Looper.getMainLooper()).idle()` inside the wait condition. Assert the exact terminal error or result and that retry is enabled again, never a transient "Reading…" label (#11057).
 
 ## A Robolectric FileProvider keeps the cache directory of the test that first used it (#9365)
 
@@ -135,6 +145,38 @@ Do not merge main or edit source while a multi-task Gradle invocation is running
 compile the old contracts and later tasks read newly merged tests, producing misleading missing-field and constructor
 errors. Finish or stop that invocation first, update the branch, then verify the fixed revision. A failure is not an
 inherited main defect until a clean, independent main worktree reproduces it.
+
+## A cache key that differs in every worktree (#10712)
+
+Gradle hashes an input as written, so an absolute path in one gives every checkout its own cache key and a second
+worktree at the same commit rebuilds and retests everything. Nothing warns about it. The ones this build had:
+
+- `Test.systemProperty("persona.repo.root", <path>)` and the native library's path. Pass a path through
+  `jvmArgumentProviders` (`android/build-logic/convention/src/main/kotlin/persona/buildlogic/TestArguments.kt`):
+  `@Internal` for a location, or `@InputFiles` with `PathSensitivity.NONE` when the file's contents are the input.
+- `-Xfriend-paths=<build dir>` in `freeCompilerArgs`. Use the Kotlin compile task's `friendPaths` instead: Kotlin keys
+  it by each friend's path relative to the module's build directory (the classpath tracks the contents). Keep the friends
+  to project outputs with a non-transitive configuration; a jar from the Gradle cache sits at a different relative path
+  in every checkout, so a transitive friend list still splits the key.
+- An `Exec` task's `commandLine` / `args` set at configuration time, and KSP's `arg(key, "$projectDir/…")`. Set the
+  command line inside `exec()`, and give KSP a `CommandLineArgumentProvider` with a relative fingerprint.
+- `inputs.files(…)` without `withPathSensitivity(…)`: its default is `ABSOLUTE`.
+
+To check, run one task in two worktrees at one commit with `--info` and look for `FROM-CACHE`; with
+`-Dorg.gradle.caching.debug=true` Gradle prints each input property's hash, and the one that differs is the culprit.
+
+Two more traps from the same change. Reading a source file at configuration time (to find which fixtures a module's
+tests read, say) makes it a configuration-cache input, so editing a test discards the configuration; do such a scan
+in a task whose output feeds the test task's inputs, as `fixtureReferences` does. And a Kotlin package named
+`persona.build` lives in `persona/build/`, which `android/.gitignore`'s `build/` rule hides: the build compiles it
+locally and the commit leaves it out.
+
+Shared keys also change what a cache hit leaves behind. Robolectric screenshot tests write PNGs to `build/<name>-shots/`,
+which no task declares; while each checkout had its own keys, a new worktree's first test run always drew them. Once
+keys match, a new worktree's test task can come `FROM-CACHE` with no pictures, and a reused one keeps an older run's. An
+undeclared output is only safe where the task cannot be restored, so `--tests` runs (how screenshots are captured)
+skip the build cache (`android/build-logic/convention/src/main/kotlin/persona/buildlogic/TestRuns.kt`), and a
+whole-suite capture adds `--rerun`.
 
 ## Reusing an onboarding checklist for ordinary settings (#5233)
 
@@ -825,6 +867,8 @@ A file attachment's unbounded error text can make its row taller than the previe
 ## Keep expanded-composer send and Escape focus states separate
 
 A movable small composer field can remain composed and focused behind the expanded editor, so `onFocusChanged` may not fire again when the editor closes. Preserving `focusRequest` alone therefore leaves `state.focused` stale after a hardware send, while the following Escape cannot restore it through another callback. Use separate collapse actions: sending preserves the request count and clears the focused state; Escape follows the ordinary focus request and restores it. Target key injection at the expanded input's own tag when both nodes report focus.
+
+A one-shot picker request cannot depend on a control whose composition ends when the same send clears the draft and focus. Keep that control's owner composed for the whole picker lifetime, not merely until `onOpenHandled` consumes the request; disposing it then also disposes the menu or sheet. Test the actual popup or dialog and its dismissal for every style, not only the request callback (#11405).
 
 ## A registering surface must not take focus from a child that already has it
 

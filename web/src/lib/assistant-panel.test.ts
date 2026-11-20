@@ -90,6 +90,13 @@ describe("the setup a Persona chat's next message runs on", () => {
     expect(view(chat({ session: session({ model_pick: { launcher: "team-api" } }) }))).toMatchObject({ provider: "Team API", model: "sonnet 5.5" });
     expect(view(chat({ session: session({ model_pick: { launcher: "claude" } }) })).model).toBe("Default (recommended)");
     expect(view(chat({ session: session({ model_pick: { launcher: "codex", model: "gpt-5.5" } }) }))).toMatchObject({ engine: "codex", model: "5.5" });
+    // A side conversation whose session model carries a gateway route prefix keeps the route on the pill while matching the panel row.
+    const gwInfo: AssistantLaunchers = { launchers: [{ name: "gw", source: "persona" }], def: { provider: "claude", model: "opus" }, unavailable: [] };
+    const gwList: ModelList = { list: { agent: "claude", models: [{ id: "gemini-4-carbon", name: "Gemini 4 Carbon" }] } };
+    const side = chat({ isMain: false, session: session({ launcher: "gw", model: "route-a/gemini-4-carbon" }) });
+    const sideSetup = assistantSetup(side, gwInfo);
+    expect(assistantPillView(side, sideSetup, gwInfo, gwList).model).toBe("route-a/gemini-4-carbon");
+    expect(assistantPanel(sideSetup, gwInfo, () => gwList).state.current?.model).toBe("gemini-4-carbon");
   });
   it("treats an older node's Chinese default placeholder exactly like an empty launcher model", () => {
     const withModel = (model?: string): AssistantLaunchers => ({
@@ -112,6 +119,12 @@ describe("the setup a Persona chat's next message runs on", () => {
 });
 
 describe("the panel's providers", () => {
+  it("names the configured default launcher exactly as the hub does, with a readable default model", () => {
+    const { providers } = assistantPanel(assistantSetup(chat({ isMain: true }), info), info, listOf);
+    expect(providers.find((p) => p.id === "claude")).toMatchObject({ isDefault: true, defaultModel: "opus 5.5" });
+    expect(providers.find((p) => p.id === "relay")?.isDefault).toBe(false);
+  });
+
   it("what can run Persona chats, each with its list; what can't, off with the hub's reason (not hidden)", () => {
     const { providers, state } = assistantPanel(assistantSetup(chat({ isMain: true }), info), info, listOf, { typed: true });
     expect(providers.map((p) => [p.id, p.name, p.engine, p.unavailable ?? ""])).toEqual([

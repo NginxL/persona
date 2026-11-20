@@ -17,14 +17,17 @@ var errApprovalConversationGone = errors.New("the originating conversation no lo
 // approvalJournalEntry contains delivery state only. In particular it has no
 // executable callback, tool arguments, Resolution.Values or approval fields.
 type approvalJournalEntry struct {
-	ID        string    `json:"id"`
-	MachineID string    `json:"machine_id"`
-	SessionID string    `json:"session_id"`
-	Status    string    `json:"status,omitempty"`
-	Result    string    `json:"result,omitempty"`
-	Private   bool      `json:"private,omitempty"`
-	Accepted  bool      `json:"accepted,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string `json:"id"`
+	MachineID string `json:"machine_id"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status,omitempty"`
+	Result    string `json:"result,omitempty"`
+	Private   bool   `json:"private,omitempty"`
+	// Continuation marks a detached command result whose retry instruction is
+	// valid only while its one-time grant remains unused.
+	Continuation bool      `json:"continuation,omitempty"`
+	Accepted     bool      `json:"accepted,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (s *Service) loadApprovalJournalLocked(ctx context.Context) bool {
@@ -117,7 +120,7 @@ func (s *Service) approvalJournalAborted(ctx context.Context, id string) {
 // original card is no longer waiting, including when execution is uncertain.
 func approvalResultText(id, status, text string) string {
 	word := map[string]string{
-		"resolved": "applied", "denied": "denied", "expired": "expired",
+		"resolved": "applied", "approved": "approved", "covered": "covered by a newer Always allow", "denied": "denied", "expired": "expired",
 		"replaced": "replaced", "stale": "stale and cancelled", "cancelled": "cancelled", "dismissed": "dismissed",
 		"failed": "left with an uncertain execution outcome",
 	}[status]
@@ -145,6 +148,7 @@ func (s *Service) approvalJournalFinished(ctx context.Context, ix proto.Interact
 	if b.list[i].Result == "" {
 		b.list[i].Status = status
 		b.list[i].Result = approvalResultText(ix.ID, status, text)
+		b.list[i].Continuation = ix.Detachable && status == "approved"
 		b.list[i].UpdatedAt = time.Now().UTC()
 	}
 	if err := s.saveApprovalJournalLocked(ctx); err != nil {
@@ -254,6 +258,20 @@ func (s *Service) scheduleApprovalResultRetryLocked() {
 func (s *Service) deliverApprovalResult(a approvalJournalEntry) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	if a.Continuation {
+		// Serialize with grant consumption through the actual conversation/queue
+		// handoff. If another call consumed first, the late result must not tell
+		// the model to execute that same call again (especially under Always).
+		s.detached.mu.Lock()
+		defer s.detached.mu.Unlock()
+		pending, err := s.detachedContinuationPendingLocked(ctx, a.ID)
+		if err != nil {
+			return fmt.Errorf("check detached continuation before delivery: %w", err)
+		}
+		if !pending {
+			a.Result = fmt.Sprintf("Approval %s is no longer pending. Its one-time continuation was already consumed or is no longer available. Do not retry it automatically; check whether the exact call already ran.", a.ID)
+		}
+	}
 	if _, deleted, err := s.deletedConversation(ctx, a.MachineID, a.SessionID); err != nil {
 		return fmt.Errorf("check the originating conversation's deletion record: %w", err)
 	} else if deleted {
@@ -270,7 +288,7 @@ func (s *Service) deliverApprovalResult(a approvalJournalEntry) error {
 		// node, or a list that has not arrived yet says nothing about deletion.
 		return errors.New("the originating conversation is not currently listed")
 	}
-	msg := relayMsg{From: "approval-result-" + a.ID, FromTitle: "Approval result", Tool: askAnswerTool,
+	msg := relayMsg{From: approvalResultFrom + a.ID, FromTitle: "Approval result", Tool: askAnswerTool,
 		Text: a.Result, At: a.UpdatedAt, Private: a.Private}
 	if msg.At.IsZero() {
 		msg.At = time.Now().UTC()
@@ -280,9 +298,11 @@ func (s *Service) deliverApprovalResult(a approvalJournalEntry) error {
 		working = c.Status == proto.StatusWorking || c.Starting
 	}
 	if !working {
-		if err := s.deliverRelay(ctx, a.MachineID, a.SessionID, msg); err == nil {
+		if err := s.tryDirectRelay(ctx, a.MachineID, a.SessionID, &msg); err == nil {
 			return nil
-		} else if !relayInDoubt(err) {
+		} else if s.refusedDirect(ctx, a.MachineID, a.SessionID, msg, err) {
+			return nil // a runtime conversation that cannot take it: the owner was pushed (relayRefused)
+		} else if !relayInDoubt(err) && !refusedForGood(err) {
 			// A transient send refusal may still be retried through the durable
 			// queue; an actually missing conversation was rejected above.
 			s.logf("approval result %s direct send: %v; queued", a.ID, err)
@@ -328,6 +348,14 @@ func (s *Service) recoverApprovalJournals(ctx context.Context) {
 	}
 	var unfinished []approvalJournalEntry
 	for i := range b.list {
+		if b.list[i].Status != "approved" {
+			// A continuation grant is valid only with its completed approved
+			// result. Revoke interrupted, cancelled and failed outcomes before
+			// delivery; a crashed apply must never leave an execution permit.
+			if err := s.revokeDetachedGrant(ctx, b.list[i].ID); err != nil {
+				s.logf("revoke interrupted approval %s: %v", b.list[i].ID, err)
+			}
+		}
 		if b.list[i].Result != "" {
 			continue
 		}

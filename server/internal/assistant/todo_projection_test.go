@@ -451,3 +451,28 @@ func TestProjectionAsksByTheRunsCard(t *testing.T) {
 		t.Fatalf("the run's ask with its cards answered %+v", a)
 	}
 }
+
+func TestDeliveryApprovalProjectsToNeedsYou(t *testing.T) {
+	now := time.Now().UTC()
+	task := listedTodo{Todo: Todo{
+		ID: "todo_release", Title: "Release sample page", Origin: "main", PRURL: "https://github.com/example/app/pull/12",
+		Delivery: &TodoDelivery{State: deliveryPR, Unblock: unblockUser, Gate: "Approve the release", At: now.Add(-time.Hour)},
+		PRStatus: &TodoPRStatus{URL: "https://github.com/example/app/pull/12", State: "open", CheckedAt: now},
+	}}
+	project := func() assistantwire.TodoSummary { return projection.View(projectionFacts(task, nil, time.UTC), now) }
+	if view := project(); view.Section != assistantwire.TodoListSectionNeedsYou || view.Line == nil ||
+		view.Line.Args["text"] != "Approve the release" || len(view.Asks) != 0 {
+		t.Fatalf("delivery approval view: %+v", view)
+	}
+	if old := triageTodo(task, nil, now, time.Time{}, time.UTC, false); old.Section != triageWaiting {
+		t.Fatalf("legacy placement: %+v", old)
+	}
+	task.Delivery.Unblock = unblockOther
+	if view := project(); view.Section == assistantwire.TodoListSectionNeedsYou {
+		t.Fatalf("reviewer or CI wait needs the owner: %+v", view)
+	}
+	task.Delivery.Unblock, task.Todo.DoneAt = unblockUser, &now
+	if view := project(); view.Phase != assistantwire.TodoPhaseDone {
+		t.Fatalf("closed task returned to the owner: %+v", view)
+	}
+}

@@ -166,8 +166,8 @@ func TestCommandPrinted(t *testing.T) {
 }
 
 func TestGoldenAuthRelayed(t *testing.T) {
-	golden(t, "agent_auth_relayed", renderAuthRelayed("示例 CLI"))
-	golden(t, "agent_auth_relayed.no_app", renderAuthRelayed(""))
+	golden(t, "agent_auth_relayed", renderAuthRelayed("示例 CLI", ""))
+	golden(t, "agent_auth_relayed.no_app", renderAuthRelayed("", ""))
 }
 
 // A computer a member hub brought is not the user's own here: its links are not handed on.

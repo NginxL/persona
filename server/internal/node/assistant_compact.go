@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/nwverse/persona/server/internal/compat"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -25,12 +25,12 @@ const assistantCompactTimeout = 10 * time.Minute
 // assistantCompact starts compacting conversation id, resuming its process when it is not running; with onlyRunning
 // (the hub compacting a meeting's room, #8253) it refuses not_running instead: a process that exited since the hub saw it
 // running is never started only to be compacted.
-func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool) error {
-	if id == "" || !validID(id) {
-		return errors.New("invalid session id")
-	}
+func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool) (compactErr error) {
 	if n.runtimeAssistant(id) {
-		return refusal("unsupported", "这个对话由 runtime 运行，不能在这里压缩", nil)
+		return n.assistantCompactRuntime(ctx, id, onlyRunning)
+	}
+	if !validID(id) {
+		return errors.New("invalid session id")
 	}
 	if saved, ok := n.state.get(id); ok && proto.IsExternalLauncher(saved.Launcher) {
 		var finish func()
@@ -38,6 +38,13 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		defer finish()
 	}
 	defer n.assistantLife.lock(id)() // not while a send or a restore has this conversation's process (model_restore.go)
+	// As in assistantSend, a start after pruning the only, refused turn counts as starting only while it can still come up.
+	drop := func() {}
+	defer func() {
+		if compactErr != nil {
+			drop()
+		}
+	}()
 	n.mu.Lock()
 	p := n.procs[id]
 	n.mu.Unlock()
@@ -66,18 +73,32 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		if cwd == "" {
 			cwd = identity.AssistantDir(n.home)
 		}
+		var agentKind string
 		if !proto.IsExternalLauncher(launcher) {
-			if _, err := n.assistantAgent(ctx, launcher); err != nil {
+			var err error
+			agentKind, err = n.assistantAgent(ctx, launcher)
+			if err != nil {
 				return err
 			}
-			n.stopAssistant(id)
+			n.cancelAssistantRecovery(id)
+			if held := n.takeAssistant(id); held != nil {
+				stopAndWait([]*assistantProc{held})
+			}
 		}
 		var err error
 		// A guest (a meeting's room too) starts as on any resume: spawnClaude reads its tools and kind from its record
 		// (no built-in tools, strict MCP config, project setting sources, its own settings and profile), and
 		// spawnAssistant refuses one whose launcher runs another agent by now.
-		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions, Origin: st.Origin}
-		resolved, current := n.assistantModel(ctx, id)
+		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions, Origin: st.Origin, OriginKnown: st.OriginKnown}
+		resolved, current, _ := n.assistantModelDecision(ctx, id)
+		if current.OriginKnown {
+			execution.Origin, execution.OriginKnown = current.Origin, true
+		}
+		if st.Guest == nil && !execution.OriginKnown {
+			// Cold compaction spawns directly rather than passing through assistantSend. Apply the same fail-closed
+			// boundary: a successful empty model answer and an older hub are not ordinary-origin attestations.
+			return errAssistantOriginUnknown
+		}
 		if proto.IsExternalLauncher(launcher) {
 			if resolved != launcher || current.External == nil {
 				return externalRefusal(ctx, "adapter_scope_required")
@@ -90,18 +111,37 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 			if err := n.checkExternalAssistant(ctx, id, launcher, execution, false); err != nil {
 				return err
 			}
-			if _, err := n.assistantAgent(ctx, launcher); err != nil {
+			agentKind, err = n.assistantAgent(ctx, launcher)
+			if err != nil {
 				return err
 			}
-			n.stopAssistant(id)
+			n.cancelAssistantRecovery(id)
+			if held := n.takeAssistant(id); held != nil {
+				stopAndWait([]*assistantProc{held})
+			}
 		}
 		if current.SupervisionResolved {
 			execution.SupervisionInstructions = current.SupervisionInstructions
 		}
+		// It starts as a send would: in interactive Claude Code while the setting is on (#10058; tuiWanted leaves guests
+		// and plan mode in print mode), so neither the compaction nor the next message runs a process of the other kind.
+		execution.Interactive = current.Interactive
 		if proto.IsExternalLauncher(launcher) {
 			execution.StartupContext = ctx
 		}
-		if p, err = n.spawnAssistant(id, cwd, launcher, true, false, execution); err != nil {
+		if st.Origin != execution.Origin || st.OriginKnown != execution.OriginKnown {
+			// Tool selection reads session state during spawn. Record the explicit decision before the process can start.
+			st.Origin, st.OriginKnown = execution.Origin, execution.OriginKnown
+			n.state.put(id, st)
+		}
+		// A trailing refused turn is no context the compaction would summarize: it is cut, and a session left with no
+		// file by that starts under the id rather than resuming nothing.
+		if agentKind == "claude" {
+			if pruned, clean := n.healClaudeRefusalTranscript(id); pruned && !clean {
+				drop = n.startsBegun.begin(id, n.startWait()) // started again right below: an empty chat meanwhile
+			}
+		}
+		if p, err = n.spawnAssistant(id, cwd, launcher, n.transcriptPath(id) != "", false, execution); err != nil {
 			return err
 		}
 		if st.SupervisionInstructions != execution.SupervisionInstructions {
@@ -209,6 +249,7 @@ const (
 	handoffTurnMax    = 800   // characters of each recent message
 	handoffRecentMax  = 6000  // characters of the recent messages together
 	handoffTurns      = 12
+	handoffPageLimit  = 400
 )
 
 // HandoffTurn is one recent message of a conversation handed off: role user or assistant.
@@ -226,8 +267,11 @@ type Handoff struct {
 
 // assistantHandoff reads what a new main conversation should know of conversation id (docs/assistant/assistant.md
 // "New main chat").
-func (n *Node) assistantHandoff(id string) (Handoff, error) {
-	if id == "" || !validID(id) {
+func (n *Node) assistantHandoff(ctx context.Context, id string) (Handoff, error) {
+	if n.runtimeAssistant(id) {
+		return n.assistantHandoffRuntime(ctx, id)
+	}
+	if !validID(id) {
 		return Handoff{}, errors.New("invalid session id")
 	}
 	path := n.transcriptPath(id)
@@ -245,7 +289,7 @@ func (n *Node) assistantHandoff(id string) (Handoff, error) {
 		return Handoff{}, err
 	}
 	n.refresh(id, f)
-	page, _, _ := f.Page(0, 400)
+	page, _, _ := f.Page(0, handoffPageLimit)
 	return Handoff{Summary: clipHandoff(summary, handoffSummaryMax), Recent: recentTurns(page, at)}, nil
 }
 

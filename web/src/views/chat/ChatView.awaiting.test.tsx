@@ -18,7 +18,7 @@ const captured = vi.hoisted(() => ({
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle", state: "idle" } as Session,
 }));
 // one transcript object for every render, as the hook keeps one (a new one each time re-runs the echo checks forever)
-const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "" }));
+const transcript = vi.hoisted(() => ({ items: [] as Item[], loading: false, error: "", hasMore: false, streaming: "", streamEnded: false }));
 vi.mock("./useTranscript", () => ({ useTranscript: () => transcript }));
 vi.mock("../../lib/store", async (importOriginal) => {
   const store = await importOriginal<typeof import("../../lib/store")>();
@@ -53,6 +53,8 @@ beforeEach(() => {
   captured.session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle", state: "idle", agent: "claude" } as Session;
   transcript.items = [];
   transcript.loading = false;
+  transcript.streaming = "";
+  transcript.streamEnded = false;
   transcript.error = "";
   fetcher = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetcher);
@@ -342,6 +344,23 @@ describe("a message the launcher switch refused", () => {
 });
 
 describe("a message waiting for its turn to start (#2450)", () => {
+  it("keeps an ended reply preview after host completion without keeping its work or interrupt controls running", async () => {
+    const ts = new Date().toISOString();
+    transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Check this", ts }];
+    transcript.streaming = "Saved shortly.";
+    transcript.streamEnded = true;
+    captured.session.state_since = ts;
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.querySelector("[data-latest-text]")?.textContent).toContain("Saved shortly.");
+    expect(host.querySelector('[data-work-group="live"]')).toBeNull();
+    expect(stopControl()).toBeNull();
+    captured.session.state = "offline";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(host.querySelector("[data-latest-text]")).toBeNull();
+  });
+
   it("can be interrupted: the composer shows Interrupt, Esc sends it, and the wait ends there", async () => {
     transcript.items = [{ id: "u1", seq: 1, role: "user", kind: "text", text: "Write a status line", ts: new Date().toISOString() }];
     act(() => root.render(<ChatView mid="hub" sid="c1" />));

@@ -33,11 +33,13 @@ import (
 // that was cleaned up), a model (a Messages API the hello's "ai" points at, fakeModel), and what the assistant pushed
 // and reported. settings are the assistant's own a test service starts with (newTestService…).
 type fakeHub struct {
-	mu            sync.Mutex
-	inboxHook     func(ctx context.Context) // runs first in InboxChanged, no lock held (#4924)
-	readHooks     receiptHooks              // around session.items reads and on receipt broadcasts, no lock held
-	itemReads     int                       // session.items reads since the hooks were set
-	onDevicesList func()                    // runs once, then clears, before the next devices.list; no lock held
+	mu                 sync.Mutex
+	revokedDevices     map[string]bool
+	credentialCheckErr error
+	inboxHook          func(ctx context.Context) // runs first in InboxChanged, no lock held (#4924)
+	readHooks          receiptHooks              // around session.items reads and on receipt broadcasts, no lock held
+	itemReads          int                       // session.items reads since the hooks were set
+	onDevicesList      func()                    // runs once, then clears, before the next devices.list; no lock held
 	// beforeSend runs once, then clears, when session.send is called, before it is answered (what happens on the
 	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list made
 	// with a listHooked context was answered. No lock held. sendHangs: session.send is never answered while the link
@@ -51,13 +53,15 @@ type fakeHub struct {
 	zshrc        map[string][]proto.Launcher // a machine\'s own launchers.list (over launcherList)
 	// hostLaunchers: a machine's launchers.list for a start in its engine host (the call names a host), answered as an
 	// engine that runs only its own launchers would (host_runtime, #8140).
-	hostLaunchers map[string][]proto.Launcher
-	rcFiles       map[string]string                  // a machine's launchers.list rc_file (its shell follows: bash or zsh)
-	slowLaunchers map[string]bool                    // a machine whose launchers.list answers only when the call gives up
-	launcherGate  chan struct{}                      // when set, every launchers.list answer waits for this gate
-	agentModels   map[string][]proto.AgentModel      // the nodes' launchers.models, by launcher
-	modelsLocked  map[string]string                  // launchers.models's locked, by launcher
-	managed       map[string][]proto.ManagedLauncher // what each node was given (launchers.managed)
+	hostLaunchers       map[string][]proto.Launcher
+	rcFiles             map[string]string                  // a machine's launchers.list rc_file (its shell follows: bash or zsh)
+	slowLaunchers       map[string]bool                    // a machine whose launchers.list answers only when the call gives up
+	launcherGate        chan struct{}                      // when set, every launchers.list answer waits for this gate
+	failLauncherRefresh bool                               // launchers.list with refresh:true fails, ordinary reads still answer
+	launcherListParams  []map[string]any                   // launchers.list params in order
+	agentModels         map[string][]proto.AgentModel      // the nodes' launchers.models, by launcher
+	modelsLocked        map[string]string                  // launchers.models's locked, by launcher
+	managed             map[string][]proto.ManagedLauncher // what each node was given (launchers.managed)
 	// catalogNodes: the nodes take launchers.catalog (a node from before it answers unknown method); catalog is what each got.
 	catalogNodes  bool
 	catalog       map[string][]proto.ManagedLauncher
@@ -175,6 +179,8 @@ type fakeHub struct {
 	checks  map[string]proto.LauncherCheck
 	checked []string
 	onCheck func(f *fakeHub) // runs (under the fake's lock) inside each launchers.check
+	// onRename runs (under the fake's lock) inside each session rename, where a node's reader loop would be waiting.
+	onRename func()
 	// checkWait, when set, runs before each launchers.check is answered, outside the fake's lock, with the call's
 	// context: a check that takes its time; its error is the call's.
 	checkWait func(ctx context.Context) error
@@ -185,14 +191,15 @@ type fakeHub struct {
 	checkParams []map[string]any
 	oldCheck    bool
 
-	repairs   []map[string]any
-	repairRes *proto.LauncherRepair
-	onRepair  func(f *fakeHub)
-	onSend    func(f *fakeHub, p map[string]any) // runs (under the fake's lock) after each session.send
-	onStart   func(f *fakeHub, p map[string]any) // runs (under the fake's lock) when session.start arrives, before slowStart blocks
-	down      map[string]bool                    // machines listed as not connected (devices.list) while f.devices is nil
-	downLists map[string]int                     // and for how many more devices.list answers a machine is listed so
-	onList    func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
+	repairs    []map[string]any
+	repairRes  *proto.LauncherRepair
+	onRepair   func(f *fakeHub)
+	onSend     func(f *fakeHub, p map[string]any) // runs (under the fake's lock) after each session.send
+	onSendOnce func(f *fakeHub, p map[string]any) // runs under the fake's lock when a once-only send is accepted
+	onStart    func(f *fakeHub, p map[string]any) // runs (under the fake's lock) when session.start arrives, before slowStart blocks
+	down       map[string]bool                    // machines listed as not connected (devices.list) while f.devices is nil
+	downLists  map[string]int                     // and for how many more devices.list answers a machine is listed so
+	onList     func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
 	// onAssistantSend runs (under the fake's lock) when assistant.send arrives, before it is answered
 	onAssistantSend func(f *fakeHub, p map[string]any)
 	// assistantAnswer adds to assistant.send's answer (under the fake's lock): what a node says of a supervision round
@@ -235,6 +242,10 @@ func (f *fakeHub) Hello(context.Context) (Hello, error) {
 	}
 	return h, nil
 }
+
+// deviceCallsForTest records calls made with the test's context under fakeHub.mu.
+// Background refreshes can reach the same node independently of the action under test.
+type deviceCallsForTest struct{}
 
 // afterListCall marks the context of the call a test arms afterList for (listHooked).
 type afterListCall struct{}
@@ -317,6 +328,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)
+	if trace, ok := ctx.Value(deviceCallsForTest{}).(*[]DeviceCall); ok {
+		*trace = append(*trace, p)
+	}
 	if p.Method == DeviceAssistantWarm && f.refuseConfigDir && strings.Contains(string(p.Params), `"config_dir"`) {
 		return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
 	}
@@ -375,6 +389,20 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			return nil, f.failSendOnce[p.Device+"/"+sid]
 		}
 		f.sentOnce = append(f.sentOnce, a)
+		if id, _ := a["client_msg_id"].(string); strings.HasPrefix(id, "model-retry:") {
+			for _, prior := range f.agentSent {
+				if prior["client_msg_id"] == id {
+					return json.RawMessage(`{}`), nil
+				}
+			}
+			f.agentSent = append(f.agentSent, a)
+			if f.onSend != nil {
+				f.onSend(f, a)
+			}
+		}
+		if f.onSendOnce != nil {
+			f.onSendOnce(f, a)
+		}
 		return json.RawMessage(`{}`), nil
 	case DeviceSessionsList:
 		if f.sessionsFail[p.Device] > 0 { // a node that answers offline for a few tries, then recovers
@@ -419,8 +447,11 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			}
 		}
 		return json.Marshal(map[string]any{"items": items})
-	case DeviceSessionRename:
+	case DeviceSessionRename, assistantwire.DeviceSessionRenameTabIfCurrent:
 		f.sends = append(f.sends, map[string]any{"rename": a})
+		if f.onRename != nil {
+			f.onRename()
+		}
 		return json.RawMessage(`{"ok":true}`), nil
 	case assistantwire.DeviceLaunchersCheck:
 		name, _ := a["name"].(string)
@@ -452,6 +483,7 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		name, _ := a["name"].(string)
 		return json.Marshal(map[string]any{"agent": launcherAgent(name)})
 	case DeviceLaunchersList:
+		f.launcherListParams = append(f.launcherListParams, a)
 		if a["source"] == proto.ExternalLauncherSource {
 			list, ok := f.zshrc[p.Device]
 			if !ok {
@@ -481,6 +513,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			<-ctx.Done()
 			f.mu.Lock()
 			return nil, ctx.Err()
+		}
+		if a["refresh"] == true && f.failLauncherRefresh {
+			return nil, errors.New("launcher refresh failed")
 		}
 		if host, _ := a["host"].(string); host != "" {
 			if l, ok := f.hostLaunchers[p.Device]; ok {
@@ -557,6 +592,8 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			checks = append(checks, map[string]string{"name": "claude-version", "status": "ok", "state": f.doctorState[p.Device], "detail": detail})
 		}
 		return json.Marshal(map[string]any{"ok": true, "checks": checks})
+	case assistantwire.DeviceAssistantDirectory:
+		return json.Marshal(map[string]any{"cwd": a["path"]})
 	case DeviceAssistantPrepare:
 		f.prepared = append(f.prepared, a)
 		return json.Marshal(map[string]any{"cwd": "/home/me/.persona/assistant"})
@@ -806,6 +843,12 @@ func (f *fakeHub) Broadcast(_ context.Context, b Broadcast) {
 	}
 }
 
+func (f *fakeHub) CredentialRevoked(_ context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.revokedDevices[id], f.credentialCheckErr
+}
+
 func (f *fakeHub) InboxChanged(ctx context.Context, c assistantwire.InboxChanged) {
 	f.mu.Lock()
 	hook := f.inboxHook
@@ -991,6 +1034,9 @@ func (noPlans) FeedItem(context.Context, string) (*db.FeedRow, error) {
 func (noPlans) MarkFeedSent(context.Context, string, string, time.Time, json.RawMessage) ([]db.FeedRow, error) {
 	return nil, errors.New("no assistant_feed here")
 }
+func (noPlans) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
+	return nil, errors.New("no assistant_feed here")
+}
 
 func (m *memStore) Setting(_ context.Context, key string, out any) (bool, error) {
 	m.mu.Lock()
@@ -1006,6 +1052,31 @@ func (m *memStore) Setting(_ context.Context, key string, out any) (bool, error)
 		return false, nil
 	}
 	return true, json.Unmarshal(b, out)
+}
+
+func (m *memStore) SettingsPrefix(_ context.Context, prefix string) (map[string]json.RawMessage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failSetting != nil {
+		return nil, m.failSetting
+	}
+	values := map[string]json.RawMessage{}
+	for key, raw := range m.vals {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if err := m.failKeys[key]; err != nil {
+			return nil, err
+		}
+		values[key] = append(json.RawMessage(nil), raw...)
+	}
+	return values, nil
+}
+
+func (m *memStore) setFailPut(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failPut = err
 }
 
 func (m *memStore) PutSetting(_ context.Context, key string, v any) error {
@@ -1379,13 +1450,13 @@ func (f *fakeHub) fakeModel(t testing.TB) {
 		case strings.Contains(in.System, "起一个待办标题"): // a task's todo (todo_titles.go): none unless the test gives one
 			f.todoTitleAsked = append(f.todoTitleAsked, modelCall{in.System, user})
 			reply, fail = f.todoTitleReply, f.todoTitleErr != nil
-		case strings.Contains(in.System, "盯着用户电脑上的编程 Agent"): // the Agents triage (agents_triage.go)
+		case strings.Contains(in.System, "盯着用户电脑上的编程 Agent") || strings.HasPrefix(in.System, "You watch coding Agents") || strings.HasPrefix(in.System, "ユーザー（呼び方："): // the Agents triage (agents_triage.go)
 			f.triageAsked = append(f.triageAsked, modelCall{strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(in.System), jsonOnly)), user})
 			reply, fail = f.triage, f.triage == ""
-		case strings.Contains(in.System, "向 Persona 的一次汇报转述成一句话"): // the Progress row's line (report_line.go)
+		case strings.Contains(in.System, "向 Persona 的一次汇报转述成一句话") || strings.HasPrefix(in.System, "Paraphrase one report") || strings.HasPrefix(in.System, "開発AgentからPersonaへの一回の報告"): // the Progress row's line (report_line.go)
 			f.reportLineAsked = append(f.reportLineAsked, modelCall{in.System, user})
 			reply, fail = f.reportLine, f.reportLine == ""
-		case strings.Contains(in.System, "先替用户判断 Agent 的提问"): // the delegate (delegate.go)
+		case strings.Contains(in.System, "先替用户判断 Agent 的提问") || strings.HasPrefix(in.System, "You first assess questions") || strings.HasPrefix(in.System, "ユーザーのAgentからの質問を、まず"): // the delegate (delegate.go)
 			f.delegateAsked = append(f.delegateAsked, modelCall{strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(in.System), jsonOnly)), user})
 			reply, fail = f.delegate, f.delegate == ""
 		case strings.Contains(in.System, "给一件做完的任务记结论"): // the outcome of a finished task (todo_outcome.go)

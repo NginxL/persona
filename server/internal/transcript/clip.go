@@ -71,6 +71,17 @@ func light(it proto.Item, keepImage bool) (_ proto.Item, cut bool) {
 	return it, cut
 }
 
+// LightItem applies the page and push limits to an item from a native transcript reader.
+func LightItem(it proto.Item) proto.Item {
+	it, _ = light(it, false)
+	return it
+}
+
+// ClipToolInput applies the transcript's wire size limit to a tool's arguments.
+func ClipToolInput(input json.RawMessage) json.RawMessage {
+	return clipJSON(input)
+}
+
 // pageCut is where light cuts text longer than limit: s[:pageCut] is what the page keeps. It ends on a character, at
 // most limit bytes in, and on a whole line (before its newline) when one ends in the last 512 bytes of that. An
 // outcome's tail picks up from here (outputTail).

@@ -593,16 +593,17 @@ func TestReplyParentLookup(t *testing.T) {
 	}
 }
 
-// An agent message is made in the owner's DM, so the message it answers has to be in the DM, not in a listed group.
-func TestCotCreateParentMustBeInTheDM(t *testing.T) {
+// An agent message may answer in an opted-in topic, but never under a parent in a chat the bot may not use.
+func TestCotCreateParentMustBeInAnAllowedChat(t *testing.T) {
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
 	w.send(t, groupEvent("om_cot_topic", "ou_me", "在", topicChat, "omt_1"))
 	eventually(t, 5*time.Second, "handed", func() bool { return len(w.handed()) == 1 })
+	w.topicsOn(t) // the parent's chat is remembered, but is no longer one the bot may write in
 	before := w.api.total()
 	if err := w.sendErr(assistantwire.FeishuCotCreate, map[string]any{"reply_to": "om_cot_topic"}); !errors.Is(err, errBotReplyChat) {
-		t.Fatalf("an agent message answering a message in a group: %v", err)
+		t.Fatalf("an agent message answering a message in a chat that is not opted in: %v", err)
 	}
 	if w.api.total() != before {
 		t.Fatalf("something was sent:\n%s", w.api.since(before))

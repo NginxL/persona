@@ -20,9 +20,9 @@
 # (#2541). A release goes to one of two slots, <slot>/<name>, the one not served now; the deploy then switches dl/SLOT
 # (a static file, deployed with latest.json) to it. The slot left keeps the release before until the next one, so a
 # download that started before the deploy finishes. Only the newest version is served there. Every release also goes
-# to release/<version>/ (its node builds and its manifest as manifest.json), kept: a hub's manager fetches the node build
-# of the hub's own version from there (dl/<version>/…, docs/operations/node-update.md), a Docker image's version too (X.Y.Z, when
-# the release is the tag vX.Y.Z). release.sh runs this after uploading to TestFlight.
+# to release/<version>/ (its node and connector builds and its manifest as manifest.json), kept: a hub's manager
+# fetches those builds of the hub's own version from there (dl/<version>/…, docs/operations/node-update.md), a Docker
+# image's version too (X.Y.Z, when the release is the tag vX.Y.Z). release.sh runs this after uploading to TestFlight.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 _env=$(python3 scripts/persona_config.py env) || exit $?
@@ -65,12 +65,13 @@ settled() {
   "$@" || { echo "$what still differs about two minutes after the deploy" >&2; return 1; }
 }
 served_is() { [ "$(curl -fsSL "$PERSONA_PUBLISH_URL/dl/$1" 2>/dev/null)" = "$(cat "$2")" ]; }
-# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz) and
-# the iPhone helper's (persona-iphone-bridge-<os>-<arch>.gz), the only ones fetched from dl/<version>/.
+# node_archives <dir>: the node builds among the downloads (personad-<os>-<arch>.gz, persona-node-<os>-<arch>.gz), the
+# connector's (persona-link-<os>-<arch>.gz, which a switch of an ssh computer to Persona Link sends it) and the iPhone
+# helper's (persona-iphone-bridge-<os>-<arch>.gz), the only ones fetched from dl/<version>/.
 node_archives() {
   local gz
   for gz in "$1"/*.gz; do
-    [[ "${gz##*/}" =~ ^(personad|persona-node|persona-iphone-bridge)-(linux|darwin)-(amd64|arm64)\.gz$ ]] && printf '%s\n' "$gz"
+    [[ "${gz##*/}" =~ ^(personad|persona-node|persona-link|persona-iphone-bridge)-(linux|darwin|windows)-(amd64|arm64)(\.exe)?\.gz$ ]] && printf '%s\n' "$gz"
   done
   return 0
 }
@@ -161,10 +162,12 @@ if [ -n "${SITE_ONLY:-}" ]; then
   exit 0
 fi
 
-# The build number orders releases (UTC YYYYMMDDHHMM): hubs install only a larger one.
-BUILD="$(date -u +%Y%m%d%H%M)"
+# The build number orders releases (UTC YYYYMMDDHHMM): hubs install only a larger one. A release-PR workflow pins it
+# in its immutable plan so a retry verifies exactly the same downloads; ordinary builds keep the current UTC minute.
+BUILD="${PERSONA_RELEASE_BUILD:-$(date -u +%Y%m%d%H%M)}"
+[[ "$BUILD" =~ ^[0-9]{12}$ ]] || { echo "PERSONA_RELEASE_BUILD must be UTC YYYYMMDDHHMM" >&2; exit 2; }
 # The nearest vX.Y.Z tag, a lightweight one too, as deploy.sh names its builds (#7201).
-VERSION="${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}"
+VERSION="${PERSONA_RELEASE_VERSION:-${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}}"
 COMMIT="$(git rev-parse HEAD)"
 # A release is the committed code: latest.json says which commit and lists every one it contains, and a hub
 # installs a release by itself only when its own commit is among them (docs/operations/hub-update.md "No regression"). Published with
@@ -224,11 +227,14 @@ for t in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
   (cd server && GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" \
     -o "../$OUT/bin/persona-node-${t%/*}-${t#*/}" ./cmd/persona-node)
 done
-# The independent connector also runs on Windows. The hub, manager and node programs keep their existing platforms;
-# their update feeds do not acquire Windows entries along with the connector (docs/operations/windows.md).
+# The Windows connector and resident-node programs run natively on Windows. They are node downloads, not a native hub:
+# Windows personad is listed under Files so the manager can send it to a node; a hub never selects another OS for its
+# own self-update. The connector and persona-node keep their separate Links and Nodes entries.
 for t in windows/amd64 windows/arm64; do
-  (cd server && GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" \
-    -o "../$OUT/bin/persona-link-${t%/*}-${t#*/}.exe" ./cmd/persona-link)
+  for p in personad persona-link persona-node; do
+    (cd server && GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" \
+      -o "../$OUT/bin/$p-${t%/*}-${t#*/}.exe" "./cmd/$p")
+  done
 done
 # The hub and manager programs are released and swapped together with personad (update.ProgramNames).
 for t in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
@@ -266,7 +272,7 @@ adhoc_identifiers() {
 # Before anything hashes or packs them.
 adhoc_identifiers "$OUT/bin"
 cleanup
-python3 scripts/persona_identity.py --render-installer scripts/deploy/install.sh "$OUT/install.sh" "$PERSONA_PUBLISH_URL/dl"
+python3 scripts/persona_identity.py --render-installer scripts/deploy/install.sh "$OUT/install.sh" "$UPDATE_URL"
 
 # Anyone can download these: no private values in them (CLAUDE.md), and no copied skill (only the built-in ones
 # assistantskills.Redistributable lists; a copied skill lives in the user's ~/.persona/skills or comes with its
@@ -289,7 +295,17 @@ done
 
 # Releases only move forward: a larger build number than the one served, and the served commit an ancestor of this one.
 curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json" -o "$OUT/served.json" 2>/dev/null || : > "$OUT/served.json"
-"$host_bin" release check-next "$OUT/served.json" --build "$BUILD" --commit "$COMMIT" || exit 1
+RETRY_SAME_BUILD=0
+if ! "$host_bin" release check-next "$OUT/served.json" --build "$BUILD" --commit "$COMMIT"; then
+  # A retry of the exact same commit/build is allowed only after the served manifest verifies against these bytes.
+  if [ -s "$OUT/served.json" ] \
+    && [ "$(python3 -c 'import json; print(json.load(open("'"$OUT"'/served.json"))["build"])' 2>/dev/null)" = "$BUILD" ] \
+    && [ "$(python3 -c 'import json; print(json.load(open("'"$OUT"'/served.json"))["commit"])' 2>/dev/null)" = "$COMMIT" ]; then
+    RETRY_SAME_BUILD=1
+  else
+    exit 1
+  fi
+fi
 
 # The privacy scan checked the raw binaries; only the gzipped ones are published (to the bucket, see above).
 for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-node-* "$OUT/bin"/persona-hub-* "$OUT/bin"/persona-manager-* \
@@ -297,6 +313,9 @@ for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-no
   [ -f "$bin" ] || continue # no helper built here
   gzip -n -9 -c "$bin" > "$bin.gz"
 done
+if [ "$RETRY_SAME_BUILD" = 1 ]; then
+  "$host_bin" release verify --dir "$OUT/bin" --manifest "$OUT/served.json"
+fi
 # Only current product names are public downloads; command compatibility stays inside installed services.
 (cd "$OUT/bin" && shasum -a 256 *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
 
@@ -340,9 +359,9 @@ for gz in "$PWD/$OUT/bin/"*.gz; do
   put_at "$SLOT/${gz##*/}" "$gz" application/gzip
 done
 # The versioned copies, kept: release/<version>/ (and release/X.Y.Z/ when the release is the tag vX.Y.Z, the version
-# of the Docker image built from that tag), the node builds and the manifest only: a manager fetches a node build from
-# there (docs/operations/node-update.md). The tag is looked up among all the commit's tags (release.sh tags it testflight/<build>
-# too).
+# of the Docker image built from that tag), the node_archives builds and the manifest only: a manager fetches a node
+# build or the connector from there (docs/operations/node-update.md). The tag is looked up among all the commit's tags
+# (release.sh tags it testflight/<build> too).
 VERSIONS=("$VERSION")
 # A build with changes not committed (-dirty) is not the tag's release, and gets no alias.
 if [[ "$VERSION" != *-dirty* ]] && tag="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)" && [ -n "$tag" ]; then

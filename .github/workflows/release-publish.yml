@@ -1,0 +1,381 @@
+name: release-publish
+
+# Only a merged, administrator-authored release PR enters this workflow. Its protected publication consumes
+# the release PR's verified artifacts, never an arbitrary branch, fork, moving tag or ordinary PR merge.
+on:
+  workflow_run:
+    workflows: [release-pr]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Merged release PR number whose verified merge commit is an ancestor of current main'
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publication-${{ github.event.workflow_run.head_sha || inputs.pr || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Check that the verified main merge is an administrator release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      pr: ${{ steps.pr.outputs.number }}
+      title: ${{ steps.pr.outputs.title }}
+    steps:
+      - name: Resolve the source PR without requesting release signing approval
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          PR_NUMBER: ${{ inputs.pr || 0 }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          if [[ "$PR_NUMBER" = 0 ]]; then
+            gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" > release/merged-pr-list.json
+            python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          commit=os.environ['HEAD_SHA']
+          candidates=[p for p in json.loads(Path('release/merged-pr-list.json').read_text()) if p.get('state')=='closed' and (p.get('merge_commit_sha') or p.get('mergeCommit',{}).get('oid'))==commit and p.get('title','').startswith('release:') and p.get('user',{}).get('login')=='chyroc']
+          if len(candidates)!=1:
+              print('No unique administrator release PR for this verified main commit; not publishing')
+              raise SystemExit(0)
+          Path('release/merged-pr.json').write_text(json.dumps(candidates[0]))
+          pr=json.loads(Path('release/merged-pr.json').read_text())
+          Path('release/merged-pr.json').write_text(json.dumps(pr))
+          PY
+          else
+            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json number,title,state,isDraft,baseRefName,headRefOid,headRepository,author,mergedBy,mergeCommit > release/merged-pr.json
+          fi
+          if [[ -s release/merged-pr.json ]] && python3 -c 'import json; d=json.load(open("release/merged-pr.json")); assert d["title"].startswith("release:")' 2>/dev/null; then
+            python3 -c 'import json; d=json.load(open("release/merged-pr.json")); print("number=%s"%d["number"])' >> "$GITHUB_OUTPUT"
+            python3 -c 'import json; d=json.load(open("release/merged-pr.json")); print("title=%s"%d["title"])' >> "$GITHUB_OUTPUT"
+          fi
+
+  authorize:
+    name: Resolve the merged release PR and its verified plan
+    needs: source
+    if: needs.source.outputs.pr != '' && (github.event_name == 'workflow_dispatch' || (
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login == 'chyroc')) &&
+      github.actor == 'chyroc' &&
+      github.triggering_actor == 'chyroc'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    environment: persona-release
+    outputs:
+      channel: ${{ steps.source.outputs.channel }}
+      pr: ${{ needs.source.outputs.pr }}
+      title: ${{ needs.source.outputs.title }}
+      version: ${{ steps.source.outputs.version }}
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the merged release PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr || 0 }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          if [[ "$PR_NUMBER" = 0 ]]; then
+            gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" > release/merged-pr-list.json
+            python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          commit=os.environ['HEAD_SHA']
+          candidates=[p for p in json.loads(Path('release/merged-pr-list.json').read_text()) if p.get('state')=='closed' and (p.get('merge_commit_sha') or p.get('mergeCommit',{}).get('oid'))==commit and p.get('title','').startswith('release:') and p.get('user',{}).get('login')=='chyroc']
+          if len(candidates)!=1:
+              raise SystemExit('No unique administrator release PR for this verified main commit; not publishing')
+          Path('release/merged-pr.json').write_text(json.dumps(candidates[0]))
+          pr=json.loads(Path('release/merged-pr.json').read_text())
+          pr['state']='MERGED'
+          pr['isDraft']=pr.get('draft',False)
+          pr['baseRefName']=pr.get('base',{}).get('ref','main')
+          pr['headRepository']={'nameWithOwner':pr.get('head',{}).get('repo',{}).get('full_name','')}
+          pr['author']=pr.get('user',{})
+          pr['mergedBy']=pr.get('merged_by',{})
+          pr['mergeCommit']={'oid':pr.get('merge_commit_sha')}
+          Path('release/merged-pr.json').write_text(json.dumps(pr))
+          PY
+          else
+            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,baseRefName,headRefOid,headRepository,author,mergedBy,mergeCommit,title > release/merged-pr.json
+          fi
+          printf 'number=%s\n' "$(python3 -c 'import json; print(json.load(open("release/merged-pr.json"))["number"])' 2>/dev/null || printf '%s' "$PR_NUMBER")" >> "$GITHUB_OUTPUT"
+      - name: Resolve the exact merged commit and channel
+        id: source
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number || inputs.pr }}
+        run: |
+          set -euo pipefail
+          MERGE_COMMIT="$(python3 -c 'import json; print(json.load(open("release/merged-pr.json"))["mergeCommit"]["oid"])')"
+          TITLE="$(python3 -c 'import json; print(json.load(open("release/merged-pr.json"))["title"])')"
+          case "$MERGE_COMMIT" in (*[!0-9a-f]*|'') exit 1;; esac
+          title="$TITLE"
+          if [[ "$title" == *-beta.* ]]; then channel=beta; else channel=release; fi
+          version="$(python3 -c 'import json,os,re; title=os.environ["TITLE"]; print(re.fullmatch(r"release: v?([0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[0-9]+)?)",title).group(1))' )"
+          {
+            printf 'channel=%s\n' "$channel"
+            printf 'version=%s\n' "$version"
+            printf 'commit=%s\n' "$MERGE_COMMIT"
+          } >> "$GITHUB_OUTPUT"
+      - name: Verify the merged PR and current main retain this exact source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number || inputs.pr }}
+          CHANNEL: ${{ steps.source.outputs.channel }}
+          COMMIT: ${{ steps.source.outputs.commit }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-merged-pr --pr-json release/merged-pr.json --commit "$COMMIT" --actor "$ACTOR")"
+          test "$version" = "${{ steps.source.outputs.version }}"
+          # Ordinary PRs may merge during the exact-source post-merge build. Keep this verified commit as the tag
+          # source, but require it to be retained by main rather than racing a moving branch head.
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$COMMIT" FETCH_HEAD
+      - name: Download the release PR's exact verified artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-pr-verified-${{ steps.pr.outputs.number || inputs.pr }}-${{ steps.source.outputs.commit }}
+          path: release
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify plan identity and exact artifact bytes
+        env:
+          REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ steps.source.outputs.channel }}
+          COMMIT: ${{ steps.source.outputs.commit }}
+          PR_NUMBER: ${{ steps.pr.outputs.number || inputs.pr }}
+        run: |
+          set -euo pipefail
+          python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-artifacts --plan release/plan.json --commit "$COMMIT"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          plan=json.loads(Path('release/plan.json').read_text())
+          assert plan['pr']==int(os.environ['PR_NUMBER'])
+          store=plan['stores']['iphone_watch']
+          assert store['build']==str(plan['build'])
+          assert store['processing']=='VALID'
+          assert store['groups']==['Internal','Friends']
+          assert store['external']=='IN_BETA_TESTING'
+          assert json.loads(Path('release/store-verified.json').read_text())==plan['stores']
+          print('Verified merged release plan',plan['tag'],plan['commit'])
+          PY
+      - name: Create the immutable tag only after the merged source passed every platform check
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ steps.source.outputs.version }}
+          COMMIT: ${{ steps.source.outputs.commit }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; refusing an unauthorized tag actor' >&2; exit 1; }
+          existing="$(git ls-remote --tags "https://github.com/$REPOSITORY.git" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          if [[ -n "$existing" ]]; then
+            printf '%s\n' "$existing" | grep -F "$COMMIT" >/dev/null || {
+              echo "$TAG already identifies another source; refusing to move or replace it" >&2
+              exit 1
+            }
+          else
+            git tag -a "$TAG" -m "Persona $TAG" "$COMMIT"
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push "https://github.com/$REPOSITORY.git" "refs/tags/$TAG"
+          fi
+          test "$(git rev-parse "$TAG^{commit}")" = "$COMMIT"
+      - name: Mark the Release as owned by this verified release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ steps.source.outputs.version }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if body="$(gh release view "$TAG" --repo "$REPOSITORY" --json body --jq .body 2>/dev/null)"; then
+              if [[ "$body" != release-pr:* ]]; then
+                gh release edit "$TAG" --repo "$REPOSITORY" --notes "release-pr: $PR_NUMBER"
+              fi
+              exit 0
+            fi
+            test "$attempt" -lt 90 || { echo 'Release was not created by the tag workflow in time' >&2; exit 1; }
+            sleep 20
+          done
+
+  cli-web:
+    name: Attach the release PR's verified CLI and Web downloads
+    needs: [source, authorize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    environment: persona-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.authorize.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-verified-${{ needs.authorize.outputs.pr || inputs.pr }}-${{ needs.authorize.outputs.commit }}
+          path: release
+      - name: Wait for the tag-triggered container and Release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+          COMMIT: ${{ needs.authorize.outputs.commit }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            status="$(gh run list --repo "$REPOSITORY" --workflow release.yml --event push --branch "$TAG" --limit 1 --json status,conclusion,headSha --jq '.[0] | [.status,.conclusion,.headSha] | @tsv')"
+            read -r state conclusion sha <<< "$status"
+            test "$sha" = "$COMMIT"
+            if [[ "$state" = completed ]]; then
+              test "$conclusion" = success
+              break
+            fi
+            test "$attempt" -lt 90 || { echo 'tag release workflow did not finish in time' >&2; exit 1; }
+            sleep 20
+          done
+      - name: Verify the Release, tag source and manifest before any upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+          COMMIT: ${{ needs.authorize.outputs.commit }}
+          PYTHONPATH: scripts/operations
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$REPOSITORY" --json tagName,isDraft,isPrerelease,targetCommitish > release/release.json
+          python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          release=json.loads(Path('release/release.json').read_text())
+          assert release['tagName']==os.environ['TAG'] and not release['isDraft']
+          assert release['targetCommitish']==os.environ['COMMIT']
+          assert release['isPrerelease']==(os.environ['TAG'].find('-beta.')>=0)
+          manifest=json.loads(Path('release/downloads/latest.json').read_text())
+          assert manifest['version']==os.environ['TAG'][1:]
+          assert manifest['commit']==os.environ['COMMIT']
+          plan=json.loads(Path('release/plan.json').read_text())
+          assert manifest['build']==plan['build']
+          assert manifest.get('channel','release')==plan['channel']
+          from windows_release import check_windows_artifacts
+          assets=[{'name':item['name'],'path':item['path']} for item in plan['artifacts']]
+          check_windows_artifacts(assets,plan['version'])
+          from tag_release import check_android_index
+          check_android_index(assets,plan['version'])
+          assert any(item['name'].endswith('.verification.json') for item in assets)
+          assert any(item['name'].endswith('.apk') for item in assets)
+          assert {path.name for path in Path('release/downloads').iterdir()} == {item['name'] for item in assets}
+          if plan['channel']=='beta':
+              assert (Path('release/downloads')/'beta.yml').is_file()
+          else:
+              assert (Path('release/downloads')/'latest.yml').is_file()
+          PY
+      - name: Upload verified downloads and verify remote SHA-256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+        run: |
+          set -euo pipefail
+          for path in release/downloads/*; do
+            test -f "$path"
+            name="$(basename "$path")"
+            case "$name" in
+              latest.json|SHA256SUMS|VERSION|android.json)
+                # Update indexes go last: a hub must never see metadata whose referenced downloads are absent.
+                continue
+                ;;
+              *.verification.json|receipt.json|plan.json|release.json|merged-pr.json|store-verified.json|authorization.json|beta-receipt.json)
+                printf 'receipt_kept_out_of_release_assets %s\n' "$name"
+                continue
+                ;;
+            esac
+            gh release upload "$TAG" "$path" --repo "$REPOSITORY" --clobber
+            expected="$(shasum -a 256 "$path" | awk '{print $1}')"
+            remote="$(gh api "repos/$REPOSITORY/releases/tags/$TAG" --jq '.assets[] | select(.name == "'"$name"'") | .digest')"
+            test "$remote" = "sha256:$expected"
+            printf 'verified %s %s\n' "$name" "$expected"
+          done
+          for name in VERSION SHA256SUMS android.json latest.json; do
+            path="release/downloads/$name"
+            test -f "$path" || continue
+            gh release upload "$TAG" "$path" --repo "$REPOSITORY" --clobber
+            expected="$(shasum -a 256 "$path" | awk '{print $1}')"
+            remote="$(gh api "repos/$REPOSITORY/releases/tags/$TAG" --jq '.assets[] | select(.name == "'"$name"'") | .digest')"
+            test "$remote" = "sha256:$expected"
+            printf 'verified %s %s\n' "$name" "$expected"
+          done
+      - name: Independently download every uploaded artifact and compare bytes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/independent
+          for path in release/downloads/*; do
+            name="$(basename "$path")"
+            case "$name" in *.verification.json) continue;; esac
+            rm -f "release/independent/$name"
+            gh release download "$TAG" --repo "$REPOSITORY" --pattern "$name" --dir release/independent
+            cmp "$path" "release/independent/$name"
+            printf 'independent_download_verified %s %s\n' "$name" "$(shasum -a 256 "release/independent/$name" | awk '{print $1}')"
+          done
+      - name: Advance only the verified stable Latest pointer
+        if: needs.authorize.outputs.channel == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+        run: python3 scripts/operations/stable_release.py --repository "$REPOSITORY" --tag "$TAG" --manifest release/downloads/latest.json
+      - name: Advance only the authenticated beta pointer
+        if: needs.authorize.outputs.channel == 'beta'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+          COMMIT: ${{ needs.authorize.outputs.commit }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          plan=json.loads(Path('release/plan.json').read_text())
+          receipt={'commit':os.environ['COMMIT'],'assets':[]}
+          for name in ('latest.json','android.json'):
+              path=Path('release/downloads')/name
+              if path.is_file():
+                  receipt['assets'].append({'path':str(path),'name':name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+          Path('release/beta-receipt.json').write_text(json.dumps(receipt)+'\n')
+          PY
+          python3 scripts/operations/beta_channel_release.py --repo . --repository "$REPOSITORY" --tag "$TAG" --receipt release/beta-receipt.json

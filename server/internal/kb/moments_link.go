@@ -84,7 +84,7 @@ func (e *Engine) LinkMoments(ctx context.Context, max int) int {
 	}
 	var projects []*Project
 	for _, p := range e.Store.Projects() {
-		if p.Live() && p.Status != "ignored" && p.Status != "done" && len(p.Keywords) > 0 {
+		if p.Live() && !p.referenceOnly() && p.Status != "ignored" && p.Status != "done" && len(p.Keywords) > 0 {
 			projects = append(projects, p)
 		}
 	}
@@ -172,7 +172,8 @@ func momentForPrompt(m *MomentPost, note string, chars int, zone *time.Location)
 
 // judgeMoments asks which candidates are about p, links those, and remembers every verdict.
 func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPost, judged map[string]bool) (int, error) {
-	in := prompts.KBMomentsLinkInput{Name: p.Name, Aliases: p.Aliases, Keywords: p.Keywords, OneLine: p.OneLine, Goal: p.Goal,
+	owner := e.knowledgeOwner()
+	in := prompts.KBMomentsLinkInput{Language: owner.Language, Name: p.Name, Aliases: p.Aliases, Keywords: p.Keywords, OneLine: p.OneLine, Goal: p.Goal,
 		Summary: clip(e.Store.Summary(KindProject, p.Slug), 1500)}
 	for _, m := range cands {
 		in.Posts = append(in.Posts, momentForPrompt(m, "", 300, e.Store.Zone()))
@@ -186,7 +187,7 @@ func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPo
 	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.moments").JSONMax(cctx, prompts.RenderKBMomentsLink(prompts.KBOwner{Owner: e.ownerName()}),
+	if err := e.modelFor("kb.moments").JSONMax(cctx, prompts.RenderKBMomentsLink(owner),
 		prompts.RenderKBMomentsLinkInput(in), 3000, &d); err != nil {
 		return 0, err
 	}
@@ -205,6 +206,10 @@ func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPo
 	// Reread: the project may have changed while the model thought.
 	cur, ok := e.Store.Project(p.Slug)
 	if !ok || !cur.Live() {
+		return 0, nil
+	}
+	if cur.referenceOnly() {
+		e.logf("project %s: %v: skipped Moments detail", cur.Slug, ErrReferenceOnly)
 		return 0, nil
 	}
 	var added []ProjectMoment
@@ -263,7 +268,7 @@ func (e *Engine) projectMomentsForPrompt(p *Project, n int) []prompts.KBMoment {
 func (e *Engine) SeedKeywords(recent time.Duration) int {
 	n := 0
 	for _, p := range e.Store.Projects() {
-		if !p.Live() || p.Status == "ignored" || p.Status == "done" || len(p.Keywords) > 0 || p.Dirty || time.Since(p.Updated) > recent {
+		if !p.Live() || p.referenceOnly() || p.Status == "ignored" || p.Status == "done" || len(p.Keywords) > 0 || p.Dirty || time.Since(p.Updated) > recent {
 			continue
 		}
 		p.Dirty = true

@@ -68,7 +68,7 @@ type Credentials interface {
 ```
 
 - Credentials live on the hub: AES-GCM encryption with `secret.key` (the same master key as launcher keys and `mail` credentials, `internal/secretkey`), in a new Postgres table
-  `connector_accounts(connector, account, config jsonb, secret_enc text, created_at, updated_at)`; check every worktree before selecting a migration number.
+  `connector_accounts(connector, account, config jsonb, secret_enc text, created_at, updated_at)`; its migration is named by the UTC second it is written (`docs/server/server.md` "Migrations").
   Plaintext exists only in memory and is never returned by an API (only "configured" and the account name). A hub.json `<connector>.token_file` (0600) is also available for people who do not want to use the App.
 - States such as `not_signed_in` appear consistently in Settings › Connectors, the `Inbox`'s top `error` bar, and assistant snapshots (it will not call tools when "GitHub is not signed in").
   In the App (`ConnectorText.state` / `tone`), only `error` says "Something went wrong"; red dots are only for `error` and `no_permission`. Disabled ("Off"), unconfigured and unsigned-in states have grey dots;
@@ -162,7 +162,7 @@ type ReadTools interface {
 
 - Descriptions and schemas live in `server/internal/prompts/mcp/<connector>/<tool name>.md` (unchanged format from `docs/assistant/prompts.md` ("MCP tools")), read by `prompts.Tool(name)`.
 - The hub tool list comes from `Registry`: only `ok` connectors expose tools (today's two booleans in `assistantTools(withLark, withMail)` are a special case);
-  `callTool` / `runAssistantTool` dispatch by prefix. `mcp_tools.*` goldens must remain byte-for-byte identical across migration.
+  `callTool` / `runAssistantTool` dispatch by prefix. `mcp_tools/` goldens must remain byte-for-byte identical across migration.
 - Read-only tools need no approval under `--allowedTools mcp__persona` (like today's `lark_*`); writes do not belong here.
 
 ### 7. Writes (`Actions`)
@@ -268,7 +268,7 @@ A `connector` uses only **one** machine (configured as `imessage.machine`), not 
 One PR per step, with the same checks before merging:
 
 - **All existing tests pass**: `./scripts/test/test-server.sh` (hub machine, real Postgres), `go test ./...`, App `PersonaTests` and `Inbox` / knowledge-base UI tests.
-- **Byte-identical goldens**: prompts, MCP tool lists (`mcp_tools.*`, `mail_tools`).
+- **Byte-identical goldens**: prompts, MCP tool lists (`mcp_tools/`, `mail_tools`).
 - **New comparison tests** (write in M0, baseline generated with old code): fake Lark gateway + fake `mail` (synthetic data), one archive + `Inbox` collection round,
   saving results (knowledge-base directory tree and every file's content, `InboxItem` JSON) as goldens; every subsequent step must match.
 - **Real-data comparison** (read-only, print numbers only): `personad dev connector-diff` (DEBUG builds / tests only), using real Lark gateway and `mail` on the hub machine;
@@ -314,6 +314,7 @@ Later activity merges into the unresolved item; activity after completion opens 
 
 - **`Conversations`**: one per PR / `issue`, `chats/github-<owner>-<repo>-<number>` (`kind: pr | issue`), description first, then `issue` comments, reviews ("`alice` approved", "bob requested `changes`: …"),
   inline comments (with file:line), chronologically ordered. Bots (`[bot]` accounts, CI comments) are marked as bots and excluded from real people by `HasPeople`.
+  The chat carries the thread's state, and a merge, close or reopen adds one line (`docs/assistant/knowledge.md` "Chat state and finished projects", #9427).
 - **What is collected**: only `threads` "related to me" (seen in notifications + search `involves:@me` updated in the last 30 days), not entire repositories. Cursor uses thread `updated_at`
   + `since` per `comment` type (`StreamSource`); backfill reads all comments on first fetch (like Moments, no `Older` needed).
 - **Repositories link to projects**: project `dirs` (`<machine>:<path>`) are code directories; node `git.status` gains optional `remotes` (skip old nodes without it).

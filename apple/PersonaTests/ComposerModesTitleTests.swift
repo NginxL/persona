@@ -59,7 +59,7 @@ struct ComposerModesTitleTests {
     }
 
     @Test func starterLauncherLegacyDefaultMatchesAnEmptyModel() {
-        let modes = StarterComposer.ShellModes(launcher: .constant("old"), mode: .constant(""), effort: .constant(""))
+        let modes = StarterComposer.ShellModes(launcher: .constant("old"), launcherModel: .constant(nil), mode: .constant(""), effort: .constant(""))
         let app = AppModel()
         let legacy = StarterModesMenu.title(modes: modes, launchers: [Launcher(name: "old", model: "默认")], model: app)
         #expect(legacy == StarterModesMenu.title(modes: modes, launchers: [Launcher(name: "old")], model: app))

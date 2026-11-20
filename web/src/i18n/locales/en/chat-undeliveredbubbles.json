@@ -2,5 +2,8 @@
   "waiting": "Not delivered: {reason}. It will be sent automatically.",
   "failed": "Not delivered: {reason}",
   "images": "Pictures: {count}",
-  "action_failed": "That did not work: {error}"
+  "action_failed": "That did not work: {error}",
+  "held_waiting": "Will send when {computer} is back",
+  "held_failed": "Not sent",
+  "held_placeholder": "{computer} is offline. Sends when it's back."
 }

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -121,6 +124,25 @@ func TestStartResultUnknown(t *testing.T) {
 	}
 }
 
+func TestTracksNodeWriteClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		want   bool
+	}{
+		{"session send", DeviceSessionSend, true},
+		{"session start", DeviceSessionStart, true},
+		{"task terminal close", devicewire.MethodCloseTaskTerminal, true},
+		{"unrelated method", DeviceSessionItems, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tracksNodeWrite(tc.method); got != tc.want {
+				t.Fatalf("tracksNodeWrite(%q) = %t, want %t", tc.method, got, tc.want)
+			}
+		})
+	}
+}
+
 // Which failed sends may still have reached the agent (#7539): no answer came, or the node's error says delivered
 // unknown or yes. A refusal, an error that says nothing of delivery, and a request that never went out are definite.
 func TestSendUnknown(t *testing.T) {
@@ -135,6 +157,17 @@ func TestSendUnknown(t *testing.T) {
 		{"deadline", context.DeadlineExceeded, true},
 		{"dropped", rpc.ErrDropped, true},
 		{"inbox did not confirm it", delivered("peer_unconfirmed", "unknown"), true},
+		{"deadline across the bus", relayedDeadline, true},
+		{"only the deadline words", errors.New(context.DeadlineExceeded.Error()), true},
+		{"device deadline", &rpc.Error{Code: devicewire.CodeDeadline, Message: "node timed out"}, true},
+		{"device link dropped", &rpc.Error{Code: devicewire.CodeNodeClosed, Message: "node disconnected"}, true},
+		{"node took nothing before its timeout", delivered(devicewire.CodeDeadline, "none"), false},
+		{"cancellation across the bus", &rpc.Error{Message: context.Canceled.Error()}, true},
+		{"different words", &rpc.Error{Message: "configuration: " + context.DeadlineExceeded.Error()}, false},
+		{"coded refusal with deadline words", &rpc.Error{Code: "invalid_params", Message: context.DeadlineExceeded.Error()}, false},
+		{"node typed nothing before the link closed", &rpc.Error{Message: rpc.ErrClosed.Error(), Data: json.RawMessage(`{"delivered":"none"}`)}, false},
+		{"writer timed out after a partial frame", errors.Join(rpc.ErrNotWritten, context.DeadlineExceeded), true},
+		{"timed out before writing any frame", rpc.NotSent(errors.Join(rpc.ErrNotWritten, context.DeadlineExceeded)), false},
 		{"typing failed part way", delivered("", "unknown"), true},
 		{"wrapped, typing failed part way", fmt.Errorf("session.send: %w", delivered("", "unknown")), true},
 		{"delivered, then failed", delivered("internal", "yes"), true},
@@ -150,6 +183,45 @@ func TestSendUnknown(t *testing.T) {
 				t.Fatalf("sendUnknown(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSendUnknownAcrossBus(t *testing.T) {
+	clientConn, nodeConn := net.Pipe()
+	client, node := rpc.New("client", clientConn), rpc.New("node", nodeConn)
+	answers := map[string]error{"deadline": context.DeadlineExceeded, "written": nodeAfterWrite, "refused": nodeRefused}
+	node.OnRequest = func(_ context.Context, method string, _ json.RawMessage) (any, error) { return nil, answers[method] }
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var servers sync.WaitGroup
+	servers.Go(func() { _ = client.Serve(ctx, clientConn) })
+	servers.Go(func() { _ = node.Serve(ctx, nodeConn) })
+	t.Cleanup(func() {
+		clientConn.Close()
+		nodeConn.Close()
+		servers.Wait()
+	})
+	for _, method := range []string{"deadline", "written", "refused"} {
+		err := busError(client.Call(ctx, method, nil, nil))
+		var re *rpc.Error
+		if !errors.As(err, &re) || errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s did not cross the RPC boundary: %v", method, err)
+		}
+		if sendUnknown(err) != (method != "refused") {
+			t.Errorf("%s: mistaken delivery result for %+v", method, re)
+		}
+	}
+}
+
+type expiredSendParams struct{}
+
+func (expiredSendParams) MarshalJSON() ([]byte, error) { return nil, context.DeadlineExceeded }
+
+func TestSendDeadlineBeforeDispatch(t *testing.T) {
+	s, f := newTaskService(t)
+	err := s.call(t.Context(), "box", DeviceSessionSend, expiredSendParams{}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || sendUnknown(err) || sessionSends(f) != 0 {
+		t.Fatalf("definitely unsent: %v, dispatched %d times", err, sessionSends(f))
 	}
 }
 

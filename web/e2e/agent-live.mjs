@@ -10,7 +10,7 @@
 //   node web/e2e/agent-live.mjs http://127.0.0.1:5183 --hub http://127.0.0.1:18783 [--shots <dir>]
 //
 // Runs wide (1280) and phone width (390), light and dark, each from the agent as the fake hub started it (step reset);
-// --shots saves the reply streaming, live while the tool runs (the live work row under it), the moment its item replaces
+// --shots saves the reply streaming, live while the tool runs (the live work row above it), the moment its item replaces
 // it, the message after the tool, and the finished exchange once the run bar has faded. The chat keeps the live text's
 // end in view, also on a page opened by its address (the chat's frame changes once the session arrives). Prints one line
 // per check and a verdict; exits 1 on a failure.
@@ -81,13 +81,13 @@ async function shot(page, name, tag) {
   if (shots) await page.screenshot({ path: join(shots, `agent-live-${tag}-${name}.png`) });
 }
 
-// The live work row ("Working…") stays under an agent's live words: they come in batches and stay while a tool runs.
-async function workingUnderWords(page, tag) {
+// The live work row ("Working…") stays above an agent's live words: they come in batches and stay while a tool runs.
+async function workingAboveWords(page, tag) {
   const where = await page.evaluate(([live, working]) => {
     const l = document.querySelector(live), w = document.querySelector(working);
     return !l || !w ? `${!!l} ${!!w}` : l.compareDocumentPosition(w) & Node.DOCUMENT_POSITION_FOLLOWING ? "under" : "above";
   }, [LIVE, WORKING]);
-  if (where !== "under") fail(`${tag}: the live work row is not under the live words (${where})`);
+  if (where !== "above") fail(`${tag}: the live work row is not above the live words (${where})`);
 }
 
 async function run(browser, size, theme) {
@@ -99,8 +99,8 @@ async function run(browser, size, theme) {
   await page.waitForSelector("main textarea", { timeout: 15000 }); // paired
   await page.evaluate((t) => localStorage.setItem("persona.theme", t), theme);
   await page.reload();
-  // to the agent the way a click goes, once the list has it (opened by its address, see byAddress)
-  await until(page, "the agent is listed", tag, () => document.body.textContent.includes("检查 PR #42 的改动"), undefined, 15000);
+  // Open the session after pairing; the sidebar can start with its Agents section collapsed.
+  await page.waitForSelector("main textarea", { timeout: 15000 });
   await page.evaluate((path) => {
     history.pushState(null, "", path);
     dispatchEvent(new PopStateEvent("popstate"));
@@ -119,7 +119,7 @@ async function run(browser, size, theme) {
   await step("lines", 3); // a blank line, then the list's first item
   await until(page, "the next batch adds its lines", tag, ([sel, w]) => document.querySelector(sel)?.textContent.includes(w), [LIVE, FIRST[1]]);
   await followsEnd(page, "streaming", tag);
-  await workingUnderWords(page, tag);
+  await workingAboveWords(page, tag);
   await page.waitForTimeout(400);
   await shot(page, "streaming", tag);
   ok(`${tag}: an agent's reply streams a batch of whole lines at a time`);
@@ -128,10 +128,10 @@ async function run(browser, size, theme) {
   await until(page, "the final batch brings the last line", tag, ([sel, w]) => document.querySelector(sel)?.textContent.includes(w), [LIVE, FIRST[3]]);
   await page.waitForTimeout(1200); // the tool runs: nothing new comes
   if (!(await liveText(page))?.includes(FIRST[3])) fail(`${tag}: the live text went while the tool ran`);
-  await workingUnderWords(page, tag);
+  await workingAboveWords(page, tag);
   await followsEnd(page, "the last line", tag);
   await shot(page, "while-tool", tag);
-  ok(`${tag}: the words before the tool call stay live while it runs, the live work row under them`);
+  ok(`${tag}: the words before the tool call stay live while it runs, the live work row above them`);
 
   await step("land");
   await until(page, "the item replaces the live text", tag, (sel) => !document.querySelector(sel), LIVE);

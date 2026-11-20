@@ -18,7 +18,11 @@ data class SessionListFilter(
     /** Runtime lists fold children when sessions_hierarchy is advertised. Complete membership keeps their rows. */
     val roots: Boolean = true,
     val parentSessionId: String? = null,
-)
+    /** Merged group namespaces with botmux hidden. A single Hub always uses its plain (null) namespace. */
+    val hiddenBotmuxHubs: Set<String?> = emptySet(),
+) {
+    fun forHub(namespace: String?) = copy(hiddenBotmuxHubs = if (namespace in hiddenBotmuxHubs) setOf(null) else emptySet())
+}
 
 @Serializable
 data class SessionListPage(
@@ -43,6 +47,7 @@ data class SessionListCounts(
      * "Waiting in the background" filter, takes them out of its Working count. 0 from older hubs.
      */
     @SerialName("background_waiting") val backgroundWaiting: Int = 0,
+    @SerialName("pane_source") val paneSource: Map<String, Int> = emptyMap(),
 )
 
 /** An older hub cannot serve bounded lists; callers may use its legacy list API. */

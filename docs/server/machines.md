@@ -11,6 +11,11 @@ Each computer's OS, current load and curves for the past 24 hours. The node coll
 | App | `apple/Persona/Views/Machines/` (`MachinesView`, `MachineDetailView`, `MetricCharts`, `OSBadge`), model `apple/Packages/PersonaWire/Sources/PersonaWire/MachineMetrics.swift` |
 | Inspect local samples / overhead | `personad sysmon [n]`: prints system info and n+1 samples (one every 10 seconds, n ≤ 8640, one day); final line gives actual sample count, collection duration and personad CPU (Ctrl-C stops immediately) |
 
+For node `session.send` and `codex.answer`, the devices manager supplies the optional `prompt_language` native
+language name from the owner locale. It replaces caller-provided variants and affects only generated Agent prompt
+wrappers. Missing language preserves legacy Chinese; old nodes ignore the field. It neither supplies nor changes
+owner provenance or permission mode. Details: `docs/assistant/prompts.md` ("Agent prompt migration (#6268)").
+
 ## Who connects to computers
 
 Product decision: **computers belong to the manager, which connects to them itself**; the hub sees no computers directly, so the bus has nothing to gate between computers and manager (physical separation). During migration there is only one manager, the chief manager (assistant process `personad assistant`), holding all computers.
@@ -70,7 +75,7 @@ Reachability and distance of the hub's own computers in its records come from ma
 
 **While the manager is away** (restarting or crashed):
 
-- All machines show offline, `error` is "Can’t reach the assistant right now. Try again later", sessions become unknown (hub keeps the last list, sessions with pending cards stay **Needs you**); terminal streams end with the same message and forwarded ports close. Hub keeps listing the last cards, but answers fail (`503 assistant_offline`).
+- All of that manager's machines show offline (another manager's stay as it reports them), `error` is "Can’t reach the assistant right now. Try again later", sessions become unknown (hub keeps the last list, sessions with pending cards stay **Needs you**); terminal streams end with the same message and forwarded ports close. Hub keeps listing the last cards, but answers fail (`503 assistant_offline`).
 - Manager-dependent endpoints (items, send, create, files, git, terminal, ports, manager-owned routes…) return `503 {"code":"assistant_offline"}`; `GET /api/v1/machines` and `GET /api/v1/sessions` return hub's retained snapshot normally.
 - When the manager returns (hub restarts it with backoff beginning at 1 second), it reconnects every computer; hub requests rewatch of App-visible sessions automatically. Persona Link reconnects on its next retry.
   Calls to a machine still connecting after startup (hub-held card answers, new App Agents) wait for its first connection attempt to finish (up to 20 seconds), rather than immediately returning offline.
@@ -84,9 +89,10 @@ an items page, image or screenshot is one message (same as the former node conne
 manager generates them during pairing, hands to hub for encrypted storage, then retrieves once and caches in memory (retrieves again only after rejection, re-pairing or pairing to another hub), not on every probe.
 
 **Hub restart**: the manager is a hub child and restarts too. Before stopping, it hands online machines' `node.info` and session lists to its next instance (its settings `hub.warm_machines`), then disconnects; the hub keeps what it saw reported in its own settings (`hub.devices_warm`, [hub-restart.md](../operations/hub-restart.md));
-the new hub takes its own snapshot to display machines (including engines), and calls to them wait for manager's first report (up to 30 seconds). Manager consumes its snapshot, shows machines online for 30 seconds and reconnects nodes.
-Hub listening starts before manager: App requests and manager-owned routes arriving during these seconds wait (up to 30 seconds); Persona Link links and primary node streams arriving at member hubs wait up to 5 seconds (Persona Link gives a handshake 8 seconds),
-then return 503 if not ready (normal Persona Link backoff). After this startup window, absent manager returns 503 immediately, without waiting.
+the new hub takes its own snapshot to display machines (including engines), and calls to them wait for their own manager's first report (up to 30 seconds). Manager consumes its snapshot, shows machines online for 30 seconds and reconnects nodes.
+The hub records per manager whether it is connected and has reported (`devicesUpFor`, `waitDevicesFor` in `server/internal/hub/devices_reports.go`): a machine is reachable, a call to it goes out and its manager's `devices.list` is `complete` by that manager's own state, never the built-in assistant's for everyone. So the built-in assistant restarting leaves another manager's computers reachable and its list complete, a manager's list is complete only after its own report, and a call to another manager's computer during the start waits for that manager the same way (after the start, a manager connected but not yet reported is offline for its machines' calls, as the built-in assistant always was).
+Hub listening starts before manager: App requests and manager-owned routes arriving during these seconds wait (up to 30 seconds) for the manager they go to; Persona Link links whose manager is not ready wait up to 5 seconds for the machine's manager (Persona Link gives a handshake 8 seconds),
+then return 503 if not ready (normal Persona Link backoff). After this startup window, absent manager returns 503 immediately, without waiting. A computer nobody is known to carry (the ownership setting could not be read) is offline at once.
 
 Observable differences from before:
 
@@ -94,6 +100,17 @@ Observable differences from before:
 - On machine connection, Cua / ego state and extension programs start a little later (after hub answers `devices.connected`); `waitNodeIdle` before node updates uses node-listed sessions and unanswered questions forwarded by manager to hub, no longer **Needs you** on hub cards.
 - With `assistant.external` (manager on another computer), that computer makes connections: its SSH config, tailcat key, `node --stdio` binary and node update packages are used;
   hub restart doesn't restart it (computers stay connected), but for the second or two before it reconnects to the bus, hub shows machines from hub.json as offline.
+
+### A dropped connection that resumes (#10663)
+
+A computer whose resident node announces `node_resume_v1` is not offline when its connection's transport ends (a relay
+ended, a link dropped, the address changed and pings went unanswered): for up to `nodeproto.ResumeWindowSeconds` (30 s)
+the manager keeps the connection and shows the computer as it was, its calls waiting rather than failing, and takes
+the connection back over a new transport on the same path (`devices/resume.go`; protocol.md "Resuming"). The node
+keeps it longer, `nodeproto.ResumeKeepSeconds` (60 s), since it may notice the drop first. Nothing is watched again
+and the apps see no change. Not resumed in that time, or refused (the node restarted), the connection
+ends as any does: the reconnect grace and offline below follow. The lines about the computer's connections log its
+drops, resumes, fall backs and the time to resume (`drops=… resumed=… fell_back=… recover=latest/longest`).
 
 ## Who handles computer events
 
@@ -203,6 +220,8 @@ It writes once every machine that sent in the last 30 seconds has sent this tick
 Samples wait in a queue of 1024; when Postgres is that far behind, a sample is dropped with a log line. A stopping manager still writes what it has, for at most 2 seconds.
 
 The main assistant's read-only `machines_list` tool combines the trusted machine list with the manager's last system information and sample, working agent count, recent failing launchers and node version status. It reports the list's completeness and excluded count; machines that belong to another manager or are not trusted are not exposed. Connection, session and launcher records have separate availability: an empty failure list means no recent failure is recorded, not that every launcher was checked. Values whose source is missing, ambiguous, offline, stale or has a future timestamp are null with a reason. Samples over 30 seconds old retain their age but are not current; a sample from before the current connection is not current either. System information is the last reported information and may persist while offline; memory and disk availability follow the collection definitions above, and disk is an aggregate rather than necessarily the work directory's filesystem. Node builds that differ cannot be ordered by their identifiers, so a different build alone is not called outdated. The tool returns facts without ranking machines.
+
+The assistant-only `machine_redeploy` tool accepts a machine ID or an exact, unambiguous display name. Name selection requires a complete machine inventory; an ID remains valid when the list is incomplete. It invokes the same explicit `Machine.startDeploy` operation as `POST /api/v1/machines/{mid}/deploy`, waits for that job's outcome and returns success or the failure reason. The app's route remains asynchronous. Canceling the tool's wait does not cancel the deployment or change its card phases, persisted outcome or notifications; an unconfirmed wait is not reported as a failed deployment. A call cannot target the machine running its own conversation, because the update waits for that conversation to become idle; use a conversation on another machine instead.
 Every minute `metricsLoop`:
 
 1. **Downsamples** raw rows older than an hour into one row per machine per minute (`step = 60`): averages values and takes maximum totals (memory, disk, etc.).
@@ -395,7 +414,8 @@ The retired native Mac app showed this section through the shared iOS view and r
 
 ## Diagnosis and cleanup (#8037)
 
-An alert on a machine card says what is wrong; the sheet it opens also says why and offers the action that fixes it. For memory, CPU and disk the "why" comes from the computer
+An alert on a machine card says what is wrong; the sheet it opens also says why and offers the action that fixes it. A launcher's alert shows the recorded error without terminal escapes or
+the shell's startup noise, and the redacted line is already clean (`docs/server/launcher-health.md` "Checks"). For memory, CPU and disk the "why" comes from the computer
 itself: the manager routes `GET /api/v1/machines/{mid}/diagnosis` and `POST /api/v1/machines/{mid}/cleanup` (`devices/diagnosis.go`, `full` devices only) call the node's
 `machine.diagnose` and `machine.cleanup` (`node/machdiag/`, capability `machine_diagnose`). The wire is in [protocol.md](../protocol/protocol.md) ("Data types").
 
@@ -460,6 +480,22 @@ A computer's name is its hub.json `name`; its id never changes. It can be rename
 Persona Link (`persona-link name`, the Windows tray) — see [protocol.md](../protocol/protocol.md) "Renaming a computer" and [link.md](../operations/link.md) "The computer's name". The hub writes hub.json and takes it at once:
 `hub/machine_rename.go` updates the entries it hands the manager and the name it shows (`Machine.name()`, never `cfg.Name`: the entry is read without a lock and stays as it was made); the manager keeps the machine
 when only the name changed (`sameConfig` ignores it) and tells the link (`endpoints`'s `machine_name`, part of `linkSays`); a member's rename reaches the center through its record (`derivedName`).
+
+## Switching an ssh computer to Persona Link
+
+The one other live edit of an entry is its kind, from `ssh` to `link` and back (#10662; the steps and what runs on the computer are in
+[link.md](../operations/link.md) "Switching from SSH"). Who does what follows the rule above:
+
+- **The manager** owns the switch (`devices/link_switch*.go`). It holds a write-ahead record (setting `link_switch.<machine id>`) and
+  runs the SSH probe, transfer, install and rollback with its own SSH access. It waits for the node over the new link and reports
+  `link_switch` in each machine's snapshot. The Persona Link build it sends is found like a node build (`devices/connector_package.go`).
+- **The hub** answers `devices.link_switch.begin` / `end` (`hub/link_switch.go`), because the entry, the pairing code and the
+  credential are its. It compare-and-swaps the kind in hub.json, or in the manager's own list through `devices.machines.put`, and
+  takes the change live, as a rename does (so the admin page's restart list does not count it). It makes or revokes the code and
+  credential, and relays the admin page's `POST /api/v1/admin/machines/{mid}/link-switch` to the machine's manager.
+- When the kind changes, the manager replaces the machine (`sameConfig` sees a change), which ends the SSH connection. The new
+  machine then waits for Persona Link. Everything kept by id stays: pins, mutes, trust, engine choice, sessions, metrics, usage and
+  `node.deploy.<id>`.
 
 ## API
 

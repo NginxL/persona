@@ -11,7 +11,8 @@ import (
 )
 
 // diskCache keeps sources and the sizes drawn from them, one file each named by its key: a first line "<type> <width>
-// <height>", then the bytes. It is a cache, not state: the directory may be deleted at any time. A read marks the file
+// <height>", then the bytes. A key may put its file one directory down ("<sub>/<hash>", inSub: a source's own), all of
+// them under the one cap. It is a cache, not state: the directory may be deleted at any time. A read marks the file
 // used (its modification time); past max bytes the least recently used go until it holds 80% of max. A nil
 // *diskCache keeps nothing.
 type diskCache struct {
@@ -24,7 +25,32 @@ type diskCache struct {
 	total   int64 // bytes in the directory, as far as this process knows
 }
 
-func (c *diskCache) path(k string) string { return filepath.Join(c.dir, k) }
+func (c *diskCache) path(k string) string { return filepath.Join(c.dir, filepath.FromSlash(k)) }
+
+// validSub says whether sub may name a subdirectory of the cache: "" (none), or a plain name of letters, digits and
+// ".-_" that is not hidden (the cache's own temporary files start with a dot) and not "." or "..".
+func validSub(sub string) bool {
+	if sub == "" {
+		return true
+	}
+	if len(sub) > 64 || sub[0] == '.' {
+		return false
+	}
+	for _, r := range sub {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// inSub is key k kept in sub ("" the cache's own directory).
+func inSub(sub, k string) string {
+	if sub == "" {
+		return k
+	}
+	return sub + "/" + k
+}
 
 // image is the file under k, or nil.
 func (c *diskCache) image(k string) *Image {
@@ -54,12 +80,13 @@ func (c *diskCache) put(k string, img *Image) {
 	if c == nil {
 		return
 	}
-	if err := os.MkdirAll(c.dir, 0o700); err != nil {
+	dir := filepath.Dir(c.path(k))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		c.logf("remote images: cache: %v", err)
 		return
 	}
 	head := fmt.Sprintf("%s %d %d\n", img.Type, img.Width, img.Height)
-	tmp, err := os.CreateTemp(c.dir, ".put-*")
+	tmp, err := os.CreateTemp(dir, ".put-*")
 	if err != nil {
 		c.logf("remote images: cache: %v", err)
 		return
@@ -97,6 +124,7 @@ type cached struct {
 	used time.Time
 }
 
+// list is every kept file, those one directory down too (named "<sub>/<file>").
 func (c *diskCache) list() []cached {
 	entries, err := os.ReadDir(c.dir)
 	if err != nil {
@@ -104,11 +132,36 @@ func (c *diskCache) list() []cached {
 	}
 	out := make([]cached, 0, len(entries))
 	for _, e := range entries {
+		if e.IsDir() {
+			sub, err := os.ReadDir(filepath.Join(c.dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			for _, f := range sub {
+				if info, err := f.Info(); err == nil && info.Mode().IsRegular() {
+					out = append(out, cached{e.Name() + "/" + f.Name(), info.Size(), info.ModTime()})
+				}
+			}
+			continue
+		}
 		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
 			out = append(out, cached{e.Name(), info.Size(), info.ModTime()})
 		}
 	}
 	return out
+}
+
+// drop removes sub's directory and all it keeps (a source that is gone).
+func (c *diskCache) drop(sub string) {
+	if c == nil || sub == "" || !validSub(sub) {
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(c.dir, sub)); err != nil {
+		c.logf("remote images: cache: %v", err)
+	}
+	c.mu.Lock()
+	c.counted = false // counted again from the directory by the next put
+	c.mu.Unlock()
 }
 
 func (c *diskCache) size() int64 {

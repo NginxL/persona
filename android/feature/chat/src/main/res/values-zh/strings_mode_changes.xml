@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_mode_change_changed_from">%1$s 把权限模式从「%2$s」改成了「%3$s」</string>
+    <string name="chat_mode_change_changed_to">%1$s 把权限模式改成了「%2$s」</string>
+    <string name="chat_mode_change_restart_queued">%1$s 选了「%2$s」，这一轮结束后会重启会话再切过去</string>
+    <string name="chat_mode_change_restart_done">已重启，切到了「%1$s」</string>
+    <string name="chat_mode_change_restart_already">已经是「%1$s」了，不用重启</string>
+    <string name="chat_mode_change_restart_failed">没能重启到「%1$s」</string>
+    <string name="chat_mode_change_restart_failed_why">没能重启到「%1$s」：%2$s</string>
+    <string name="chat_mode_change_restart_dropped">已取消，不会重启到「%1$s」</string>
+    <string name="chat_mode_change_restart_dropped_why">已取消，不会重启到「%1$s」：%2$s</string>
+    <string name="chat_mode_change_why_cancelled">会话保持当前模式</string>
+    <string name="chat_mode_change_why_replaced">被另一次切换取代</string>
+    <string name="chat_mode_change_why_process_exited">原进程已经退出</string>
+    <string name="chat_mode_change_why_process_replaced">会话换了进程</string>
+    <string name="chat_mode_change_why_process_unknown">不知道该重启哪个进程</string>
+    <string name="chat_mode_change_why_expired">等了两个多小时</string>
+    <string name="chat_mode_change_why_not_stopped">原进程没有退出</string>
+    <string name="chat_mode_change_why_start_failed">新进程没起来，会话按原来的模式继续</string>
+    <string name="chat_mode_change_why_stopped">新进程没起来，会话已经停下</string>
+    <string name="chat_mode_change_by_hub">hub</string>
+    <string name="chat_mode_change_by_unknown">某台设备</string>
+</resources>

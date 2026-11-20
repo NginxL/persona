@@ -8,6 +8,7 @@ import {
   formFromView,
   formModel,
   formProblems,
+  headersProblem,
   importCanSplit,
   importCount,
   importCreates,
@@ -109,12 +110,12 @@ describe("formProblems", () => {
     // Codex runs without an address or key, so nothing keeps it from being tested
     expect(formProblems(ready({ agent: "codex", base_url: "", api_key: "" }), true).reach).toBe("");
   });
-  it("ignores unsupported chat draft values without weakening other protocols' validation", () => {
+  it("keeps supported chat headers while ignoring other unsupported draft values", () => {
     const draft = ready({ kind: "api", api: "chat", headers: "invalid", headers_touched: true, proxy: "invalid", no_proxy: "example.com", env: "invalid", env_touched: true, timeout_ms: "bad", compact_window: "bad", max_context: "bad", effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true });
     expect(formProblems(draft, true).advanced).toBe("");
     expect(formProblems({ ...draft, api: "responses" }, true).advanced).not.toBe("");
     for (const body of [providerBody(draft, null), providerBody(draft, { name: "gw", kind: "api", api: "chat", model: "m1" }), probeBody(draft, null)]) {
-      expect(body).not.toHaveProperty("headers");
+      expect(body).toHaveProperty("headers", "invalid");
       expect(body).not.toHaveProperty("proxy");
       for (const key of ["no_proxy", "env", "timeout_ms", "compact_window", "max_context", "opus_model", "sonnet_model", "haiku_model", "fable_model", "subagent_force"]) expect(body).not.toHaveProperty(key);
     }
@@ -151,8 +152,8 @@ describe("formProblems", () => {
     expect(formProblems(ready({ models: [formModel({ id: "m1" }), formModel({ id: "m1" }, false)] }), true).models).toBe("");
   });
   it("checks the advanced fields", () => {
-    expect(formProblems(ready({ headers: "no colon", headers_touched: true }), true).advanced).toMatch(/请求头第 1 行/);
-    expect(formProblems(ready({ headers: "X-A: 1\n\nX-B: 2", headers_touched: true }), true).advanced).toBe("");
+    expect(formProblems(ready({ headers: "no colon", headers_touched: true }), true).connect).toMatch(/请求头第 1 行/);
+    expect(formProblems(ready({ headers: "X-A: 1\n\nX-B: 2", headers_touched: true }), true).connect).toBe("");
     expect(formProblems(ready({ env: "A=1\nbad name=2", env_touched: true }), true).advanced).toMatch(/环境变量第 2 行/);
     expect(formProblems(ready({ env: Array(51).fill("A=1").join("\n"), env_touched: true }), true).advanced).toMatch(/最多 50/);
     expect(formProblems(ready({ env: "# off for this one\nexport HTTP_PROXY=\nno_proxy=*.example.com\nexport\tB=1\n\uFEFFC=2 # c", env_touched: true }), true).advanced).toBe("");
@@ -171,6 +172,10 @@ describe("providerBody", () => {
     expect(legacyChatClears(old)).toEqual({});
     expect(providerBody(formFromView(old), old, true)).not.toHaveProperty("effort");
     expect(providerBody({ ...formFromView(old), effort: "max" }, old, true)).toHaveProperty("effort", "max");
+  });
+  it("leaves purpose and default alias migration to the hub when legacy Chat tier settings are cleared", () => {
+    const old: ProviderView = { name: "chat", kind: "api", api: "chat", model: "Sonnet[1m]", sonnet_model: "gw/sonnet", small_model: "gw/fast", proxy: "http://proxy.example.com" };
+    expect(providerBody(formFromView(old), old, true)).toMatchObject({ model: "Sonnet[1m]", small_model: "", sonnet_model: "", proxy: "" });
   });
   it("a new provider sends what is set, not the empty ones", () => {
     const b = providerBody(ready({ timeout_ms: "30000", subagent_force: true }), null);
@@ -244,6 +249,54 @@ describe("providerBody", () => {
     expect(providerBody(form, old)).toMatchObject({ kind: "api", api: "chat", auth: "api_key" });
     expect(formProblems({ ...form, api_key: "" }, true).connect).toBe("要填 API Key");
     expect(formProblems(form, false, true).connect).toBe("");
+  });
+});
+
+describe("request header payloads (#11075)", () => {
+  it.each([
+    "Authorization: protocol-managed",
+    "x-api-key: protocol-managed",
+    "Anthropic-Version: 2023-06-01",
+    "Content-Type: application/json",
+    "Content-Length: 10",
+    "Host: gateway.example.com",
+  ])("rejects the reserved or protocol-managed name in %s", (raw) => {
+    expect(headersProblem(raw)).not.toBe("");
+  });
+
+  it("allows custom names, including an intentionally custom User-Agent", () => {
+    expect(headersProblem("X-Custom-Header: example-value\nX-Team: blue\nUser-Agent: example-agent")).toBe("");
+  });
+
+  it.each(["messages", "responses", "chat"] as const)("%s direct API saves and probes header replacement and removal", (api) => {
+    const old: ProviderView = { name: "gw", kind: "api", api, base_url: "https://gw.example.com", model: "m1", has_key: true, has_headers: true, models: [{ id: "m1" }] };
+    const opened = formFromView(old);
+    for (const headers of ["X-Custom-Header: replacement-value", ""]) {
+      const draft = { ...opened, headers, headers_touched: true };
+      expect(providerBody(draft, old)).toHaveProperty("headers", headers);
+      expect(probeBody(draft, old.name, "m1")).toHaveProperty("headers", headers);
+      expect(probeBody(draft, old.name)).toHaveProperty("headers", headers);
+    }
+  });
+
+  it.each(["messages", "responses", "chat"] as const)("%s direct API leaves existing no-header save and probe payloads unchanged", (api) => {
+    const fresh = ready({ kind: "api", api, headers: "", headers_touched: false });
+    expect(providerBody(fresh, null)).not.toHaveProperty("headers");
+    expect(probeBody(fresh, null, "m1")).not.toHaveProperty("headers");
+    expect(probeBody(fresh, null)).not.toHaveProperty("headers");
+
+    const old: ProviderView = { name: "gw", kind: "api", api, base_url: "https://gw.example.com", model: "m1", has_key: true, models: [{ id: "m1" }] };
+    const opened = formFromView(old);
+    expect(providerBody(opened, old)).not.toHaveProperty("headers");
+    expect(probeBody(opened, old.name, "m1")).not.toHaveProperty("headers");
+    expect(probeBody(opened, old.name)).not.toHaveProperty("headers");
+  });
+
+  it.each(["X-Custom-Header: replacement-value", ""])("automatically rechecks a saved provider after header replacement or removal: %s", (headers) => {
+    const old: ProviderView = { name: "gw", base_url: "https://gw.example.com", model: "m1", has_key: true, has_headers: true, auth: "bearer" };
+    const opened = formFromView(old);
+    expect(autoCheckable(opened, old)).toBe(false);
+    expect(autoCheckable({ ...opened, headers, headers_touched: true }, old)).toBe(true);
   });
 });
 

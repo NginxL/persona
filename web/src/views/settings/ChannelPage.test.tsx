@@ -31,7 +31,7 @@ vi.hoisted(() => {
 /** The hub's detail with features a and b on or off as given. */
 const detail = (a: boolean, b: boolean): ChannelDetail => ({
   id: "demo", name: "Demo", kind: "im", source: "builtin", installed: true, enabled: true, state: "connected",
-  account: { name: "owner" }, capabilities: {}, bind: "none", target: { kind: "main" },
+  account: { name: "owner" }, capabilities: { push: true }, bind: "none", target: { kind: "main" },
   features: [{ id: "a", title: "Feature A", on: a }, { id: "b", title: "Feature B", on: b }],
   waiting: { answers: 0, asks: 0 },
 });
@@ -67,6 +67,16 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+});
+
+it("offers a test message only when the connected channel can send without a reply", async () => {
+  expect(byText(t("settings-channels.send_test"))).toBeDefined();
+
+  const refresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("settings-channels.refresh")}"]`)!;
+  await act(async () => refresh.click());
+  await answer(hub.asked.shift(), { ...detail(false, false), source: "plugin", capabilities: { format: "plain" } });
+
+  expect(byText(t("settings-channels.send_test"))).toBeUndefined();
 });
 
 describe("ChannelPage saves", () => {

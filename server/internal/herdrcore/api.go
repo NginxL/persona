@@ -28,6 +28,9 @@ type Terminal struct {
 	// Status is the program's own OSC 7501 report; nil when it never said, or after it exited.
 	Status     *Status     `json:"status"`
 	Foreground *Foreground `json:"foreground"`
+	// Parent is the terminal that started this one (its address, "machine/t7" on another machine), "" when it belongs to
+	// no other terminal: a sub-agent, a worker, a terminal a terminal started.
+	Parent string `json:"parent"`
 }
 
 // Status is an OSC 7501 record: the program's words, untranslated.

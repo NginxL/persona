@@ -1,9 +1,9 @@
 import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./background-work";
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
-import { decisionDismissed, reviewState } from "./supervision";
-import { supersededFailedStarts, triage } from "./todo-triage";
-import { awaitsReview, dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { decisionDismissed, linkedParkInteraction, parkInteractionID, reviewState, withoutParkInteraction } from "./supervision";
+import { finishedAt, JUST_DONE_MS, supersededFailedStarts, triage } from "./todo-triage";
+import { awaitsReview, dockAgents, heldDelivery, makeSessionLookup, openAsk, todoRank, todoStatus, withInteractionLookup, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
 import type { Interaction, Session } from "./types";
@@ -11,7 +11,8 @@ import type { Interaction, Session } from "./types";
 /**
  * The Assistant's entries above the composer (docs/assistant/unified-entry.md "Needs you and In progress"):
  * Needs you lists the user's turn, In progress the active work, and Parked the external waits, including ready PRs.
- * Each thing has one home and one count; finished things are on the board, not counted in these entries. A
+ * Each thing has one home and one count. Finished things are not open work: the handed-out ones that finished in the
+ * last 24 hours are under Finished (`finished`, #10922), everything else on the board. A
  * task waiting for its supervisor's review is in neither: the web lists it under Persona reviewing (`review`, #8678),
  * however long it has waited. A task is one row whatever its agents: they are not listed on their own. In the main
  * conversation an Agent that belongs to no task (opened by hand) is a row of its own.
@@ -34,6 +35,11 @@ export type RunningItem =
   /** A working Agent that belongs to no task. */
   | { kind: "agent"; key: string; session: Session; activity?: BackgroundWork };
 
+/** A task the conversation handed out that finished in the last 24 hours (Finished, #10922). `fresh`: the owner has not
+ *  opened it since it finished (the To-dos page's Just finished), so it is drawn as new; seeing it changes only that.
+ *  `at`: when it finished (ms, `finishedAt`). */
+export interface FinishedItem { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; fresh: boolean; at: number }
+
 export interface AssistantEntries {
   needsYou: NeedsYouItem[];
   running: RunningItem[];
@@ -46,10 +52,11 @@ export interface AssistantEntries {
    *  the review has waited (web only, #8678): Persona's to do, not the owner's, so outside Needs you; still open tasks,
    *  counted like the other entries. An asking agent, an open `ask` or `needs_user` makes such a task Needs you instead. */
   review: RunningItem[];
-  /** Handed-out tasks that finished in the last 24 hours and that the owner has not opened since (the To-dos page's Just
-   *  finished, todo-triage), newest first: a group under In progress, not counted (#8237). How a task ended is told
-   *  here, not by a card in the chat. */
-  justFinished: RunningItem[];
+  /** Handed-out tasks that finished in the last 24 hours (JUST_DONE_MS, the To-dos page's Just finished window), seen or
+   *  not, newest finished first: the Finished entry (#10922). How a task ended is told here, not by a card in the chat
+   *  (#8237). Not open work: its count is its rows, and opening one marks it seen without taking it out. Until #10922
+   *  only the unseen ones were listed, as a group under In progress that went as soon as one was opened. */
+  finished: FinishedItem[];
 }
 
 export interface AssistantEntriesInput {
@@ -124,7 +131,7 @@ export function decisionLaterKey(todo: Todo): string {
 export function assistantEntries(input: AssistantEntriesInput): AssistantEntries {
   const { conversation, main, todos, sessions, interactions, plans, feed } = input;
   const now = input.now ?? Date.now();
-  const lookup = input.lookup ?? makeSessionLookup(sessions);
+  const lookup = withInteractionLookup(input.lookup ?? makeSessionLookup(sessions), interactions);
   const isMain = !!main && main === conversation;
   const byTodo = new Map(todos.map((todo) => [todo.id, todo]));
   // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
@@ -142,10 +149,11 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const shelved: { item: RunningItem; at: string }[] = [];
   const parked: { item: RunningItem; at: string }[] = [];
   const review: { item: RunningItem; rank: number; at: string }[] = [];
-  const finished: { item: RunningItem; at: number }[] = [];
+  const finished: FinishedItem[] = [];
   const folded = new Set<string>();
   const slots = taskCardSlots(conversation, input.cards ?? [], feed, plans, todos, isMain);
   const activeAgents = (todo: Todo) => (todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at));
+  const homeAgents = (todo: Todo) => (todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at || parkInteractionID(todo)));
   // One home per request (docs/design/DESIGN_SYSTEM.md 4.8): an Agent several of these tasks list asks under one of them,
   // the task the hub ties its session to (`todo`), else the first that lists it. The others neither repeat its cards nor
   // wait on the user for them; they are in progress.
@@ -153,7 +161,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   for (const card of slots) {
     const todo = card.todo_id ? byTodo.get(card.todo_id) : undefined;
     if (!todo) continue;
-    for (const a of activeAgents(todo)) {
+    for (const a of homeAgents(todo)) {
       const k = sessionKey(a.machine_id, a.session_id);
       const ids = listing.get(k) ?? [];
       if (!ids.includes(todo.id)) listing.set(k, [...ids, todo.id]);
@@ -165,24 +173,31 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     return tied && ids?.includes(tied) ? tied : ids?.[0];
   };
   for (const card of slots) {
-    const todo = card.todo_id ? byTodo.get(card.todo_id) : undefined;
+    const sourceTodo = card.todo_id ? byTodo.get(card.todo_id) : undefined;
     // a plan task with no to-do yet is its plan's row (below); a to-do the hub no longer sends is finished
-    if (!todo) continue;
+    if (!sourceTodo) continue;
+    const candidate = linkedParkInteraction(sourceTodo, interactions);
+    const linkedHome = candidate ? homeOf(candidate.machine_id, candidate.session_id) : undefined;
+    const todo = linkedHome !== undefined && linkedHome !== sourceTodo.id ? withoutParkInteraction(sourceTodo) : sourceTodo;
     const active = activeAgents(todo);
     const own = active.filter((a) => homeOf(a.machine_id, a.session_id) === todo.id);
     // what the task waits on the user for is its own Agents' (an Agent another task holds asks there)
     const status = own.length < active.length ? withNeeds(entryStatus(todo, lookup, plans), todoStatus({ ...todo, agents: own }, lookup)) : entryStatus(todo, lookup, plans);
-    const asks = own.flatMap((a) => asksOf.get(sessionKey(a.machine_id, a.session_id)) ?? []);
+    const linked = linkedParkInteraction(todo, interactions);
+    const ownAsks = own.flatMap((a) => asksOf.get(sessionKey(a.machine_id, a.session_id)) ?? []);
+    const asks = linked && !ownAsks.some((ix) => ix.id === linked.id) ?
+      [...ownAsks, linked].sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id)) : ownAsks;
     const key = `task:${todo.id}`;
     const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
     const countsOpen = bucket === "open";
     // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
     const waits = status === "failed" ? bucket === "open" : !todo.done_at && WAITS_ON_YOU.has(status);
     const decision = taskAwaitsDecision(todo);
+    const deliveryApproval = heldDelivery(todo)?.unblock === "user";
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks, countsOpen });
-    else if (waits || decision) {
+    else if (waits || decision || deliveryApproval) {
       // Only the review decision is hidden; a live Agent question above still has its home.
-      if (!(status !== "needs_you" && decision && (decisionDismissed(todo) || input.deferred?.[decisionLaterKey(todo)]))) {
+      if (deliveryApproval || !(status !== "needs_you" && decision && (decisionDismissed(todo) || input.deferred?.[decisionLaterKey(todo)]))) {
         deciding.push({ item: { kind: "task", key, todo, status, asks, countsOpen }, rank: todoRank(todo, status), at: card.at });
       }
     }
@@ -195,12 +210,17 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     else if (bucket === "open" || reviewState(todo) === "pending_review") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
     else {
-      // finished work a conversation handed out (a failed start a related to-do finished is history, not news)
+      // finished work a conversation handed out, for a day after it finished, seen or not (#10922); a failed start a
+      // related to-do finished is history, not news
       const tr = triage(todo, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
-      if (tr.section === "just_done" && status !== "failed" && todo.origin) finished.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: tr.last });
+      const ended = finishedAt(todo, tr);
+      if ((tr.section === "just_done" || tr.section === "done") && status !== "failed" && todo.origin && ended > 0 && now - ended < JUST_DONE_MS) {
+        finished.push({ kind: "task", key, card, todo, status, fresh: tr.section === "just_done", at: ended });
+      }
       continue;
     }
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
+    if (linked) folded.add(sessionKey(linked.machine_id, linked.session_id));
   }
 
   // Agents that belong to no task, the main conversation's only (dockAgents): asking ones wait on the user, working ones run.
@@ -232,7 +252,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     shelved: shelved.sort(newest).map((row) => row.item),
     parked: parked.sort(newest).map((row) => row.item),
     review: review.sort(newest).map((row) => row.item),
-    justFinished: finished.sort((a, b) => b.at - a.at).map((row) => row.item),
+    // newest finished first; the same moment by id, so every client lists them in one order
+    finished: finished.sort((a, b) => b.at - a.at || (a.todo.id < b.todo.id ? -1 : a.todo.id > b.todo.id ? 1 : 0)),
   };
 }
 

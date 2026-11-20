@@ -145,6 +145,10 @@ func (s *Service) workGuard(v *workView, e db.SessionWork, ownCard bool) (proto.
 	switch {
 	case !ok:
 		return c, "gone"
+	case c.HiddenByDirectory():
+		return c, "hidden by directory"
+	case proto.UnrecoverableTurnErrorCode(c.TurnError) != "" || c.TurnErrorKind == proto.TurnErrorUnrecoverable:
+		return c, "conversation invalid"
 	case c.ReadOnlyReason != "":
 		return c, "read-only"
 	case c.Status == proto.StatusWorking || !sameTurn(c, e.TurnAt):
@@ -166,8 +170,24 @@ func (s *Service) workGuard(v *workView, e db.SessionWork, ownCard bool) (proto.
 // workWake sends what is due for k: "Continue" after a transient error, the continue once a usage limit reset, or a
 // wake for a wait.
 func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now time.Time) {
+	s.work.mu.Lock()
+	s.work.init()
+	if s.work.retrying == nil {
+		s.work.retrying = map[[2]string]bool{}
+	}
+	if s.work.retrying[k] {
+		s.work.mu.Unlock()
+		return
+	}
+	s.work.retrying[k] = true
+	s.work.mu.Unlock()
+	defer func() {
+		s.work.mu.Lock()
+		delete(s.work.retrying, k)
+		s.work.mu.Unlock()
+	}()
 	e, ok := s.workEntry(k)
-	if !ok || e.WakeAt == nil {
+	if !ok || e.WakeAt == nil || e.Work.On == proto.WaitTransient && e.WakeAt.After(now) || e.Work.RetiredAt != nil {
 		return
 	}
 	// Read again right before acting: the pass's view may be a send or two old.
@@ -201,6 +221,11 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 		return
 	}
 	sw := s.triageSwitches(ctx)
+	if e.Work.On == proto.WaitTransient && !turnErrorTransient(c) {
+		e.WakeAt, e.Work.WakeAt = nil, nil
+		s.putWork(ctx, e)
+		return
+	}
 	if !sw.wakes(e.Work) {
 		before := e
 		e.WakeAt, e.Work.WakeAt = nil, nil // turned off since it was set
@@ -271,12 +296,12 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 			return
 		}
 		e.Retries++
-		text, kind = prompts.RenderAgentLimitContinue(), "limit_continued"
+		text, kind = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale)), "limit_continued"
 	case e.Work.On == proto.WaitTransient:
-		e.Retries++
+		e.Retries = min(e.Retries+1, 1<<30)
 		text, kind = continueText, "continued"
-		s.logf("work %s/%s: auto-continue: sending %q after a transient model error (attempt %d/%d)", k[0], short(k[1]), text,
-			e.Retries, e.Work.Max)
+		s.logf("work %s/%s: auto-continue: sending %q after a transient model error (attempt %d)", k[0], short(k[1]), text,
+			e.Retries)
 	case e.Work.On == proto.WaitExternal || e.Work.On == proto.WaitAgent:
 		e.Wakes++
 		wk := agentWake{Language: answerLanguage(s.hello(ctx).Locale), Attempt: e.Wakes, Wait: e.Work.Wait, Then: e.Work.Then}
@@ -306,9 +331,20 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 		}
 		return
 	}
-	e.WakeAt, e.Work.WakeAt = nil, nil
-	s.putWork(ctx, e)
-	if err := s.sendToSession(ctx, k[0], c.SessionID, text); err != nil {
+	// Keep a durable due row until acknowledgement. A crash before dispatch or
+	// after uncertain delivery retries the same hub once-only message id.
+	if kind != "continued" {
+		e.WakeAt, e.Work.WakeAt = nil, nil
+		s.putWork(ctx, e)
+	}
+	if latest, ok := s.workEntry(k); !ok || latest.Work.RetiredAt != nil || latest.Work.Deferred || !latest.TurnAt.Equal(e.TurnAt) {
+		return
+	}
+	send := func() error { return s.sendToSession(ctx, k[0], c.SessionID, text) }
+	if kind == "continued" {
+		send = func() error { return s.sendModelRetry(ctx, e, text) }
+	}
+	if err := send(); err != nil {
 		s.logf("work %s/%s: %s: %v", k[0], short(k[1]), kind, err)
 		at := now.Add(2 * time.Minute).UTC()
 		e.WakeAt, e.Work.WakeAt = &at, &at
@@ -319,6 +355,13 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 		}
 		s.putWork(ctx, e)
 		return
+	}
+	if kind == "continued" {
+		current, ok := s.workEntry(k)
+		if ok && current.TurnAt.Equal(e.TurnAt) && current.Work.RetiredAt == nil {
+			e.WakeAt, e.Work.WakeAt = nil, nil
+			s.putWork(ctx, e)
+		}
 	}
 	s.logf("work %s/%s: %s (%d)", k[0], short(k[1]), kind, max(e.Retries, e.Wakes))
 	s.workEvent(k[0], k[1], kind, map[string]any{"attempt": max(e.Retries, e.Wakes), "after": now.Sub(e.TurnAt).Seconds()})
@@ -498,7 +541,7 @@ func (s *Service) backfillWork(ctx context.Context, v *workView, now time.Time) 
 			if n >= 3 {
 				return
 			}
-			if c.Assistant || c.State != proto.StateUnread || c.Work != nil || now.Sub(c.UpdatedAt) > workBackfill ||
+			if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) || c.State != proto.StateUnread || c.Work != nil || now.Sub(c.UpdatedAt) > workBackfill ||
 				now.Sub(c.UpdatedAt) < settle || !full && (c.TurnError == "" || !turnErrorTransient(c)) {
 				continue
 			}
@@ -520,7 +563,7 @@ func (s *Service) sampleWork(v *workView) {
 	counts := map[string]any{}
 	for _, d := range v.machines() {
 		for _, c := range v.listedSessions(d.ID) { // an archive row is offline: never counted
-			if c.Assistant || c.State == proto.StateOffline {
+			if c.HiddenByDirectory() || c.Assistant || c.State == proto.StateOffline {
 				continue
 			}
 			n, _ := counts[c.State].(int)

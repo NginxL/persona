@@ -171,7 +171,7 @@ struct InboxPage: View {
                 .sheet(isPresented: $showingSubscriptions) { SubscriptionsSheet() }
                 .sheet(item: $ruling) { InboxPolicySheet(target: $0) }
                 .sheet(item: $todoRequest) { InboxDueSheet(request: $0) }
-                .confirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
+                .accessibleConfirmationDialog(InboxBulk.confirmTitle, isPresented: $confirming, titleVisibility: .visible, hasCancel: true) {
                     Button(InboxBulk.confirmButton(count: cleanScope.count)) { clean(confirmed: true) }
                         .accessibilityIdentifier("inbox.cleanConfirm")
                     Button("Cancel", role: .cancel) {}
@@ -1501,7 +1501,7 @@ struct InboxRow: View {
     private var from: String {
         if item.isAssistantRow { return item.linePreview } // the tag says who: no "Assistant:" in front
         #if !os(macOS)
-        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier) { return meta }
+        if let meta = InboxNow.meta(item, lang: interfaceTextLocale.identifier, translatedPreview: translated?.preview) { return meta }
         #endif
         if let doc = item.doc { return doc.typeName + " · " + item.preview } // the preview names who: Li Lei mentioned you
         if item.moment != nil { return String(localized: "\(item.sender ?? ""): \(item.preview)", comment: "Who wrote it: what they wrote") } // who commented, on the post in the title
@@ -1536,10 +1536,12 @@ struct InboxRow: View {
                     .scaledFrame(width: Theme.Size.avatar, height: Theme.Size.avatar)
                     .overlay(ThemedIcon(Theme.Icon.moments).font(Theme.Font.bodyStrong).foregroundStyle(LarkColor.text("orange") ?? Theme.accent))
             } else if item.isLark {
-                LarkAvatarImage(name: item.title, url: item.avatar, isGroup: item.lark?.isGroup ?? false, size: Theme.Size.avatar)
+                LarkAvatarImage(name: item.title, url: item.avatarURL ?? item.avatar, account: item.lark?.olAccount, size: Theme.Size.avatar)
+                    .environment(\.larkManager, AppModel.shared.linkManager(item.manager))
             } else {
-                let disc = Theme.monogram(item.sender ?? "")
-                Monogram(name: item.sender ?? "", fill: disc.fill, ink: disc.ink)
+                // A connector's thread picture (the other person, a group's own) over the initial; the initial alone
+                // without one, mail's included.
+                ChatAvatar(url: item.connector?.avatarURL, name: item.sender ?? "")
             }
             }
             .opacity(item.isDone ? 0.6 : 1)
@@ -1818,7 +1820,7 @@ struct InboxDetailView: View {
         if current.doc != nil {
             InboxDocDetailView(item: current)
         } else if current.connector != nil {
-            InboxConnectorDetailView(item: current)
+            InboxConnectorDetailView(item: current, manager: model.itemManager(current.manager))
         } else if let m = current.moment {
             LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(current.manager)) // the post and its comments, as a shared Moments card opens
         } else if item.larkConversation != nil || item.mailSummary != nil {

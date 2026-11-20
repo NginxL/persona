@@ -718,7 +718,7 @@ func TestScheduledRunEndTellsTheSetupBlock(t *testing.T) {
 			ended := proto.Session{SessionID: "s1", Status: proto.StatusDone, State: proto.StateIdle, Assistant: true, UpdatedAt: time.Now()}
 			f.items = append(f.items, proto.Item{ID: "answer", Role: "assistant", Kind: proto.KindText, Text: "Good morning"})
 			if failed {
-				ended.TurnError = "API Error: 503 no eligible upstream"
+				ended.TurnError = "API Error: 401 invalid API key"
 			}
 			f.setSessions("server", ended)
 			select {

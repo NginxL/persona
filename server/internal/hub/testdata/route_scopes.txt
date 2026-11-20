@@ -10,6 +10,7 @@
 -                    /api/v1/agents/
 -                    /api/v1/auth/browser-login/
 -                    /api/v1/auth/password/
+-                    /api/v1/avatars/
 -                    /api/v1/bots/
 -                    /api/v1/channels/{id}/bind
 -                    /api/v1/connectors
@@ -88,6 +89,7 @@ inbox.write          DELETE /api/v1/inbox/policies/{id}
 -                    DELETE /api/v1/recordings/{id}
 -                    DELETE /api/v1/recordings/{id}/photos/{n}
 -                    DELETE /api/v1/sessions/{mid}/{sid}
+-                    DELETE /api/v1/sessions/{mid}/{sid}/held/{msg}
 -                    DELETE /api/v1/subscriptions/{id}
 -                    DELETE /api/v1/task-trust
 -                    DELETE /api/v1/todos/{id}
@@ -95,6 +97,7 @@ todos.write          DELETE /api/v1/todos/{id}/agents/{mid}/{sid}
 -                    DELETE /api/v1/todos/{id}/seen
 -                    DELETE /api/v1/todos/{id}/someday
 todos.write          DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}
+-                    DELETE /api/v1/todos/{id}/terminal-cleanup
 -                    DELETE /api/v1/todos/{id}/thread
 -                    DELETE {base}/markets/{mid}
 -                    GET /api/v1/admin/devices
@@ -119,6 +122,7 @@ todos.write          DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    GET /api/v1/agent-shares/{share_id}
 -                    GET /api/v1/agent-shares/{share_id}/messages
 agents.read          GET /api/v1/agents
+-                    GET /api/v1/agents/display-settings
 -                    GET /api/v1/agents/hidden
 -                    GET /api/v1/agents/outbox
 -                    GET /api/v1/agents/prefs
@@ -139,6 +143,8 @@ assistant.ask        GET /api/v1/assistant/capabilities
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
 -                    GET /api/v1/assistant/directions/offers
 -                    GET /api/v1/assistant/directions/tree
+-                    GET /api/v1/assistant/directions/{id}
+dispatch.guard       GET /api/v1/assistant/dispatch-guard
 assistant.dispatch_policy GET /api/v1/assistant/dispatch-policy
 -                    GET /api/v1/assistant/feishu/notices
 -                    GET /api/v1/assistant/followups
@@ -236,6 +242,7 @@ kb.read              GET /api/v1/kb/{kind}/{id}
 machines.read        GET /api/v1/machines
 machines.read        GET /api/v1/machines/{id}/metrics
 machines.read        GET /api/v1/machines/{id}/usage
+-                    GET /api/v1/machines/{mid}/agent-dirs/hidden
 -                    GET /api/v1/machines/{mid}/agy-settings
 -                    GET /api/v1/machines/{mid}/botmux
 -                    GET /api/v1/machines/{mid}/browser
@@ -271,6 +278,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/git/status
 -                    GET /api/v1/machines/{mid}/grok-settings
 -                    GET /api/v1/machines/{mid}/health/reports
+-                    GET /api/v1/machines/{mid}/held-messages
 -                    GET /api/v1/machines/{mid}/herdr
 -                    GET /api/v1/machines/{mid}/iphone
 -                    GET /api/v1/machines/{mid}/launchers
@@ -316,7 +324,9 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/info
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full
 agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/image
+agents.read          GET /api/v1/sessions/{mid}/{sid}/items/{iid}/visualization
 -                    GET /api/v1/sessions/{mid}/{sid}/mode-changes
+-                    GET /api/v1/sessions/{mid}/{sid}/review
 agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 -                    GET /api/v1/sessions/{mid}/{sid}/share-catalog
 -                    GET /api/v1/sessions/{mid}/{sid}/share-preview/{preview_id}
@@ -332,8 +342,14 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/places
 todos.read           GET /api/v1/todos/{id}
+-                    GET /api/v1/todos/{id}/backend-workspace
+-                    GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}
 todos.read           GET /api/v1/todos/{id}/decisions
+-                    GET /api/v1/todos/{id}/images/{image}
 todos.read           GET /api/v1/todos/{id}/repositories
+todos.read           GET /api/v1/todos/{id}/timeline
+todos.read           GET /api/v1/todos/{id}/workspace-naming/plans/{operation_id}
+todos.read           GET /api/v1/todos/{id}/workspace-rules
 -                    GET /api/v1/usage
 -                    GET /api/v1/usage/days
 -                    GET /api/v1/usage/hours
@@ -373,6 +389,7 @@ todos.write          PATCH /api/v1/todos/{id}
 -                    POST /api/v1/admin/machines/{id}/connector
 -                    POST /api/v1/admin/machines/{id}/link-pair
 -                    POST /api/v1/admin/machines/{id}/reconnect
+-                    POST /api/v1/admin/machines/{mid}/link-switch
 -                    POST /api/v1/admin/owner-subjects
 -                    POST /api/v1/admin/password
 -                    POST /api/v1/admin/password-login/register/finish
@@ -431,6 +448,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/tasks/{id}/run
 -                    POST /api/v1/assistant/urgent-call/test
 -                    POST /api/v1/assistant/warm
+todos.write          POST /api/v1/assistant/workspace-naming/preview
 -                    POST /api/v1/auth/browser-login/approve
 -                    POST /api/v1/auth/browser-login/confirm
 -                    POST /api/v1/auth/browser-login/poll
@@ -458,6 +476,7 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/extensions/-/install
 -                    POST /api/v1/extensions/-/operations/{op}/retry
 -                    POST /api/v1/extensions/-/preview
+market.refresh_own   POST /api/v1/extensions/-/self/market/refresh
 -                    POST /api/v1/extensions/{id}/-/assistant-data/apply
 -                    POST /api/v1/extensions/{id}/-/attach
 -                    POST /api/v1/extensions/{id}/-/auth/logout
@@ -487,6 +506,7 @@ inbox.write          POST /api/v1/inbox/{id}/done
 inbox.write          POST /api/v1/inbox/{id}/draft
 inbox.write          POST /api/v1/inbox/{id}/handoff
 inbox.write          POST /api/v1/inbox/{id}/reply
+inbox.write          POST /api/v1/inbox/{id}/retry
 inbox.write          POST /api/v1/inbox/{id}/suggestion
 inbox.write          POST /api/v1/inbox/{id}/task-link/recheck
 agents.control       POST /api/v1/interactions/{id}/choose
@@ -537,6 +557,7 @@ agents.control       POST /api/v1/interactions/{id}/resolve
 -                    POST /api/v1/machines/{mid}/git/switch
 -                    POST /api/v1/machines/{mid}/herdr/start
 -                    POST /api/v1/machines/{mid}/iphone/{action}
+-                    POST /api/v1/machines/{mid}/link-switch
 -                    POST /api/v1/machines/{mid}/node-update/{action}
 -                    POST /api/v1/machines/{mid}/panes
 -                    POST /api/v1/machines/{mid}/panes/agent
@@ -585,6 +606,7 @@ agents.control       POST /api/v1/sessions
 -                    POST /api/v1/sessions/{mid}/{sid}/autoname
 -                    POST /api/v1/sessions/{mid}/{sid}/close
 -                    POST /api/v1/sessions/{mid}/{sid}/fork
+-                    POST /api/v1/sessions/{mid}/{sid}/held/{msg}/retry
 agents.control       POST /api/v1/sessions/{mid}/{sid}/interrupt
 -                    POST /api/v1/sessions/{mid}/{sid}/keys
 agents.control       POST /api/v1/sessions/{mid}/{sid}/messages
@@ -593,6 +615,7 @@ agents.control       POST /api/v1/sessions/{mid}/{sid}/queue
 agents.control       POST /api/v1/sessions/{mid}/{sid}/queue/send-now
 agents.control       POST /api/v1/sessions/{mid}/{sid}/rename
 -                    POST /api/v1/sessions/{mid}/{sid}/restore-model
+-                    POST /api/v1/sessions/{mid}/{sid}/review
 -                    POST /api/v1/sessions/{mid}/{sid}/rewind
 -                    POST /api/v1/sessions/{mid}/{sid}/screen/before
 agents.control       POST /api/v1/sessions/{mid}/{sid}/seen
@@ -614,14 +637,22 @@ todos.write          POST /api/v1/todos
 -                    POST /api/v1/todos/import/reminders
 -                    POST /api/v1/todos/retitle
 -                    POST /api/v1/todos/{id}/accept
+-                    POST /api/v1/todos/{id}/asks/{ask}/answer
+-                    POST /api/v1/todos/{id}/backend-workspace/cancel
+-                    POST /api/v1/todos/{id}/backend-workspace/cleanup
+-                    POST /api/v1/todos/{id}/backend-workspace/prepare
+-                    POST /api/v1/todos/{id}/backend-workspace/start
 -                    POST /api/v1/todos/{id}/decision-dismiss
 -                    POST /api/v1/todos/{id}/decision-undo-dismiss
 todos.write          POST /api/v1/todos/{id}/decisions
 -                    POST /api/v1/todos/{id}/done-check
 -                    POST /api/v1/todos/{id}/retry
 -                    POST /api/v1/todos/{id}/start/answer
+todos.write          POST /api/v1/todos/{id}/workspace-naming/plans
+todos.write          POST /api/v1/todos/{id}/workspace-naming/preview
 -                    POST /api/v1/translate
 -                    POST /api/v1/translate/mail
+-                    POST /api/v1/translate/message
 -                    POST /api/v1/workspace-board
 -                    POST {adminUploadPath}
 -                    POST {base}/catalog/preview
@@ -639,6 +670,7 @@ todos.write          POST /api/v1/todos/{id}/decisions
 -                    PUT /api/v1/admin/password-login
 -                    PUT /api/v1/admin/usage-sources
 -                    PUT /api/v1/admin/usage-sources/{id}
+-                    PUT /api/v1/agents/display-settings
 -                    PUT /api/v1/agents/prefs
 -                    PUT /api/v1/agents/triage
 -                    PUT /api/v1/assistant
@@ -646,6 +678,7 @@ todos.write          POST /api/v1/todos/{id}/decisions
 -                    PUT /api/v1/assistant/conversations/{id}/tags
 -                    PUT /api/v1/assistant/directions/{id}/name
 -                    PUT /api/v1/assistant/directions/{id}/notes
+dispatch.guard       PUT /api/v1/assistant/dispatch-guard
 assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/feishu/companions
 -                    PUT /api/v1/assistant/memory/{name}
@@ -654,6 +687,7 @@ assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/routines
 -                    PUT /api/v1/assistant/saved-prompts/order
 -                    PUT /api/v1/assistant/saved-prompts/{id}
+-                    PUT /api/v1/assistant/sessions/{mid}/{sid}/direction
 assistant.start_defaults PUT /api/v1/assistant/start-defaults
 -                    PUT /api/v1/assistant/tasks/{id}
 -                    PUT /api/v1/assistant/urgent-call
@@ -681,6 +715,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/launchers/{name}
 -                    PUT /api/v1/looks/current
 -                    PUT /api/v1/machines/{id}/name
+-                    PUT /api/v1/machines/{mid}/agent-dirs/hidden
 -                    PUT /api/v1/machines/{mid}/agy-settings
 -                    PUT /api/v1/machines/{mid}/botmux
 -                    PUT /api/v1/machines/{mid}/browser
@@ -717,6 +752,7 @@ todos.write          PUT /api/v1/todos/{id}/repositories/{repo_id}/links
 -                    PUT /api/v1/todos/{id}/someday
 todos.write          PUT /api/v1/todos/{id}/spaces/{mid}/{space...}
 -                    PUT /api/v1/todos/{id}/thread
+todos.write          PUT /api/v1/todos/{id}/workspace-rules
 -                    PUT /api/v1/workspace-board/settings
 -                    PUT {base}/market-settings
 -                    PUT {base}/markets/{mid}

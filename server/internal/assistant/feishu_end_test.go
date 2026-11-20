@@ -158,7 +158,7 @@ func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
 	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
 	s.chans.mu.Lock()
 	left := r.Ext["card"]
-	r.Started = time.Now().Add(-channel.HeldIdleMost - time.Minute)
+	r.HeldAt = time.Now().Add(-channel.HeldIdleMost - time.Minute)
 	s.chans.mu.Unlock()
 	if left != "" {
 		t.Fatalf("the held run kept its card: %q", left)
@@ -182,6 +182,62 @@ func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
 	}
 }
 
+// An unrelated user turn ends the held wait without an answer or a quiet-ending card, even while background work
+// remains. Reaction cleanup still uses the normal sink; no conversation content is posted back to the chat.
+func TestFeishuHeldRunUnrelatedUserTurnSaysNothing(t *testing.T) {
+	s, f, r, posts := heldRunWithoutCard(t)
+	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1",
+		Background: []proto.BackgroundTask{{ID: "background-work", Kind: "shell"}}}
+	f.setSessions("server", sess)
+	f.setItems(
+		proto.Item{Seq: 5, Role: "user", Kind: proto.KindText, Text: "an unrelated private question"},
+		proto.Item{Seq: 6, Role: "assistant", Kind: proto.KindText, Text: "the unrelated private answer"},
+	)
+	s.checkChannelRun(r.ID)
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatalf("the unrelated turn did not end the held run: %+v", run)
+	}
+	if len(*posts) != 0 {
+		t.Fatalf("the unrelated turn posted to the original chat: %v", *posts)
+	}
+}
+
+// Live deltas cannot stream an unrelated turn into a held run's new progress card. Its user item ends the run and
+// closes any card already opened, without posting the private text or a new quiet-ending card.
+func TestFeishuHeldRunStopsUnrelatedProgress(t *testing.T) {
+	s, f, r, posts := heldRunWithoutCard(t)
+	sess := proto.Session{Status: proto.StatusWorking, State: proto.StateWorking, MachineID: "server", SessionID: "c1",
+		Background: []proto.BackgroundTask{{ID: "background-work", Kind: "shell"}}}
+	f.setSessions("server", sess)
+	s.chans.mu.Lock()
+	r.Ext["card"] = "om_unrelated_progress"
+	prog := s.chans.live[r.ID]
+	prog.updated = time.Now().Add(-channel.ProgressIdle - time.Second)
+	prog.looked = time.Now()
+	s.chans.mu.Unlock()
+	s.SessionDelta(context.Background(), SessionDelta{MachineID: "server", SessionID: "c1", Text: "the unrelated private answer"})
+	s.channelProgressTick(r.ID)
+	s.SessionItems(context.Background(), SessionItems{MachineID: "server", SessionID: "c1", Items: []proto.Item{
+		{Seq: 5, Role: "user", Kind: proto.KindText, Text: "an unrelated private question"},
+	}})
+	s.channelProgressTick(r.ID)
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Errorf("the unrelated user item did not end the held run")
+	}
+	for _, post := range *posts {
+		raw, err := json.Marshal(post)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "unrelated private") || strings.Contains(string(raw), "处理中") {
+			t.Errorf("unrelated progress leaked or stayed open: %s", raw)
+		}
+		if post["update"] != true {
+			t.Errorf("the unrelated end posted a new card: %v", post)
+		}
+	}
+}
+
 // heldRunWithoutCard is a run answered once (held) whose card went back with its message, and whose background wait is
 // older than HeldIdleMost: its next end is a quiet one.
 func heldRunWithoutCard(t *testing.T) (*Service, *fakeHub, *channel.Run, *[]map[string]any) {
@@ -190,7 +246,7 @@ func heldRunWithoutCard(t *testing.T) (*Service, *fakeHub, *channel.Run, *[]map[
 	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
 	s.chans.mu.Lock()
 	left := r.Ext["card"]
-	r.Started = time.Now().Add(-channel.HeldIdleMost - time.Minute)
+	r.HeldAt = time.Now().Add(-channel.HeldIdleMost - time.Minute)
 	s.chans.mu.Unlock()
 	if left != "" {
 		t.Fatalf("the held run kept its card: %q", left)

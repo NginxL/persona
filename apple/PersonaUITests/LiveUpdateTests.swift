@@ -33,10 +33,11 @@ final class LiveUpdateTests: XCTestCase {
 
     /// `chat`: opened as the chat left open last time. A cold start restores it only when the tab saved with it is
     /// Agents (`app.tab`), so that is given too: otherwise the tab the last run ended on (another test's) decided it.
-    private func launch(chat: String = "", _ extra: [String] = []) {
+    /// `tab`: the tab opened at launch (the Sidebar layout's start is the conversation, `assistant`).
+    private func launch(chat: String = "", tab: String = "dev", _ extra: [String] = []) {
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
-        app.launchArguments = ["-pairURL", pair, "-app.tab", "chats", "-dev.openChat", chat, "-tab", "dev", "-openAgentsFresh", "YES", "-openChatsFresh", "YES", "-perfCounts", "YES"]
+        app.launchArguments = ["-pairURL", pair, "-app.tab", "chats", "-dev.openChat", chat, "-tab", tab, "-openAgentsFresh", "YES", "-openChatsFresh", "YES", "-perfCounts", "YES"]
             + extra
         app.launchPinned()
     }
@@ -55,8 +56,9 @@ final class LiveUpdateTests: XCTestCase {
 
     /// Pushes `rounds` rounds of updates, 400 ms apart, and waits for the last. `steps`: new steps per round in each
     /// open conversation.
-    private func churn(steps: Int = 1, final: Bool = false, waiting: Bool = false) {
-        mock("churn?n=\(Self.rounds)&ms=400&steps=\(steps)&final=\(final ? 1 : 0)&inbox=1&waiting=\(waiting ? 1 : 0)")
+    /// `real`: also what else a real hub's pushes change (an agent finishing and starting again, rows growing and shrinking).
+    private func churn(steps: Int = 1, final: Bool = false, waiting: Bool = false, real: Bool = false) {
+        mock("churn?n=\(Self.rounds)&ms=400&steps=\(steps)&final=\(final ? 1 : 0)&inbox=1&waiting=\(waiting ? 1 : 0)&real=\(real ? 1 : 0)")
         let deadline = Date.now.addingTimeInterval(30)
         while (mock("churned")["rounds"] as? Int ?? 0) < Self.rounds + (final ? 1 : 0), Date.now < deadline { usleep(300_000) }
         sleep(1) // the last round applied
@@ -135,6 +137,107 @@ final class LiveUpdateTests: XCTestCase {
         XCTAssertLessThanOrEqual((after.bodies["ListMenu.content"] ?? 0) - (before.bodies["ListMenu.content"] ?? 0), 1,
                                  "the open menu's content is not rebuilt for each push")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.95)).tap() // close it
+    }
+
+    // The same menu at the end of the Sidebar layout's Agents heading (#10738): there it is in the sidebar's list, whose
+    // view graph updates with every push (states, times, the waiting count). SwiftUI handed the menu's items to UIKit
+    // again on those updates (`updateVisibleMenuWithBlock:`), and UIKit replaced the open menu and scrolled it back to
+    // its top: scrolled down to the machines, it jumped. The iPad's and the open Duo's column, or the phone's drawer.
+    @MainActor func testSidebarAgentsMenuHoldsStillThroughUpdates() {
+        launch(tab: "assistant", ["-app.navigation", "sidebar", "-sidebar.fold.places", "YES", "-sidebar.fold.chats", "YES"])
+        let menuButton = app.descendants(matching: .any)["sidebar-agents-menu"].firstMatch
+        let face = app.descendants(matching: .any)["assistant-sidebar-button"].firstMatch
+        let shown = NSPredicate { _, _ in (menuButton.exists && menuButton.isHittable) || face.exists }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: shown, object: NSNull())], timeout: 25), .completed,
+                       "no sidebar and no face:\n\(app.debugDescription)")
+        if !(menuButton.exists && menuButton.isHittable) {
+            face.tap() // a phone's drawer
+            XCTAssertTrue(menuButton.waitForExistence(timeout: 10), "the drawer did not open:\n\(app.debugDescription)")
+        }
+        sleep(2)
+        menuButton.tap()
+        let machines = app.buttons["全部机器"]
+        // Its first item: a short screen (the Duo on its side) leaves the rows below the fold out of the tree.
+        let opened = app.buttons[Self.menuItems[0]].waitForExistence(timeout: 5)
+        keep("menu-opened")
+        XCTAssertTrue(opened, "the menu opened:\n\(app.debugDescription)")
+        let last = app.buttons["训练机"]
+        scrollMenu(to: last)
+        sleep(1)
+        XCTAssertTrue(last.isHittable, "the last machine must really be on screen")
+        XCTAssertTrue(machines.isHittable, "All Machines must really be on screen")
+        let lastY = last.frame.minY
+        let machinesY = machines.frame.minY
+        keep("menu-scrolled")
+        let before = counts()
+        churn(waiting: true, real: true)
+        // Where the menu is, before the counts: reading the probe while the menu is open moves the menu itself. A menu
+        // put back to its top may no longer list the machines at all (a phone's).
+        let (lastShown, machinesShown) = (last.exists, machines.exists)
+        let lastAfter = lastShown ? last.frame.minY : .infinity
+        let machinesAfter = machinesShown ? machines.frame.minY : .infinity
+        let onScreen = lastShown && last.isHittable && machines.isHittable
+        keep("menu-after-updates")
+        let after = counts()
+        report("Sidebar Agents heading, ⋯ menu open", from: before, to: after)
+        XCTAssertTrue(app.buttons[Self.menuItems[0]].exists || lastShown, "the menu is still open")
+        XCTAssertTrue(lastShown && machinesShown, "the menu still lists the machines it was scrolled to")
+        XCTAssertTrue(onScreen, "the machines it was scrolled to are still on screen")
+        XCTAssertEqual(lastAfter, lastY, accuracy: 1, "the menu did not scroll or jump")
+        XCTAssertEqual(machinesAfter, machinesY, accuracy: 1, "the menu did not scroll or jump")
+        XCTAssertLessThanOrEqual((after.bodies["ListMenu.content"] ?? 0) - (before.bodies["ListMenu.content"] ?? 0), 1,
+                                 "the open menu's content is not rebuilt for each push")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.95)).tap() // close it
+    }
+
+    /// A screenshot kept with the test's results, for the PR's before and after. PERSONA_SHOTS=<dir> also writes it there
+    /// (PERSONA_SHOTS_DEVICE names the device, PERSONA_SHOTS_APPEARANCE the look; PERSONA_SHOTS_EXTERNAL=1 asks a watcher
+    /// for a `simctl` screenshot instead, which the iPhone Duo needs, as SidebarHeadingGapsUITests does).
+    @MainActor private func keep(_ name: String) {
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = name
+        a.lifetime = .keepAlways
+        add(a)
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["PERSONA_SHOTS"] else { return }
+        let device = env["PERSONA_SHOTS_DEVICE"] ?? (UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")
+        let file = "agents-menu-\(device)-\(env["PERSONA_SHOTS_APPEARANCE"] ?? "light")-\(name).png"
+        let folder = URL(fileURLWithPath: dir)
+        guard env["PERSONA_SHOTS_EXTERNAL"] != nil else {
+            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: folder.appendingPathComponent(file))
+            return
+        }
+        try? file.write(to: folder.appendingPathComponent("want"), atomically: true, encoding: .utf8)
+        let target = folder.appendingPathComponent(file)
+        let deadline = Date.now.addingTimeInterval(15)
+        while Date.now < deadline, !FileManager.default.fileExists(atPath: target.path) { Thread.sleep(forTimeInterval: 0.2) }
+    }
+
+    /// The menu's items above the machines, in the app's test language: what a drag may start and end on.
+    private static let menuItems = ["按仓库", "按项目", "按待办", "按状态", "按机器", "按 App", "最近使用", "按常驻", "状态优先",
+                                    "最近更新", "头像", "紧凑两行", "卡片", "细列表", "全部折叠", "全部展开"]
+
+    /// Scrolls an open long menu until `target` is on screen. A swipe on the menu's own list where it can be found: a
+    /// held drag that starts on an item is the menu's slide to choose on a phone, and letting go chose the item under
+    /// the finger. Otherwise a drag inside its visible rows (the native menu exposes its offscreen rows too, an empty
+    /// row frame takes no drag, and a drag that starts outside the menu closes it).
+    @MainActor private func scrollMenu(to target: XCUIElement) {
+        let list = app.collectionViews.containing(.button, identifier: Self.menuItems[0]).firstMatch
+        for _ in 0..<3 where !target.isHittable && list.exists && list.isHittable {
+            list.swipeUp(velocity: .slow)
+            usleep(800_000)
+        }
+        for _ in 0..<4 where !target.isHittable {
+            let rows = Self.menuItems.map { app.buttons[$0].firstMatch }.filter { $0.exists && $0.isHittable }
+            guard let top = rows.min(by: { $0.frame.minY < $1.frame.minY }),
+                  let bottom = rows.max(by: { $0.frame.maxY < $1.frame.maxY }) else { break }
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: bottom.frame.midX, dy: bottom.frame.midY))
+            let end = origin.withOffset(CGVector(dx: bottom.frame.midX, dy: top.frame.midY))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 600, thenHoldForDuration: 0)
+            usleep(500_000)
+        }
+        XCTAssertTrue(target.isHittable, "\(target.label) must really be on screen:\n\(app.debugDescription)")
     }
 
     // A row's long-press menu stays open through updates of that very agent (it is working: a new line every push).

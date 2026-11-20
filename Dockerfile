@@ -14,6 +14,8 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 # The browser's OPAQUE implementation is built from the same Go sources as the hub.
 COPY --from=go-toolchain /usr/local/go/ /usr/local/go/
 ENV PATH="/usr/local/go/bin:${PATH}"
+ARG NODE_OPTIONS=
+ENV NODE_OPTIONS=${NODE_OPTIONS}
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 # Packages the project keeps in web/vendor/ (SheetJS publishes its current releases only as a tarball, docs/web/web.md "Spreadsheets").
@@ -40,6 +42,8 @@ COPY spec/desktop-bridge.d.ts /src/spec/desktop-bridge.d.ts
 # the admin page's assistant card preview and the showcase glob its examples (import.meta.glob, which comes out empty
 # without them), and tests import example JSON (TS2307 in tsc -b without it).
 COPY schema/extension/ /src/schema/extension/
+# The configuration form's schema and validation cases: its web tests import them directly (TS2307 in tsc -b without them).
+COPY schema/configuration/ /src/schema/configuration/
 # Without prebuild's privacy check: it scans the whole checkout (scripts/, git), which is not in this context. It
 # runs on the checkout before the image is built (.github/workflows/release.yml; locally the hooks and web builds).
 RUN npm run pake:build && npm run build --ignore-scripts

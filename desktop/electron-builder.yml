@@ -5,8 +5,10 @@ directories:
   buildResources: build
 artifactName: Persona-${version}-${os}-${arch}.${ext}
 npmRebuild: false
+afterPack: "./scripts/macos-after-pack.cjs"
 asar: true
 electronFuses:
+  resetAdHocDarwinSignature: true
   runAsNode: false
   enableCookieEncryption: true
   enableNodeOptionsEnvironmentVariable: false
@@ -28,6 +30,7 @@ mac:
   # build/icon.png and build/icon.ico come from scripts/assets/make_icon.py desktop (docs/desktop/desktop.md "Icons")
   icon: build/icon.png
   category: public.app-category.productivity
+  minimumSystemVersion: "15.0"
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   hardenedRuntime: true

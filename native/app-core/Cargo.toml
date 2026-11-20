@@ -35,3 +35,11 @@ lto = "fat"
 codegen-units = 1
 panic = "unwind"
 debug = "line-tables-only"
+
+# Debug Android packages (debug APKs and their replay tests; never shipped, and production code does not call the core
+# yet): cargo's dev profile, as the host JNI tests use, with line tables only so the unstripped library stays small.
+# Both a cold build and a small edit rebuild well ahead of release's fat LTO (measured in #10712); the optimised core is
+# still what release packages and what the release test APK replays.
+[profile.android-dev]
+inherits = "dev"
+debug = "line-tables-only"

@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useState } from "react";
-import { handOffToMain, itemRoute, loadRoutedItem, suggestionAct, useInbox, type InboxItem } from "../../lib/inbox";
-import { suggestionButtons } from "../../lib/inbox-events";
-import { handoffCardBody, handoffCardState, wrapUpItems, wrapUpWait, type HandoffCardBody } from "../../lib/handoff-card";
+import { handOffToMain, itemRoute, itemKey, getInbox, loadRoutedItem, suggestionAct, uncertainReplyKey, useInbox, type InboxItem } from "../../lib/inbox";
+import { chainTime, suggestionButtons } from "../../lib/inbox-events";
+import { handoffCardBody, handoffCardState, wrapUpItems, wrapUpWait, type HandoffCardBody, type HandoffCardState } from "../../lib/handoff-card";
 import { later, useFeed, type FeedItem } from "../../lib/feed";
 import { navigate } from "../../lib/router";
 import { errorText } from "../../lib/api";
@@ -9,6 +9,8 @@ import { uuid } from "../../lib/format";
 import { Button, cx, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";
+import { useScope, scoped } from "../../lib/current-assistant";
+import { sameManager } from "../../lib/manager-choice";
 
 // A hand-off conversation's write-back as a card in the chat (#5932, docs/assistant/inbox.md "Item actions"): the
 // item's summary, the reply or conclusion, and Send / OK, which confirm the item's suggestion. The item is the one home
@@ -16,13 +18,27 @@ import { t } from "../../i18n";
 
 /** The item the card is about: the list's, else the history's, asked for once when neither has it. */
 function useCardItem(id: string): { item?: InboxItem; asking: boolean } {
-  const item = useInbox((s) => s.items.find((x) => x.id === id) ?? s.history.find((x) => x.id === id));
+  const scope = useScope();
+  const item = useInbox((s) => s.items.find((x) => x.id === id && scope.has(x.manager)) ?? s.history.find((x) => x.id === id && scope.has(x.manager)));
   const loaded = useInbox((s) => s.loaded);
   const asking = useInbox((s) => s.routing.some((k) => k.endsWith(`\u0000${id}`)));
   useEffect(() => {
-    if (!item && loaded) loadRoutedItem(id, undefined);
-  }, [id, item, loaded]);
+    if (!item && loaded) loadRoutedItem(id, scope.several ? scope.id : undefined);
+  }, [id, item, loaded, scope.several, scope.id]);
   return { item, asking: !item && (asking || !loaded) };
+}
+
+/** Reuse the card already in this page, or its existing Inbox home when it is outside the rendered history. */
+function revealCurrentSuggestion(item: InboxItem) {
+  const suggestion = item.suggestion;
+  const card = suggestion && [...document.querySelectorAll<HTMLElement>('[data-testid="handoff-card"]')].find((el) =>
+    el.dataset.inboxRef === item.id && el.dataset.suggestionVersion === String(suggestion.version) &&
+    el.dataset.conversation === suggestion.conversation?.session_id && sameManager(el.dataset.manager || undefined, item.manager) &&
+    el.dataset.state !== "later");
+  if (card) {
+    card.scrollIntoView?.({ block: "nearest" });
+    card.focus({ preventScroll: true });
+  } else navigate(itemRoute(item));
 }
 
 function sourceName(card: HandoffCardBody): string {
@@ -40,19 +56,25 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
     const mine = (s.feeds[feed.conversation] ?? []).filter((x) => x.kind === "inbox_suggestion" && x.ref === feed.ref);
     return mine.length === 0 || mine[mine.length - 1].id === feed.id;
   });
-  const sending = useInbox((s) => !!item && s.sending.some((k) => k === item.id || k.endsWith(`\u0000${item.id}`)));
+  const sending = useInbox((s) => !!item && s.sending.includes(itemKey(item)));
   const deferred = useFeed((s) => !!s.later[feed.id]);
   const [text, setText] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const headingId = useId();
+  const uncertain = useInbox((s) => card && item ? s.uncertainReplies?.[uncertainReplyKey(item, card.version, feed.conversation)] : undefined);
   if (!card || !id) return null;
-  const st = handoffCardState(card, feed.conversation, item, newest);
+  const st: HandoffCardState = uncertain
+    ? { state: "uncertain", attempt: uncertain } : handoffCardState(card, feed.conversation, item, newest);
+  const attempt = "attempt" in st ? st.attempt : undefined;
   const live = st.state === "live" && !!item;
   const reply = card.kind === "reply";
   const draft = text ?? card.text;
   const confirm = async () => {
     if (!item) return;
     await suggestionAct(item, "confirm", reply && draft !== card.text ? draft : undefined);
+  };
+  const retry = async () => {
+    if (item) await suggestionAct(item, "confirm", undefined, undefined, card.version);
   };
   const heading = (() => {
     switch (st.state) {
@@ -64,6 +86,9 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
         return reply ? t("assistant-handoffcard.filed_not_sent") : t("assistant-handoffcard.conclusion_filed");
       case "replaced":
         return t("assistant-handoffcard.replaced");
+      case "failed": return t("assistant-handoffcard.failed");
+      case "sending": return t("assistant-handoffcard.sending");
+      case "uncertain": return t("assistant-handoffcard.uncertain");
       default:
         return reply ? t("assistant-handoffcard.reply_as_you", { title: card.title }) : t("assistant-handoffcard.conclusion");
     }
@@ -79,10 +104,13 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
     );
   }
   const tone = st.state === "sent" ? "bg-green-tint" : resolved ? "bg-field" : "bg-accent-tint";
-  const ink = st.state === "sent" ? "text-green" : resolved ? "text-ink-2" : "text-accent";
-  const icon = st.state === "sent" || st.state === "self" ? "check" : resolved ? "archive" : reply ? "pencil" : "flag";
+  const ink = st.state === "sent" ? "text-green" : st.state === "failed" ? "text-red" : resolved ? "text-ink-2" : "text-accent";
+  const icon = st.state === "sent" || st.state === "self" ? "check" : st.state === "failed" || st.state === "uncertain" ? "alertCircle" : st.state === "sending" ? "clock" : resolved ? "archive" : reply ? "pencil" : "flag";
+  const hasNewer = !!item?.suggestion && (item.suggestion.version !== card.version || item.suggestion.conversation?.session_id !== feed.conversation);
   return (
-    <div className="flex flex-col gap-2.5 rounded-card bg-surface p-4 shadow-card" data-testid="handoff-card" data-state={st.state}>
+    <div className="flex flex-col gap-2.5 rounded-card bg-surface p-4 shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      tabIndex={-1} role="group" aria-labelledby={headingId} data-testid="handoff-card" data-state={st.state}
+      data-inbox-ref={id} data-suggestion-version={card.version} data-conversation={feed.conversation} data-manager={item?.manager ?? ""}>
       <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-ink-2">
         <Icon name={card.source === "mail" ? "mail" : "inbox"} size={13} className="shrink-0 text-accent" />
         <span className="min-w-0 truncate">{[card.title, sourceName(card)].filter(Boolean).join(" · ")}</span>
@@ -113,9 +141,20 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
             className="-mx-1.5 resize-none rounded-control bg-transparent px-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
         ) : (
-          <div className="whitespace-pre-line text-sm [overflow-wrap:anywhere]">{st.state === "sent" ? st.text : card.text}</div>
+          <div className="whitespace-pre-line text-sm [overflow-wrap:anywhere]">{st.state === "sent" ? st.text : attempt?.text ?? card.text}</div>
         )}
       </div>
+      {attempt && Number.isFinite(Date.parse(attempt.at)) && <time dateTime={attempt.at} className="text-xs text-ink-3" data-testid="handoff-attempt-time">{chainTime(attempt.at)}</time>}
+      {st.state === "uncertain" && <div className="text-sm text-ink-2" role="status">{t("assistant-handoffcard.uncertain_hint")}</div>}
+      {st.state === "sending" && <div className="text-sm text-ink-2" role="status">{t("assistant-handoffcard.sending_hint")}</div>}
+      {st.state === "failed" && <div className="text-sm text-ink-2" role="status">
+        {t(st.retryable ? "assistant-handoffcard.retry_hint" : "assistant-handoffcard.failed_hint")}
+        {st.retryable && attempt?.retry_after ? " " + t("assistant-handoffcard.retry_after", { seconds: Math.ceil(attempt.retry_after) }) : ""}
+      </div>}
+      {(st.state === "failed" && st.retryable || hasNewer) && <div className="flex flex-col gap-2 sm:flex-row">
+        {st.state === "failed" && st.retryable && <Button tone="accent" className="min-h-11" busy={sending} disabled={sending} onClick={() => void retry()} testId="handoff-card-retry">{t("assistant-handoffcard.retry")}</Button>}
+        {hasNewer && item && <Button className="min-h-11" onClick={() => revealCurrentSuggestion(item)} testId="handoff-card-current">{t("assistant-handoffcard.current_suggestion")}</Button>}
+      </div>}
       {card.note && !resolved && <div className="text-xs text-ink-2 [overflow-wrap:anywhere]">{card.note}</div>}
       {live && (
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -136,13 +175,20 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
  *  item has a suggestion waiting for the owner says so ("To send" / "To confirm"); one handled with nothing waiting is
  *  gone (wrapUpItems). */
 export const WrapUpChips = memo(function WrapUpChips({ conversation }: { conversation: string }) {
-  const items = useInbox((s) => wrapUpItems(s.items, conversation));
+  const scope = useScope();
+  const items = useInbox((s) => wrapUpItems(scoped(s.items, scope), conversation));
   const [busy, setBusy] = useState<string | null>(null);
   if (!items.length) return null;
   const wrapUp = async (it: InboxItem) => {
+    if (it.suggestion) {
+      revealCurrentSuggestion(it);
+      return;
+    }
     setBusy(it.id);
     try {
-      await handOffToMain(it, t("assistant-handoffcard.wrap_up_ask"), uuid());
+      await handOffToMain(it, t("assistant-handoffcard.wrap_up_ask"), uuid(), true);
+      const current = getInbox().items.find((x) => itemKey(x) === itemKey(it));
+      if (current?.suggestion) revealCurrentSuggestion(current);
     } catch (e) {
       toast(t("assistant-handoffcard.wrap_up_failed", { error: errorText(e) }), "error");
     } finally {

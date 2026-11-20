@@ -22,8 +22,11 @@
   "cursor_style": "カーソルのスタイル",
   "cursor_blink": "カーソルの点滅",
   "cursor_blink_hint": "フォーカス中に点滅します",
-  "webgl": "WebGLレンダリング",
-  "webgl_hint_long": "GPUでターミナルを描画し、出力が多いときや文字が小さいときも滑らかになります。オフにすると標準のレンダリングを使います",
-  "webgl_hint": "出力が多いときも滑らか。オフで標準のレンダリング",
+  "renderer": "描画方式",
+  "renderer_standard": "このターミナル：標準",
+  "renderer_webgl": "このターミナル：WebGL",
+  "renderer_fell_back": "このターミナル：標準（WebGL 停止）",
+  "renderer_tooltip": "設定 › ラボで選びます。変更はその後に開いたターミナルに反映されます。",
+  "renderer_open_labs": "ラボ",
   "edit_shortcuts": "ショートカットを編集…"
 }

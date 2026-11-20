@@ -19,6 +19,7 @@ nonisolated struct SeenOutbox {
     enum Route: Equatable { case socket, http }
 
     struct Mark: Equatable {
+        let id: UInt64
         /// The hub's `seen_at` and the agent's `updated_at` when it was marked.
         var seenBefore: Date?
         var updatedBefore: Date?
@@ -31,20 +32,34 @@ nonisolated struct SeenOutbox {
     }
 
     private(set) var marks: [SessionKey: Mark] = [:]
+    private var nextID: UInt64 = 0
 
-    /// `session` as the app had it when the user looked at it. Only an unread one waits for the hub.
+    /// `session` as the app had it when the user looked at it. Unread and Just finished both wait for the hub.
     mutating func mark(_ key: SessionKey, _ session: Session, at now: Date) {
-        guard session.state == .unread else { return }
-        marks[key] = Mark(seenBefore: session.seenAt, updatedBefore: session.updatedAt, markedAt: now, sentAt: now)
+        guard session.needsSeen() else { return }
+        nextID &+= 1
+        marks[key] = Mark(id: nextID, seenBefore: session.seenAt, updatedBefore: session.updatedAt, markedAt: now, sentAt: now)
     }
 
-    mutating func sent(_ key: SessionKey, _ route: Route, at now: Date) {
-        marks[key]?.sentAt = now
-        marks[key]?.route = route
-        marks[key]?.answered = false
+    @discardableResult mutating func sent(_ key: SessionKey, _ route: Route, at now: Date) -> UInt64? {
+        guard var mark = marks[key] else { return nil }
+        mark.sentAt = now
+        mark.route = route
+        mark.answered = false
+        marks[key] = mark
+        return mark.id
     }
 
-    mutating func answered(_ key: SessionKey) { marks[key]?.answered = true }
+    mutating func answered(_ key: SessionKey, markID: UInt64?) {
+        guard let markID, marks[key]?.id == markID else { return }
+        marks[key]?.answered = true
+    }
+
+    /// A forgotten pairing cannot leave receipts for the next owner of that local group.
+    mutating func forget(groups: Set<String>? = nil) {
+        guard let groups else { marks.removeAll(); return }
+        marks = marks.filter { !groups.contains($0.key.group) }
+    }
 
     /// Sent over the socket and not taken within `confirmWithin`: for HTTP now.
     func due(at now: Date) -> [SessionKey] {
@@ -68,24 +83,31 @@ nonisolated struct SeenOutbox {
     /// shown seen. Lists of other machines leave their marks alone.
     mutating func land(_ lists: [MachineRef: [Session]], at now: Date) -> [MachineRef: [Session]] {
         guard !marks.isEmpty else { return lists }
+        var pending: [MachineRef: [String: (key: SessionKey, mark: Mark)]] = [:]
+        for (key, mark) in marks {
+            if expired(mark, now) { marks[key] = nil }
+            else if lists[key.machineRef] != nil { pending[key.machineRef, default: [:]][key.sessionID] = (key, mark) }
+        }
+
         var out = lists
-        for (key, m) in marks {
-            guard var list = out[key.machineRef] else { continue }
-            guard let i = list.firstIndex(where: { $0.sessionID == key.sessionID }) else {
-                marks[key] = nil // gone from its machine
-                continue
+        for (machine, var remaining) in pending {
+            guard var list = lists[machine] else { continue }
+            var changed = false
+            for i in list.indices {
+                if remaining.isEmpty { break }
+                guard let (key, mark) = remaining.removeValue(forKey: list[i].sessionID) else { continue }
+                let s = list[i]
+                let recorded = (s.seenAt ?? .distantPast) > (mark.seenBefore ?? .distantPast)
+                let newTurn = (s.updatedAt ?? .distantPast) > (mark.updatedBefore ?? .distantPast).addingTimeInterval(Self.sameTurn)
+                if recorded || newTurn || s.state == .working || s.state == .needsYou {
+                    marks[key] = nil
+                } else if s.needsSeen() {
+                    list[i].markLocallySeen()
+                    changed = true
+                }
             }
-            let s = list[i]
-            let recorded = (s.seenAt ?? .distantPast) > (m.seenBefore ?? .distantPast)
-            let newTurn = (s.updatedAt ?? .distantPast) > (m.updatedBefore ?? .distantPast).addingTimeInterval(Self.sameTurn)
-            if recorded || newTurn || s.state == .working || s.state == .needsYou || expired(m, now) {
-                marks[key] = nil
-                continue
-            }
-            if s.state == .unread {
-                list[i].state = .idle
-                out[key.machineRef] = list
-            }
+            if changed { out[machine] = list }
+            for entry in remaining.values { marks[entry.key] = nil } // gone from this machine's list
         }
         return out
     }

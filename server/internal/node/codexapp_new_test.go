@@ -8,11 +8,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -293,6 +295,48 @@ read l5
 	if strings.Contains(got, "turn/start") {
 		t.Error("a turn was started")
 	}
+}
+
+func TestCodexStdioCancellationStopsWrapperChild(t *testing.T) {
+	home := t.TempDir()
+	cli := filepath.Join(home, "codex")
+	// The wrapper waits for a child with inherited stdout. Closing the wrapper alone cannot unblock initialize.
+	script := `#!/bin/sh
+mkfifo "$CODEX_HOME/block"
+cat "$CODEX_HOME/block" &
+printf '%s\n' "$!" > "$CODEX_HOME/child"
+wait
+`
+	if err := os.WriteFile(cli, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		server, err := startCodexStdio(ctx, cli, home, home)
+		if server != nil {
+			server.close()
+		}
+		finished <- err
+	}()
+	var child int
+	waitFor(t, "wrapper child to start", func() bool {
+		b, _ := os.ReadFile(filepath.Join(home, "child"))
+		child, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		return child > 0
+	})
+	t.Cleanup(func() { _ = osproc.Kill(child) })
+	cancel()
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Fatal("initialize succeeded after cancellation")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("initialize stayed blocked on the wrapper child's stdout")
+	}
+	waitFor(t, "wrapper child to exit", func() bool { return !osproc.Alive(child) })
 }
 
 func TestCodexAppSlugIsTheTitlesASCIIWords(t *testing.T) {

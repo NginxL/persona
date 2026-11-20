@@ -1,0 +1,4 @@
+{
+  "unverified_after_paste": "テキストは貼り付けましたが、Agent の状態を確認できないため送信していません：{reason}",
+  "changed_after_paste": "貼り付け後に Agent が変わったかダイアログが開いたため、テキストは送信していません。"
+}

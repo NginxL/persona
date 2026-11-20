@@ -61,7 +61,7 @@ nonisolated extension AgentsNeedsYou {
     /// The sessions that wait for the user whether or not a card was read, as the Needs You filter matches them;
     /// never the Persona tab's own conversations.
     static func waiting(_ sessions: [Session]) -> [Session] {
-        ChildSessions.fold(sessions).filter { !$0.assistant && $0.countedState == .needsYou }
+        ChildSessions.fold(sessions.filter { $0.hiddenByDirectory != true }).filter { !$0.assistant && $0.countedState == .needsYou }
     }
 
     /// The Agents tab's badge: its rows less the ones that are not the tab's to announce (`TabBadges.place`): the

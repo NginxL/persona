@@ -51,7 +51,9 @@ internal fun AssistantPendingConversation(
         items(messages, key = { it.clientMessageId }) { message ->
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp.dense)) {
-                UserBubble(message.text)
+                // A forward (#3901) shows as its card and note, as the conversation will show it, not as its block.
+                if (persona.feature.chat.carriesForward(message.text)) persona.feature.chat.PendingForwardBubble(message.text, message.clientMessageId)
+                else UserBubble(message.text)
                 if (receipts.any { it.clientMessageId == message.clientMessageId && it.processing })
                     Text(stringResource(persona.core.designsystem.R.string.designsystem_message_processing),
                         style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)

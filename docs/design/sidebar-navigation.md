@@ -212,8 +212,8 @@ switch the detail without a push when a sidebar item is chosen; only drilling do
 - **Each root keeps its drill-down** while the user is elsewhere (`SidebarPageRoots`, a pure value with unit tests,
   `PersonaTests/SidebarPageRootsTests`); picking the root in front goes back to it (the tab-bar rule); another conversation
   picked while the conversation is in front starts at its root without a pop. Another assistant or hub forgets every root.
-- **The shaded row follows the root**, also while drilled in (`UnifiedSidebar.atRoot`, `shownPlace`; an Agent's row from
-  the root).
+- **The shaded row follows the root**, also while drilled in (`UnifiedSidebar.atRoot`, `shownPlace`, `shownAgent`): one
+  row of the whole column at a time, an Agent's in every grouping, all in one shade (`SidebarSelectedShade`, #11032).
 - **Motion**: a switch is never animated (the open Duo upright: the column sliding away is the only motion); a drill-down's
   push and a re-pick's pop are.
 - **Structure**: `AssistantView` (embedded) stays the stack's root, so the sidebar's requests and routes keep landing there,
@@ -237,7 +237,10 @@ switch the detail without a push when a sidebar item is chosen; only drilling do
 **Android** (#9667). A regular window — the sidebar column beside the page, or over it — follows this section. `SidebarPageRoots`
 (`android/app/src/main/java/persona/android/navigation/SidebarPageRoots.kt`) is the pure model, with the same steps as `SidebarPageRoots.swift`: a place
 replaces the Assistant stack's root and does not animate; a drill-down pushes; each root keeps its path; picking the root in
-front pops; the shaded row follows the root (`AssistantSidebarShade`). The conversation and the fixed places (Inbox, To-dos,
+front pops; the shaded row follows the root (`AssistantSidebarShade`). An Agent root shades its exact Directions row with the
+same `JRow` selected look and semantics as the other rows; a nested sub-Agent opens its parent without selecting both rows.
+An Agent pushed from inside Persona keeps Persona's root shade on either tab, including compact windows; compact Persona
+retains its existing conversation shading. The conversation and the fixed places (Inbox, To-dos,
 Knowledge and Computers) stay composed while another is in front, so the conversation keeps its non-saveable history, local
 operations, running effects and list anchor, and those places keep their list, filter and scroll. Folding inserts the
 conversation under that same list and unfolding removes it, so that page is not rebuilt. A to-do opened as its own root, or an

@@ -7,5 +7,8 @@
   "container": "コンテナ {name}",
   "offline": "メインチャット · オフライン",
   "stopped": "メインチャット · 停止中",
-  "last_location": "前回の実行場所：{location}"
+  "last_location": "前回の実行場所：{location}",
+  "interactive": "{harness}（対話型）",
+  "print": "{harness}（印刷モード）",
+  "print_note": "対話型 Claude Code が起動しませんでした：{reason}"
 }

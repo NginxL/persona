@@ -17,7 +17,7 @@ vi.mock("./api", () => {
     constructor(readonly status: number, message: string, readonly body: Record<string, unknown> = {}) { super(message); }
     get code() { return typeof this.body.code === "string" ? this.body.code : undefined; }
   }
-  return { api: fixture.api, credentialOwner: () => fixture.owner, ApiError, errorText: (e: unknown) => (e instanceof Error ? e.message : String(e)) };
+  return { api: fixture.api, onCredentialChange: () => () => {}, credentialOwner: () => fixture.owner, ApiError, errorText: (e: unknown) => (e instanceof Error ? e.message : String(e)) };
 });
 vi.mock("./store", async () => {
   const { useSyncExternalStore } = await import("react");
@@ -644,4 +644,15 @@ describe("a complete copy on a paging hub", () => {
     expect([hub.baselines, hub.deltas]).toEqual([4, 2]);
     expect(host.querySelector("output")!.dataset.titles).toContain("round 4");
   });
+});
+
+it("filters hidden rows before folding and restores them when the rule is disabled", async () => {
+  const parent = row("parent", { hidden_by_directory: true });
+  const child = row("child", { folded_under: "parent" });
+  fixture.state = { sessions: { demo: [parent, child] }, features: [], loaded: true };
+  await mount();
+  expect(host.textContent).toBe("child");
+  await act(async () => publish({ sessions: { demo: [{ ...parent, hidden_by_directory: false }, child] } }));
+  expect(host.textContent).toBe("parent");
+  expect(fixture.api).not.toHaveBeenCalled();
 });

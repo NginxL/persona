@@ -20,7 +20,7 @@ import (
 // what it sends an agent can be typed into the agent's terminal, now or later in a prompt (a to-do, a knowledge-base
 // entry), where they are keys rather than text, and keys can do what the extension was not granted (switch the
 // permission mode). Newline, carriage return and tab are text there; every other control character (C0, DEL, C1) is
-// refused, in any chat, its extension's own included. The apps' and devices' tokens are not held to it.
+// refused, in any chat, its extension's own included. Scoped device tokens use the same input check.
 
 // codeTerminalControls answers a request of an extension's token that carries a terminal control character.
 const codeTerminalControls = "terminal_control_refused"
@@ -37,7 +37,7 @@ const terminalTextMax = 32 << 20
 func (h *Hub) withoutTerminalControls(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := principalOf(r.Context())
-		if p.Role != roleExtension {
+		if p.Role != roleExtension && p.Role != roleScoped {
 			next(w, r)
 			return
 		}
@@ -128,6 +128,10 @@ func isTerminalControl(r rune) bool {
 // refuseTerminalControls answers 403 to a request of extension token p that carries terminal control characters, and
 // has its manager record it in the extension's audit: the route and its path, never the text.
 func (h *Hub) refuseTerminalControls(w http.ResponseWriter, r *http.Request, p principal) {
+	if p.Role == roleScoped {
+		writeErrCode(w, http.StatusForbidden, codeTerminalControls, errors.New("a scoped device may not send terminal control characters"))
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
 	route, path := rowText(r.Pattern, 128), rowText(r.URL.EscapedPath(), 256)

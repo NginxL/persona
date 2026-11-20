@@ -360,10 +360,27 @@ func LauncherDetail(p Probe) proto.LauncherDetail {
 		if secretEnv.MatchString(k) && v != "" {
 			v = "•••"
 		}
+		if k == "ANTHROPIC_CUSTOM_HEADERS" {
+			v = maskHeaderValues(v)
+		}
 		v = maskSecrets(v) // a key in a header (ANTHROPIC_CUSTOM_HEADERS), a proxy's password
 		d.Env = append(d.Env, proto.LauncherEnv{Key: k, Value: v})
 	}
 	return d
+}
+
+// maskHeaderValues keeps configured header names useful for diagnostics while treating every value as secret, not only
+// values whose names happen to contain key, token or auth.
+func maskHeaderValues(raw string) string {
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		name, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		lines[i] = strings.TrimSpace(name) + ": •••"
+	}
+	return strings.Join(lines, "\n")
 }
 
 func firstNonEmpty(v ...string) string {

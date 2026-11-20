@@ -52,6 +52,26 @@ final class ClipboardSectionTests: XCTestCase {
         XCTAssertTrue(hint.waitForNonExistence(timeout: 5))
     }
 
+    /// An image fetched from the computer is a visible, accessible picture, not a blank success row (#7925).
+    @MainActor func testGetImagePreview() throws {
+        guard env["PERSONA_CLIPBOARD_STATE"] == "image" else { throw XCTSkip("MOCK_CLIPBOARD=image") }
+        let app = try open()
+        app.buttons["clipboard-get"].firstMatch.tap()
+        let preview = app.descendants(matching: .any)["clipboard-preview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "no preview:\n\(app.debugDescription)")
+        XCTAssertTrue(preview.images.firstMatch.waitForExistence(timeout: 5), "the fetched picture is visible")
+        shot(app, "clipboard-image-fetched")
+    }
+
+    /// The self-contained DEBUG screenshot path prepares its picture too (#7925).
+    @MainActor func testDebugImagePreview() throws {
+        guard env["PERSONA_CLIPBOARD_STATE"] != "off" else { throw XCTSkip("needs the clipboard switch on") }
+        let app = try open(["-showClipboardFetched", "image"])
+        let preview = app.descendants(matching: .any)["clipboard-preview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "no DEBUG preview:\n\(app.debugDescription)")
+        XCTAssertTrue(preview.images.firstMatch.waitForExistence(timeout: 5), "the DEBUG picture is not blank")
+    }
+
     /// Off by default (MOCK_CLIPBOARD=off): the switch with its explanation and nothing to tap, and the offer setting off.
     @MainActor func testOffByDefault() throws {
         guard env["PERSONA_CLIPBOARD_STATE"] == "off" else { throw XCTSkip("MOCK_CLIPBOARD=off (PERSONA_CLIPBOARD_STATE=off)") }

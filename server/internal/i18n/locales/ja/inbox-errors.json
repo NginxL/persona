@@ -1,4 +1,5 @@
 {
+  "retry_stale": "この項目は再試行が必要な状態ではなくなりました",
   "no_item": "この受信トレイの項目はありません。",
   "item_done": "この項目はアーカイブ済みです。何も送信されていません。",
   "save_failed": "この項目を保存できませんでした。もう一度お試しください。",
@@ -30,6 +31,7 @@
   "mail_target_changed": "メールの返信先が変わりました。更新してもう一度お試しください。",
   "mail_target_required": "メールアカウントとメールのUIDを指定してください。",
   "translation_empty": "モデルが翻訳を返しませんでした。もう一度お試しください。",
+  "translation_message_size": "翻訳する返信は1〜{max}文字にしてください。",
   "mail_unconfigured": "メールがまだ設定されていません。",
   "not_processing": "この会話は受信トレイの項目に関連付けられていません。",
   "translation_target": "対象言語{target}はサポートされていません。",

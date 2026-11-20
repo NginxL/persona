@@ -94,6 +94,7 @@
     <string name="assistant_full_search_no_results">没有找到“%1$s”</string>
     <string name="assistant_start_main">开始主对话</string>
     <string name="assistant_main_chat">主对话</string>
+    <string name="assistant_main_conversation">主对话</string>
     <!-- The drawer's newest eligible chats, between 常驻 and All chats (#4922, #5196) -->
     <string name="assistant_recent">最近</string>
     <string name="assistant_directions">常驻</string>
@@ -164,11 +165,11 @@
     <string name="assistant_settings_target">助手</string>
     <string name="assistant_settings_permission">新会话默认权限</string>
     <string name="assistant_settings_permission_hint">仅用于未明确选择权限的新会话，已有会话的权限保持不变。</string>
-    <string name="assistant_settings_permission_default">默认</string>
+    <string name="assistant_settings_permission_default">默认权限</string>
     <string name="assistant_settings_permission_edits">允许编辑</string>
-    <string name="assistant_settings_permission_plan">仅规划</string>
-    <string name="assistant_settings_permission_auto">自动</string>
-    <string name="assistant_settings_permission_full">完全允许</string>
+    <string name="assistant_settings_permission_plan">计划模式</string>
+    <string name="assistant_settings_permission_auto">自动审批</string>
+    <string name="assistant_settings_permission_full">完全访问</string>
     <string name="assistant_settings_permission_failed">未能保存默认权限</string>
     <string name="assistant_settings_permission_unavailable">此助手尚未确认支持默认权限设置，暂不可修改。其他设置仍可使用。</string>
     <string name="assistant_health">健康</string>
@@ -201,4 +202,32 @@
     <string name="assistant_archived_empty_detail">在对话列表里左滑一个对话就能归档，它会收在这里。</string>
     <string name="assistant_unarchive">取消归档</string>
     <string name="assistant_unarchived">已取消归档</string>
+    <string name="assistant_usage_title">Token 用量</string>
+    <string name="assistant_usage_open">查看 Token 用量详情</string>
+    <string name="assistant_usage_today">今天 · %1$s 个 token</string>
+    <string name="assistant_usage_last_7">近 7 天</string>
+    <string name="assistant_usage_last_30">近 30 天 · %1$s 个 token</string>
+    <string name="assistant_usage_last_30_label">近 30 天</string>
+    <string name="assistant_usage_today_label">今天</string>
+    <string name="assistant_usage_day">%1$s · %2$s 个 token</string>
+    <string name="assistant_usage_token_description">%1$s，%2$s 个 token</string>
+    <string name="assistant_usage_hour_description">%1$s %2$s，%3$s 个 token</string>
+    <string name="assistant_usage_input">输入</string>
+    <string name="assistant_usage_output">输出</string>
+    <string name="assistant_usage_cache_write">缓存写入</string>
+    <string name="assistant_usage_cache_read">缓存读取</string>
+    <string name="assistant_usage_by_hour">近 7 天按小时</string>
+    <string name="assistant_usage_by_computer">按电脑</string>
+    <string name="assistant_usage_by_agent">按 Agent · 最近 7 天</string>
+    <string name="assistant_usage_before_agent_split">未区分（更新前）</string>
+    <string name="assistant_usage_by_kind">按 Token 类型</string>
+    <string name="assistant_usage_less">较少</string>
+    <string name="assistant_usage_more">较多</string>
+    <string name="assistant_usage_previous_day">前一天</string>
+    <string name="assistant_usage_next_day">后一天</string>
+    <string name="assistant_usage_read_failed">没读到 Token 用量</string>
+    <string name="assistant_usage_retry">重试</string>
+    <string name="assistant_usage_unavailable">Token 用量不可用</string>
+    <string name="assistant_usage_unavailable_detail">当前 Hub 不提供历史 Token 用量。</string>
+    <string name="assistant_usage_unknown_machine">以前的电脑</string>
 </resources>

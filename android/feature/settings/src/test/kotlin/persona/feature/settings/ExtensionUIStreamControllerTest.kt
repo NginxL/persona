@@ -36,8 +36,8 @@ class ExtensionUIStreamControllerTest {
         session.visibility(true,true)
         val open = connection.sent.single().getValue("request").jsonObject
         assertEquals(JsonPrimitive(""),open["state"])
-        // UI version 8 (#9158): the stream draws through the pages' renderer, so it asks for the pages' version
-        assertEquals(JsonPrimitive(8),open.getValue("context").jsonObject["ui_version"])
+        // UI version 10 (#9727): streams use the pages' version while the hub still downgrades graphs to rows.
+        assertEquals(JsonPrimitive(10),open.getValue("context").jsonObject["ui_version"])
         assertEquals(JsonPrimitive("manager-a"),connection.sent.single()["manager"])
         connection.frame("""{"type":"extension_ui_stream","kind":"snapshot","manager":"manager-a","request_id":${open.getValue("request_id")},"snapshot":$snapshot}""")
         runCurrent()

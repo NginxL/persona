@@ -77,6 +77,55 @@ class AssistantSwitchIsolationTest {
         assertEquals("new-main", repository.assistant.value.mainSession?.sessionId)
     }
 
+    @Test fun recentTaskChatsApplyLocallyAndFollowTheNextRefresh() = runTest {
+        val transport = Transport()
+        val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope)
+        runCurrent()
+        assertNull(repository.assistant.value.recentTaskChats)
+        repository.updateRecentTaskChats(true)
+        assertEquals(true, repository.assistant.value.recentTaskChats)
+        transport.recentTaskChats = false
+        repository.refresh()
+        assertEquals(false, repository.assistant.value.recentTaskChats)
+        transport.recentTaskChats = null
+        repository.refresh()
+        assertNull(repository.assistant.value.recentTaskChats)
+    }
+
+    @Test fun lateRefreshCannotEraseRecentTaskChatsUpdate() = runTest {
+        val transport = Transport().apply { recentTaskChats = false }
+        val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope)
+        runCurrent()
+        val response = CompletableDeferred<JsonObject>()
+        transport.read = { response.await() }
+        val refresh = async { repository.refresh() }
+        runCurrent()
+        repository.updateRecentTaskChats(true)
+        response.complete(config(null, recentTaskChats = false))
+        refresh.await()
+        assertEquals(true, repository.assistant.value.recentTaskChats)
+    }
+
+    @Test fun recentTaskChatsUpdaterKeepsRollbackWithOriginalManager() = runTest {
+        val transport = Transport().apply { read = { config(it, recentTaskChats = it != null) } }
+        val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope)
+        runCurrent()
+        assertEquals(false, repository.assistant.value.recentTaskChats)
+        val update = repository.recentTaskChatsUpdater()
+        update(true)
+        AssistantManagerChoice.pick("work")
+        runCurrent()
+        assertEquals(true, repository.assistant.value.recentTaskChats)
+
+        update(false)
+
+        assertEquals("A's rollback must not rewrite B", true, repository.assistant.value.recentTaskChats)
+        transport.read = { manager -> if (manager == null) throw IOException("offline") else config(manager, recentTaskChats = true) }
+        AssistantManagerChoice.pick(null)
+        runCurrent()
+        assertEquals("A's cached optimistic value is rolled back too", false, repository.assistant.value.recentTaskChats)
+    }
+
     @Test fun mainLookupPinsTheReturnedConversationBeforePageSwitchAndSend() = runTest {
         val repository = RealAssistantRepository(Connection(Transport()), Sessions(), backgroundScope)
         assertEquals(SessionKey("mac", "work-main"), repository.mainConversationOf("work"))
@@ -245,7 +294,8 @@ class AssistantSwitchIsolationTest {
     }
     private class Transport : InboxAssistantTransport {
         override val scope = "scope"
-        var read: suspend (String?) -> JsonObject = { config(it) }
+        var read: suspend (String?) -> JsonObject = { config(it, recentTaskChats = recentTaskChats) }
+        var recentTaskChats: Boolean? = null
         val creates = mutableListOf<String?>()
         val readOwners = mutableListOf<String?>()
         val createOwners = mutableListOf<String?>()
@@ -271,9 +321,10 @@ class AssistantSwitchIsolationTest {
     }
     companion object {
         private fun header(id: String) = AssistantManagerChoice.itemHeader(listOf("assistant", "conversations", id, "messages"), "hub")
-        private fun config(manager: String?, main: String = "${manager ?: "assistant"}-main") = buildJsonObject {
+        private fun config(manager: String?, main: String = "${manager ?: "assistant"}-main", recentTaskChats: Boolean? = null) = buildJsonObject {
             put("machine_id", "mac")
             put("main", main)
+            recentTaskChats?.let { put("recent_task_chats", it) }
             put("conversations", buildJsonArray { if (main.isNotEmpty()) add(session(manager, main)) })
         }
         private fun session(manager: String?, id: String) = buildJsonObject {

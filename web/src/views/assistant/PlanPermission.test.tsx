@@ -6,10 +6,10 @@ import zhTasks from "../../i18n/locales/zh-Hans/assistant-tasks.json";
 import { permissionLabel } from "./PlanEdit";
 
 describe("a plan task's permission (#3026)", () => {
-  it("names Auto, which the hub may settle from Claude Code's default mode, instead of calling it 每步都问", () => {
+  it("names Auto-review, which the hub may settle from Claude Code's default mode, instead of calling it 默认权限", () => {
     expect(PLAN_PERMISSIONS).toContain("auto");
-    expect(permissionLabel("auto")).toBe("自动判断");
-    expect(permissionLabel("default")).toBe("每步都问");
+    expect(permissionLabel("auto")).toBe("自动审批");
+    expect(permissionLabel("default")).toBe("默认权限");
     // Every mode Edit offers reads differently.
     expect(new Set(PLAN_PERMISSIONS.map(permissionLabel)).size).toBe(PLAN_PERMISSIONS.length);
   });

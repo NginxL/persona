@@ -29,6 +29,12 @@ final class AgentsTopMotionTests: XCTestCase {
     }
 
     override func tearDown() {
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: tracePath)), !data.isEmpty {
+            let trace = XCTAttachment(data: data, uniformTypeIdentifier: "public.plain-text")
+            trace.name = "Agents SearchTrace"
+            trace.lifetime = .deleteOnSuccess // Keep every raw frame and note with a failure.
+            add(trace)
+        }
         try? FileManager.default.removeItem(atPath: tracePath)
     }
 
@@ -88,6 +94,7 @@ final class AgentsTopMotionTests: XCTestCase {
                            "the field half folded after 取消")
             XCTAssertEqual(try XCTUnwrap(last["filter"]).y, rest.y + band, accuracy: 1, "the filters not under the field after 取消")
         }
+        try coherentRest("closing the search", closed, shell: shell, fieldOut: true)
 
         // Searching, the filters go with the results (#1051, #2189); 「取消」 from there comes back to the whole list.
         app.revealAgentsSearch().tapCenter()
@@ -100,8 +107,11 @@ final class AgentsTopMotionTests: XCTestCase {
         sleep(1)
         let after = check("scrolling the results", since: scrolled, dragged: true)
         if let y = after.last?["filter"]?.y { XCTAssertLessThan(y, before - 20, "the filters stayed while the results scrolled") }
+        let closingAgain = mark()
         closeButton.tap()
         sleep(2)
+        let closedAgain = check("closing the search again", since: closingAgain, swapsContent: true, resetsList: true)
+        try coherentRest("closing the search again", closedAgain, shell: shell, fieldOut: true)
         let back = mark()
         sleep(1)
         XCTAssertEqual(frames(since: back).last?["filter"]?.y ?? 0, rest.y + band, accuracy: 1, "not back at the list's top after 取消")
@@ -111,11 +121,30 @@ final class AgentsTopMotionTests: XCTestCase {
         let finger = ShellFinger(app)
         finger.tap(agents: false)
         sleep(2)
+        app.expectShell(agents: false, "Assistant after the second search closed")
         finger.tap(agents: true)
         sleep(2)
+        app.expectShell(agents: true, "Agents picked again")
         let returned = check("coming back to the tab", since: away, pageMoves: true)
         XCTAssertEqual(returned.last?["filter"]?.y ?? 0, rest.y, accuracy: 1, "not folded again when the tab came back")
+        try coherentRest("coming back to the tab", returned, shell: shell, fieldOut: false)
         XCTAssertTrue(app.revealAgentsSearch().exists, "no search field after coming back")
+    }
+
+    /// A trace can contain all the right moves and still end with nothing usable drawn: the bar stayed transparent
+    /// after the second close, so the next taps did not change pages (#10166). Check the drawn end as well as its way.
+    private func coherentRest(_ step: String, _ all: [[String: Block]], shell: Bool, fieldOut: Bool) throws {
+        let last = try XCTUnwrap(all.last, "\(step): no final drawn frame")
+        if shell {
+            let bar = try XCTUnwrap(last["topbar"], "\(step): the shell's bar is not drawn at rest")
+            XCTAssertEqual(bar.a, 1, accuracy: 0.01, "\(step): the shell's bar is still fading at rest")
+        }
+        XCTAssertNil(last["float"], "\(step): the floating field is still drawn at rest")
+        if fieldOut {
+            let field = try XCTUnwrap(last["field"], "\(step): the field is not drawn in the list at rest")
+            XCTAssertEqual(field.a, 1, accuracy: 0.01, "\(step): the field is still fading at rest")
+        }
+        // A folded row's marker remains in the trace, clipped by the list. The filter-position assertion checks the fold.
     }
 
     /// The field's band and the shell's room over the list (`AgentsHeader`).
@@ -159,32 +188,35 @@ final class AgentsTopMotionTests: XCTestCase {
 
     /// The frames of a step, checked. `dragged`: a finger moved the list (its blocks go with it, back and forth).
     /// `swapsContent`: the list's rows change (only the filters and the field are followed). `pageMoves`: the whole
-    /// page slides in (only the end is checked).
+    /// page slides in (only the end is checked). `resetsList`: the results' scroll position is replaced by the list's
+    /// top before closing, so positions on opposite sides of that reset are not one continuous move.
     @discardableResult
     private func check(_ step: String, since t: Double, dragged: Bool = false, swapsContent: Bool = false,
-                       pageMoves: Bool = false) -> [[String: Block]] {
+                       pageMoves: Bool = false, resetsList: Bool = false) -> [[String: Block]] {
         // The trace is written in batches: give it a moment.
         usleep(300_000)
         let all = frames(since: t)
         XCTAssertGreaterThan(all.count, 10, "\(step): the app wrote no frames (\(tracePath))")
         guard !pageMoves else { return all }
-        var names = ["topbar", "float", "field", "filter"]
-        if !swapsContent { names.append("needs") }
-        for name in names {
-            var last: Double?, way = 0.0, run: [Double] = []
-            for f in all {
-                guard let b = f[name] else { last = nil; way = 0; continue }
-                run.append(b.y)
-                if let l = last {
-                    let d = b.y - l
-                    if !dragged { XCTAssertLessThanOrEqual(abs(d), jump, "\(step): \(name) jumped \(Int(d)) pt in a frame \(trail(run))") }
-                    // A finger's drag overshoots and springs back on its own (the list's rubber band).
-                    if !dragged, abs(d) > still {
-                        if way != 0, (d > 0) != (way > 0) { XCTFail("\(step): \(name) turned back (\(Int(way)) then \(Int(d))) \(trail(run))") }
-                        way = d
+        if !resetsList {
+            var names = ["topbar", "float", "field", "filter"]
+            if !swapsContent { names.append("needs") }
+            for name in names {
+                var last: Double?, way = 0.0, run: [Double] = []
+                for f in all {
+                    guard let b = f[name] else { last = nil; way = 0; continue }
+                    run.append(b.y)
+                    if let l = last {
+                        let d = b.y - l
+                        if !dragged { XCTAssertLessThanOrEqual(abs(d), jump, "\(step): \(name) jumped \(Int(d)) pt in a frame \(trail(run))") }
+                        // A finger's drag overshoots and springs back on its own (the list's rubber band).
+                        if !dragged, abs(d) > still {
+                            if way != 0, (d > 0) != (way > 0) { XCTFail("\(step): \(name) turned back (\(Int(way)) then \(Int(d))) \(trail(run))") }
+                            way = d
+                        }
                     }
+                    last = b.y
                 }
-                last = b.y
             }
         }
         // The shell's bar and the floating field never over each other.

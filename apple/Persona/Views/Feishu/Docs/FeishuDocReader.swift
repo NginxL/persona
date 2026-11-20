@@ -248,7 +248,8 @@ struct FeishuDocReader: View {
                         if let id = owner.id { open?(.profile(LarkPersonRef(id: id, name: owner.name, avatar: owner.avatarUrl), manager: manager)) }
                     } label: {
                         HStack(spacing: Theme.Space.sm) {
-                            LarkAvatarImage(name: owner.name, url: owner.avatarUrl.map(media), size: 22)
+                            LarkAvatarImage(name: owner.name, url: owner.avatarUrl, size: 22)
+                                .environment(\.larkManager, manager)
                             Text(owner.name).font(Theme.Font.captionMedium).foregroundStyle(.primary).lineLimit(1)
                         }
                     }

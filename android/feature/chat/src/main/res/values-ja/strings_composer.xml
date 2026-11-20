@@ -37,4 +37,8 @@
     <string name="chat_host_open_feishu">Larkで開く</string>
     <string name="chat_suggestion_send">すぐに送信</string>
     <string name="chat_suggestion_fill">入力欄に入れる</string>
+    <string name="chat_slash_permissions_detail">権限モードを切り替え</string>
+    <string name="chat_modes_bypass_restart">このターンが終わるとセッションを再起動して適用します。会話はそのまま続きます</string>
+    <string name="chat_modes_bypass_pending">このターンが終わるとセッションを再起動してフルアクセスに切り替えます</string>
+    <string name="chat_modes_bypass_next_message">次のメッセージから適用されます</string>
 </resources>

@@ -1,6 +1,9 @@
 // Jupyter notebooks for the web's file viewer (docs/web/web.md "Jupyter", #1407; iOS / Mac: #1296): nbformat 4 (and 3's
 // worksheets) into cells, each output reduced to the one representation the viewer shows. Pure; notebook.test.ts.
 import { t } from "../i18n";
+import { stripAnsi } from "./ansi";
+
+export { stripAnsi };
 
 export type Output =
   | { kind: "stream"; name: "stdout" | "stderr"; text: string }
@@ -32,12 +35,6 @@ export const MAX_OUTPUT_LINES = 2000;
 
 type Json = Record<string, unknown>;
 const str = (v: unknown): string => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : "")).join("") : typeof v === "string" ? v : "");
-
-/** Removes terminal color codes (tracebacks are full of them). */
-export function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\u001b\][^\u0007]*\u0007/g, "");
-}
 
 /** Text cut to MAX_OUTPUT_LINES, saying how many lines were left out. */
 export function capLines(s: string, max = MAX_OUTPUT_LINES): string {

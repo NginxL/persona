@@ -66,8 +66,12 @@ fn fixture_manifest_has_unique_names_and_projection_shape() {
         "active_space_uses_rank_not_slots",
         "client_state_precedence",
         "compact_expands_idle_without_reordering",
+        "composable_qualifiers_match_with_plain_term",
+        "composable_qualifiers_reject_one_wrong_dimension",
         "cross_machine_same_session_id",
         "cross_machine_same_session_id_reversed",
+        "dimension_settings_compose_with_plain_term",
+        "dimension_settings_reject_wrong_model",
         "empty_list",
         "filter_all",
         "filter_needsyou",
@@ -90,8 +94,11 @@ fn fixture_manifest_has_unique_names_and_projection_shape() {
         "hub_pending_offline",
         "hub_unknown",
         "hub_working_seen",
+        "just_finished_rank_and_precedence",
         "kept_cannot_escape_base",
         "machine_search_before_counts",
+        "machine_qualifier_matches_registry_title",
+        "machine_qualifier_rejects_session_title_match",
         "machine_uses_registry_order",
         "mute_allow_and_explicit_override",
         "pinned_offline_is_visible",
@@ -99,11 +106,32 @@ fn fixture_manifest_has_unique_names_and_projection_shape() {
         "quick_filter_ignores_rank",
         "quick_spaces_use_updated_time",
         "rank_all_states_and_mutes",
+        "search_as_code_day_keyword_uses_ios_window",
+        "search_as_code_disabled_keeps_plain_text_matches",
+        "search_as_code_error_keyword_filters_plain_text",
+        "search_as_code_pinned_keyword_composes_with_terms",
+        "search_as_code_preserves_explicit_longer_window",
+        "search_as_code_week_keyword_uses_ios_window",
         "search_expands_idle",
+        "search_scope_assistant_matches_prose_and_work",
+        "search_scope_assistant_rejects_user_and_tool_fields",
+        "search_scope_conversation_matches_prose_and_summaries",
+        "search_scope_conversation_rejects_tool_noise",
+        "search_scope_errors_matches_reason_fields",
+        "search_scope_errors_rejects_non_error_evidence",
+        "search_scope_errors_without_terms_lists_only_error_rows",
+        "search_scope_title_matches_display_names",
+        "search_scope_title_rejects_other_fields",
+        "search_scope_user_matches_request_summaries",
+        "search_scope_user_rejects_assistant_fields",
+        "session_summary_fields_do_not_leak_into_all_scope",
         "space_header_counts",
         "space_time_tie",
         "space_time_tie_reversed",
         "spaces_pin_busy_muted_quiet",
+        "subtask_summary_evidence_retains_parent_in_user_scope",
+        "subtask_summary_evidence_does_not_leak_into_all_scope",
+        "subtask_title_evidence_retains_parent_in_all_scope",
         "unread_keeps_seen_rows",
         "unread_reselected_drops_seen_rows",
         "waiting_requires_quiet_state",
@@ -228,6 +256,110 @@ fn multi_hub_preferences_scoped_pin_mute_and_order_match_ios() {
         actual["groups"][0]["rows"],
         serde_json::json!(["shared/first", "shared/second"]),
         "legacy preferences retain their old semantics"
+    );
+}
+
+fn hub_selection_input(multi_hub: bool, hub_filter: &str, quick: &str) -> Input {
+    serde_json::from_value(serde_json::json!({
+        "sessions": [
+            {"machine_id": "shared", "session_id": "default", "app_hub_group": "", "title": "needle", "state": "needs_you"},
+            {"machine_id": "shared", "session_id": "same", "app_hub_group": "hub-a", "title": "needle", "state": "working"},
+            {"machine_id": "shared", "session_id": "same", "app_hub_group": "hub-b", "title": "needle", "state": "unread"},
+        ],
+        "machines": [
+            {"id": "shared", "name": "Fixture"},
+            {"id": "shared", "name": "Fixture", "group": "hub-a"},
+            {"id": "shared", "name": "Fixture", "group": "hub-b"},
+        ],
+        "pins": {}, "mutes": {},
+        "settings": {"grouping": "state", "quick": quick, "multi_hub": multi_hub, "hub_filter": hub_filter},
+    }))
+    .expect("hub selection input")
+}
+
+fn all_hubs_projection_expectation() -> Value {
+    serde_json::json!({
+        "counts": {"needsYou": 1, "working": 1, "unread": 1, "backgroundWaiting": 0},
+        "groups": [
+            {"id": "state/needs", "title": "需要你", "rows": ["shared/default"], "visible_rows": ["shared/default"], "folded": false},
+            {"id": "state/unread", "title": "完成未看", "rows": ["hub-b|shared/same"], "visible_rows": ["hub-b|shared/same"], "folded": false},
+            {"id": "state/working", "title": "工作中", "rows": ["hub-a|shared/same"], "visible_rows": ["hub-a|shared/same"], "folded": false},
+        ],
+        "unread_shown": ["hub-b|shared/same"],
+    })
+}
+
+#[test]
+fn selected_hub_scopes_counts_groups_and_unread_match_ios() {
+    let input = hub_selection_input(true, "=hub-a", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("selected hub projection");
+    // HubFilter.matches("=hub-a", group) admits only hub-a before any of these outputs are derived.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 0, "working": 1, "unread": 0, "backgroundWaiting": 0},
+            "groups": [
+                {"id": "state/working", "title": "工作中", "rows": ["hub-a|shared/same"], "visible_rows": ["hub-a|shared/same"], "folded": false},
+            ],
+            "unread_shown": [],
+        }),
+        "the selected non-default hub retains its full path without admitting the default or hub-b rows"
+    );
+}
+
+#[test]
+fn selected_hub_filter_precedes_quick_filter_match_ios() {
+    let input = hub_selection_input(true, "=hub-a", "unread");
+    let actual =
+        serde_json::to_value(persona_core::sort::project(&input)).expect("selected hub quick-filter projection");
+    // iOS counts the selected hub's base first, then applies Unread. hub-b's matching unread row is already absent.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 0, "working": 1, "unread": 0, "backgroundWaiting": 0},
+            "groups": [],
+            "unread_shown": [],
+        }),
+        "another hub's unread session must not satisfy the selected hub's quick filter"
+    );
+}
+
+#[test]
+fn empty_hub_filter_selects_all_hubs_with_distinct_full_paths() {
+    let input = hub_selection_input(true, "", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("all-hubs projection");
+    assert_eq!(
+        actual,
+        all_hubs_projection_expectation(),
+        "the empty HubFilter selects every group and identical short IDs remain distinct by full path"
+    );
+}
+
+#[test]
+fn default_hub_filter_selects_only_the_empty_group() {
+    let input = hub_selection_input(true, "=", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("default hub projection");
+    // HubFilter.value("") is "=", which selects the default empty group rather than every group.
+    assert_eq!(
+        actual,
+        serde_json::json!({
+            "counts": {"needsYou": 1, "working": 0, "unread": 0, "backgroundWaiting": 0},
+            "groups": [
+                {"id": "state/needs", "title": "需要你", "rows": ["shared/default"], "visible_rows": ["shared/default"], "folded": false},
+            ],
+            "unread_shown": [],
+        })
+    );
+}
+
+#[test]
+fn legacy_multi_hub_false_ignores_hub_filter() {
+    let input = hub_selection_input(false, "=hub-a", "all");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("legacy multi-hub projection");
+    assert_eq!(
+        actual,
+        all_hubs_projection_expectation(),
+        "without multiHub, iOS does not apply HubFilter even when a selected value is present"
     );
 }
 
@@ -622,6 +754,82 @@ fn nested_rows_and_folded_children_match_ios_counts() {
 }
 
 #[test]
+fn search_retains_parent_when_nested_subtask_matches() {
+    // iOS retains a prepared root when any task below it admits the query. Pinning the offline parent makes its
+    // otherwise invisible inventory membership observable in the one section that can render an offline row.
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "sessions": [
+            {"machine_id": "machine-a", "session_id": "e", "title": "ordinary parent", "state": "offline", "status": "offline", "nested_match": true},
+        ],
+        "machines": [{"id": "machine-a", "name": "Machine A"}],
+        "pins": {"sessions": ["machine-a/e"]}, "mutes": {},
+        "settings": {"grouping": "state", "quick": "all", "query": "needle", "inventory": true},
+    }))
+    .expect("nested search input");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("projection");
+    assert_eq!(
+        actual["groups"],
+        serde_json::json!([{
+            "id": "pinned", "title": "置顶", "rows": ["machine-a/e"],
+            "visible_rows": ["machine-a/e"], "folded": false,
+        }]),
+        "the matching nested row retains its parent, not a flattened subtask row"
+    );
+    assert_eq!(actual["filtered"], serde_json::json!(["machine-a/e"]));
+    assert_eq!(actual["unpinned"], serde_json::json!([]));
+}
+
+#[test]
+fn search_keeps_promoted_subtask_root_when_parent_cannot_render() {
+    // A live subtask is an independent root when no rendered ancestor is live or pinned. Parent identity alone must
+    // not fold that root back into an offline parent (regression control for the prepared-input contract).
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "sessions": [
+            {"machine_id": "machine-a", "session_id": "e", "title": "ordinary parent", "state": "offline", "status": "offline"},
+            {"machine_id": "machine-a", "session_id": "child", "title": "needle", "state": "working", "status": "idle", "source_kind": "runtime", "nested_subtask": true, "parent_session_id": "e"},
+        ],
+        "machines": [{"id": "machine-a", "name": "Machine A"}],
+        "pins": {}, "mutes": {},
+        "settings": {"grouping": "state", "quick": "all", "query": "needle", "inventory": true},
+    }))
+    .expect("promoted subtask input");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("projection");
+    assert_eq!(
+        actual["groups"],
+        serde_json::json!([{
+            "id": "state/working", "title": "工作中", "rows": ["machine-a/child"],
+            "visible_rows": ["machine-a/child"], "folded": false,
+        }])
+    );
+    assert_eq!(actual["filtered"], serde_json::json!(["machine-a/child"]));
+    assert_eq!(actual["unpinned"], serde_json::json!(["machine-a/child"]));
+}
+
+#[test]
+fn missing_machine_stays_in_filtered_inventory_without_a_group() {
+    // Inventory membership is independent of whether the machine registry can supply a section. The Needs You quick
+    // filter also removes the registered Working row, leaving only the unregistered, unpinned session.
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "sessions": [
+            {"machine_id": "machine-a", "session_id": "working", "state": "working"},
+            {"machine_id": "machine-missing", "session_id": "orphan", "state": "needs_you"},
+        ],
+        "machines": [{"id": "machine-a", "name": "Machine A"}],
+        "pins": {}, "mutes": {},
+        "settings": {"grouping": "machine", "quick": "needsYou", "inventory": true},
+    }))
+    .expect("missing machine input");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("projection");
+    assert_eq!(actual["filtered"], serde_json::json!(["machine-missing/orphan"]));
+    assert_eq!(actual["unpinned"], serde_json::json!(["machine-missing/orphan"]));
+    assert_eq!(
+        actual["groups"],
+        serde_json::json!([]),
+        "an absent registry entry emits no machine section"
+    );
+}
+
+#[test]
 fn fixture_assertion_catches_a_wrong_sort_comparison() {
     let document: Value =
         serde_json::from_str(&fs::read_to_string(fixture_dir().join("ordering.json")).expect("ordering"))
@@ -654,6 +862,42 @@ fn fixture_assertion_catches_a_wrong_sort_comparison() {
         failure.is_err(),
         "reversing the date comparison must fail the shared fixture assertion"
     );
+}
+
+#[test]
+fn just_finished_stays_active_but_its_muted_row_folds_with_seen() {
+    let document: Value =
+        serde_json::from_str(&fs::read_to_string(fixture_dir().join("ordering.json")).expect("ordering"))
+            .expect("JSON");
+    let case = document["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|case| case["name"] == "just_finished_rank_and_precedence")
+        .expect("just finished fixture");
+    let mut input = case["input"].clone();
+    input["sessions"]
+        .as_array_mut()
+        .expect("sessions")
+        .retain(|session| matches!(session["session_id"].as_str(), Some("finished" | "muted")));
+    input["settings"]["grouping"] = Value::String("space".to_owned());
+    input["settings"]["expanded_quiet"] = serde_json::json!(["machine-a/space-muted"]);
+    let input: Input = serde_json::from_value(input).expect("space input");
+    let actual = serde_json::to_value(persona_core::sort::project(&input)).expect("space projection");
+
+    assert_eq!(actual["groups"][0]["id"], serde_json::json!("machine-a/space-live"));
+    assert_eq!(actual["groups"][0]["parent"], Value::Null);
+    assert_eq!(
+        actual["groups"][0]["visible_rows"],
+        serde_json::json!(["machine-a/finished"])
+    );
+    assert_eq!(actual["groups"][1]["id"], serde_json::json!("machine-a/space-muted"));
+    assert_eq!(actual["groups"][1]["parent"], serde_json::json!("quiet"));
+    assert_eq!(
+        actual["groups"][1]["visible_rows"],
+        serde_json::json!(["machine-a/muted"])
+    );
+    assert_eq!(actual["quiet_title"], serde_json::json!("空闲的空间"));
 }
 
 fn assert_projection(actual: &Value, expected: &Value, label: &str) {

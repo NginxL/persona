@@ -24,13 +24,16 @@ func (s *Service) ChannelUnbound(_ context.Context, p ChannelUnbound) error {
 
 // ChannelReceive is channels.receive: the owner's message from a plugin's channel, taken once (the chat apps deliver
 // some again) and handled in the background.
-func (s *Service) ChannelReceive(_ context.Context, p ChannelReceive) error {
+func (s *Service) ChannelReceive(ctx context.Context, p ChannelReceive) error {
 	var m channel.Message
 	if err := json.Unmarshal(p.Message, &m); err != nil {
 		return badRequest(err)
 	}
 	if m.ID == "" {
 		return badRequest(errors.New("a message without an id"))
+	}
+	if m.Owner != nil && !*m.Owner {
+		return badRequest(errors.New(i18n.T(s.botLang(ctx), "assistant-channels_plugin.mention_owner_required")))
 	}
 	first, err := s.claimChannelMessage(p.Channel, m.ID)
 	if err != nil {

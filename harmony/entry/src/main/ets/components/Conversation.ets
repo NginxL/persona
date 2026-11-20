@@ -699,6 +699,7 @@ export struct Conversation {
         }
         }
       }
+      if (entry.item.message!.held) this.heldStatus(entry.item.message!)
       if (entry.item.message!.deliveryState && entry.item.message!.deliveryState !== 'done' && !entry.item.message!.failed) Text(tr(entry.item.message!.deliveryState === 'unknown' ? 'result_unknown' : entry.item.message!.deliveryState)).fontSize(Tokens.meta).fontColor($r('sys.color.font_secondary'))
       if (entry.item.message!.failed) Text(tr('failed')).fontColor($r('app.color.persona_danger')).fontSize(Tokens.meta)
       if (entry.item.message!.localOperation && this.model.canCheckLocalMessage(entry.item.message!.localOperation)) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('checked')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('checked', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('checked')).bindTips(tr('checked')).onClick(() => this.confirmChecked(entry.item.message!.localOperation))
@@ -712,6 +713,36 @@ export struct Conversation {
         MenuItem({ content: item.title }).constraintSize({ minHeight: Tokens.touch }).onClick(() => item.action())
       }, (_item: SheetInfo, index: number) => String(this.actionsRequest) + ':' + String(index))
     }
+  }
+  private confirmHeldDelete(message: ChatMessage): void {
+    const model = this.model, generation = model.connectionGeneration(), scope = model.scope(), visibility = this.revisionVisibilityRevision;
+    const current = (): boolean => this.sendCurrent() && this.model === model && model.owns(generation, scope) && this.revisionVisibilityRevision === visibility;
+    if (!current() || !model.canActOnHeld(message, false)) return;
+    const photos = message.localImageCount > 0 ? tr('photos') + ' · ' + message.localImageCount : '';
+    const body = [message.text, photos].filter((part: string) => !!part).join('\n');
+    this.getUIContext().showAlertDialog({ title: tr('agent_delete_held_title'), message: body,
+      primaryButton: { value: tr('cancel'), defaultFocus: true, action: () => {} },
+      secondaryButton: { value: tr('delete'), action: () => model.actOnHeld(message, false, current) } });
+  }
+  @Builder heldStatus(message: ChatMessage) {
+    Column({ space: Tokens.fine }) {
+      Text(message.held!.line || tr(message.held!.state === 'failed' ? 'agent_delivery_failed' : 'agent_delivery_waiting').replace('{computer}', () => message.held!.computer))
+        .fontSize(Tokens.meta).fontColor(message.held!.state === 'failed' ? Colors.danger : Colors.working)
+        .constraintSize({ maxWidth: '100%' }).id('chat.held.status.' + message.held!.id)
+      if (this.model.heldRetryPending(message)) Text(tr('agent_delivery_updating'))
+        .fontSize(Tokens.meta).fontColor(Colors.secondary).constraintSize({ maxWidth: '100%' }).id('chat.held.update.' + message.held!.id)
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End }) {
+        if (this.model.offersHeldAction(message, true)) Button(tr('retry')).buttonStyle(ButtonStyleMode.TEXTUAL)
+          .constraintSize({ minHeight: Tokens.touch, minWidth: Tokens.touch }).enabled(this.model.canActOnHeld(message, true))
+          .onClick(() => this.model.actOnHeld(message, true, () => this.sendCurrent())).id('chat.held.retry.' + message.held!.id)
+        if (this.model.offersHeldAction(message, false)) Button(tr('cancel')).buttonStyle(ButtonStyleMode.TEXTUAL)
+          .constraintSize({ minHeight: Tokens.touch, minWidth: Tokens.touch }).enabled(this.model.canActOnHeld(message, false))
+          .onClick(() => this.confirmHeldDelete(message)).id('chat.held.cancel.' + message.held!.id)
+      }.width('100%')
+    }.alignItems(HorizontalAlign.End).width('100%')
+  }
+  private agentNotice(): string {
+    return tr(this.model.agentInputNotice()).replace('{computer}', () => this.model.machineName(this.model.selected.machine));
   }
   private actionMenuOptions(request: number): MenuOptions {
     return { onDisappear: () => this.onHideActions(request) };
@@ -798,7 +829,7 @@ export struct Conversation {
       }.width('100%')
       GridRow({ columns: this.composerColumns(), gutter: { x: 0, y: Tokens.gap } }) {
         GridCol({ span: this.expandedComposer() ? this.composerColumns() : this.composerColumns() - this.leftColumns() - this.sendColumns(), order: this.expandedComposer() ? 0 : 1 }) {
-          TextArea({ text: this.model.draft, placeholder: tr('message') }).maxLength(Tokens.maxMessage).width('100%')
+          TextArea({ text: this.model.draft, placeholder: this.model.agentInputNotice() === 'agent_computer_holds' ? this.agentNotice() : tr('message') }).maxLength(Tokens.maxMessage).width('100%')
             .fontSize(Tokens.body).placeholderFont({ size: Tokens.body }).fontColor(Colors.ink).placeholderColor(Colors.secondary)
             .lineHeight(String(Tokens.lineHeight) + 'fp').caretColor(Colors.action).backgroundColor(Color.Transparent)
             .padding({ left: Tokens.gap, right: Tokens.gap, top: Tokens.inset, bottom: Tokens.inset })
@@ -869,7 +900,7 @@ export struct Conversation {
         this.composer()
       } else if (!this.model.canSend() && !this.model.decision) {
         if (this.model.canAttach()) Button({ type: ButtonType.Circle }) { SymbolGlyph(IconActions.symbol('attach_live')).fontSize(Tokens.symbolFont).fontColor([IconActions.color('attach_live', false)]) }.attributeModifier(ButtonStyles.icon).accessibilityText(tr('attach_live')).bindTips(tr('attach_live')).onClick(() => this.model.attach())
-        Text(tr('read_only')).fontSize(Tokens.meta).padding(Tokens.page)
+        Text(this.model.agentInputNotice() ? this.agentNotice() : tr('read_only')).fontSize(Tokens.meta).padding(Tokens.page)
       }
       }.width('100%').constraintSize({ maxWidth: Tokens.readingMax }).padding({ left: Tokens.page, right: Tokens.page, bottom: Tokens.footer, top: Tokens.gap }).onAreaChange((_before: Area, area: Area): void => {
         const height = Number(area.height);

@@ -59,6 +59,7 @@ type fakeInbox struct {
 type fakeMail struct {
 	accounts []assistantwire.InboxMailAccount
 	bodies   map[uint32]assistantwire.InboxMailMessage
+	bodyAsks []assistantwire.InboxMailRef
 	reads    int
 	sent     []map[string]any
 	fetched  func(uid uint32)
@@ -242,6 +243,7 @@ func (in *fakeInbox) answer(ctx context.Context, p AppCall) (json.RawMessage, bo
 		if in.mail == nil {
 			err = errors.New("mail is not set up")
 		} else if m, ok := in.mail.bodies[ref.UID]; ok {
+			in.mail.bodyAsks = append(in.mail.bodyAsks, ref)
 			in.mail.reads++
 			out, fetched = m, in.mail.fetched
 		} else {
@@ -588,6 +590,8 @@ func newInboxHubWith(t *testing.T, kbo *KBOptions) *inboxHub {
 		t.Cleanup(s.kbEnd)
 	}
 	in.svc = s
+	// This fixture's synthetic translation model is exposed through legacy.kb, independently of screening.
+	setModel(t, s, purposeTranslate, ModelBinding{Provider: "legacy.kb"})
 	h := &inboxHub{Service: s, f: f, in: in, st: st}
 	h.inbox.init()
 	return h

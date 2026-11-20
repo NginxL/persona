@@ -5,9 +5,11 @@ import XCTest
 /// MOCK_MANAGERS=1 MOCK_TASKS_NO_ASKS=1 (PERSONA_MOCK_HUB; one manager, so the MacBook's agents are this page's, and no
 /// task's question card over the chat): the main chat draws no
 /// receipt, the settings task's hand-off card says why it did not start and the release task's that it was cut off;
-/// In Progress lists the two finished tasks under Just Finished, uncounted; Needs You's rows carry Continue (the release
-/// task, cut off) and Retry and Remove (the settings task). Each look in PERSONA_LOOKS (`light:L,dark:L,light:XXXL,dark:XXXL`
-/// by default) is checked, and PERSONA_SHOTS=<dir> keeps each screen as `<screen>-<appearance>-<size>.png`.
+/// In Progress no longer lists finished tasks: the Finished entry (#10922) lists the three that finished in the last
+/// hours, the two nobody opened yet as Just Finished and the one already opened as Done, and opening one keeps it there;
+/// Needs You's rows carry Continue (the release task, cut off) and Retry and Remove (the settings task). Each look in
+/// PERSONA_LOOKS (`light:L,dark:L,light:XXXL,dark:XXXL` by default) is checked, and PERSONA_SHOTS=<dir> keeps each screen
+/// as `<screen>-<appearance>-<size>.png`.
 final class QuietReceiptsUITests: XCTestCase {
     private var app: XCUIApplication!
     private var hub = ""
@@ -35,8 +37,10 @@ final class QuietReceiptsUITests: XCTestCase {
             let (appearance, size) = (parts[0], parts[1])
             chat(appearance, size)
             inProgress(appearance, size)
+            finished(appearance, size)
             needsYou(appearance, size)
         }
+        openingAFinishedRowKeepsIt()
     }
 
     /// The main chat, up from its bottom to the hand-off cards: the settings task's says why it did not start, the
@@ -68,21 +72,59 @@ final class QuietReceiptsUITests: XCTestCase {
         }
     }
 
-    /// In Progress: the open tasks, then Just Finished with the two finished ones, which the entry does not count.
+    /// The finished tasks of the mock (MOCK_TASKS_FINISHED=1): title, and what its row says it did.
+    private static let finishedTasks = [("修复登录页闪退", "改好了：登录页不再闪退，PR #43 已合并"),
+                                        ("整理本周发布说明", "写好了：7 个 PR 分成新功能、修复和其他三组"),
+                                        ("更新常见问题页", "改好了：常见问题页补了三条付款问题")]
+
+    /// In Progress: the open tasks only; what finished is under Finished (#10922), not a group here.
     @MainActor private func inProgress(_ appearance: String, _ size: String) {
         launch(appearance, size, ["-showActionTray", "running"])
-        let group = app.descendants(matching: .any)["action-tray.just-finished"].firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 60), "\(appearance) \(size): Just Finished under In Progress:\n\(app.debugDescription)")
+        let tray = app.descendants(matching: .any)["action-tray.running"].firstMatch
+        XCTAssertTrue(tray.waitForExistence(timeout: 60), "\(appearance) \(size): In Progress:\n\(app.debugDescription)")
         sleep(2)
+        XCTAssertFalse(app.descendants(matching: .any)["action-tray.just-finished"].exists, "\(appearance) \(size): a Just Finished group under In Progress")
+        for (title, _) in Self.finishedTasks {
+            XCTAssertFalse(tray.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.exists,
+                           "\(appearance) \(size): \(title) under In Progress")
+        }
         shot("in-progress-\(appearance)-\(size)")
-        let finished = app.buttons.matching(identifier: "action-tray.finished")
-        reveal(finished.element(boundBy: max(0, finished.count - 1)), in: "action-tray.running")
-        for (title, line) in [("修复登录页闪退", "改好了：登录页不再闪退，PR #43 已合并"), ("整理本周发布说明", "写好了：7 个 PR 分成新功能、修复和其他三组")] {
-            let row = finished.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
-            XCTAssertTrue(row.exists, "\(appearance) \(size): \(title) under Just Finished")
+    }
+
+    /// Finished: the three tasks that finished in the last hours, newest first, each saying what it did; the one already
+    /// opened says Done, not Just Finished. The entry counts what it lists.
+    @MainActor private func finished(_ appearance: String, _ size: String) {
+        launch(appearance, size, ["-showActionTray", "finished"])
+        let tray = app.descendants(matching: .any)["action-tray.finished"].firstMatch
+        XCTAssertTrue(tray.waitForExistence(timeout: 60), "\(appearance) \(size): the Finished tray:\n\(app.debugDescription)")
+        sleep(2)
+        XCTAssertTrue(app.buttons["action-bar.finished"].exists, "\(appearance) \(size): the Finished entry")
+        shot("finished-\(appearance)-\(size)")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'action-tray.finished-row'"))
+        reveal(rows.element(boundBy: max(0, rows.count - 1)), in: "action-tray.finished")
+        for (title, line) in Self.finishedTasks {
+            let row = rows.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            XCTAssertTrue(row.exists, "\(appearance) \(size): \(title) under Finished")
             XCTAssertTrue(row.label.contains(line), "\(appearance) \(size): \(title) says what it did: \(row.label)")
         }
-        shot("in-progress-finished-\(appearance)-\(size)")
+        let opened = app.buttons.matching(identifier: "action-tray.finished-row").matching(NSPredicate(format: "label CONTAINS %@", "更新常见问题页")).firstMatch
+        XCTAssertTrue(opened.exists, "\(appearance) \(size): the task already opened is Done, not new")
+        shot("finished-rows-\(appearance)-\(size)")
+    }
+
+    /// Opening a task under Finished shows it and marks it seen where the hub keeps the mark; it stays under Finished, as
+    /// Done (#10922). The mock keeps the mark, so a launch after it still lists the row.
+    @MainActor private func openingAFinishedRowKeepsIt() {
+        launch("light", "L", ["-showActionTray", "finished"])
+        let title = Self.finishedTasks[0].0
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'action-tray.finished-row' AND label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 60), "\(title) under Finished:\n\(app.debugDescription)")
+        row.tap()
+        sleep(3) // the task's details open; the seen mark goes to the hub
+        launch("light", "L", ["-showActionTray", "finished"])
+        let seen = app.buttons.matching(identifier: "action-tray.finished-row").matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(seen.waitForExistence(timeout: 60), "\(title) left Finished once opened:\n\(app.debugDescription)")
+        shot("finished-after-opening-light-L")
     }
 
     /// Needs You: the cut-off release task with Continue, the settings task that did not start with Retry and Remove.

@@ -1498,6 +1498,13 @@ class RealInboxRepository(
         val agent = data.obj("agent")
         val mail = data.obj("mail")
         val moment = data.obj("moment")
+        val connector = data.obj("connector")?.let { c ->
+            c.optional("thread")?.let { thread ->
+                persona.feature.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"), c.optional("url"),
+                    c.optional("avatar_url"))
+            }
+        }
+        val connectorManager = data.optional("manager") ?: previous?.takeIf { it.hubItemId == data.string("id") }?.manager
         val event = persona.core.contracts.inboxEventFields(data)
         val fresh = InboxRecord(
             InboxItem(data.string("id"), data.string("account"), data.string("kind"), data.string("title"),
@@ -1520,8 +1527,9 @@ class RealInboxRepository(
                     // The hub omits direct when false: a mail the user was only copied on (or got through a list).
                     direct = it.flag("direct"))
             },
-            // Only a Feishu chat has a picture on the hub; a mail row keeps its initial, as on iOS.
-            avatar = if (data.string("source") == "lark") avatar(data.optional("avatar"), transport) else null,
+            // Feishu keeps its top-level picture; a connector's thread picture is its hub avatar path.
+            avatar = if (data.string("source") == "lark") avatar(data.optional("avatar"), transport)
+                else avatar(connector?.avatarUrl, LarkContentSource(transport, connectorManager)),
             moment = moment?.let {
                 InboxMomentRef(
                     postId = it.string("post_id"),
@@ -1537,11 +1545,7 @@ class RealInboxRepository(
                 }
             }?.toMap().orEmpty(),
             doc = persona.feature.inbox.inboxDocRef(data.obj("doc")),
-            connector = data.obj("connector")?.let { c ->
-                c.optional("thread")?.let { thread ->
-                    persona.feature.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"), c.optional("url"))
-                }
-            },
+            connector = connector,
             mutes = persona.feature.inbox.inboxMuteOptions(data),
             event = event,
             manager = data.optional("manager"),

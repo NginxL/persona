@@ -30,6 +30,44 @@ func resumingNode(f *fakeHub) {
 	})
 }
 
+func TestAgentSendUncertainResume(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		full       bool
+		failedCall string
+	}{
+		{"with first message", false, DeviceSessionStart},
+		{"before first message", true, DeviceSessionStart},
+		{"after compaction", true, DeviceSessionSend},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			row := stoppedBoxAgent("sec00001")
+			if tc.full {
+				row.ContextTokens, row.ContextWindow = 190000, 200000
+			}
+			f.setSessions("box", row)
+			resumingNode(f)
+			f.answerNode(tc.failedCall, func(string, json.RawMessage) (any, error) { return nil, nodeAfterWrite })
+			_, err := runJSON(t, s, "conv1", "agent_send", map[string]any{"machine": "box", "session_id": row.SessionID,
+				"text": "Check the figures", "resume": true, "resume_why": "Use the existing context", "task": map[string]any{"title": "Figures"}})
+			want := "check with agent_read before sending again"
+			if tc.full && tc.failedCall == DeviceSessionStart {
+				want = "may have resumed without a first message"
+			}
+			if !errors.Is(err, nodeAfterWrite) || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "start a replacement") {
+				t.Fatalf("resume returned %v; want %q", err, want)
+			}
+			if starts, sends := len(startCalls(f)), sessionSends(f); starts != 1 || (sends == 1) != (tc.failedCall == DeviceSessionSend) || sends > 1 {
+				t.Fatalf("starts = %d, sends = %d", starts, sends)
+			}
+			if _, kept := s.openTodoOfAgent("box", row.SessionID); !kept {
+				t.Fatal("lost supervision of the possibly resumed agent")
+			}
+		})
+	}
+}
+
 // startCalls are the session.start params the nodes were asked for.
 func startCalls(f *fakeHub) []map[string]any {
 	f.mu.Lock()
@@ -152,11 +190,11 @@ func TestAssistantResumesAStoppedAgentOnItsOwnTask(t *testing.T) {
 
 // A resume is refused before anything is asked, started or sent when it has no reason, would leave the agent
 // unsupervised (no task given and none of its own), would take another conversation's or the user's task, its
-// computer is offline, or the agent's context is nearly full; each refusal says why, and the last two suggest a new
-// agent.
+// computer is offline, or the agent's context is nearly full on a runtime Persona cannot compact (#11137: Claude Code
+// and Codex are compacted instead); each refusal says why, and the last two suggest a new agent.
 func TestAssistantResumeRefusals(t *testing.T) {
 	full := stoppedBoxAgent("full0001")
-	full.ContextTokens, full.ContextWindow = 190_000, 200_000
+	full.ContextTokens, full.ContextWindow, full.Agent = 190_000, 200_000, "pi"
 	roomy := stoppedBoxAgent("roomy001")
 	roomy.ContextTokens, roomy.ContextWindow = 100_000, 200_000
 	for _, c := range []struct {
@@ -170,7 +208,7 @@ func TestAssistantResumeRefusals(t *testing.T) {
 		{"another conversation's task", "peer0001", "needs its context", false, false, []string{"of another conversation", "not yours to resume"}},
 		{"the user's own todo", "user0001", "needs its context", false, false, []string{"user's own todo", "not yours to resume"}},
 		{"offline", "free0001", "needs its context", true, true, []string{"could not resume free0001 on box", "agent_start"}},
-		{"context nearly full", "full0001", "needs its context", true, false, []string{"context is nearly full (190000 of 200000 tokens)", "agent_start"}},
+		{"context nearly full", "full0001", "needs its context", true, false, []string{"context is nearly full (190000 of 200000 tokens)", "pi has no compaction", "agent_start"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, f := newQuietService(t)

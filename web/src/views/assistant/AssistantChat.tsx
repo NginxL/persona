@@ -1,6 +1,6 @@
 // What a Persona conversation adds to the chat page (the app's AssistantTopBar): the persona's dot in the header,
 // moving with the conversation's state; the header menu's "Details" / "Knowledge" / "Back to main chat" / "Copy info"; the
-// main conversation's "Compact context" / "New main chat" and the strip above the composer while it compacts (#1727). Its
+// conversation's "Compact context", the main conversation's "New main chat", and the strip while it compacts (#1727). Its
 // model is the composer's model pill (views/chat/ModelPill.tsx AssistantModelPill, #5033).
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api, errorText } from "../../lib/api";
@@ -39,7 +39,7 @@ export function AssistantFace({ session, last }: { session?: Session; last?: Pic
 }
 
 /** The header menu's Persona part: "Details" (the profile), "Knowledge", "Back to main chat", an ordinary conversation's
- *  "Archive" (the sidebar row's action), the main conversation's "Compact context", "Clear context" and "New main chat"
+ *  "Archive" (the sidebar row's action), "Compact context", the main conversation's "Clear context" and "New main chat"
  *  (when the hub can), "Copy info"; `dialogs` goes with them. Empty for an agent. */
 const NewMainDialog = lazyDialog(() => import("./NewMainDialog").then((m) => m.NewMainDialog));
 
@@ -62,7 +62,7 @@ export function useAssistantMenu(session: Session | undefined): { items: MenuIte
     { key: "kb", label: t("assistant-assistantchat.knowledge"), icon: "book", onSelect: () => navigate({ name: "kb" }) },
     ...(assistant?.main && !isMain ? [{ key: "main", label: t("assistant-assistantchat.back_to_main"), icon: "home" as const, onSelect: () => navigate(conversationPage(assistant.main!, assistant.machine_id, shownManager())) }] : []),
     ...(!isMain && !isBackgroundSupervisor(assistant, session.session_id) ? [conversationArchiveItem(session)] : []),
-    ...(isMain && canCompact
+    ...(canCompact
       ? [{ key: "compact", label: compacting ? t("assistant-assistantchat.compacting") : t("assistant-assistantchat.compact"), icon: "layers" as const, disabled: compacting, onSelect: () => void startCompaction(session) }]
       : []),
     // as /clear (#5095): no confirmation, the old conversation is archived, not deleted

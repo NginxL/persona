@@ -288,19 +288,27 @@ func TestSecretScrubberKeepsTheNewest(t *testing.T) {
 	}
 }
 
-// The connection's writer hides values only once there are some, and reports the bytes it was given.
-func TestScrubWriter(t *testing.T) {
-	var out bytes.Buffer
+// The connection's line filter hides values only once there are some, framed or not.
+func TestScrubFilter(t *testing.T) {
 	s := &secretScrubber{}
-	w := scrubWriter{w: &out, s: s}
 	line := []byte(`{"result":{"text":"` + handoffTestValue + `"}}` + "\n")
-	if n, err := w.Write(line); err != nil || n != len(line) || out.String() != string(line) {
-		t.Fatalf("nothing staged: %d %v %s", n, err, out.String())
+	if got := s.filter(line); string(got) != string(line) {
+		t.Fatalf("nothing staged: %s", got)
 	}
 	s.add([]byte(handoffTestValue))
-	out.Reset()
-	if n, err := w.Write(line); err != nil || n != len(line) || strings.Contains(out.String(), handoffTestValue) {
-		t.Fatalf("staged: %d %v %s", n, err, out.String())
+	if got := s.filter(line); strings.Contains(string(got), handoffTestValue) || !strings.HasSuffix(string(got), "}}\n") {
+		t.Fatalf("staged: %s", got)
+	}
+	for _, framed := range []bool{false, true} {
+		var out syncBuffer
+		p := rpc.New("t", &out)
+		p.LineFilter = s.filter
+		_, end := servePeer(t, p, framed)
+		_ = p.Notify("session.items", map[string]any{"items": []any{map[string]any{"text": handoffTestValue}}})
+		end()
+		if !strings.Contains(out.String(), "session.items") || strings.Contains(out.String(), handoffTestValue) {
+			t.Fatalf("framed=%t sent: %q", framed, out.String())
+		}
 	}
 }
 
@@ -322,7 +330,8 @@ func TestStagedValuesAreHidden(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	p := rpc.New("t", scrubWriter{w: &out, s: n.handoffs().scrub})
+	p := rpc.New("t", &out)
+	p.LineFilter = n.handoffs().scrub.filter
 	_ = p.Notify("session.items", map[string]any{"items": []any{map[string]any{"text": handoffTestValue}}})
 	if strings.Contains(out.String(), handoffTestValue) {
 		t.Fatalf("sent: %s", out.String())

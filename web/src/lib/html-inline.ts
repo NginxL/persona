@@ -66,7 +66,7 @@ export async function inlineSiblings(html: string, pagePath: string, read: ReadF
         const path = resolveRelative(dir, imp);
         const text = await asText(path);
         const body = text === null ? "" : await sheet(text, dirOf(path), depth + 1);
-        css = css.replace(new RegExp(`@import\\s+(?:url\\(\\s*)?['"]?${imp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*\\)?[^;]*;`), body);
+        css = css.replace(new RegExp(`@import\\s+(?:url\\(\\s*)?['"]?${imp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*\\)?[^;]*;`), () => body); // a function: a string would read $$, $& and $' in the sheet as patterns
       }
     }
     const urls = [...css.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi)].map((m) => m[2]).filter(isRelativeRef);
@@ -101,6 +101,8 @@ export async function inlineSiblings(html: string, pagePath: string, read: ReadF
       asText(path).then(async (text) => {
         if (text === null) return;
         const style = doc.createElement("style");
+        const media = link.getAttribute("media"); // the sheet still applies only where the page asked for it
+        if (media) style.setAttribute("media", media);
         style.textContent = await sheet(text, dirOf(path));
         link.replaceWith(style);
       }),

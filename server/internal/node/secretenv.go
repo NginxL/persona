@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"runtime"
 	"slices"
 	"strconv"
@@ -581,21 +580,13 @@ func isKey(b []byte, i int) bool {
 	return i < len(b) && b[i] == ':'
 }
 
-// scrubWriter is the node's connection with the values hidden in every line it writes (Serve). rpc.Peer writes
-// one whole line a call.
-type scrubWriter struct {
-	w io.Writer
-	s *secretScrubber
-}
-
-func (w scrubWriter) Write(p []byte) (int, error) {
-	if !w.s.active() {
-		return w.w.Write(p)
+// filter is the node connection's rpc.Peer.LineFilter (Serve): every line it writes with the values hidden, once there
+// are some, just before the line goes out (framed, as its first frame does).
+func (s *secretScrubber) filter(line []byte) []byte {
+	if !s.active() {
+		return line
 	}
-	if _, err := w.w.Write(w.s.line(p)); err != nil {
-		return 0, err
-	}
-	return len(p), nil
+	return s.line(line)
 }
 
 // scrubBytes is b, raw bytes the node sends as base64 (the full herdr client's), with the handed-over values hidden.
@@ -675,6 +666,9 @@ func (n *Node) capabilities() []string {
 	}
 	if n.external != nil {
 		capabilities = append(capabilities, nodeproto.ExternalLauncherInventory)
+	}
+	if n.resumeWindow > 0 { // a resident node's only (attach_resume.go)
+		capabilities = append(capabilities, nodeproto.NodeResume)
 	}
 	return capabilities
 }

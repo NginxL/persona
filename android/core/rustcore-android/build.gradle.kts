@@ -41,12 +41,28 @@ val ndkHostTag = when {
     else -> error("Unsupported NDK host OS '${hostOs.name}' (expected macOS or Linux)")
 }
 
+// The ABIs a debug build packages: -Ppersona.abis=arm64-v8a (or x86_64) builds one for a local device or emulator.
+// Release always packages both, whatever the property says. Read here, not in a provider's lambda: a lambda that uses
+// this script's values cannot be stored in the configuration cache.
+val allAbis = listOf("arm64-v8a", "x86_64")
+val debugAbis: List<String> = providers.gradleProperty("persona.abis").orNull?.let { value ->
+    value.split(',').map(String::trim).filter(String::isNotEmpty).distinct().also { abis ->
+        require(abis.isNotEmpty() && abis.all(allAbis::contains)) {
+            "persona.abis must list one or more of ${allAbis.joinToString(", ")}, separated by commas (got '$value')"
+        }
+    }
+} ?: allAbis
+
 abstract class BuildAndroidCore : Exec() {
     @get:OutputDirectory abstract val jniDirectory: DirectoryProperty
     @get:OutputDirectory abstract val symbolsDirectory: DirectoryProperty
     @get:OutputDirectory abstract val reportsDirectory: DirectoryProperty
     @get:Input abstract val cargoFeatures: Property<String>
-    @get:Input abstract val cargoTargetDirectory: Property<String>
+    /** release for Release packages; android-dev (cargo's dev profile with line tables; Cargo.toml) for debug builds. */
+    @get:Input abstract val cargoProfile: Property<String>
+    @get:Input abstract val abis: ListProperty<String>
+    // Cargo's incremental state for this checkout: an absolute path, so never part of the cache key (#10712).
+    @get:Internal abstract val cargoTargetDirectory: Property<String>
     @get:Input abstract val ndkHost: Property<String>
 
 
@@ -62,6 +78,8 @@ abstract class BuildAndroidCore : Exec() {
             "NDK 29.0.14206865 prebuilt host tools are missing: $prebuilt"
         }
         environment("PERSONA_ANDROID_CARGO_FEATURES", cargoFeatures.get())
+        environment("PERSONA_ANDROID_CARGO_PROFILE", cargoProfile.get())
+        environment("PERSONA_ANDROID_ABIS", abis.get().joinToString(" "))
         environment("CARGO_TARGET_DIR", cargoTargetDirectory.get())
         commandLine("bash", workingDir.resolve("scripts/build-android.sh").absolutePath)
         args(jniDirectory.get().asFile.absolutePath, symbolsDirectory.get().asFile.absolutePath, reportsDirectory.get().asFile.absolutePath)
@@ -83,8 +101,6 @@ tasks.withType<BuildAndroidCore>().configureEach {
     inputs.files(coreInputs).withPropertyName("rustCore").withPathSensitivity(PathSensitivity.RELATIVE)
     ndkHost.set(ndkHostTag)
     inputs.property("ndkVersion", ndkVersion)
-    inputs.property("cargoFeatures", cargoFeatures)
-    inputs.property("cargoTargetDirectory", cargoTargetDirectory)
     val ndkRoot = "$resolvedSdk/ndk/$ndkVersion"
     val llvm = "$ndkRoot/toolchains/llvm/prebuilt/$ndkHostTag"
     inputs.files(fileTree("$ndkRoot/sysroot") { include("**/*") })
@@ -108,6 +124,8 @@ tasks.withType<BuildAndroidCore>().configureEach {
 val buildAndroidReleaseCore by tasks.registering(BuildAndroidCore::class) {
     description = "Builds Release native libraries without the DEBUG-only Agents-list sort JNI export."
     cargoFeatures.set("release-android")
+    cargoProfile.set("release")
+    abis.set(allAbis)
     cargoTargetDirectory.set(coreWorkspace.file("target/android-release").asFile.absolutePath)
     jniDirectory.set(layout.buildDirectory.dir("native/releaseJni"))
     symbolsDirectory.set(layout.buildDirectory.dir("native/releaseSymbols"))
@@ -116,8 +134,11 @@ val buildAndroidReleaseCore by tasks.registering(BuildAndroidCore::class) {
     outputs.cacheIf { true }
 }
 val buildAndroidCore by tasks.registering(BuildAndroidCore::class) {
-    description = "Builds stripped and symbol-retaining arm64-v8a and x86_64 Rust libraries with the pinned NDK."
+    description = "Builds stripped and symbol-retaining debug Rust libraries (arm64-v8a and x86_64, or -Ppersona.abis) with the pinned NDK."
     cargoFeatures.set("")
+    // Debug APKs never ship and production code does not call the core yet: no optimisation or fat LTO (#10712).
+    cargoProfile.set("android-dev")
+    abis.set(debugAbis)
     cargoTargetDirectory.set(coreWorkspace.file("target/android").asFile.absolutePath)
     jniDirectory.set(nativeOutput)
     symbolsDirectory.set(nativeSymbols)
@@ -190,21 +211,28 @@ val prepareContinuityFixtures by tasks.registering(PrepareContinuityFixtures::cl
     fixtureFiles.from(fileTree("$repositoryRoot/spec/fixtures/continuity") { include("*.json") })
     outputDirectory.set(layout.buildDirectory.dir("generated/continuityAssets"))
 }
+// The command line is set when the task runs: an Exec task's arguments are inputs, and these are absolute paths (#10712).
 abstract class PrepareCoreLicenses : Exec() {
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+    // Cargo.lock pins every crate's version and checksum, so the registry's location is not an input.
+    @get:Internal abstract val registrySource: Property<String>
+
+    override fun exec() {
+        commandLine("python3", "-I", workingDir.resolve("scripts/android-licenses.py").absolutePath,
+            "--workspace", workingDir.absolutePath, "--registry-src", registrySource.get(),
+            "--output", outputDirectory.get().asFile.absolutePath)
+        super.exec()
+    }
 }
 val prepareCoreLicenses by tasks.registering(PrepareCoreLicenses::class) {
     description = "Collects every locked public Cargo dependency's license notices into the Android assets."
     inputs.files(coreWorkspace.file("Cargo.lock"), coreWorkspace.file("scripts/android-licenses.py"),
         rootProject.file("LICENSE"), fileTree(coreWorkspace.dir("licenses")) { include("**/*") })
-    val notices = layout.buildDirectory.dir("generated/notices")
-    outputDirectory.set(notices)
-    outputs.dir(notices)
-    val registry = providers.environmentVariable("CARGO_HOME").map { "$it/registry/src" }
-        .orElse(providers.systemProperty("user.home").map { "$it/.cargo/registry/src" })
+        .withPropertyName("licenseSources").withPathSensitivity(PathSensitivity.RELATIVE)
+    outputDirectory.set(layout.buildDirectory.dir("generated/notices"))
+    registrySource.set(providers.environmentVariable("CARGO_HOME").map { "$it/registry/src" }
+        .orElse(providers.systemProperty("user.home").map { "$it/.cargo/registry/src" }))
     workingDir(coreWorkspace)
-    commandLine("python3", "-I", coreWorkspace.file("scripts/android-licenses.py"),
-        "--workspace", coreWorkspace, "--registry-src", registry.get(), "--output", outputDirectory.get().asFile.absolutePath)
     outputs.cacheIf { true }
 }
 androidComponents {
@@ -230,14 +258,13 @@ dependencies {
     api(project(":core:rustcore"))
     // Instrumentation verifies the same private JNI boundary as RustCore. Compile the tests as a friend of
     // :core:rustcore rather than making NativeBridge public or adding a production diagnostic API.
+    // friendPaths, not an -Xfriend-paths= argument: the argument's absolute path would be part of the cache key (#10712).
     val rustCoreJar = layout.buildDirectory.file("../../rustcore/build/libs/rustcore.jar")
     tasks.matching { it.name == "compileReleaseAndroidTestKotlin" }.configureEach {
         val compile = this as org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
         compile.dependsOn(":core:rustcore:jar")
-        compile.inputs.file(rustCoreJar).withPropertyName("rustCoreFriendJar")
-        compile.compilerOptions.freeCompilerArgs.add(
-            rustCoreJar.map { "-Xfriend-paths=${it.asFile.absolutePath}" },
-        )
+        compile.inputs.file(rustCoreJar).withPropertyName("rustCoreFriendJar").withPathSensitivity(PathSensitivity.NONE)
+        compile.friendPaths.from(rustCoreJar)
     }
     androidTestImplementation(testFixtures(project(":core:domain")))
     androidTestImplementation("androidx.test:runner:1.7.0")

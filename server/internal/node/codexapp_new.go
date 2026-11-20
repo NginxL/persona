@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -239,6 +240,11 @@ func startCodexStdio(ctx context.Context, cli, home, dir string) (*codexStdio, e
 	cmd := exec.CommandContext(ctx, cli, "app-server")
 	cmd.Dir = dir
 	cmd.Env = append(desktopSeedEnv(os.Environ()), "CODEX_HOME="+home)
+	if bin := codexAppNodeBin(cli); bin != "" {
+		path := withDirsAfter(envValue(cmd.Env, "PATH"), []string{bin})
+		cmd.Env = append(withoutEnv(cmd.Env, []string{"PATH"}), "PATH="+path)
+	}
+	killGroupOnCancel(cmd)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -247,6 +253,16 @@ func startCodexStdio(ctx context.Context, cli, home, dir string) (*codexStdio, e
 	if err != nil {
 		return nil, err
 	}
+	stopGroup := cmd.Cancel
+	cmd.Cancel = sync.OnceValue(func() error {
+		// A CLI launcher can fork a child that keeps both pipes open. Close our ends even if the group is gone.
+		_ = in.Close()
+		_ = out.Close()
+		if err := stopGroup(); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	})
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -263,9 +279,32 @@ func startCodexStdio(ctx context.Context, cli, home, dir string) (*codexStdio, e
 	return s, nil
 }
 
+// codexAppNodeBin is the interpreter directory for the official npm launcher when the service has no node on PATH.
+// npm links bin/codex to the script, which uses /usr/bin/env node rather than an absolute interpreter path.
+func codexAppNodeBin(cli string) string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	if _, err := exec.LookPath("node"); err == nil {
+		return ""
+	}
+	real, err := filepath.EvalSymlinks(cli)
+	if err != nil {
+		return ""
+	}
+	prefix, ok := strings.CutSuffix(real, "/lib/node_modules/@openai/codex/bin/codex.js")
+	if !ok || !filepath.IsAbs(prefix) {
+		return ""
+	}
+	bin := filepath.Join(prefix, "bin")
+	if _, err := exec.LookPath(filepath.Join(bin, "node")); err != nil {
+		return ""
+	}
+	return bin
+}
+
 func (s *codexStdio) close() {
-	_ = s.in.Close()
-	_ = s.cmd.Process.Kill()
+	_ = s.cmd.Cancel()
 	_ = s.cmd.Wait()
 }
 

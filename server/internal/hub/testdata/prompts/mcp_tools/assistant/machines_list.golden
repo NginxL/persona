@@ -1,0 +1,8 @@
+{
+  "name": "machines_list",
+  "description": "List computers' connection, system, resources, agents, launcher failures and node builds. Samples over 30 seconds old are stale. Nulls have reasons; do not infer or rank.",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  }
+}

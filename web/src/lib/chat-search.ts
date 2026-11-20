@@ -87,13 +87,14 @@ export async function loadEarlierForSearch(o: {
   stopped: () => boolean;
   onPage: (n: number) => void;
   pages?: number;
+  joinEarlier?: boolean;
 }): Promise<SearchLoadOutcome> {
   const pages = o.pages ?? SEARCH_PAGES;
   for (let page = 0; page < pages; page++) {
     if (o.stopped()) return "stopped";
     const now = o.get();
     if (!now.hasMore) return "start";
-    if (now.loading || now.loadingEarlier) return "busy";
+    if (now.loading || (now.loadingEarlier && !o.joinEarlier)) return "busy";
     const firstSeq = now.items[0]?.seq ?? Infinity;
     await o.load();
     await o.frame();

@@ -79,7 +79,7 @@ the logic is in `server/internal/assistant`, so the hub only forwards it).
 
 ## 4. The index
 
-A manager migration (`docs/server/server.md` ("Migrations"); the number is picked after looking at every worktree):
+A manager migration (`docs/server/server.md` ("Migrations"); named by the UTC second it is written):
 
 ```sql
 CREATE TABLE assistant_search_items (

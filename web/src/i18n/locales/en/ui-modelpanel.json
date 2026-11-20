@@ -1,13 +1,6 @@
 {
   "search": "Search models…",
   "list": "Models",
-  "views": "Model views",
-  "recent": "Recent",
-  "favorites": "Favorites",
-  "all": "All",
-  "recommended": "Recommended",
-  "recent_empty": "No recent models yet — pick a model and it will show up here",
-  "favorites_empty": "No favorites yet — hover a model and hit ☆ to pin it here",
   "no_match": "No matching models",
   "save_favorite": "Save to favorites",
   "remove_favorite": "Remove from favorites",
@@ -41,10 +34,14 @@
   "how_to_fix": "How to fix",
   "engine_via": "Runs through {provider}",
   "effort_unset": "Model default",
-  "show_all": "Show all {count} models",
   "older": "Earlier versions · {count}",
   "older_of": "{family}: show {count} earlier versions",
   "hide_older": "Hide earlier",
   "hide_older_of": "{family}: hide earlier versions",
-  "latest": "Latest"
+  "latest": "Latest",
+  "model_count": "{count} models",
+  "current_launcher": "Current",
+  "default_launcher": "Default",
+  "quick_picks": "Recent and favorites",
+  "recommended": "Recommended"
 }

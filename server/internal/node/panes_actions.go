@@ -227,11 +227,13 @@ func paneShells(ctx context.Context, created *host.Created) []string {
 	return []string{herdrPaneShell()}
 }
 
-// startPaneShells resolves the shell for one start. An adopted pane reuses the foreground answer already gathered by
-// runAgentInPane; a new pane goes through the platform resolver (Windows adds one foreground request, then config).
+// startPaneShells resolves the shell for one start. An adopted pane reuses the foreground answer gathered before the
+// start (runAgentInPane, the stopped-session and switch checks), which on Windows turns an innermost PowerShell into
+// the new pane's handoff (adoptedPaneShells); a new pane goes through the platform resolver (Windows adds one
+// foreground request, then config).
 func (n *Node) startPaneShells(ctx context.Context, launch host.Launcher, created *host.Created) []string {
 	if _, ok := ctx.Value(adoptedPaneKey{}).(adopted); ok {
-		return paneShells(ctx, created)
+		return adoptedPaneShells(paneShells(ctx, created))
 	}
 	return n.freshPaneShells(ctx, launch, created)
 }

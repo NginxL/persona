@@ -1,8 +1,10 @@
 import { Pairing } from '../../../main/ets/platform/Pairing';
-import { describe, it, expect } from '@ohos/hypium';
+import { afterAll, beforeAll, describe, it, expect } from '@ohos/hypium';
 import { abilityDelegatorRegistry } from '@kit.TestKit';
 import { util } from '@kit.ArkTS';
 import { relationalStore } from '@kit.ArkData';
+import { connection, socket } from '@kit.NetworkKit';
+import { startIPv6Relay } from './NativeIPv6Relay';
 import { HubTransport, EndpointConfig, HttpFailure } from '../../../main/ets/platform/HubTransport';
 import { HubRepository } from '../../../main/ets/models/HubRepository';
 import { LocalStore } from '../../../main/ets/platform/LocalStore';
@@ -22,6 +24,71 @@ async function count(name: string, pin: string = fixtureArgument('fixturePin')):
   const transport = fixture(pin);
   try { return Wire.number(Wire.parse(await transport.request('/api/v1/test/stats')), name); } finally { transport.close(); }
 }
+
+const ipv6FixtureHost = 'hub-v6.test';
+
+function ipv6Fixture(host: string, pin: string = fixtureArgument('fixturePin')): HubTransport {
+  const port = Number(fixtureArgument('ipv6FixturePort'));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid_fixture_port');
+  return new HubTransport(new EndpointConfig('https://' + host + ':' + port + '/',
+    '00000000-0000-4000-8000-000000000001', 'synthetic-fixture-token', pin, 'synthetic'));
+}
+
+async function receiveHello(transport: HubTransport): Promise<Record<string, Object>> {
+  let hello: Record<string, Object> = {};
+  await transport.connect((payload: string): void => {
+    const message = Wire.parse(payload);
+    if (Wire.text(message, 'type') === 'hello') hello = message;
+  });
+  for (let attempt = 0; attempt < 100 && !Wire.has(hello, 'type'); attempt++) await pause();
+  expect(Wire.text(hello, 'type')).assertEqual('hello');
+  expect(transport.hello(['elicitation'])).assertTrue();
+  return Wire.object(hello, 'fixture_identity');
+}
+
+export function nativeIPv6TransportTests(): void {
+  describe('NativeIPv6Transport', (): void => {
+    let relay: socket.TCPSocketServer | undefined;
+    beforeAll(async (): Promise<void> => {
+      if (fixtureArgument('ipv6ForwardPort')) relay = await startIPv6Relay(Number(fixtureArgument('ipv6FixturePort')),
+        Number(fixtureArgument('ipv6ForwardPort')));
+    });
+    afterAll(async (): Promise<void> => { if (relay) await relay.close(); });
+    it('receives_a_hub_hello_over_the_ipv6_loopback_literal', 0, async (): Promise<void> => {
+      const literal = ipv6Fixture('[::1]');
+      try { await receiveHello(literal); } finally { literal.close(); }
+    });
+    it('resolves_only_ipv6_for_the_fixture_domain', 0, async (): Promise<void> => {
+      await connection.addCustomDnsRule(ipv6FixtureHost, ['::1']);
+      try {
+        const results = await connection.getAddressesByName(ipv6FixtureHost);
+        expect(results.length > 0).assertTrue();
+        expect(results.every((address: connection.NetAddress): boolean => address.family === 2)).assertTrue();
+      } finally { await connection.removeCustomDnsRule(ipv6FixtureHost); }
+    });
+    it('connects_the_hub_and_child_stream_with_the_aaaa_only_domain_and_pin', 0, async (): Promise<void> => {
+      await connection.addCustomDnsRule(ipv6FixtureHost, ['::1']);
+      const main = ipv6Fixture(ipv6FixtureHost), child = main.stream('/api/v1/ws?stream=ipv6');
+      const wrongPin = ipv6Fixture(ipv6FixtureHost, 'A'.repeat(43));
+      try {
+        const primary = await receiveHello(main), stream = await receiveHello(child);
+        for (const peer of [primary, stream]) {
+          expect(Wire.text(peer, 'host')).assertEqual(ipv6FixtureHost + ':' + fixtureArgument('ipv6FixturePort'));
+          expect(Wire.text(peer, 'sni')).assertEqual(ipv6FixtureHost);
+        }
+        expect(Wire.text(primary, 'path')).assertEqual('/api/v1/ws');
+        expect(Wire.text(stream, 'path')).assertEqual('/api/v1/ws?stream=ipv6');
+        let rejected = false;
+        try { await wrongPin.connect((): void => {}); } catch (_) { rejected = true; }
+        expect(rejected).assertTrue();
+      } finally {
+        wrongPin.close(); child.close(); main.close();
+        await connection.removeCustomDnsRule(ipv6FixtureHost);
+      }
+    });
+  });
+}
+
 export default function nativeTransportTests(): void {
   describe('NativeTransport', (): void => {
     it('committed_app_language_updates_http_and_existing_websocket_locale', 0, async (): Promise<void> => {

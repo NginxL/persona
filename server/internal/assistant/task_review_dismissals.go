@@ -151,6 +151,13 @@ func (s *Service) changeDecisionDismissal(ctx context.Context, id string, at tim
 	b := &s.reviewDismissals
 	b.actions.acquire(id)
 	defer b.actions.release(id)
+	return s.changeDecisionDismissalLocked(ctx, id, at, receipt, undo)
+}
+
+// changeDecisionDismissalLocked is changeDecisionDismissal once the caller holds the task's action lock and loaded the
+// to-dos, so a caller that checks the ask's round first does so under the same lock (todo_asks_routes.go).
+func (s *Service) changeDecisionDismissalLocked(ctx context.Context, id string, at time.Time, receipt string, undo bool) (*decisionReview, error) {
+	b := &s.reviewDismissals
 	// An accept in flight has already claimed its ask before releasing accept.mu.
 	s.accept.mu.Lock()
 	if !s.loadAcceptLocked(ctx) {

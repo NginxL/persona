@@ -42,6 +42,7 @@ async function open(key: string) {
   act(() => root.render(<NewAgent key={key} open onClose={() => {}} />));
   await flush();
   act(() => pill().click());
+  await act(async () => vi.dynamicImportSettled());
   await flush();
   act(() => document.body.querySelector<HTMLButtonElement>("[data-panel-row][data-current] [data-row-customize]")!.click());
   await flush();

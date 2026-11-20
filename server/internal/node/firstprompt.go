@@ -236,7 +236,7 @@ func (n *Node) confirmFirst(ctx context.Context, pane, id, prompt string, since 
 			return lostTimeout
 		}
 		if try == firstPromptTries {
-			return fmt.Sprintf("首条消息送了 %d 次都没进去，Agent 还没开始：看看电脑上的终端，或者在这里把任务重发一遍。", firstPromptTries)
+			return fmt.Sprintf(lostTries, firstPromptTries)
 		}
 		log.Printf("start %s: the first message did not reach the transcript (try %d), typing it again", id, try)
 		why := n.readyForFirstPrompt(ctx, pane, prompt, draft)
@@ -272,6 +272,8 @@ const (
 	lostOther      = "输入框里有别的内容，首条消息没有再送，Agent 还没开始：看看电脑上的终端，再在这里把任务重发一遍。"
 	lostNoBox      = "Claude 没有回到可以输入的状态，首条消息没有送进去，Agent 还没开始：看看电脑上的终端，再在这里把任务重发一遍。"
 	lostTimeout    = "等首条消息送进去超时了，Agent 还没开始：看看电脑上的终端，或者在这里把任务重发一遍。"
+	// lostTries: typed firstPromptTries times (the %d), and it never went in.
+	lostTries = "首条消息送了 %d 次都没进去，Agent 还没开始：看看电脑上的终端，或者在这里把任务重发一遍。"
 	// lostUltracode: the start's ultracode command may still sit in the input box (ultracode.go), or the box could
 	// not be read after it.
 	lostUltracode = "ultracode 的开关命令可能还停在电脑上的输入框里，首条消息没有送进去，Agent 还没开始：看看电脑上的终端，再在这里把任务重发一遍。"

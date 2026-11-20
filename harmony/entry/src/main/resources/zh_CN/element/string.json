@@ -1546,11 +1546,19 @@
     },
     {
       "name": "assistant_feed_permission_default",
-      "value": "默认"
+      "value": "默认权限"
+    },
+    {
+      "name": "assistant_feed_permission_acceptEdits",
+      "value": "允许编辑"
     },
     {
       "name": "assistant_feed_permission_plan",
-      "value": "只读"
+      "value": "计划模式"
+    },
+    {
+      "name": "assistant_feed_permission_auto",
+      "value": "自动审批"
     },
     {
       "name": "assistant_feed_persona_message",
@@ -4637,6 +4645,10 @@
       "value": "后台等待中"
     },
     {
+      "name": "agent_group_just_finished",
+      "value": "刚做完待看"
+    },
+    {
       "name": "agent_group_waiting",
       "value": "待唤醒"
     },
@@ -4699,6 +4711,34 @@
     {
       "name": "decrease",
       "value": "减少"
+    },
+    {
+      "name": "agent_computer_holds",
+      "value": "{computer} 已离线。重新上线时会发送你的消息。"
+    },
+    {
+      "name": "agent_computer_offline",
+      "value": "{computer} 已离线。重新连接后即可发送消息。"
+    },
+    {
+      "name": "agent_stopped",
+      "value": "此 Agent 已停止。请在终端中恢复后再发送消息。"
+    },
+    {
+      "name": "agent_delete_held_title",
+      "value": "删除这条待送达的消息？"
+    },
+    {
+      "name": "agent_delivery_updating",
+      "value": "正在等待送达状态更新。"
+    },
+    {
+      "name": "agent_delivery_failed",
+      "value": "未能将这条消息送达 {computer}。"
+    },
+    {
+      "name": "agent_delivery_waiting",
+      "value": "正在等待 {computer}。"
     }
   ]
 }

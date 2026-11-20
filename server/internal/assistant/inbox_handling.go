@@ -56,6 +56,9 @@ type InboxSuggestion struct {
 	// Conversation is the conversation the event was handed to that handed this suggestion in (Hand to AI, inbox_handoff.go);
 	// nil for the event's processing conversation. What the user does with it is told there, not to the processing one.
 	Conversation *SessionRef `json:"conversation,omitempty"`
+	// Owner and SourceOf bind an unsent reply to its author and source snapshot; persisted, not listed.
+	Owner    *SessionRef `json:"owner,omitempty"`
+	SourceOf string      `json:"source_of,omitempty"`
 }
 
 // InboxHandoff is one hand-off of the event to Persona's main conversation (POST /api/v1/inbox/{id}/handoff): that
@@ -66,4 +69,8 @@ type InboxHandoff struct {
 	SessionID string    `json:"session_id"`
 	At        time.Time `json:"at"`
 	Op        string    `json:"op,omitempty"`
+	// PendingSuggestion coalesces explicit Wrap up requests until this conversation offers a result. SourceOf is
+	// the incoming source snapshot before the handoff send, not a read/triage stamp; both are kept, not listed.
+	PendingSuggestion bool   `json:"pending_suggestion,omitempty"`
+	SourceOf          string `json:"source_of,omitempty"`
 }

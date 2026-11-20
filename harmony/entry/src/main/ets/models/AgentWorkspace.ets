@@ -366,7 +366,10 @@ export class AgentWorkspace {
       ['offline', 'done', 'idle', 'unknown', 'interrupted'].includes(Wire.text(data, 'status'));
   }
 
-  canMarkSeen(row: ResourceRow): boolean { return this.rowBelongs(row) && row.state === 'unread'; }
+  canMarkSeen(row: ResourceRow): boolean {
+    return this.rowBelongs(row) && (row.state === 'unread' ||
+      (row.state === 'idle' && Wire.bool(Wire.object(row.data(), 'work'), 'just_finished')));
+  }
   readOnly(row: ResourceRow): boolean {
     const data = row.data();
     return !!Wire.text(data, 'read_only_reason') || Wire.bool(data, 'read_only') || Wire.text(data, 'source_kind') === 'codex_history';
@@ -606,7 +609,12 @@ export class AgentWorkspace {
     const key = rowKey(row);
     const patch = (items: ResourceRow[]): ResourceRow[] => items.map((item: ResourceRow) => {
       if (rowKey(item) !== key) return item;
-      const next = cloneRow(item), data = next.data(); data['state'] = state; next.raw = JSON.stringify(data); next.state = state; return next;
+      const next = cloneRow(item), data = next.data();
+      if (state === 'idle') {
+        const work = Wire.object(data, 'work');
+        if (Wire.bool(work, 'just_finished')) { work['just_finished'] = false; data['work'] = work; }
+      }
+      data['state'] = state; next.raw = JSON.stringify(data); next.state = state; return next;
     });
     this.latestSourceRows = patch(this.sourceRows); this.historyRows = patch(this.historyRows); this.rebuild();
   }

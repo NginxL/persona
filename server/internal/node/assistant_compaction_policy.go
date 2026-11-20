@@ -433,6 +433,11 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 	}
 	s["skillOverrides"] = overrides
 	n.assistantUserSetup(s, cwd, c.profile) // a private profile: ~/.claude's instructions out, the user's skill switches in
+	// One memory whichever profile the conversation runs in (memory_merge.go): Claude Code takes the directory from
+	// --settings before the profile's own settings. A guest keeps none (guestSettingsFile turns auto memory off).
+	if dir := n.conversationMemoryDir(id, cwd); dir != "" {
+		s["autoMemoryDirectory"] = dir
+	}
 
 	b, err := json.Marshal(s)
 	if err != nil {

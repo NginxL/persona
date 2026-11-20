@@ -1,4 +1,6 @@
 {
+  "kind_todo_handoff": "Waiting for",
+  "handoff_deadline": "Result due by {time}",
   "kind_person_reply": "Reply",
   "kind_merge_review": "Review or merge",
   "kind_external_event": "External change",
@@ -18,7 +20,10 @@
   "contact_unknown": "Sent request not recorded",
   "wake": "Expected change: {wake}",
   "wake_unknown": "Condition for resuming not recorded",
-  "source": "Source {number}",
+  "source_pr": "PR #{number}",
+  "source_issue": "issue #{number}",
+  "source_comment": "Comment on #{number}",
+  "source_lark": "Lark conversation",
   "request": "Asked: {request}",
   "fallback": "Fallback review: {time}",
   "evidence_note": "Supervisor's record; not independently checked here. Displaying it does not watch events.",

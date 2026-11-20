@@ -19,18 +19,39 @@ describe("agentCommands", () => {
     expect(words(session({ state: "working", status: "working" }))).toEqual(["继续", "/compact", "/model", LOOP_TEXT.trim()]);
     expect(words(session({ state: "needs_you", status: "blocked" }))).toEqual(["继续", "/compact", "/model", LOOP_TEXT.trim()]);
   });
-  it("has neither for Codex, TRAEX, a session without a pane or a read-only source", () => {
-    for (const s of [session({ agent: "codex" }), session({ agent: "traex" }), session({ pane_id: undefined }), session({ source_kind: "codex_app_server", capabilities: { send: true, terminal: true } })]) {
+  it("has neither for Codex, TRAEX or a runtime that cannot switch models", () => {
+    for (const s of [session({ agent: "codex" }), session({ agent: "traex" }), session({ source_kind: "codex_app_server", capabilities: { send: true, terminal: true } })]) {
       const w = words(s);
       expect(w).not.toContain("/model");
       expect(w).not.toContain("/clear");
     }
+  });
+  it("offers /model wherever the model pill switches models, /clear only in a pane", () => {
+    const w = words(session({ pane_id: undefined }));
+    expect(w).toContain("/model");
+    expect(w).not.toContain("/clear");
   });
   it("drops /loop where the agent has none", () => {
     expect(words(session({ agent: "codex" }))).toEqual(["继续", "/compact"]);
   });
   it("has neither /model nor /clear for an offline Claude", () => {
     expect(words(session({ state: "offline", status: "offline" }))).not.toContain("/model");
+  });
+});
+
+// A runtime's session (#11237): /model where it says the model can switch; Claude Code's typed commands never.
+describe("agentCommands on a runtime's session", () => {
+  const LIST = [{ text: "继续" }, { text: "/compact" }, { text: "/context" }, { text: "/model " }];
+  const runtime = (o: Partial<Session> = {}) => session({ source_kind: "antigravity", pane_id: undefined, agent: "antigravity", capabilities: { send: true, model: true }, ...o });
+  const list = (s?: Session) => agentCommands(LIST, s).map((c) => c.text.trim());
+  it("lists /model where capabilities.model says so, and no /compact or /context", () => {
+    expect(list(runtime())).toEqual(["继续", "/model"]);
+    expect(list(runtime({ capabilities: { send: true, model: false } }))).toEqual(["继续"]);
+  });
+  it("keeps /context to Claude Code's terminal and /compact to terminal agents", () => {
+    expect(list(session({}))).toEqual(["继续", "/compact", "/context", "/model"]);
+    expect(list(session({ agent: "codex" }))).toEqual(["继续", "/compact"]);
+    expect(list(session({ assistant: true }))).toEqual(["继续"]);
   });
 });
 

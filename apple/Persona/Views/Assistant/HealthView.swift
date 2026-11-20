@@ -75,6 +75,8 @@ struct HealthView: View {
     /// A conversation is being started (the Persona page shows it coming).
     var disabled: Bool
     @Binding var launcher: String?
+    /// The model picked under `launcher` (#11472), in the same menu.
+    @Binding var launcherModel: String?
     /// The permission mode and effort a new conversation starts with: Persona's new conversation's, which `start` sends
     /// for Health's too; picked here in the shell composer's model menu (#3825).
     @Binding var mode: String
@@ -112,7 +114,7 @@ struct HealthView: View {
                 if ChatComposerKind.padCard {
                     // iPhone and iPad, every style: Persona's new conversation's composer (#3825), with the attach panel and
                     // + menu (#3225, #3805) and the launcher, effort and permission mode in its model button.
-                    StarterComposer(disabled: disabled, shell: StarterComposer.ShellModes(launcher: $launcher, mode: $mode, effort: $effort, health: true),
+                    StarterComposer(disabled: disabled, shell: StarterComposer.ShellModes(launcher: $launcher, launcherModel: $launcherModel, mode: $mode, effort: $effort, health: true),
                                     placeholder: String(localized: "Ask about your health…"), uploadDest: Session.healthSpace, send: send)
                 } else if AppStyle.current.usesBeautifulUI {
                     BeautifulStarterComposer(disabled: disabled, launcher: $launcher, placeholder: String(localized: "Ask about your health…"), uploadDest: Session.healthSpace, send: send)

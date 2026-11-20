@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -45,11 +46,16 @@ type testNode struct {
 	sessionsListHook func() error
 	// fileStarted / fileCancelled hold one file call until its RPC context ends, for cancellation tests.
 	fileStarted, fileCancelled chan struct{}
+	// lanes: it can frame its connection when asked, as a node does (rpc.Peer.EnableLanes).
+	lanes bool
 }
 
 func (n *testNode) dial(context.Context) (net.Conn, error) {
 	managerSide, nodeSide := net.Pipe()
 	p := rpc.New("n", nodeSide)
+	if n.lanes {
+		p.EnableLanes(nodeproto.ControlLane, nodeproto.BulkLane)
+	}
 	p.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		if method == "sessions.list" && n.sessionsListHook != nil {
 			if err := n.sessionsListHook(); err != nil {

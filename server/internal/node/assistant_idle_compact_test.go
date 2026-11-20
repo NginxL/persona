@@ -50,6 +50,7 @@ func idleCompactFixture(t *testing.T) (*Node, *assistantProc, *idleCompactSink) 
 	p.stdin = &ackControlWriter{WriteCloser: sink, p: p}
 	n.state.update(p.id, func(st *sessionState) bool {
 		st.IsMain = true
+		st.OriginKnown = true
 		st.IdleCompaction = &idleCompactionState{
 			Policy: idleCompactPolicy, Since: time.Now().Add(-time.Hour), Tokens: p.context,
 		}

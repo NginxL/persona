@@ -140,7 +140,7 @@ func (s *Service) modelLauncherCompatible(p ModelPurpose, l ConfiguredLauncher, 
 	if p.ID == purposeMeetingRoom && runtime {
 		return false // a room runs on Claude Code's CLI only
 	}
-	if p.CategoryID == "assistant" && runtime {
+	if p.CategoryID == "assistant" && (runtime || v.Kind == "launcher" && (v.Agent == "agy" || v.Agent == "omp")) {
 		if !l.Assistant {
 			return false
 		}
@@ -214,7 +214,7 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 			if provider.Status != "" {
 				return errors.New(provider.Status)
 			}
-			if !slices.ContainsFunc(provider.Models, func(m ModelChoice) bool { return m.ID == b.Model }) {
+			if !slices.ContainsFunc(provider.Models, func(m proto.ProviderModel) bool { return m.ID == b.Model }) {
 				return i18n.Err("assistant-models.err_extension_model")
 			}
 		}

@@ -13,12 +13,12 @@ import { ago } from "../../lib/format";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
 import {
   botStateText, botStatus, botSummary, botTone, credentialsChanged, credentialsOf, credentialsUpdate, DEFAULT_FEATURES, DEFAULT_NUDGE_AFTER, livePairing, nudgeChoices, nudgeLabel, pairBot, pairingLeft,
-  featureEdit, testBot, unpairBot, updateBot, type BotCredentials, type BotFeatures, type FeishuBotStatus,
+  featureEdit, testBot, unpairBot, updateBot, type BotCredentials, type BotFeatures, type FeishuBotStatus, type BotTopicChat,
 } from "../../lib/feishu-bot";
 import { Button, copyText, cx, Dialog, IconButton, Spinner, toast } from "../../ui/atoms";
 import { BrandMark } from "../../ui/BrandMark";
 import { Icon, type IconName } from "../../ui/icons";
-import { Group, Pill, Row, Switch } from "./SettingsParts";
+import { Group, Pill, Row, Switch, settingsInputClass } from "./SettingsParts";
 import { SignInSteps } from "./HubConnector";
 
 const SOURCE_REPORT_DELAYS = [0, 1, 2, 5, 10, 15, 30, 60];
@@ -63,6 +63,7 @@ const FEATURES: { key: keyof BotFeatures; icon: IconName; title: string; detail:
   { key: "all_cards", icon: "bell", title: t("settings-feishubot.feature_all_cards_title"), detail: t("settings-feishubot.feature_all_cards_detail") },
   { key: "pushes", icon: "send", title: t("settings-feishubot.feature_pushes_title"), detail: t("settings-feishubot.feature_pushes_detail") },
   { key: "answer_new_card", icon: "bell", title: t("settings-feishubot.feature_answer_new_card_title"), detail: t("settings-feishubot.feature_answer_new_card_detail") },
+  { key: "topic_cot", icon: "spark", title: t("settings-feishubot.feature_topic_cot_title"), detail: t("settings-feishubot.feature_topic_cot_detail") },
   { key: "sync", icon: "loop", title: t("settings-feishubot.feature_sync_title"), detail: t("settings-feishubot.feature_sync_detail") },
   { key: "reports", icon: "list", title: t("settings-feishubot.feature_reports_title"), detail: t("settings-feishubot.feature_reports_detail") },
   { key: "board", icon: "pin", title: t("settings-feishubot.feature_board_title"), detail: t("settings-feishubot.feature_board_detail") },
@@ -364,12 +365,14 @@ function FeishuBotDialog({ bot, larkcli, onClose, onOpen }: { bot: ReturnType<ty
             )}
           </Group>
 
+          {status.owner && <TopicGroups status={status} saving={saving} save={(topic_chats) => run(t("settings-feishubot.save_failed"), () => updateBot({ topic_chats }))} />}
+
           <Group title={t("settings-feishubot.features")} footer={t("settings-feishubot.features_footer")}>
-            {FEATURES.filter((f) => (f.key !== "report_steps" && f.key !== "answer_new_card") || features[f.key] !== undefined).map((f) => {
+            {FEATURES.filter((f) => (f.key !== "report_steps" && f.key !== "answer_new_card" && f.key !== "topic_cot") || features[f.key] !== undefined).map((f) => {
               // "All cards" needs "cards"; "only conclusions" needs task progress, without which the hub sends no conclusions either,
               // and trims only the execution steps, which a current hub pushes only with "report_steps" on (#3218).
               // "report_steps" needs task progress too; a hub from before it leaves the key out and the switch is hidden,
-              // as is "answer_new_card" on a hub from before it.
+              // as are "answer_new_card" and "topic_cot" on hubs from before them.
               const off =
                 (f.key === "all_cards" && !features.cards) ||
                 (f.key === "only_conclusions" && (features.reports === false || (features.report_steps === false && !features.only_conclusions))) ||
@@ -650,6 +653,54 @@ function LarkReadSection({ connector, status, waitsForApp, autoStart, reload, on
         </Row>
       )}
       <Row label={t("settings-feishubot.read_more")} hint={t("settings-feishubot.read_more_hint")} onClick={onOpen} />
+    </Group>
+  );
+}
+
+
+/** Group policies use the same acknowledged save as the other bot settings. */
+function TopicGroups({ status, saving, save }: { status: FeishuBotStatus; saving: boolean; save: (groups: BotTopicChat[]) => Promise<boolean> }) {
+  const groups = status.topic_chats ?? [];
+  const [adding, setAdding] = useState(false);
+  const [chatID, setChatID] = useState("");
+  const [name, setName] = useState("");
+  const [strict, setStrict] = useState(false);
+  const add = async () => {
+    if (await save([...groups, { chat_id: chatID.trim(), name: name.trim(), require_owner_mention: strict }])) {
+      setAdding(false);
+      setChatID("");
+      setName("");
+      setStrict(false);
+    }
+  };
+  return (
+    <Group title={t("settings-feishubot.topic_groups")} footer={t("settings-feishubot.topic_policy_footer")} anchor="topic-groups">
+      <Row label={t("settings-feishubot.topic_home")} hint={t("settings-feishubot.topic_home_hint")} wrapHint stackOnNarrow>
+        <select aria-label={t("settings-feishubot.topic_home")} className={settingsInputClass} disabled={saving || !groups.length} value={groups.find((g) => g.home)?.chat_id ?? ""}
+          onChange={(e) => void save(groups.map((g) => ({ ...g, home: g.chat_id === e.target.value })))}>
+          <option value="">{t(groups.some((g) => g.home) ? "settings-feishubot.topic_home_default" : "settings-feishubot.topic_home_none")}</option>
+          {groups.map((g) => <option key={g.chat_id} value={g.chat_id}>{g.name || g.chat_id}</option>)}
+        </select>
+      </Row>
+      {groups.map((g) => (
+        <Row key={g.chat_id} label={g.name || g.chat_id} hint={t("settings-feishubot.topic_owner_mention")} wrapHint>
+          <Switch on={g.require_owner_mention ?? false} disabled={saving} label={t("settings-feishubot.topic_mention_for", { name: g.name || g.chat_id })}
+            onChange={(required) => void save(groups.map((item) => item.chat_id === g.chat_id ? { ...item, require_owner_mention: required } : item))} />
+        </Row>
+      ))}
+      {adding ? (
+        <div className="space-y-3 px-4 py-3">
+          <label className="block text-label text-ink">{t("settings-feishubot.topic_group_id")}<input className={settingsInputClass} value={chatID} disabled={saving} onChange={(e) => setChatID(e.target.value)} /></label>
+          <label className="block text-label text-ink">{t("settings-feishubot.topic_group_name")}<input className={settingsInputClass} value={name} disabled={saving} onChange={(e) => setName(e.target.value)} /></label>
+          <Row label={t("settings-feishubot.topic_owner_mention")} wrapHint>
+            <Switch on={strict} disabled={saving} label={t("settings-feishubot.topic_owner_mention")} onChange={setStrict} />
+          </Row>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button disabled={saving} onClick={() => setAdding(false)}>{t("common.cancel")}</Button>
+            <Button tone="accent" busy={saving} disabled={saving || !chatID.trim() || groups.some((g) => g.chat_id === chatID.trim())} onClick={() => void add()}>{t("settings-feishubot.topic_add")}</Button>
+          </div>
+        </div>
+      ) : <div className="flex justify-end px-4 py-2.5"><Button disabled={saving || groups.length >= 50} onClick={() => setAdding(true)}>{t("settings-feishubot.topic_add")}</Button></div>}
     </Group>
   );
 }

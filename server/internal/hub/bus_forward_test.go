@@ -87,6 +87,9 @@ func TestBusForwardsTrustedDeviceActor(t *testing.T) {
 				if req.Method != http.MethodPost || req.Path != r.URL.Path || string(req.Body) != `{}` {
 					t.Fatalf("forwarded request: %+v", req)
 				}
+				if req.ModeActor == nil || req.ModeActor.Kind != "device" || req.ModeActor.DeviceName != "Trusted device" {
+					t.Errorf("trusted mode actor: %+v", req.ModeActor)
+				}
 				for name, want := range map[string]string{assistantwire.DeviceNameHeader: "Trusted device", assistantwire.RoleHeader: roleFull} {
 					if values := req.Header[name]; len(values) != 1 || values[0] != want {
 						t.Errorf("forwarded %s=%v want [%s]", name, values, want)

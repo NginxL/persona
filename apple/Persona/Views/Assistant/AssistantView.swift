@@ -58,8 +58,12 @@ struct AssistantView: View {
     /// A first message whose start failed (#1368): it stays on the page until it is sent again or deleted.
     @State private var failedStart = FailedStart.shared
     @State private var starterLauncher: String?
+    /// The model picked under `starterLauncher` (#11472); nil: its default entry, or nothing picked. Set together with the
+    /// launcher by the starter's model menu (`StarterModesMenu`); the Mac's launcher-only pickers never set it.
+    @State private var starterModel: String?
     /// Health's own pick with several managers: its conversations are the default's, whichever manager the page shows.
     @State private var healthLauncher: String?
+    @State private var healthModel: String?
     @State private var showProfile = false
     @State private var showKnowledge = false
     @State private var showRoutines = false
@@ -281,7 +285,8 @@ struct AssistantView: View {
             } else if shell != nil || drawerPage || phonePage {
                 // A phone's page at regular width too (iPhone Duo open, either layout; #3680, #3641): the iPhone's new
                 // conversation, with what needs the user over the composer. The iPad keeps `AssistantHome`.
-                ShellHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher, mode: $starterMode,
+                ShellHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher,
+                          launcherModel: $starterModel, mode: $starterMode,
                           effort: $starterEffort, openInbox: openFromOutside, resend: resend, delete: deleteFailed) { text, images in
                     Task { await start(text, images) }
                 }
@@ -292,7 +297,8 @@ struct AssistantView: View {
                     #endif
                 }
             } else {
-                AssistantHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher, mode: $starterMode,
+                AssistantHome(pending: shownStart, error: shownFailure?.reason, cleared: showsClearedMain, launcher: $starterLauncher,
+                              launcherModel: $starterModel, mode: $starterMode,
                               effort: $starterEffort, resend: resend, delete: deleteFailed) { text, images in
                     Task { await start(text, images) }
                 }
@@ -314,10 +320,16 @@ struct AssistantView: View {
             #endif
         }
         .navigationDestination(isPresented: $showRoutines) { AssistantRoutinesView() }
-        .navigationDestination(isPresented: $showTodos) { TodosView() }
+        .navigationDestination(isPresented: $showTodos) {
+            #if os(iOS)
+            TodosPlacePage() // the V1 list where the hub sends the view (#10465), else TodosView
+            #else
+            TodosView()
+            #endif
+        }
         .navigationDestination(item: $openedExtension) { ExtensionNavPage(route: $0) }
         .navigationDestination(isPresented: $showHealth) {
-            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, mode: $starterMode, effort: $starterEffort) { text, images in
+            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick, mode: $starterMode, effort: $starterEffort) { text, images in
                 Task { await start(text, images, space: Session.healthSpace) }
             }
         }
@@ -367,12 +379,12 @@ struct AssistantView: View {
             .transformEnvironment(\.macTitleRowLeading) { if columns != .detailOnly { $0 = 0 } }
             #endif
             #if os(iOS)
-            .liftBlur(liftHost.menu)
+            .liftBlur(host: liftHost)
             #endif
         }
         #if os(iOS)
         // A message pressed in the conversation, over the bar too: the whole page dims (#3188).
-        .overlay { if let menu = liftHost.menu { MessageLiftLayer(menu: menu) } }
+        .overlay { MessageLiftHostLayer(host: liftHost) }
         #endif
         #if os(macOS)
         // The bar is the title bar's row, as the list beside it (#830); pushed pages keep their own.
@@ -436,6 +448,7 @@ struct AssistantView: View {
             }
             .onChange(of: model.assistantManagerID) {
                 starterLauncher = nil // a launcher of the assistant shown before
+                starterModel = nil
                 model.forgetMainClear() // the empty page belongs to the manager that was cleared
                 // A first message still spinning up is the other assistant's: its conversation is listed there when it
                 // starts (`start`), and this page shows the one switched to.
@@ -738,7 +751,7 @@ struct AssistantView: View {
         case .messages:
             LarkConversationsView().modifier(InboxDestinationEnvironment(chat: inboxChatPush, openFeishu: { navPath.wrappedValue.append($0) }))
         case .health:
-            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, mode: $starterMode, effort: $starterEffort) { text, images in
+            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, launcherModel: healthModelPick, mode: $starterMode, effort: $starterEffort) { text, images in
                 Task { await start(text, images, space: Session.healthSpace) }
             }
             .modifier(InboxDestinationEnvironment(chat: inboxChatPush, openFeishu: { navPath.wrappedValue.append($0) }))
@@ -815,6 +828,7 @@ struct AssistantView: View {
 
     /// Health's launcher pick: home's with one manager.
     private var healthLauncherPick: Binding<String?> { model.managerRoster?.isMulti == true ? $healthLauncher : $starterLauncher }
+    private var healthModelPick: Binding<String?> { model.managerRoster?.isMulti == true ? $healthModel : $starterModel }
 
     /// Resend on a failed first message: the op id a chat's Resend would choose (`FailedStart.resendOp`), then the start.
     private func resend() {
@@ -856,18 +870,20 @@ struct AssistantView: View {
         do {
             // The first one becomes the main conversation; with the settings not read yet, whether there is one is unknown.
             let makesMain = space == nil && model.assistantConfig != nil && model.assistantMain == nil
-            let launcher = space == nil ? starterLauncher : healthLauncherPick.wrappedValue
+            // Nothing picked names neither, so the hub keeps no pick over Main chat's default (#11472).
+            let pick = AssistantStarterChoice.request(launcher: space == nil ? starterLauncher : healthLauncherPick.wrappedValue,
+                                                      model: space == nil ? starterModel : healthModelPick.wrappedValue)
             // Suggestions and Resend share the cached check. Discovery never delays sending or clears an unknown choice.
             if !starterEffort.isEmpty {
                 let machine = model.hubRef(space == Session.healthSpace ? model.healthMachineID : model.assistantConfig?.machineID ?? model.hubMachineID)
                 let fallback = space == Session.healthSpace ? model.healthLauncherSetting : model.starterLauncherSetting
                 let manager = space == Session.healthSpace ? nil : api.currentAssistantSettings().managerID
-                let source = AssistantStarterModels.source(machine, launcher: launcher, fallback: fallback,
+                let source = AssistantStarterModels.source(machine, launcher: pick.launcher, model: pick.model, fallback: fallback,
                                                            manager: manager, revision: model.assistantLauncherRequestRevision)
                 starterEffort = model.assistantStarterCache.retained(starterEffort, source: source)
             }
             let s = try await AssistantStart.run(receipts: model.hubFeatures.contains(AssistantStart.feature), op: op) { op in
-                try await api.startConversation(prompt: text, images: images, launcher: launcher,
+                try await api.startConversation(prompt: text, images: images, launcher: pick.launcher, model: pick.model,
                                                 permissionMode: starterMode.isEmpty ? nil : starterMode,
                                                 effort: starterEffort.isEmpty ? nil : starterEffort,
                                                 main: makesMain, space: space, opID: op)
@@ -970,6 +986,8 @@ struct AssistantHome: View {
     /// Clear context (#5100): the same composer, an empty middle. Not the centered new-chat page.
     var cleared = false
     @Binding var launcher: String?
+    /// The model picked under `launcher` (#11472): the iPad's model menu sets it; the Mac's launcher chip leaves it nil.
+    @Binding var launcherModel: String?
     @Binding var mode: String
     @Binding var effort: String
     var resend: () -> Void = {}
@@ -981,7 +999,7 @@ struct AssistantHome: View {
     private var starterMachine: MachineRef { model.hubRef(model.assistantConfig?.machineID ?? model.hubMachineID) }
     private var starterManager: String? { model.api(starterMachine.group)?.currentAssistantSettings().managerID }
     private var effortSource: String {
-        AssistantStarterModels.source(starterMachine, launcher: launcher, fallback: model.starterLauncherSetting,
+        AssistantStarterModels.source(starterMachine, launcher: launcher, model: launcherModel, fallback: model.starterLauncherSetting,
                                       manager: starterManager, revision: model.assistantLauncherRequestRevision)
     }
 
@@ -1036,11 +1054,16 @@ struct AssistantHome: View {
                     Label(error, systemImage: Theme.Icon.error).font(Theme.Font.caption).foregroundStyle(Theme.danger)
                         .padding(.horizontal, Theme.Space.s)
                 }
-                if pending == nil || pending?.failed != nil { ReadinessHomeCard(route: $route) }
+                if pending == nil || pending?.failed != nil {
+                    VStack(spacing: Theme.Space.m) {
+                        PushHealthNotice(group: model.hub?.group ?? "")
+                        ReadinessHomeCard(route: $route)
+                    }
+                }
                 if let m = model.assistantManagerOffline { ManagerOfflineNote(manager: m) }
                 if ChatComposerKind.padCard {
                     // The iPad: the iPhone's composer, the launcher, mode and effort in its model menu (#2779).
-                    StarterComposer(disabled: blocked, shell: StarterComposer.ShellModes(launcher: $launcher, mode: $mode, effort: $effort),
+                    StarterComposer(disabled: blocked, shell: StarterComposer.ShellModes(launcher: $launcher, launcherModel: $launcherModel, mode: $mode, effort: $effort),
                                     gate: model.readinessGate(route: $route), offersClear: cleared && pending == nil, send: send)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1081,7 +1104,7 @@ struct AssistantHome: View {
         .task(id: launcher) { if pending == nil { await model.warmAssistant(launcher: launcher) } }
         .task(id: effortSource) {
             guard !ChatComposerKind.padCard else { return }
-            if await starterModels.load(starterMachine, launcher: launcher, fallback: model.starterLauncherSetting,
+            if await starterModels.load(starterMachine, launcher: launcher, model: launcherModel, fallback: model.starterLauncherSetting,
                                         manager: starterManager, revision: model.assistantLauncherRequestRevision) {
                 effort = starterModels.retained(effort, source: effortSource)
             }
@@ -1350,6 +1373,8 @@ struct StarterComposer: View {
 
     struct ShellModes {
         @Binding var launcher: String?
+        /// The model picked under `launcher` (#11472); nil: its default entry, or nothing picked (Main chat's default).
+        @Binding var launcherModel: String?
         @Binding var mode: String
         @Binding var effort: String
         /// Health's new conversation (#3825): with none picked, the launcher is Health's (the default manager's).
@@ -1540,7 +1565,7 @@ struct StarterComposer: View {
         uploadDest == Session.healthSpace ? nil : model.api(machine.group)?.currentAssistantSettings().managerID
     }
     private var effortSource: String {
-        AssistantStarterModels.source(machine, launcher: shell?.launcher, fallback: shell.flatMap { model.launcherSetting($0) },
+        AssistantStarterModels.source(machine, launcher: shell?.launcher, model: shell?.launcherModel, fallback: shell.flatMap { model.launcherSetting($0) },
                                       manager: starterManager, revision: model.assistantLauncherRequestRevision)
     }
 
@@ -1582,7 +1607,7 @@ struct StarterComposer: View {
             if let shell {
                 ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !files.items.isEmpty || !quotes.isEmpty,
-                                 modesTitle: StarterModesMenu.title(modes: shell, launchers: starterModels.launchers, model: model),
+                                 modesTitle: StarterModesMenu.title(modes: shell, launchers: starterModels.launchers, mainDefault: starterModels.mainDefault, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener,
                                  dictationRequest: uploadDest == nil ? model.dictationRequest : nil,
                                  takeDictation: { request in model.takeDictationRequest(request, uploadDest: uploadDest) }, send: submit) {
@@ -1599,14 +1624,17 @@ struct StarterComposer: View {
                     attachments
                     #endif
                 } modes: {
-                    StarterModesMenu(modes: shell, launchers: starterModels.launchers,
-                                     efforts: starterModels.options(for: effortSource))
+                    StarterModesMenu(modes: shell, starter: starterModels, efforts: starterModels.options(for: effortSource)) {
+                        Task { await starterModels.loadLists(machine, manager: starterManager, revision: model.assistantLauncherRequestRevision) }
+                    }
                 }
                 .task(id: effortSource) {
-                    if await starterModels.load(machine, launcher: shell.launcher, fallback: model.launcherSetting(shell),
+                    if await starterModels.load(machine, launcher: shell.launcher, model: shell.launcherModel, fallback: model.launcherSetting(shell),
                                                 manager: starterManager, revision: model.assistantLauncherRequestRevision) {
                         shell.effort = starterModels.retained(shell.effort, source: effortSource)
                     }
+                    // The menu's model rows under each launcher (#11472); sending never waits for them.
+                    await starterModels.loadLists(machine, manager: starterManager, revision: model.assistantLauncherRequestRevision)
                 }
             } else {
                 ComposerRow(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
@@ -2020,32 +2048,66 @@ private extension AppModel {
     }
 }
 
-/// The shell composer's model menu for a conversation not started yet (#1091): the launcher it starts with (that is the
-/// model), the effort and, a level down, the permission mode ("" keeps the launcher's own).
+/// The shell composer's model menu for a conversation not started yet (#1091): the launcher and, under it, the model it
+/// starts with (#11472, the running chat's model sheet and the web's model panel: launchers first, each one's models a
+/// level down), the effort and, a level down, the permission mode ("" keeps the launcher's own). With nothing picked the
+/// conversation follows Main chat's default and the start names neither launcher nor model.
 struct StarterModesMenu: View {
     @Environment(AppModel.self) private var model
     var modes: StarterComposer.ShellModes
-    var launchers: [Launcher]
+    var starter: AssistantStarterModels
     var efforts: [SessionModes.Option]
+    /// Reads the launchers' model lists that failed again.
+    var retryLists: () -> Void = {}
 
-    /// The button's title: the launcher's model (its name when it names none) and the effort picked. While the
-    /// launcher is not known (#4200) the title is the status text, not nil — the shell bar draws the button so the
-    /// menu's Reading / Couldn't Load Settings section is reachable on the iPhone path.
-    @MainActor static func title(modes: StarterComposer.ShellModes, launchers: [Launcher], model: AppModel) -> SessionModes.ComposerTitle? {
+    /// The button's title: the model the new conversation starts on (Main chat's default with nothing picked, #11472;
+    /// the launcher's name when it names none) and the effort picked. While the launcher is not known (#4200) the title
+    /// is the status text, not nil — the shell bar draws the button so the menu's Reading / Couldn't Load Settings section
+    /// is reachable on the iPhone path.
+    @MainActor static func title(modes: StarterComposer.ShellModes, launchers: [Launcher], mainDefault: LauncherDefault? = nil,
+                                 model: AppModel) -> SessionModes.ComposerTitle? {
         let effort = SessionModes.effort(modes.effort)?.title
-        guard let name = modes.launcher ?? model.launcherSetting(modes) else {
+        guard let current = effective(modes: modes, mainDefault: mainDefault, model: model) else {
             return SessionModes.ComposerTitle(model: model.assistantConfigLoadFailed ? String(localized: "Couldn't Load Settings") : String(localized: "Reading"), effort: effort)
         }
-        let launcher = launchers.first { $0.name == name }
-        return SessionModes.composerTitle(model: SessionModes.modelName(launcher?.model) ?? launcher?.name ?? name,
-                                          effort: effort)
+        let response = APIClient.LaunchersResponse(launchers: launchers, default: mainDefault, unavailable: nil)
+        return SessionModes.composerTitle(model: AssistantModelChoice.displayName(current, response: response), effort: effort)
+    }
+
+    /// What the new conversation starts on (`AssistantStarterChoice.effective`); nil while Persona settings are not read.
+    @MainActor static func effective(modes: StarterComposer.ShellModes, mainDefault: LauncherDefault?,
+                                     model: AppModel) -> AssistantModelChoice.Effective? {
+        guard let fallback = modes.launcher ?? model.launcherSetting(modes) else { return nil }
+        return AssistantStarterChoice.effective(launcher: modes.launcher, model: modes.launcherModel, fallback: fallback,
+                                                mainDefault: mainDefault)
+    }
+
+    private var current: AssistantModelChoice.Effective? {
+        Self.effective(modes: modes, mainDefault: starter.mainDefault, model: model)
     }
 
     var body: some View {
         if modes.mode == "bypassPermissions" { // said first, as in a running conversation's menu (SessionModesMenu)
             Section { BypassWarning() }
         }
-        if modes.launcher ?? model.launcherSetting(modes) == nil {
+        if let current {
+            if !starter.launchers.isEmpty {
+                Section("Model [Assistant View c98e11]") { // the launchers, each one's models a level down (#11472)
+                    if current.picked {
+                        Button {
+                            Haptics.tap()
+                            choose(launcher: nil, model: nil)
+                        } label: {
+                            Label(String(localized: "Follow Main Chat default"), systemImage: Theme.Icon.clearContext)
+                        }
+                        .accessibilityIdentifier("starterModel.followDefault")
+                    }
+                    ForEach(starter.launchers) { l in
+                        launcherMenu(l, current: current)
+                    }
+                }
+            }
+        } else {
             // Settings are not read yet: the menu says so (and offers a retry) instead of a launcher name (#4200).
             Section("Model [Assistant View c98e11]") {
                 if model.assistantConfigLoadFailed {
@@ -2067,18 +2129,6 @@ struct StarterModesMenu: View {
                     .disabled(true)
                 }
             }
-        } else if !launchers.isEmpty {
-            Section("Model [Assistant View c98e11]") { // switches, so the title is drawn (#4322, `MenuChoice`)
-                let current = modes.launcher ?? model.launcherSetting(modes) ?? ""
-                ForEach(launchers) { l in
-                    MenuChoice(id: l.name, selected: current, pick: { name in
-                        if name != current { modes.effort = "" }
-                        modes.launcher = name
-                    }) {
-                        Text(SessionModes.modelName(l.model).map { "\(l.name) · \($0)" } ?? l.name)
-                    }
-                }
-            }
         }
         Section("Thinking Effort") { // switches, so the title is drawn (#4322, `MenuChoice`)
             MenuChoice(id: "", selected: modes.effort, pick: { modes.effort = $0 }) { Text("Use Launcher's") }
@@ -2095,6 +2145,85 @@ struct StarterModesMenu: View {
             Label("Permission Mode: \(SessionModes.mode(modes.mode)?.title ?? String(localized: "Use Launcher's"))", systemImage: SessionModes.mode(modes.mode)?.symbol ?? Theme.Icon.askFirst)
         }
         .pickerStyle(.menu)
+    }
+
+    /// One launcher: its name and, for the one the conversation starts on, its model; a level down its models as the
+    /// running chat's model sheet lists them (`AssistantModelSheet.section`): the catalog's rows with its Default entry,
+    /// else the configured model, a lock's reason, Reading models… or Retry.
+    private func launcherMenu(_ l: Launcher, current: AssistantModelChoice.Effective) -> some View {
+        let list = starter.lists[l.name]
+        let models = starter.visibleModels[l.name] ?? []
+        let configured = list == nil ? nil : AssistantModelChoice.configuredFallback(l, models: models, locked: list?.locked)
+        let aliases = starter.aliases[l.name] ?? [:]
+        let selected = AssistantModelChoice.selectedModel(current, launcher: l.name, aliases: aliases, configuredModel: configured?.id)
+        let pick = { (row: String) in
+            guard let p = AssistantStarterChoice.pick(launcher: l.name, model: row, current: current, aliases: aliases,
+                                                      configuredModel: configured?.id,
+                                                      configuredIsDefault: configured?.sendsDefault == true) else { return }
+            choose(launcher: p.launcher, model: p.model)
+        }
+        let title = l.displayName.flatMap { $0.isEmpty ? nil : $0 } ?? l.name
+        return Menu {
+            Group {
+                if let configured {
+                    // No catalog (a direct API, an older node): its configured model is still a concrete choice; a locked
+                    // launcher sends its Default (no model), never an overriding model ID.
+                    MenuChoice(id: configured.sendsDefault ? "" : configured.id, selected: selected, pick: pick) {
+                        Text(SessionModes.modelName(configured.id) ?? configured.id)
+                    }
+                } else {
+                    if !models.contains(where: \.isDefault) {
+                        // The launcher's own default, when its catalog has no Default row (or is not read yet).
+                        MenuChoice(id: "", selected: selected, pick: pick) {
+                            Text(String(localized: "Default [Prompt Composer 844b8c]"))
+                            if let own = l.model.flatMap({ $0.isEmpty || $0 == "默认" ? nil : $0 }) { Text(own) } // i18n-ignore: legacy wire value, never displayed
+                        }
+                    }
+                    ForEach(models) { m in
+                        MenuChoice(id: m.isDefault ? "" : m.id, selected: selected, pick: pick) {
+                            Text(m.displayName)
+                            if let detail = m.detail { Text(detail) }
+                        }
+                        .accessibilityIdentifier("starterModel.\(l.name).\(m.isDefault ? "default" : m.id)")
+                    }
+                }
+                if let locked = list?.locked {
+                    Button {} label: { Label(locked, systemImage: Theme.Icon.locked) }.disabled(true)
+                }
+                if list == nil {
+                    if starter.listFailures.contains(l.name) {
+                        Button {
+                            Haptics.tap()
+                            retryLists()
+                        } label: {
+                            Label(String(localized: "Retry"), systemImage: Theme.Icon.retry)
+                        }
+                    } else {
+                        Button {} label: { Text(String(localized: "Reading models…")) }.disabled(true)
+                    }
+                }
+            }
+        } label: {
+            // A submenu's row draws no second line and tints an icon with the accent, unlike the switches' checks: the one
+            // the conversation starts on says its model after its name instead.
+            if current.launcher == l.name,
+               let name = AssistantModelChoice.displayName(current, response: .init(launchers: starter.launchers, default: starter.mainDefault, unavailable: nil)),
+               name != title {
+                Text(verbatim: "\(title) · \(name)")
+            } else {
+                Text(title)
+            }
+        }
+        .accessibilityIdentifier("starterModel.\(l.name)")
+    }
+
+    /// Keeps the pick for the new conversation (nil, nil: follow Main chat's default again). Another launcher clears the
+    /// effort, as before (its levels differ); another model of the same one keeps it while its levels have it (`retained`).
+    private func choose(launcher: String?, model picked: String?) {
+        let next = launcher ?? starter.mainDefault?.launcher ?? model.launcherSetting(modes)
+        if next != current?.launcher { modes.effort = "" }
+        modes.launcher = launcher
+        modes.launcherModel = picked
     }
 }
 

@@ -3,74 +3,31 @@
 // It is the agent's own claim and the card says so. Beside "merged" and "deployed" stands what the hub found when it
 // looked itself: confirmed, contradicted (in the caution color, with the warning mark: color is never the only signal)
 // or not checked. It is not part of the transcript: the reply that carried the raw block shows without it while this
-// card is there (lib/closeout.ts stripCloseout).
+// card is there (lib/closeout-text.ts stripCloseout).
 // Verified commands get only the facts recorded in this closeout's own exchange, never a badge: CloseoutEvidence, a chunk
 // of its own, so its matching code and strings stay off the first screen (#8118).
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { closeoutClaim, shownCloseout, type Claim } from "../../lib/closeout";
-import { lazyPage } from "../../lib/lazy-page";
 import { clickLink, linkHref } from "../../lib/links";
-import { getState, subscribe, type State } from "../../lib/store";
 import type { Segment } from "../../lib/turns";
 import type { Item, Session } from "../../lib/types";
 import { Collapse, cx } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { prLink } from "../TodoStageBar";
+import { CloseoutEvidence, closeoutEvidenceChunk, loadCloseoutEvidence, onCloseoutEvidenceChunk } from "./closeout-chunks";
+export { stripCloseout } from "../../lib/closeout-text";
 
 const KIND_ICON: Record<string, IconName> = { pr: "pullRequest", commit: "commit", branch: "branch", doc: "file", build: "tool", url: "link" };
 
-const CloseoutEvidence = lazyPage(() => import("./CloseoutEvidence").then((m) => m.CloseoutEvidence));
-
 // The evidence chunk starts loading as soon as the store holds a session whose closeout a card would show, before any
-// card mounts (preloadCloseoutEvidence, #8139). Session lists carry only where a closeout stands; did and Verified come
+// card mounts (preloadCloseout, #8139). Session lists carry only where a closeout stands; did and Verified come
 // with the session's own read, so the chunk is normally in before a card has a Verified line to draw the row under. When
 // that read still comes first, the card keeps drawing without its did, Verified and evidence rows until the chunk is in
 // and so is the closeout's exchange (the row's facts come from it): HOLD_MS at most, and never again once they showed.
 // The card grows once, as it does when the read arrives, and not again when the chunk or the transcript lands. After a
 // failed load they draw without the row, which joins them when a later card's load brings the chunk in.
 const HOLD_MS = 1000;
-type Chunk = "idle" | "loading" | "failed" | "retrying";
-let chunk: Chunk = "idle";
-const chunkListeners = new Set<() => void>();
-const setChunk = (next: Chunk) => {
-  chunk = next;
-  chunkListeners.forEach((l) => l());
-};
-const onChunk = (l: () => void) => {
-  chunkListeners.add(l);
-  return () => void chunkListeners.delete(l);
-};
-const chunkNow = (): Chunk | "in" => (CloseoutEvidence.ready() ? "in" : chunk);
-
-/** Loads the evidence chunk (again after a failure); nothing while it is in or on its way. */
-function loadEvidence() {
-  if (CloseoutEvidence.ready() || chunk === "loading" || chunk === "retrying") return;
-  setChunk(chunk === "failed" ? "retrying" : "loading");
-  CloseoutEvidence.preload().then(() => setChunk("idle"), () => setChunk("failed"));
-}
-
-type SaverWindow = { navigator?: { connection?: { saveData?: boolean } } };
-
-/** Starts the evidence chunk once the store holds a session whose closeout a card would show (App, from the start). Not
- *  with Data Saver on: a card's own load starts it then. Returns the stop. */
-export function preloadCloseoutEvidence(w: SaverWindow = globalThis as SaverWindow): () => void {
-  if (w.navigator?.connection?.saveData) return () => {};
-  let sessions: State["sessions"] | undefined;
-  let summaries: State["sessionSummaries"] | undefined;
-  const check = () => {
-    const s = getState();
-    if (s.sessions === sessions && s.sessionSummaries === summaries) return;
-    sessions = s.sessions;
-    summaries = s.sessionSummaries;
-    if (!Object.values(sessions).some((rows) => rows.some((row) => shownCloseout(row))) && !summaries.some((row) => shownCloseout(row))) return;
-    stop();
-    loadEvidence();
-  };
-  const stop = subscribe(check);
-  check();
-  return stop;
-}
 
 type ExpandFold = (fold: Item) => Promise<boolean | void>;
 
@@ -87,13 +44,13 @@ function webLink(ref: string): string | undefined {
 export function CloseoutCard({ session, segment, expandFold }: { session: Session; segment?: Segment; expandFold?: ExpandFold }) {
   const c = shownCloseout(session);
   const [open, setOpen] = useState(true);
-  const evidenceChunk = useSyncExternalStore(onChunk, chunkNow, chunkNow);
+  const evidenceChunk = useSyncExternalStore(onCloseoutEvidenceChunk, closeoutEvidenceChunk, closeoutEvidenceChunk);
   const hasVerified = Boolean(c?.verified);
   const waiting = hasVerified && (evidenceChunk === "idle" || evidenceChunk === "loading" || !segment);
   const [released, release] = useState(false);
   const hold = waiting && !released;
   useEffect(() => {
-    if (hasVerified) loadEvidence();
+    if (hasVerified) loadCloseoutEvidence();
   }, [hasVerified]);
   useEffect(() => {
     if (!hasVerified) return;

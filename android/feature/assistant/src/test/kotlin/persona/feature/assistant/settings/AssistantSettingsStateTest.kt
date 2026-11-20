@@ -7,6 +7,10 @@ import persona.core.contracts.api.AgentSkill
 import persona.core.contracts.api.AssistantRefused
 import persona.core.contracts.api.AssistantSkills
 import persona.core.contracts.api.MemoryFile
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -20,6 +24,7 @@ import java.util.Locale
 /** Runs with Robolectric so the page's text resolves from the Chinese resources (the default test language). */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
+@OptIn(ExperimentalCoroutinesApi::class)
 class AssistantSettingsStateTest {
     private val res get() = RuntimeEnvironment.getApplication().resources
     private val SettingsNotice.shown get() = text.resolve(res)
@@ -39,10 +44,13 @@ class AssistantSettingsStateTest {
         val deleted = mutableListOf<String>()
         var fail = false
         var updateAnswer: ((AssistantConfigUpdate) -> AssistantConfig)? = null
+        var configAnswer: suspend () -> AssistantConfig = { config }
+        var beforeUpdate: suspend () -> Unit = {}
         var skillsAnswer: () -> AssistantSkills = { AssistantSkills("server", "服务器", listOf(AgentSkill("lark-gateway", "飞书", "builtin"))) }
 
-        override suspend fun config(): AssistantConfig { check(!fail) { "hub unreachable" }; return config }
+        override suspend fun config(): AssistantConfig { check(!fail) { "hub unreachable" }; return configAnswer() }
         override suspend fun updateConfig(update: AssistantConfigUpdate): AssistantConfig {
+            beforeUpdate()
             check(!fail) { "hub refused" }
             updates += update
             config = config.copy(
@@ -56,6 +64,7 @@ class AssistantSettingsStateTest {
                 main = if (update.main == AssistantConfigUpdate.CLEAR_MAIN) null else update.main ?: config.main,
                 mainTasksQuiet = update.mainTasksQuiet ?: config.mainTasksQuiet,
                 mainBackgroundFolded = update.mainBackgroundFolded ?: config.mainBackgroundFolded,
+                recentTaskChats = update.recentTaskChats ?: config.recentTaskChats,
                 nextSuggestions = update.nextSuggestions ?: config.nextSuggestions,
                 mainSupervisesOwnTasks = update.mainSupervisesOwnTasks ?: config.mainSupervisesOwnTasks,
                 closeEndedTerminals = update.closeEndedTerminals ?: config.closeEndedTerminals,
@@ -147,6 +156,111 @@ class AssistantSettingsStateTest {
         state.setMainBackgroundFolded(true)
         assertEquals(false, state.state.value.config?.mainBackgroundFolded)
         assertTrue(state.state.value.notice?.error == true)
+    }
+
+    @Test fun recentTaskChatsSwitchUpdatesAtOnceAndRollsBack() = runTest {
+        val seen = mutableListOf<Boolean?>()
+        val api = FakeApi()
+        val state = AssistantSettingsState(api, Zone(), recentTaskChatsChanged = { { value -> seen += value } })
+        state.load()
+        state.setRecentTaskChats(true)
+        assertTrue("an older hub has no switch", api.updates.isEmpty())
+        api.config = api.config.copy(recentTaskChats = false)
+        state.load()
+        state.setRecentTaskChats(true)
+        assertEquals(AssistantConfigUpdate(recentTaskChats = true), api.updates.single())
+        assertEquals(true, state.state.value.config?.recentTaskChats)
+        assertEquals(true, seen.last())
+        api.fail = true
+        state.setRecentTaskChats(false)
+        assertEquals("a refused write restores the previous list", true, state.state.value.config?.recentTaskChats)
+        assertEquals(true, seen.last())
+        assertTrue(state.state.value.notice?.error == true)
+    }
+
+    @Test fun recentTaskChatsRestoresSnapshotWhenWriteIsCancelled() = runTest {
+        val seen = mutableListOf<Boolean?>()
+        var captures = 0
+        val api = FakeApi().apply { config = config.copy(recentTaskChats = false) }
+        val state = AssistantSettingsState(api, Zone(), recentTaskChatsChanged = {
+            captures++
+            { value -> seen += value }
+        })
+        state.load()
+        val updateStarted = CompletableDeferred<Unit>()
+        val never = CompletableDeferred<Unit>()
+        api.beforeUpdate = {
+            updateStarted.complete(Unit)
+            never.await()
+        }
+        val writing = async { state.setRecentTaskChats(true) }
+        updateStarted.await()
+        writing.cancel()
+        writing.join()
+
+        assertTrue("the write was cancelled", writing.isCancelled)
+        assertEquals("cancellation restores the previous setting", false, state.state.value.config?.recentTaskChats)
+        assertEquals("cancellation restores the shared Recent snapshot", false, seen.last())
+        assertEquals("one write reuses its captured snapshot updater", 1, captures)
+    }
+
+    @Test fun recentTaskChatsSerializesConfigLoadStartedBeforeWrite() = runTest {
+        val api = FakeApi().apply { config = config.copy(recentTaskChats = false) }
+        val state = AssistantSettingsState(api, Zone())
+        state.load()
+        val release = CompletableDeferred<Unit>()
+        api.configAnswer = {
+            val stale = api.config
+            release.await()
+            stale
+        }
+        val loading = async { state.load() }
+        runCurrent()
+        val writing = async { state.setRecentTaskChats(true) }
+        runCurrent()
+        release.complete(Unit)
+        loading.await()
+        writing.await()
+        assertEquals(true, state.state.value.config?.recentTaskChats)
+        assertFalse(state.state.value.loading)
+    }
+
+    @Test fun recentTaskChatsSkipsConfigLoadStartedDuringWrite() = runTest {
+        val api = FakeApi().apply { config = config.copy(recentTaskChats = false) }
+        val state = AssistantSettingsState(api, Zone())
+        state.load()
+        val updateStarted = CompletableDeferred<Unit>()
+        val finishUpdate = CompletableDeferred<Unit>()
+        api.beforeUpdate = {
+            updateStarted.complete(Unit)
+            finishUpdate.await()
+        }
+        val writing = async { state.setRecentTaskChats(true) }
+        updateStarted.await()
+        val loading = async { state.load() }
+        runCurrent()
+        assertEquals(true, state.state.value.config?.recentTaskChats)
+        finishUpdate.complete(Unit)
+        writing.await()
+        loading.await()
+        assertEquals(true, state.state.value.config?.recentTaskChats)
+        assertFalse(state.state.value.loading)
+    }
+
+    @Test fun recentTaskChatsKeepsHubSuccessWhenSnapshotSyncFails() = runTest {
+        val api = FakeApi().apply { config = config.copy(recentTaskChats = false) }
+        var callbacks = 0
+        val state = AssistantSettingsState(api, Zone(), recentTaskChatsChanged = {
+            { _ ->
+                callbacks++
+                if (callbacks == 2) error("pairing closed")
+            }
+        })
+        state.load()
+        state.setRecentTaskChats(true)
+        assertEquals(true, api.config.recentTaskChats)
+        assertEquals(true, state.state.value.config?.recentTaskChats)
+        assertTrue(state.state.value.notice?.error != true)
     }
 
     @Test fun nextSuggestionsSwitchWritesOnlyItselfAndFollowsTheHubAnswer() = runTest {

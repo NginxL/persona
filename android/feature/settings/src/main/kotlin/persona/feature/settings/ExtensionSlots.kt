@@ -330,7 +330,7 @@ fun rememberMachineExtensionSections(slots: ExtensionSlots?, machineId: String,
                 JInlineStatus(view.error.text(), Modifier.padding(vertical = Tokens.Space.xs), tone = InlineTone.Failed)
 
             }
-            extensionViewItems(key, view, handle, showTitles = true)
+            extensionViewItems(key, view, handle, showTitles = true, compactGraph = true)
         }
     }
 }

@@ -113,9 +113,9 @@
     <string name="chat_answered_entered">(Entered)</string>
     <string name="chat_answered_separator">", "</string>
     <string name="chat_answered_labeled">%1$s: %2$s</string>
-    <string name="chat_answered_mode_accept_edits">auto-accept edits</string>
-    <string name="chat_answered_mode_bypass">allow everything</string>
-    <string name="chat_answered_mode_default">confirm each step</string>
+    <string name="chat_answered_mode_accept_edits">Auto accept edits</string>
+    <string name="chat_answered_mode_bypass">Full access</string>
+    <string name="chat_answered_mode_default">Default permissions</string>
     <string name="chat_context_ai_edit">AI edit</string>
     <string name="chat_context_linked">Context</string>
     <string name="chat_context_web_selection">Web selection</string>
@@ -287,11 +287,11 @@
     <string name="chat_tasks_collapsed">Collapsed</string>
     <string name="chat_tasks_open_task">Open task</string>
     <string name="chat_tasks_answered_default">Answered</string>
-    <string name="chat_tasks_permission_accept_edits">Can edit files</string>
-    <string name="chat_tasks_permission_plan">Plan first</string>
-    <string name="chat_tasks_permission_auto">Auto</string>
-    <string name="chat_tasks_permission_bypass">Allow everything</string>
-    <string name="chat_tasks_permission_default">Ask every step</string>
+    <string name="chat_tasks_permission_accept_edits">Auto accept edits</string>
+    <string name="chat_tasks_permission_plan">Plan mode</string>
+    <string name="chat_tasks_permission_auto">Auto-review</string>
+    <string name="chat_tasks_permission_bypass">Full access</string>
+    <string name="chat_tasks_permission_default">Default permissions</string>
     <plurals name="chat_tasks_plan_started">
         <item quantity="one">✓ Started %1$d task</item>
         <item quantity="other">✓ Started %1$d tasks</item>
@@ -308,6 +308,8 @@
     </plurals>
     <string name="chat_tasks_plan_single">Start like this</string>
     <string name="chat_tasks_default_model">Default model</string>
+    <string name="chat_tasks_preset">Preset %1$s</string>
+    <string name="chat_tasks_launcher_preset">%1$s · %2$s</string>
     <string name="chat_tasks_read_only">Read-only requested</string>
     <string name="chat_tasks_plan_remember">Start directly here and in subfolders</string>
     <plurals name="chat_tasks_plan_start_count">

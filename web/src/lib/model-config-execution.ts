@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import { api, enc } from "./api";
 import { MANAGER_HEADER } from "./manager-choice";
+import type { CandidateUpdate } from "./model-candidates";
 import { modelSummary, providerAgent, providerName, RUNTIMES, runtimeLabel, type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody } from "./model-config";
 import type { Machine } from "./types";
 
@@ -196,21 +197,26 @@ export function parentCategory(p: ModelPurpose, purposes: ModelPurpose[]): Model
   return ownRecord(p) && p.parent ? purposes.find((c) => c.id === p.parent && c.category_id === c.id) : undefined;
 }
 
-/** A provider that takes a thinking effort: a launcher, or a direct API connection on Messages or Responses (one that
- *  says no protocol is a Messages one). Unknown: the editor does not hold it back. */
+/** A provider that took a thinking effort before Chat support (#8779): a launcher, or a direct API connection on Messages
+ *  or Responses (one that says no protocol is a Messages one). Unknown: the editor does not hold it back. */
 function takesEffortProvider(v?: ModelProvider): boolean {
   return v?.kind !== "api" || v.api === "responses" || v.api === "messages" || !v.api;
 }
 
-/** Whether the editor offers a thinking effort for a draft that runs on `chosen`. The hub lists `effort` in an API
- *  purpose's `fields` only while the provider in effect takes one (models_routes.go), so where that provider takes
- *  none (a Chat Completions connection) its absence says nothing about another: picking a Messages or Responses one here
- *  offers it (#7980, Meeting minutes on a Chat Completions connection). Otherwise the hub's `fields`, and on a direct
- *  API connection only one that takes it. The uses of Agents take it on whatever they run on (`followsAgents`). */
-export function effortOffered(p: ModelPurpose, chosen: ModelProvider | undefined, effective: ModelProvider | undefined, followsAgents = false): boolean {
-  const field = supportsField(p, "effort")
-    || (p.kind === "api" && !!p.fields?.includes("provider") && !!effective && !takesEffortProvider(effective));
-  return field && (followsAgents || takesEffortProvider(chosen));
+/** Whether the editor offers a thinking effort for a draft that runs on `chosen`. A current hub lists `effort` for Chat
+ *  and marks the provider `chat_effort`; without that mark, an older hub's field for Messages or Responses does not
+ *  admit a different Chat provider. An effort field already supplied for any effective Chat provider remains valid.
+ *  `chatEffortKnown` is another listed provider's current-hub mark: it restores Messages or Responses when the previous
+ *  effective provider is missing. On an older hub that omits effort for Chat, picking Messages or Responses offers it
+ *  again (#7980). */
+export function effortOffered(p: ModelPurpose, chosen: ModelProvider | undefined, effective: ModelProvider | undefined, followsAgents = false, chatEffortKnown = false): boolean {
+  const explicit = supportsField(p, "effort");
+  const markedChat = chosen?.kind === "api" && chosen.api === "chat" && chosen.chat_effort === true;
+  const field = explicit || (p.kind === "api" && !!p.fields?.includes("provider")
+    && (markedChat || chatEffortKnown || (!!effective && !takesEffortProvider(effective))));
+  const chat = chosen?.kind === "api" && chosen.api === "chat"
+    && (chosen.chat_effort === true || (explicit && effective?.kind === "api" && effective.api === "chat"));
+  return field && (followsAgents || chat || takesEffortProvider(chosen));
 }
 
 /** What Save sends: the revision and each field the purpose takes, explicit `null` for an empty one. `effort` says
@@ -234,7 +240,7 @@ export function resetPatch(p: ModelPurpose, runtime = "", configDir?: string): R
   return ownRecord(p) ? { ...patch, provider: null, model: null, effort: null } : patch;
 }
 
-export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null>, manager?: string): Promise<ModelPurposeBody> {
+export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null | CandidateUpdate>, manager?: string): Promise<ModelPurposeBody> {
   return api(`/model-config/purposes/${enc(p.id)}`, { method: "PATCH", json: patch, headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 }
 

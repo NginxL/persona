@@ -114,7 +114,7 @@ func TestGoldenSnapshotAndAgentsListUltracode(t *testing.T) {
 		proto.Session{SessionID: "assistant", Title: "主对话", State: proto.StateWorking, Assistant: true, Ultracode: &on})
 	s := newStorelessService(t, f)
 	snap := prompts.Snapshot{Now: time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC), Zone: "UTC"}
-	snap.Needs, snap.Unread, snap.Awaiting, snap.Waiting, snap.Done, snap.Muted, snap.Working, snap.Workflows = s.snapshotAgents(context.Background(),
+	snap.Needs, snap.Unread, snap.Awaiting, snap.Waiting, snap.Done, snap.Muted, snap.Working = s.snapshotAgents(context.Background(),
 		[]Device{{ID: "box", Name: "电脑", Online: true}}, "")
 	if len(snap.Needs) != 1 || snap.Needs[0].Ultracode != "on" || len(snap.Unread) != 1 || snap.Unread[0].Ultracode != "off" ||
 		len(snap.Working) != 2 || snap.Working[0].Ultracode != "" || snap.Working[1].Ultracode != "on" {

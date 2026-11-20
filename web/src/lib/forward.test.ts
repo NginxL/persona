@@ -160,9 +160,15 @@ describe("what a forward carries", () => {
 
 describe("the card and the route", () => {
   beforeEach(() => initI18n("en"));
-  afterEach(() => initI18n("zh-Hans"));
+  afterEach(() => {
+    vi.useRealTimers();
+    return initI18n("zh-Hans");
+  });
 
   it("heads the card with who wrote it and the chat, then the computer and time", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // One minute ago is today at noon; just after midnight it belongs to yesterday and correctly carries a date.
+    vi.setSystemTime(new Date(2026, 10, 18, 12));
     const now = new Date();
     const at = new Date(now.getTime() - 60_000).toISOString();
     const ref = forwardRef("x", source({ time: at }));

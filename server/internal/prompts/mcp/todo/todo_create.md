@@ -1,4 +1,4 @@
-Create a Persona to-do when the user asks or agrees to record work or a reminder. Immediate, without confirmation; agents execute via task_plan. An open title/due duplicate returns the existing to-do, but refuses supplied bindings: edit those with todo_repositories_get/set. Use a short action title in the user's language and details in notes. In a leader chat, records a piece of that direction; dispatch with task_plan todo_id, or finish unassigned work with todo_complete. Optional repository_bindings save atomically; get IDs/catalog_revision from repositories_list. Metadata does not create files or advance task progress.
+Record requested/agreed work or reminders immediately, without confirmation; execute via task_plan. Open title/due duplicates return existing to-dos but refuse bindings: use todo_repositories_get/set. Short title in the user's language; details in notes. In leader chats: record that direction's work; task_plan dispatches, todo_complete finishes unassigned work. Bindings save atomically; IDs/catalog_revision from repositories_list. No files or task progress changes.
 
 ```json
 {
@@ -13,15 +13,15 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
     },
     "notes": {
       "type": "string",
-      "description": "Source, links, amounts and other details."
+      "description": "Details."
     },
     "due": {
       "type": "string",
-      "description": "Due date YYYY-MM-DD when only the day is known; otherwise YYYY-MM-DD HH:MM in the user's time zone or RFC3339. Relative 2h/3d also accepted."
+      "description": "Day only: YYYY-MM-DD; otherwise YYYY-MM-DD HH:MM (user time zone) or RFC3339. Relative 2h/3d accepted."
     },
     "remind": {
       "type": "string",
-      "description": "Reminder datetime (user's time zone or RFC3339) or relative 30m/2h/1d; never past. Omit unless requested or the deadline is close and important."
+      "description": "Future reminder (user time zone/RFC3339 or relative 30m/2h/1d). Only if requested or deadline close and important."
     },
     "priority": {
       "type": "string",
@@ -42,7 +42,7 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
     },
     "project": {
       "type": "string",
-      "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates."
+      "description": "Existing kb_list project slug/name; prefer long-term work. Only when clear; no near-duplicates."
     },
     "part_of": {
       "type": "string",
@@ -95,10 +95,30 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
                     ]
                   },
                   "value": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "default"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                ]
               },
               "links": {
                 "type": "array",
@@ -106,7 +126,8 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
                   "type": "object",
                   "properties": {
                     "url": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     },
                     "kind": {
                       "type": "string",
@@ -116,16 +137,50 @@ Create a Persona to-do when the user asks or agrees to record work or a reminder
                       ]
                     },
                     "number": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
                     },
                     "title": {
                       "type": "string",
-                      "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                      "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
                       "maxLength": 1024
                     }
                   },
-                  "additionalProperties": false
-                }
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "required": [
+                        "url"
+                      ],
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "number"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "kind",
+                        "number"
+                      ],
+                      "not": {
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "maxItems": 50
               }
             },
             "additionalProperties": false

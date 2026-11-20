@@ -262,7 +262,7 @@ Apply in order; on a match, do not call the model:
    "questions":[{"question":"…","header":"…","options":[{"label":"…","description":"…"}],"multi_select":false}],
    "link":{"url":"https://…","minutes":10},
    "wait":{"what":"What it is waiting for","then":"What to do afterward","check_minutes":10,"agent":"<short id>","risky":false},
-   "artifacts":[{"kind":"pr|commit|doc|build|url","ref":"…"}]}
+   "artifacts":[{"kind":"pr|commit|doc|build|url|file","ref":"…"}]}
   ```
 
 - Decision principles in the prompt:
@@ -275,26 +275,58 @@ Apply in order; on a match, do not call the model:
 
 - The `session_work` table ("Storage" below), sent with the session list as `work`;
 - When done: add `完成：<结论>` ("Completed: <conclusion>") to the knowledge-base project timeline for this directory (`kbAgentDone` used to record the last words of every turn; now it records the conclusion when available);
+- A supervised worker's `report_to_supervisor(kind=done)` and the committed `WorkDone` also share one structured outcome writer. It appends a typed outcome, every model-extracted decision with its question and reason, and every pitfall to the project's `memory.jsonl`, deduplicated by todo, agent, turn, transcript item and per-kind index. New records carry `recorded_at` and `verification=agent_reported`; the dispatch prompt marks them as not supervisor-accepted. Ownership is the todo's live explicit project, then its unique direction's live project through `Supervision.Supervisor` / `leaderAbove`, then `ProjectsForWork(machine, cwd)`; without any, nothing is written and a title is never treated as ownership. If the model is unavailable, the original short conclusion and links are kept with no invented decisions or pitfalls. A failed append logs a warning and remains retryable; the base outcome is appended after its typed records so a partial retry cannot claim a complete batch. This record does not change the existing `log.md` conclusion. Later dispatches inject its bounded contents as described in [todos.md](todos.md) "Record conclusions on completion";
 - Replace the "Completed" push body with the conclusion; the main chat's live snapshot adds "Done" and "Waiting" sections ("What Persona knows" below).
+
+### Planned task assignments and instructions
+
+For people delegating work from Assistant, `task_plan.prompt` contains the assignment, boundaries and new facts. Optional `context` supplies pertinent facts the manager cannot resolve. Do not copy knowledge-base project background into either field: the manager appends the matching project and direction context once, followed by the to-do's effective decisions. Criteria and read-only constraints stay with the assignment; project text is user context, never system policy. Attachments remain last.
+
+With a node announcing `task_instructions_v1`, the manager sends stable handoff, role, delivery and closeout rules separately as `task_instructions`. A positively identified Claude launcher forwards an append-system-prompt file; node state and Herdr's restore command retain that file. Its SessionStart hook does not ask for a duplicate closeout already supplied by the task. A clean native Codex launch uses the developer-instructions config channel and retains it for resume. Configured Codex profiles, project/home config files, remote daemons, uncertain wrappers and overlong restore commands use a first-message fallback, preserving their existing policy. Runtimes and desktop launchers likewise receive required rules after the assignment. If a previously dedicated Claude policy cannot be restored by a newly selected launcher, an explicit continuation carries it once; a bare Resume is refused before creating a terminal, with instructions to send a continuation or choose the original launcher. Older nodes receive the combined first message; no required rule is silently dropped. Historical sessions keep their original instructions and closeout parsing.
 
 ## Closeout
 
 A closeout is a small record an Agent ends a turn with, so that a stopped session answers "done or not, merged or not, deployed or not, what is missing" without anyone reading its transcript or asking it (#3612). It is the Agent's own claim; nothing in it has been checked by the hub.
 
+On a node that announces `closeout.markdown.v1`, the Agent writes an ordinary Markdown report. A terminal shows the heading and fields directly. This is a complete example:
+
+```markdown
+### Persona work report
+
+- Status: blocked
+- Merged: no
+- Deployed: n/a
+- Did: Checked three of the four sample entries.
+- Artifact: doc notes/review.md
+- Verified: Three entries matched the checklist.
+- Missing: The fourth sample entry.
+- Waiting: The sample owner will supply the fourth entry.
+
+---
+```
+
+The other supported headings are `### Persona 工作报告` and `### Persona 作業報告`. Each report ends the reply with a standalone `---`, after its required Status, Merged and Deployed lines, in that order. Optional list fields are Did, Artifact, Delivery, Unblock, Verified, Missing, Waiting and Next. On a completed turn with no outstanding need, a single `- Next: Shortlist the three candidates.` line offers that reply in the composer. It passes through the older-client projection and leaves the work state done. Field names and enumerated values stay fixed across languages. Ordinary headings/lists, quotations, code examples, reports without a closing rule and reports followed by further remarks remain ordinary text. The runtime's trailing citation footer may follow a report. Explicit delivery still needs the latest task-owned, complete assistant reply and its unambiguous PR artifact. A document-only completion still needs an artifact and explicit `n/a` for both merge and deployment.
+
+Archived XML records remain readable. A destination with unknown capability, including an older node, receives the following form:
+
 ```text
 <closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
-artifact: <pr|commit|branch|doc|build|url> <reference>
+artifact: <pr|commit|branch|doc|build|url|file> <reference>
+delivery: <live|pr|merged|off|none; only when the task asks for delivery>
+unblock: <user|agent|other; only with a delivery gate>
 verified: <what was run or measured and its reading, or "untested">
 missing: <what it still needs from someone, if anything>
 waiting: <for status="blocked": who or what it waits for>
+next: <optional on done: one short reply naming the proposed action in the owner's language>
 </closeout>
 ```
 
 - **Reading it** (`server/internal/closeout`): the last block in the final reply counts. The attribute names, the line keys and the status values are fixed; the text after each colon is in the user's language. A block with no status, or one that is not `done`, `not_done` or `blocked`, is no closeout. Bounds: three `did` lines of 200 characters, five artifacts, 300 characters for `verified` and `missing`, 120 for `waiting`. `n/a` and an unsaid `merged` / `deployed` are left empty.
+- **Optional next step** (#11874). An Agent that has finished and offers follow-up work may add one `next` line in the owner's voice, for example `next: Shortlist the three candidates.` A complete final report with status `done` and no outstanding `missing` or `waiting` value can supply the suggested reply above the empty composer. The owner can fill it in, edit it, send it, or leave it unanswered. The line is optional and limited to 180 Unicode characters. Duplicate, multiline and overlong values are discarded. A question in ordinary prose does not produce a report-based suggestion.
 - **Asking for it** (the `closeout` switch, off by default): when an Agent's Stop hook fires, the node holds the stop once (`decision: block`, `server/internal/node/closeout_stop.go`) if all of these hold: the session has Persona's own hooks (sessions the user started in a terminal only report and are never held); it is not an assistant conversation, a subagent or a review's reviewer; the stop is not already a held one (`stop_hook_active`); the last reply is not empty, not a model API error and has no closeout; and the turn changed files or ran commands (a `tool_use` of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` or `Bash` since the turn's prompt, read from the last 2 MiB of the transcript). The node then asks the manager (`agents.closeout.check`, 5 seconds), which answers with the reason only while the main switch and `closeout` are on (`server/internal/assistant/agents_closeout.go`, prompt `prompts/agents/closeout_required.md`). The Agent is told to repeat its conclusion with a closeout and to start nothing new. A turn that cannot be read, a manager that does not answer, and an Agent that ignores the request all end as before: at most one held stop per turn. The work event `closeout_asked` records each one.
 - **Telling it up front** (the same switch; `server/internal/assistant/agents_closeout_brief.go`, prompt `prompts/agents/closeout_brief.md`, which shares its filling rules with the held stop's through `prompts/agents/closeout_rules.md`): a held stop costs the Agent one more turn, so an Agent is told the form before it works, in two places.
-  - *With its task.* The prompts of `task_plan`, `agent_start` and `dispatch_start` end with the form and with when to write it: at the very end of the final reply of every turn that changed files or ran commands. A turn that only answered needs none, except one that ends with a question that is only conversation or an offer: it writes `status="done"` with no `missing`, so the turn is not read as awaiting the user's reply (#4110, "Awaiting your reply" below). The held stop and the status question still cover only turns that did work. This is part of the prompt, so it reaches every runtime, Codex included. When the delivery standard is asked for too (`docs/assistant/todos.md` "Delivery"), the two are one instruction: the delivery line first, the closeout block after it, both saying the same of merging and deploying. `deliveryMark` reads the line wherever it stands in the reply, so a block after it changes nothing for the code that reads it.
+  - *With its task.* The prompts of `task_plan`, `agent_start` and `dispatch_start` end with the form and with when to write it: at the very end of the final reply of every turn that changed files or ran commands. A turn that only answered needs none, except one that ends with a question that is only conversation or an offer: it writes `status="done"` with no `missing`, so the turn is not read as awaiting the user's reply (#4110, "Awaiting your reply" below). The held stop and the status question still cover only turns that did work. This is part of the prompt, so it reaches every runtime, Codex included. When a planned task also asks for the delivery standard (`docs/assistant/todos.md` "Delivery"), new replies use only this block: `delivery` records live, pr, merged, off or none; `missing` records the gate, `unblock` its responsible party and `waiting` the concrete dependency. `merged` and `deployed` still record facts, so deployed-but-disabled is `deployed="yes"` with `delivery: off`. Historical delivery lines and blocks without these fields remain readable; an explicit historical delivery line keeps its precedence.
   - *As a session starts.* A Claude Code session with Persona's own hooks is given the form as the SessionStart hook's `additionalContext` (`server/internal/node/closeout_start.go`): an Agent opened from an app with no task prompt, a resumed one, and one whose context was compacted or cleared. The node asks the manager once per session (`agents.closeout.brief`, 1.5 seconds) and keeps the answer, so later starts of that session ask nothing; a manager that does not answer in time tells nothing, and the session then learns the form only if a stop of its is held. Nothing is asked for a session that only reports (its hook is async and cannot answer), one outside an engine pane, a subagent, or an assistant conversation; the manager answers nothing while a switch is off and for a review's reviewer (by its session once linked, by the review's worktree before). A task's Agent on Claude Code is therefore told twice, in the same words; the session's copy does not mention the delivery line.
   - Sessions the user started in a terminal, and Codex sessions started without a task prompt, are told nothing up front: the first only report, and Persona neither holds a Codex stop nor adds starting context through Codex hooks (`docs/integrations/codex.md`, "Closeout").
 - **Triage** reads the closeout from the final reply before it asks the model. `status="done"` is `done` by rule (`by: "rule"`, no model call), with the first `did` line as the list line. With `not_done` or `blocked` the model is still asked what the turn waits for, and the closeout is kept on the result; when the Agent says `not_done` and the model reads the reply as done, the Agent's word wins and the turn is not finished (below), as any turn nobody can call finished.
@@ -308,6 +340,16 @@ waiting: <for status="blocked": who or what it waits for>
 - **Delivery**: a reply with a closeout and no delivery line of its own (`docs/assistant/todos.md` "Delivery") states its delivery through the closeout: deployed `yes` is live, merged `yes` is merged and not live, merged `no` with a pull request is held at the PR, and a done closeout that says neither is "nothing to ship". A delivery line in the same reply wins.
 - **Not done yet** (follow-ups of #3612): the web (`docs/web/web.md`, "Pages": **Closeout**; the web and Android also have `closeout_ask`, #3616), Android (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on") and the iOS app ("Clients" below) draw the closeout and have the switch, the Mac app and the watch do not; only Android gives a turn that is not finished a mark of its own (on the web and iOS it shows as the plain line of an Unread row, with a claim the hub found untrue marked in the suffix); Codex has no held stop and no starting context, so a Codex session started without a task prompt writes a closeout only if it is asked to (one it writes is read all the same); a session already running when the switch is turned on learns the form at its next start or held stop; the form reaches a task's Agent on Claude Code twice (prompt and starting context).
 
+## Files a task hands over (#10511)
+
+A task whose result is a file — a report, a PDF, an image, an archive — must not have its content pasted into the reply: the conversation sees a clipped copy of the text (1500 characters in a quiet task's notice, 600 in the receipt, 24 KiB in a paged item), and a binary file cannot be pasted at all.
+
+- **Asking for it** (always, independent of the closeout switch): every task prompt ends with `prompts/agents/task_files.md` (started by `startTaskAgent` and `startTaskSuccessor`), which asks the Agent to write one `file: <absolute path>` line per file (at most five) in its final reply, and never to paste the file's content. A closeout may name the same file as `artifact: file <path>`.
+- **Copying it** (`server/internal/assistant/task_files.go`): when a task's turn ends, `taskTurnSettled` reads the whole final reply (the paged item again with `session.item` when the node cut it), takes the paths, and copies each from the Agent's computer to the computer of the conversation that hears of the task (`taskReceiver`: its supervisor, the reporting conversation that opened it, the main conversation for a quiet one, else its origin). It uses the same node RPCs as the user's attachments in the other direction: `file.chunk` (the node's path guard refuses credentials, iCloud and the hub's own secrets) and `file.upload` with `dest=file`, which lands in `uploads/files/<date>/` and is kept, not swept (`dest=terminal` when the node is older). The same computer copies nothing. Limits: explicit paths only, regular files, 50 MB each and 100 MB a turn, five a turn; a copy that fails says why in the notice and never fails the task. The copy is the same trust as the reply it comes with: an Agent can already name any file it can read, and the read guard is what stops a credential from coming along.
+- **Telling the conversation**: the task notice (`prompts/assistant/task_notice.md`), the receipt body (`files`) and the supervision message (`prompts/assistant/supervise.md`) list the files by name and path on the conversation's computer, outside the text clip. The assistant is told to give the user the path in backticks and to read the file itself when it needs the content; never to ask the Agent to paste it or resend it in pieces.
+- **A file it did not hand over**: ask the Agent for it with `file: <path>` (its next reply carries the line, and the copy happens then) — never for the file's content, which would be clipped in the reply. An on-demand tool for pulling a path the Agent already named is a follow-up: it must free its prompt bytes from the assistant's instructions, which the size ratchet keeps from growing.
+- **Clients** need no change: the copy is on the conversation's computer, so the existing backticked-path links (web, iOS, Android) open it in the app's file viewer.
+
 ## Automatic actions
 
 An Agent still linked to a completed to-do, with no open to-do linked to it, receives no automatic continuation,
@@ -319,17 +361,24 @@ later without sending.
 
 ### Transient errors: automatic continuation
 
+- An unrecoverable conversation error overrides a runtime's generic transient kind and any upstream status.
+  Account-sealed native compaction is `turn_error_code: compaction_sealed`, `turn_error_kind: unrecoverable`:
+  the context belongs to another account, so the conversation is invalid. Clients explain the reason and direct
+  the owner to a new conversation instead of offering Continue. The manager neither schedules another retry nor
+  sends a retry queued before the cause was recognized. Adding permanent causes extends
+  `proto.UnrecoverableTurnErrorCode` and the clients' error parsers, with positive and negative regression cases.
+- An old interrupted participant does not override another participant that is working or waiting to resume.
+  Interrupted task rows stay out of Needs you when the task is parked or closed. Archive visibility still follows
+  new activity; it is not a substitute for the task-state filter.
 - On by default and independent of the main switch (`transient_retry`, #3208): it is a rule, with no triage model call. With the main switch off, only
   turns that a transient error ended are followed (`workActive`), and the lists show only the continuation on its way (`transientPending`); everything else stays as without triage.
-- Exponential backoff (`retryBackoff`): `retry_base_seconds` (default 15) doubled for each attempt, so 15 s, 30 s, 60 s, 120 s, 240 s; a rate limit (429, "rate limit",
-  "too many requests") waits four times as long (60 s … 960 s); never more than 30 minutes. Up to 5 consecutive attempts (`agents.triage.max_retries`).
-  A turn that ends otherwise (normally, or on an error that is not transient) starts the count again.
-- If all fail: the session keeps its error and the apps' "Retry", as before. With the main switch and `decide` on, also a `blocked · user` card,
-  "The model service keeps failing after 5 automatic retries: <original text>", with options "Try Again" / "Leave it for now".
-- Send exactly `继续` ("Continue"), the same text sent by "Retry" on the App's error card (`continueText`).
-- The manager logs each step: `work <machine>/<session>: auto-continue: transient model error, attempt <n>/<max> in <backoff>: <error>` when it schedules one,
-  `work <machine>/<session>: auto-continue: sending "继续" after a transient model error (attempt <n>/<max>)` and `work <machine>/<session>: continued (<n>)` when it sends,
-  and `work <machine>/<session>: auto-continue: transient model error persists after <n> automatic continues, left to the user: <error>` at the cap.
+- Assistant conversations and managed Agents share the manager's durable due-wake scheduler (Refs #10444). Temporary network failures, timeouts, throttling and recoverable server errors continue indefinitely until cancelled, with no attempt budget. Authentication, permissions, invalid requests, missing models, usage limits, user decisions and repeated-tool-loop stops never enter this outage retry loop. Existing bounded unavailable-model, safeguards-refusal, gateway-quota and tool-search recovery keeps its own behavior.
+- Exponential backoff uses a 15-second base (`retry_base_seconds`), doubled per failed continuation; throttling starts at four times the base. Equal jitter selects between half of the exponential ceiling and that ceiling, capped at 30 minutes. The legacy `max_retries` configuration remains readable but no longer limits temporary model failures. A productive turn resets the count.
+- Send `继续` ("Continue") into the existing session history, without resubmitting the original task or its completed tool calls. Due timestamps persist in `session_work`; waiting uses the existing manager tick, without a waiting execution subprocess. Old pending retries survive database loading and pruning.
+- Stop and a bare `/exit` or `/quit` retire the pending wake durably. The hub reports every known session's interrupt to the manager, and node guards reject known stop causes that forbid supervisor resume. New input, changed turns, queued input and pending interactions prevent automatic continuation. Concurrent ticks share a session claim. A stable `client_msg_id` and restored transcript receipt prevent repeating a delivered continuation; runtime tool history remains the authority for completed side effects.
+- Retry IDs normalize turn timestamps to PostgreSQL microsecond precision before the first send. A manager crash after delivery but before acknowledgement therefore reuses the same ID after loading the pending row. Hub receipts in `sending` or `unknown` remain blocked across restarts; the scheduler retains the pending wake, but cannot infer delivery or automatically resolve an uncertain receipt.
+- `TestModelRetryProcessRestart` uses a disposable PostgreSQL database and separate test processes for Assistant and managed Agents: pending sends, delivery before acknowledgement, unknown delivery, process exit during sending, repeated concurrent due events and Stop followed by restart. `TestSendOnceProcessRestart` separately exercises production hub send guards with a fake RPC node. These probes do not exercise a real model provider or app UI.
+- The manager logs the attempt and delay when scheduling and sending. An attempt count is diagnostic only, never a reason to ask the user to continue.
 
 ### Usage limits: continue at the reset
 
@@ -374,8 +423,8 @@ A subscription's 5-hour or weekly usage limit (#1710) is no failure to report an
 - **The user's actions cancel it** as any automatic action ("Avoid conflicting with manual user actions"): a message, looking at it in herdr, queued input, a pending card.
 - **Moving it to another provider instead of waiting** (`agent_switch`, #5973): when the user asks, the main conversation moves a Claude Code agent its limit stopped to another launcher on its computer and sends it `prompts/agents/limit_continue.md` there, at once ([claude-integration.md](../integrations/claude-integration.md) "Switching a running Agent to another provider"). It is now or not at all: a busy agent is refused with nothing typed and no switch left waiting. The continuation that was due is not sent afterwards: the agent's turn moved on, and `workGuard` drops the wake. Persona never switches on its own; agents_list marks the agents a limit stopped (`usage_limit`) and their launcher. `agents_switch` (#6008) does the same for many agents in one call: the ones a limit stopped are switched and continued, idle ones switched with nothing sent, busy ones queued until their turn ends, stopped ones Persona started pointed at the new launcher for their next Resume.
 - **No misleading notices while it waits** (`limitTakenUp`: the reset is known and at most 10 minutes past, and the CLI said it goes on by itself, or Persona's continuation or its card is set): no "Completed" or "Interrupted" push for the turn. The turn stays followed, so the end after the reset is the one pushed, timed from the turn's start. A task dispatched from the main chat gets no receipt meanwhile; it is looked at again when the wait is over, so a turn that did not go on after all (its continuation cancelled) still gets its "Interrupted" receipt. A limit nothing takes up (the switches off and a CLI that does not go on by itself, or no reset known) is told as the turn ends, as a usage limit ("Usage limit reached; continue it once the limit resets: …"), never as "the model service failed". For the main assistant, a task waiting for the reset reads as `usage_limit` in its snapshot, not `interrupted`. A sign-in that is gone ("Please run /login · …", "Login expired · …") is no usage limit: it reads as interrupted (`turn_error_code` `auth_failed` / `not_logged_in`), never as "Completed".
-- **Scheduled tasks** (`watchScheduledRun`): a run whose conversation stopped on a usage limit with a known reset is retried a minute or so after the reset instead of after 3 minutes; that wait is not cut by the watcher's 30 minutes, and `retryStillDue` decides at that time as before (a retry that fails again is not retried); a conversation that went on meanwhile (its turn is no longer the one the limit stopped) is not retried, so what the run does is not done twice. A conversation that goes on by itself is not retried. The failure push is unchanged.
-- **Known limits**: the waits are kept in `session_work` like any wakeup and come back after a restart, but only for turns that ended within the last two days (a weekly limit can be longer); a scheduled run's retry waits in memory and is lost when the manager restarts.
+- **Scheduled tasks** (`watchScheduledRun`): a run whose conversation stopped on a usage limit with a known reset is retried a minute or so after the reset instead of after 3 minutes; that wait is not cut by the watcher's 30 minutes, and `retryStillDue` decides at that time as before (a retry that fails again is not retried); a conversation that went on meanwhile (its turn is no longer the one the limit stopped) is not retried, so what the run does is not done twice. A conversation that goes on by itself is not retried. The absolute retry deadline, failed run and target turn are persisted before the wait and restored after a restart. A claimed retry whose dispatch outcome is unknown after a restart is not sent again: its original run records the unknown outcome and the ordinary failure notification explains it. The initial failure push is unchanged.
+- **Known limits**: the waits are kept in `session_work` like any wakeup and come back after a restart, but only for turns that ended within the last two days (a weekly limit can be longer). Scheduled-run retries and delayed task receipt rechecks use the manager's durable wait backlog and resume at their original deadlines, promptly when already overdue. Receipt rechecks are fenced to the same task-agent link and reopen generation; the durable turn ledger and stable receipt ID prevent duplicate completion when a recheck is replayed.
 
 ## Safety boundary
 
@@ -564,7 +613,7 @@ Users enable them under **Settings › Session Triage**. The switches are stored
 - Subswitches work only when the main switch is on (but `reply_reminder` and `transient_retry`). Disabling a switch takes effect immediately: Persona-created cards are removed, and queued retries / wakeups / status questions are not sent.
 - `GET / PUT /api/v1/agents/triage` (`{enabled, auto_continue, wake, decide, tool_loop, closeout, closeout_ask, reply_reminder, reply_reminder_minutes, transient_retry}`, forwarded by the hub to the manager); changes broadcast `{"type":"agents.triage"}`. A PUT without `tool_loop`, `closeout`, `closeout_ask`, `reply_reminder`, `reply_reminder_minutes` (or with minutes 0) or `transient_retry` keeps their values for older apps; negative minutes go back to the default 30. While the saved switches cannot be read, such a PUT saves their defaults.
 - A `GET` whose first read of the database fails answers `503` with an `error` in the request's language (Chinese, English or Japanese) saying why, instead of returning the defaults as if they were the saved switches (#4553). Failures are not cached: the next request reads again. Switches once read or saved stay cached in memory; `manager.json`'s initial values apply only when the database really has no setting. Triage itself still falls back to the defaults when its own read fails, and `PUT` saves as before.
-- `agents.triage` in the manager's `manager.json` (`docs/operations/config.md` ("manager.json"); in hub.json before 2026-11-06) now retains limits (`max_retries` default 5, `retry_base_seconds` default 15, `max_wakes` default 6, `settle_seconds` default 15, `just_finished_hours` default 3);
+- `agents.triage` in the manager's `manager.json` (`docs/operations/config.md` ("manager.json"); in hub.json before 2026-11-06) now retains limits (legacy `max_retries` retained but unused for temporary failures, `retry_base_seconds` default 15, `max_wakes` default 6, `settle_seconds` default 15, `just_finished_hours` default 3);
   its triage switches are initial values only when settings have never been saved in the App (omitted means off). The manager reads this section itself and lays it over the hub's handshake reply (`assistantwire.Hello.Agents`); the hub no longer reads or sends it.
 
 ## Storage
@@ -580,7 +629,7 @@ A process can be redeployed and cleared at any time, so triage results, retry co
 The main chat's live snapshot (`prompts/assistant/snapshot*.md`):
 
 - Each Agent under "Needs you" includes what it is waiting for;
-- Adds "Waiting" (Persona is waiting for it: retrying, deployment, another Agent). "Done (within 24 hours)" and "Muted" carry only counts; `agents_list state=done` / `state=muted` returns their names, session ids and conclusions when the assistant needs them;
+- Adds "Waiting" (Persona is waiting for it: retrying, deployment, another Agent). Working agents render only their count in the Agents heading (#11261), and "Done (within 24 hours)" and "Muted" carry only counts; `agents_list` returns working agents' names, session ids and running workflows (`state=working`) and done or muted agents' conclusions (`state=done` / `state=muted`) when the assistant needs them;
 - "Unread" contains only sessions not yet successfully triaged, and those whose closeout says the turn is not finished, with that line ("Closeout");
 - An Agent's line ends with what its closeout claims of merging and deploying, and the hub's finding where it differs.
 
@@ -637,7 +686,7 @@ Pre-launch baseline (evening of 2026-11-04, non-assistant sessions on the hub): 
 - iOS / Mac (#2895): Agents-list and space-page card previews (`Session.listPreview`) switch to the same line when the session is stopped and the hub has triaged it (`Session.workLine`, `apple/Shared/Models.swift`).
   Host-provided reasons for needing the user (botmux) and failure notices still take precedence. Sessions the hub waits for go into "Waiting", not collapsed into idle (`WorkState.hubWaits`, `Session.isWaiting`). Unit tests: `SessionWorkTests`.
   **Settings › Session Triage** (below the assistant, `TriageSettingsView` / `TriageSettingsModel`) has the main switch, triage model (opens `agent.triage` in Model Settings), and three action switches (disabled when the main switch is off). Failed changes revert to the old value with an explanation; old hubs (404) report unsupported. Unit tests: `TriageSettingsTests`; DEBUG `-tab settings -openTriageSettings YES`.
-- iOS (#3612; iPad and Vision through the same views, not the frozen Mac app): a stopped Agent session's closeout is a card in its chat's header, above the transcript (`CloseoutCard`): the status, "The agent's own report", what changed, artifacts, merged and deployed each with the hub's finding (confirmed, contradicted in the caution color with the warning mark, or not checked), verified and still needs. While it shows, the last reply is drawn without its raw `<closeout>` block (`ChatLines.hidingCloseout`). List rows keep their line and add where the closeout stands ("merged ✓ · not deployed", "✗ says merged, isn't"; `Session.closeoutPreview`); a turn with an empty phase and a line shows that line. **Settings › Session Triage** has **Ask for a Closeout** (`closeout`; no row on a hub that does not name the switch), followed by **Ask for the Status Afterwards** (`closeout_ask`, #3616): a stopped → one question → report example, disabled only by the main switch rather than by `closeout`, and likewise hidden and unencoded when its field is absent. Details, tests and the DEBUG samples: `docs/apple/ios.md` ("Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)").
+- iOS (#3612; iPad and Vision through the same views, not the frozen Mac app): a stopped Agent session's closeout is a card in its chat's header, above the transcript (`CloseoutCard`): the status, "The agent's own report", what changed, artifacts, merged and deployed each with the hub's finding (confirmed, contradicted in the caution color with the warning mark, or not checked), verified and still needs. While it shows, the last reply is drawn without its raw closeout record (`ChatLines.hidingCloseout`). List rows keep their line and add where the closeout stands ("merged ✓ · not deployed", "✗ says merged, isn't"; `Session.closeoutPreview`); a turn with an empty phase and a line shows that line. **Settings › Session Triage** has **Ask for a Closeout** (`closeout`; no row on a hub that does not name the switch), followed by **Ask for the Status Afterwards** (`closeout_ask`, #3616): a stopped → one question → report example, disabled only by the main switch rather than by `closeout`, and likewise hidden and unencoded when its field is absent. Details, tests and the DEBUG samples: `docs/apple/ios.md` ("Closeout, orphaned tasks and answerable decisions (#3612, #3618, #3804)").
 - Watch: list rows do not show last words; work previews are not displayed yet.
 
 ## Steps
@@ -647,3 +696,38 @@ Pre-launch baseline (evening of 2026-11-04, non-assistant sessions on the hub): 
 | 1 | This document; hub (moved to the manager since 2026-11-04, see "Responsibilities"): `session_work` table, triage (rules + model), automatic continuation, wakeups, cards, `state` algorithm, `work` field, statistics endpoint; snapshot; task interruption receipts |
 | 2 | Move switches into App settings, all off by default; web displays `work.line`, Waiting, and switches (#1837) |
 | 3 | Android (#1837); iOS / Mac work previews (#2895) and settings page (#3078) |
+
+## Independent review of a session's work (#1808)
+
+An Agent session's web menu offers **Review this work** only when the hub advertises `session_review`. Nothing starts at
+rest: opening ⋯ reads `GET /api/v1/sessions/{mid}/{sid}/review` for `{running,has_changes,started_at}`, and only the
+explicit choice POSTs. A busy or starting Agent, a running review, or no change disables the entry with the reason.
+The source session's own Claude launcher starts the fresh reviewer with `permission_mode: "plan"`; Codex and other
+launchers are refused before a snapshot or reviewer starts.
+
+The source directory is only read. `git.review` supplies the branch change (falling back to uncommitted when no default
+branch or merge base exists), and `worktree.snapshot` makes a disposable copy of its current HEAD and uncommitted change.
+The reviewer runs in that copy. This is the safety boundary established for #2218: if the engine later recovers the
+reviewer outside its plan-mode launch, it still cannot edit the source working tree. The reviewer's session ID is named
+and persisted before `session.start`; no unacknowledged node `state.put` participates in identity or cleanup.
+
+The prompt contains the genuine recent user asks (bounded together with the diff) and the real diff, never the source
+Agent's replies, reasoning, injected follow-ups or peer messages. It asks for prioritized `path:line` findings and short
+fix suggestions, ending in `<review-findings count="N" blocking="M"/>`. The manager removes the marker and uses its count;
+an empty or unmarked answer is a failed review, not a blank card.
+
+The manager's `assistant.session_reviews` setting holds running and finished records with acknowledged, revisioned writes.
+A failed read never becomes an empty book, and memory advances only after persistence succeeds. At most one review runs
+per source. A reviewer turn end finishes its run; the periodic review tick also recovers a reviewer that stopped while
+the manager was away, fails runs older than 30 minutes, and expires result cards after seven days. A newer result
+atomically replaces the older pending result for the same source. Reviewer sessions and their snapshot directories stay
+out of published Agent lists and triage; cleanup stops the reviewer with `session.stop` (keeping its terminal) and removes
+only the disposable snapshot.
+
+The result is a manager-owned **question** interaction with `tool_name: "persona_session_review"`, so older clients do not
+need a new kind decoder. Its additive `review_report`, `review_count` and `reviewer_session_id` fields hold the report,
+count and correlation ID. **Send to agent** resolves the card through the normal answer path and forwards the persisted
+report once to the source (an explicit resume when stopped), using the review ID for send deduplication. A failed send
+returns a conflict and leaves the same card answerable. **Dismiss** resolves without sending. Manager reconstruction
+restores the same pending card and its answers remain durable. Go coverage is in `agents_session_review_test.go`;
+web coverage is in `ChatView.session-review.test.tsx` and `Interactions.session-review.test.tsx`.

@@ -15,7 +15,7 @@ final class HubLink: Identifiable {
     /// What the hub listed in its hello beyond the first protocol (`terminal_stream`, `file_upload`…).
     private(set) var features: Set<String> = []
     /// The credential whose authenticated hello supplied these capabilities; nil before the first hello.
-    @ObservationIgnored private(set) var surfaceCapabilitiesConfig: ServerConfig?
+    private(set) var surfaceCapabilitiesConfig: ServerConfig?
     /// The group's last Fleet state (hub/liveactivity.go): merged with the other groups' for the Live Activity.
     var fleet: FleetState?
     /// The hub's `desktops` list: Mac apps connected and computers where Persona Link reports you at them (the banner over
@@ -106,7 +106,7 @@ final class HubLink: Identifiable {
 
     func received(_ hello: HubHello) {
         self.hello = hello
-        surfaceCapabilitiesConfig = config
+        if surfaceCapabilitiesConfig != config { surfaceCapabilitiesConfig = config }
         let f = Set(hello.features)
         let changed = f != features
         if changed { features = f }
@@ -116,6 +116,7 @@ final class HubLink: Identifiable {
         let ext = f.contains("extensions")
         if !f.isEmpty, ext != Self.remembersExtensions(group) { UserDefaults.standard.set(ext, forKey: "hubExtensionsAPI." + group) }
         if !f.isEmpty { SideFold.remember(f.contains(SideFold.feature), group: group) }
+        if !f.isEmpty { TodosV1.shared.heard(TodoFeatures(f), from: group) }
     }
 }
 
@@ -199,9 +200,7 @@ extension AppModel {
     /// A group that is gone is treated the same way.
     func resolve(machineID: String, sessionID: String, group: String?) -> SessionKey {
         if let group, link(group) != nil { return SessionKey(group: group, machineID: machineID, sessionID: sessionID) }
-        let found = links.map(\.group).first { g in
-            sessionsByMachine[MachineRef(group: g, id: machineID)]?.contains { $0.sessionID == sessionID } == true
-        }
+        let found = links.first { latest(SessionKey(group: $0.group, machineID: machineID, sessionID: sessionID)) != nil }?.group
         return SessionKey(group: found ?? links.first?.group ?? "", machineID: machineID, sessionID: sessionID)
     }
 
@@ -215,7 +214,13 @@ extension AppModel {
     /// `resolve` for a key read from a string (`SessionKey.path`): a path without a group says nothing about it.
     func resolve(path: String) -> SessionKey? {
         guard let k = SessionKey(path: path) else { return nil }
-        return resolve(machineID: k.machineID, sessionID: k.sessionID, group: path.contains("|") ? k.group : nil)
+        return resolve(machineID: k.machineID, sessionID: k.sessionID, group: path.hasPrefix("|") ? "" : k.hubGroup)
+    }
+
+    func openExternal(path: String, latestAnswer: Bool = false) {
+        guard let k = SessionKey(path: path) else { return }
+        openExternal(machineID: k.machineID, sessionID: k.sessionID, group: path.hasPrefix("|") ? "" : k.hubGroup,
+                     latestAnswer: latestAnswer)
     }
 
     /// The group a push came from: the hub that sent it (`hub_id`), the push key that opened it, else the group that
@@ -374,6 +379,7 @@ extension AppModel {
         guard let hub = registry.hubs.first(where: { $0.id == id }) else { return }
         guard registry.members(hub.group).count > 1 else { removeGroup(hub.group); return }
         closeTunnels(id)
+        updateHeldRetryReceipts { receipts in receipts.filter { $0.target.pairing != id } }
         var r = registry
         r.hubs.removeAll { $0.id == id }
         registry = r
@@ -497,13 +503,17 @@ nonisolated struct PushRef: Sendable, Equatable {
         group = PushCrypto.group(from: info)
     }
 
-    /// The session in its group: the hub that sent the push, the key that opened it, else the group that has such a
-    /// session, else the first group (docs/protocol/multi-hub.md「Push and notifications」).
-    @MainActor func key(_ model: AppModel) -> SessionKey {
+    /// The paired group identified by the sender or decryption key, if the push names one.
+    @MainActor func sourceGroup(_ model: AppModel) -> String? {
         var info: [AnyHashable: Any] = [:]
         if let hubID { info["hub_id"] = hubID }
         if let group { info[PushCrypto.groupKey] = group }
-        return model.resolve(machineID: machine, sessionID: session, group: model.pushGroup(info))
+        return model.pushGroup(info)
+    }
+
+    /// Notification actions need a concrete key even when the push did not specify a group.
+    @MainActor func key(_ model: AppModel) -> SessionKey {
+        model.resolve(machineID: machine, sessionID: session, group: sourceGroup(model))
     }
 }
 

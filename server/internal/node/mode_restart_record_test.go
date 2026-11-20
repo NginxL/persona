@@ -85,6 +85,37 @@ func TestModesAnswerSaysHowAPickTookEffect(t *testing.T) {
 	}
 }
 
+// Picking the mode the session still runs in while a restart into Allow All waits calls the restart off: reported as
+// cancelled, not as replaced by another switch, which a pick of a third mode still is (#11089).
+func TestPickingTheModeItRunsInCancelsAWaitingRestart(t *testing.T) {
+	n, f, _, _, _ := switchNode(t, proto.StatusWorking, nil)
+	knownProcess(t, n, 4101)
+	events := modeRestartEvents(t, n)
+	cycleModes(t, f, "w1:p1", "default")
+	if err := pick(t, n, map[string]any{"permission_mode": "acceptEdits"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct{ pick, reason string }{
+		{"acceptEdits", proto.ModeRestartReasonCancelled},
+		{"plan", proto.ModeRestartReasonReplaced},
+	} {
+		if res, err := request(t, n, "session.modes", map[string]any{"session_id": sidA, "permission_mode": proto.ModeBypass}); err != nil || res["applied"] != "restart" {
+			t.Fatalf("Allow All by a restart answered %v, %v", res, err)
+		}
+		before := len(events())
+		if res, err := request(t, n, "session.modes", map[string]any{"session_id": sidA, "permission_mode": want.pick}); err != nil || res["applied"] != "now" {
+			t.Fatalf("%s answered %v, %v", want.pick, res, err)
+		}
+		waitFor(t, "the drop reported", func() bool { return len(events()) > before })
+		if e := events()[before]; e.Outcome != proto.ModeRestartDropped || e.Mode != proto.ModeBypass || e.Reason != want.reason {
+			t.Errorf("picking %s while the restart waits reported %+v, want dropped for %s", want.pick, e, want.reason)
+		}
+		if n.switches().restartMode(sidA) != "" {
+			t.Fatalf("picking %s left the restart waiting", want.pick)
+		}
+	}
+}
+
 // What became of a waiting restart reaches the manager: done once it ran, dropped (with why) when the claude it was
 // picked for exited or it waited too long.
 func TestModeRestartOutcomesAreReported(t *testing.T) {

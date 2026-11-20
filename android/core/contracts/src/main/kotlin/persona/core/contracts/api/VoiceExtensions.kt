@@ -34,6 +34,8 @@ data class HubExtension(
     @SerialName("auto_upgrade") val autoUpgrade: Boolean? = null,
     /** Why its own switch does not apply now: "disabled" while the extension is off (the hub keeps the switch for when it is on). */
     @SerialName("auto_upgrade_paused") val autoUpgradePaused: String? = null,
+    /** The market it upgrades from, retained after that market is removed (null: a hub from before this field). */
+    val market: String? = null,
     val upgrade: ExtensionUpgrade? = null,
     @SerialName("upgrade_note") val upgradeNote: ExtensionUpgradeNote? = null,
     /** An extension with a program on computers: how that program is on each machine it is switched on for. */

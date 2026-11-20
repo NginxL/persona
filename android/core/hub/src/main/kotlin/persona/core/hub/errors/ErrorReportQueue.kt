@@ -13,6 +13,7 @@ import persona.core.contracts.generated.ExtensionErrorReport
 class ErrorReportQueue(
     private val directory: File,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val localCopy: (ExtensionErrorReport) -> Unit = {},
 ) {
     /** A queued report and its file, for [delete] after the hub took it. */
     data class Entry(val file: File, val report: ExtensionErrorReport, val json: String)
@@ -21,15 +22,20 @@ class ErrorReportQueue(
      * Writes [report] synchronously (the crash handler calls this right before the process dies). Never throws;
      * false when it could not be written.
      */
-    fun write(report: ExtensionErrorReport): Boolean = try {
-        directory.mkdirs()
-        val millis = runCatching { Instant.parse(report.time).toEpochMilli() }.getOrDefault(clock())
-        val name = "$millis-${report.id.filter { it.isLetterOrDigit() || it == '-' }.take(64)}"
-        val temp = File(directory, "$name.tmp")
-        temp.writeText(JsonCodec.encodeToString(ExtensionErrorReport.serializer(), report))
-        temp.renameTo(File(directory, "$name.json"))
-    } catch (_: Throwable) {
-        false
+    fun write(report: ExtensionErrorReport): Boolean {
+        val written = try {
+            directory.mkdirs()
+            val millis = runCatching { Instant.parse(report.time).toEpochMilli() }.getOrDefault(clock())
+            val name = "$millis-${report.id.filter { it.isLetterOrDigit() || it == '-' }.take(64)}"
+            val temp = File(directory, "$name.tmp")
+            temp.writeText(JsonCodec.encodeToString(ExtensionErrorReport.serializer(), report))
+            temp.renameTo(File(directory, "$name.json"))
+        } catch (_: Throwable) {
+            false
+        }
+        // The optional local recorder never changes the established hub queue's outcome.
+        if (written) runCatching { localCopy(report) }
+        return written
     }
 
     /**

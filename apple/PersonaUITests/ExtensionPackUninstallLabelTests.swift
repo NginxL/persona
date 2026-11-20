@@ -21,7 +21,7 @@ final class ExtensionPackUninstallLabelTests: XCTestCase {
         for (language, locale) in languages { for (size, sizeArgs) in sizes { for scheme in ["light", "dark"] {
             let app = XCUIApplication()
             let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
-            app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-ui.scheme", scheme,
+            app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-ui.scheme", scheme, "-probes", "YES",
                                    "-openMarketExtension", "3f2a9c1d0b/example-pack",
                                    "-AppleLanguages", "(\(language))", "-AppleLocale", locale] + sizeArgs
             app.launchPinned()
@@ -44,11 +44,13 @@ final class ExtensionPackUninstallLabelTests: XCTestCase {
             }
             XCTAssertTrue(remove.waitForExistence(timeout: 5))
             remove.tap()
-            let only = app.buttons["market-uninstall-confirm"].firstMatch // a dialog lists its buttons twice
-            let all = app.buttons["market-uninstall-members"].firstMatch
-            XCTAssertTrue(all.waitForExistence(timeout: 5), "the confirmation")
+            let confirmation = app.buttons["market-uninstall-members"].firstMatch
+            XCTAssertTrue(confirmation.waitForExistence(timeout: 5), "the confirmation")
             sleep(1)
             if !before {
+                // A dialog lists its buttons twice; select the drawn copies without putting hittable in a query predicate.
+                let only = try XCTUnwrap(visibleDialogButton("market-uninstall-confirm", in: app), "Pack Only is not visible")
+                let all = try XCTUnwrap(visibleDialogButton("market-uninstall-members", in: app), "Everything is not visible")
                 // The dialog has no Cancel (a popover; tapping outside closes it), so the two buttons are measured
                 // against each other: the same height. Before #5201 the longer one took a line more (zh-Hans one and
                 // two lines, English two and three); both wrapping alike is ruled out by the words' measured widths
@@ -56,11 +58,48 @@ final class ExtensionPackUninstallLabelTests: XCTestCase {
                 XCTAssertTrue(only.exists, "Pack Only")
                 XCTAssertEqual(only.frame.height, all.frame.height, accuracy: 2,
                                "\(only.label) / \(all.label) at \(size) in \(language): not the same number of lines")
+                for button in [only, all] {
+                    let context = "\(button.label) at \(size) in \(language), \(scheme)"
+                    let label = try labelFrame(for: button, in: app)
+                    assertLabel(label, inside: button, context: context)
+                }
             }
             if let dir = env["PERSONA_SHOTS"] {
                 try? XCUIScreen.main.screenshot().pngRepresentation
                     .write(to: URL(fileURLWithPath: dir).appending(path: "pack-labels-\(language)-\(size)-\(scheme).png"))
             }
         } } }
+    }
+
+    @MainActor private func visibleDialogButton(_ id: String, in app: XCUIApplication) -> XCUIElement? {
+        app.buttons.matching(identifier: id).allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable })
+    }
+
+    private struct DialogLabel: Decodable {
+        let text: String
+        let x, y, width, height: Double
+        var frame: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+    }
+
+    @MainActor private func labelFrame(for button: XCUIElement, in app: XCUIApplication) throws -> CGRect {
+        let probe = app.descendants(matching: .any)["probe.confirmation-dialog-labels"].firstMatch
+        let value = try XCTUnwrap(probe.value as? String, "missing dialog-label probe")
+        let labels = try JSONDecoder().decode([DialogLabel].self, from: Data(value.utf8))
+        return try XCTUnwrap(labels.first(where: { $0.text == button.label })?.frame,
+                             "no UIKit label for \(button.label) in \(value)")
+    }
+
+    @MainActor private func assertLabel(_ labelFrame: CGRect, inside button: XCUIElement, context: String) {
+        let buttonFrame = button.frame
+        // A shared edge can round differently between accessibility frames; half a point covers only that rounding.
+        let contained = buttonFrame.insetBy(dx: -0.5, dy: -0.5).contains(labelFrame)
+        if !contained {
+            let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            evidence.name = "Confirmation label overflow: \(context)"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+        }
+        XCTAssertTrue(contained,
+                      "\(context): label \(labelFrame) is outside button \(buttonFrame)")
     }
 }

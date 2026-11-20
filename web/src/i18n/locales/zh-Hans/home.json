@@ -37,6 +37,7 @@
   "permission_detail": "{tool}：{what}",
   "tasks": "进行中的任务",
   "tasks_all": "查看全部 ›",
+  "task_agents_more": "+{count}",
   "continue": "继续",
   "continue_placeholder": "接下来让它做什么？",
   "continue_send": "发送",
@@ -44,5 +45,6 @@
   "continue_failed": "没发出去：{why}",
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "接下来让 {agent} 做什么？",
-  "continue_failed_plain": "没发出去，打开对话看原因。"
+  "continue_failed_plain": "没发出去，打开对话看原因。",
+  "arrange": "整理总览"
 }

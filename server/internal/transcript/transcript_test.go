@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1158,14 +1159,32 @@ func TestLongToolOutputIsCutForPages(t *testing.T) {
 }
 
 // A message with a picture typed while the agent worked is absorbed mid-turn as a queued_command whose prompt is
-// blocks: the picture is part of the message (it used to be dropped, and the phone showed the text alone).
+// blocks: the picture is part of the message (it used to be dropped, and the phone showed the text alone). Newer
+// Claude Code puts the pictures first: each item still has an id of its own, in block order, or an app merging by
+// id keeps the picture and loses the text (#10854).
 func TestQueuedPromptKeepsItsImages(t *testing.T) {
-	line := `{"type":"attachment","uuid":"a1","attachment":{"type":"queued_command","commandMode":"prompt","prompt":[` +
-		`{"type":"text","text":"[Image #1]看这个"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}}`
-	items, _ := parse(t, line)
-	if len(items) != 2 || items[0].Kind != proto.KindText || !items[0].Queued ||
-		items[1].Kind != proto.KindImage || !items[1].Queued || items[1].Image == nil || items[1].ID != "a1#1" {
-		t.Fatalf("items = %+v", items)
+	const img = `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}`
+	for _, c := range []struct {
+		name   string
+		blocks string
+		want   []string // id and kind of each item, in order
+	}{
+		{"text first", `{"type":"text","text":"[Image #1]看这个"},` + img, []string{"a1#0 text", "a1#1 image"}},
+		{"picture first", img + `,{"type":"text","text":"看这个"}`, []string{"a1#0 image", "a1#1 text"}},
+		{"two pictures first", img + `,` + img + `,{"type":"text","text":"看这两个"}`, []string{"a1#0 image", "a1#1 image", "a1#2 text"}},
+	} {
+		line := `{"type":"attachment","uuid":"a1","attachment":{"type":"queued_command","commandMode":"prompt","prompt":[` + c.blocks + `]}}`
+		items, _ := parse(t, line)
+		var got []string
+		for _, it := range items {
+			got = append(got, it.ID+" "+it.Kind)
+			if !it.Queued || it.Kind == proto.KindImage && it.Image == nil || it.Kind == proto.KindText && !strings.Contains(it.Text, "看这") {
+				t.Errorf("%s: item %+v", c.name, it)
+			}
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: items %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

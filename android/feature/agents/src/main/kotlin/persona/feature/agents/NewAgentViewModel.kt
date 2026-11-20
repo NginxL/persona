@@ -8,7 +8,11 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.UiText
 import persona.core.designsystem.failureReasonText
+import persona.feature.chat.ChatLinkContext
 import persona.feature.chat.ComposerUploadLimiter
+import persona.feature.chat.ForwardMessage
+import persona.feature.chat.ForwardPlacements
+import persona.feature.chat.ForwardPlacement
 import persona.feature.chat.R as ChatR
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,9 +37,15 @@ internal data class AgentSpacePreset(val machineId: String, val workspaceId: Str
 
 /**
  * What a caller fills in ahead (the knowledge base's "Open Agent"): [machineId] and [cwd] are picked when that machine is
- * online, [prompt] starts the first message; all of it can still be changed.
+ * online, [prompt] starts the first message; all of it can still be changed. [context] goes before the first message as it
+ * is (a forwarded message's block, #3901). [forwardedPhotos] is the matching in-memory handoff from that forward.
  */
-internal data class NewAgentPrefill(val machineId: String? = null, val cwd: String? = null, val prompt: String? = null)
+internal data class NewAgentPrefill(val machineId: String? = null, val cwd: String? = null, val prompt: String? = null,
+    val context: String? = null, val forwardedPhotos: List<ForwardPlacement> = ForwardPlacements.takeNewAgent(context))
+
+/** The forward block a required first message may stand in for: one the card can read. Null for no context, or unreadable. */
+internal fun usableForward(context: String?): String? =
+    context?.takeIf { it.isNotBlank() }?.takeIf { ForwardMessage.read(it) != null }
 
 /** The hub's "New Agent" model use (docs/assistant/model-config.md), read once per form. */
 internal sealed interface NewAgentModelConfig {
@@ -72,11 +82,19 @@ internal data class NewAgentState(
      * rule leaves out here, with why. Shown after the launchers ([leftOutLaunchers]), never picked; empty from an older hub.
      */
     val unavailable: List<UnavailableLauncher> = emptyList(),
+    /** Agent presets of the model profile in use on this computer (#2225); empty on an older hub. */
+    val tiers: List<PickerTier> = emptyList(),
+    /** The profile [tiers] belongs to, for the picker heading. */
+    val profile: PickerTierProfile? = null,
+    /** The preset whose launcher, model and effort fill this start; a manual edit to any of them clears the mark. */
+    val pickedTier: PickerTier? = null,
     val recent: List<AgentRecentDirectory> = emptyList(),
     val browser: AgentDirectories? = null,
     val browsing: Boolean = false,
     val browsePath: String = "",
     val prompt: String = "",
+    /** A block that goes before the first message (a forward, #3901), drawn over it as a card; null: none. */
+    val context: String? = null,
     val loading: Boolean = false,
     val starting: Boolean = false,
     val pending: AgentStartOperation? = null,
@@ -177,16 +195,20 @@ internal data class NewAgentState(
     /** Older computers still require Codex's first message, including when following model configuration. */
     val promptRequired: Boolean get() = agentType == "codex" &&
         launchers.firstOrNull { it.name == modelLauncher }?.promptOptional != true
-    /** [modelLauncher]'s models, once there are some to show. */
+    /** [modelLauncher]'s models, once there are some to show (or a locked reason to explain). */
     val modelList: LauncherModels? get() = models.list?.takeIf {
-        it.models.isNotEmpty() && models.machineId == machineId && models.launcher == modelLauncher
+        (it.models.isNotEmpty() || it.locked != null) && models.machineId == machineId && models.launcher == modelLauncher
     }
     /** There is a list and a pick reaches the agent (the launcher does not pass its own --model). */
     val canPickModel: Boolean get() = modelList.let { it != null && it.locked == null }
     val pickedModel: AgentModel? get() = model.takeIf { it.isNotEmpty() && canPickModel }
         ?.let { id -> modelList?.models?.firstOrNull { it.id == id } }
-    /** The `model` a start sends: only a picked one that is not the default (picking the default is picking none). */
-    val sentModel: String? get() = pickedModel?.takeUnless { it.isDefault }?.id
+    /**
+     * The `model` a start sends: a manual pick omits the default, while a preset's default stays explicit so Model
+     * Settings cannot silently replace it. A model the launcher cannot take is left out and explained by [presetLeftOut].
+     */
+    val sentModel: String? get() = if (pickedTier?.model?.isNotEmpty() == true) pickedModel?.id
+        else pickedModel?.takeUnless { it.isDefault }?.id
     /** Model configuration › New Agent's model: what runs with no pick when its launcher is the one that runs. */
     val configuredModel: String get() = follow?.takeIf { configuredLauncher?.name == modelLauncher }
         ?.purpose?.effective?.model.orEmpty()
@@ -199,6 +221,31 @@ internal data class NewAgentState(
     }
     /** The efforts a start on a launcher that lists its modes takes (#8261): only those its model lists, none while not known. */
     val providerEfforts: List<String> get() = if (providerModes == null) emptyList() else modelEfforts.orEmpty()
+    /** The effort a start sends under the existing Claude Code / provider rules; an unsupported preset effort is omitted. */
+    val sentEffort: String? get() {
+        val efforts = modelEfforts
+        return if (claudeModes) selection.effort.takeIf { it.isNotEmpty() && (efforts == null || it in efforts) }
+            else providerEffort.takeIf { it.isNotEmpty() && it in providerEfforts }
+    }
+    /** A preset with an explicit model or effort waits for the list that can validate it before Start becomes available. */
+    val presetNeedsModels: Boolean get() {
+        val tier = pickedTier ?: return false
+        return (!tier.model.isNullOrEmpty() || !tier.effort.isNullOrEmpty()) && models.loading &&
+            models.machineId == machineId && models.launcher == modelLauncher
+    }
+    /** What of the picked preset cannot reach the agent, once its model list has answered; empty while that list loads. */
+    val presetLeftOut: List<AgentText> get() {
+        val tier = pickedTier ?: return emptyList()
+        if (models.loading || tier.launcher != modelLauncher) return emptyList()
+        return buildList {
+            val model = tier.model
+            if (!model.isNullOrEmpty() && sentModel != model)
+                add(AgentText(R.string.agents_new_preset_left_out_model, model))
+            val effort = tier.effort
+            if (!effort.isNullOrEmpty() && sentEffort != effort)
+                add(AgentText(R.string.agents_new_preset_left_out_effort, effort))
+        }
+    }
 }
 
 /**
@@ -207,6 +254,8 @@ internal data class NewAgentState(
  */
 private fun NewAgentState.settled(): NewAgentState {
     var next = this
+    // A preset keeps its requested values so sentModel / sentEffort and presetLeftOut can explain what cannot run.
+    if (pickedTier != null) return this
     val list = modelList
     if (model.isNotEmpty() && list != null && list.models.none { it.id == model }) next = next.copy(model = "")
     val efforts = next.modelEfforts
@@ -243,6 +292,10 @@ internal class NewAgentViewModel(
     private var workspacesJob: Job? = null
     private val uploadJobs = mutableMapOf<String, Job>()
     private val uploadLimiter = ComposerUploadLimiter()
+    private var prefillPhotos = prefill?.forwardedPhotos.orEmpty()
+    // Parsing the route gives its cards new UI IDs. The source URL and its message ID survive that round trip.
+    private val ChatLinkContext.photoSource get() = url to msg
+    private val photoSources = mutableMapOf<String, Pair<String, String>>()
     init {
         // Whether the folder is in a Git repository, a moment after it stops changing (iOS `loadRepo`): New Agent's
         // worktree switch shows only then, and never for a tab in an existing space.
@@ -262,19 +315,28 @@ internal class NewAgentViewModel(
                 val pending = store.pending(service.scope)
                 val recents = recentSetups()
                 if (pending != null) {
+                    discardPrefillExcept(emptySet())
                     val r = pending.request
                     // Another agent's mode and effort are its launcher's own picks (#8261), never Claude Code's.
                     val claude = r.agentType == null
                     val mode = r.permissionMode.orEmpty()
                     val effort = r.effort.orEmpty()
+                    // A forwarded start's first message holds its card: the form shows that card again and what was typed after it.
+                    val restored = pending.firstMessage ?: r.prompt.orEmpty()
+                    // Its forward's card again, and the rest of the first message as it was saved: any other block and
+                    // what was typed. Without a forward, the saved message is the prompt as it is.
+                    val (blocks, rest) = ForwardMessage.splitAll(restored)
+                    val forward = blocks.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.xml() }
+                    // A start of something else keeps its first message as it was sent, other blocks included.
+                    val typed = if (forward != null) rest else restored
                     mutable.value = NewAgentState(initialized = true, machineId = r.machineId,
                         selection = AgentDefaults(r.cwd, r.launcher, if (claude) mode else "", if (claude) effort else ""),
                         providerMode = if (claude) "" else mode, providerEffort = if (claude) "" else effort, model = r.model.orEmpty(),
-                        prompt = pending.firstMessage ?: r.prompt.orEmpty(), pending = pending, error = AgentText(R.string.agents_new_error_pending),
+                        prompt = typed, context = forward, pending = pending, error = AgentText(R.string.agents_new_error_pending),
                         recentSetups = recents)
                 } else {
                     val last = store.lastMachine(service.scope)
-                    mutable.update { it.copy(initialized = true, prompt = prefill?.prompt.orEmpty(), recentSetups = recents) }
+                    mutable.update { it.copy(initialized = true, prompt = prefill?.prompt.orEmpty(), context = prefill?.context, recentSetups = recents) }
                     machines.collect { list ->
                         if (state.value.machineId.isEmpty() && !state.value.locked) {
                             val space = state.value.space
@@ -320,9 +382,18 @@ internal class NewAgentViewModel(
         machineJob?.cancel()
         browseJob?.cancel()
         modelsJob?.cancel()
-        mutable.update { it.copy(machineId = id, selection = AgentDefaults(), launchers = emptyList(), unavailable = emptyList(), recent = emptyList(),
+        mutable.update { it.copy(machineId = id, selection = AgentDefaults(), launchers = emptyList(), unavailable = emptyList(),
+            tiers = emptyList(), profile = null, pickedTier = null, recent = emptyList(),
             browser = null, browsing = false, loading = true, error = null, models = NewAgentModels(), model = "", pickedSetup = null,
             workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "", providerMode = "", providerEffort = "") }
+        val forwarded = prefillPhotos
+        prefillPhotos = emptyList()
+        var lost = 0
+        for ((ref, photos) in forwarded) {
+            lost += photos.lost + attach(photos.attachments, showLimit = false, forward = ref)
+        }
+        if (lost > 0) notice(AgentText(if (lost == 1) ChatR.string.chat_forward_photos_lost_one
+            else ChatR.string.chat_forward_photos_lost_other, lost))
         loadWorkspaces(id)
         machineJob = viewModelScope.launch {
             try {
@@ -338,7 +409,9 @@ internal class NewAgentViewModel(
                 val prefilledCwd = prefill?.cwd?.takeIf { prefill.machineId == id && it.isNotBlank() }
                 val launchers = listed.launchers
                 val launcher = defaultLauncher(config, defaults, launchers)
-                mutable.update { it.copy(loading = false, launchers = launchers, unavailable = listed.unavailable, recent = dirs.recent.take(6), modelConfig = config,
+                mutable.update { it.copy(loading = false, launchers = launchers, unavailable = listed.unavailable,
+                    tiers = listed.tiers, profile = listed.tiersProfile, pickedTier = null,
+                    recent = dirs.recent.take(6), modelConfig = config,
                     selection = defaults.copy(cwd = it.space?.cwd ?: prefilledCwd ?: defaults.cwd.ifEmpty { dirs.recent.firstOrNull()?.path ?: dirs.path },
                         launcher = launcher),
                     model = RecentSetups.model(it.recentSetups, id, launcher),
@@ -464,12 +537,29 @@ internal class NewAgentViewModel(
     fun reloadModels() {
         if (!state.value.locked) loadModels(refresh = true)
     }
+    /** Applies a whole Agent preset; a blocked launcher requires the help sheet's explicit [allowBlocked]. */
+    fun pickTier(tier: PickerTier, allowBlocked: Boolean = false) {
+        val current = state.value
+        if (current.locked || current.loading) return
+        val picked = current.tiers.firstOrNull { it.name == tier.name } ?: return
+        val launcher = current.launchers.firstOrNull { it.name == picked.launcher } ?: return
+        if (launcher.block != null && !allowBlocked) return
+        mutable.update {
+            it.copy(selection = it.selection.copy(launcher = picked.launcher, effort = picked.effort.orEmpty()),
+                providerEffort = picked.effort.orEmpty(), model = picked.model.orEmpty(), pickedTier = picked,
+                error = null, pickedSetup = null)
+        }
+        loadModels()
+    }
+
     /** Picks the model for this start; the default entry, or "", is no pick. */
     fun pickModel(id: String) {
         val current = state.value
         if (current.locked || !current.canPickModel) return
         val entry = current.modelList?.models?.firstOrNull { it.id == id }
-        mutable.update { it.copy(model = entry?.takeUnless { m -> m.isDefault }?.id.orEmpty(), error = null, pickedSetup = null).settled() }
+        val model = entry?.takeUnless { m -> m.isDefault }?.id.orEmpty()
+        mutable.update { it.copy(model = model, pickedTier = if (model == it.model) it.pickedTier else null,
+            error = null, pickedSetup = null).settled() }
     }
     private suspend fun modelConfig(): NewAgentModelConfig = try {
         service.newAgentModel()?.let { NewAgentModelConfig.Follow(it) } ?: NewAgentModelConfig.Unsupported
@@ -480,6 +570,7 @@ internal class NewAgentViewModel(
         // Another launcher has its own models: back to its default, and its list.
         mutable.update { val folder = value.cwd != it.selection.cwd
             val next = it.copy(selection = value, error = null, pickedSetup = null,
+                pickedTier = if (value.launcher == it.selection.launcher && value.effort == it.selection.effort) it.pickedTier else null,
                 // another folder is a start by folder, not in the workspace picked (#7259)
                 workspace = it.workspace.takeUnless { folder }, folderBeforeWorkspace = if (folder) "" else it.folderBeforeWorkspace,
                 // another folder: its repository is asked again (the switch never shows one folder's answer for another)
@@ -487,6 +578,20 @@ internal class NewAgentViewModel(
             (if (next.modelLauncher != it.modelLauncher) next.copy(model = "") else next).settled() }
         loadModels()
     }
+    fun forwardContext(value: String?) {
+        if (state.value.locked) return
+        val remaining = ForwardMessage.readAll(value.orEmpty()).mapTo(mutableSetOf()) { it.photoSource }
+        discardPrefillExcept(remaining)
+        photoSources.filterValues { it !in remaining }.keys.forEach(::drop)
+        mutable.update { it.copy(context = value) }
+    }
+
+    private fun discardPrefillExcept(remaining: Set<Pair<String, String>>) {
+        val (keep, removed) = prefillPhotos.partition { it.ref.photoSource in remaining }
+        prefillPhotos = keep
+        removed.forEach { handoff -> handoff.photos.attachments.forEach { uploads?.discard?.invoke(it) } }
+    }
+
     fun prompt(value: String) { if (!state.value.locked) mutable.update { it.copy(prompt = value) } }
     fun ultracode(on: Boolean) { if (!state.value.locked && state.value.ultracode != on) mutable.update { it.copy(ultracode = on, error = null) } }
     /** The permission mode for a launcher that lists its own (#8261): "" its own approval, or one it lists. */
@@ -495,7 +600,10 @@ internal class NewAgentViewModel(
     }
     /** The thinking effort for such a launcher: "" its own, or one its model lists. */
     fun providerEffort(value: String) {
-        if (!state.value.locked && !state.value.loading) mutable.update { it.copy(providerEffort = value, error = null, pickedSetup = null).settled() }
+        if (!state.value.locked && !state.value.loading) mutable.update {
+            it.copy(providerEffort = value, pickedTier = if (value == it.providerEffort) it.pickedTier else null,
+                error = null, pickedSetup = null).settled()
+        }
     }
     fun inWorktree(on: Boolean) { if (!state.value.locked) mutable.update { it.copy(inWorktree = on, error = null) } }
     fun worktreeBranch(value: String) { if (!state.value.locked) mutable.update { it.copy(worktreeBranch = value) } }
@@ -557,13 +665,13 @@ internal class NewAgentViewModel(
     }
     fun submit() {
         val current = state.value
-        if (!current.initialized || current.starting || current.loading || current.created != null) return
+        if (!current.initialized || current.starting || current.loading || current.created != null || current.presetNeedsModels) return
         val previous = current.pending
         val agentType = current.agentType
         if (previous == null && (current.selection.cwd.isBlank() || (current.selection.launcher.isBlank() && !current.following) ||
                 machines.value.none { it.id == current.machineId && it.online } ||
                 (current.space != null && current.space.machineId != current.machineId) ||
-                (current.promptRequired && current.prompt.isBlank()) || current.attachmentsHold != null)) return
+                (current.promptRequired && current.prompt.isBlank() && usableForward(current.context) == null) || current.attachmentsHold != null)) return
         mutable.update { it.copy(starting = true, error = null) }
         viewModelScope.launch {
             try {
@@ -596,14 +704,15 @@ internal class NewAgentViewModel(
      */
     private fun newOperation(current: NewAgentState, agentType: String, worktree: WorktreeAdded? = null): AgentStartOperation {
         val typed = current.prompt.trim().takeIf { it.isNotEmpty() }
+        // A forward goes first, what is typed after it (iOS NewChat's contextBody); the name comes from what is typed.
+        val forwarded = usableForward(current.context)
         val async = sender != null && current.firstMessageAfterStart
         // The photos and the uploaded files go with the first message as the composer writes them (#2321); the tab is
         // named from what was typed, as on iOS.
         val first = if (async && current.attachments.isNotEmpty())
-            NewAgentAttachments.firstMessage(current.prompt.takeIf(String::isNotBlank).orEmpty(), current.attachments,
-                uploads?.photosOnly?.invoke().orEmpty(), uploads?.filesOnly?.invoke().orEmpty()).takeIf { it.isNotEmpty() }
-        else typed
-        val efforts = current.modelEfforts
+            NewAgentAttachments.firstMessage(listOfNotNull(forwarded, current.prompt.takeIf { it.isNotBlank() }).joinToString("\n\n"),
+                current.attachments, uploads?.photosOnly?.invoke().orEmpty(), uploads?.filesOnly?.invoke().orEmpty()).takeIf { it.isNotEmpty() }
+        else listOfNotNull(forwarded, typed).joinToString("\n\n").takeIf { it.isNotEmpty() }
         // A catalog workspace picked (#7259): the start goes into it, by its engine's id, in its folder; with a worktree
         // made from it (#8856), into the workspace made for the worktree, on the same engine.
         val workspace = current.workspace?.takeIf { current.space == null }
@@ -614,11 +723,10 @@ internal class NewAgentViewModel(
         val claude = current.claudeModes
         val mode = if (claude) current.selection.mode.takeIf { it.isNotEmpty() }
             else current.providerMode.takeIf { it != "default" && current.providerModes?.contains(it) == true }
-        val effort = if (claude) current.selection.effort.takeIf { it.isNotEmpty() && (efforts == null || it in efforts) }
-            else current.providerEffort.takeIf { it.isNotEmpty() && it in current.providerEfforts }
+        val effort = current.sentEffort
         val request = AgentStartRequest(
             current.machineId, worktree?.path ?: workspace?.cwd ?: current.selection.cwd, current.selection.launcher,
-            typed.takeUnless { async }, mode, effort,
+            first.takeUnless { async }, mode, effort,
             workspaceId, agentType.takeIf { it != "claude" }, async = true.takeIf { async },
             nameHint = typed.takeIf { async }, model = current.sentModel,
             ultracode = true.takeIf { current.ultracode && agentType == "claude" },
@@ -693,13 +801,13 @@ internal class NewAgentViewModel(
     /** What the form's toast says (iOS `model.toast`): a pick not taken, an upload that failed. */
     val notices: Flow<AgentText> = noticeChannel.receiveAsFlow()
     fun notice(text: AgentText) { noticeChannel.trySend(text) }
-    /** Picked photos and files join the form and go to the computer picked, three at a time. */
-    fun attach(picked: List<persona.feature.chat.ComposerAttachment>) {
+    /** Picked photos and files join the form and go to the computer picked, three at a time. Returns how many did not fit. */
+    fun attach(picked: List<persona.feature.chat.ComposerAttachment>, showLimit: Boolean = true, forward: ChatLinkContext? = null): Int {
         val uploads = uploads
         val current = state.value
         if (uploads == null || picked.isEmpty() || current.locked || !current.takesAttachments || current.machineId.isEmpty()) {
             picked.forEach { uploads?.discard?.invoke(it) }
-            return
+            return picked.size
         }
         var files = fileRoom()
         var media = photoRoom()
@@ -709,11 +817,13 @@ internal class NewAgentViewModel(
         }
         val refused = picked.filterNot { it in accepted }
         refused.forEach(uploads.discard)
-        if (refused.isNotEmpty()) notice(AgentText(
+        if (showLimit && refused.isNotEmpty()) notice(AgentText(
             if (refused.any { it.media }) R.string.agents_attach_photo_limit else ChatR.string.chat_composer_file_limit))
-        if (accepted.isEmpty()) return
+        if (accepted.isEmpty()) return refused.size
+        forward?.photoSource?.let { source -> accepted.forEach { photoSources[it.id] = source } }
         mutable.update { it.copy(attachments = it.attachments + accepted, attachedOn = it.machineId, attachNote = null) }
         accepted.forEach { upload(it.id) }
+        return refused.size
     }
     /** A failed file stays in the form; Retry goes through the same three-slot pump. */
     fun retryAttachment(id: String) {
@@ -740,6 +850,8 @@ internal class NewAgentViewModel(
         clearAttachments()
     }
     private fun clearAttachments() {
+        discardPrefillExcept(emptySet())
+        photoSources.clear()
         uploadJobs.values.toList().forEach { it.cancel() }
         uploadJobs.clear()
         val gone = state.value.attachments
@@ -751,6 +863,7 @@ internal class NewAgentViewModel(
         super.onCleared()
     }
     private fun drop(id: String) {
+        photoSources.remove(id)
         uploadJobs.remove(id)?.cancel()
         val gone = state.value.attachments.firstOrNull { it.id == id } ?: return
         mutable.update { it.copy(attachments = it.attachments.filterNot { a -> a.id == id }) }
@@ -805,7 +918,7 @@ internal class NewAgentViewModel(
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (state.value.attachedOn != machine) return@launch
+                if (state.value.attachedOn != machine || state.value.attachments.none { it.id == id }) return@launch
                 // A failed upload stays as a row with its reason and Retry; its local content is not discarded.
                 notice(uploadFailure(attachment.name, e))
                 if (attachment.image) {
@@ -849,7 +962,7 @@ internal class NewAgentViewModel(
     suspend fun acknowledge() {
         try {
             store.pending(service.scope, null)
-            mutable.update { it.copy(pending = null, created = null, prompt = "", providerMode = "", providerEffort = "") }
+            mutable.update { it.copy(pending = null, created = null, prompt = "", context = null, providerMode = "", providerEffort = "") }
             clearAttachments()
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { mutable.update { it.copy(error = AgentText(R.string.agents_new_error_cleanup)) } }
@@ -868,7 +981,7 @@ private fun NewAgentState.filled(setup: RecentSetup): NewAgentState {
     return copy(
         selection = selection.copy(cwd = setup.cwd, launcher = launcher, mode = if (claude) setup.mode else selection.mode,
             effort = if (claude) setup.effort else selection.effort),
-        model = if (known) setup.model else "", pickedSetup = setup, focusPrompt = focusPrompt + 1,
+        model = if (known) setup.model else "", pickedSetup = setup, pickedTier = null, focusPrompt = focusPrompt + 1,
         // a recent setup starts by its folder (#7259)
         workspace = null, folderBeforeWorkspace = "",
     )

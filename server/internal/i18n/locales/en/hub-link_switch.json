@@ -1,0 +1,4 @@
+{
+  "forbidden": "Only a signed-in device can switch a computer to Persona Link",
+  "in_progress": "This computer is switching to Persona Link. Wait until the switch finishes, then try again"
+}

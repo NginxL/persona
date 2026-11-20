@@ -30,10 +30,11 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 	}
 	background := s.isBackground(ctx, p.SessionID)
 	snapshot := ""
-	if !s.cleanRoundSession(p.SessionID) { // a granted schedule's round reads nothing from outside (schedule_grant.go)
+	cleanRound := s.cleanRoundSession(p.SessionID)
+	if !cleanRound { // a granted schedule's round reads nothing from outside (schedule_grant.go)
 		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
 	}
-	c := prompts.AssistantContext{Snapshot: snapshot, Owner: s.owner(ctx),
+	c := prompts.AssistantContext{ScheduledWorkPlan: cleanRound && s.settings(ctx).workGuideOn(), Snapshot: snapshot, Owner: s.owner(ctx),
 		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}
 	switch {
 	case c.Main:
@@ -212,16 +213,14 @@ const (
 )
 
 // snapshotOmits are the sections fitSnapshot leaves out, the least needed first. Never left out: the agents waiting
-// for the user (needs you, awaiting a reply), the running workflows (an agent waiting for one has not finished), the
-// plan cards waiting for "Start" and the failed scheduled runs (no tool lists them), the calendar and the chats that
-// @ the user.
+// for the user (needs you, awaiting a reply), the plan cards waiting for "Start" and the failed scheduled runs (no
+// tool lists them), the calendar and the chats that @ the user.
 var snapshotOmits = []func(*prompts.SnapshotOmit){
 	func(o *prompts.SnapshotOmit) { o.Waiting = true },
 	func(o *prompts.SnapshotOmit) { o.Routines = true },
 	func(o *prompts.SnapshotOmit) { o.Following = true },
 	func(o *prompts.SnapshotOmit) { o.Followups = true },
 	func(o *prompts.SnapshotOmit) { o.OtherChats = true },
-	func(o *prompts.SnapshotOmit) { o.Working = true },
 	func(o *prompts.SnapshotOmit) { o.KB = true },
 	func(o *prompts.SnapshotOmit) { o.Asked = true },
 	func(o *prompts.SnapshotOmit) { o.Unaccepted = true },
@@ -285,7 +284,7 @@ func (s *Service) takeSnapshot(done chan struct{}) {
 		snap.Machines = append(snap.Machines, prompts.SnapshotMachine{Name: m.Name, ID: m.ID, Online: m.Online})
 	}
 	web := s.webBase(ctx) // the agents' and tasks' links (#2194)
-	snap.Needs, snap.Unread, snap.Awaiting, snap.Waiting, snap.Done, snap.Muted, snap.Working, snap.Workflows = s.snapshotAgents(ctx, devices, web)
+	snap.Needs, snap.Unread, snap.Awaiting, snap.Waiting, snap.Done, snap.Muted, snap.Working = s.snapshotAgents(ctx, devices, web)
 	snap.Tasks = s.snapshotTasks(ctx, web)
 	snap.OpenTodos, snap.OpenTodosTotal = s.snapshotOpenTodos(ctx, web)
 	snap.OpenTodosLoaded = snap.OpenTodos != nil
@@ -346,6 +345,8 @@ func (s *Service) ProfileChanged(context.Context) {
 	s.prefs.mu.Lock()
 	s.prefs.at = time.Time{}
 	s.prefs.mu.Unlock()
+	// A manager.json pin may have changed the supervision interval even though the saved settings did not.
+	s.rescheduleSupervision()
 }
 
 type snapshotAgentGroupKind string
@@ -391,21 +392,17 @@ func snapshotAgentGroup(c proto.Session, now time.Time) snapshotAgentGroupKind {
 // space) are in none of the others: the Live Activity, the Agents badge and the inbox leave them out
 // (docs/apple/live-activity.md), so "Needs you" here does too; they are told apart, for when the user asks about them (#4562).
 func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web string) (needs, unread, awaiting, waiting, done, muted []prompts.SnapshotAgent,
-	working []prompts.SnapshotAgent, workflows []prompts.SnapshotWorkflow) {
+	working []prompts.SnapshotAgent) {
 	now := time.Now()
 	for _, m := range devices {
 		list, off, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant || c.FoldedUnder() != "" {
+			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" {
 				continue
 			}
 			c.State = c.FoldedState()
 			a := prompts.SnapshotAgent{Label: agentLabel(c), Machine: m.ID, Session: short(c.SessionID),
 				Link: sessionLink(web, m.ID, c.SessionID, false), Ultracode: ultracodeState(c.Ultracode), Plan: snapshotPlan(c)}
-			for _, w := range runningWorkflows(c, now) {
-				w.Agent, w.Machine, w.Session = a.Label, a.Machine, a.Session
-				workflows = append(workflows, w)
-			}
 			w := c.Work
 			if w != nil && w.Phase != proto.WorkWorking {
 				a.Line, a.Closeout = w.Line, snapshotCloseout(w)
@@ -441,7 +438,7 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 			}
 		}
 	}
-	return needs, unread, awaiting, waiting, done, muted, working, workflows
+	return needs, unread, awaiting, waiting, done, muted, working
 }
 
 // runningWorkflows are c's background workflow runs still running, as the snapshot tells them (#2935).

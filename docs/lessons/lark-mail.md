@@ -2,6 +2,12 @@
 
 Pitfalls, odd behavior and the trade-offs made at the time (originally in `CLAUDE.md`; index in `docs/lessons/README.md`). Put new lessons in the matching section; if none fits, start a new one.
 
+## Lark system events are not new conversation requests
+
+A new message ID and timestamp do not establish new human activity (#9789). Consume system events and unidentified senders without creating or updating Inbox things, including the direct-chat sweep and history promotion path. Keep real attachments and independently authored bot notifications. When fetching conversation history for triage, retain timestamps and distinguish the incoming batch from background: an empty system event otherwise disappears from flattened context and makes an old request look current. An already collected follow-up remains background; promoting an unindexed follow-up must not rewind Last when another group of the same chat is processed in the same round.
+
+Coalesce the entire incoming batch by conversation key before constructing an Inbox thing: interleaved chats must not turn an earlier new request into background or discard it when history cannot be read. Incoming message IDs own current/history membership even when history has different timestamps, positions or thread metadata. Empty attachments need the same bounded, normalized fallback in their preview and model context; localize the visible preview rather than exposing an arbitrary source type.
+
 ## Saving mail attachments
 
 - Enforce a save limit while spooling, not after writing the attachment to disk (#9398). Keep reading and hashing the
@@ -32,6 +38,25 @@ The summary above an Inbox chat changes the ScrollView's top inset. Using `conte
 Don't give the whole `LarkMessageRow` one accessibilityIdentifier on sending rows: SwiftUI propagates it to child nodes and overrides the identifiers of the sending / failed markers next to the bubble. Attachment echo confirmation asserts that the local preview button disappears; sending state keeps using mainline's `lark.outgoing.sending` / `lark.outgoing.failed`.
 
 When mainline hides the send button for an empty composer, attachment drafts still count as sendable content: photos / files alone should still show the button, it hides after the last attachment is removed, and it's disabled while attachments are being prepared. Existing text, quote, thread composer and read markers stay.
+
+## Versioned Inbox reply recovery (#9126)
+
+- No current suggestion or no receipt means unknown history, not proof of non-delivery. Preserve the existing coded
+  `delivered` / `retryable` distinction; only confirmed retryable non-delivery may send again. Enforce that in the
+  manager, not only by hiding a Web button.
+- Freeze the first confirmation's actual edited payload, client ID and source/target before I/O. Retry the same version
+  with that identity after reload. Never reuse its ID with changed text, and never let an equivalent proposal of the
+  edited text escape an unknown reservation through a new version.
+  Check both re-proposed and actually confirmed edits against historical unresolved operations, including after
+  intervening proposals. A display-history cap must not delete the last proof used by this guard; settle the result
+  of equivalent current aliases without clearing a different proposal or source.
+- Saving an empty mutation set is not proof of a durable reservation. A failed or missing store prevents outward work;
+  an interrupted reservation stays conservative after restart. Keep the send-success helper's local side effects under
+  the same version/attempt/source fence as completion; an outer restore check is too late if the helper already filed
+  the item or marked a newer card sent.
+- Deduplicate default Wrap up by explicit intent and incoming identity, not an arbitrary time window, component-local
+  busy state or changed metadata timestamps. User-authored different instructions remain a fresh handoff. Compare the
+  full action, conversation and target when reusing a waiting suggestion, not just its visible words.
 
 ## Messages and documents
 
@@ -175,3 +200,7 @@ Pinned chats on the home page and normal paging both need to be bound to the act
   not feed alone. That's also why the hub doesn't guess the account from the feed (when an old client opens another account's chat, the default account is used: better to fail to read than to send under the wrong identity).
 - Resource URLs (avatars, images, files) for added accounts come from the Lark gateway with `ol_account` already in them; the hub rewrites them to `/api/v1/lark/media/…?ol_account=N`, and passing that back unchanged is correct;
   when the App adds an account to such URLs, it must not overwrite the `ol_account` already there.
+
+## Group delivery is not permission to trigger (#10238)
+
+A platform's mention scope may coexist with broader message scopes. Enforce per-group mention-only policy before the bot's own settings commands as well as assistant handoff; a command reply is already an observable side effect. Match structured open IDs, fail closed while the bot identity is unknown, and read the policy after a queued message gets its turn. Keep omitted boolean edits distinct from false so older clients cannot silently loosen a saved policy. A strict first enrollment must not become the fallback home for unrelated requests.

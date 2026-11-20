@@ -20,5 +20,6 @@
   "assistant_says": "アシスタントによると",
   "say_something": "ひとこと伝える",
   "retry": "もう一度試す",
-  "retry_text": "もう一度試してください。"
+  "retry_requested": "AIに再試行を依頼しました",
+  "retry_failed": "再試行できませんでした：{error}"
 }

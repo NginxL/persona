@@ -94,6 +94,12 @@
     <string name="settings_pairing_scan_title">扫描配对二维码</string>
     <string name="settings_pairing_scan_hint">把 Hub 装好时出的二维码，\n或已登录设备上「连接新设备」出的码\n放入取景框</string>
     <string name="settings_pairing_scan_manual">扫不了？手动输入</string>
+    <string name="settings_pairing_scan_photo">从照片选取</string>
+    <string name="settings_pairing_scan_camera_unavailable">相机不可用，请改选二维码照片。</string>
+    <string name="settings_pairing_scan_photo_reading">正在读取二维码…</string>
+    <string name="settings_pairing_scan_photo_unreadable">这张照片里的二维码读不出来，换一张试试。</string>
+    <string name="settings_pairing_scan_photo_none">照片中没有二维码，请另选一张。</string>
+    <string name="settings_pairing_scan_photo_multiple">照片中有多个二维码，请选择只有一个二维码的照片。</string>
 
     <!-- Hubs -->
     <string name="settings_hubs_title">Hub</string>

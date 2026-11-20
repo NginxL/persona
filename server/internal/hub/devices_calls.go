@@ -34,21 +34,28 @@ func (b *busNode) Call(ctx context.Context, method string, params, out any) erro
 	if caller, ok := callerOf(ctx); ok && caller != owner { // a manager's device.call, the machine moved since its check
 		return &rpc.Error{Code: devicewire.CodeNoDevice, Message: fmt.Sprintf("%s on machine %q: another manager's now", clip(method, 64), clip(b.id, 64))}
 	}
-	if owner == devicesOwner {
-		if err := b.h.waitDevices(ctx); err != nil {
-			return fmt.Errorf("%s: %w", b.id, err)
-		}
+	if err := b.h.waitDevicesFor(ctx, owner); err != nil {
+		return fmt.Errorf("%s: %w", b.id, err)
+	}
+	var streamVersion int
+	if dial, ok := params.(devicewire.PortDial); method == devicewire.MethodPortDial && ok {
+		// An old manager ignores the outer offer and forwards only the legacy port.dial parameters.
+		streamVersion, dial.StreamVersion = dial.StreamVersion, 0
+		params = dial
 	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
-	p := devicewire.NodeCall{MachineID: b.id, Method: method, Params: raw}
+	p := devicewire.NodeCall{MachineID: b.id, Method: method, Params: raw, StreamVersion: streamVersion}
 	if method == "session.interrupt" {
 		attachNodeCaller(ctx, &p)
 	}
 	if method == "session.modes" { // the manager records who changed a mode (#10297)
 		p.Actor = modesActor(ctx)
+	}
+	if method == "session.send" { // the owner's message to an Agent: after held ones, maybe held itself (send.go, #10661)
+		p.Hold, p.Ordered = holdOf(ctx), orderedOf(ctx)
 	}
 	if devicewire.IsSessionStart(method) || method == "session.send" {
 		attachNodeCaller(ctx, &p)
@@ -154,6 +161,12 @@ func deviceError(id string, err error) error {
 // modesActor is who asks for a session.modes call, for the manager's record of mode changes (#10297): the device and
 // its name, the hub's own token, or an extension. Display only; the request was checked before it got here.
 func modesActor(ctx context.Context) *devicewire.Actor {
+	if a := devicewire.ModeActorOf(ctx); a != nil {
+		return a
+	}
+	if _, ok := callerOf(ctx); ok {
+		return devicewire.AssistantModeActor()
+	}
 	pr := principalOf(ctx)
 	switch {
 	case pr.Role == roleExtension:

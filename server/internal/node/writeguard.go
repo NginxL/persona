@@ -161,5 +161,8 @@ func renameIfFree(from, to string) error {
 	return os.Rename(from, to)
 }
 
+// errNoReplaceRename: the system or the file system has no rename that refuses to replace (renameNoReplace).
+var errNoReplaceRename = errors.New("no rename that refuses to replace here")
+
 // renameFreeCheckedHook, when set (by tests), runs in renameIfFree between the check and the move.
 var renameFreeCheckedHook func()

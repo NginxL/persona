@@ -31,6 +31,12 @@ func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
 			return
 		}
 	}
+	if principalOf(r.Context()).Role == roleScoped {
+		if mode, ok := p["permission_mode"].(string); !ok || mode == "" || len(p) != 1 {
+			writeErr(w, http.StatusBadRequest, errors.New("provide only a nonempty permission_mode"))
+			return
+		}
+	}
 	// Keep speed separate from session.modes, which older nodes ignore unknown fields in.
 	if tier, exists := p["service_tier"]; exists {
 		if value, ok := tier.(string); !ok || value == "" || len(p) != 1 {

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -23,14 +24,14 @@ import (
 // ultracode is the tri-state the caller gave (nil: it said nothing, false: it explicitly asked for it off). permission
 // is a task's permission mode as it stood before the launcher that runs set it (launchPick only; pickOf leaves it "").
 type startPick struct {
-	launcher, effort, model, tier, permission string
-	ultracode                                 *bool
+	launcher, effort, model, speed, tier, permission string
+	ultracode                                        *bool
 }
 
 // launchPick is what task t holds of its launch now, as pickOf reads it from a start's params, with its ultracode.
 func (t *PlanTask) launchPick() startPick {
 	return startPick{launcher: strings.TrimSpace(t.Launcher), effort: strings.TrimSpace(t.Effort),
-		model: strings.TrimSpace(t.Model), tier: strings.TrimSpace(t.Tier), permission: strings.TrimSpace(t.Permission),
+		model: strings.TrimSpace(t.Model), speed: strings.TrimSpace(t.Speed), tier: strings.TrimSpace(t.Tier), permission: strings.TrimSpace(t.Permission),
 		ultracode: copyBool(t.Ultracode)}
 }
 
@@ -52,7 +53,7 @@ func (t PlanTask) storedLaunch() startPick {
 	}
 	own := *t.callerPick
 	if t.startFilled.preset {
-		kept.launcher, kept.model, kept.effort, kept.tier, kept.permission = own.launcher, own.model, own.effort, own.tier, own.permission
+		kept.launcher, kept.model, kept.effort, kept.speed, kept.tier, kept.permission = own.launcher, own.model, own.effort, own.speed, own.tier, own.permission
 	}
 	if t.startFilled.effort {
 		kept.effort = own.effort
@@ -78,20 +79,21 @@ func pickOf(params map[string]any) startPick {
 	e, _ := params["effort"].(string)
 	m, _ := params["model"].(string)
 	t, _ := params["tier"].(string)
+	v, _ := params["speed"].(string)
 	u, _ := params["ultracode"].(*bool)
 	return startPick{launcher: strings.TrimSpace(l), effort: strings.TrimSpace(e),
-		model: strings.TrimSpace(m), tier: strings.TrimSpace(t), ultracode: u}
+		model: strings.TrimSpace(m), speed: strings.TrimSpace(v), tier: strings.TrimSpace(t), ultracode: u}
 }
 
 // resolveStart fills params (a session.start's, with the caller's own launcher, model, effort and tier, if any) with
 // what the new Agent runs on: the tier, then Model configuration › Agents. It answers the caller's own pick, for
 // fitLauncher.
-func (s *Service) resolveStart(ctx context.Context, params map[string]any) (startPick, error) {
+func (s *Service) resolveStart(ctx context.Context, params map[string]any, launcherDefaultModel bool) (startPick, error) {
 	own := pickOf(params)
 	if err := s.applyStartTier(ctx, params); err != nil {
 		return own, err
 	}
-	return own, s.applyModel(ctx, "agent.new", params)
+	return own, s.applyModelBinding(ctx, "agent.new", params, launcherDefaultModel)
 }
 
 // startAgent is what a start's launcher runs on the computer it starts on (fitLauncher): the agent type (claude, codex,
@@ -100,6 +102,7 @@ func (s *Service) resolveStart(ctx context.Context, params map[string]any) (star
 // Auto Accept).
 type startAgent struct {
 	agent      string
+	snapshot   string // the explicitly known kind for a to-do link; agent's compatibility defaults are not evidence
 	source     string // the selected launcher's provenance, retained through fitting and health detours
 	autoAccept bool
 }
@@ -107,6 +110,31 @@ type startAgent struct {
 // launcherStartAgent is what launcher l runs.
 func launcherStartAgent(l ConfiguredLauncher) startAgent {
 	return startAgent{agent: l.AgentType, source: l.Source, autoAccept: l.AutoAccept}
+}
+
+// launcherKindSnapshot is the kind the launcher metadata actually names, before sessionLaunchers applies its Claude
+// compatibility default to an arbitrary wrapper. Explicit hub configuration wins over the node's answer, as it does
+// for the start itself. Recognized built-in names are evidence; a guessed wrapper type is not.
+func launcherKindSnapshot(discovered, overrides []ConfiguredLauncher, name string) string {
+	kind := ""
+	for _, l := range discovered {
+		if l.Name == name {
+			kind = cmp.Or(l.AgentType, l.Agent)
+			break
+		}
+	}
+	for _, l := range overrides {
+		if l.Name == name && l.AgentType != "" && l.Source != proto.ExternalLauncherSource && !proto.IsExternalLauncher(l.Name) {
+			kind = l.AgentType
+		}
+	}
+	if kind == "" {
+		switch name {
+		case "claude", "codex", "traex":
+			kind = name
+		}
+	}
+	return kind
 }
 
 // allowAll: the Agents Persona itself starts on the launcher (agent_start, a planned task, a read-only one too) run with
@@ -136,11 +164,11 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 	}
 	if s.launcherEverywhere(ctx, name) {
 		if name == "" || name == "claude" {
-			return "", startAgent{agent: "claude"}, nil
+			return "", startAgent{agent: "claude", snapshot: "claude"}, nil
 		}
 		for _, l := range s.storedLaunchers(ctx) {
 			if l.Name == name {
-				return "", startAgent{agent: l.AgentType(), source: "persona"}, nil
+				return "", startAgent{agent: l.AgentType(), snapshot: l.AgentType(), source: "persona"}, nil
 			}
 		}
 		return "", startAgent{}, nil
@@ -149,15 +177,18 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 	if !known {
 		return "", s.lastSeenAgent(ctx, m.ID, name), nil
 	}
-	configured := make([]ConfiguredLauncher, 0, len(list))
+	discovered := make([]ConfiguredLauncher, 0, len(list))
 	for _, l := range list {
-		configured = append(configured, ConfiguredLauncher{Launcher: l})
+		discovered = append(discovered, ConfiguredLauncher{Launcher: l})
 	}
-	configured = sessionLaunchers(configured, s.hello(ctx).Models.Launchers[m.ID])
+	overrides := s.hello(ctx).Models.Launchers[m.ID]
+	configured := sessionLaunchers(discovered, overrides)
 	agentOf := func(name string) startAgent {
 		for _, l := range configured {
 			if l.Name == name {
-				return launcherStartAgent(l)
+				a := launcherStartAgent(l)
+				a.snapshot = launcherKindSnapshot(discovered, overrides, name)
+				return a
 			}
 		}
 		return startAgent{}
@@ -171,12 +202,15 @@ func (s *Service) fitLauncher(ctx context.Context, m Device, own startPick, para
 		})
 	}
 	to := launcherInstead(m, list)
-	for _, k := range []string{"model", "effort", "model_fingerprint"} {
+	for _, k := range []string{"model", "effort", "model_fingerprint", "speed"} {
 		delete(params, k)
 	}
 	params["launcher"] = to
 	if own.effort != "" {
 		params["effort"] = own.effort
+	}
+	if own.speed != "" {
+		params["speed"] = own.speed
 	}
 	if err := s.applyModel(ctx, "agent.new", params); err != nil {
 		return "", startAgent{}, err
@@ -199,6 +233,7 @@ func (s *Service) lastSeenAgent(ctx context.Context, machine, name string) start
 		return startAgent{}
 	}
 	seen, _ := s.zshrcLaunchersLastSeen(ctx)
+	overrides := s.hello(ctx).Models.Launchers[machine]
 	for _, z := range seen {
 		if z.MachineID != machine {
 			continue
@@ -212,9 +247,11 @@ func (s *Service) lastSeenAgent(ctx context.Context, machine, name string) start
 		if len(configured) == 0 {
 			return startAgent{}
 		}
-		for _, l := range sessionLaunchers(configured, s.hello(ctx).Models.Launchers[machine]) {
+		for _, l := range sessionLaunchers(configured, overrides) {
 			if l.Name == name {
-				return launcherStartAgent(l)
+				a := launcherStartAgent(l)
+				a.snapshot = launcherKindSnapshot(configured, overrides, name)
+				return a
 			}
 		}
 	}

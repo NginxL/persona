@@ -110,9 +110,10 @@ export function SidePanel() {
         closePanel();
       }}
       // narrow: over the visible part of the page (--kb-top / --kb-h, lib/viewport.ts), so on iOS the terminal's key
-      // bar sits on the keyboard instead of under it
+      // bar sits on the keyboard instead of under it; fixed, it is outside #root's safe-area padding, so it keeps clear
+      // of a landscape notch itself, as the drawer does
       className={cx(
-        "fixed inset-x-0 top-(--kb-top) z-30 flex h-(--kb-h) flex-col bg-page shadow-overlay lg:relative lg:inset-auto lg:top-auto lg:z-auto lg:h-auto lg:w-(--panel-w) lg:shrink-0 lg:border-l lg:border-line lg:shadow-none",
+        "fixed inset-x-0 top-(--kb-top) z-30 flex h-(--kb-h) flex-col bg-page shadow-overlay max-lg:pr-[env(safe-area-inset-right)] max-lg:pl-[env(safe-area-inset-left)] lg:relative lg:inset-auto lg:top-auto lg:z-auto lg:h-auto lg:w-(--panel-w) lg:shrink-0 lg:border-l lg:border-line lg:shadow-none",
         maximized && "lg:hidden",
       )}
       style={{ "--panel-w": `${shown}px`, animation: `slide-in-right 260ms ${EASE} both` } as React.CSSProperties}

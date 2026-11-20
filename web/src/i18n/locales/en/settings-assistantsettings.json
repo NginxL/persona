@@ -151,5 +151,7 @@
   "idle_close_unit": "hours",
   "main_supervises": "The main chat supervises its own tasks",
   "main_supervises_hint": "Off by default: a built-in background supervisor follows up and reviews the tasks Persona hands out, so the main chat stays free to answer you; turn this on and the main chat does that itself, as it did before",
-  "background_supervisor_model": "Background supervisor's model"
+  "background_supervisor_model": "Background supervisor's model",
+  "claude_interactive": "Interactive Claude Code",
+  "claude_interactive_footer": "Off by default. When on, Claude chats run the real interactive Claude Code on their computer instead of its print mode (claude -p), with the same instructions, tools and settings. People report that on a Claude subscription print mode uses the 5-hour limit faster; Anthropic does not document this. Risk: Persona then drives a program made for a person, which Anthropic may treat as a different kind of use, and your account could be restricted. Replies appear a block at a time instead of word by word. Needs tmux on that computer; if the interactive start fails, the chat runs in print mode and Runs on above says why."
 }

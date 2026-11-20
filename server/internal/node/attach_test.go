@@ -194,11 +194,13 @@ func TestAttachServesExtraConnections(t *testing.T) {
 	a, b := net.Pipe()
 	defer a.Close()
 	extra <- b
+	go func() { _, _ = a.Write([]byte("{}\n")) }() // a connection is served once its first line came (attach_resume.go)
 	wait("a tailcat connection")
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		if c, err := net.Dial("unix", AttachSocketPath()); err == nil {
 			defer c.Close()
+			_, _ = c.Write([]byte("{}\n"))
 			break
 		}
 		if time.Now().After(deadline) {
@@ -213,6 +215,7 @@ func TestAttachServesExtraConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	_, _ = c.Write([]byte("{}\n"))
 	wait("a relay after tailcat stopped")
 	cancel()
 	if err := <-done; err != nil {

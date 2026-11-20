@@ -47,13 +47,12 @@ nonisolated enum MessagingSources {
     /// The named manager's source was found this launch: its chats don't ask again.
     static func knows(_ hub: URL, manager: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return byManager[key(hub) + "@" + manager] != nil
+        return !(byManager[key(hub) + "@" + manager] ?? "").isEmpty
     }
 
-    /// Only a source found is kept: with none (an extension restarting lists none for a moment) the next open asks again.
-    static func set(_ source: String, for hub: URL, manager: String) {
+    static func set(_ source: String?, for hub: URL, manager: String) {
         lock.lock(); defer { lock.unlock() }
-        byManager[key(hub) + "@" + manager] = source
+        byManager[key(hub) + "@" + manager] = source ?? ""
     }
 
     /// One hub however its address is written (with or without a trailing /): its scheme, host, port and path.
@@ -84,11 +83,15 @@ extension APIClient {
     /// Reads the named manager's sources through it before its Feishu screens read anything, until one is found this launch
     /// (the default's are the hub's, `HubLink.refreshMessagingSources`). `features`: the hub's at its last hello.
     func readMessagingSource(features: Set<String>) async {
-        guard let managerID, features.contains("messaging"), !MessagingSources.knows(config.url, manager: managerID),
+        guard let managerID else { return }
+        guard features.contains("messaging") else {
+            if !features.isEmpty { MessagingSources.set(nil, for: config.url, manager: managerID) }
+            return
+        }
+        guard !MessagingSources.knows(config.url, manager: managerID),
               let raw = try? await request("GET", "/api/v1/messaging"),
-              let list = try? JSON.decoder.decode(ExtensionMessagingSources.self, from: raw),
-              let source = list.sources.first?.id else { return }
-        MessagingSources.set(source, for: config.url, manager: managerID)
+              let list = try? JSON.decoder.decode(ExtensionMessagingSources.self, from: raw) else { return }
+        MessagingSources.set(list.sources.first?.id, for: config.url, manager: managerID)
     }
 
     /// A path under the source.
@@ -159,6 +162,35 @@ nonisolated enum MessagingShape {
         return url
     }
 
+    /// A messaging avatar always loads from the selected manager. An older hub
+    /// supplies just the source value: relative media uses its original endpoint.
+    static func avatar(_ row: Object, source: String, account: String?) -> String? {
+        let prefix = "/api/v1/avatars/" + source + "/"
+        if let path = row["avatar_url"] as? String, path.hasPrefix(prefix),
+           let url = URLComponents(string: path), url.fragment == nil,
+           !url.path.dropFirst(prefix.count).isEmpty,
+           url.path.dropFirst(prefix.count).allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }),
+           (url.queryItems ?? []).allSatisfy({ $0.name == "account" || $0.name == "messaging" }) {
+            return path
+        }
+        guard let raw = row["avatar"] as? String, !raw.isEmpty, raw.utf8.count <= 2048,
+              let url = URLComponents(string: raw) else { return nil }
+        if url.scheme?.lowercased() == "https", url.host?.isEmpty == false, url.user == nil, url.password == nil {
+            let value = Data(raw.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+            return prefix + value + "?messaging=1"
+        }
+        guard raw.hasPrefix("media/"), url.fragment == nil, !url.path.contains("\\"),
+              url.path.split(separator: "/", omittingEmptySubsequences: false)
+                .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        var path = "/api/v1/messaging/" + source + "/" + raw
+        if let account {
+            let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            path += (path.contains("?") ? "&" : "?") + "account=" + (account.addingPercentEncoding(withAllowedCharacters: unreserved) ?? "")
+        }
+        return path
+    }
+
     static func conversations(_ page: Any, source: String, account: String?, user: String?) -> Any {
         guard var o = page as? Object else { return page }
         o["conversations"] = (o["conversations"] as? [Object] ?? []).map { conversation($0, source: source, account: account) }
@@ -176,7 +208,7 @@ nonisolated enum MessagingShape {
                            ("updated_at", "updated_at"), ("read_position", "read_position"), ("mention_position", "mention_position")] {
             if let v = c[from] { o[to] = v }
         }
-        if let a = media(c["avatar"], source: source, account: account) { o["avatar"] = a }
+        if let a = avatar(c, source: source, account: account) { o["avatar"] = a }
         return o
     }
 
@@ -199,7 +231,7 @@ nonisolated enum MessagingShape {
                          "is_mine": m["mine"] ?? false, "type": senderKind == "system" ? "SYSTEM" : "TEXT", "text": m["text"] ?? "",
                          "recalled": m["recalled"] ?? false, "parts": parts]
         if let v = sender["id"] { o["sender_id"] = v }
-        if let a = media(sender["avatar"], source: source, account: account) { o["sender_avatar"] = a }
+        if let a = avatar(sender, source: source, account: account) { o["sender_avatar"] = a }
         if senderKind == "bot" { o["sender_type"] = "bot" }
         if (m["recalled"] as? Bool) == true, !parts.isEmpty { o["retained"] = true }
         let count = (m["thread"] as? Object)?["count"] as? Int ?? 0
@@ -433,7 +465,7 @@ nonisolated enum MessagingShape {
             o["olk"] = ["version": 1, "state": "decrypted", "publicParts": coverParts, "bodyParts": body] as Object
             o["textPreview"] = cover
         }
-        if let a = media(sender["avatar"], source: source, account: account) { o["senderAvatarUrl"] = a }
+        if let a = avatar(sender, source: source, account: account) { o["senderAvatarUrl"] = a }
         if let t = m["created_at"] { o["createdAt"] = t }
         return o
     }
@@ -524,7 +556,7 @@ nonisolated extension MessagingShape {
     static func profile(_ raw: Any, source: String, account: String?) -> Any {
         guard let p = raw as? Object else { return raw }
         var o: Object = ["displayName": p["name"] ?? ""]
-        if let a = media(p["avatar"], source: source, account: account) { o["avatarUrl"] = a }
+        if let a = avatar(p, source: source, account: account) { o["avatarUrl"] = a }
         if let c = media(p["cover"], source: source, account: account) { o["coverUrl"] = c }
         if let d = p["description"] { o["description"] = d }
         // The line under the name (a note, another name): the name stays the title.
@@ -549,7 +581,7 @@ nonisolated extension MessagingShape {
         if let s = p["summary"] { card["body"] = s }
         if let a = p["author"] as? Object {
             card["author"] = a["name"] ?? ""
-            if let av = media(a["avatar"], source: source, account: account) { card["avatarUrl"] = av }
+            if let av = avatar(a, source: source, account: account) { card["avatarUrl"] = av }
         }
         if !card.isEmpty { o["card"] = card }
         return o
@@ -565,7 +597,7 @@ nonisolated extension MessagingShape {
             let id = a["id"] as? String ?? ""
             x["id"] = Int(id) ?? 0
             x["unread"] = a["unread"] ?? 0
-            x["avatar"] = media(a["avatar"], source: source, account: id == main ? nil : id)
+            x["avatar"] = avatar(a, source: source, account: id == main ? nil : id)
             return x
         }
         o["default"] = Int(main) ?? 1
@@ -588,7 +620,7 @@ nonisolated extension MessagingShape {
         let author = p["author"] as? Object ?? [:]
         var o: Object = ["id": p["id"] ?? "", "userName": author["name"] ?? "", "content": momentsContent(p["parts"])]
         if let id = author["id"] { o["userId"] = id }
-        if let a = media(author["avatar"], source: source, account: account) { o["userAvatarUrl"] = a }
+        if let a = avatar(author, source: source, account: account) { o["userAvatarUrl"] = a }
         o["images"] = (p["images"] as? [Object] ?? []).map { i in
             var x: Object = ["url": media(i["media"], source: source, account: account) ?? ""]
             if let w = i["width"] { x["width"] = w }
@@ -610,7 +642,7 @@ nonisolated extension MessagingShape {
             let author = c["author"] as? Object ?? [:]
             var x: Object = ["id": c["id"] ?? "", "userName": author["name"] ?? "", "content": momentsContent(c["parts"])]
             if let id = author["id"] { x["userId"] = id }
-            if let a = media(author["avatar"], source: source, account: account) { x["userAvatarUrl"] = a }
+            if let a = avatar(author, source: source, account: account) { x["userAvatarUrl"] = a }
             if let t = c["created_at"] as? String, let d = JSON.parseDate(t) { x["createTime"] = d.timeIntervalSince1970 * 1000 }
             if (c["hot"] as? Bool) == true { x["isHot"] = true }
             return x

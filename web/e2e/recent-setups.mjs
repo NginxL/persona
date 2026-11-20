@@ -103,6 +103,8 @@ async function openPanel(page, dialog, tag) {
   const panel = page.locator("[data-model-panel]");
   await expectVisible(panel, `${tag}: the model panel`);
   await until(async () => (await panel.locator('[role="status"]').count()) === 0, `${tag}: the panel's lists did not load`);
+  // The catalog is one disclosure per launcher; these existing checks exercise the model actions below them.
+  while (await panel.locator('[data-panel-launcher][aria-expanded="false"]').count()) await panel.locator('[data-panel-launcher][aria-expanded="false"]').first().click();
   return panel;
 }
 

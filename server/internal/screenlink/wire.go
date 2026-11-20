@@ -40,6 +40,8 @@ const (
 	// The video over UDP (#7873), on a direct route's TLS connection only.
 	TypeUDPOpen  byte = 12 // empty: open a UDP flow beside this connection
 	TypeUDPReady byte = 13 // JSON UDPReady
+	// A close acknowledgement is separate from ack: a final-data ack can cross with a close the phone has not read yet.
+	TypeCloseAck byte = 14 // u8 channel, u64 its close's end; repeat it for every copy of that close
 )
 
 // Channels of a session: RFB is Screen Sharing's stream, resumed byte for byte and never dropped. Each video stream

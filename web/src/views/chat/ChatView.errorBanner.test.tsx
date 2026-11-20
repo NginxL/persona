@@ -22,7 +22,7 @@ const captured = vi.hoisted(() => ({ session: undefined as Session | undefined }
 
 vi.mock("./Composer", async (importOriginal) => ({
   ...await importOriginal<typeof import("./Composer")>(),
-  Composer: () => <textarea aria-label="composer" />,
+  Composer: () => <textarea aria-label="composer" data-composer-input />,
 }));
 // one transcript for every render; a test swaps its items and draws again
 const transcript = vi.hoisted(() => ({ items: [] as unknown[], loading: false, firstRead: true, error: "", hasMore: false, streaming: "" }));

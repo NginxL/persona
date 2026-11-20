@@ -55,15 +55,32 @@ func (h *Manager) channelsAppCall(ctx context.Context, p assistantwire.AppCall) 
 			Action        string `json:"action"`
 			Channel       string `json:"channel"`
 			Kind          string `json:"kind"`
+			Clarify       bool   `json:"clarify"`
+			Text          string `json:"text"`
+			ClientMsgID   string `json:"client_msg_id"`
+			MachineID     string `json:"machine_id"`
+			SessionID     string `json:"session_id"`
 		}
 		if err := json.Unmarshal(p.Params, &a); err != nil {
 			return nil, true, err
+		}
+		var question assistantwire.ClarificationProof
+		if a.Clarify {
+			question = assistantwire.ClarificationProof{InteractionID: strings.TrimSpace(a.InteractionID), MachineID: a.MachineID,
+				SessionID: a.SessionID, Text: a.Text, ClientMsgID: a.ClientMsgID}
+			if a.Channel != channel.Feishu || !validClarificationProof(question) {
+				return nil, true, errors.New("invalid clarification proof request")
+			}
 		}
 		// The assistant answers a card from a channel only with the owner's action handed over with that press or
 		// message in that channel (a card's for that card, a message's for a kind it takes typed), once
 		// (fleet_routes.go channelResolve there; kind is the queue's).
 		err = h.takeOwnerAction(a.Action, a.Channel, strings.TrimSpace(a.InteractionID), a.Kind)
-		out = map[string]any{}
+		if err == nil && a.Clarify {
+			out = map[string]any{"clarification_proof": h.clarificationProofs.issue(question)}
+		} else {
+			out = map[string]any{}
+		}
 	default:
 		return nil, false, nil
 	}
@@ -99,6 +116,10 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		ChatID     string               `json:"chat_id"`   // feishu.post / feishu.text: the chat to send into (default: the owner's)
 		InThread   bool                 `json:"in_thread"` // feishu.post / feishu.text: a reply goes into the parent's thread
 		Exclusive  bool                 `json:"exclusive"` // feishu.pin: the bot's other pins in the chat come off
+		CardID     string               `json:"card_id"`   // feishu.card_*: the card entity
+		Element    string               `json:"element"`   // feishu.card_stream: the element streamed into
+		Sequence   int64                `json:"sequence"`  // feishu.card_*: the write's place, larger than the last
+		Streaming  bool                 `json:"streaming"` // feishu.card_settings
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &a); err != nil {
@@ -178,9 +199,19 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		}
 		msgType, content := feishubot.TypeText, feishubot.TextContent(a.Text)
 		if a.FullAnswer {
-			msgType, content, err = api.AnswerContent(ctx, a.Text)
+			msgType, content, err = h.feishuAnswerContent(ctx, api, a.ReplyTo, replyUUID, a.Text)
 			if err != nil {
 				return nil, err
+			}
+			current, settings := h.botAPI()
+			if !settings.SourceReportFullReply {
+				return nil, errBotSourceReply
+			}
+			if current != api {
+				// The bot restarted during the upload (new credentials, turned off and on, the group's
+				// center moved): a file key of the old client may not be usable. Failing for now lets
+				// the report try again with the current client.
+				return nil, errBotRestarted
 			}
 		}
 		if found && !h.useAISourceReply(a.ReplyTo, a.FullAnswer) {
@@ -193,6 +224,18 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		return map[string]any{"message_id": id}, err
 	case assistantwire.FeishuUpdateCard:
 		return map[string]any{}, api.UpdateCard(ctx, a.MessageID, a.Card)
+	case assistantwire.FeishuCardCreate:
+		if a.Card == "" {
+			return nil, errors.New("feishu.card_create needs a card")
+		}
+		id, err := api.CardCreate(ctx, a.Card)
+		return map[string]any{"card_id": id}, feishuCoded(err)
+	case assistantwire.FeishuCardUpdate:
+		return map[string]any{}, feishuCoded(api.CardUpdate(ctx, a.CardID, a.Card, a.Sequence))
+	case assistantwire.FeishuCardStream:
+		return map[string]any{}, feishuCoded(api.CardStream(ctx, a.CardID, a.Element, a.Text, a.Sequence))
+	case assistantwire.FeishuCardSettings:
+		return map[string]any{}, feishuCoded(api.CardSettings(ctx, a.CardID, a.Streaming, a.Sequence))
 	case assistantwire.FeishuPin:
 		if err := checkOwnDMMessage(ctx, api, set, a.MessageID); err != nil {
 			return nil, err
@@ -212,17 +255,23 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		}
 		return map[string]any{}, feishuCoded(api.Recall(ctx, a.MessageID))
 	case assistantwire.FeishuCotCreate:
-		// The agent message is made in the owner's DM, so the message it answers has to be in the DM too.
+		chatID, err := botSendChat(set, a.ChatID)
+		if err != nil {
+			return nil, err
+		}
 		parent, err := h.checkReplyParent(ctx, api, set, a.ReplyTo)
 		if err != nil {
 			return nil, err
 		}
-		if parent != "" && parent != set.Owner.ChatID {
+		if a.InThread && a.ReplyTo == "" {
 			return nil, errBotReplyChat
 		}
-		cot, id, err := api.CotCreate(ctx, set.Owner.ChatID, a.ReplyTo)
+		// As with other replies, the parent decides where the agent message lands; chat_id must still name a chat
+		// the bot may use, and reply_in_thread keeps it in the parent's origin topic.
+		chatID = firstNonEmpty(parent, chatID)
+		cot, id, err := api.CotCreate(ctx, chatID, a.ReplyTo, a.InThread)
 		if err == nil {
-			h.rememberMessageChat(id, set.Owner.ChatID)
+			h.rememberMessageChat(id, chatID)
 		}
 		return map[string]any{"cot_id": cot, "message_id": id}, feishuCoded(err)
 	case assistantwire.FeishuCotAppend:

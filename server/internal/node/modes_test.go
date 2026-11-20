@@ -25,6 +25,7 @@ func TestTuiMode(t *testing.T) {
 		box + "  ⏵⏵ accept edits on (shift+tab to cycle)":       "acceptEdits",
 		box + "  ⏸ plan mode on (shift+tab to cycle)\n\n":       "plan",
 		box + "  ⏵⏵ auto mode on (shift+tab to cycle)":          "auto",
+		box + "  ⏵⏵ don't ask on (shift+tab to cycle)":          "dontAsk",
 		box + "  ⏵⏵ bypass permissions on (shift+tab to cycle)": "bypassPermissions",
 		// Chat text mentioning a mode, far above the footer, does not count.
 		"I turned plan mode on for you\n" + box + "\n\n\n\n\n": "",

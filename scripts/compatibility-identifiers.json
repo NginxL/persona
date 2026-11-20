@@ -400,6 +400,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "docs/operations/link.md": {
+      "reason": "Published upgrade, storage identity or compatibility documentation retained for existing installations.",
+      "tokens": [
+        ".jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "docs/operations/persona-cutover.md": {
       "reason": "Published upgrade, storage identity or compatibility documentation retained for existing installations.",
       "tokens": [

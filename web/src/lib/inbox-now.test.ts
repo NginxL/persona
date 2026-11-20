@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../i18n";
 import { fromLine, matches, type InboxFilter, type InboxItem } from "./inbox";
 import { nowText, rowMeta } from "./inbox-now";
+import { handOffContext, sourceLine } from "./inbox-page";
 
 const LANGS = ["en", "zh-Hans", "ja"] as const;
 type Lang = (typeof LANGS)[number];
@@ -97,6 +98,20 @@ for (const lang of LANGS) {
 }
 
 describe("older and newer hubs", () => {
+  it("shows the source mailbox with the mail preview, including its translation", async () => {
+    await initI18n("en");
+    const mail = (mailbox?: string) => item({ source: "mail", kind: "mail", account: "demo", account_name: "Example mail", sender: "Alex", preview: "Update",
+      mail: { account_id: "demo", mailbox, uids: [7] } });
+    expect(rowMeta(mail("Projects/通知"))).toBe("Projects/通知 · Alex: Update");
+    expect(rowMeta(mail("Projects/通知"), "Translated")).toBe("Projects/通知 · Alex: Translated");
+    expect(sourceLine(mail("Projects/通知"))).toBe("Example mail · Projects/通知 · Alex");
+    expect(handOffContext(mail()).text).toContain("INBOX");
+    expect(rowMeta(mail(" INBOX "))).toBe(" INBOX  · Alex: Update");
+    for (const mailbox of [undefined, "INBOX", "InBoX", ""]) {
+      expect(rowMeta(mail(mailbox))).toBe("Alex: Update");
+    }
+  });
+
   it("leaves the app's own words in place without now or for an unknown key", () => {
     expect(nowText(item())).toBeUndefined();
     for (const now of ["a_future_state", "tomorrow", "next", "look_again", "waiting_anyone", "failed_plain"]) {

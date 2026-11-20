@@ -126,10 +126,13 @@ func (n *Node) launcherModes(ctx context.Context, id, launcher, from, model, mod
 		return true, err
 	}
 	ps := proto.PendingSwitch{Launcher: launcher, Model: strings.TrimSpace(model), Effort: effort}
+	// An agent whose claude Persona did not start with its command (herdr's bare resume, offlauncher.go) does not run
+	// on its own launcher: picking that one may be a switch back to it, checked like any other.
+	off := n.offLauncher(id)
 	// The checks run a login shell, ask the hub for a provider's secrets, read the launcher's models: not while holding
 	// up the session's messages.
 	checked := false
-	if own, _ := n.engineOwnLauncher(id, n.liveEngine(id)); launcher != own {
+	if own, _ := n.engineOwnLauncher(id, n.liveEngine(id)); launcher != own || off {
 		// A launcher of the other engine (Claude Code ↔ Codex) is a switch to it (engine_switch.go, #5054).
 		to, err := n.switchEngine(ctx, id, launcher)
 		if err != nil {
@@ -155,11 +158,15 @@ func (n *Node) launcherModes(ctx context.Context, id, launcher, from, model, mod
 	// meanwhile; this one waits for it, and is then taken against the launcher the agent runs on by then.
 	unlock := n.typing.lock(id)
 	own, _ := n.engineOwnLauncher(id, n.liveEngine(id))
-	if from != "" && from != own || launcher != own && !checked {
+	// Off its launcher (again by then: a switch carried out meanwhile puts it back on), picking that launcher is the
+	// switch back to it, unless a switch to another one waits: that pick cancels it, as it does for an agent on it.
+	waiting := n.pendingSwitch(id)
+	back := launcher == own && n.offLauncher(id) && (waiting == nil || waiting.Launcher == own)
+	if from != "" && from != own || (launcher != own || back) && !checked {
 		unlock()
 		return true, refusal(proto.CodeSwitchStale, fmt.Sprintf("the session runs on launcher %s now, not %s", own, cmp.Or(from, launcher)), nil)
 	}
-	if launcher == own {
+	if launcher == own && !back {
 		if n.pendingSwitch(id) != nil {
 			n.putPendingSwitch(id, nil)
 			n.logf("session %s: launcher switch cancelled", id)
@@ -260,6 +267,9 @@ func (n *Node) planSwitch(ctx context.Context, id string, ps proto.PendingSwitch
 		return nil, err
 	}
 	forward := modelExecution{Model: ps.Model, PlanThen: n.planThen(id)}
+	if st, _ := n.state.get(id); forward.Model == "" && st.Launcher == ps.Launcher && n.offLauncher(id) {
+		forward.Model = st.Model // back on the launcher it was started on (offlauncher.go): with the model it ran there
+	}
 	if forward.Model == "" {
 		model, ok := n.switchModel(ps.Launcher, cwd, dir, dirKnown)
 		if !ok {
@@ -745,6 +755,50 @@ func (n *Node) backgroundWork(id string) string {
 	return ""
 }
 
+// turnOver: session id's Claude Code in a pane is at rest as far as the node knows (its turn ended: not working, not
+// waiting on the user, not starting or moving to another launcher). From what the node holds, without asking the host.
+func (n *Node) turnOver(id string) bool {
+	a, ok := n.agent(id)
+	if !ok || a.Agent != "" && a.Agent != "claude" {
+		return false
+	}
+	return (a.AgentStatus == proto.StatusDone || a.AgentStatus == proto.StatusIdle) && !n.restarting(id)
+}
+
+// backgroundRuns: session id is known to have background work running: a background command, a workflow or a
+// background subagent. False while that is not known (the transcript's background work still being read): a Stop on a
+// session at rest is then answered as it always was.
+func (n *Node) backgroundRuns(id string) bool {
+	p := n.transcriptPath(id)
+	if p == "" {
+		return false
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	m := n.meta(p, fi)
+	if _, _, _, pending := n.backgroundTasks(p); m.bgWait || pending {
+		return false
+	}
+	if n.liveBackground(p, n.processSince(id)) > 0 {
+		return true
+	}
+	s := proto.Session{SessionID: id}
+	n.setBackground(&s, m)
+	for _, w := range s.Workflows {
+		if w.Running {
+			return true
+		}
+	}
+	for _, sub := range n.subagents(id) {
+		if sub.Running && sub.Background {
+			return true
+		}
+	}
+	return false
+}
+
 // processSince is when session id's claude process started as far as the node saw it (its ultracode process
 // boundary: a start or resume of Persona's, a SessionStart hook), zero when it did not.
 func (n *Node) processSince(id string) time.Time {
@@ -885,7 +939,7 @@ func (n *Node) resumeTurn(ctx context.Context, id string) (done func()) {
 // is dropped and refuses the message instead (switchNowRefusal).
 func (n *Node) applySwitch(ctx context.Context, id, pane string, ps proto.PendingSwitch, now bool) (string, bool, error) {
 	own, _ := n.ownLauncher(id)
-	if ps.Launcher == own || time.Since(ps.At) > switchMaxAge {
+	if ps.Launcher == own && !n.offLauncher(id) || time.Since(ps.At) > switchMaxAge { // off its own: a switch back (offlauncher.go)
 		n.logf("session %s: switch to launcher %s picked %s dropped: on it already, or picked too long ago", id, ps.Launcher, ps.At.Format(time.RFC3339))
 		n.putPendingSwitch(id, nil)
 		return pane, false, nil
@@ -1036,7 +1090,7 @@ func (n *Node) switched(id string, ps proto.PendingSwitch) {
 func (n *Node) noteSwitchedModel(id string, ps proto.PendingSwitch) {
 	n.mu.Lock()
 	if m, ok := n.modes[id]; ok {
-		m.Model = nil
+		m.Model, m.Awaited = nil, nil // a switch typed into the old launcher's process is not this one's
 		n.modes[id] = m
 	}
 	n.mu.Unlock()

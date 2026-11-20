@@ -112,7 +112,7 @@ const pluginsCopied = ".persona-extension-skills" // in the assistant's skills: 
 func installPlugins(dir, plugins string, mine []string) error {
 	var want []string
 	for _, n := range pluginNames(plugins) {
-		if slices.Contains(mine, n) || slices.Contains(builtinNames(), n) {
+		if slices.Contains(mine, n) || (n != workGuideName && slices.Contains(builtinNames(), n)) {
 			continue
 		}
 		stamp, _ := os.ReadFile(filepath.Join(plugins, n, pluginStamp))

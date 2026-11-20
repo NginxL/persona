@@ -59,4 +59,16 @@ describe("the to-do's own state is a chip of its own (#6492)", () => {
     expect(todoChipState({ toStart: false, status: "follow_up", done: false, todo: { done_at: null, supervision: review("pending_review") } })).toBe(t("assistant-tasks.review_pending"));
     expect(todoChipState({ toStart: false, status: "follow_up", done: false, todo: { done_at: null, supervision: review("rework") } })).toBe(t("assistant-tasks.review_rework", { round: 2 }));
   });
+
+  it("has no Accepted chip for a continuation's new round, only for an acceptance that stands (#11553)", () => {
+    const earlier = { at: "2026-11-20T02:23:57Z", verdict: "accepted" as const };
+    // task_plan continues: the hub kept the earlier acceptance in the reviews and put the ledger back to going on
+    const continued: Supervision = { state: "", supervisor: "c", reviews: [earlier], round: 0 };
+    for (const status of ["working", "follow_up"]) {
+      expect(todoChipState({ toStart: false, status, done: false, todo: { done_at: null, supervision: continued } })).toBeUndefined();
+    }
+    // more work sent to the accepted task's Agent (#3156): its acceptance stands until the next review
+    const standing: Supervision = { ...continued, state: "accepted" };
+    expect(todoChipState({ toStart: false, status: "working", done: false, todo: { done_at: null, supervision: standing } })).toBe(t("assistant-tasks.review_accepted"));
+  });
 });

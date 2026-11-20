@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -75,11 +76,31 @@ func TestCodexRemoteNodeProcess(t *testing.T) {
 	if f.count("thread/resume") != 0 {
 		t.Fatal("listing resumed the real node's thread")
 	}
+	f.mu.Lock()
+	f.reject = "turn/start"
+	f.rejectMessage = "thread " + remoteRaw + " already has an active writer"
+	f.mu.Unlock()
+	err = peer.Call(ctx, "session.send", map[string]any{"session_id": session.SessionID, "text": "合成协议请求", "client_msg_id": "smoke-one"}, nil)
+	var refusal *rpc.Error
+	if !errors.As(err, &refusal) || refusal.Code != "codex_writer_busy" {
+		t.Fatalf("active writer through the real node = %v", err)
+	}
+	var outcome struct {
+		Delivered string `json:"delivered"`
+		Detail    string `json:"detail"`
+	}
+	if json.Unmarshal(refusal.Data, &outcome) != nil || outcome.Delivered != "none" || !strings.Contains(outcome.Detail, "active writer") {
+		t.Fatalf("active writer outcome = %+v (%s)", outcome, refusal.Data)
+	}
+	f.mu.Lock()
+	f.reject = ""
+	f.mu.Unlock()
+	// An undelivered conflict keeps the draft: the same intentional retry has the same delivery ID and runs once now.
 	if err = peer.Call(ctx, "session.send", map[string]any{"session_id": session.SessionID, "text": "合成协议请求", "client_msg_id": "smoke-one"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if f.count("turn/start") != 1 || f.count("thread/resume") != 1 {
-		t.Fatal("real process did not drive app-server")
+	if f.count("turn/start") != 2 || f.count("thread/resume") != 1 {
+		t.Fatal("conflict retry did not deliver exactly one follow-up through the same owner")
 	}
 	if err = peer.Call(ctx, "session.interrupt", map[string]any{"session_id": session.SessionID}, nil); err != nil {
 		t.Fatal(err)

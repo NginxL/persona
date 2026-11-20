@@ -54,8 +54,8 @@ function metaOf(m: ReportedMeta): ReportedMeta {
   return out;
 }
 
-/** GET /api/v1/launchers' managed launcher (hub LauncherView): never the key, the headers or the environment, only
- *  has_key / has_headers / has_env; the device scope's fields (lib/provider-scope.ts) when the hub has them. */
+/** GET /api/v1/launchers' managed launcher (hub LauncherView): never key/header/env values, only
+ *  has_key / has_headers / has_env and header_names; the device scope's fields (lib/provider-scope.ts) when present. */
 export interface ProviderView extends ScopeView {
   name: string;
   /** The name it shows, in any language (one added from a preset gets the provider's). */
@@ -82,6 +82,8 @@ export interface ProviderView extends ScopeView {
   fable_model?: string;
   subagent_force?: boolean;
   has_headers?: boolean;
+  /** Configured field names only; saved values remain sealed on the hub and are never returned. */
+  header_names?: string[];
   has_env?: boolean;
   proxy?: string;
   no_proxy?: string;
@@ -323,6 +325,12 @@ export function gatewayProblem(raw: string): string {
   return "";
 }
 
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const RESERVED_HEADERS = new Set([
+  "host", "content-length", "content-type", "authorization", "x-api-key", "anthropic-version",
+  "accept", "accept-encoding", "connection", "transfer-encoding", "proxy-authorization", "trailer", "upgrade",
+]);
+
 export function headersProblem(raw: string): string {
   const lines = raw.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -330,9 +338,41 @@ export function headersProblem(raw: string): string {
     if (!line) continue;
     const at = line.indexOf(":");
     const name = at < 0 ? "" : line.slice(0, at).trim();
-    if (!name || /\s/.test(name)) return t("lib-providers.header_line", { line: i + 1 });
+    const value = at < 0 ? "" : line.slice(at + 1).trim();
+    if (!HEADER_NAME.test(name) || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return t("lib-providers.header_line", { line: i + 1 });
+    if (RESERVED_HEADERS.has(name.toLowerCase())) return t("lib-providers.header_reserved", { name });
   }
   return "";
+}
+
+/** The settings-providerwizard key that explains this runtime's real header channel or its limitation. */
+export function headerRuntimeHint(f: Pick<ProviderForm, "kind" | "agent" | "api" | "base_url">): string {
+  if (f.kind === "api") return "headers_runtime_direct";
+  if (f.agent === "codex") return "headers_runtime_codex";
+  if (f.agent === "agy") return "headers_runtime_agy";
+  if (f.agent === "omp") return "headers_runtime_omp";
+  return "headers_runtime_claude";
+}
+
+function runtimeHeadersSupported(f: Pick<ProviderForm, "kind" | "agent" | "api" | "base_url">): boolean {
+  if (f.kind === "api" || f.agent === "codex" || f.agent === "claude" || !f.agent) return true;
+  if (f.agent !== "omp" || f.api !== "messages") return false;
+  try {
+    return new URL(f.base_url).hostname.toLowerCase() !== "api.anthropic.com";
+  } catch {
+    return true; // the URL's own validation reports the malformed address
+  }
+}
+
+/** Structural or runtime support errors that keep checks, Next and Save from silently dropping a configured header. */
+export function requestHeaderProblem(f: ProviderForm, hadHeaders = false): string {
+  if (f.headers_touched) {
+    const problem = headersProblem(f.headers);
+    if (problem) return problem;
+  }
+  const configured = f.headers_touched ? !!f.headers.trim() : hadHeaders;
+  if (!configured || runtimeHeadersSupported(f)) return "";
+  return t(`settings-providerwizard.${headerRuntimeHint(f)}`);
 }
 
 /** The hub keeps at most this many variables in a provider's environment (checkEnv); an import leaves the rest out as `limit`. */
@@ -400,9 +440,9 @@ export function firstConnectProblem(problems: Record<ConnectField, string>): Con
 
 /** `autoName`: the hub makes up a new provider's startup ID when none is typed (`launcher_auto_name`, #5029); an older
  *  hub needs one. */
-export function formProblems(f: ProviderForm, isNew: boolean, hadKey = false, autoName = false): FormProblems {
+export function formProblems(f: ProviderForm, isNew: boolean, hadKey = false, autoName = false, hadHeaders = false): FormProblems {
   const fields = connectProblems(f, isNew, hadKey, autoName);
-  const reach = fields.base_url || fields.api_key;
+  const reach = fields.base_url || fields.api_key || requestHeaderProblem(f, hadHeaders);
   const connect = fields.display_name || fields.name || reach;
 
   const chat = f.kind === "api" && f.api === "chat";
@@ -422,7 +462,6 @@ export function formProblems(f: ProviderForm, isNew: boolean, hadKey = false, au
   else if (!models && !ids.has(f.model.trim())) models = t("lib-providers.default_unchecked");
 
   const advanced =
-    (!chat && f.headers_touched && headersProblem(f.headers)) ||
     (!chat && f.env_touched && envProblem(f.env)) ||
     (!chat && proxyProblem(f.proxy)) ||
     (!chat && !nonNegInt(f.timeout_ms) && t("lib-providers.timeout_int")) ||
@@ -448,11 +487,12 @@ export function fallbackTitle(f: ProviderForm, autoName: boolean): string {
  *  or sign-in method differs from what is stored (choosing Automatic does: it checks which one works, #5329), so opening
  *  it sends nothing (#4881). */
 export function autoCheckable(f: ProviderForm, old: ProviderView | null): boolean {
-  if (!f.base_url.trim() || gatewayProblem(f.base_url) || referencePending(f)) return false;
+  if (!f.base_url.trim() || gatewayProblem(f.base_url) || referencePending(f) || requestHeaderProblem(f, !!old?.has_headers)) return false;
   const key = f.api_key.trim();
   if (key && !testableKey(key)) return false;
   if (!old) return !!key;
   if (!key && !old.has_key) return false;
+  if (f.headers_touched) return true;
   return !!key || f.base_url.trim() !== (old.base_url ?? "").trim() || f.auth !== storedAuth(old);
 }
 
@@ -495,7 +535,6 @@ function extraFields(f: ProviderForm): Record<string, unknown> {
 export function legacyChatClears(v: ProviderView | null): Record<string, string | number | boolean> {
   if (!v || v.kind !== "api" || v.api !== "chat") return {};
   const clears: Record<string, string | number | boolean> = {};
-  if (v.has_headers) clears.headers = "";
   if (v.has_env) clears.env = "";
   for (const key of ["proxy", "no_proxy", "opus_model", "sonnet_model", "haiku_model", "fable_model"] as const) {
     if (v[key]) clears[key] = "";
@@ -540,8 +579,9 @@ export function providerBody(f: ProviderForm, old: ProviderView | null, clearLeg
     if (chat && ["proxy", "no_proxy", "timeout_ms", "compact_window", "max_context", "opus_model", "sonnet_model", "haiku_model", "fable_model", "subagent_force"].includes(k)) continue;
     if (before ? !sameJSON(before[k], v) : v !== "" && v !== 0 && v !== false && !(Array.isArray(v) && v.length === 0)) body[k] = v;
   }
-  if (!chat && f.headers_touched) body.headers = f.headers.trim();
+  if (f.headers_touched) body.headers = f.headers.trim();
   if (!chat && f.env_touched) body.env = f.env.replace(/\s+$/, ""); // the start kept: the hub's line numbers match the box
+  // The hub migrates affected purpose aliases in the same transaction as these clears.
   if (chat && clearLegacyChat) Object.assign(body, legacyChatClears(old));
   if (api && f.via_machine !== (old?.via_machine ?? "")) body.via_machine = f.via_machine;
   return body;
@@ -558,7 +598,7 @@ export function probeBody(f: ProviderForm, stored: string | null, model?: string
   // always named, so a stored provider's agent never stands in for the one the form has now
   b.agent = f.kind === "api" ? "" : f.agent;
   if (f.api_key.trim() && !f.key_by_reference) b.api_key = f.api_key.trim();
-  if (!(f.kind === "api" && f.api === "chat") && f.headers_touched) b.headers = f.headers.trim();
+  if (f.headers_touched) b.headers = f.headers.trim();
   if (model !== undefined) b.model = model;
   if (model !== undefined) b.effort = f.effort.trim();
   if (f.kind === "api") b.via_machine = f.via_machine; // tested from where it will be sent

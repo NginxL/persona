@@ -143,7 +143,7 @@ describe("the editor", () => {
     expect(sameTask(t, { ...t, enabled: false })).toBe(false);
     expect(sameTask(t, { ...t, permission_mode: "auto" })).toBe(false);
     expect(sameTask(t, { ...t, title: "早报 " })).toBe(true);
-    expect(sameTask(t, { ...t, launcher: "legacy", effort: "high" })).toBe(true); // models are configured by category
+    expect(sameTask(t, { ...t, launcher: "legacy", effort: "high" })).toBe(false); // task-local overrides are editable
     const end = iso(at(5, 18));
     expect(sameTask(t, { ...t, until: end })).toBe(false);
     expect(sameTask({ ...t, until: end }, { ...t, until: end })).toBe(true);
@@ -152,10 +152,10 @@ describe("the editor", () => {
     expect(sameTask(once, { ...once, until: undefined })).toBe(true); // a one-off ignores its end time
   });
 
-  it("saves editable fields without task model overrides", () => {
+  it("saves editable fields and task model overrides", () => {
     const saved = task({ repeat: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5, 6, 7], launcher: "claude", effort: "low", session_id: "s1", at: "0001-01-01T00:00:00Z" });
     const body = taskBody({ ...saved, title: " 早报 ", permission_mode: "auto" });
-    expect(body).toEqual({ title: "早报", prompt: "给我早报", repeat: "daily", enabled: true, time: "09:00", weekdays: [], every_minutes: 0, cron: "", session_id: "s1", permission_mode: "auto" });
+    expect(body).toEqual({ title: "早报", prompt: "给我早报", repeat: "daily", enabled: true, time: "09:00", weekdays: [], every_minutes: 0, cron: "", session_id: "s1", permission_mode: "auto", launcher: "claude", effort: "low", model_revision: 0 });
     expect(taskBody({ ...saved, session_id: undefined }).session_id).toBe(""); // runs go to the task's own conversation
     const once = taskBody(task({ repeat: "once", at: iso(at(2, 15)) }));
     expect(once).toMatchObject({ repeat: "once", at: iso(at(2, 15)), time: "", weekdays: [] });

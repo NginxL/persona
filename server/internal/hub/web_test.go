@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/webasset"
 )
@@ -96,6 +97,52 @@ func TestWebAppFallsBackToTheEmbeddedCopy(t *testing.T) {
 		if w.Code != 404 {
 			t.Fatalf("no web client: %d", w.Code)
 		}
+	}
+}
+
+// An update brings a newer web client inside personad while the data dir still holds an older web-only deploy
+// (#11794): the built-in copy serves until the data dir gets a newer build again. A data dir copy from before the
+// stamp counts from its index.html's modification time.
+func TestWebAppDoesNotLetAnOlderDataDirShadowTheBuiltInCopy(t *testing.T) {
+	stamp := func(at string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(`{"built_at":"` + at + `"}`)} }
+	embedded := fstest.MapFS{"index.html": {Data: []byte("<html>embedded</html>")}, ".build.json": stamp("2026-11-20T02:49:00Z")}
+	dir := t.TempDir()
+	h := webFrom(dir, embedded)
+	body := func() string {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+		return w.Body.String()
+	}
+	write := func(name, data string, mod time.Time) {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// the live case: a deploy.sh web copy from Nov 10 with no stamp, under a binary built on Nov 20
+	write("index.html", "<html>old disk</html>", time.Date(2026, 11, 10, 16, 20, 12, 0, time.UTC))
+	if b := body(); !strings.Contains(b, "embedded") {
+		t.Fatalf("an older unstamped data dir should give way: %q", b)
+	}
+	// a later web-only deploy, stamped after the binary's build, wins again
+	write(".build.json", `{"built_at":"2026-11-21T08:00:00Z"}`, time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC))
+	write("index.html", "<html>new disk</html>", time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC))
+	if b := body(); !strings.Contains(b, "new disk") {
+		t.Fatalf("a newer data dir should win: %q", b)
+	}
+	// its stamp, not its file time, decides: a copy stamped before the binary gives way even with a fresh index.html
+	write(".build.json", `{"built_at":"2026-11-19T00:00:00Z"}`, time.Now())
+	write("index.html", "<html>older stamped disk</html>", time.Now())
+	if b := body(); !strings.Contains(b, "embedded") {
+		t.Fatalf("an older stamped data dir should give way: %q", b)
+	}
+	// a built-in copy without a stamp (a binary from before it) never takes over: the data dir wins, as before
+	h = webFrom(dir, fstest.MapFS{"index.html": {Data: []byte("<html>embedded</html>")}})
+	if b := body(); !strings.Contains(b, "older stamped disk") {
+		t.Fatalf("an unstamped built-in copy should leave the data dir in charge: %q", b)
 	}
 }
 

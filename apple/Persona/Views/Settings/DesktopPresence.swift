@@ -88,7 +88,7 @@ struct DesktopPresenceSheet: View {
             .toolbar {
                 SheetClose { dismiss() }
             }
-            .confirmationDialog(signingOut.map { String(localized: "Sign out Persona on “\($0.name)”?") } ?? "",
+            .accessibleConfirmationDialog(signingOut.map { String(localized: "Sign out Persona on “\($0.name)”?") } ?? "",
                                 isPresented: Binding(get: { signingOut != nil }, set: { if !$0 { signingOut = nil } }),
                                 titleVisibility: .visible) {
                 Button("Sign Out [Desktop Presence 498e1d]", role: .destructive) {

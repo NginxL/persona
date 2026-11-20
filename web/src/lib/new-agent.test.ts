@@ -204,6 +204,16 @@ describe("本地优先启动", () => {
     expect(body).not.toHaveProperty("effort");
   });
 
+  it("requests the native agy effort with no effort override", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(response({ session })).mockResolvedValueOnce(response({}));
+    vi.stubGlobal("fetch", fetcher);
+    launchAgent({ ...input, launcher: "agy", host: "herdr", launcherDefaultEffort: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const body = JSON.parse(fetcher.mock.calls[0][1].body);
+    expect(body).toMatchObject({ launcher: "agy", host: "herdr", launcher_default_effort: true });
+    expect(body).not.toHaveProperty("effort");
+  });
+
   it("keeps exact host/workspace IDs through retries and the legacy Codex prompt fallback", async () => {
     const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("network"))
       .mockResolvedValueOnce(response({ code: "codex_needs_prompt", error: "needs prompt" }, 409))

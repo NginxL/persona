@@ -348,7 +348,16 @@ describe("the two meeting uses (#7980)", () => {
     expect(effortOffered(onChat, chat, chat)).toBe(false);
     expect(effortOffered(onChat, messages, chat)).toBe(true);
     expect(effortOffered(onChat, responses, chat)).toBe(true);
-    expect(effortOffered(minutes, chat, messages)).toBe(false);
+    const currentChat: ModelProvider = { ...chat, chat_effort: true };
+    expect(effortOffered(minutes, chat, chat)).toBe(true); // #8779 hub: the effective Chat fields already admit effort
+    expect(effortOffered(minutes, currentChat, messages)).toBe(true); // a current hub explicitly marks Chat effort
+    expect(effortOffered(onChat, currentChat, undefined)).toBe(true); // the previous effective provider may be gone
+    expect(effortOffered(minutes, chat, messages)).toBe(false); // the same DTO on an older hub, after Messages → Chat
+    expect(effortOffered(minutes, { ...chat, id: "chat-b" }, chat)).toBe(true); // Chat A's explicit field also covers Chat B
+    expect(effortOffered(onChat, responses, undefined)).toBe(false);
+    expect(effortOffered(onChat, responses, undefined, false, true)).toBe(true);
+    expect(effortOffered(onChat, messages, undefined, false, true)).toBe(true);
+    expect(effortOffered(onChat, chat, undefined, false, true)).toBe(false); // an unmarked Chat stays hidden
     expect(effortOffered(minutes, messages, messages)).toBe(true);
     // the hub leaves effort out on a connection that takes one: it takes none here (an older hub), whatever is picked
     expect(effortOffered({ ...minutes, fields: ["provider", "model"] }, messages, messages)).toBe(false);

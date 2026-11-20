@@ -54,7 +54,9 @@ func (n *Node) startWait() time.Duration {
 // once claude runs in the pane: a slow shell before it is not claude being slow. A wait in a herdr pane that ends with
 // the input box on screen and herdr knowing no agent there (agent_not_found, or none named) says so: herdr does not
 // know that program as Claude (#3454). probe (nil: none) is a start's command: while claude has not come, the tab's
-// shell saying it cannot run it ends the wait at once with a coded refusal (shellmiss.go, #1642).
+// shell saying it cannot run it ends the wait at once with a coded refusal (shellmiss.go, #1642). A start in a pane
+// whose host's word is not enough (startNeedsEvidence) takes claude as come only with evidence of its own, and ends
+// as not delivered when its line never reached the tab (#10588).
 func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*host.Agent, error) {
 	startWait, readyWait := n.claudeWaits()
 	poll := n.readinessPoll()
@@ -62,6 +64,8 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	running := false
 	h, _, _ := n.paneHost(pane)
 	_, onHerdr := h.(*herdrHost)
+	ownEvidence := probe != nil && startNeedsEvidence(h)
+	echoed := false // ownEvidence: the start's line has shown in the pane at some look
 	started := func() {
 		if !running {
 			running = true
@@ -87,6 +91,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		}
 		if err != nil {
 			continue
+		}
+		if ownEvidence && !echoed {
+			echoed = probe.echoed(screen)
 		}
 		if keys := trustKeys(screen); keys != nil {
 			started()
@@ -128,7 +135,11 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {
 			return nil, errPaneGone()
 		}
-		if err != nil || a.Agent != "claude" {
+		claude := err == nil && a.Agent == "claude"
+		if claude && ownEvidence && !running && !probe.claudeCame(screen) {
+			claude = false // the host's word alone: looked at as a tab where claude has not come
+		}
+		if !claude {
 			// The tab's shell could not run the command (a launcher its rc files do not define, a claude not on its
 			// PATH): it said so right after it and is back at its prompt, and claude will not come (#1642).
 			// Or it did not take the typed line at all: a startup question ate its head (#2570). The start types it again.
@@ -191,6 +202,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	}
 	if !running && gone > 0 {
 		return nil, errPaneGone()
+	}
+	if !running && ownEvidence && !echoed && probe.unread() {
+		return nil, startNotDelivered(startWait)
 	}
 	if !running {
 		return nil, fmt.Errorf("claude did not start within %s: the tab's shell had not run it yet (is the machine busy?)", startWait)

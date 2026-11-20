@@ -146,4 +146,59 @@ struct WatchGroupRefreshTests {
         #expect(titles.count == 20)
         #expect(titles.contains("old"))
     }
+
+    @Test func aSummaryWithOnlyANewTimestampIsNotSentAgain() {
+        let sentAt = Date(timeIntervalSince1970: 10_000)
+        let first = WatchSummary(sessions: [], interactions: [], machines: [], at: sentAt)
+        var gate = WatchSummaryGate()
+        #expect(!gate.shouldSkip(first, now: sentAt))
+        gate.sent(first, at: sentAt)
+        var repeated = first
+        repeated.at = sentAt.addingTimeInterval(2)
+        #expect(gate.shouldSkip(repeated, now: repeated.at))
+    }
+
+    @Test func aChangedSummaryIsSentAgain() {
+        let sentAt = Date(timeIntervalSince1970: 10_000)
+        let machine = Machine(id: "m", name: "Computer", kind: "ssh", online: true)
+        let first = WatchSummary(sessions: [], interactions: [], machines: [machine], at: sentAt)
+        var gate = WatchSummaryGate()
+        gate.sent(first, at: sentAt)
+        var changed = first
+        changed.machines[0].online = false
+        changed.at = sentAt.addingTimeInterval(1)
+        #expect(!gate.shouldSkip(changed, now: changed.at))
+    }
+
+    @Test func aFailedContextUpdateIsNotRememberedAsSent() {
+        let sentAt = Date(timeIntervalSince1970: 10_000)
+        let first = WatchSummary(sessions: [], interactions: [], machines: [], at: sentAt)
+        var gate = WatchSummaryGate()
+        gate.sent(first, at: sentAt, succeeded: false)
+        var repeated = first
+        repeated.at = sentAt.addingTimeInterval(1)
+        #expect(!gate.shouldSkip(repeated, now: repeated.at))
+    }
+
+    @Test func activationResetSendsAnEqualSummaryAgain() {
+        let sentAt = Date(timeIntervalSince1970: 10_000)
+        let summary = WatchSummary(sessions: [], interactions: [], machines: [], at: sentAt)
+        var gate = WatchSummaryGate()
+        gate.sent(summary, at: sentAt)
+        #expect(gate.shouldSkip(summary, now: sentAt.addingTimeInterval(1)))
+        gate.reset()
+        #expect(!gate.shouldSkip(summary, now: sentAt.addingTimeInterval(1)))
+    }
+
+    @Test func anUnchangedSummaryGoesAgainBeforeTheWatchFaceIsStale() {
+        let sentAt = Date(timeIntervalSince1970: 10_000)
+        let summary = WatchSummary(sessions: [], interactions: [], machines: [], at: sentAt)
+        var gate = WatchSummaryGate()
+        gate.sent(summary, at: sentAt)
+        let heartbeat = WatchSummaryGate.unchangedHeartbeat
+        #expect(heartbeat == 20 * 60)
+        #expect(heartbeat < WatchPetSnapshot.staleAfter)
+        #expect(gate.shouldSkip(summary, now: sentAt.addingTimeInterval(heartbeat - 1)))
+        #expect(!gate.shouldSkip(summary, now: sentAt.addingTimeInterval(heartbeat)))
+    }
 }

@@ -11,7 +11,11 @@ import persona.core.contracts.CoreText
  * before it, a document). [kind] is `context`, `edit`, `instructions`, `doc`…; [url] is null when missing or blank;
  * [body] may be empty, and the hub may have cut it (it then ends with the Chinese "…(truncated, N bytes total)" mark).
  */
-data class MessageContext(val kind: String, val title: String, val url: String?, val body: String) {
+data class MessageContext(
+    val kind: String, val title: String, val url: String?, val body: String,
+    /** Its other attributes as written (a forward's `msg`, `role`, `author`, `chat`, `machine`, `time`…), decoded. */
+    val attributes: Map<String, String> = emptyMap(),
+) {
     /** What a row calls it: the title, else the link, else "Quote". */
     val label: CoreText get() = (title.takeIf(String::isNotBlank) ?: url)?.let(CoreText::plain) ?: CoreText.of(Key.ContextQuote)
 }
@@ -47,6 +51,7 @@ fun parseContexts(text: String): Pair<List<MessageContext>, String> {
             title = attributes["title"].orEmpty().trim(),
             url = attributes["url"]?.trim()?.takeIf { it.isNotEmpty() },
             body = decodeXmlEntities(block.groupValues[2]).trim('\n', '\r').takeIf { it.isNotBlank() }.orEmpty(),
+            attributes = attributes - setOf("kind", "title", "url"),
         )
     }.filterNot { it.kind == "message-source" }.toList()
     return contexts to contextBlock.replace(text, "").trim()

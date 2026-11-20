@@ -249,6 +249,7 @@ func (s *Service) dropQueuedNotices(conversation string) int {
 // UserStopped: the user stopped a conversation's turn in an app. A reporting one is stopped with what it handed out,
 // as the plugin's /stop does (the plugin sees it in GET /api/v1/assistant/reporters and says so in Feishu).
 func (s *Service) UserStopped(ctx context.Context, r SessionRef) {
+	s.retireTodoWork([2]string{r.MachineID, r.SessionID})
 	if _, ok := s.reporterOf(ctx, r.SessionID); !ok {
 		return
 	}

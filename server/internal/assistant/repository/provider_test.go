@@ -105,7 +105,7 @@ func TestRegistryRoutesAddresses(t *testing.T) {
 	}
 	for _, remote := range []string{"https://code.acme.test/team/app/-/tree/main", "git@ssh.acme.test:team/app.git"} {
 		got, err := r.Parse(ctx, remote, "")
-		if err != nil || got.Identity != (Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}) || got.ProviderName != "Acme Code" {
+		if err != nil || got.Identity != (Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}) || got.ProviderName != "Acme Code" {
 			t.Fatalf("%s: %+v %v", remote, got, err)
 		}
 	}
@@ -181,10 +181,10 @@ func TestParseAnswersAreRechecked(t *testing.T) {
 }
 
 func TestLinkAnswersStayUnderTheRepository(t *testing.T) {
-	repo := Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}
+	repo := Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}
 	in := LinkInput{URL: "https://code.acme.test/team/app/reviews/12/files"}
 	got, err := CheckLinkAnswer(repo, in, LinkAnswer{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12", Title: "Fix\nthe  build"})
-	if err != nil || got != (TaskLink{"pull_request", "12", repo.CanonicalURL + "/reviews/12", "Fix the build"}) {
+	if err != nil || got != (TaskLink{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12", Title: "Fix the build"}) {
 		t.Fatalf("%+v %v", got, err)
 	}
 	if got, _ := CheckLinkAnswer(repo, in, LinkAnswer{Kind: "issue", Number: "3", CanonicalURL: repo.CanonicalURL + "/i/3", Title: strings.Repeat("é", 600)}); len(got.Title) > 1024 {
@@ -224,7 +224,7 @@ func TestLinkAnswersStayUnderTheRepository(t *testing.T) {
 // An extension's links come from the store or the provider's answer, never from a GitHub-style guess, and its rows bind
 // and read with the provider gone.
 func TestExtensionRowsWorkWithoutTheProvider(t *testing.T) {
-	repo := Identity{acmeID, "https://code.acme.test", "team/app", "https://code.acme.test/team/app"}
+	repo := Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/app", CanonicalURL: "https://code.acme.test/team/app"}
 	source := SourceSnapshot{Identity: repo, CloneURL: repo.CanonicalURL, TransportOrigin: "canonical_default", ProviderName: "Acme Code"}
 	review := TaskLink{Kind: "pull_request", Number: "12", CanonicalURL: repo.CanonicalURL + "/reviews/12"}
 	if _, err := NormalizeLink(repo, LinkInput{Kind: "pull_request", Number: "12"}); err == nil {
@@ -233,15 +233,15 @@ func TestExtensionRowsWorkWithoutTheProvider(t *testing.T) {
 	if _, err := NormalizeLink(repo, LinkInput{URL: review.CanonicalURL}); err == nil {
 		t.Fatal("accepted a link without an answer")
 	}
-	got, err := NormalizeLink(repo, LinkInput{Kind: "pull_request", Number: "12", Title: "Fix", Resolved: &ResolvedLink{source, review}})
+	got, err := NormalizeLink(repo, LinkInput{Kind: "pull_request", Number: "12", Title: "Fix", Resolved: &ResolvedLink{Source: source, Link: review}})
 	if err != nil || got.CanonicalURL != review.CanonicalURL || got.Title != "Fix" {
 		t.Fatalf("%+v %v", got, err)
 	}
 	for name, in := range map[string]LinkInput{
-		"another number": {Kind: "pull_request", Number: "13", Resolved: &ResolvedLink{source, review}},
-		"another repo":   {URL: review.CanonicalURL, Resolved: &ResolvedLink{SourceSnapshot{Identity: Identity{acmeID, "https://code.acme.test", "team/other", "https://code.acme.test/team/other"}}, review}},
-		"outside":        {URL: review.CanonicalURL, Resolved: &ResolvedLink{source, TaskLink{Kind: "issue", Number: "1", CanonicalURL: "https://code.acme.test/team/app2/i/1"}}},
-		"both forms":     {URL: review.CanonicalURL, Kind: "pull_request", Number: "12", Resolved: &ResolvedLink{source, review}},
+		"another number": {Kind: "pull_request", Number: "13", Resolved: &ResolvedLink{Source: source, Link: review}},
+		"another repo":   {URL: review.CanonicalURL, Resolved: &ResolvedLink{Source: SourceSnapshot{Identity: Identity{Provider: acmeID, InstanceURL: "https://code.acme.test", Path: "team/other", CanonicalURL: "https://code.acme.test/team/other"}}, Link: review}},
+		"outside":        {URL: review.CanonicalURL, Resolved: &ResolvedLink{Source: source, Link: TaskLink{Kind: "issue", Number: "1", CanonicalURL: "https://code.acme.test/team/app2/i/1"}}},
+		"both forms":     {URL: review.CanonicalURL, Kind: "pull_request", Number: "12", Resolved: &ResolvedLink{Source: source, Link: review}},
 	} {
 		if _, err := NormalizeLink(repo, in); err == nil {
 			t.Error("accepted", name)
@@ -263,17 +263,17 @@ func TestExtensionRowsWorkWithoutTheProvider(t *testing.T) {
 		t.Fatalf("bind: %+v %v", rows, err)
 	}
 	rows[0].Links = []TaskLink{review}
-	stored := LinkInput{Kind: "pull_request", Number: "12", Resolved: &ResolvedLink{rows[0].SourceSnapshot, review}}
+	stored := LinkInput{Kind: "pull_request", Number: "12", Resolved: &ResolvedLink{Source: rows[0].SourceSnapshot, Link: review}}
 	kept, err := Bind(rows, []TaskInput{{RepoID: "repo_acme", Links: []LinkInput{stored}}}, Catalog{})
 	if err != nil || len(kept[0].Links) != 1 || kept[0].Links[0] != review {
 		t.Fatalf("kept: %+v %v", kept, err)
 	}
-	merged, err := MergeTaskLinkDetails(nil, []LinkInput{{URL: review.CanonicalURL + "/files", Title: "Fix", Resolved: &ResolvedLink{source, review}},
-		{URL: repo.CanonicalURL + "/i/4", Resolved: &ResolvedLink{source, TaskLink{Kind: "issue", Number: "4", CanonicalURL: repo.CanonicalURL + "/i/4"}}}}, Catalog{})
+	merged, err := MergeTaskLinkDetails(nil, []LinkInput{{URL: review.CanonicalURL + "/files", Title: "Fix", Resolved: &ResolvedLink{Source: source, Link: review}},
+		{URL: repo.CanonicalURL + "/i/4", Resolved: &ResolvedLink{Source: source, Link: TaskLink{Kind: "issue", Number: "4", CanonicalURL: repo.CanonicalURL + "/i/4"}}}}, Catalog{})
 	if err != nil || len(merged) != 1 || !strings.HasPrefix(merged[0].RepoID, "linked_") || merged[0].SourceSnapshot != source || len(merged[0].Links) != 2 || merged[0].Links[0].Title != "Fix" {
 		t.Fatalf("merge: %+v %v", merged, err)
 	}
-	if _, err := MergeTaskLinkDetails(nil, []LinkInput{{URL: review.CanonicalURL, Resolved: &ResolvedLink{SourceSnapshot{Identity: mustParse(t, "https://github.com/example/web")}, review}}}, Catalog{}); err == nil {
+	if _, err := MergeTaskLinkDetails(nil, []LinkInput{{URL: review.CanonicalURL, Resolved: &ResolvedLink{Source: SourceSnapshot{Identity: mustParse(t, "https://github.com/example/web")}, Link: review}}}, Catalog{}); err == nil {
 		t.Fatal("a resolved link claimed a built-in repository")
 	}
 }

@@ -6,6 +6,7 @@ import "strings"
 // #1618, docs/assistant/todos.md "Decision records"). The caller leaves out the closing tags
 // ("</persona-context>") from the texts.
 type TodoDecisions struct {
+	Language  string
 	Title     string
 	Decisions []TodoDecision
 }
@@ -43,6 +44,7 @@ func RenderTodoDecisions(d TodoDecisions) string {
 // is the todo's, on one line, with nothing in it that closes a context block; Recorded: the words were written into
 // the todo's decisions (it is not said when they were not: a message of only a picture, no database, a failed write).
 type TodoThreadReply struct {
+	Language    string
 	Title, Text string
 	Recorded    bool
 }
@@ -54,6 +56,7 @@ func RenderTodoThreadReply(r TodoThreadReply) string { return render("todo/threa
 // the first words as said, and that task_plan takes the to-do's id. Title and Text carry nothing that closes a context
 // block.
 type TodoThreadOpen struct {
+	Language            string
 	Title, TodoID, Text string
 	// Quote is the text of a message the owner's request replied to in another chat (#6146): someone else's words, shown
 	// apart from Text, as background and escaped (ctx), never as the user's own. "" for none.
@@ -82,20 +85,22 @@ type TodoTitle struct {
 func RenderTodoTitle(t TodoTitle) string { return render("todo/title", t) }
 
 // RenderTodoTitleInput is what the title model reads: the task's prompt (the todo's notes).
-func RenderTodoTitleInput(prompt string) string {
-	return render("todo/title_input", struct{ Prompt string }{prompt})
+func RenderTodoTitleInput(prompt, language string) string {
+	return render("todo/title_input", struct{ Prompt, Language string }{prompt, language})
 }
 
 // TodoOutcome is the system prompt pulling what a finished task came to out of its agents' last replies: a one-line
 // outcome, links, decisions, pitfalls (todo/outcome, docs/assistant/todos.md "Record conclusions on completion", #2820).
 type TodoOutcome struct {
-	Owner string
+	Language string
+	Owner    string
 }
 
 func RenderTodoOutcome(d TodoOutcome) string { return render("todo/outcome", d) }
 
 // TodoOutcomeInput is the task as it was handed out and what its agents said when they stopped (todo/outcome_input).
 type TodoOutcomeInput struct {
+	Language      string
 	Title, Prompt string
 	Replies       []TodoOutcomeReply
 }
@@ -111,6 +116,7 @@ func RenderTodoOutcomeInput(in TodoOutcomeInput) string { return render("todo/ou
 // project (todo/project, #2820): the project's one line and the outcomes of its latest finished todos, newest first.
 // The caller leaves out "</persona-context>" from the texts.
 type TodoProject struct {
+	Language      string
 	Name, OneLine string
 	Outcomes      []TodoProjectOutcome
 	// Extensions are what extensions wrote for this project (contributes.prompts project_context), each under its
@@ -127,6 +133,42 @@ type ExtensionContext struct {
 // TodoProjectOutcome is one finished todo's outcome as the project's timeline keeps it.
 type TodoProjectOutcome struct {
 	When, Title, Text string
+}
+
+// TodoProjectMemory is the memory-aware project background for a dispatch. Its sections always render in this order:
+// bounded summary, outcomes, effective decisions with reasons, pitfalls, then extension-provided context.
+type TodoProjectMemory struct {
+	Language, Name, Summary string
+	Outcomes                []TodoProjectMemoryOutcome
+	Decisions               []TodoProjectMemoryDecision
+	Pitfalls                []TodoProjectMemoryPitfall
+	Extensions              []ExtensionContext
+}
+
+type TodoProjectMemoryOutcome struct {
+	When, Text, Verification string
+	Links                    []string
+	Unaccepted               bool
+}
+
+type TodoProjectMemoryDecision struct {
+	ID, Question, Choice, Reason string
+	When, Verification           string
+	Unaccepted                   bool
+}
+
+type TodoProjectMemoryPitfall struct {
+	Text, When, Verification string
+	Unaccepted               bool
+}
+
+// RenderTodoProjectMemory renders only projects with usable memory.jsonl records. RenderTodoProject remains the
+// byte-compatible path for projects without them.
+func RenderTodoProjectMemory(p TodoProjectMemory) string {
+	if p.Summary == "" && len(p.Outcomes) == 0 && len(p.Decisions) == 0 && len(p.Pitfalls) == 0 && len(p.Extensions) == 0 {
+		return ""
+	}
+	return render("todo/project_memory", p)
 }
 
 // RenderTodoProject is the block; empty when there is nothing to say (no one line, no outcomes, nothing from an

@@ -53,7 +53,7 @@ export function metricsFields(metrics: readonly ProcessMetric[], onBattery: bool
 }
 
 /** Only the hub's page may turn it on or read it: its window's main frame, on an http(s) address (the local setup and
- *  the island are file pages). */
+ *  the island use the shell's own schemes). */
 export function readerAllowed(frameURL: string | undefined, isMainFrame: boolean): boolean {
   if (!isMainFrame || !frameURL) return false;
   try {

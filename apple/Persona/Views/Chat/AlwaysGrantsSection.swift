@@ -120,7 +120,7 @@ private struct AlwaysGrantRow: View {
                 .tint(Theme.danger)
                 .disabled(busy)
                 .accessibilityIdentifier("always-grant-revoke")
-                .confirmationDialog("Revoke this permission?", isPresented: $confirming, titleVisibility: .visible) {
+                .accessibleConfirmationDialog("Revoke this permission?", isPresented: $confirming, titleVisibility: .visible) {
                     Button("Revoke", role: .destructive) { Task { await revoke() } }
                 } message: {
                     Text("Revoking stops the current response to clear its permissions. Send another message to continue.")

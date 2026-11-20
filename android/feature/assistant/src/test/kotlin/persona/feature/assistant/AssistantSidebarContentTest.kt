@@ -122,7 +122,7 @@ class AssistantSidebarContentTest {
             override suspend fun refresh() = Unit
         }
         val management = testManagement(archived = listOf(archived))
-        val bindings = testBindings(management)
+        val bindings = testBindings(management, repository)
         var opened: SessionKey? = null
         rule.setContent {
             PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
@@ -276,7 +276,7 @@ class AssistantSidebarContentTest {
         var active by mutableStateOf(first.key)
         rule.setContent {
             PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
-                CompositionLocalProvider(LocalAssistantHost provides testBindings(management)) {
+                CompositionLocalProvider(LocalAssistantHost provides testBindings(management, repository)) {
                     Box(Modifier.width(400.dp).height(1200.dp)) {
                         AssistantSidebarContent(
                             snapshot, repository, active, operations, demo = false,
@@ -329,7 +329,7 @@ class AssistantSidebarContentTest {
         override suspend fun deleteMemory(name: String) = Unit
     }
 
-    private fun testBindings(management: AssistantManagement): AssistantHostBindings {
+    private fun testBindings(management: AssistantManagement, conversations: AssistantRepository): AssistantHostBindings {
         val drafts = object : DraftRepository {
             override fun observe(key: DraftKey): Flow<DraftSnapshot> =
                 flowOf(DraftSnapshot(HubScope("hub", "gen"), key))
@@ -344,7 +344,7 @@ class AssistantSidebarContentTest {
         }
         return AssistantHostBindings(
             identity = "test", management = management, drafts = drafts, coroutineScope = operations,
-            phoneToolsAvailable = false, machines = emptyList(), mainSender = mainSender,
+            phoneToolsAvailable = false, machines = emptyList(), conversations = conversations, mainSender = mainSender,
             chatContent = { _, _ -> },
         )
     }

@@ -361,7 +361,7 @@ fun LauncherPage(machines: MachineManagement?, extensions: ExtensionManagement?,
                 if (state.view == null && state.error == null) return@forEach
                 item("$key-title") { JSectionHeader(state.view?.title?.takeIf { it.isNotBlank() } ?: place.title.ifBlank { place.extension }) }
                 viewStatus(key, state, onRetry = { scope.launch { models.firstOrNull { it.first == place }?.second?.load() } })
-                extensionViewItems(key, state, handle)
+                extensionViewItems(key, state, handle, compactGraph = true)
             }
             if (placesState.places == null && placesState.loading || sections.any { it.second.view == null && it.second.loading }) {
                 item("places-loading") { JLoading() }

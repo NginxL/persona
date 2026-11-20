@@ -290,15 +290,15 @@ private struct HomeAgentsWidget: View {
     private var lead: (n: Int, words: String, color: Color)? {
         if counts.needsYou > 0 { return (counts.needsYou, StateName.needsYou.text, HomeWidgetTokens.needsYou.dot) }
         if counts.working > 0 { return (counts.working, StateName.working.text, HomeWidgetTokens.working.dot) }
-        if counts.done > 0 { return (counts.done, interfaceText("Just Finished [Home Widgets]"), HomeWidgetTokens.done.dot) } // perf-ok: drawn once per timeline entry, in the widget extension
+        if counts.done > 0 { return (counts.done, StateName.unread.text, HomeWidgetTokens.done.dot) } // perf-ok: drawn once per timeline entry, in the widget extension
         return nil
     }
 
-    /// The categories after the lead one, in a line ("3 working · 1 just finished").
+    /// The categories after the lead one, in a line ("3 working · 1 unread").
     private var rest: String {
         var parts: [String] = []
         if counts.needsYou > 0, counts.working > 0 { parts.append(StateName.count(.working, counts.working)) }
-        if counts.done > 0, counts.needsYou + counts.working > 0 { parts.append(interfaceText("\(counts.done) just finished [Home Widgets]")) } // perf-ok: drawn once per timeline entry, in the widget extension
+        if counts.done > 0, counts.needsYou + counts.working > 0 { parts.append(StateName.count(.unread, counts.done)) } // perf-ok: drawn once per timeline entry, in the widget extension
         return parts.joined(separator: " · ")
     }
 
@@ -362,7 +362,7 @@ private struct HomeAgentsWidget: View {
         HStack(alignment: .top, spacing: HomeWidgetTokens.flush) {
             stat(counts.needsYou, StateName.needsYou.text, HomeWidgetTokens.needsYou.dot)
             stat(counts.working, StateName.working.text, HomeWidgetTokens.working.dot)
-            stat(counts.done, interfaceText("Just Finished [Home Widgets]"), HomeWidgetTokens.done.dot) // perf-ok: drawn once per timeline entry, in the widget extension
+            stat(counts.done, StateName.unread.text, HomeWidgetTokens.done.dot) // perf-ok: drawn once per timeline entry, in the widget extension
         }
     }
 

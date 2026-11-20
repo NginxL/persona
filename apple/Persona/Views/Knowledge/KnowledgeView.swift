@@ -330,7 +330,7 @@ struct KnowledgeView: View {
                 }
             }
             .accessibilityAction(named: Text("Rename")) { if RecordingLibrary.shared.entry(id)?.isDay == false { renamingRecording = id } }
-            .confirmationDialog("Delete This Recording?", isPresented: Binding(get: { deletingRecording == id }, set: { if !$0, deletingRecording == id { deletingRecording = nil } }),
+            .accessibleConfirmationDialog("Delete This Recording?", isPresented: Binding(get: { deletingRecording == id }, set: { if !$0, deletingRecording == id { deletingRecording = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     if let message = RecordingDeletion.run(id) { recordingFailure = message }
@@ -357,10 +357,10 @@ struct KnowledgeView: View {
             .contextMenu {
                 Button(role: .destructive) { deletingProject = e } label: { Label("Delete", systemImage: Theme.Icon.delete) }
             }
-            .confirmationDialog(String(localized: "Delete This Project?"),
+            .accessibleConfirmationDialog(String(localized: "Delete This Project?"),
                                 isPresented: Binding(get: { deletingProject?.id == e.id },
                                                      set: { if !$0, deletingProject?.id == e.id { deletingProject = nil } }),
-                                titleVisibility: .visible) {
+                                titleVisibility: .visible, hasCancel: true) {
                 Button(String(localized: "Delete"), role: .destructive) { Task { await deleteProject(e) } }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -1230,9 +1230,9 @@ struct KnowledgeDetailView: View {
                     Button(role: .destructive) { unlinking = removal } label: { Label("Remove Link", systemImage: Theme.Icon.clear) }
                 }
                 // On the row, so the question points at the link it is about (on the page it pointed at the header).
-                .confirmationDialog(removal.question, isPresented: Binding(get: { unlinking?.id == removal.id },
+                .accessibleConfirmationDialog(removal.question, isPresented: Binding(get: { unlinking?.id == removal.id },
                                                                            set: { if !$0, unlinking?.id == removal.id { unlinking = nil } }),
-                                    titleVisibility: .visible) {
+                                    titleVisibility: .visible, hasCancel: true) {
                     Button(String(localized: "Remove Link"), role: .destructive) { Task { await unlink(removal) } }
                     Button("Cancel", role: .cancel) {}
                 } message: {

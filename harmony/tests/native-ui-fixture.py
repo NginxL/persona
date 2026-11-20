@@ -28,7 +28,7 @@ MANAGER = 'assistant'
 MACHINE = 'fixture-computer'
 MAIN = 'fixture-main'
 LEAD_SESSION = 'fixture-followup'
-SCENARIOS = ('normal', 'question', 'pending', 'failed')
+SCENARIOS = ('normal', 'question', 'pending', 'failed', 'held')
 BASE_TIME = '2026-11-14T03:00:00.000Z'
 INBOX_ITEM_ID = 'fixture-inbox'
 TRANSCRIPT_HISTORY = 'fixture-transcript-v1'
@@ -195,7 +195,11 @@ def _lead_working(recovered_todos=(), agent_working=None):
     return 'fixture-todo-interrupted' in recovered_todos
 
 
-def session_rows(recovered_todos=(), agent_working=None):
+def held_message(operation, text, state='waiting', line='Will send when Test computer is back.'):
+    return dict(id=operation, text=text, computer='Test computer', state=state, error=line, at=BASE_TIME)
+
+
+def session_rows(recovered_todos=(), agent_working=None, held=None):
     capabilities = {
         'read': True, 'send': True, 'approve': True, 'interrupt': True,
         'terminal': True, 'attach': True, 'modes': True,
@@ -212,7 +216,7 @@ def session_rows(recovered_todos=(), agent_working=None):
     if 'fixture-todo-interrupted' in recovered_todos:
         lead.pop('turn_error', None)
         lead.pop('turn_error_kind', None)
-    return [
+    rows = [
         {
             'id': MAIN, 'session_id': MAIN, 'machine_id': MACHINE,
             'manager': MANAGER, 'title': 'Persona UI fixture', 'state': 'idle',
@@ -222,6 +226,16 @@ def session_rows(recovered_todos=(), agent_working=None):
         },
         lead,
     ]
+    if held is not None:
+        lead.update(title='Field notes', status='offline', state='offline', undelivered=held)
+        lead.pop('turn_error', None)
+        lead.pop('turn_error_kind', None)
+        for identifier, title, fields in (
+            ('fixture-stopped', 'Stopped Agent', {'status': 'interrupted', 'capabilities': {'read': True, 'terminal': True}}),
+            ('fixture-readonly', 'Read-only Agent', {'read_only': True, 'source_kind': 'history', 'capabilities': {'read': True}}),
+        ):
+            rows.append(dict(id=identifier, session_id=identifier, machine_id=MACHINE, manager=MANAGER, title=title, **fields))
+    return rows
 
 
 def conversations(recovered_todos=(), agent_working=None):
@@ -329,6 +343,7 @@ class FixtureState:
         self.state_path = runtime / 'state.json'
         self.requests_path = runtime / 'requests.jsonl'
         self.lock = threading.RLock()
+        self.held_listeners = set()
         if not self.control_path.exists():
             self.write_private(self.control_path, {
                 'scenario': default_scenario,
@@ -349,6 +364,12 @@ class FixtureState:
         self.data.setdefault('question_resolved', False)
         self.data.setdefault('inbox_done', False)
         self.data.setdefault('recovered_todos', [])
+        self.data.setdefault('held', [
+            held_message('waiting', 'Pack the field notes.'),
+            held_message('expired', 'File the receipts.', 'failed', 'Not sent. Test computer was away for 24 hours.'),
+            held_message('uncertain', 'Send the revised map.', 'failed', 'Might not have arrived. Retry checks the chat first.'),
+            dict(held_message('signed-out', 'Seal the envelope.', 'failed', 'The sender signed out. You can delete this message.'), delete_only=True),
+        ])
         self.save()
 
     @staticmethod
@@ -395,24 +416,24 @@ class FixtureState:
             self.save()
 
     def begin_operation(self, operation_id, path, response, status=200, apply=None,
-                        admit=None, denied_status=409, denied_response=None):
+                        admit=None, denied_status=409, denied_response=None, method='POST'):
         with self.lock:
             if operation_id and operation_id in self.data['operations']:
                 self.data['replays'] += 1
                 saved = self.data['operations'][operation_id]
-                self.record('POST', path, operation_id, saved.get('status', 200), replay=True)
+                self.record(method, path, operation_id, saved.get('status', 200), replay=True)
                 self.save()
                 return saved.get('status', 200), saved.get('response', response), True
             if admit is not None and not admit():
                 denied_response = denied_response or {'code': 'request_updated'}
-                self.record('POST', path, operation_id, denied_status, replay=False)
+                self.record(method, path, operation_id, denied_status, replay=False)
                 return denied_status, denied_response, False
             if operation_id:
                 self.data['operations'][operation_id] = {'path': path, 'status': status, 'response': response}
             self.data['writes'] += 1
             if apply is not None:
                 apply()
-            self.record('POST', path, operation_id, status, replay=False)
+            self.record(method, path, operation_id, status, replay=False)
             self.save()
             return status, response, False
 
@@ -421,11 +442,20 @@ class FixtureState:
             saved = self.data['operations'].get(operation_id)
             if not saved:
                 return {'state': 'unknown'}
-            state = 'pending' if saved.get('status') == 202 else 'done'
+            state = 'pending' if saved.get('status') == 202 and saved.get('response', {}).get('delivered') != 'later' else 'done'
             configured = self.control().get('receipts', {})
             if isinstance(configured, dict) and configured.get(operation_id) in ('done', 'failed', 'unknown', 'pending'):
                 state = configured[operation_id]
             return {'state': state}
+
+    def announce_held(self):
+        row = next(row for row in session_rows(held=self.data['held']) if row['id'] == LEAD_SESSION)
+        payload = frame(1, json.dumps(dict(type='session', session=row)).encode())
+        for listener in self.held_listeners.copy():
+            try:
+                listener(payload)
+            except OSError:
+                self.held_listeners.discard(listener)
 
 
 def main():
@@ -526,12 +556,12 @@ def main():
             if path == '/api/v1/sessions':
                 agent_working = optional_bool(state.control(), 'agent_working')
                 return self.tracked_reply(method, path, 200, {
-                    'sessions': session_rows(snapshot['recovered_todos'], agent_working),
+                    'sessions': session_rows(snapshot['recovered_todos'], agent_working, snapshot['held'] if scenario == 'held' else None),
                 })
             if path == '/api/v1/machines':
                 return self.tracked_reply(method, path, 200, {'machines': [
                     {'id': MACHINE, 'name': 'Test computer', 'title': 'Test computer',
-                     'manager': MANAGER, 'os': 'mac', 'online': True, 'trust': 'trusted'},
+                     'manager': MANAGER, 'os': 'mac', 'online': scenario != 'held', 'trust': 'trusted'},
                 ]})
             if path == '/api/v1/assistant':
                 agent_working = optional_bool(state.control(), 'agent_working')
@@ -705,6 +735,30 @@ def main():
                 )
                 self.reply(status, response)
                 return
+            held_root = f'/api/v1/sessions/{MACHINE}/{LEAD_SESSION}'
+            if scenario == 'held' and path == held_root + '/messages':
+                operation = self.operation_id()
+                try:
+                    body = json.loads(payload)
+                except (ValueError, UnicodeDecodeError):
+                    body = None
+                if not isinstance(body, dict):
+                    return self.tracked_reply('POST', path, 400, {'code': 'invalid_json'}, operation)
+                features = [value.strip() for value in self.headers.get('X-Persona-Features', '').split(',')]
+                if not operation or body.get('client_msg_id') != operation or 'agent_message_hold' not in features:
+                    return self.tracked_reply('POST', path, 409, {'delivered': 'none'}, operation)
+                held = held_message(operation, body.get('text', ''))
+                held['images'] = len(body.get('images', []))
+                status, response, replay = state.begin_operation(
+                    operation, path, {'delivered': 'later', 'undelivered': held}, 202,
+                    apply=lambda: state.data['held'].append(held),
+                )
+                self.reply(status, response)
+                if not replay:
+                    state.announce_held()
+                return
+            if scenario == 'held' and path.startswith(held_root + '/held/') and path.endswith('/retry'):
+                return self.act_on_held(path, True)
             if path.startswith('/api/v1/sessions/') and path.endswith('/messages'):
                 operation_id = self.operation_id()
                 status = 202 if scenario == 'pending' else 200
@@ -739,11 +793,33 @@ def main():
 
         def do_DELETE(self):
             self.read_body()
-            state.scenario()
             path = self.parsed_path()
             if not self.authorized():
                 return self.tracked_reply('DELETE', path, 401, {'code': 'unauthorized'})
+            if state.scenario() == 'held' and path.startswith(f'/api/v1/sessions/{MACHINE}/{LEAD_SESSION}/held/'):
+                with state.lock:
+                    return self.act_on_held(path, False)
             return self.tracked_reply('DELETE', path, 404, {'code': 'not_found'})
+
+        def act_on_held(self, path, retry):
+            method = 'POST' if retry else 'DELETE'
+            identifier = path.split('/')[-2 if retry else -1]
+            row = next((row for row in state.data['held'] if row['id'] == identifier), None)
+
+            def apply():
+                if retry:
+                    row.update(state='waiting', error=('Will check the chat when Test computer is back.' if identifier == 'uncertain'
+                                                       else 'Will send when Test computer is back.'))
+                else:
+                    state.data['held'].remove(row)
+            status, response, replay = state.begin_operation(
+                self.operation_id(), path, {'ok': True}, apply=apply, method=method,
+                admit=lambda: row and (not retry or row['state'] == 'failed' and not row.get('delete_only')),
+                denied_status=409 if row else 404,
+            )
+            self.reply(status, response)
+            if status == 200 and not replay:
+                state.announce_held()
 
         def websocket(self, path):
             key = self.headers.get('Sec-WebSocket-Key', '')
@@ -758,11 +834,14 @@ def main():
             state.record('GET', path, '', 101)
             hello = json.dumps({
                 'type': 'hello', 'hub_id': HUB_ID,
-                'features': ['managers', 'client_ops'],
+                'features': ['managers', 'client_ops'] + (['agent_message_hold'] if state.scenario() == 'held' else []),
             }, separators=(',', ':')).encode()
             try:
-                self.wfile.write(frame(1, hello))
-                self.wfile.flush()
+                with state.lock:
+                    if state.scenario() == 'held':
+                        state.held_listeners.add(self.connection.sendall)
+                    self.wfile.write(frame(1, hello))
+                    self.wfile.flush()
                 while True:
                     header = self.rfile.read(2)
                     if len(header) != 2:
@@ -798,6 +877,9 @@ def main():
                             self.wfile.flush()
             except (OSError, ssl.SSLError, struct.error, ConnectionError):
                 pass
+            finally:
+                with state.lock:
+                    state.held_listeners.discard(self.connection.sendall)
             self.close_connection = True
 
     class Server(ThreadingHTTPServer):

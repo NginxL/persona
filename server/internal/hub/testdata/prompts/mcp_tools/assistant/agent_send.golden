@@ -1,0 +1,104 @@
+{
+  "name": "agent_send",
+  "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why if this work needs its context. Only a recorded idle, task completion or restart stop permits that. For user and unknown stops use the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. A branch that never ran starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nFrom the main conversation, give task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "machine",
+      "session_id",
+      "text"
+    ],
+    "properties": {
+      "wait_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "0/omitted: normal receipt"
+      },
+      "machine": {
+        "type": "string"
+      },
+      "session_id": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "resume": {
+        "type": "boolean",
+        "description": "resume this stopped agent with its context, text as its first message"
+      },
+      "resume_why": {
+        "type": "string",
+        "description": "shown to the user"
+      },
+      "dismiss_notice": {
+        "type": "boolean",
+        "description": "Press Enter first to close a notice that only says \"Enter to continue\" (no options). Any other dialog still refuses the send."
+      },
+      "attachments": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "string"
+        },
+        "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
+      },
+      "handoff": {
+        "type": "object",
+        "required": [
+          "todo_id",
+          "receiving_todo_id",
+          "head",
+          "check",
+          "until"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "todo_id": {
+            "type": "string"
+          },
+          "receiving_todo_id": {
+            "type": "string"
+          },
+          "head": {
+            "type": "string",
+            "description": "Full candidate commit ID"
+          },
+          "check": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string",
+            "description": "Duration or RFC 3339 deadline"
+          }
+        }
+      },
+      "task": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "description": "new work: make it your supervised task first (main conversation only); null for a reply",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "the task in a short line (Chinese, under 20 characters)"
+          },
+          "done_when": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string"
+            },
+            "description": "results you can check when it says it is done (a PR merged, a sheet's link, what the live system answers)"
+          },
+          "expect_minutes": {
+            "type": "integer",
+            "description": "how long it should take from now; longer without progress counts as stuck"
+          }
+        }
+      }
+    }
+  }
+}

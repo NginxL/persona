@@ -93,6 +93,14 @@ Within the preview the address bar and links may go to any loopback port, as the
 
 `pick {on: true}` puts the tab in the inspector's "select an element" mode (`Overlay.setInspectMode`): the element under the pointer is outlined in the pictures (content, padding, margin), and a click picks it instead of clicking it. The node runs `preview_pick.js` on it and sends `picked`: a CSS `selector` (ids first, readable class names, `:nth-of-type` where needed, unique when it can be), `tag`, its `text` (300 characters), `html` (`outerHTML`, 6000 characters), `role`, `label` (aria-label), its box (`rect`), the page's `url` and `title`, and when a dev build says so the `component` that drew it and its `source` (React 18's `_debugSource`, Vue 3's `__file`, Svelte's `__svelte_meta`). The web turns it into a comment for the Agent: an `Element comment N` block in front of the next message (`docs/protocol/protocol.md` "Quote and comment blocks"), the HTML cut to 60 lines.
 
+### Typing and a phone's keyboard
+
+The web panel types into the page through a hidden text field (`web/src/views/session/PreviewPanel.tsx`): keys, an input method's text and a paste go from there as `key` / `text`. On a phone, focusing that field raises the keyboard, which shrinks the panel and so the page (a smaller `size`, and the page lays itself out again). So on a touch screen only a tap that lands on the page focuses it, once the finger lifts (until then the press may become a scroll); a finger's scroll, Pick element (cancelled there with the bar's Cancel rather than Esc) and Go in the address bar (which puts the keyboard away) leave it alone. A mouse or trackpad focuses it on the press, and after Pick and Go.
+
+- A tap on a part of the page that takes no typing still raises the keyboard: telling the two apart needs the node to say when an editable element of the page has focus.
+- A touch's `pointerup` is a user activation in the HTML standard, which is what lets iOS raise the keyboard for a focus made in it; assumed for iOS WebKit, not yet checked on a device.
+- `scripts/test/web_preview_e2e.py`'s phone step checks it at 390 with CDP touches and a stand-in for the iOS keyboard (up while a text field has focus): no focus and no smaller `size` after a scroll, Pick or Go; a tap focuses the field only after the finger lifts. `web/src/views/session/PreviewPanel.touch.test.tsx` covers the same cases and the mouse.
+
 ### Implementation notes
 
 - The tab's goroutine handles CDP events and the web's messages in order and never waits for a CDP answer that may depend on an event it has not handled yet (a navigation waits on `Fetch.requestPaused`): input and acknowledgements are sent without waiting, calls whose answer matters run on goroutines of their own and post the answer back.

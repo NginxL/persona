@@ -71,7 +71,7 @@ func run() error {
 		result := any(map[string]any{"ok": true})
 		switch req.Method {
 		case "node.info":
-			result = map[string]any{"version": "compat-fixture", "protocol": nodeproto.Version, "protocol_min": nodeproto.MinManagerVersion, "capabilities": nodeproto.Announced, "os": "linux", "arch": "amd64", "home": "/home/example", "hostname": "fixture", "engine": "herdr", "model_configuration": true}
+			result = map[string]any{"version": "compat-fixture", "protocol": nodeproto.Version, "protocol_min": nodeproto.MinManagerVersion, "capabilities": linesOnly(nodeproto.Announced), "os": "linux", "arch": "amd64", "home": "/home/example", "hostname": "fixture", "engine": "herdr", "model_configuration": true}
 		case "sessions.list":
 			result = map[string]any{"sessions": []proto.Session{session}}
 		case "sessions.revs":
@@ -110,4 +110,16 @@ func run() error {
 		}
 	}
 	return scanner.Err()
+}
+
+// linesOnly is caps without lane framing (docs/protocol/protocol.md "Lanes"): this fixture reads and writes JSON lines
+// only. By name, so the baseline's nodeproto, which has no constant for it, builds it too.
+func linesOnly(caps []string) []string {
+	var out []string
+	for _, c := range caps {
+		if c != "node_lanes_v1" {
+			out = append(out, c)
+		}
+	}
+	return out
 }

@@ -45,6 +45,18 @@ export interface InboxSuggestion {
   conversation?: { machine_id: string; session_id: string };
 }
 
+/** A server-kept reply attempt. Its text is the actual confirmed payload, including edits. */
+export interface InboxSuggestionAttempt {
+  version: number;
+  status: "sending" | "failed" | "unknown" | "sent";
+  retryable: boolean;
+  code?: string;
+  retry_after?: number;
+  text: string;
+  at: string;
+  conversation?: { machine_id: string; session_id: string };
+}
+
 export type ChainLink =
   | { type: "source"; position?: string; uid?: number; url?: string }
   | { type: "session"; machine_id: string; session_id: string }
@@ -217,7 +229,7 @@ export function itemAtUid(it: InboxItem, uid?: number): InboxItem {
 export type SuggestionResult =
   | { ok: true; item: InboxItem }
   | { ok: false; stale: true; item?: InboxItem; error: string }
-  | { ok: false; stale: false; error: string; code?: string };
+  | { ok: false; stale: false; error: string; code?: string; item?: InboxItem; delivered?: "none" | "unknown"; retryable?: boolean; retry_after?: number };
 
 /**
  * POST /api/v1/inbox/{id}/suggestion: "Confirm" (with the edited text when "Edit" changed it), "Reject", or "Say something" (instruct).
@@ -234,7 +246,13 @@ export async function actOnSuggestion(path: string, version: number, action: Sug
       const item = e.body.item as InboxItem | undefined;
       return { ok: false, stale: true, item: item?.id ? item : undefined, error: t("lib-inbox-events.stale") };
     }
-    return { ok: false, stale: false, error: errorText(e), code: e instanceof ApiError && typeof e.body?.code === "string" ? e.body.code : undefined };
+    const body = e instanceof ApiError ? e.body : undefined;
+    const item = body?.item as InboxItem | undefined;
+    return { ok: false, stale: false, error: errorText(e), code: typeof body?.code === "string" ? body.code : undefined,
+      item: item?.id ? item : undefined,
+      delivered: body?.delivered === "none" || body?.delivered === "unknown" ? body.delivered : undefined,
+      retryable: typeof body?.retryable === "boolean" ? body.retryable : undefined,
+      retry_after: typeof body?.retry_after === "number" && body.retry_after > 0 ? body.retry_after : undefined };
   }
 }
 

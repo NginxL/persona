@@ -26,6 +26,7 @@ type AssistantMachine struct {
 
 // AssistantClaudeMD is the assistant directory's CLAUDE.md (assistant/claude_md).
 type AssistantClaudeMD struct {
+	WorkGuide    bool
 	Owner        string // "" is "user"
 	Machines     []AssistantMachine
 	Notes        string // Settings › Assistant › About me, trimmed
@@ -281,11 +282,10 @@ type SnapshotReport struct {
 // SnapshotWorkflow is a Claude Code workflow run still running in an agent's background (#2935): the agent's turn
 // ended to wait for its result, which wakes it.
 type SnapshotWorkflow struct {
-	Agent, Machine, Session string // whose run: its label, machine and short session id (left empty inside a task)
-	Name, Phase             string
-	PhaseIndex, Phases      int    // Phase's 1-based place among the script's phases; 0 when not known
-	Done, Started           int    // its agents that returned, and started so far
-	For                     string // how long it has run ("12 minutes"), "" under a minute
+	Name, Phase        string
+	PhaseIndex, Phases int    // Phase's 1-based place among the script's phases; 0 when not known
+	Done, Started      int    // its agents that returned, and started so far
+	For                string // how long it has run ("12 minutes"), "" under a minute
 }
 
 // SnapshotProfile is the model profile in use (docs/assistant/model-profiles.md) with its tiers, the Agent presets
@@ -300,7 +300,7 @@ type SnapshotProfile struct {
 // SnapshotTier is one tier of the profile in use: what an Agent started on it runs on ("" model or effort: the
 // launcher's), and when to use it.
 type SnapshotTier struct {
-	Name, Launcher, Model, Effort, Description string
+	Name, Launcher, Model, Effort, Speed, Description string
 }
 
 // Snapshot is the live context a starting assistant gets in its system prompt.
@@ -318,9 +318,10 @@ type Snapshot struct {
 	Awaiting []SnapshotAgent
 	// Muted: agents (or their spaces) the user turned notifications off for that would be in one of the above; in
 	// none of them, as the Live Activity and the Agents badge count none of them (#4562).
-	Muted           []SnapshotAgent
+	Muted []SnapshotAgent
+	// Working: running agents; the snapshot renders only their count in the Agents heading, leaving details to
+	// agents_list (#11261).
 	Working         []SnapshotAgent
-	Workflows       []SnapshotWorkflow // background workflow runs still running, newest first
 	PhoneOnline     bool
 	NoPhone         bool               // leaves the iPhone line out: the background supervisor's (assistant/context.go backgroundSnapshot)
 	Apps            []SnapshotApp      // one per kind of device, the user's own before a simulator
@@ -366,7 +367,7 @@ type Snapshot struct {
 // and count with where to see the rows (a tool, or the App for Inbox follow-ups), never as empty: the node sends only
 // what changed, so a section that went missing would read as gone, and one rendered without its items as "none".
 type SnapshotOmit struct {
-	Waiting, Working, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
+	Waiting, Unread, Routines, Following, Followups, Asked, KB, OtherChats, Unaccepted, OpenTodos, Tasks, Approvals bool
 }
 
 // SnapshotCut is the line a snapshot cut short ends with (assistant/snapshot_cut).
@@ -433,10 +434,11 @@ func RenderSnapshotWorkflow(w SnapshotWorkflow) string {
 // AssistantContext is the hub's answer to assistant.context: the snapshot, for the main conversation with a line
 // saying so first (assistant/context). Node puts what changed of it at the start of each message (TurnContext).
 type AssistantContext struct {
-	Main     bool
-	Leader   bool // a leader conversation (#3133): it supervises the tasks it hands out
-	Owner    string
-	Snapshot string
+	ScheduledWorkPlan bool // Inline instructions for a granted scheduled round when the manager uses persona-work.
+	Main              bool
+	Leader            bool // a leader conversation (#3133): it supervises the tasks it hands out
+	Owner             string
+	Snapshot          string
 	// Directions: for the main conversation, the current leaders it hands work to (task_plan supervisor, #3609);
 	// LeaderName: for a leader, its direction's name.
 	Directions []ContextDirection
@@ -466,6 +468,7 @@ func RenderAssistantContext(c AssistantContext) string { return render("assistan
 // TaskRun is the message a scheduled task's run starts with (assistant/task_run).
 type TaskRun struct {
 	Label          string
+	TodoID         string
 	Once, Interval bool   // neither: daily
 	Every          string // interval: "30 minutes"
 	Late           string // "" when on time; else how late ("25 minutes")
@@ -709,6 +712,9 @@ type TaskNotice struct {
 	Earlier        []string // what else it went through since the last notice ("waiting on the user", "done"), oldest first
 	Ask            string   // needs: what it asks
 	Text           string   // what its agent said last, or why it did not start
+	// Files: the files it handed over, with where each is on the conversation's computer (task_files.go, #10511); the
+	// agent named them in its reply, and the manager copied them here. They are kept out of Text's clip.
+	Files []TaskFile
 	// RetryWith: failed because of its launcher there, the launcher the assistant may start it with instead when the
 	// user asks (task_retry's launcher; only the web's card has a button for it, #10365).
 	RetryWith string
@@ -718,6 +724,13 @@ type TaskNotice struct {
 }
 
 func RenderTaskNotice(n TaskNotice) string { return render("assistant/task_notice", n) }
+
+// TaskFile is one file a task handed over (task_files.go, #10511), as the task notice and a supervision message list
+// it: Path is where the conversation finds it (its copy, else the original). Error says why it did not come; Path is
+// then where it stayed, on the Agent's computer.
+type TaskFile struct {
+	Name, Path, Error string
+}
 
 // SpawnNotice tells the conversation that opened another with conversation_new that the other failed, or ended a turn
 // without reporting back with conversation_send (#4669): once per opened conversation.
@@ -739,6 +752,29 @@ type TaskEnded struct {
 }
 
 func RenderTaskEnded(n TaskEnded) string { return render("assistant/task_ended", n) }
+
+// RelayRefused tells a conversation that the message it sent another with conversation_send or conversation_new (Tool)
+// was refused for good by that conversation (Title, ID) with a refusal Code, and is not tried again (#11393). Excerpt
+// is how the message began. Language is the owner's (answerLanguage: "" Chinese, "English", "日本語").
+type RelayRefused struct {
+	Language                       string
+	Tool, ID, Title, Code, Excerpt string
+}
+
+func RenderRelayRefused(d RelayRefused) string { return render("assistant/relay_refused", d) }
+
+// ChatReply tells a conversation that wrote into a Lark chat as the user that others wrote there since (#10777): the
+// chat's name (Group: a group, else a direct chat with that person), when the conversation last wrote there (local
+// "01-02 15:04"), how many new messages and who wrote the newest, whether Context also repeats messages it was told
+// before (Earlier), and the messages' text, which goes in a context block as someone else's words.
+type ChatReply struct {
+	Language                     string // answerLanguage: "" Chinese, "English", "日本語"
+	Title, Sender, Sent, Context string
+	Group, Earlier               bool
+	Count                        int
+}
+
+func RenderChatReply(d ChatReply) string { return render("assistant/chat_reply", d) }
 
 // AskTodoAnswer is the message to the conversation whose ask_user question became a to-do (#1617): the user's call on it
 // (Thread: said in the to-do's Lark topic), or that the to-do was closed without one (Dropped). The questions and choices
@@ -853,6 +889,9 @@ type SuperviseEntry struct {
 	Said        string
 	Evidence    []string
 	Step, Steps int
+	// Files: the files its agent handed over, with where each is on this conversation's computer (task_files.go,
+	// #10511). The manager copied them here when the agent's turn ended; they are kept out of Last's clip.
+	Files []TaskFile
 	// failed with its tab kept (#2570): until when (local "15:04"), the question its shell waits on, the tab's last
 	// lines, and how many retries are left; KeptUntil "" when the start failed for good.
 	KeptUntil, Question, Screen string
@@ -891,6 +930,8 @@ type SuperviseLastReview struct {
 // DecisionAgentReply asks a supervisor to confirm a pending decision after its owner writes in the task's Agent chat.
 type DecisionAgentReply struct {
 	Language, Machine, Session string
+	Handled                    bool
+	Text, Closeout             string
 }
 
 // SuperviseInbox is the Inbox item an inbox entry names (#4293): its id, title (the chat's name or the mail's subject),
@@ -900,7 +941,7 @@ type SuperviseInbox struct {
 	Item, Title, Sender, Preview string
 	Count                        int
 	// URL is a GitHub PR's or issue's address; ToAgent is "sent" once the note reached the task's agent (InboxToAgent,
-	// #7346), "" when the supervisor is the only one told.
+	// #7346), "unhandled" when its bounded retry failed, "" when only the supervisor is told.
 	URL, ToAgent string
 }
 
@@ -909,6 +950,7 @@ type SuperviseInbox struct {
 type InboxToAgent struct {
 	Sender, Preview, URL string
 	Count                int
+	Event                string // server-authored delivery identity, absent for legacy callers
 }
 
 // RenderInboxToAgent is that note.
@@ -952,6 +994,14 @@ type DraftPR struct {
 }
 
 func RenderDraftPR(p DraftPR) string { return render("assistant/draft_pr", p) }
+
+// EstimateDue is the localized fact attached to an automatic estimate_due supervision entry.
+type EstimateDue struct {
+	Language          string
+	Expected, Elapsed int
+}
+
+func RenderEstimateDue(p EstimateDue) string { return render("assistant/estimate_due", p) }
 
 // SuperviseReviewed is the independent review of a task waiting for review: State clean (nothing blocking), blocking
 // (blocking findings left once the rework rounds ran out) or failed (Error says why), its counts and report.
@@ -1012,6 +1062,7 @@ type Relay struct {
 // RelayQuote is the owner's message a relay carries: its id, when and in which conversation they wrote it, the
 // conversations that passed it on after that one (oldest first), and the text verbatim. ParseRelayQuoteID reads the id back.
 type RelayQuote struct {
+	Part                 bool // the text is an excerpt from the source message
 	ID, At, Conversation string
 	Via                  []string
 	Text                 string
@@ -1223,19 +1274,8 @@ type SuperviseCloseout struct {
 	Artifacts         []string
 	// CheckedMerged, CheckedDeployed: what the hub found itself, "yes", "no" or "" when it could not tell.
 	CheckedMerged, CheckedDeployed string
+	LocalDeployment                bool
 }
-
-// Route is the system prompt of assistant.route (assistant/route): is a New chat's first message a direction or a quick
-// chat. Language is the direction name's language by its own name ("" Chinese); Crowded: there are Leaders leaders
-// already, so the model names the closest one too.
-type Route struct {
-	Language string
-	TitleMax int
-	Crowded  bool
-	Leaders  int
-}
-
-func RenderRoute(r Route) string { return render("assistant/route", r) }
 
 // RouteLeader is a current leader as the route model is shown it.
 type RouteLeader struct{ ID, Title, Project string }

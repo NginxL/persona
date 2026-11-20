@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -27,6 +28,27 @@ type nodeDeployRecord struct {
 	// Fallback: the target is a fallback build (another version than the hub's), which only an explicit Redeploy
 	// sends; a record queued for the hub's own version never resumes as one.
 	Fallback bool `json:"fallback,omitempty"`
+}
+
+type nodeDeployPreflight struct {
+	id     string
+	failed chan error
+}
+
+// nodeUpdatePreflightFailed wakes only the deploy waiting on this upload's commit or confirmation.
+func (m *Machine) nodeUpdatePreflightFailed(params json.RawMessage) {
+	var failure proto.NodeUpdatePreflightFailure
+	if json.Unmarshal(params, &failure) != nil || failure.Error == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if pending := m.deployPreflight; pending != nil && pending.id == failure.ID {
+		select {
+		case pending.failed <- errors.New(failure.Error):
+		default:
+		}
+	}
 }
 
 func (d *Devices) deployContext() context.Context {
@@ -85,16 +107,22 @@ func (m *Machine) deploymentPhase(ctx context.Context, record *nodeDeployRecord,
 }
 
 func (m *Machine) startRPCDeployment(pkg nodePackage, saved *nodeDeployRecord) error {
+	_, err := m.startRPCDeploymentRun(pkg, saved)
+	return err
+}
+
+func (m *Machine) startRPCDeploymentRun(pkg nodePackage, saved *nodeDeployRecord) (*deployRun, error) {
 	m.mu.Lock()
 	if m.deploying {
+		run := m.deployRun
 		m.mu.Unlock()
-		return nil
+		return run, nil
 	}
 	if err := m.canDeployLocked(); err != nil {
 		m.mu.Unlock()
-		return err
+		return nil, err
 	}
-	m.deploying, m.deployErr, m.deployPhase = true, "", "waiting_idle"
+	run := m.beginDeployLocked("waiting_idle")
 	m.mu.Unlock()
 	record := nodeDeployRecord{Target: pkg.Version, State: "queued", Phase: "waiting_idle", At: time.Now().UTC(), Fallback: pkg.Fallback}
 	if saved != nil {
@@ -102,14 +130,15 @@ func (m *Machine) startRPCDeployment(pkg nodePackage, saved *nodeDeployRecord) e
 	}
 	ctx := m.d.deployContext()
 	if err := m.saveDeployRecord(ctx, record); err != nil {
+		err = explain(i18n.Err("devices-deploy.save_task_failed", i18n.Args{"err": err.Error()}), err)
 		m.mu.Lock()
-		m.deploying, m.deployPhase = false, ""
+		m.endDeployLocked(err)
 		m.mu.Unlock()
-		return explain(i18n.Err("devices-deploy.save_task_failed", i18n.Args{"err": err.Error()}), err)
+		return nil, err
 	}
 	m.d.changed()
 	go m.runRPCDeployment(ctx, pkg, record)
-	return nil
+	return run, nil
 }
 
 func (m *Machine) runRPCDeployment(ctx context.Context, pkg nodePackage, record nodeDeployRecord) {
@@ -142,7 +171,7 @@ func (m *Machine) runRPCDeployment(ctx context.Context, pkg nodePackage, record 
 		}
 	}
 	m.mu.Lock()
-	m.deploying, m.deployPhase = false, ""
+	m.endDeployLocked(err)
 	if err != nil && ctx.Err() == nil {
 		m.deployErr = err.Error()
 	}
@@ -160,7 +189,7 @@ func (m *Machine) performRPCDeployment(ctx context.Context, bin string, record *
 	already := m.online && m.info.Version == record.Target
 	m.mu.Unlock()
 	if already {
-		return m.confirmNodeDeployment(ctx, record)
+		return m.confirmNodeDeployment(ctx, record, nil)
 	}
 	for {
 		if err := m.deploymentPhase(ctx, record, "waiting_idle"); err != nil {
@@ -302,6 +331,16 @@ func (m *Machine) sendNodeUpdate(ctx context.Context, bin string, record *nodeDe
 	if err := m.deploymentPhase(ctx, record, "restarting"); err != nil {
 		return err
 	}
+	// Preflight can finish as soon as the node writes the commit reply, before this worker resumes.
+	preflight := &nodeDeployPreflight{id: begin.ID, failed: make(chan error, 1)}
+	m.mu.Lock()
+	m.deployPreflight = preflight
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.deployPreflight = nil
+		m.mu.Unlock()
+	}()
 	commit, cancelCommit := context.WithTimeout(ctx, 30*time.Second)
 	err = peer.Call(commit, "node.update.commit", map[string]any{"id": begin.ID}, nil)
 	cancelCommit()
@@ -315,10 +354,15 @@ func (m *Machine) sendNodeUpdate(ctx context.Context, bin string, record *nodeDe
 		m.d.logf("[%s] node update commit response lost, checking reconnect: %v", m.cfg.ID, err)
 	}
 	committed = true
-	return m.confirmNodeDeployment(ctx, record)
+	return m.confirmNodeDeployment(ctx, record, preflight.failed)
 }
 
-func (m *Machine) confirmNodeDeployment(ctx context.Context, record *nodeDeployRecord) error {
+func (m *Machine) confirmNodeDeployment(ctx context.Context, record *nodeDeployRecord, preflightFailed <-chan error) error {
+	select {
+	case err := <-preflightFailed:
+		return err
+	default:
+	}
 	if err := m.deploymentPhase(ctx, record, "confirming"); err != nil {
 		return err
 	}
@@ -337,6 +381,8 @@ func (m *Machine) confirmNodeDeployment(ctx context.Context, record *nodeDeployR
 			}
 		}
 		select {
+		case err := <-preflightFailed:
+			return err
 		case <-deadline.Done():
 			if ctx.Err() != nil {
 				return ctx.Err()

@@ -21,20 +21,28 @@ spec/
     injected/         hub 注入给模型的消息怎么认
     comments/         comment blocks a message leads with (web and iOS)
     sync/             chat sync scenarios: hub state, frames with faults, what each device shows
+    sync-driver/      one hub group's reconnect, event cursor and lifecycle decisions
     fold-changes/     the files a run of work changed, counted by the hub and the web alike
     fold-sources/     the web pages a run of work used, read by the hub and the web alike
+    graph-layout/     an extension graph's layout, reading order and folds, checked by the web, iOS, Android and the hub
     input-clip/       the whole-input bound after the hub and runtime SDK's two string passes
     attention/        Persona Link's "Needs you" summary against the web badge
+    counts/           every place a count is drawn, the count it draws, and how the clients' replays agree
     entries/          the Assistant's two composer entries, Needs you and In progress
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
     todo-view/        a to-do's view (phase, section, reason, line, asks) the manager works out, schema/wire/todo-view
     todo-counts/      the To-dos list's counts and places, schema/wire/todo-view
+    todo-rounds/      a to-do's conversation in rounds, its results and what changed since the owner looked, schema/wire/todo-view
+    todo-asks/        an answer to a to-do's own ask: what it takes, refuses and changes, schema/wire/todo-view
+    todo-writes/      a to-do's message or answer that failed: what it typed, and what the hub's receipt makes of it
     todo-detail/      a to-do's page: which elements it draws, in order, and its one primary action
     todo-layout/      the To-dos window rule: a window and what is wanted → its regions and their widths
+    todo-push/        a decision's push: what the manager sends → its category, mutable-content and todo, schema/wire/todo-view
     provider-import-link/ provider import links: what the web builds and what the hub reads
     deep-links/       links to Persona's pages: the hub's paths and what each client opens for a link
     agent-names/      what every client calls each coding agent (names.json)
+    permission-modes/ what every client calls each permission mode, in en, zh-Hans and ja (names.json)
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     stream-chunks/     the completed-block split of a streaming reply, checked against iOS by the pure Rust core
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS
@@ -66,16 +74,21 @@ spec/
 | review | [README](fixtures/review/README.md): the node's real `git.review` answers, empty `header` and base `hash` left out, written by the node's test and decoded by iOS (#8733) |
 | comments | [README](fixtures/comments/README.md): the `> Comment N` / `Code comment N` / `Element comment N` blocks a message leads with, written and read back by the web app and the iOS app (#151) |
 | attention | [README](fixtures/attention/README.md): Persona Link's "Needs you" summary counts what the web app's badge counts, checked by Go and the web app |
+| counts | [README](fixtures/counts/README.md): the surface table, every place a count is drawn on each client, the count it draws and whether drawing the manager's view would show today's number, held to the code by `scripts/test/test_counts_surfaces.py`; and the agreement report, which compares what the iOS and Android needs-you replays count (`scripts/test/counts_agreement.py`, #11900) |
 | session-search | [README](fixtures/session-search/README.md): ranked runtime-Agent search, explicit query operators and shared local/server matching (#7624) |
 | chat-export | [README](fixtures/chat-export/README.md): a conversation exported as Markdown (#7375): who wrote each part, merged replies, work steps on and off, cut text and fences, written by the web app |
 | entries | [README](fixtures/entries/README.md): which of the Assistant's two composer entries (Needs you, In progress) each task, Agent, plan and message card goes to, checked by the web app and Android (#3387) |
 | needs-you | [README](fixtures/needs-you/README.md): the Agents tab's Needs you section, one row per session that waits for the user, and what its header, filter and badge count, checked by iOS and Android (#3580) |
 | triage | [README](fixtures/triage/README.md): the To-dos page's sections (the status SOP), related rows and counts, checked by the web app and the hub (#3483) |
 | todo-view | [README](fixtures/todo-view/README.md): the view the manager works out for each to-do (phase, section, reason, line 2, times, marks, asks, steps) by the redesign's decision table, held to `schema/wire/todo-view.schema.json`, answered by the manager's projection (`server/internal/assistant/todo/projection`, `fixtures_test.go`) and read back by the generated Go, Kotlin and Swift types (#10226) |
-| todo-counts | [README](fixtures/todo-counts/README.md): a To-dos list's counts (N, open, in progress, rows per section), its places (All, Today, Upcoming, projects) and the order within each section, with the same schema and readers (#10226) |
+| todo-counts | [README](fixtures/todo-counts/README.md): a To-dos list's counts (N, open, in progress, rows per section), its places (All, Today, Upcoming, projects) and the order within each section, with the same schema and readers (#10226); its counting rules are replayed by the iOS app's `TodoCountsFallback` (#10465) |
+| todo-asks | [README](fixtures/todo-asks/README.md): an answer to one of a to-do's own asks through `POST /api/v1/todos/{id}/asks/{ask}/answer` (what waits, the ask's id and the answer → the status, code, reply and what it changed), held to `schema/wire/todo-view.schema.json`, replayed by the manager against its route (`server/internal/assistant/todo_asks_routes_test.go`) and read back by the generated Go types (#10465) |
+| todo-writes | [README](fixtures/todo-writes/README.md): how a to-do's message or answer that carries the owner's words ends (what happens to the words → the manager's status, code and `delivered` → the hub's final `todo_send_state` and receipt), replayed by the manager against its routes (`server/internal/assistant/todo_write_outcome_test.go`) and by the hub's relay (`server/internal/hub/todo_send_state_test.go`), the seam between two packages that never import each other (#10465) |
 | todo-detail | [README](fixtures/todo-detail/README.md): a to-do's page (the paper) from what the item route answers and where it is shown: its elements in order, its one primary action and whom its composer addresses, with a guard that everyday pages name no engine, runtime, model, path, repository or session id; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: iOS will replay it from its paper (#10465), the web and Android from their stages |
 | todo-layout | [README](fixtures/todo-layout/README.md): the To-dos window rule, a window, its text size and what the owner asked for → the sidebar, list, paper and conversation regions with their forms and widths, every window of the redesign's table included; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: each will replay it with its own pure function, iOS first (#10465) |
+| todo-push | [README](fixtures/todo-push/README.md): a decision's push, the `todo` a manager sends → the push's category, whether it sets `mutable-content`, and its `todo` (an older manager's unchanged, the lock-screen rule, the options forwarded), answered by the hub (`TestDecisionPushFixtures`), held to the schema by `scripts/test/test_wire_schema.py` and read back by the generated Go, Swift and Kotlin types (#10465) |
 | sync | [README](fixtures/sync/README.md): stories of one chat on one or more devices (sends, cards, reconnects, hub restarts, wakes, long chats) with faults, checked at every step by Go, the clients and the end-to-end runs (#1073) |
+| sync-driver | [README](fixtures/sync-driver/README.md): single-group socket, retry, cursor and lifecycle decisions derived from iOS and replayed against the pure Rust driver (#9783) |
 | stream-chunks | [README](fixtures/stream-chunks/README.md): the pure Rust projection of iOS `StreamChunks.split`, with source-cited Apple cases (#8607) |
 | tool-names | [README](fixtures/tool-names/README.md): a tool no table names in words ("GitHub · Create issue"), what its call is about, a shell's command line and its arguments as a key/value list, checked by Android; iOS's own tests hold the same cases until it reads them (#4339) |
 | fold-changes | [README](fixtures/fold-changes/README.md): the files a run of work's successful edits changed and their lines, counted by the hub for a fold and by the web for the same calls unfolded (#5157) |
@@ -88,6 +101,7 @@ spec/
 | minutes-overview | [README](fixtures/minutes-overview/README.md): the minutes' summary card (#6563), which places of a text are bold (each `strong` entry's first occurrence after the one before), how a client cleans a malformed overview and when it falls back to the minutes as before, and the hub's Markdown of the same minutes, checked by the hub, the mock hub, the iPhone and the web |
 | screen-link | [README](fixtures/screen-link/README.md): the live screen's session wire (#6398), every message framed byte for byte alike by the node and the iPhone's client |
 | file-types | [README](fixtures/file-types/README.md): a `.ts` / `.mts` / `.cts` file typed by its first bytes (#7974), a real TypeScript module and a real MPEG-TS segment, checked by the node and the hub (Go) |
+| graph-layout | [README](fixtures/graph-layout/README.md): an extension view's `graph` (UI version 10, #9727), each node's place in slots, the edges drawn, the reading order with depths, fold counts and group frames, written by the reference `scripts/gen/graph_layout.py` and checked by the web, iOS, Android and the hub |
 | tokens | 见各自 [README](tokens/README.md)；校验夹具如放在 `fixtures/tokens/`，结构由该领域 README 说明 |
 
 ## 夹具约定

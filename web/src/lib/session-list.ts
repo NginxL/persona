@@ -88,6 +88,8 @@ export interface ListSnapshot<T> {
 }
 
 export interface SessionListOptions<T> {
+  /** Side data refreshed with a coalesced list read, never once per raw hint. */
+  onRefresh?: () => void;
   summary?: boolean;
   /** Receives only this completed delta's net changes, including unloaded identities. Must not throw. */
   onDelta?: (upsert: T[], remove: string[]) => void;
@@ -140,6 +142,7 @@ export class SessionList<T> {
   private onDelta?: (upsert: T[], remove: string[]) => void;
   private pageCounts: () => boolean;
   private counted: boolean;
+  private onRefresh?: () => void;
 
   constructor(
     private path: string,
@@ -149,6 +152,7 @@ export class SessionList<T> {
     protected removeIdentity: (id: string) => string = (id) => id,
     options: SessionListOptions<T> = {},
   ) {
+    this.onRefresh = options.onRefresh;
     this.summary = options.summary ?? true;
     this.roots = options.roots ?? false;
     this.onDelta = options.onDelta;
@@ -381,6 +385,7 @@ export class SessionList<T> {
   }
 
   private async refresh(generation: number, retry = true): Promise<void> {
+    this.onRefresh?.();
     const withCounts = this.counted && this.pageCounts();
     const results = await Promise.allSettled([
       this.checkpoint && this.snapshot.supported !== false ? this.readDelta(generation, withCounts) : this.readFirst(generation, withCounts),

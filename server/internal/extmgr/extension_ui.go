@@ -47,6 +47,8 @@ type UIPlace struct {
 	Connector string           `json:"connector,omitempty"`
 	// Group: the sidebar group a nav_page names (#9071), its title in the request's language.
 	Group *extension.UIGroup `json:"group,omitempty"`
+	// IconColor: a nav_page's icon color (#10822), drawn only with Colored sidebar icons.
+	IconColor string `json:"icon_color,omitempty"`
 }
 
 // uiPlaces are the plugins' UI of placement (every slot's but launcher sections' when it is empty); for launcher
@@ -101,7 +103,7 @@ func (ps *extensions) uiPlaces(placement, base string) []UIPlace {
 				continue
 			}
 			place := UIPlace{Extension: p.Record.ID, ExtensionName: p.Manifest.Name, ID: u.ID, Title: u.Title, Placement: u.Placement,
-				Size: slot.Size, Icon: u.Icon, Opens: u.Opens, Connector: u.Connector, Group: u.Group}
+				Size: slot.Size, Icon: u.Icon, Opens: u.Opens, Connector: u.Connector, Group: u.Group, IconColor: u.IconColor}
 			if extension.PageSlot(u.Placement) {
 				place.Placement = "extension_page" // the old paths answer plugin_page (legacyUIPlaces)
 			}

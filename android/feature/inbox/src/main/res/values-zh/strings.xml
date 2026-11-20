@@ -101,6 +101,12 @@
     <string name="inbox_group_fyi">知悉即可</string>
     <string name="inbox_mark_all_seen">全部看过</string>
     <string name="inbox_clear_all">全部清除</string>
+    <plurals name="inbox_mark_all_in_seen">
+        <item quantity="other">看过「%2$s」的全部 %1$d 条</item>
+    </plurals>
+    <plurals name="inbox_clear_all_in">
+        <item quantity="other">清除「%2$s」的全部 %1$d 条</item>
+    </plurals>
     <string name="inbox_translated">已翻译</string>
     <plurals name="inbox_messages_count">
         <item quantity="other">%1$d 条消息</item>

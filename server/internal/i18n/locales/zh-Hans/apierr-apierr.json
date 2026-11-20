@@ -5,6 +5,7 @@
   "claude_missing_here": "这台电脑上还没装 Claude Code。",
   "launcher_missing": "在 {machine} 上找不到「{launcher}」这个模型入口，可能被删了。",
   "launcher_missing_here": "在这台电脑上找不到「{launcher}」这个模型入口，可能被删了。",
+  "not_logged_in": "这个对话的 Claude Code 配置还没有登录。请登录该配置，或者改用 API Key。",
   "launcher_missing_terminal": "{machine} 上新开的终端标签页（{pane_shell}）里没有「{launcher}」这个命令；Persona 是在 {launcher_shell}（{rc_file}）里找到它的。请在终端的 shell 会读到的启动文件里定义它，或者在 Persona 里把它添加为模型供应商。",
   "launcher_missing_terminal_here": "这台电脑上新开的终端标签页（{pane_shell}）里没有「{launcher}」这个命令；Persona 是在 {launcher_shell}（{rc_file}）里找到它的。请在终端的 shell 会读到的启动文件里定义它，或者在 Persona 里把它添加为模型供应商。",
   "launcher_missing_terminal_path": "{machine} 上新开的终端标签页（{pane_shell}）运行不了启动模型入口「{launcher}」要用的「{missing}」：终端所在的环境里没有这个文件，或者不能运行它（比如在容器里）。请在能看到它的终端里启动 Agent，或者换一个模型入口。",
@@ -18,5 +19,7 @@
   "shell_waiting": "{machine} 上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行。如果 Persona 里列出了这个提问的回答，选一个，Agent 就会在那个标签里启动；也可以去 {machine} 上的那个标签里回答，再重新启动 Agent。标签会再留几分钟。",
   "shell_waiting_here": "这台电脑上新开的终端标签停在一个提问上，Agent 没能启动：“{line}”。什么都没运行。如果 Persona 里列出了这个提问的回答，选一个，Agent 就会在那个标签里启动；也可以在这台电脑上的那个标签里回答，再重新启动 Agent。标签会再留几分钟。",
   "start_line_rejected": "{machine} 上新开的终端标签两次都没接住启动命令（它显示“{line}”）。什么都没运行；看看那个 shell 启动时做了什么，再重试。",
-  "start_line_rejected_here": "这台电脑上新开的终端标签两次都没接住启动命令（它显示“{line}”）。什么都没运行；看看那个 shell 启动时做了什么，再重试。"
+  "start_line_rejected_here": "这台电脑上新开的终端标签两次都没接住启动命令（它显示“{line}”）。什么都没运行；看看那个 shell 启动时做了什么，再重试。",
+  "session_no_transcript": "这台电脑上记着这个对话，但 Persona 在那里找不到它的对话记录。",
+  "session_unknown": "Persona 在这台电脑上找不到这个对话。"
 }

@@ -89,6 +89,11 @@ type Placement struct {
 	// Standby: this hub is a member of a mesh group, whose center runs the scheduled tasks (docs/server/mesh.md).
 	Standby        bool `json:"standby,omitempty"`
 	MemoryDreaming bool `json:"memory_dreaming,omitempty"`
+	// CompleteAgentlessTodos lets a supervising conversation complete its own agentless memo without another card.
+	CompleteAgentlessTodos bool `json:"complete_agentless_todos,omitempty"`
+	// SupervisionBatchMinutes is manager.json's administrator-pinned routine supervision interval. Nil leaves the
+	// assistant's saved setting in effect; an explicit zero pins immediate delivery through the legacy cadence.
+	SupervisionBatchMinutes *int `json:"supervision_batch_minutes,omitempty"`
 }
 
 // DeviceCall is device.call's params. Device is a machine id, or DeviceAll for DeviceDevicesList.
@@ -102,11 +107,12 @@ type DeviceCall struct {
 // answers the others from what it holds about the machine.
 const (
 	// The node's (docs/protocol/protocol.md "hub ↔ node").
-	DeviceSessionItems  = "session.items"  // {session_id, turns} → {items}
-	DeviceSessionRename = "session.rename" // {session_id, title} → {ok}
-	DeviceAssistantSend = "assistant.send" // {session_id, text, resume_only?, permission_mode?, …model} → {session_id}
-	DeviceSessionSend   = "session.send"   // {session_id, text} → {}
-	DeviceSessionStart  = "session.start"  // {cwd, prompt, launcher?, model?, permission_mode?, tab_name?, workspace_id?, session_id?} → {session}; session_id names the new session (Claude), for an exact reconciliation when the answer is lost
+	DeviceSessionItems              = "session.items"                 // {session_id, turns} → {items}
+	DeviceSessionRename             = "session.rename"                // {session_id, title?, tab_name?} → {ok}
+	DeviceSessionRenameTabIfCurrent = "session.rename_tab_if_current" // {session_id, tab_id, expected_tab_name, tab_name} → {ok}
+	DeviceAssistantSend             = "assistant.send"                // {session_id, text, resume_only?, permission_mode?, …model} → {session_id}
+	DeviceSessionSend               = "session.send"                  // {session_id, text} → {}
+	DeviceSessionStart              = "session.start"                 // {cwd, prompt, launcher?, model?, permission_mode?, tab_name?, workspace_id?, session_id?} → {session}; session_id names the new session (Claude), for an exact reconciliation when the answer is lost
 	// DeviceSessionModes: {session_id, launcher?, from?, model?, effort?, permission_mode?} → {}; a launcher other than
 	// the session's own is a switch to it, carried out by a session.send with apply_switch (docs/protocol/protocol.md).
 	DeviceSessionModes = "session.modes"
@@ -150,6 +156,8 @@ type Device struct {
 	ModelConfiguration bool   `json:"model_configuration,omitempty"`
 	// ExternalInventory is announced only by a node with an enabled, trusted local model adapter.
 	ExternalInventory bool `json:"external_inventory,omitempty"`
+	// TaskInstructions: this node preserves delegated instructions separately, including fallback/resume.
+	TaskInstructions bool `json:"task_instructions,omitempty"`
 	// ClaudeVersion is Claude Code's version there ("" when it has none or never said): 设置 › 模型供应商's built-in
 	// claude lists the machines that have it.
 	ClaudeVersion string `json:"claude_version,omitempty"`
@@ -203,6 +211,8 @@ const (
 	// (internal/extmgr), not the hub; AppSettings is Persona's own settings (persona_settings).
 	AppInbox    = "inbox"
 	AppSettings = "settings"
+	// AgentsDisplayGet reads the default manager's shared Agents display settings for another manager.
+	AgentsDisplayGet = "agents.display.get"
 
 	// AppNotify is the hub's push settings: NotifyQuietGet tells whether the user is in their quiet hours now.
 	AppNotify = "notify"
@@ -319,6 +329,12 @@ type NotifyTodo struct {
 	// `response`. Left out by a hub from before them.
 	Options   []string `json:"options,omitempty"`
 	Responses []string `json:"responses,omitempty"`
+	// Ask is the decision's ask in the to-do's view (OwnerAsk.ID), which an answer from the notification names, and
+	// Lockscreen what its push may offer on the lock screen (OwnerAskLockscreen: answer, its options as actions;
+	// open_only, none, a tap opens it), from how risky answering it is (#10465). The hub forwards the options only
+	// with answer, and sends an older manager's push, which has neither, as before.
+	Ask        string `json:"ask,omitempty"`
+	Lockscreen string `json:"lockscreen,omitempty"`
 }
 
 // NotifyPush is the kind of the assistant's pushes.
@@ -361,15 +377,16 @@ type Snapshot struct {
 
 // TaskView is one scheduled task in the snapshot.
 type TaskView struct {
-	ID           string    `json:"id"`
-	Label        string    `json:"label"`  // its title, or what stands for one
-	Repeat       string    `json:"repeat"` // once / daily / interval / cron
-	Enabled      bool      `json:"enabled"`
-	At           time.Time `json:"at,omitempty"` // once: when; interval, cron: the next run
-	EveryMinutes int       `json:"every_minutes,omitempty"`
-	MachineID    string    `json:"machine_id,omitempty"` // of the conversation it came from
-	RunMachineID string    `json:"run_machine_id,omitempty"`
-	RunSessionID string    `json:"run_session_id,omitempty"` // its own conversation
+	ExecutionMachineID string    `json:"execution_machine_id,omitempty"`
+	ID                 string    `json:"id"`
+	Label              string    `json:"label"`  // its title, or what stands for one
+	Repeat             string    `json:"repeat"` // once / daily / interval / cron
+	Enabled            bool      `json:"enabled"`
+	At                 time.Time `json:"at,omitempty"` // once: when; interval, cron: the next run
+	EveryMinutes       int       `json:"every_minutes,omitempty"`
+	MachineID          string    `json:"machine_id,omitempty"` // of the conversation it came from
+	RunMachineID       string    `json:"run_machine_id,omitempty"`
+	RunSessionID       string    `json:"run_session_id,omitempty"` // its own conversation
 	// Push is what of a run reaches the phone: "" every run's answer, PushAsked only what the run sends with
 	// notify_user (#2396). Such a task always runs in its own conversation, whose finished turns are not pushed.
 	Push string `json:"push,omitempty"`

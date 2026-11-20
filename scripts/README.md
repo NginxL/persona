@@ -21,9 +21,11 @@ Scripts are grouped by purpose and resolve their own repository root. Build/depl
 ## Shared tools
 
 - `mock/turn_folding_hub.py` serves isolated synthetic Apple chats for running/completed execution and compaction with a failed tool. Run it on an unused loopback port and point `AppleTurnFoldingTests` at it; never use a production hub for this suite.
+- `mock/mock_domains.py` is the mock hub's domain registry: a new made-up area of the hub is a module with `register(d)` and one line in its `DOMAINS`, not another edit of `mock/mock_hub.py` (`docs/operations/testing.md` "Mock hub domains"). A block moved out of `mock/mock_hub.py` lists the names it took in `mock/test_mock_domains.py`'s `MOVED`, so a branch that brings it back fails.
 - `persona_config.py` reads private build/deploy configuration and generates Xcode settings without changing registered app IDs.
 - `persona_identity.py --service hub|node|link` resolves only a matching canonical service's root. It honors unit resets, ordered drop-ins, XDG paths, HOME-only environment files and unset rules; it never executes configuration or exposes other credentials. `--prepare` creates only the selected directory, with no directory aliases. `--prefix` resolves remote paths using the remote HOME.
 - `privacy_check.py` scans repository/staged content. Git hooks, web builds and CI use it.
+- `heavy_slot.py run --kind xcode|gradle|go|web -- <command>` runs a heavy build in one of a few machine-wide slots of its kind, so parallel worktrees queue instead of thrashing; `sim.sh`, `android.sh` and `check-fast.sh` use it, and `PERSONA_HEAVY_SLOTS=0` turns it off ([heavy build slots](../docs/operations/testing.md#heavy-build-slots)).
 - Existing non-brand shell shortcuts (`sim.sh`, `android.sh`, `deploy.sh`, `release.sh` and others) only forward arguments/environment/stdin/exit status to their grouped implementation. Repository examples use grouped paths. Python tools have only their canonical entry points.
 
 ## Verification

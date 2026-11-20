@@ -160,7 +160,7 @@ The same definition as the app, from the same code (principle 4):
 | Usage | money spent today | only what a gateway reports: the `cost_usd` of the quota report's usage entries whose `period` is `day`, over the launchers with a gateway, a key two launchers share counted once (`HomeUsage.spentToday`). Never estimated from prices, never an entry known only by its label. With no gateway saying, the widget shows no money | launcher quotas (`GET /api/v1/launchers/{name}/quota`) |
 | Computers | online, load | `Machine.online`; load from `FleetState.stats.loads` | `AppModel.machines` |
 | Health | steps, sleep, resting heart rate | Health's own numbers, with the user's permission | `HealthTool.daily` / `.summary` |
-| Inbox | Need You, Unread | open items the triage marks as yours (`InboxStore.actionCount`); the Inbox badge's number | `InboxStore` |
+| Inbox | Need You | open items the triage marks as yours, read ones included (`InboxStore.actionCount`). The snapshot also carries the unread ones among them (`InboxStore.unreadCount`, the Inbox badge's number), which no widget draws | `InboxStore` |
 
 **Private content**: Inbox and Health are `privacySensitive`. While the phone is locked the system blurs them on the
 Lock Screen, in StandBy and in the Smart Stack.

@@ -19,6 +19,30 @@ import org.junit.Test
 class CompleteSessionsFollowTest {
     private val complete = SessionListFilter(requiresCompleteMembership = true)
 
+    @Test fun onlyChangedHeldDecisionsInManagerDeltasReachTheReceiptBeforeTheRowIsPublished() = runTest {
+        val hub = JournalHub(0)
+        val failed = HeldAgentMessage("kept", state = "failed", error = "Not sent", computer = "Demo Mac")
+        val session = Session("demo", "chat", undelivered = listOf(failed))
+        hub.add(session)
+        val connection = Connection()
+        val transitions = mutableListOf<Pair<String, String>>()
+        lateinit var repository: HubSessionsRepository
+        repository = HubSessionsRepository(hub, connection, backgroundScope, reconcileHeldRetries = { previous, next ->
+            assertEquals(previous, repository.sessions.value.single())
+            transitions += previous.undelivered!!.single().state to next.undelivered!!.single().state
+        })
+        connection.events.emit(Hello(features = listOf("sessions_list")))
+        repository.setListFilter(complete)
+        connection.state.value = ConnectionState.Online
+        runCurrent()
+        for (row in listOf(failed, failed.copy(state = "waiting", error = "Sending…"), failed)) {
+            hub.add(session.copy(undelivered = listOf(row), rev = (hub.deltaReads + 1).toLong()))
+            connection.events.emit(SessionsListEvent(hub.revision()))
+            advanceTimeBy(250); runCurrent()
+        }
+        assertEquals(listOf("failed" to "waiting", "waiting" to "failed"), transitions)
+    }
+
     @Test fun aMinuteOfHintsReadsOneBaselineAndThenOnlyChanges() = runTest {
         val hub = JournalHub(1000)
         val connection = Connection()

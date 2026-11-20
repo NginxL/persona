@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import Observation
+import UIKit
 
 /// A computer's clipboard section (#3064): its switch, Send Clipboard (the phone's to the computer), Get Clipboard (the
 /// computer's onto the phone), and the one-time hint to stop iOS asking before every paste. The hub and the phone's
@@ -20,6 +22,9 @@ import Observation
     private(set) var saved: MachineClipboard?
     /// What Get Clipboard put on the phone, for its preview.
     private(set) var fetched: ClipboardContent?
+    /// The fetched picture as its preview draws it (#7925): decoded once, off the main thread, at the size it is drawn,
+    /// never the computer's full-size picture (tens of megabytes decoded), and not again on a redraw.
+    private(set) var fetchedPicture: UIImage?
     /// The last result, said under the buttons.
     private(set) var outcome: ClipboardOutcome?
     /// "Asked every time?": after the first paste the user allowed (iOS only), until dismissed.
@@ -54,8 +59,9 @@ import Observation
         }
     }
 
-    /// Get Clipboard: the computer's clipboard onto the phone's (no prompt), kept for the preview.
-    @discardableResult func fetch(machineID: String) async -> ClipboardOutcome {
+    /// Get Clipboard: the computer's clipboard onto the phone's (no prompt), kept for the preview. A picture shows once
+    /// it is decoded for the preview at `scale` pixels a point; Get stays busy until then, so no other fetch overlaps.
+    @discardableResult func fetch(machineID: String, scale: CGFloat) async -> ClipboardOutcome {
         guard busy == nil else { return outcome ?? .nothingToSend }
         busy = .fetching
         defer { busy = nil }
@@ -63,10 +69,22 @@ import Observation
             guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
             let content = try await api.clipboard(machine: machineID)
             switch content.kind {
-            case .text where content.text?.isEmpty == false, .image where content.image?.bytes != nil:
+            case .text where content.text?.isEmpty == false:
                 deps.pasteboard.write(content)
                 fetched = content
-                return finish(.fetched(content.kind))
+                fetchedPicture = nil
+                return finish(.fetched(.text))
+            case .image:
+                guard let bytes = content.image?.bytes else { return finish(.remoteEmpty) }
+                deps.pasteboard.write(content)
+                guard let picture = await Self.previewPicture(bytes, height: Theme.Size.box200 * scale) else {
+                    fetched = nil
+                    fetchedPicture = nil
+                    return finish(.failed(.badImage))
+                }
+                fetched = content
+                fetchedPicture = picture
+                return finish(.fetched(.image))
             case .concealed:
                 return finish(.remoteConcealed)
             default:
@@ -87,7 +105,10 @@ import Observation
             let state = try await api.setClipboardEnabled(machine: machineID, enabled: on)
             saved = state
             deps.updated(state)
-            if !state.enabled { fetched = nil }
+            if !state.enabled {
+                fetched = nil
+                fetchedPicture = nil
+            }
             outcome = nil
             return true
         } catch {
@@ -122,11 +143,53 @@ import Observation
         return result
     }
 
+    /// The most pixels a picture's longer side gets in the preview. Only a panorama reaches it, and only a card wider
+    /// than that many pixels draws it slightly soft.
+    nonisolated static let previewPixelLimit: CGFloat = 2048
+
+    /// The longer side, in pixels, the preview draws a picture of `size` at: it is at most `height` pixels high, so a
+    /// wide picture is at most `height` × its aspect ratio wide. The card can make it narrower, never wider, so this
+    /// never needs the card's width and never changes with it.
+    nonisolated static func previewPixels(_ size: CGSize, height: CGFloat) -> CGFloat {
+        min(height * max(size.width / size.height, 1), previewPixelLimit)
+    }
+
+    /// The picture downsampled by ImageIO to what its preview draws (`previewPixels`), off the main actor; nil when the
+    /// bytes are not a picture. A smaller picture keeps its own size.
+    nonisolated static func previewPicture(_ data: Data, height: CGFloat) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let p = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let w = p[kCGImagePropertyPixelWidth] as? Int, let h = p[kCGImagePropertyPixelHeight] as? Int, w > 0, h > 0
+            else { return nil }
+            // EXIF orientations 5–8 turn the picture a quarter and swap its dimensions; 2–4 do not.
+            let size = (p[kCGImagePropertyOrientation] as? Int ?? 1) >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
+            let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                         kCGImageSourceThumbnailMaxPixelSize: previewPixels(size, height: height),
+                                         kCGImageSourceShouldCacheImmediately: true]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary).map { UIImage(cgImage: $0) }
+        }.value
+    }
+
     #if DEBUG
     /// Screenshots: a state without a hub (`-showClipboardFetched text|image`, `-showClipboardHint YES`).
-    func preview(fetched: ClipboardContent?, hint: Bool) {
-        self.fetched = fetched
-        if let fetched { outcome = .fetched(fetched.kind) }
+    func preview(fetched: ClipboardContent?, hint: Bool, scale: CGFloat = 3) async {
+        self.fetched = nil
+        fetchedPicture = nil
+        outcome = nil
+        if let fetched {
+            if case .image = fetched.kind {
+                guard let bytes = fetched.image?.bytes,
+                      let picture = await Self.previewPicture(bytes, height: Theme.Size.box200 * scale) else {
+                    outcome = .failed(.badImage)
+                    showsPasteHint = hint
+                    return
+                }
+                fetchedPicture = picture
+            }
+            self.fetched = fetched
+            outcome = .fetched(fetched.kind)
+        }
         showsPasteHint = hint
     }
     #endif

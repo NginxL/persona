@@ -75,8 +75,9 @@ func (u *updater) stageNodesFrom(ctx context.Context, m *update.Manifest, staged
 	return nodes, nil
 }
 
-// nodeBuildName: a personad build for one platform as bin/nodes holds it (personad-<os>-<arch>, or the former name).
-var nodeBuildName = lazyre.New(`^(?:personad|` + regexp.QuoteMeta(compat.DaemonBinary) + `)-[a-z0-9]+-[a-z0-9]+$`)
+// nodeBuildName: a personad build for one platform as bin/nodes holds it. Windows keeps .exe: dropping it would
+// leave the downloaded program outside both manager lookup and update retention.
+var nodeBuildName = lazyre.New(`^(?:personad|` + regexp.QuoteMeta(compat.DaemonBinary) + `)-[a-z0-9]+-[a-z0-9]+(?:\.exe)?$`)
 
 // setAsideOldNodes renames the personad builds in dir that would pass for the hub's own version and no longer are. The
 // manager takes a personad there with no version file beside it for a build of the hub's version

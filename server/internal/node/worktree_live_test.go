@@ -73,7 +73,7 @@ func TestLiveWorktree(t *testing.T) {
 	}
 
 	dest := filepath.Join(tmp, "checkouts", "live-checkout")
-	res, err := n.worktreeCreate(ctx, host.Herdr, wsID, repo, "persona-live/worktree", dest)
+	res, err := n.worktreeCreate(ctx, host.Herdr, wsID, repo, "persona-live/worktree", dest, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestLiveWorktree(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), res.WorkspaceID) || !strings.Contains(string(out), "persona-live/worktree") {
 		t.Errorf("herdr does not list the worktree as open: %v %s", err, out)
 	}
-	if _, err := n.worktreeCreate(ctx, host.Herdr, wsID, repo, "persona-live/other", dest); err == nil {
+	if _, err := n.worktreeCreate(ctx, host.Herdr, wsID, repo, "persona-live/other", dest, "", nil); err == nil {
 		t.Error("created a second worktree over the first one's directory")
 	}
 }

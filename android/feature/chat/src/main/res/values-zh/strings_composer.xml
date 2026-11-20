@@ -37,4 +37,8 @@
     <string name="chat_host_open_feishu">在飞书打开</string>
     <string name="chat_suggestion_send">直接发送</string>
     <string name="chat_suggestion_fill">填入输入框</string>
+    <string name="chat_slash_permissions_detail">切换权限模式</string>
+    <string name="chat_modes_bypass_restart">这一轮结束后将重启会话以生效，对话接着进行</string>
+    <string name="chat_modes_bypass_pending">这一轮结束后会重启会话，切到完全访问</string>
+    <string name="chat_modes_bypass_next_message">从下一条消息起生效</string>
 </resources>

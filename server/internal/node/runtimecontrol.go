@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // What a runtime that is a machine's engine needs beyond listing and driving its sessions (Paseo, docs/integrations/paseo.md):
@@ -152,10 +153,9 @@ func (n *Node) runtimeLauncherModels(name string) (proto.LauncherModels, bool) {
 	return launcherModelsOf(n.runtimeOf(name), name)
 }
 
-// agyRuntimeModels is the Antigravity runtime's own launcher models, which a managed launcher named agy does not hide:
-// what a managed Antigravity launcher starts (startRuntime) and offers.
+// agyRuntimeModels is the Antigravity companion's advertised catalog for settings.
 func (n *Node) agyRuntimeModels() (proto.LauncherModels, bool) {
-	return launcherModelsOf(n.runtimes.launcherRuntime("agy"), "agy")
+	return launcherModelsOf(n.runtimes.launcherRuntime(agyAgent), agyAgent)
 }
 
 // launcherModelsOf is runtime h's advertisement for its launcher name; false without a runtime.
@@ -179,6 +179,8 @@ func launcherModelsOf(h *runtimeConn, name string) (proto.LauncherModels, bool) 
 type runtimeStartParams struct {
 	Cwd, Prompt, Launcher         string
 	Model, PermissionMode, Effort string
+	ClientMsgID                   string
+	Images                        []proto.Image
 	WorkspaceID                   string // a space of the runtime's to start in (one of its sessions' space_id)
 	Resume                        string // the Claude session to take over and continue (caps.resume)
 	// SessionID: the id the hub named for a new session (session.start's session_id, #8130): the manager finds a
@@ -312,7 +314,7 @@ func (n *Node) watchTakenOver(h *runtimeConn, id string) {
 	if w == nil || w.parent == nil || w.ctx.Err() != nil || n.runtimes.watchedOn(h, id) {
 		return
 	}
-	attempt := n.runtimes.watch(h, id, 0, w.parent)
+	attempt := n.runtimes.watch(h, id, 0, "", w.parent)
 	if err := n.runtimeWatch(h, id, attempt.since); err != nil {
 		n.runtimes.watchFailed(h, id, attempt.token)
 	}
@@ -388,6 +390,11 @@ func (n *Node) runtimeLauncherCheck(ctx context.Context, h *runtimeConn, name, c
 	if err := h.peer.Call(ctx, "launchers.check", params, &result); err != nil {
 		result = proto.LauncherCheck{Error: err.Error()}
 	}
+	// The runtime's CLI may print colour and shell integration like any other: the record and the apps read it clean.
+	if result.Error != "" {
+		result.Error = textfmt.LauncherErrorSummary(result.Error, 400)
+	}
+	result.Answer = textfmt.StripTerminalEscapes(result.Answer)
 	launcher, _ := h.launcherNamed(name)
 	result.Agent = launcher.Agent
 	if result.Agent == "" {

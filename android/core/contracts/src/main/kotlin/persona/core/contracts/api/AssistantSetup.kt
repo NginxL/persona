@@ -36,6 +36,8 @@ data class AssistantConfig(
      * follow-up started show as one line; null from a hub without the setting (see [backgroundFolded]).
      */
     @SerialName("main_background_folded") val mainBackgroundFolded: Boolean? = null,
+    /** Show scheduled task and background-supervisor chats in Recent; null from a hub without the setting. */
+    @SerialName("recent_task_chats") val recentTaskChats: Boolean? = null,
     /** Suggest the next message after a reply; null from a hub without the setting, never a local opt-in. */
     @SerialName("next_suggestions") val nextSuggestions: Boolean? = null,
     /**
@@ -90,6 +92,7 @@ data class AssistantConfigUpdate(
     val main: String? = null,
     @SerialName("main_tasks_quiet") val mainTasksQuiet: Boolean? = null,
     @SerialName("main_background_folded") val mainBackgroundFolded: Boolean? = null,
+    @SerialName("recent_task_chats") val recentTaskChats: Boolean? = null,
     @SerialName("next_suggestions") val nextSuggestions: Boolean? = null,
     @SerialName("main_supervises_own_tasks") val mainSupervisesOwnTasks: Boolean? = null,
     @SerialName("close_ended_terminals") val closeEndedTerminals: Boolean? = null,

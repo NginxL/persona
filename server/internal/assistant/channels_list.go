@@ -63,7 +63,7 @@ func (s *Service) pluginChannelNow(ctx context.Context, id string) (channel.View
 		return channel.View{}, false, err
 	}
 	for _, v := range list {
-		if v.ID == id && v.Source == channel.SourcePlugin && v.Kind == channel.KindIM {
+		if v.ID == id && v.Source == channel.SourcePlugin && (v.Kind == channel.KindIM || v.Kind == channel.KindMention) {
 			return v, true, nil
 		}
 	}
@@ -106,12 +106,15 @@ func (s *Service) filledChannel(ctx context.Context, v channel.View) channel.Vie
 	case v.ID == channel.Feishu:
 		t := s.feishuChannelTarget(ctx)
 		v.Target = &t
-	case v.Source == channel.SourcePlugin && v.Kind == channel.KindIM && v.Installed:
+	case v.Source == channel.SourcePlugin && (v.Kind == channel.KindIM || v.Kind == channel.KindMention) && v.Installed:
 		c := &s.chans
 		c.mu.Lock()
 		s.loadChannelsLocked(ctx)
 		pref := s.channelPrefLocked(v.ID)
 		t := channel.Target{Kind: channel.TargetMain}
+		if v.Kind == channel.KindMention {
+			t.Kind = channel.TargetNew
+		}
 		if pref.Target != nil {
 			t = *pref.Target
 		}
@@ -120,7 +123,10 @@ func (s *Service) filledChannel(ctx context.Context, v channel.View) channel.Vie
 		if t.Kind == channel.TargetConversation && t.Title == "" {
 			t.Title = s.conversationTitle(ctx, t.MachineID, t.SessionID)
 		}
-		v.Target, v.Features = &t, features
+		v.Target = &t
+		if v.Kind == channel.KindIM {
+			v.Features = features
+		}
 	}
 	return v
 }

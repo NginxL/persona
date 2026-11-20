@@ -3,9 +3,12 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +48,22 @@ func assistantLine(uuid string, at time.Time, text string) string {
 	return fmt.Sprintf(`{"type":"assistant","uuid":%q,"timestamp":%q,"message":{"role":"assistant","content":[{"type":"text","text":%s}]}}`, uuid, at.UTC().Format(time.RFC3339Nano), b)
 }
 
+func echoTurnEndLine(at time.Time) string {
+	return fmt.Sprintf(`{"type":"system","subtype":"turn_duration","uuid":"turn-end","parentUuid":"older","timestamp":%q,"durationMs":1000}`, at.UTC().Format(time.RFC3339Nano))
+}
+
+func appendEchoTestLine(t *testing.T, path, line string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func tagsOf(items []proto.Item) map[string]string {
 	out := map[string]string{}
 	for _, it := range items {
@@ -65,6 +84,27 @@ func sameTags(t *testing.T, got []proto.Item, want map[string]string) {
 		if g[id] != c {
 			t.Fatalf("tags %v, want %v", g, want)
 		}
+	}
+}
+
+func TestEchoRuntimeRebindsToNativeLineWithClientMessageID(t *testing.T) {
+	var log echoLog
+	at := time.Now()
+	log.expect(echoRecord{SessionID: "agy-session", ClientMsgID: "sent", Text: "Check this", Images: 1, SentAt: at})
+	live := []proto.Item{{ID: "1@live#0", Seq: 1, Role: "user", Kind: proto.KindText, ClientMsgID: "sent"}}
+	if found := log.match("agy-session", echoInRuntime, live); len(found) != 1 || found[0].Line != "1@live" {
+		t.Fatalf("live match: %+v", found)
+	}
+	native := []proto.Item{
+		{ID: "2@native#0", Seq: 2, Role: "user", Kind: proto.KindText, Text: "/plan Check this", ClientMsgID: "sent"},
+		{ID: "2@native#media0", Seq: 2, Role: "user", Kind: proto.KindImage},
+	}
+	if found := log.match("agy-session", echoInRuntime, native); len(found) != 1 || found[0].Line != "2@native" {
+		t.Fatalf("native match: %+v", found)
+	}
+	sameTags(t, log.tag("agy-session", echoInRuntime, native), map[string]string{"2@native#0": "sent", "2@native#media0": "sent"})
+	if found := log.match("agy-session", echoInRuntime, native); len(found) != 0 {
+		t.Fatalf("already matched: %+v", found)
 	}
 }
 
@@ -255,6 +295,39 @@ func pageItems(t *testing.T, n *Node, id string) []proto.Item {
 // that line in pages, and the hub is told what was expected and what was found. A node started again knows nothing
 // until the hub hands its records back (session.echoes): then the same page carries the id again, and a message it
 // was still waiting for when it stopped is found.
+func TestEchoTiesAnImageOnlyClaudeStart(t *testing.T) {
+	n, fake, home := herdrNode(t)
+	withSubmitGrace(t, 60*time.Millisecond)
+	withFirstPromptWaits(t, 500*time.Millisecond, 3*time.Second)
+	cwd := mkdir(t, filepath.Join(home, "project"))
+	startPane(t, fake, screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi"))
+	const image = "aW1hZ2U="
+	const clientID = "image-only-start"
+	fake.after(func(call herdrCall) {
+		if call.Method != "agent.prompt" {
+			return
+		}
+		prompt := str(call.Params["text"])
+		if !strings.HasPrefix(prompt, "<attached_images>") || !strings.Contains(prompt, "\npath:") {
+			t.Errorf("missing Claude attachment paths in %q", prompt)
+		}
+		text, _ := json.Marshal(prompt)
+		blocks := fmt.Sprintf(`[{"type":"image","source":{"type":"base64","media_type":"image/png","data":%q}},{"type":"text","text":%s}]`, image, text)
+		appendTranscript(t, home, cwd, startedID(fake), userBlocks("image-input", time.Now(), blocks))
+	})
+	if _, err := request(t, n, "session.start", map[string]any{
+		"cwd": cwd, "workspace_id": "w1", "client_msg_id": clientID,
+		"images": []proto.Image{{Mime: "image/png", Data: image}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.firstWait.Wait()
+	items := pageItems(t, n, startedID(fake))
+	if len(items) == 0 || items[0].ClientMsgID != clientID {
+		t.Fatalf("image-only start did not match its transcript: %+v", items)
+	}
+}
+
 func TestEchoAcrossSendPagesAndRestart(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, home+"/proj")
@@ -479,5 +552,221 @@ func TestEchoForgetsASendThatFailed(t *testing.T) {
 	}
 	if _, ok := n.echoes.record(sidA, "m-y"); !ok {
 		t.Fatal("a send that went out is not expected")
+	}
+}
+
+func TestHeldEchoStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change string
+		want   proto.SessionEchoState
+	}{
+		{name: "idle after the turn ended", want: proto.EchoKnownUnseen},
+		{name: "idle but the turn ended before the send", change: "before", want: proto.EchoUnknown},
+		{name: "idle but the turn ended at the send time", change: "equal", want: proto.EchoUnknown},
+		{name: "idle without a recorded turn end", change: "no end", want: proto.EchoUnknown},
+		{name: "agent still working", change: "working", want: proto.EchoUnknown},
+		{name: "another turn started", change: "open", want: proto.EchoUnknown},
+		{name: "agent no longer live", change: "offline", want: proto.EchoUnknown},
+		{name: "known unseen after restart", change: "restored", want: proto.EchoKnownUnseen},
+		{name: "seen outside latest turns", change: "seen", want: proto.EchoSeen},
+		{name: "no record", change: "missing", want: proto.EchoUnknown},
+		{name: "another session", change: "other", want: proto.EchoUnknown},
+		{name: "forgotten", change: "forgotten", want: proto.EchoUnknown},
+		{name: "runtime without a tie", change: "runtime", want: proto.EchoUnknown},
+		{name: "expired matching window", change: "old", want: proto.EchoUnknown},
+		{name: "queued or accepted", change: "accepted", want: proto.EchoUnknown},
+		{name: "in flight", change: "active", want: proto.EchoUnknown},
+		{name: "incomplete transcript line", change: "partial", want: proto.EchoUnknown},
+		{name: "rewritten transcript", change: "rewritten", want: proto.EchoUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			cwd := mkdir(t, home+"/proj")
+			now := time.Now()
+			path := writeTranscript(t, home, cwd, sidA, now, userLine("older", now.Add(-time.Minute), "hello"))
+			base := n.echoBase(sidA)
+			r := echoRecord{SessionID: sidA, ClientMsgID: "m1", Text: "hello", SentAt: now, In: base.in, AfterSeq: base.seq, History: base.history}
+			ended := now.Add(time.Second)
+			switch tc.change {
+			case "before":
+				ended = now.Add(-time.Second)
+			case "equal":
+				ended = now
+			}
+			if tc.change != "no end" {
+				appendEchoTestLine(t, path, echoTurnEndLine(ended))
+			}
+			params := map[string]any{"session_id": sidA, "client_msg_id": "m1"}
+			switch tc.change {
+			case "seen":
+				appendEchoTestLine(t, path, userLine("landed", now, "hello"))
+				for i := range 6 {
+					appendEchoTestLine(t, path, userLine(fmt.Sprintf("later-%d", i), now, "other"))
+				}
+			case "open":
+				appendEchoTestLine(t, path, userLine("new-turn", now.Add(2*time.Second), "other"))
+			case "other":
+				params["session_id"] = sidB
+			case "runtime":
+				r.In = echoInRuntime
+			case "old":
+				r.SentAt = now.Add(-echoWithin - time.Minute)
+			case "accepted":
+				r.Accepted = true
+			case "active":
+				n.sends.sent = map[string]*sendRecord{"m1": {at: now, done: make(chan struct{})}}
+			case "partial":
+				file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = file.WriteString(`{"type":"user"`)
+				file.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "rewritten":
+				replacement := userLine("replacement", now, "new history") + "\n" + echoTurnEndLine(ended) + "\n"
+				if err := os.WriteFile(path, []byte(replacement), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch tc.change {
+			case "missing":
+			case "restored":
+				n, f, _ = herdrNode(t)
+				n.home = home
+				if _, err := request(t, n, "session.echoes", map[string]any{"echoes": []echoRecord{r}}); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				n.echoes.expect(r)
+			}
+			if tc.change == "forgotten" {
+				n.echoes.forget(sidA, "m1")
+			}
+			if tc.change != "offline" {
+				status := proto.StatusIdle
+				if tc.change == "working" {
+					status = proto.StatusWorking
+				}
+				seedAgents(t, n, f, claudeAgent(sidA, status, "w1:p1", "w1:t1", "w1", cwd, ""))
+			}
+			out, err := request(t, n, proto.MethodSessionEchoStatus, params)
+			if err != nil || out["state"] != string(tc.want) {
+				t.Fatalf("status %v, error %v, want %s", out, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeldEchoStatusWaitsForCodexTurnEnd(t *testing.T) {
+	n, f, home := herdrNode(t)
+	cwd := mkdir(t, home+"/proj")
+	now := time.Now()
+	writeRollout(t, home, sidA, cwd, now, now, event("task_started"))
+	seedAgents(t, n, f, agentOf("codex", sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", cwd, ""))
+	base := n.echoBase(sidA)
+	n.echoes.expect(echoRecord{SessionID: sidA, ClientMsgID: "m1", Text: "hello", SentAt: now,
+		In: base.in, AfterSeq: base.seq, History: base.history})
+	params := map[string]any{"session_id": sidA, "client_msg_id": "m1"}
+	check := func(want proto.SessionEchoState) {
+		t.Helper()
+		out, err := request(t, n, proto.MethodSessionEchoStatus, params)
+		if err != nil || out["state"] != string(want) {
+			t.Fatalf("status %v, error %v, want %s", out, err, want)
+		}
+	}
+	check(proto.EchoUnknown)
+	path := n.transcriptPath(sidA)
+	eventAt := func(kind string, at time.Time) string {
+		return fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":%q}}`, at.UTC().Format(time.RFC3339Nano), kind)
+	}
+	appendEchoTestLine(t, path, eventAt("task_complete", now.Add(-time.Second)))
+	check(proto.EchoUnknown)
+	appendEchoTestLine(t, path, eventAt("task_started", now))
+	appendEchoTestLine(t, path, eventAt("task_complete", now.Add(time.Second)))
+	check(proto.EchoKnownUnseen)
+	appendEchoTestLine(t, path, eventAt("task_started", now.Add(2*time.Second)))
+	check(proto.EchoUnknown)
+}
+
+func TestHeldEchoGuardedSendReplacesOnlyUnseenAttempt(t *testing.T) {
+	for _, name := range []string{"unseen", "line appeared after status check", "agent started a turn while the retry waited"} {
+		t.Run(name, func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			cwd := mkdir(t, home+"/proj")
+			now := time.Now()
+			path := writeTranscript(t, home, cwd, sidA, now, assistantLine("older", now, "previous answer"))
+			seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", cwd, ""))
+			f.setScreens("w1:p1", screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi"))
+			withSubmitGrace(t, 10*time.Millisecond)
+			f.reply("agent.prompt", herdrFail{Code: "server_error", Message: "host reply lost"})
+			p := map[string]any{"session_id": sidA, "text": "hello", "client_msg_id": "m1"}
+			for range 2 {
+				if _, err := request(t, n, "session.send", p); !maybeDelivered(err) {
+					t.Fatalf("ordinary send should return the cached ambiguous reply, got %v", err)
+				}
+			}
+			appendEchoTestLine(t, path, echoTurnEndLine(time.Now()))
+			out, err := request(t, n, proto.MethodSessionEchoStatus, p)
+			if err != nil || out["state"] != string(proto.EchoKnownUnseen) {
+				t.Fatalf("status %v, error %v", out, err)
+			}
+			if name == "agent started a turn while the retry waited" {
+				unlock := sync.OnceFunc(n.typing.lock(sidA))
+				defer unlock()
+				done := make(chan error, 1)
+				go func() {
+					_, err := request(t, n, proto.MethodSessionSendUnseen, p)
+					done <- err
+				}()
+				waitFor(t, "the retry to wait for input", func() bool {
+					_, canRetry := n.sends.completed("m1")
+					return !canRetry
+				})
+				n.mu.Lock()
+				a := n.agents[sidA]
+				a.AgentStatus = proto.StatusWorking
+				n.agents[sidA] = a
+				n.mu.Unlock()
+				unlock()
+				if err := <-done; rpcCode(err) != proto.CodeEchoUnconfirmed {
+					t.Fatalf("guarded retry while working: %v", err)
+				}
+				if _, err := request(t, n, "session.send", p); !maybeDelivered(err) {
+					t.Fatalf("the ambiguous send receipt changed: %v", err)
+				}
+				if calls := callsOf(f, "agent.prompt"); len(calls) != 1 {
+					t.Fatalf("prompted %d times, want 1", len(calls))
+				}
+				return
+			}
+			seen := name == "line appeared after status check"
+			if seen {
+				appendEchoTestLine(t, path, userLine("late", time.Now(), "hello"))
+			}
+			f.reply("agent.prompt", map[string]any{})
+			if _, err := request(t, n, proto.MethodSessionSendUnseen, p); err != nil {
+				t.Fatalf("guarded retry: %v", err)
+			}
+			_, err = request(t, n, proto.MethodSessionSendUnseen, p)
+			want := 1
+			if seen {
+				if err != nil {
+					t.Fatalf("seen reply: %v", err)
+				}
+			} else {
+				want = 2
+				var re *rpc.Error
+				if !errors.As(err, &re) || re.Code != proto.CodeEchoUnconfirmed {
+					t.Fatalf("repeat after acceptance: %v", err)
+				}
+			}
+			if calls := callsOf(f, "agent.prompt"); len(calls) != want {
+				t.Fatalf("prompted %d times, want %d", len(calls), want)
+			}
+		})
 	}
 }

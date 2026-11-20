@@ -20,6 +20,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -35,6 +36,8 @@ import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ComposerOperationException
 import persona.core.contracts.api.DraftUploadState
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
+import persona.core.designsystem.icons.dismissKeyboard
 import persona.core.designsystem.icons.PhIcons
 import persona.feature.chat.media.MediaShare
 import java.io.File
@@ -45,6 +48,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+/** The upload boundary of an ordinary composer attachment; tests can complete it without native image decoding. */
+typealias ComposerAttachmentUpload = suspend (ChatComposerService, SessionKey, ComposerAttachment, suspend (Long) -> Unit) -> String
 
 /** How long an upload waits for the hub connection to be ready again before it fails (a setting, not measured). */
 internal const val UPLOAD_READY_WAIT_MILLIS = 15_000L
@@ -88,6 +94,11 @@ fun ChatComposer(
     onMentionOpen: (Boolean) -> Unit = {},
     /** /model in the "/" list, which opens the model choices instead of typing (Claude in a terminal pane). */
     onModel: (() -> Unit)? = null,
+    /**
+     * /permissions in the "/" list (#6513): opens the chat's permission mode menu with every mode, nothing sent. Null where
+     * the chat has no mode picker, so the words are an ordinary message there.
+     */
+    onPermissions: (() -> Unit)? = null,
     /** /loop in the "/" list, with a line under the box saying what it will do (Claude Code only, web `hasLoop`). */
     loop: Boolean = false,
     /**
@@ -96,13 +107,21 @@ fun ChatComposer(
      */
     blockedLabel: String? = null,
     onBlocked: () -> Unit = {},
+    useShellSurface: Boolean = false,
     /**
      * The model pill (#5055, Glass): at the right of the toolbar row, before the mic and Send, while the toolbar shows; it
      * gets how much room the composer has ([ModelPillWidth], the web's container rules). Null: none.
      */
     modelPill: (@Composable (ModelPillWidth) -> Unit)? = null,
+    upload: ComposerAttachmentUpload? = null,
+    wrapPlaceholder: Boolean = false,
+    dictate: DictationControl? = rememberComposerDictation(session, state, visible && enabled, onNotice),
 ) {
     val context = LocalContext.current
+    val performUpload: ComposerAttachmentUpload = upload ?: { uploadService, uploadSession, attachment, onStaged ->
+        uploadAttachment(context, uploadService, uploadSession, attachment, destination = uploadDestination, onStaged = onStaged)
+    }
+    val compactShell = useShellSurface && PersonaTheme.style == AppStyle.Glass
     val adaptiveProbePage = "chat:${session.path}"
     val resources = LocalResources.current
     val photosOnly = stringResource(R.string.chat_composer_photos_only)
@@ -118,14 +137,17 @@ fun ChatComposer(
     var confirmClear by remember { mutableStateOf(false) }
     var cameraDenied by remember { mutableStateOf(false) }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     // A photo in the draft being marked up (iOS editingIndex); [editOpening] while it is read for the editor.
     var editing by remember { mutableStateOf<ComposerPhotoEdit?>(null) }
     var editOpening by remember { mutableStateOf(false) }
     // The draft full screen (#5688): offered once the field has grown to its line limit and scrolls.
     var expandedEditor by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(menu, confirmClear, cameraDenied, editing, expandedEditor) {
-        onOverlay(menu || confirmClear || cameraDenied || editing != null || expandedEditor)
+    val composerCovered = menu || confirmClear || cameraDenied || editing != null || expandedEditor
+    LaunchedEffect(composerCovered, dictate) {
+        if (composerCovered) dictate?.stopListening()
+        onOverlay(composerCovered)
     }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -265,7 +287,7 @@ fun ChatComposer(
 
     state.attachments.forEach { attachment ->
         key(attachment.id) {
-            LaunchedEffect(attachment.id, attachment.error, service, uploadDestination) {
+            LaunchedEffect(attachment.id, attachment.error, service, uploadDestination, upload) {
                 if (attachment.uploadState == DraftUploadState.Invalid) return@LaunchedEffect
                 // Once the computer has it, a revoked local picker grant cannot make the attachment unsendable.
                 if (attachment.path != null) return@LaunchedEffect
@@ -283,7 +305,7 @@ fun ChatComposer(
                         state.attachments = state.attachments.map {
                             if (it.id == attachment.id) it.copy(uploadState = DraftUploadState.Uploading) else it
                         }
-                        uploadAttachment(context, service, session, attachment, destination = uploadDestination) { size ->
+                        performUpload(service, session, attachment) { size ->
                             state.attachments = state.attachments.map {
                                 if (it.id == attachment.id) it.copy(size = size) else it
                             }
@@ -311,25 +333,26 @@ fun ChatComposer(
         key(edit) { ImageEditor(edit.source, onCancel = { if (editing === edit) editing = null }, onDone = { finishEdit(edit, it, done) },
             start = edit.prior?.state ?: ImageEditState(), onEdited = { done = it }) }
     }
-    // Voice input: what the phone's recognizer heard goes at the end of the draft, to edit before sending.
-    val dictation = rememberDictation(onHeard = { state.appendDictation(it) }, onError = onNotice)
     if (!visible) return
     if (AdaptiveProbe.enabled) {
         AdaptiveComposerProbe(adaptiveProbePage, state.value, state.attachments.map { it.id to it.uploadState.name }, state.draftLoaded)
     }
     LaunchedEffect(state.focusRequest) { if (state.focusRequest > 0) focusRequester.requestFocus() }
     // A read-only session (enabled = false) offers nothing to type with: no +, no mic, no "/" list, no send.
-    val dictate = dictation?.takeIf { enabled }
     // The main conversation's /clear (#5100): offered while it works too (the hub stops the turn), and it never asks first.
     val mainClear = LocalMainChatClear.current?.takeIf { enabled }
     // Both the "/" list and the + sheet offer only what an Assistant conversation runs, never an Agent's quick messages.
     val useMainCommands = assistantChat || mainClear != null
-    val suggestions = if (!enabled) emptyList() else if (useMainCommands) {
-        SlashCommand.mainSuggestions(state.value.text, clear = mainClear != null, resources = resources)
+    val slashDraft = state.value.text.takeIf { enabled && !state.hasPickedSavedPrompt }.orEmpty()
+    val saved = matchingSavedPrompts(LocalSavedPrompts.current, slashDraft)
+    val suggestions = if (useMainCommands) {
+        SlashCommand.mainSuggestions(slashDraft, clear = mainClear != null, resources = resources,
+            permissions = onPermissions != null)
     } else {
-        SlashCommand.suggestions(state.value.text, canClear && !working, resources, model = onModel != null, loop = loop)
+        SlashCommand.suggestions(slashDraft, canClear && !working, resources, model = onModel != null, loop = loop,
+            permissions = onPermissions != null, keepExact = saved.isNotEmpty())
     }
-    val hint = if (enabled && loop) loopHint(state.value.text, resources) else null
+    val hint = if (loop) loopHint(slashDraft, resources) else null
     // @: the word being typed just before the caret, while nothing is selected and no "/" list is open.
     val selection = state.value.selection
     val mention = if (enabled && mentions != null && suggestions.isEmpty() && selection.collapsed) mentionAt(state.value.text, selection.start) else null
@@ -384,17 +407,23 @@ fun ChatComposer(
         state.focusRequest++
     }
     val extensionPrompts = if (enabled) LocalExtensionPrompts.current else emptyList()
-    val quick = ExtensionPromptText.matching(extensionPrompts, state.value.text)
+    val quick = ExtensionPromptText.matching(extensionPrompts, slashDraft)
+    val savedSection = stringResource(R.string.chat_slash_saved_prompts)
+    val slashItems = suggestions.map { ComposerSuggestion(it.word, it.detail, destructive = it.clear && mainClear == null) } +
+        saved.map { ComposerSuggestion("/${it.name}", it.text.lineSequence().first(), key = "saved:${it.id}",
+            flexible = true, section = savedSection) } +
+        quick.map { ComposerSuggestion(it.title, it.extensionName, key = "extension:${it.extension}/${it.id}", flexible = true) }
     // The main conversation's /clear: the box empties and the hub clears it; /clear goes back into the box if it did not.
     fun clearMain(clear: MainChatClear) {
         state.beginEdit()
         state.value = TextFieldValue()
         clear.clear { state.value = TextFieldValue(SlashCommand.CLEAR, TextRange(SlashCommand.CLEAR.length)) }
     }
-    // /clear sent alone in the main conversation clears it instead of going to Persona (web `isClearCommand`).
+    // /clear sent alone in the main conversation clears it instead of going to Persona (web `isClearCommand`);
+    // /permissions typed out opens the mode picker (shared with LargeWindowComposer's hardware send path).
     fun send() {
-        val clear = mainClear
-        if (clear != null && isMainClearCommand(state.value.text, state.attachments.size, extraContent)) clearMain(clear) else onSend()
+        if (dictate?.active == true) return
+        dispatchComposerSend(state, extraContent, mainClear, onPermissions, onSend)
     }
     // Picking a quick message puts its words in the box to send; /clear empties the box and asks first (the main
     // conversation's clears at once).
@@ -404,17 +433,19 @@ fun ChatComposer(
             command.clear && mainClear != null -> clearMain(mainClear)
             command.clear -> { state.value = TextFieldValue(); confirmClear = true }
             command.model -> { state.value = TextFieldValue(); onModel?.invoke() }
+            command.permissions -> { state.value = TextFieldValue(); onPermissions?.invoke() }
             else -> state.value = TextFieldValue(command.text, TextRange(command.text.length))
         }
     }
 
-    // The field grows with the draft through six lines, then scrolls inside and offers Expand.
-    // The text keeps clear of the button only while it shows.
+    // The field grows through six lines. On a compact Agent chat the editor is also a shortcut while typing or for a
+    // multiline draft, as on the iPhone. The text keeps clear of the button only while it shows.
     val growLines = ComposerGrowLines
     var lineCount by remember { mutableIntStateOf(1) }
-    val offersExpand = enabled && composerOffersExpand(lineCount, growLines)
+    val offersExpand = enabled && (composerOffersExpand(lineCount, growLines) ||
+        compactShell && (state.focused || '\n' in state.value.text))
     LaunchedEffect(enabled) { if (!enabled) expandedEditor = false }
-    val canSend = enabled && state.ready && !sending
+    val canSend = enabled && state.ready && !sending && dictate?.active != true
     val homeAssistant = LocalHomeChrome.current?.let { it.items.firstOrNull()?.key == it.selected } == true
     val fullToolbar = !homeAssistant || state.focused || hasContent
     // Expand once on focus, not when the first character arrives. ComposerFrame keeps the field in the same row across
@@ -426,29 +457,51 @@ fun ChatComposer(
     val density = androidx.compose.ui.platform.LocalDensity.current
     var composerDp by remember { mutableFloatStateOf(0f) }
     ComposerFrame(
-        modifier = if (modelPill != null) Modifier.onSizeChanged { composerDp = with(density) { it.width.toDp().value } } else Modifier,
+        modifier = if (!compactShell && modelPill != null) Modifier.onSizeChanged { composerDp = with(density) { it.width.toDp().value } } else Modifier,
         // Blank space around the field (its padding, beside the buttons) types too: one tap, not a hunt for the line.
         onBlankTap = { if (enabled) { focusRequester.requestFocus(); keyboard?.show() } },
         expanded = expanded,
+        useShellSurface = useShellSurface,
         leading = {
-            JIconButton(PhIcons.Plus, stringResource(R.string.chat_composer_add), { menu = true }, enabled = !sending && enabled)
+            if (!compactShell || enabled)
+                JIconButton(PhIcons.Plus, stringResource(R.string.chat_composer_add), { menu = true }, enabled = !sending && enabled)
+            if (compactShell && state.focused) {
+                JIconButton(PersonaIcons.dismissKeyboard, stringResource(R.string.chat_composer_hide_keyboard), {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                }, raised = false)
+            }
             if (expanded) {
-                if (mentions != null) JIconButton(PhIcons.At, stringResource(R.string.chat_mention), ::startMention, enabled = enabled)
+                // The + sheet opens the same mention picker. Keep the direct entry while the + sheet is disabled by sending.
+                if (mentions != null && (!compactShell || sending))
+                    JIconButton(PhIcons.At, stringResource(R.string.chat_mention), ::startMention, enabled = enabled)
                 leading?.invoke(this)
             }
         },
         trailing = {
-            if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
+            if (expanded && compactShell) {
+                if (enabled && modelPill != null) {
+                    // A model pill that cannot fit its touch target would overlap a neighbor.
+                    BoxWithConstraints(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        when {
+                            maxWidth >= Tokens.Size.box80 -> modelPill(ModelPillWidth.AgentComposer)
+                            maxWidth >= Tokens.MinTouch.android -> modelPill(ModelPillWidth.Compact)
+                            else -> Unit
+                        }
+                    }
+                } else Spacer(Modifier.weight(1f))
+            } else if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
             // The mic stays (iOS ShellComposerBar): more can be dictated after what is typed. Send beside it once there is
             // something to send, else a stop while the agent works; nothing else while the box is empty. On Glass the button
             // changing grows and shrinks as iOS's does (ComposerActionSlot, #4210 T3).
-            dictate?.let { JIconButton(PhIcons.Microphone, stringResource(R.string.chat_composer_dictate), it, enabled = !sending) }
+            dictate?.let { DictationMic(it, stringResource(R.string.chat_composer_dictate), enabled = !sending) }
             if (blockedLabel != null && enabled) BlockedSendButton(blockedLabel, onBlocked)
             else ComposerActionSlot(
                 when {
-                    hasContent -> ComposerAction(SendKind.Send, enabled = canSend, loading = sending)
-                    working && canInterrupt -> ComposerAction(SendKind.Stop, enabled = !sending && !interruptPending && service != null)
-                    dictate == null -> ComposerAction(SendKind.Send, enabled = false, loading = sending)
+                    hasContent && (!compactShell || enabled) -> ComposerAction(SendKind.Send, enabled = canSend, loading = sending)
+                    working && canInterrupt && (!compactShell || enabled) ->
+                        ComposerAction(SendKind.Stop, enabled = !sending && !interruptPending && service != null)
+                    dictate == null && (!compactShell || enabled && sending) -> ComposerAction(SendKind.Send, enabled = false, loading = sending)
                     else -> null
                 },
                 // A lambda, not `::send`: references to a local function compare equal whatever they capture, so the slot was
@@ -467,6 +520,7 @@ fun ChatComposer(
             )
         },
         accessory = {
+            dictate?.let { DictationStatus(it) }
             if (state.oldVersion) Text(stringResource(R.string.chat_composer_old_version), style = PersonaTheme.type.caption,
                 color = PersonaTheme.palette.cautionText)
             if (PersonaTheme.style == AppStyle.Glass && enabled && !sending && service != null && state.focused && clipboardImages.offered)
@@ -475,12 +529,14 @@ fun ChatComposer(
             if (fullToolbar) accessory?.invoke(this)
             if (fullToolbar) modeHint?.let { JChip(it, icon = PhIcons.SlidersHorizontal) }
             if (working && hasContent && enabled) Text(stringResource(R.string.chat_composer_will_queue), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-            // A draft that is one "/" word: the quick messages it can be, right above the field.
-            ComposerSuggestions(quick.map { ComposerSuggestion(it.title, it.extensionName, key = "${it.extension}/${it.id}", flexible = true) },
-                onPick = { picked -> quick.firstOrNull { "${it.extension}/${it.id}" == picked.key }?.let { state.fillQuickPrompt(it) } },
-                modifier = Modifier.padding(vertical = Tokens.Space.xs))
-            ComposerSuggestions(suggestions.map { ComposerSuggestion(it.word, it.detail, destructive = it.clear && mainClear == null) },
-                onPick = { picked -> suggestions.firstOrNull { it.word == picked.word }?.let(::pick) },
+            ComposerSuggestions(slashItems,
+                onPick = { row ->
+                    when {
+                        row.key.startsWith("saved:") -> saved.firstOrNull { "saved:${it.id}" == row.key }?.let { state.fillSavedPrompt(it.text) }
+                        row.key.startsWith("extension:") -> quick.firstOrNull { "extension:${it.extension}/${it.id}" == row.key }?.let { state.fillQuickPrompt(it) }
+                        else -> suggestions.firstOrNull { it.word == row.key }?.let(::pick)
+                    }
+                },
                 modifier = Modifier.padding(vertical = Tokens.Space.xs))
             // The @ menu: Persona's open tasks, files this chat used, the session folder's entries, then other sessions; a word
             // that matches nothing says so. On Glass it grows in and out in iOS's state motion, rising from the field, as the
@@ -511,7 +567,8 @@ fun ChatComposer(
             decorationBox = { field ->
                 Box {
                     if (state.value.text.isEmpty()) Text(if (working && enabled && !homeAssistant) stringResource(R.string.chat_composer_placeholder_working) else composerPlaceholder,
-                        style = PersonaTheme.type.body, color = PersonaTheme.palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        style = PersonaTheme.type.body, color = PersonaTheme.palette.ink3, maxLines = if (wrapPlaceholder) growLines else if (compactShell) 1 else 2,
+                        overflow = TextOverflow.Ellipsis)
                     field()
                 }
             })
@@ -545,4 +602,35 @@ fun ChatComposer(
     if (cameraDenied) JDialog(onDismiss = { cameraDenied = false }, title = stringResource(R.string.chat_composer_camera_title),
         text = stringResource(R.string.chat_composer_camera_text, appLabel(context)),
         confirm = stringResource(R.string.chat_composer_open_settings) to { cameraDenied = false; openAppSettings(context) })
+}
+
+/** True when [dispatchComposerSend] opens the permission picker instead of sending the draft. */
+internal fun isPermissionsCommand(state: ChatComposerState, extraContent: Boolean, onPermissions: (() -> Unit)?): Boolean =
+    onPermissions != null && !state.hasPickedSavedPrompt && SlashCommand.isPermissions(state.value.text) &&
+        state.attachments.isEmpty() && !extraContent
+
+/**
+ * Shared send dispatcher for both touch/IME send (`ChatComposer`) and hardware keyboard send (`LargeWindowComposer`):
+ * intercepts `/clear` in the main conversation and bare `/permissions` (without attachments or quoted extra content).
+ */
+internal fun dispatchComposerSend(
+    state: ChatComposerState,
+    extraContent: Boolean,
+    mainClear: MainChatClear?,
+    onPermissions: (() -> Unit)?,
+    onSend: () -> Unit,
+) {
+    when {
+        mainClear != null && !state.hasPickedSavedPrompt && isMainClearCommand(state.value.text, state.attachments.size, extraContent) -> {
+            state.beginEdit()
+            state.value = TextFieldValue()
+            mainClear.clear { state.value = TextFieldValue(SlashCommand.CLEAR, TextRange(SlashCommand.CLEAR.length)) }
+        }
+        isPermissionsCommand(state, extraContent, onPermissions) -> {
+            state.beginEdit()
+            state.value = TextFieldValue()
+            onPermissions?.invoke()
+        }
+        else -> onSend()
+    }
 }

@@ -56,5 +56,7 @@
   "register_denied": "認証が拒否されました。準備ができたらもう一度開いてください。",
   "register_failed": "Larkでアプリを作成できませんでした。代わりに、作成済みのアプリのApp IDとApp Secretを入力してください。",
   "feature_answer_new_card": "回答を新しいカードで送る",
-  "feature_answer_new_card_description": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます"
+  "feature_answer_new_card_description": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます",
+  "feature_topic_cot": "トピックにエージェントの過程を表示",
+  "feature_topic_cot_description": "トピックの思考とツール呼び出しを Lark 標準の折りたたみ可能なエージェントメッセージに表示し、進捗カードも残します。オフのときはカード内の折りたたみパネルに表示します"
 }

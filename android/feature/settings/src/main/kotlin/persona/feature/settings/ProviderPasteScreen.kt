@@ -64,11 +64,18 @@ internal fun LazyListScope.pasteStep(
     state: NewProviderState,
     onText: (String) -> Unit,
     onRetry: () -> Unit,
+    onSomethingElse: () -> Unit,
     onDraft: (Int) -> Unit,
     onAction: (ProviderPasteAction) -> Unit,
 ) {
     val paste = state.paste
-    item("paste-input") {
+    if (paste.fromLink) item("paste-link") {
+        // The link may carry a key: show the same review as a paste, never the link itself (#5428).
+        Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+            SettingsCaption(stringResource(R.string.settings_paste_link_opened), Modifier.padding(horizontal = rowPadding))
+            JTextButton(stringResource(R.string.settings_paste_something_else), onSomethingElse)
+        }
+    } else item("paste-input") {
         JTextField(paste.text, onText, Modifier.padding(top = Tokens.Space.m), label = stringResource(R.string.settings_paste_label),
             placeholder = stringResource(R.string.settings_paste_placeholder), supportingText = stringResource(R.string.settings_paste_hint),
             minLines = 6, maxLines = 12, enabled = !state.busy, autofill = false, monospace = true)

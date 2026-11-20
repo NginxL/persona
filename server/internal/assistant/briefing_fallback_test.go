@@ -407,7 +407,7 @@ func briefRetryRun(t *testing.T, succeedRetry bool) (*Service, *fakeHub, *briefF
 				if f.sessions["server"][i].SessionID == "s1" {
 					f.sessions["server"][i].Status, f.sessions["server"][i].State = proto.StatusIdle, proto.StateIdle
 					if step == 1 || !succeedRetry {
-						f.sessions["server"][i].TurnError = "API Error: 529 quota unavailable"
+						f.sessions["server"][i].TurnError = "API Error: 401 invalid API key"
 					}
 				}
 			}
@@ -470,7 +470,7 @@ func TestBriefingFailureFallbackIsNotRepeatedByAutomaticRetry(t *testing.T) {
 	}
 	card := capture.cards()[0]
 	header := i18n.T(i18n.ZhHans, "assistant-briefing.fallback_header")
-	if !strings.Contains(card, header) || strings.Contains(card, "API Error: 529") {
+	if !strings.Contains(card, header) || strings.Contains(card, "API Error: 401") {
 		t.Fatalf("fallback exposed the raw model error or lacked its fixed header: %s", card)
 	}
 	if title := f.pushed()[0].Title; strings.Contains(title, "失败") {

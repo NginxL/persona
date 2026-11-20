@@ -22,6 +22,12 @@ func (h *Hub) hubModels() assistantwire.HubModels {
 			}
 			out.Launchers[m.cfg.ID] = m.cfg.Launchers
 		}
+		if m.cfg.LauncherRecovery != nil {
+			if out.LauncherRecovery == nil {
+				out.LauncherRecovery = map[string]assistantwire.LauncherRecovery{}
+			}
+			out.LauncherRecovery[m.cfg.ID] = *m.cfg.LauncherRecovery
+		}
 	}
 	return out
 }

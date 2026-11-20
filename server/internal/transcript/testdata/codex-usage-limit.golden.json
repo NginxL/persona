@@ -15,6 +15,7 @@
       "role": "assistant",
       "kind": "text",
       "text": "Running the checks.",
+      "narration": true,
       "model": "gpt-5-codex"
     },
     {

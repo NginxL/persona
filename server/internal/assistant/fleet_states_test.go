@@ -471,3 +471,41 @@ func TestTurnError(t *testing.T) {
 		}
 	}
 }
+
+// A live terminal row whose node kept StatusBlocked (for example, a generic dialog or approval overlay confirmed by
+// the node's screen read, or before an approval card reaches the manager) must remain StateNeedsYou in the assistant
+// even when PendingInteractions is 0 and ActivityAt keeps advancing.
+func TestDecorateInventoryPreservesNodeBlockedStatus(t *testing.T) {
+	ft := newFleetTestNoStore(t)
+	s := ft.s
+
+	makeRaw := func(status string, activityAt time.Time) proto.Session {
+		at := activityAt
+		return proto.Session{
+			SessionID: "s1", Agent: "codex", CodexRoute: "terminal", AsksRead: true,
+			Status: status, AttentionReason: "waiting",
+			Activity: "Running command", ActivityAt: &at,
+			UpdatedAt: activityAt,
+		}
+	}
+
+	// Simulate the session already being in StateNeedsYou for 20s while ActivityAt advances.
+	s.fleet.mu.Lock()
+	s.fleet.stateSince = map[[2]string]stateMark{
+		{"m1", "s1"}: {state: proto.StateNeedsYou, at: time.Now().Add(-20 * time.Second)},
+	}
+	s.fleet.mu.Unlock()
+
+	for pass := 1; pass <= 2; pass++ {
+		out := s.decorateInventory("m1", []proto.Session{makeRaw(proto.StatusBlocked, time.Now().Add(-time.Second))}, true)
+		if len(out) != 1 || out[0].State != proto.StateNeedsYou || out[0].Status != proto.StatusBlocked {
+			t.Fatalf("pass %d: got state=%s status=%s, want needs_you/blocked", pass, out[0].State, out[0].Status)
+		}
+	}
+
+	// Once the node clears stale StatusBlocked after a fresh screen read and reports StatusWorking, the row becomes working.
+	outWorking := s.decorateInventory("m1", []proto.Session{makeRaw(proto.StatusWorking, time.Now().Add(-time.Second))}, true)
+	if len(outWorking) != 1 || outWorking[0].State != proto.StateWorking || outWorking[0].Status != proto.StatusWorking {
+		t.Fatalf("node-validated working: got state=%s status=%s, want working", outWorking[0].State, outWorking[0].Status)
+	}
+}

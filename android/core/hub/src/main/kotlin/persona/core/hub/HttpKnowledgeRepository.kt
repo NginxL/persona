@@ -98,6 +98,25 @@ class HttpKnowledgeRepository(
         })
     }
 
+    override suspend fun handOff(id: String, request: MeetingHandoffRequest): MeetingHandoff {
+        val body = buildJsonObject {
+            put("machine_id", JsonPrimitive(request.machineId))
+            put("session_id", JsonPrimitive(request.sessionId))
+            put("title", JsonPrimitive(request.title))
+            put("text", JsonPrimitive(request.text))
+            put("transcript", JsonPrimitive(request.transcript))
+        }
+        val answer = postResult<JsonObject>(url("recordings", recording(id), "handoff"), body)
+        val handoff = answer["handoff"] ?: throw HubFailure(HubError.Protocol)
+        return withContext(dispatcher) {
+            try {
+                JsonCodec.decodeFromString(MeetingHandoff.serializer(), handoff.toString()).also {
+                    if (it.state != "sent" && it.state != "failed") throw HubFailure(HubError.Protocol)
+                }
+            } catch (error: SerializationException) { throw HubFailure(HubError.Protocol, cause = error) }
+        }
+    }
+
     private fun recording(id: String) = id.also { require(it.isNotBlank() && it != "." && it != "..") }
 
     /** A write to the knowledge base's recordings: its answer isn't needed, the page reads the recording back. */
@@ -109,6 +128,24 @@ class HttpKnowledgeRepository(
             checkScope()
             if (!response.isSuccessful) throw HubFailure.from(response)
         }
+    }
+
+    /** A recording write whose answer is the authoritative result the page shows at once. */
+    private suspend inline fun <reified T> postResult(url: HttpUrl, body: JsonObject): T {
+        checkScope()
+        val request = Request.Builder().url(url.withRequestManager()).header("Authorization", "Bearer $token")
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        val answer = http.newCall(request).awaitResponse().use { response ->
+            checkScope()
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            response.body?.string() ?: throw HubFailure(HubError.Protocol)
+        }
+        val decoded = withContext(dispatcher) {
+            try { JsonCodec.decodeFromString<T>(answer) }
+            catch (error: SerializationException) { throw HubFailure(HubError.Protocol, cause = error) }
+        }
+        checkScope()
+        return decoded
     }
 
     override suspend fun search(query: String): List<KnowledgeHit> {

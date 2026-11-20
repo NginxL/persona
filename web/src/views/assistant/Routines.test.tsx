@@ -23,6 +23,7 @@ const failedText = /读不到运行记录：.*run history unavailable/;
 let runsReply: () => Response | Promise<Response>;
 let tasksReply: () => Response;
 let providers: unknown[];
+let catalogReplies: Record<string, () => Response | Promise<Response>>;
 // the hub is unreachable: every request, a change or a read, answers 502
 let down: boolean;
 let calls: string[];
@@ -35,6 +36,7 @@ beforeEach(() => {
   runsReply = failure;
   tasksReply = () => json({ tasks: [task] });
   providers = [];
+  catalogReplies = {};
   forgetProviderNames();
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = String(input);
@@ -43,6 +45,10 @@ beforeEach(() => {
     if (path === "/api/v1/assistant/tasks") return Promise.resolve(tasksReply());
     if (path === "/api/v1/assistant/runs") return Promise.resolve(runsReply());
     if (path === "/api/v1/model-config") return Promise.resolve(json({ providers }));
+    const machine = /^\/api\/v1\/machines\/([^/]+)\/launchers/.exec(path)?.[1];
+    if (machine && catalogReplies[machine]) return Promise.resolve(catalogReplies[machine]());
+    if (path.startsWith("/api/v1/machines/box/launchers")) return Promise.resolve(json({ launchers: [{ name: "assistant", display_name: "Assistant", agent: "claude" }, { name: "shared", agent: "claude" }] }));
+    if (path.startsWith("/api/v1/machines/remote/launchers")) return Promise.resolve(json({ launchers: [{ name: "shared", agent: "codex" }] }));
     throw new Error(`Unexpected request: ${path}`);
   }));
   host = document.createElement("div");
@@ -57,6 +63,7 @@ afterEach(() => {
 });
 
 const render = () => act(async () => root.render(<Routines onToggleSidebar={() => {}} />));
+const rowOf = (title: string) => [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((el) => el.getAttribute("aria-label")?.includes(title));
 const history = () => host.querySelector("aside")!;
 const retry = () => [...history().querySelectorAll("button")].find((b) => b.textContent === "重试");
 const refresh = () => act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="刷新"]')!.click());
@@ -159,7 +166,6 @@ describe("routine run history loading", () => {
 
 describe("a change the hub refuses while the list cannot be read again", () => {
   const switchOf = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
-  const rowOf = (title: string) => [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((el) => el.getAttribute("aria-label")?.includes(title));
 
   it.each([
     { name: "off", enabled: true },
@@ -204,6 +210,58 @@ describe("a change the hub refuses while the list cannot be read again", () => {
 });
 
 describe("what a task runs with (#5029)", () => {
+  it.each([
+    { name: "empty", launchers: [], expected: "shared" },
+    { name: "missing", launchers: [{ name: "other" }], expected: "shared" },
+    { name: "present", launchers: [{ name: "shared", display_name: "Remote alias", agent: "codex" }], expected: "Remote alias" },
+    { name: "failed", launchers: null, expected: "Other computer alias" },
+  ])("uses the execution computer after its $name catalog response", async ({ name, launchers, expected }) => {
+    providers = [{ id: "launcher.shared", name: "Other computer alias", agent: "claude" }];
+    tasksReply = () => json({ tasks: [
+      { ...task, execution: { machine_id: "remote", launcher: "shared", model: "saved-model" } },
+      { ...task, id: "other", title: "Another task", execution: { machine_id: "box", launcher: "assistant" } },
+    ] });
+    runsReply = () => json({ runs: [] });
+    let finish!: (response: Response) => void;
+    catalogReplies.remote = () => new Promise<Response>((resolve) => { finish = resolve; });
+    if (name === "present") catalogReplies.box = () => new Promise<Response>(() => {});
+    await render();
+    await flush();
+    const row = rowOf(task.title)!;
+    expect(row.textContent).toContain("Other computer alias");
+    await act(async () => finish(launchers ? json({ launchers }) : json({ error: "unavailable" }, 503)));
+    await flush();
+    expect(row.textContent).toContain(expected + " ·");
+    if (launchers) expect(row.textContent).not.toContain("Other computer alias");
+  });
+
+  it("resolves backend metadata on each execution computer rather than sharing the same alias across computers", async () => {
+    tasksReply = () => json({ tasks: [
+      { ...task, id: "local", title: "Local task", execution: { machine_id: "box", launcher: "shared", model: "local-model", effort: "high" } },
+      { ...task, id: "remote", title: "Remote task", execution: { machine_id: "remote", launcher: "shared", model: "remote-model", effort: "high" } },
+    ] });
+    runsReply = () => json({ runs: [] });
+    await render();
+    await flush();
+    expect(host.textContent).toContain("shared · claude · local-model · high");
+    expect(host.textContent).toContain("shared · codex · remote-model · high");
+    expect(calls.filter((path) => path.startsWith("/api/v1/machines/box/launchers"))).toHaveLength(1);
+    expect(calls.filter((path) => path.startsWith("/api/v1/machines/remote/launchers"))).toHaveLength(1);
+  });
+
+  it("shows the full effective configuration for inherited tasks and keeps older rows without it usable", async () => {
+    providers = [{ id: "launcher.assistant", name: "Assistant", agent: "claude" }];
+    tasksReply = () => json({ tasks: [{ ...task, execution: { machine_id: "box", launcher: "assistant", model: "opus", effort: "high" } }, { ...task, id: "legacy", title: "Legacy task" }] });
+    runsReply = () => json({ runs: [] });
+    await render();
+    await flush();
+    const row = [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((el) => el.textContent?.includes(task.title))!;
+    expect(row.textContent).toContain("Assistant · claude · opus · high");
+    expect(row.querySelector<HTMLElement>('span[title*="opus"]')?.title).toContain("Assistant · claude · opus · high");
+    expect(host.textContent).toContain("Legacy task");
+    expect(host.textContent).not.toContain("undefined");
+  });
+
   it("names its launcher by the provider's display name with the ID in the tooltip; an rc alias by its ID", async () => {
     providers = [{ id: "launcher.relay-example-com", name: "我的中转 站", kind: "launcher" }];
     tasksReply = () => json({ tasks: [{ ...task, launcher: "relay-example-com" }, { ...task, id: "task-2", title: "Weekly review", launcher: "cc_glm" }] });

@@ -57,6 +57,18 @@ const (
 	// guard — a message id already delivered is not sent again, one whose send was cut off is refused.
 	DeviceSessionSendOnce = "session.send_once"
 
+	// ClarificationProofParam carries an opaque, one-time hub- or extension-manager-issued proof on
+	// session.send_once. ClarificationInteractionParam binds it to the prepared card. Both are stripped
+	// before the node call; neither is an owner_input attestation supplied by the assistant.
+	ClarificationProofParam       = "approval_clarification_proof"
+	ClarificationInteractionParam = "approval_clarification_id"
+
+	// DeviceAssistantAnswerAgain is a node send that must match the completed transcript tail.
+	// The manager and node both use this distinct method, so an older peer cannot
+	// silently ignore the guard. The hub claims the client_msg_id before forwarding.
+	DeviceAssistantAnswerAgain = "assistant.answer_again"
+	CodeAnswerAgainChanged     = "assistant_answer_again_changed"
+
 	// AppFeishu is the Feishu bot's transport (the open platform, as the paired owner's bot).
 	AppFeishu = "feishu"
 	// FeishuStatusGet: {} → FeishuStatus.
@@ -82,14 +94,24 @@ const (
 	FeishuText = "feishu.text"
 	// FeishuUpdateCard: {message_id, card} → {}.
 	FeishuUpdateCard = "feishu.update_card"
+	// FeishuCardCreate: {card} → {card_id}: a card entity (CardKit) made of the card (JSON 2.0); FeishuPost sends it with
+	// feishubot.CardEntityContent(card_id) as its card, and FeishuUpdateCard still updates that message whole.
+	FeishuCardCreate = "feishu.card_create"
+	// FeishuCardUpdate: {card_id, card, sequence} → {}: the whole card written into an entity. FeishuCardStream:
+	// {card_id, element, text, sequence} → {}: an element's whole text streamed into it (feishubot.StreamClosed tells
+	// one that stopped streaming). FeishuCardSettings: {card_id, streaming, sequence} → {}: its streaming turned on or
+	// off. A write's sequence must be larger than the entity's last; errors carry Feishu's code.
+	FeishuCardUpdate   = "feishu.card_update"
+	FeishuCardStream   = "feishu.card_stream"
+	FeishuCardSettings = "feishu.card_settings"
 	// FeishuPin: {message_id, exclusive?} → {}: one of the bot's messages in the owner's private chat pinned there;
 	// exclusive takes off the other pins the bot made in that chat (never the owner's own) (#1961, the workbench).
 	FeishuPin = "feishu.pin"
 	// FeishuRecall: {message_id} → {}: one of the bot's messages in the owner's private chat withdrawn (Lark lets a
 	// bot withdraw its messages for a while after sending; past that the call fails).
 	FeishuRecall = "feishu.recall"
-	// FeishuCotCreate: {reply_to?} → {cot_id, message_id}: an agent message (the open platform's message_cot, a
-	// collapsible process) under the message replied to, else into the owner's chat.
+	// FeishuCotCreate: {reply_to?, chat_id?, in_thread?} → {cot_id, message_id}: an agent message (the open
+	// platform's message_cot, a collapsible process) under the message replied to, in its topic when in_thread is set.
 	FeishuCotCreate = "feishu.cot_create"
 	// FeishuCotAppend: {cot_id, message_id, events: [feishubot.CotEvent]} → {}.
 	FeishuCotAppend = "feishu.cot_append"
@@ -184,6 +206,17 @@ type FeishuAction struct {
 	Action string          `json:"action,omitempty"`
 }
 
+// ClarificationProof is the bound question returned when a one-time proof is
+// consumed at the hub's final transport boundary. The opaque token itself is
+// never a caller, submission, approval, or reusable owner capability.
+type ClarificationProof struct {
+	InteractionID string `json:"interaction_id"`
+	MachineID     string `json:"machine_id"`
+	SessionID     string `json:"session_id"`
+	Text          string `json:"text"`
+	ClientMsgID   string `json:"client_msg_id"`
+}
+
 // FeishuView is feishu.view's answer.
 type FeishuView struct {
 	Target string        `json:"target,omitempty"` // where the chat's messages go now
@@ -239,6 +272,8 @@ type FeishuFeatures struct {
 	// AnswerNewCard: a finished run's answer goes out as a new card and its progress card is folded, so the answer is
 	// the chat's newest message and Lark notifies on it (#5396).
 	AnswerNewCard bool `json:"answer_new_card"`
+	// TopicCot: a topic run also shows its thinking and tools in a native agent message beside the progress card.
+	TopicCot bool `json:"topic_cot"`
 }
 
 // FeishuStatus is feishu.status's answer.

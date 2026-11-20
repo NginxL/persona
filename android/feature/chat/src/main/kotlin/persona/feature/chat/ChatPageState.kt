@@ -333,7 +333,8 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     tasks: persona.core.domain.tasks.TasksStore?, taskTodos: List<persona.core.contracts.Todo>, search: ChatSearchState,
     openWork: Set<String>, projection: persona.core.domain.lines.ChatSnapshot, feed: List<persona.core.contracts.FeedItem>,
     taskPlans: Map<String, TaskPlan>, taskCardProjection: Map<String, List<AssistantTaskCard>>,
-    children: List<Session> = emptyList()): ChatPageLines {
+    children: List<Session> = emptyList(), modeChanges: List<persona.core.contracts.ModeChange> = emptyList(),
+    modeChangesUntil: java.time.Instant? = null): ChatPageLines {
     val jumpItemState = remember { mutableStateOf<String?>(null) }
     var jumpItem by jumpItemState
     // Glass draws the hub's task records among the lines, as iOS does (#4339 C13), and folds a supervision round into one
@@ -359,7 +360,7 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     val modelChanges = PersonaTheme.style == AppStyle.Glass
     val childPlaces = remember(key) { persona.core.domain.lines.ChildSessionPlaces() }
     val places = remember(children) { childPlaces.places(children) }
-    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork) {
+    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork, modeChanges, modeChangesUntil) {
         searchVisibleLines(assistantPresentation.foreground, search.selected?.itemId ?: jumpItem)
             .let {
                 when {
@@ -373,7 +374,14 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
             .let { persona.core.domain.lines.ChildSessionCards.lines(it, places, !snapshot.hasOlder, openWork) }
             // The strip of what a turn's work looked at is Glass's, as iOS draws it (#4339 C9); Brief and Board keep their lines.
             .let { if (viewedStrips) it else it.filterNot { line -> line is ChatLine.Viewed } }
-            .let { if (modelChanges) persona.core.domain.lines.ModelChanges.mark(it) else it }.asReversed()
+            .let { if (modelChanges) persona.core.domain.lines.ModelChanges.mark(it) else it }
+            .let {
+                if (renderStyle == ChatRenderStyle.Assistant) it else persona.core.domain.lines.ModeChanges.merge(it, modeChanges,
+                    earliest = if (snapshot.hasOlder) snapshot.items.firstNotNullOfOrNull { item ->
+                        persona.core.contracts.parseTime(item.ts)
+                    } ?: java.time.Instant.MAX else null,
+                    until = modeChangesUntil)
+            }.asReversed()
     }
     return ChatPageLines(jumpItemState, assistantPresentation, subagentCards, lines)
 }
@@ -560,7 +568,8 @@ internal class ChatPageAwait(
 @Composable
 internal fun rememberChatPageSession(key: SessionKey, chrome: ChatChromeBindings, renderStyle: ChatRenderStyle,
     historyReadOnly: Boolean, historyFooter: (@Composable () -> Unit)?, historySession: Session?,
-    res: android.content.res.Resources, sessionList: List<Session>, adoptedSessions: List<Session>): ChatPageSession {
+    res: android.content.res.Resources, sessionList: List<Session>, adoptedSessions: List<Session>,
+    keptReceipts: List<persona.core.contracts.api.MessageSendReceipt>): ChatPageSession {
     val parent = sessionList.firstOrNull { it.machineId == key.machineId && it.subagents.orEmpty().any { child -> child.sessionId == key.sessionId } }
     val child = parent?.subagents?.firstOrNull { it.sessionId == key.sessionId }
     // A workflow's agent reads like a subagent (`<session>@<agent id>`, #2935).
@@ -589,14 +598,17 @@ internal fun rememberChatPageSession(key: SessionKey, chrome: ChatChromeBindings
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* Keep held detail; the info sheet still offers an explicit retry. */ }
     }
-    // What an Agent's summary row leaves out and `info` doesn't say: the launcher switch waiting for the next message
-    // (#5055), read from the session's complete row where the hub looks one up (`sessions_lookup`); Glass's pill shows it.
+    // Summary rows leave out kept messages and an Agent's launcher switch; a kept receipt refreshes those details even
+    // when the transcript's rev does not change.
     var completeRow by remember(key) { mutableStateOf<Session?>(null) }
-    val lookup = "sessions_lookup" in LocalHubFeatures.current && renderStyle != ChatRenderStyle.Assistant &&
-        PersonaTheme.style == AppStyle.Glass && AgentModelPanel.LAUNCHER_SWITCH in LocalHubFeatures.current
-    LaunchedEffect(key, row?.waiting != null, row?.rev, chrome.actions, lookup) {
+    val lookup = "sessions_lookup" in LocalHubFeatures.current && (renderStyle == ChatRenderStyle.Assistant ||
+        (PersonaTheme.style == AppStyle.Glass && AgentModelPanel.LAUNCHER_SWITCH in LocalHubFeatures.current))
+    val refreshDetail: suspend () -> Unit = {
+        if (row?.waiting != null && lookup) completeRow = chrome.actions?.completeRow(row)
+    }
+    LaunchedEffect(key, row?.waiting != null, row?.rev, chrome.actions, lookup, keptReceipts) {
         if (row?.waiting == null || !lookup) return@LaunchedEffect
-        try { completeRow = chrome.actions?.completeRow(row) }
+        try { refreshDetail() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* The switch the chat held stays. */ }
     }
@@ -613,10 +625,10 @@ internal fun rememberChatPageSession(key: SessionKey, chrome: ChatChromeBindings
     } ?: lastSession
     SideEffect { if (liveSession != null) lastSession = liveSession }
     val session = liveSession ?: readOnlySessionMetadata(key, historyReadOnly, historySession)
-    return ChatPageSession(child, workflowAgent, historyOnly, footer, readOnly, row, session)
+    return ChatPageSession(child, workflowAgent, historyOnly, footer, readOnly, row, session, refreshDetail)
 }
 
-/** What [rememberChatPageSession] hands back to ChatPage: plain values, and the state objects ChatPage reads and writes. */
+/** What [rememberChatPageSession] hands back to ChatPage: plain values, and the detail reload action. */
 internal class ChatPageSession(
     val child: persona.core.contracts.Subagent?,
     val workflowAgent: persona.core.contracts.WorkflowAgent?,
@@ -625,6 +637,7 @@ internal class ChatPageSession(
     val readOnly: Boolean,
     val row: Session?,
     val session: Session?,
+    val refreshDetail: suspend () -> Unit,
 )
 
 /** ChatPage's launcher switch and closeout: the switch drawn here, the closeout card's detail (moved as is). */

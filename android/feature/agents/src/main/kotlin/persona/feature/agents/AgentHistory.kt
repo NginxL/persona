@@ -100,17 +100,3 @@ private fun scopedRootAgentList(
 private fun AgentListSettings.admitsHistory(s: persona.core.contracts.Session): Boolean =
     !s.assistant && (machineFilter.isEmpty() || machineFilter == s.machineId) &&
         (query.isEmpty() || s.key.path in queryAncestors || listOf(s.displayTitle, s.cwd, s.lastText, s.branch).any { it?.contains(query, true) == true })
-
-/**
- * The botmux sessions the "Show botmux" switch counts: what [scopedAgentList] would count under "Lark groups" with botmux shown,
- * without building the list again (it runs on every push).
- */
-internal fun botmuxCount(rows: List<AgentSession>, preferences: AgentsPreferencesSnapshot, settings: AgentListSettings): Int =
-    foldRows(rows).count { row ->
-        val s = row.session
-        s.isBotmux && when (preferences.range) {
-            AgentRange.Running -> settings.admits(s)
-            AgentRange.All -> if (s.isLive) settings.admits(s) else settings.admitsHistory(s)
-            AgentRange.History -> !s.isLive && settings.admitsHistory(s)
-        }
-    }

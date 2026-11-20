@@ -23,6 +23,7 @@ func (n *Node) assistantExecution(ctx context.Context, id string) proto.Assistan
 	n.mu.Unlock()
 	if p != nil && p.alive() {
 		out.Source, out.Harness = "native", p.agent
+		out.Mode, out.ModeNote = p.executionMode()
 		out.State = proto.ExecutionRunning
 		if p.ready != nil {
 			select {

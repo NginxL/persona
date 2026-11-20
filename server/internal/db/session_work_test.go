@@ -27,6 +27,25 @@ func TestTruncateForTestClearsDetachedWorkEvents(t *testing.T) {
 	}
 }
 
+func TestSessionWorkRestoresOldModelRetry(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	_, _ = d.pool.Exec(ctx, `TRUNCATE session_work, session_work_events`)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	wake := now.Add(time.Minute)
+	w := SessionWork{MachineID: "box", SessionID: "retry", TurnAt: now.Add(-40 * 24 * time.Hour), WakeAt: &wake,
+		Work: proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitTransient}, UpdatedAt: now}
+	if err := d.PutSessionWork(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PruneSessionWork(ctx, now.Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.SessionWorks(ctx, now.Add(-48*time.Hour))
+	if err != nil || len(got) != 1 || got[0].WakeAt == nil {
+		t.Fatalf("old pending model retry lost: %+v, %v", got, err)
+	}
+}
+
 func TestSessionWork(t *testing.T) {
 	d, ctx := open(t), context.Background()
 	_, _ = d.pool.Exec(ctx, `TRUNCATE session_work, session_work_events`)

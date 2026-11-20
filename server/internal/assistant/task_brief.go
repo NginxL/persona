@@ -47,10 +47,32 @@ const (
 	briefLogMax = 40
 )
 
+// Automatic estimates are attached only to a task_plan dispatch, never to manual Agent work (#11685).
+const (
+	defaultTaskEstimateMinutes = 60
+	briefEstimateSystemDefault = "system_default"
+	briefEstimateOverride      = "override"
+)
+
+// automaticEstimate resolves one task_plan task's estimate while preserving its source across plan serialization.
+// Clearing an override restores the default; changing the default's value makes it an explicit override.
+func automaticEstimate(minutes int, source string) (int, string) {
+	if minutes <= 0 {
+		return defaultTaskEstimateMinutes, briefEstimateSystemDefault
+	}
+	if source == "" || source == briefEstimateSystemDefault && minutes != defaultTaskEstimateMinutes {
+		source = briefEstimateOverride
+	}
+	return minutes, source
+}
+
 // Kinds of brief log entries.
 const (
-	briefEventScope   = "scope"
-	briefEventOverdue = "overdue"
+	briefEventScope       = "scope"
+	briefEventOverdue     = "overdue"
+	briefEventDispatch    = "dispatch"
+	briefEventCompletion  = "completion"
+	briefEventEstimateDue = "estimate_due"
 )
 
 // BriefRequest is the owner's message that led to a task: its words as they wrote them (cut at briefRequestMax, then
@@ -58,6 +80,7 @@ const (
 type BriefRequest struct {
 	Text         string    `json:"text"`
 	Truncated    bool      `json:"truncated,omitempty"`
+	Part         bool      `json:"part,omitempty"` // a quoted passage from the source message
 	At           time.Time `json:"at"`
 	Conversation string    `json:"conversation,omitempty"`
 	MessageID    string    `json:"message_id,omitempty"`
@@ -67,19 +90,25 @@ type BriefRequest struct {
 	Via []string `json:"via,omitempty"`
 }
 
-// BriefEvent is one entry of a brief's log. A scope change (Kind scope): what changed and why, as the supervisor said
-// it, the criteria and expected time it left in effect (DoneWhen nil, ExpectMinutes 0: unchanged), which criteria it
-// added and dropped, and the owner's message that approved it when it added a step only they may allow. An overdue
-// mark (Kind overdue): the task passed its clock and its supervisor was told.
+// BriefEvent is one entry of a brief's log. A scope change says what changed and the criteria/estimate it left;
+// dispatch starts one automatic task_plan round; completion records that round's first active completion and actual
+// minutes; estimate_due and overdue record accepted supervisor delivery. Approval belongs only to a risky scope change.
 type BriefEvent struct {
-	At            time.Time     `json:"at"`
-	Kind          string        `json:"kind"`
-	Todo          string        `json:"todo_id,omitempty"`
-	By            string        `json:"by,omitempty"` // the conversation that changed it
-	Change        string        `json:"change,omitempty"`
-	Why           string        `json:"why,omitempty"`
-	DoneWhen      []string      `json:"done_when,omitempty"`
-	ExpectMinutes int           `json:"expect_minutes,omitempty"`
+	At             time.Time `json:"at"`
+	Kind           string    `json:"kind"`
+	Todo           string    `json:"todo_id,omitempty"`
+	By             string    `json:"by,omitempty"` // the conversation that changed it
+	Change         string    `json:"change,omitempty"`
+	Why            string    `json:"why,omitempty"`
+	DoneWhen       []string  `json:"done_when,omitempty"`
+	ExpectMinutes  int       `json:"expect_minutes,omitempty"`
+	EstimateSource string    `json:"estimate_source,omitempty"`
+	// Dispatch records one task_plan round (source is task_plan; round_id names it); completion records its first
+	// active completion report (source is report_to_supervisor, task_review or judge) and wall-clock actual_minutes.
+	Source        string        `json:"source,omitempty"`
+	PlanID        string        `json:"plan_id,omitempty"`
+	RoundID       string        `json:"round_id,omitempty"`
+	ActualMinutes int           `json:"actual_minutes,omitempty"`
 	Added         []string      `json:"added,omitempty"`
 	Dropped       []string      `json:"dropped,omitempty"`
 	Approval      *BriefRequest `json:"approval,omitempty"`
@@ -119,16 +148,17 @@ type briefRecord struct {
 	// Request: the owner's message, nil when the work was not started on one (StartedBy says by whom) or it could not
 	// be read. Trigger is what the turn that handed the work out followed instead (supervision, followup, routine,
 	// conversation, notice, meeting, wake), TriggerTitle its one line; Reason is why, as whoever started it said.
-	Request       *BriefRequest `json:"request,omitempty"`
-	StartedBy     string        `json:"started_by"`
-	Trigger       string        `json:"trigger,omitempty"`
-	TriggerTitle  string        `json:"trigger_title,omitempty"`
-	Reason        string        `json:"reason,omitempty"`
-	Conversation  string        `json:"conversation,omitempty"` // where it was handed out
-	Goal          string        `json:"goal"`
-	DoneWhen      []string      `json:"done_when"`
-	ExpectMinutes int           `json:"expect_minutes,omitempty"`
-	OutOfBounds   []string      `json:"out_of_bounds,omitempty"`
+	Request        *BriefRequest `json:"request,omitempty"`
+	StartedBy      string        `json:"started_by"`
+	Trigger        string        `json:"trigger,omitempty"`
+	TriggerTitle   string        `json:"trigger_title,omitempty"`
+	Reason         string        `json:"reason,omitempty"`
+	Conversation   string        `json:"conversation,omitempty"` // where it was handed out
+	Goal           string        `json:"goal"`
+	DoneWhen       []string      `json:"done_when"`
+	ExpectMinutes  int           `json:"expect_minutes,omitempty"`
+	EstimateSource string        `json:"estimate_source,omitempty"`
+	OutOfBounds    []string      `json:"out_of_bounds,omitempty"`
 	// Reconstructed: made later from what the to-do still had (a task from before briefs): Handover is the prompt its
 	// agent was handed, which is not the owner's words, and nothing else was invented.
 	Reconstructed bool   `json:"reconstructed,omitempty"`
@@ -150,11 +180,19 @@ type TaskBrief struct {
 	// Criteria and ExpectNow are done_when and expect_minutes as the scope changes left them; ClockAt is when its
 	// clock last started (the hand-out, or the latest scope change) and DueAt when it runs out; Overdue: it ran out
 	// and the supervisor was told.
-	Criteria  []string   `json:"criteria"`
-	ExpectNow int        `json:"expect_minutes_now,omitempty"`
-	ClockAt   time.Time  `json:"clock_at"`
-	DueAt     time.Time  `json:"due_at"`
-	Overdue   *time.Time `json:"overdue_at,omitempty"`
+	Criteria  []string `json:"criteria"`
+	ExpectNow int      `json:"expect_minutes_now,omitempty"`
+	// EstimateSourceNow, EstimateClockAt and EstimateDueAt describe the automatic review clock, not the older
+	// overdue clock below. Empty for manual or pre-feature work until a task_plan dispatch makes it eligible.
+	EstimateSourceNow  string     `json:"estimate_source_now,omitempty"`
+	EstimateClockAt    time.Time  `json:"estimate_clock_at,omitzero"`
+	EstimateDueAt      time.Time  `json:"estimate_due_at,omitzero"`
+	EstimateDueToldAt  *time.Time `json:"estimate_due_told_at,omitempty"`
+	ActualMinutes      int        `json:"actual_minutes,omitempty"`
+	CompletionReported *time.Time `json:"completion_reported_at,omitempty"`
+	ClockAt            time.Time  `json:"clock_at"`
+	DueAt              time.Time  `json:"due_at"`
+	Overdue            *time.Time `json:"overdue_at,omitempty"`
 }
 
 // LineageStep is one to-do of a brief's lineage: who worked on it, from when to when, and why it stopped ("" while it
@@ -262,15 +300,90 @@ func (tb *taskBrief) criteria() []string {
 	return slices.Clone(out)
 }
 
-// expect is the brief's expect_minutes as its scope changes left it.
+// expect is the brief's expect_minutes as its dispatches and scope changes left it.
 func (tb *taskBrief) expect() int {
 	out := tb.rec.ExpectMinutes
 	for _, e := range tb.st.Log {
-		if e.Kind == briefEventScope && e.ExpectMinutes > 0 {
+		if (e.Kind == briefEventScope || e.Kind == briefEventDispatch) && e.ExpectMinutes > 0 {
 			out = e.ExpectMinutes
 		}
 	}
 	return out
+}
+
+// estimateState is the automatic review clock as task_plan dispatches and actual estimate revisions left it. A
+// criteria-only scope change deliberately does not restart this clock; it still restarts the older overdue clock.
+func (tb *taskBrief) estimateState() (expect int, source string, clock time.Time) {
+	source, clock = tb.rec.EstimateSource, tb.rec.CreatedAt
+	for _, e := range tb.st.Log {
+		if e.Kind != briefEventDispatch && (e.Kind != briefEventScope || e.ExpectMinutes <= 0) {
+			continue
+		}
+		clock = e.At
+		if e.EstimateSource != "" {
+			source = e.EstimateSource
+		}
+	}
+	return tb.expect(), source, clock
+}
+
+// estimateDueToldAt is when a supervision message carried the current estimate_due, nil before that or after a new
+// dispatch / estimate revision. The event is written only after delivery or durable queue admission.
+func (tb *taskBrief) estimateDueToldAt() *time.Time {
+	var told *time.Time
+	for _, e := range tb.st.Log {
+		if e.Kind == briefEventDispatch || e.Kind == briefEventScope && e.ExpectMinutes > 0 {
+			told = nil
+			continue
+		}
+		if e.Kind == briefEventEstimateDue {
+			at := e.At
+			told = &at
+		}
+	}
+	return told
+}
+
+// roundFor names the current task_plan round on t. A manual reopen starts a new measurement from ReopenedAt;
+// a task_plan continuation has a later dispatch event and therefore already has a new round.
+func (tb *taskBrief) roundFor(t Todo) (id string, start time.Time, ok bool) {
+	for i := len(tb.st.Log) - 1; i >= 0; i-- {
+		e := tb.st.Log[i]
+		if e.Kind != briefEventDispatch || e.Todo != t.ID || e.RoundID == "" {
+			continue
+		}
+		id, start = e.RoundID, e.At
+		break
+	}
+	if id == "" {
+		return "", time.Time{}, false
+	}
+	if t.ReopenedAt != nil && t.ReopenedAt.After(start) {
+		start = t.ReopenedAt.UTC()
+		id += "@reopened:" + start.Format(time.RFC3339Nano)
+	}
+	return id, start, true
+}
+
+// completionFor is this round's first active completion report, nil when it has none.
+func (tb *taskBrief) completionFor(roundID, todoID string) *BriefEvent {
+	for i := len(tb.st.Log) - 1; i >= 0; i-- {
+		e := &tb.st.Log[i]
+		if e.Kind == briefEventCompletion && e.RoundID == roundID && e.Todo == todoID {
+			return e
+		}
+	}
+	return nil
+}
+
+// latestCompletion is the brief's newest active completion report, used only as a summary; every round remains in Log.
+func (tb *taskBrief) latestCompletion() *BriefEvent {
+	for i := len(tb.st.Log) - 1; i >= 0; i-- {
+		if tb.st.Log[i].Kind == briefEventCompletion {
+			return &tb.st.Log[i]
+		}
+	}
+	return nil
 }
 
 // clockAt is when the brief's clock last started: when the work was handed out, or its latest scope change.
@@ -327,8 +440,17 @@ func (tb *taskBrief) dropped() []BriefCriterion {
 }
 
 func (tb *taskBrief) view() TaskBrief {
+	_, source, clock := tb.estimateState()
 	v := TaskBrief{briefRecord: tb.rec, Log: slices.Clone(tb.st.Log), Criteria: tb.criteria(), ExpectNow: tb.expect(),
-		ClockAt: tb.clockAt(), DueAt: tb.dueAt(), Overdue: tb.overdueAt()}
+		EstimateSourceNow: source, ClockAt: tb.clockAt(), DueAt: tb.dueAt(), Overdue: tb.overdueAt()}
+	if source != "" && v.ExpectNow > 0 {
+		v.EstimateClockAt, v.EstimateDueAt = clock, clock.Add(time.Duration(v.ExpectNow)*time.Minute)
+		v.EstimateDueToldAt = tb.estimateDueToldAt()
+	}
+	if c := tb.latestCompletion(); c != nil {
+		at := c.At
+		v.ActualMinutes, v.CompletionReported = c.ActualMinutes, &at
+	}
 	v.DoneWhen = slices.Clone(tb.rec.DoneWhen)
 	if v.DoneWhen == nil {
 		v.DoneWhen = []string{}
@@ -764,7 +886,9 @@ func (s *Service) briefOrigin(ctx context.Context, machine, conversation string)
 		case src.Kind == proto.SourceConversation:
 			rec.Trigger, rec.TriggerTitle = "conversation", src.Title
 			// The owner's words it carried, as the hub verified them when it was sent (relay_quote.go).
-			rec.Request = s.receivedQuote(ctx, it, src)
+			if q := s.receivedQuote(ctx, it, src); q != nil {
+				rec.Request = &q.BriefRequest
+			}
 		case src.Kind == proto.SourceMeeting:
 			rec.Trigger, rec.TriggerTitle = "meeting", src.Title
 		default:

@@ -1,4 +1,5 @@
 {
+  "task_instructions_resume": "This launcher cannot restore the task's instructions with a bare Resume. Send a continuation message or choose the original launcher. Nothing was started or sent.",
   "skill_unavailable": "This skill is unavailable or the execution environment changed. Remove it and select it again. Nothing was sent.",
   "readonly_unsupported": "Cannot apply read-only mode on this launch path. Choose a compatible terminal launcher without conflicting permission options.",
   "launcher_kind_missing": "The engine on that computer has no provider for this kind of agent, so nothing was started and nothing else runs in its place. Pick one of its providers, or turn one on in its settings.",
@@ -44,6 +45,7 @@
   "open_elsewhere_agents_list": "This tab is on Claude Code’s agents list. Open the terminal, pick a session with the arrow keys and press Enter, then send. Nothing was sent.",
   "modes_on_computer": "This Claude session runs in Claude on the computer (its desktop app or another terminal). Change its mode, effort or model there.",
   "modes_not_running": "This agent isn’t running. Resume it from its terminal page, then change this.",
+  "effort_change_pending": "The message was not sent because the thinking effort change has not been confirmed. If the change failed, choose a thinking effort again.",
   "agent_stopped": "This agent has stopped. Its conversation and terminal stay; it doesn’t take messages, and nothing was sent. To run it again, use Resume on its terminal page.",
   "resume_not_allowed": "This agent cannot be resumed automatically. Use Resume on its terminal page.",
   "stop_not_saved": "The stop state could not be saved. Nothing was started, stopped or closed; try again.",
@@ -57,6 +59,7 @@
   "codex_not_ready": "Codex on the computer isn’t at its input box yet (still loading, or another screen is open). Nothing was sent; try again in a moment.",
   "codex_first_text": "Codex’s first message can only be text. Remove the photos or files, then send it again.",
   "codex_first_unconfirmed": "The message went into Codex, but its session didn’t appear in time. Check the computer before sending it again.",
+  "codex_compact_busy": "Codex is working on a turn. Compact once it finishes; nothing was sent.",
   "codex_waiting": "Codex hasn’t had its first message yet. This works once it has its session.",
   "codex_no_box": "Codex opened in a new tab on the computer, but its input box didn’t appear within a minute.",
   "codex_no_box_here": "Codex started in the pane you picked, but its input box didn’t appear within a minute. The pane is left as it is.",
@@ -83,8 +86,19 @@
   "assistant_service_tier_start_only": "Fast can be chosen only when starting a new conversation. Change it in the existing conversation instead.",
   "assistant_service_tier_unsupported": "Fast from the first message is available only for Codex models that offer it. Nothing was sent.",
   "assistant_service_tier_refused": "Codex couldn’t apply Fast before the first message. Nothing was sent; try again or choose Standard.",
+  "agent_speed_unsupported": "This launcher can’t start an Agent at that speed: {reason}",
+  "agent_speed_start_only": "A faster speed applies only to a new Agent start: {reason}",
+  "agent_speed_model": "This model doesn’t advertise that Codex speed: {reason}",
+  "agent_speed_invalid": "That Agent speed isn’t valid: {reason}",
   "assistant_supervision_busy": "This conversation's task-follow-up role changed. Wait for its current work to finish, then try again. Nothing was sent.",
   "assistant_supervision_runtime": "Use a Claude Code or Codex conversation for task follow-up. This Agent does not support its separate instructions. Nothing was started or sent.",
   "assistant_supervision_node_outdated": "Update this computer's Persona Link before following up tasks here. Its current version cannot apply separate task instructions. Nothing was started or sent.",
-  "omp_resume_unknown": "Persona can’t resume this omp session from here yet. Continue it on the computer with omp --resume. Nothing was sent."
+  "omp_resume_unknown": "Persona can’t find this omp session’s file, so it can’t resume it from here. Continue it on the computer with omp --resume. Nothing was sent.",
+  "held_ahead": "Earlier messages to this Agent are still waiting to be sent. Send this one after them.",
+  "held_not_kept": "Earlier messages are still waiting to be sent, and this one couldn't be saved. Try again in a moment.",
+  "held_full": "Too many messages are waiting for this Agent. Delete some, or send this one when the computer is back.",
+  "assistant_launcher_profile_switch": "Can’t switch this conversation to the selected connection. Nothing was sent. Choose the previous connection to continue here, or start a new conversation with the selected connection and one of its models.",
+  "codex_writer_busy": "This Codex thread is already being written by another process on the computer. Nothing was sent. Continue in its original Codex window or terminal; if that process has exited, wait for it to disconnect, refresh, and try again.",
+  "turn_over_background": "This turn had already ended, so nothing was interrupted. Its background work is still running; stop it in the terminal on that computer.",
+  "omp_stopped": "This omp session has stopped, so this can’t be done. Send a message to continue it on the computer."
 }

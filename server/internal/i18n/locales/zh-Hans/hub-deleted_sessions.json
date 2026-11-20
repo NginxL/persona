@@ -1,5 +1,6 @@
 {
   "running": "这个 Agent 还在运行，先关闭再删除",
   "assistant": "助手的对话用归档",
-  "unknown": "没有这个会话"
+  "unknown": "没有这个会话",
+  "held": "先删除等待发送的消息"
 }

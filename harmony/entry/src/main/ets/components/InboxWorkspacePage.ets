@@ -6,7 +6,7 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { ComposeListItemV2, ContentItemV2, CapsuleSegmentButtonV2, SegmentButtonV2Items, ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { ClientModel } from '../models/ClientModel';
-import { InboxAttachmentDraft, InboxMailComposeSnapshot, InboxMailMessage, InboxMessage, InboxWorkspace } from '../models/InboxWorkspace';
+import { InboxAttachmentDraft, InboxMailComposeSnapshot, InboxMailMessage, InboxMessage, InboxWorkspace, inboxRowSourceLabel } from '../models/InboxWorkspace';
 import { ResourceRow, Wire } from '../models/Wire';
 import { BoundRow, reconcileBoundRows } from '../models/RowBinding';
 import { MarkdownText } from './MarkdownText';
@@ -268,7 +268,7 @@ export struct InboxWorkspacePage {
   private doneLabel(row: ResourceRow): string { return this.workspace.isHandled(row) ? tr('done') : tr('inbox_open'); }
   private rowSource(row: ResourceRow): string {
     const data = row.data();
-    return this.sourceLabel(Wire.text(data, 'source')) + ' · ' + Wire.text(data, 'account_name', Wire.text(data, 'account'));
+    return inboxRowSourceLabel(data, this.sourceLabel(Wire.text(data, 'source')));
   }
   private openListHandoff(row: ResourceRow): void {
     const copy = ResourceRow.from(row.data(), row.kind); copy.id = row.id; copy.title = row.title; copy.manager = row.manager; copy.group = row.group; copy.path = row.path;

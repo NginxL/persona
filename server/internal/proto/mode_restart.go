@@ -15,6 +15,7 @@ type ModeRestartEvent struct {
 // The reasons of a ModeRestartEvent (#10297): codes, put in words by the apps.
 const (
 	ModeRestartReasonReplaced        = "replaced"         // dropped: another mode was picked before it ran
+	ModeRestartReasonCancelled       = "cancelled"        // dropped: the mode the session runs in was picked again (#11089)
 	ModeRestartReasonProcessExited   = "process_exited"   // dropped: the claude it was picked for has exited (#10296)
 	ModeRestartReasonProcessReplaced = "process_replaced" // dropped: the session runs in another claude now (#10296)
 	ModeRestartReasonProcessUnknown  = "process_unknown"  // dropped: it was not picked for a known claude process
@@ -34,3 +35,21 @@ const (
 
 // EventModeRestart is the node's event that carries a ModeRestartEvent.
 const EventModeRestart = "session.mode_restart"
+
+// ModeActor is display-only provenance, never permission to perform a change.
+type ModeActor struct {
+	Kind       string `json:"kind"`
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
+	Extension  string `json:"extension,omitempty"`
+}
+
+// ModeSetEvent records the mode a plan hook returned to its runtime, not a runtime acknowledgement.
+type ModeSetEvent struct {
+	SessionID string     `json:"session_id"`
+	From      string     `json:"from,omitempty"`
+	To        string     `json:"to"`
+	Actor     *ModeActor `json:"actor,omitempty"`
+}
+
+const EventModeSet = "session.mode_set"

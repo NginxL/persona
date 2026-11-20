@@ -25,7 +25,7 @@ add_custom_command(TARGET persona_ssh POST_BUILD COMMAND ${CMAKE_COMMAND} -E cop
 if(DEFINED ENV{PERSONA_CORE_LIBRARY})
   set(PERSONA_CORE_LIBRARY "$ENV{PERSONA_CORE_LIBRARY}")
 else()
-  set(PERSONA_CORE_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/app-core/target/aarch64-unknown-linux-ohos/release/libpersona_core_ohos.so")
+  set(PERSONA_CORE_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../native/app-core/target/aarch64-unknown-linux-ohos/release/libpersona_core_ohos.so")
 endif()
 if(NOT EXISTS "${PERSONA_CORE_LIBRARY}")
   message(FATAL_ERROR "Build the locked shared Rust core with native/app-core/scripts/build-ohos.sh before the HAP")

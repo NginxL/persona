@@ -1,0 +1,18 @@
+{
+  "no_session": "That Agent session isn't available.",
+  "session_busy": "This Agent is working. Wait for it to stop before reviewing.",
+  "review_running": "An independent review is already running for this session.",
+  "no_change": "There are no changes to review in this directory.",
+  "no_change_not_git": "This directory isn't a Git repository, so there's no change to review.",
+  "read_only_unsupported": "{agent} can't start an enforced read-only review. Independent reviews require Claude Code plan mode.",
+  "not_supported": "This computer can't start an independent review.",
+  "start_failed": "Couldn't start the independent review: {error}",
+  "store_failed": "The review state couldn't be read or saved. Try again.",
+  "send_failed": "Couldn't send the findings to the source Agent: {error}",
+  "card_title": "Independent review",
+  "review_complete": "Review complete",
+  "finding_one": "1 finding",
+  "findings": "{count} findings",
+  "send_to_agent": "Send to agent",
+  "dismiss": "Dismiss"
+}

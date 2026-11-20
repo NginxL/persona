@@ -1,7 +1,7 @@
 {
   "held_entry": "保留された通知",
   "held_entry_label": "保留された通知、今日{count}件",
-  "held_entry_hint": "通知を抑えるモード中に保留されたP1/P2通知",
+  "held_entry_hint": "プッシュ通知の優先度フィルターがオンの間に保留された P1 / P2 通知",
   "held_title": "今日保留された通知",
   "held_explanation": "P1は確認が必要です。P2は通知されず、折りたたまれています。",
   "held_p1": "P1・要確認",

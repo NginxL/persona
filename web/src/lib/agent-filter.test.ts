@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFilter, arrangeSpaces, botmuxAndFilter, isBotmux, withoutBotmux, filterCounts, matchesFilter, matchingKeys, shownFilters, agentFilter, unreadOf, type SpaceLike } from "./agent-filter";
+import { applyFilter, arrangeSpaces, isBotmux, withoutBotmux, filterCounts, matchesFilter, matchingKeys, shownFilters, agentFilter, unreadOf, type SpaceLike } from "./agent-filter";
 import { isQuiet, type AgentMutes } from "./agent-groups";
 import { NO_PINS } from "./pins";
 import type { AgentState, Session } from "./types";
@@ -112,10 +112,7 @@ describe("筛选栏的「botmux」显示 / 隐藏（#2786）", () => {
     expect(withoutBotmux(all, false)).toBe(all);
   });
 
-  it("飞书群和隐藏 botmux 不同时成立：飞书群下隐藏回到全部，隐藏时选飞书群重新显示", () => {
-    expect(botmuxAndFilter("feishu", true, "botmux")).toEqual({ filter: "all", hidden: true });
-    expect(botmuxAndFilter("feishu", true, "filter")).toEqual({ filter: "feishu", hidden: false });
-    expect(botmuxAndFilter("unread", true, "botmux")).toEqual({ filter: "unread", hidden: true });
-    expect(botmuxAndFilter("feishu", false, "botmux")).toEqual({ filter: "feishu", hidden: false });
+  it("does not offer an empty Lark group filter even when previously selected", () => {
+    expect(shownFilters("feishu", { needs: 0, unread: 0, working: 0, bg_waiting: 0, feishu: 0, terminal: 0 })).toEqual(["all"]);
   });
 });

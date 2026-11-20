@@ -33,7 +33,7 @@ export const DEEP_KB_KINDS = ["projects", "topics", "chats", "people", "docs", "
 export const DEEP_SETTINGS_TABS: Record<string, string | null> = {
   general: null, persona: null, prompts: null, notifications: null, models: "purpose", agents: null, channels: "channel",
   connectors: "connector", sources: null, extensions: "extension", shortcuts: null, devices: null, hub: null,
-  managers: null, knowledge: null, avatar: null,
+  managers: null, knowledge: null, avatar: null, labs: null,
 };
 
 /** Sent records: an item of the connectors tab (views/settings/nav.ts SENT_SUB). */

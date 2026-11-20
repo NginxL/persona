@@ -22,6 +22,7 @@ const calls = vi.hoisted(() => ({
   list: [] as { path: string; method?: string; json?: unknown; headers?: unknown }[],
   items: [] as unknown[],
   suggestion: undefined as (() => Promise<unknown>) | undefined,
+  retry: undefined as (() => Promise<unknown>) | undefined,
 }));
 vi.mock("../../lib/api", async (orig) => ({
   ...(await orig<typeof import("../../lib/api")>()),
@@ -34,6 +35,7 @@ vi.mock("../../lib/api", async (orig) => ({
       return Promise.resolve({ message: { uid, text: `mail body ${uid}`, seen: false } });
     }
     if (path.endsWith("/suggestion")) return calls.suggestion ? calls.suggestion() : Promise.reject(new Error("offline"));
+    if (path.endsWith("/retry")) return calls.retry ? calls.retry() : Promise.reject(new Error("offline"));
     return Promise.resolve({});
   },
 }));
@@ -47,7 +49,7 @@ vi.mock("../../lib/extension-slots", () => ({ useInboxItemPlace: () => undefined
 vi.mock("../../lib/translate", () => ({ useTranslatePrefs: () => ({ enabled: false }), hubTranslation: () => undefined, translatesChat: () => false, translatesMail: () => false, languageName: () => "" }));
 
 import type { InboxItem } from "../../lib/inbox";
-import { resetInboxForTests, shortTime } from "../../lib/inbox";
+import { resetInboxForTests, shortTime, useInbox } from "../../lib/inbox";
 import { sourceLine } from "../../lib/inbox-page";
 import { rowMeta } from "../../lib/inbox-now";
 import { chainRows, type ChainEntry } from "../../lib/inbox-events";
@@ -120,6 +122,7 @@ beforeEach(() => {
   calls.list = [];
   calls.items = [];
   calls.suggestion = undefined;
+  calls.retry = undefined;
   vi.mocked(toast).mockClear();
   host = document.createElement("div");
   document.body.append(host);
@@ -131,6 +134,57 @@ afterEach(() => {
 });
 
 describe("收件箱事件：详情", () => {
+  it("keeps an unknown reply's actual payload readonly without Send or Edit", () => {
+    const item: InboxItem = { ...reply, suggestion_attempts: [{ version: 2, status: "unknown", retryable: false,
+      text: "实际确认过的修改稿", at: "2026-11-18T13:00:00Z", conversation: reply.suggestion!.conversation }] };
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(buttons()).not.toContain("发送");
+    expect(buttons()).not.toContain("修改");
+    expect(host.querySelector("[data-suggestion-text]")?.textContent).toBe("实际确认过的修改稿");
+    expect(host.textContent).toContain("请先到原会话确认");
+  });
+  it.each(["sending", "sent"] as const)("shows actual %s words without a send/edit control in the Inbox", status => {
+    const item: InboxItem = { ...reply, suggestion_attempts: [{ version: 2, status, retryable: false,
+      text: "实际确认的修改稿", at: "2026-11-18T13:00:00Z", conversation: reply.suggestion!.conversation }] };
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(buttons()).not.toContain("发送");
+    expect(buttons()).not.toContain("修改");
+    expect(buttons()).not.toContain("重试");
+    expect(host.querySelector("[data-suggestion-text]")?.textContent).toBe("实际确认的修改稿");
+    expect(host.querySelector("time")?.dateTime).toBe("2026-11-18T13:00:00Z");
+  });
+  it("offers frozen-payload Retry only for confirmed retryable non-delivery", async () => {
+    const item: InboxItem = { ...reply, suggestion_attempts: [{ version: 2, status: "failed", retryable: true, retry_after: 5,
+      text: "实际确认的修改稿", at: "2026-11-18T13:00:00Z", conversation: reply.suggestion!.conversation }] };
+    calls.items = [item];
+    const { reloadInbox } = await import("../../lib/inbox");
+    await act(async () => { await reloadInbox(); });
+    calls.suggestion = async () => ({ ...item, suggestion: undefined });
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    expect(buttons()).not.toContain("发送");
+    expect(buttons()).not.toContain("修改");
+    expect(host.textContent).toContain("5 秒后重试");
+    await press("重试");
+    const req = calls.list.find(x => x.path.endsWith("/suggestion"))?.json;
+    expect(req).toMatchObject({ version: 2, action: "confirm" });
+    expect((req as { text?: string }).text).toBeUndefined();
+    act(() => root.render(<EventBody item={{ ...item, suggestion_attempts: [{ ...item.suggestion_attempts![0], retryable: false }] }} onSource={() => {}} />));
+    expect(buttons()).not.toContain("重试");
+  });
+  it("removes Retry after its response and readback are lost, despite an older failed receipt", async () => {
+    const item: InboxItem = { ...reply, suggestion_attempts: [{ version: 2, status: "failed", retryable: true,
+      text: "实际确认的修改稿", at: "2026-11-18T13:00:00Z", conversation: reply.suggestion!.conversation }] };
+    calls.items = [item];
+    const { reloadInbox } = await import("../../lib/inbox");
+    await act(async () => { await reloadInbox(); });
+    calls.suggestion = async () => { throw new TypeError("response lost"); };
+    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+    await press("重试");
+    expect(buttons()).not.toContain("重试");
+    expect(buttons()).not.toContain("发送");
+    expect(host.textContent).toContain("请先到原会话确认");
+    expect(host.querySelector("[data-suggestion-text]")?.textContent).toBe("实际确认的修改稿");
+  });
   it("calls the section Timeline in English", () => {
     expect(enInboxEvent.chain).toBe("Timeline");
   });
@@ -369,25 +423,47 @@ describe("收件箱事件：详情", () => {
     expect(host.querySelector("[data-event-say]")).toBeNull();
     expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["已交给 AI，等它重新出建议", "ok"]);
   });
-  it("再试一次 sends the localized default instruction at once when now says failed", async () => {
-    const item = { ...failed, handling: undefined, now: "failed" } as InboxItem;
-    calls.suggestion = () => Promise.resolve({ ...item, handling: { owner: "manager", state: "looking" } });
-    act(() => root.render(<EventBody item={item} onSource={() => {}} />));
+  it("retries failed handling on the item's manager and shows the accepted state", async () => {
+    const item: InboxItem = { ...plain(failed), manager: "m-work", now: "failed" };
+    const retried: InboxItem = { ...item, now: "looking", handling: { owner: "manager", state: "looking" } };
+    calls.items = [item];
+    const Detail = () => <InboxDetail item={useInbox((s) => s.items[0])} loaded />;
+    let resolveRetry!: (item: InboxItem) => void;
+    calls.retry = () => new Promise((resolve) => { resolveRetry = resolve; });
+    act(() => root.render(<Detail />));
+    await flush();
     expect(buttons()).toContain("再试一次");
     expect(buttons()).not.toContain("说一句");
     await press("再试一次");
-    await flush();
-    const sent = calls.list.find((c) => c.path.endsWith("/suggestion"));
-    expect(sent?.json).toMatchObject({ version: 0, action: "instruct", text: "请再试一次。" });
-    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["已交给 AI，等它重新出建议", "ok"]);
+    const button = host.querySelector<HTMLButtonElement>('[data-testid="inbox-retry"]')!;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    await act(async () => button.click());
+    expect(calls.list.filter((c) => c.method === "POST")).toEqual([
+      { path: "/inbox/lark:oc_demo6:600/retry", method: "POST", headers: { "X-Persona-Manager": "m-work" } },
+    ]);
+    await act(async () => resolveRetry(retried));
+    expect(host.querySelector('[data-event-handling="looking"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-retry"]')).toBeNull();
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["已请 AI 再试一次", "ok"]);
   });
-  it("a stale instruction refreshes the item and says why", async () => {
-    calls.suggestion = () => Promise.reject(new ApiError(409, "建议已更新", { code: "suggestion_stale" }));
+  it("a stale retry refreshes the item and says why", async () => {
+    calls.retry = () => Promise.reject(new ApiError(409, "这件事已经不需要重试", { code: "inbox_retry_stale" }));
     act(() => root.render(<EventBody item={failed} onSource={() => {}} />));
     await press("再试一次");
     await flush();
     expect(calls.list.some((c) => c.path.startsWith("/inbox?sources=all"))).toBe(true); // the list again, a delta when it can
-    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["建议已更新", "info"]);
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["这件事已经不需要重试", "info"]);
+  });
+  it("keeps a failed item retryable after a request failure and hides Retry for running and filed items", async () => {
+    act(() => root.render(<EventBody item={failed} onSource={() => {}} />));
+    await press("再试一次");
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="inbox-retry"]')?.disabled).toBe(false);
+    expect(vi.mocked(toast).mock.calls.at(-1)).toEqual(["无法重试：offline", "error"]);
+    act(() => root.render(<EventBody item={{ ...failed, now: "failed", handling: { owner: "manager", state: "looking" } }} onSource={() => {}} />));
+    expect(host.querySelector('[data-testid="inbox-retry"]')).toBeNull();
+    act(() => root.render(<EventBody item={{ ...failed, done_at: failed.updated_at }} onSource={() => {}} />));
+    expect(host.querySelector('[data-testid="inbox-retry"]')).toBeNull();
   });
   it("修改: edits the text and confirms it, or 说一句话 goes back as an instruction", async () => {
     act(() => root.render(<EventBody item={reply} onSource={() => {}} />));

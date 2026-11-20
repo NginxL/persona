@@ -21,12 +21,24 @@ const (
 	refusalStopPrompt = `{"type":"user","uuid":"u1","timestamp":"2026-01-01T12:00:00Z","isSidechain":false,"message":{"role":"user","content":"Sample request"}}`
 	refusalStopRow    = `{"type":"system","subtype":"model_refusal_no_fallback","uuid":"r1","parentUuid":"u1","timestamp":"2026-01-01T12:00:01Z","isSidechain":false,"trigger":"refusal","originalModel":"primary-model","apiRefusalCategory":"synthetic-policy","apiRefusalExplanation":"Upstream refused the request","refusedUserMessageUuid":"u1"}`
 	refusalStopText   = "API Error: Opus 5.5's safeguards flagged this message"
+	// The newer frontier refusal banner: it names no safeguard and asks for a new session. Its synthetic reply says
+	// refusal in stop_details instead of stop_reason.
+	refusalFrontierText = "API Error: Opus 5.5 can't help with this. Start a new session to continue."
 )
 
 func refusalStopReply(extra string) string {
+	return refusalReplyLine(extra, refusalStopText, `"stop_reason":"refusal",`)
+}
+
+func refusalFrontierReply(extra string) string {
+	return refusalReplyLine(extra, refusalFrontierText,
+		`"stop_reason":"end_turn","stop_details":{"type":"refusal","category":"frontier_llm","explanation":"Upstream refused the request"},`)
+}
+
+func refusalReplyLine(extra, text, stop string) string {
 	return `{"type":"assistant","uuid":"e","parentUuid":"r1","timestamp":"2026-01-01T12:00:02Z","isSidechain":false,` + extra +
-		`"message":{"id":"m-e","model":"<synthetic>","role":"assistant","stop_reason":"refusal","usage":{"input_tokens":0,"output_tokens":0},` +
-		`"content":[{"type":"text","text":"` + refusalStopText + `"}]}}`
+		`"message":{"id":"m-e","model":"<synthetic>","role":"assistant",` + stop +
+		`"usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
 // writeRefusalTranscript puts lines as conversation id's transcript on n.
@@ -43,16 +55,19 @@ func writeRefusalTranscript(t *testing.T, n *Node, id string, lines ...string) s
 func TestAssistantRecoversARefusalStopWithoutFallback(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
 	for _, tc := range []struct {
-		name, extra string
-		recorded    bool // the transcript gives the failed turn (assistantRecordKind), else the words decide
+		name, extra, text string
+		reply             func(string) string
+		recorded          bool // the transcript gives the failed turn (assistantRecordKind), else the words decide
 	}{
-		{"an API error record without a code", `"isApiErrorMessage":true,`, true},
-		{"an API error record with a request error", `"isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,`, true},
-		{"a plain synthetic reply", ``, false},
+		{"an API error record without a code", `"isApiErrorMessage":true,`, refusalStopText, refusalStopReply, true},
+		{"an API error record with a request error", `"isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,`, refusalStopText, refusalStopReply, true},
+		{"a plain synthetic reply", ``, refusalStopText, refusalStopReply, false},
+		{"the frontier banner", `"isApiErrorMessage":true,"error":"invalid_request","apiErrorStatus":400,`, refusalFrontierText, refusalFrontierReply, true},
+		{"the frontier banner, no record", ``, refusalFrontierText, refusalFrontierReply, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			n := assistantNode(t)
-			path := writeRefusalTranscript(t, n, id, refusalStopPrompt, refusalStopRow, refusalStopReply(tc.extra))
+			path := writeRefusalTranscript(t, n, id, refusalStopPrompt, refusalStopRow, tc.reply(tc.extra))
 			st, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -65,7 +80,7 @@ func TestAssistantRecoversARefusalStopWithoutFallback(t *testing.T) {
 			if slices.Contains(kinds, assistantRecordKind) != tc.recorded || len(kinds) > 0 && kinds[0] == proto.TurnErrorUsageLimit {
 				t.Fatalf("the refusal's record read as %v", kinds)
 			}
-			if !assistantRecoverable(true, refusalStopText, kinds) {
+			if !assistantRecoverable(true, tc.text, kinds) {
 				t.Fatalf("the refusal is not recovered (kinds %v)", kinds)
 			}
 		})
@@ -100,34 +115,44 @@ func TestAssistantLeavesAnUnservedFallbackToTheUser(t *testing.T) {
 // The whole step as the result handler takes it (assistant.go): the kinds read from the transcript, then the chain,
 // which moves a Claude safeguards refusal straight to the launcher's next model (#4283).
 func TestAssistantRefusalStopMovesToTheNextModel(t *testing.T) {
-	const id = "11111111-2222-3333-4444-555555555555"
-	models, send := assistantRecoveryModels, assistantRecoverySend
-	t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
-	assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
-		return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}, {ID: "fallback-model"}}}, nil
-	}
-	got := make(chan string, 1)
-	assistantRecoverySend = func(_ context.Context, _ *Node, _ *assistantProc, _, _ string, execution modelExecution) error {
-		got <- execution.Model
-		return nil
-	}
-	n := assistantNode(t)
-	writeRefusalTranscript(t, n, id, refusalStopPrompt, refusalStopRow, refusalStopReply(`"isApiErrorMessage":true,`))
-	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
-	n.procs[id] = p
-	kinds := n.claudeResultKinds(id)
-	if !slices.Contains(kinds, assistantRecordKind) {
-		t.Fatalf("the transcript's failed turn was not read: %v", kinds)
-	}
-	if !n.recoverAssistantResult(p, true, refusalStopText, kinds...) {
-		t.Fatal("the refusal stop was not recovered")
-	}
-	select {
-	case model := <-got:
-		if model != "fallback-model" {
-			t.Fatalf("recovery sent on %q, want the launcher's next model", model)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no recovery send")
+	for _, tc := range []struct {
+		name, text string
+		reply      func(string) string
+	}{
+		{"a safeguards refusal", refusalStopText, refusalStopReply},
+		{"the frontier banner", refusalFrontierText, refusalFrontierReply},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "11111111-2222-3333-4444-555555555555"
+			models, send := assistantRecoveryModels, assistantRecoverySend
+			t.Cleanup(func() { assistantRecoveryModels, assistantRecoverySend = models, send })
+			assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
+				return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}, {ID: "fallback-model"}}}, nil
+			}
+			got := make(chan string, 1)
+			assistantRecoverySend = func(_ context.Context, _ *Node, _ *assistantProc, _, _ string, execution modelExecution) error {
+				got <- execution.Model
+				return nil
+			}
+			n := assistantNode(t)
+			writeRefusalTranscript(t, n, id, refusalStopPrompt, refusalStopRow, tc.reply(`"isApiErrorMessage":true,`))
+			p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
+			n.procs[id] = p
+			kinds := n.claudeResultKinds(id)
+			if !slices.Contains(kinds, assistantRecordKind) {
+				t.Fatalf("the transcript's failed turn was not read: %v", kinds)
+			}
+			if !n.recoverAssistantResult(p, true, tc.text, kinds...) {
+				t.Fatal("the refusal stop was not recovered")
+			}
+			select {
+			case model := <-got:
+				if model != "fallback-model" {
+					t.Fatalf("recovery sent on %q, want the launcher's next model", model)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("no recovery send")
+			}
+		})
 	}
 }

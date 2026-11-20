@@ -18,6 +18,7 @@ vi.mock("../../lib/store", () => ({ useStore: (select: (s: { machines: []; featu
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 import { initI18n, t } from "../../i18n";
 import type { ModelBinding, ModelProvider, ModelPurpose } from "../../lib/model-config";
+import { effortTitle } from "../../lib/session-actions";
 import { ModelConfiguration } from "./ModelConfiguration";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,7 +27,7 @@ const providers: ModelProvider[] = [
   { id: "launcher.claude", name: "Claude Code", kind: "launcher", agent: "claude" },
   { id: "launcher.codex", name: "Codex", kind: "launcher", agent: "codex" },
   { id: "api.messages", name: "Messages gateway", kind: "api", api: "messages", model: "api-default", has_key: true },
-  { id: "api.chat", name: "Chat gateway", kind: "api", api: "chat", model: "chat-default", has_key: true },
+  { id: "api.chat", name: "Chat gateway", kind: "api", api: "chat", chat_effort: true, model: "chat-default", has_key: true },
 ];
 /** The catalog's names in the hub's language: the page's words take the category's name from there. */
 const NAMES: Record<string, Record<string, string>> = {
@@ -92,6 +93,9 @@ let catalogFails: boolean;
 /** Held answers: the next catalog GET's (read when it was asked), and each save's. */
 let catalogGate: Promise<void> | undefined;
 let patchGate: Promise<void> | undefined;
+let parentFailures: number;
+let parentGated: boolean;
+let parentReleases: (() => void)[];
 let patches: { path: string; body: Record<string, unknown> }[];
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 /** The paths the page asked the hub for, in order. */
@@ -122,7 +126,15 @@ const hub = async (input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     return json(body);
   }
   const listed = catalog().find((p) => path.endsWith(`/purposes/${p.id}`));
-  if (listed) return json({ purpose: listed, providers });
+  if (listed) {
+    if (listed.id === "kb" && parentFailures > 0) {
+      parentFailures--;
+      return json({ error: "parent busy" }, 503);
+    }
+    const response = json({ purpose: listed, providers });
+    if (listed.id === "kb" && parentGated) await new Promise<void>((resolve) => parentReleases.push(resolve));
+    return response;
+  }
   if (path.includes("/purposes/")) return json({ error: "not found" }, 404);
   if (path.endsWith("/models")) return lists && path.endsWith("/providers/launcher.claude/models") ? json(CLAUDE_MODELS) : json({ error: "unavailable" }, 404);
   throw new Error(`Unexpected request: ${path}`);
@@ -135,6 +147,8 @@ const row = (id: string) => host.querySelector<HTMLElement>(`[data-model-purpose
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
 const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll("button")].find((b) => b.textContent === label);
 const effort = () => dialog().querySelector<HTMLInputElement>('input[list="model-efforts"]');
+const effortSelect = () => [...dialog().querySelectorAll<HTMLSelectElement>("select")]
+  .find((node) => node.closest("label")?.querySelector("span")?.textContent === t("settings-modelconfiguration.effort"));
 const modelField = () => dialog().querySelector<HTMLInputElement>(`input[aria-label="${t("settings-modelconfiguration.specific_model")}"]`);
 /** The launcher list's picker (its trigger), and one of its rows. */
 const picker = () => dialog().querySelector<HTMLButtonElement>("button[aria-expanded]");
@@ -178,7 +192,16 @@ beforeEach(async () => {
   catalogFails = false;
   catalogGate = undefined;
   patchGate = undefined;
+  parentFailures = 0;
+  parentGated = false;
+  parentReleases = [];
   patches = [];
+  providers.length = 4;
+  Object.assign(KB, { provider: "api.messages", model: "kb-model" });
+  delete KB.effort;
+  providers[3].chat_effort = true;
+  providers[3].models = undefined;
+  providers[3].model_aliases = undefined;
   stored = {};
   follows("meeting.room", MAIN);
   follows("meeting.minutes", KB);
@@ -266,8 +289,175 @@ describe("the meeting uses' models (#7980)", () => {
     expect(effort()).not.toBeNull();
     await choose("api.chat");
     expect(effort()).toBeNull();
+    expect(effortSelect()).toBeDefined();
+    expect(dialog().textContent).not.toContain("Test connection");
     await choose("api.messages");
     expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeUndefined();
+  });
+
+  it("uses the selected Chat model's exact capabilities and saves only a supported effort", async () => {
+    providers[3].models = [
+      { id: "chat-exact", efforts: ["low"], all_efforts: ["none", "low"] },
+      { id: "chat-none", efforts: [], no_effort: true },
+    ];
+    setApart("meeting.minutes", { provider: "api.chat", model: "chat-exact" }, 4);
+    await render();
+    await open("meeting.minutes");
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual(["", "off", "low"]);
+    expect(effortSelect()!.disabled).toBe(false);
+    type(modelField()!, "chat-none");
+    await flush();
+    expect(effortSelect()!.disabled).toBe(true);
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual([""]);
+    type(modelField()!, "chat-exact");
+    await flush();
+    await act(async () => {
+      effortSelect()!.value = "low";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => button("Save", dialog())!.click());
+    await flush();
+    expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.minutes", body: { revision: 4, provider: "api.chat", model: "chat-exact", effort: "low" } }]);
+  });
+
+  it("uses the parent model and effort when an own record keeps the same Chat provider", async () => {
+    Object.assign(KB, { provider: "api.chat", model: "parent-model", effort: "high" });
+    providers[3].models = [
+      { id: "parent-model", efforts: ["low"], all_efforts: ["none", "low"] },
+      { id: "chat-default", efforts: ["high"], all_efforts: ["none", "high"] },
+    ];
+    stored["meeting.minutes"] = {
+      override: { provider: "api.chat", effort: "low" },
+      effective: { provider: "api.chat", model: "parent-model", effort: "low" },
+      revision: 4, fields,
+    };
+    await render();
+    await open("meeting.minutes");
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual(["", "off", "low"]);
+    await act(async () => {
+      effortSelect()!.value = "";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(effortSelect()!.options[0].textContent).toBe(t("settings-modelconfiguration.api_effort_inherit", { effort: effortTitle("high") }));
+  });
+
+  it("uses effective inheritance for a same-provider Chat record when the catalog is unavailable", async () => {
+    catalogFails = true;
+    Object.assign(KB, { provider: "api.chat", model: "parent-model", effort: "high" });
+    providers[3].models = [
+      { id: "parent-model", efforts: ["low"], all_efforts: ["none", "low"] },
+      { id: "chat-default", efforts: ["high"], all_efforts: ["none", "high"] },
+    ];
+    stored["meeting.minutes"] = {
+      override: { provider: "api.chat" },
+      effective: { provider: "api.chat", model: "parent-model", effort: "high" },
+      revision: 4, fields,
+    };
+    await render("meeting.minutes");
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual(["", "off", "low"]);
+    expect(effortSelect()!.options[0].textContent).toBe(t("settings-modelconfiguration.api_effort_inherit", { effort: effortTitle("high") }));
+    await act(async () => {
+      effortSelect()!.value = "low";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => button("Save", dialog())!.click());
+    await flush();
+    expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.minutes", body: { revision: 4, provider: "api.chat", model: null, effort: "low" } }]);
+  });
+
+  it("uses the linked parent after clearing a model override without the catalog", async () => {
+    catalogFails = true;
+    Object.assign(KB, { provider: "api.chat", model: "parent-model", effort: "high" });
+    providers[3].models = [
+      { id: "parent-model", efforts: ["low"], all_efforts: ["none", "low"] },
+      { id: "child-model", efforts: ["high"], all_efforts: ["none", "high"] },
+      { id: "chat-default", efforts: ["high"], all_efforts: ["none", "high"] },
+    ];
+    setApart("meeting.minutes", { model: "child-model" }, 4);
+    await render("meeting.minutes");
+    expect(requested()).toContain("/api/v1/model-config/purposes/kb");
+    type(modelField()!, "");
+    await flush();
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual(["", "off", "low"]);
+    await act(async () => {
+      effortSelect()!.value = "low";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => button("Save", dialog())!.click());
+    await flush();
+    expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.minutes", body: { revision: 4, provider: null, model: null, effort: "low" } }]);
+  });
+
+  it("ignores an older retry after the newest linked parent loads", async () => {
+    catalogFails = true;
+    parentFailures = 1;
+    parentGated = true;
+    Object.assign(KB, { provider: "api.chat", model: "old-parent", effort: "high" });
+    providers[3].models = [
+      { id: "old-parent", efforts: ["low"], all_efforts: ["none", "low"] },
+      { id: "new-parent", efforts: ["medium"], all_efforts: ["none", "medium"] },
+      { id: "child-model", efforts: ["high"], all_efforts: ["none", "high"] },
+      { id: "chat-default", efforts: ["high"], all_efforts: ["none", "high"] },
+    ];
+    setApart("meeting.minutes", { model: "child-model" }, 4);
+    await render("meeting.minutes");
+    expect(button("Retry", dialog())).toBeDefined();
+    await act(async () => button("Retry", dialog())!.click());
+    await flush();
+    expect(parentReleases).toHaveLength(1);
+    KB.model = "new-parent";
+    await act(async () => button("Retry", dialog())!.click());
+    await flush();
+    expect(parentReleases).toHaveLength(2);
+    await act(async () => parentReleases[1]());
+    await flush();
+    await act(async () => parentReleases[0]());
+    await flush();
+    type(modelField()!, "");
+    await flush();
+    expect([...effortSelect()!.options].map((option) => option.value)).toEqual(["", "off", "medium"]);
+    await act(async () => {
+      effortSelect()!.value = "medium";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => button("Save", dialog())!.click());
+    await flush();
+    expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.minutes", body: { revision: 4, provider: null, model: null, effort: "medium" } }]);
+  });
+
+  it("keeps Chat effort when an older hub's explicit Chat binding switches to another Chat provider", async () => {
+    delete providers[3].chat_effort;
+    providers.push({ id: "api.chat-b", name: "Chat B", kind: "api", api: "chat", model: "chat-b-default", has_key: true });
+    setApart("meeting.minutes", { provider: "api.chat", model: "chat-a", effort: "low" }, 4);
+    await render();
+    await open("meeting.minutes");
+    await choose("api.chat-b");
+    expect(effortSelect()).toBeDefined();
+  });
+
+  it("restores Messages effort from another provider's current-hub mark when the effective provider is missing", async () => {
+    stored["meeting.minutes"] = {
+      override: {}, effective: { provider: "api.missing" }, revision: 4, fields: ["provider", "model"],
+    };
+    await render();
+    await open("meeting.minutes");
+    await choose("api.messages");
+    expect(effort()).not.toBeNull();
+  });
+
+  it("the minutes' editor hides and omits Chat effort after a Messages switch on an older hub", async () => {
+    delete providers[3].chat_effort;
+    setApart("meeting.minutes", { provider: "api.messages", model: "api-model" }, 4);
+    await render();
+    await open("meeting.minutes");
+    expect(effort()).not.toBeNull();
+    await choose("api.chat");
+    expect(effort()).toBeNull();
+    type(modelField()!, "chat-model");
+    await act(async () => button("Save", dialog())!.click());
+    await flush();
+    expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.minutes", body: { revision: 4, provider: "api.chat", model: "chat-model" } }]);
   });
 
   it.each([
@@ -351,8 +541,9 @@ describe("the meeting uses' models (#7980)", () => {
     expect(row("meeting.room").textContent).toContain("Follows Main chat");
   });
 
-  it("the minutes on a Chat Completions connection offer effort again once the draft runs on one that takes it", async () => {
-    // the hub lists no effort while they run on a Chat Completions connection
+  it("the minutes on an older hub's Chat Completions connection offer effort again once the draft runs on one that takes it", async () => {
+    // an older hub lists no effort while they run on a Chat Completions connection
+    delete providers[3].chat_effort;
     setApart("meeting.minutes", { provider: "api.chat", model: "chat-model" }, 4, ["provider", "model"]);
     await render();
     await open("meeting.minutes");

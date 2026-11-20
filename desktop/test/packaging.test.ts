@@ -8,8 +8,14 @@ interface Protocol {
   readonly schemes?: string[];
 }
 
+interface MacConfiguration {
+  readonly minimumSystemVersion?: string;
+}
+
 interface BuilderConfiguration {
   readonly extends?: string;
+  readonly afterPack?: string;
+  readonly mac?: MacConfiguration;
   readonly protocols?: Protocol[] | null;
 }
 
@@ -24,6 +30,12 @@ function protocols(file: string): Protocol[] {
   if (Object.hasOwn(config, "protocols")) return config.protocols ?? [];
   return config.extends ? protocols(resolve(dirname(file), config.extends)) : [];
 }
+
+test("macOS packages declare an explicit macOS 15.0 minimum", () => {
+  const config = load(readFileSync(join(root, "electron-builder.yml"), "utf8"));
+  assert.equal(config.mac?.minimumSystemVersion, "15.0");
+  assert.equal(config.afterPack, "./scripts/macos-after-pack.cjs");
+});
 
 test("release, unsigned and test packages register the persona URL scheme", async t => {
   for (const name of ["electron-builder.yml", "electron-builder.unsigned.yml", "electron-builder.update-test.yml"]) {

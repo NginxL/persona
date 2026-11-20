@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_held_composer">%1$s 已离线，上线后会发送。</string>
+    <string name="chat_held_computer_offline">%1$s 已离线。</string>
+    <string name="chat_held_waiting">%1$s 上线后会发送</string>
+    <string name="chat_held_unconfirmed">未能确认是否送达</string>
+    <string name="chat_held_remove_title">从待发送队列中移除这条消息？</string>
+    <string name="chat_held_remove_detail">所有设备上的待发送副本都会移除。已经送达的消息会保留在聊天中。</string>
+    <plurals name="chat_held_images">
+        <item quantity="other">%1$d 张图片</item>
+    </plurals>
+</resources>

@@ -489,6 +489,7 @@ class ScopedHubData internal constructor(
     val imageCacheDirectory: File get() = directory(cacheDirectory, "images")
     val inboxMediaDirectory: File get() = directory(cacheDirectory, "inbox-media")
     val listPreferences: DataStore<Preferences> by lazy { preferences("lists") }
+    val heldRetryPreferences: DataStore<Preferences> by lazy { preferences("held-retries") }
     val readingPositions: DataStore<Preferences> by lazy { preferences("reading") }
     val backgroundChecks: DataStore<Preferences> by lazy { preferences("background-checks") }
     val operations = OneShotOperationJournal(File(noBackupDirectory, "operations"), scope)

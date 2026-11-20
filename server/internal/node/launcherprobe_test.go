@@ -101,7 +101,7 @@ func TestProbeVariablesAroundAHelper(t *testing.T) {
 	if d.ContextWindow != 1000000 {
 		t.Errorf("window %d", d.ContextWindow)
 	}
-	if v, _ := env(d, "ANTHROPIC_CUSTOM_HEADERS"); v != "x-source: dogfood" {
+	if v, _ := env(d, "ANTHROPIC_CUSTOM_HEADERS"); v != "x-source: •••" {
 		t.Errorf("custom headers %q (%v)", v, d.Env)
 	}
 }

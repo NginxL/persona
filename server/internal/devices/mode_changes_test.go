@@ -129,6 +129,40 @@ func TestModeChangesAreRecorded(t *testing.T) {
 	}
 }
 
+// A pick of the mode the session runs in already changed nothing: no set row, from a node that says how it took effect
+// or an older one. When it called off a restart that waited, the node's event is the one row, with its code (#11089).
+func TestPickOfTheModeItRunsInIsNotAChange(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	var mu sync.Mutex
+	answer := map[string]any{"ok": true, "applied": "now"}
+	m := modesMachine(t, d, func() (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return answer, nil
+	})
+	phone := &devicewire.Actor{Kind: "device", DeviceID: "d1", DeviceName: "Phone"}
+	if err := modesCall(d, `{"session_id":"s1","permission_mode":"acceptEdits"}`, phone); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	answer = map[string]any{"ok": true} // an older node
+	mu.Unlock()
+	if err := modesCall(d, `{"session_id":"s1","permission_mode":"acceptEdits"}`, phone); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.recorded(); len(got) != 0 {
+		t.Fatalf("a pick of the mode it runs in was recorded: %+v", got)
+	}
+	b, _ := json.Marshal(proto.ModeRestartEvent{SessionID: "s1", Mode: "bypassPermissions", Outcome: proto.ModeRestartDropped,
+		Reason: proto.ModeRestartReasonCancelled})
+	m.onEvent(proto.EventModeRestart, b)
+	if got := st.recorded(); len(got) != 1 || got[0].Kind != db.ModeChangeRestartDropped || got[0].Reason != proto.ModeRestartReasonCancelled {
+		t.Errorf("rows = %+v", got)
+	}
+}
+
 // What became of a queued restart is kept with the session's changes and goes no further than the manager.
 func TestModeRestartOutcomeIsRecordedAndKept(t *testing.T) {
 	d := newTestDevices(t)
@@ -182,5 +216,58 @@ func TestModeChangesRoute(t *testing.T) {
 	}
 	if code, out := clipCall(t, mux, "GET", "/api/v1/sessions/mac/other/mode-changes", "", "full"); code != http.StatusOK || len(out["changes"].([]any)) != 0 {
 		t.Errorf("another session: %d %v", code, out)
+	}
+}
+
+func TestInternalModeChangeProvenance(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	var refuse error
+	modesMachine(t, d, func() (any, error) { return map[string]any{"applied": "now"}, refuse })
+	ctx := devicewire.WithModeActor(context.Background(), devicewire.AssistantModeActor())
+	call := func(ctx context.Context, p string) error {
+		_, err := d.CallNode(ctx, "mac", "session.modes", json.RawMessage(p))
+		return err
+	}
+	if err := call(ctx, `{"session_id":"s1","permission_mode":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
+	rows := st.recorded()
+	if len(rows) != 1 || rows[0].ActorKind != "assistant" || rows[0].DeviceName != "Persona" || rows[0].From != "acceptEdits" || rows[0].To != "plan" || rows[0].Applied != "now" {
+		t.Fatalf("assistant record: %+v", rows)
+	}
+	if err := call(ctx, `{"session_id":"s1","effort":"high"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := call(context.Background(), `{"session_id":"s1","permission_mode":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
+	refuse = &rpc.Error{Code: "refused", Message: "not applied"}
+	if err := call(ctx, `{"session_id":"s1","permission_mode":"plan"}`); err == nil {
+		t.Fatal("expected refusal")
+	}
+	if rows := st.recorded(); len(rows) != 1 {
+		t.Fatalf("non-changes recorded: %+v", rows)
+	}
+}
+
+func TestPlanModeEventRecordsActualChoice(t *testing.T) {
+	d := newTestDevices(t)
+	st := &modeChangesStore{memStore: newMemStore()}
+	d.opts.Store = st
+	m := modesMachine(t, d, func() (any, error) { return map[string]any{}, nil })
+	e := proto.ModeSetEvent{SessionID: "s1", From: "plan", To: "acceptEdits", Actor: &proto.ModeActor{Kind: "device", DeviceID: "d1", DeviceName: "Phone"}}
+	raw, _ := json.Marshal(e)
+	m.onEvent(proto.EventModeSet, raw)
+	rows := st.recorded()
+	if len(rows) != 1 || rows[0].From != "plan" || rows[0].To != "acceptEdits" || rows[0].DeviceID != "d1" || rows[0].DeviceName != "Phone" || rows[0].Applied != "" {
+		t.Fatalf("plan record: %+v", rows)
+	}
+	e.Actor = nil
+	raw, _ = json.Marshal(e)
+	m.onEvent(proto.EventModeSet, raw)
+	if len(st.recorded()) != 1 {
+		t.Fatal("legacy or unattributed event was recorded")
 	}
 }

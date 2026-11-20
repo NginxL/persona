@@ -99,16 +99,15 @@ function taskLine(n: GraphNode, machines: Machine[]): string {
   return [task.launcher ? agentName(task.launcher) : "", task.model ? modelLabel(task.model) : "", task.effort ? effortLabel(task.effort) : "", task.machine ? machineWithHub(task.machine, machines) : ""].filter(Boolean).join(" · ");
 }
 
-const names = (list: (GraphNode | undefined)[]) => list.map((n) => n?.title ?? "").filter(Boolean).join(t("request-graph.list_sep"));
+const names = (list: { title: string }[]) => list.map((item) => item.title).filter(Boolean).join(t("request-graph.list_sep"));
 
 /** The line beside a piece's tag: how long it works, what it waits for, what it asks, why it did not start. */
-function detail(n: GraphNode, req: GraphRequest, now: number): string {
-  const byKey = new Map(req.nodes.map((x) => [x.key, x]));
-  switch (n.state) {
-    case "queued": return n.waitsStart ? t("request-graph.waits_start") : t("request-graph.waits_for", { names: names(n.waitsFor.map((k) => byKey.get(k))) });
-    case "working": return n.since !== undefined ? shortDuration(Math.max(0, now - n.since)) : "";
-    case "needs_you": case "failed": case "review": return n.ask;
-    case "done": return n.todo?.done_at ? clock(n.todo.done_at) : "";
+function detail(node: GraphNode, now: number): string {
+  switch (node.state) {
+    case "queued": return node.waitsStart ? t("request-graph.waits_start") : t("request-graph.waits_for", { names: names(node.waitsFor) });
+    case "working": return node.since !== undefined ? shortDuration(Math.max(0, now - node.since)) : "";
+    case "needs_you": case "failed": case "review": return node.ask;
+    case "done": return node.todo?.done_at ? clock(node.todo.done_at) : "";
     default: return "";
   }
 }
@@ -301,7 +300,7 @@ function NodeCard({ node, req, at, shared, dim, lit, selected, onHot }: {
   onHot: (key: string | null) => void;
 }) {
   const { machines, now, tips, onOpenTodo } = shared;
-  const line = detail(node, req, now);
+  const line = detail(node, now);
   const current = node.agents.filter((a) => a.role !== "before");
   const lead = current[0];
   const queued = node.state === "queued";
@@ -502,8 +501,12 @@ const ROLE_KEY: Record<NodeAgent["role"], string> = {
 
 function NodeTip({ node, req, machines, now }: { node: GraphNode; req: GraphRequest; machines: Machine[]; now: number }) {
   const byKey = new Map(req.nodes.map((x) => [x.key, x]));
-  const line = detail(node, req, now);
-  const waits = node.after.map((k) => byKey.get(k)).filter((x): x is GraphNode => Boolean(x));
+  const line = detail(node, now);
+  const strictWaits = node.todo?.prerequisite_blockers !== undefined && (node.state === "queued" || node.state === "ready");
+  const waits = strictWaits ? node.waitsFor.map((wait) => ({ ...wait, piece: undefined })) : node.after.map((key) => {
+    const piece = byKey.get(key)!;
+    return { key, title: piece.title, piece };
+  });
   return (
     <>
       <p className="font-medium break-words">{node.title}</p>
@@ -517,11 +520,11 @@ function NodeTip({ node, req, machines, now }: { node: GraphNode; req: GraphRequ
         <div>
           <p className="text-xs text-tooltip-muted">{t("request-graph.tip_after")}</p>
           <ul className="space-y-0.5">
-            {waits.map((w) => (
-              <li key={w.key} className="flex items-center gap-1.5 text-xs">
-                {w.state === "done" ? <Icon name="check" size={11} className="shrink-0" /> : <span aria-hidden className="size-1.5 shrink-0 rounded-full border border-current" />}
-                <span className="min-w-0 break-words">{w.title}</span>
-                <span className="shrink-0 text-tooltip-muted">· {stateWord(w)}</span>
+            {waits.map(({ key, title, piece }) => (
+              <li key={key} className="flex items-center gap-1.5 text-xs">
+                {piece?.state === "done" ? <Icon name="check" size={11} className="shrink-0" /> : <span aria-hidden className="size-1.5 shrink-0 rounded-full border border-current" />}
+                <span className="min-w-0 break-words">{title}</span>
+                {piece && <span className="shrink-0 text-tooltip-muted">· {stateWord(piece)}</span>}
               </li>
             ))}
           </ul>

@@ -96,12 +96,19 @@ import Observation
             }, hintWindow: HintWindow(length: { [weak self] in self?.hintWindowLength ?? .zero }))
         list.changed = { [weak model, weak list] rows in
             guard let model, let list else { return }
-            if list.paged { model.landSessionSummaries(rows, group: group) }
-            else {
+            if list.paged {
+                model.landSessionSummaries(rows, group: group)
+                model.keepSeen(in: list)
+            } else {
                 // The query's manager filter (empty: every manager). A held other-manager chat is kept only when this
                 // landing filtered it out (#8748); an unfiltered landing still drops a missing row.
                 let filter = list.query.manager.isEmpty ? nil : list.query.manager
                 model.landCompleteSessionList(rows, group: group, manager: filter)
+                // A complete copy from a hub that leaves hidden sessions out stands for its list like a page (nil from
+                // an older hub); a card's session it does not hold is looked up.
+                model.rememberListedRows(group)
+                model.lookUpCardSessions()
+                model.countBadges()
             }
             // Whether the list is a window or the whole collection decides where the switcher's counts come from.
             if group == model.hub?.group { model.followNeedsYou() }
@@ -128,6 +135,16 @@ import Observation
 
     func isPaged(_ group: String) -> Bool { lists[group]?.paged == true }
 
+    /// The current windows draw their own rows. An offline mark must reach them as well as the session index.
+    func markSeen(_ keys: [SessionKey], model: AppModel) {
+        guard !lists.isEmpty else { return }
+        for group in Set(keys.lazy.map(\.group)) {
+            guard let list = lists[group], list.paged else { continue }
+            model.keepSeen(in: list)
+            for (scope, page) in sections where scope.hub == group { model.keepSeen(in: page) }
+        }
+    }
+
     private var visibleLists: [SessionListModel<Session>] {
         guard let model else { return [] }
         let groups = Set(model.groupIDs)
@@ -150,7 +167,7 @@ import Observation
         guard let model else { return [] }
         let query = selected
         return model.scoped(model.allSessions).filter { row in
-            row.group == group && !row.assistant && (query.machine.isEmpty || row.machineID == query.machine) &&
+            row.group == group && !row.assistant && (query.includeHidden || row.hiddenByDirectory != true) && (query.machine.isEmpty || row.machineID == query.machine) &&
                 (query.text.isEmpty || [row.title, row.cwd, row.lastText ?? "", row.spaceName ?? "", row.slotName ?? ""]
                     .contains { $0.localizedCaseInsensitiveContains(query.text) })
         }
@@ -219,8 +236,12 @@ import Observation
                 guard let link else { throw CancellationError() }
                 return try await link.api.sessionListCounts(query)
             }, hintWindow: HintWindow(length: { [weak self] in self?.hintWindowLength ?? .zero }))
-        page.changed = { [weak model] rows in model?.landSessionSummaries(rows, group: scope.hub) }
-        page.outside = page.changed
+        page.changed = { [weak model, weak page] rows in
+            guard let model, let page else { return }
+            model.landSessionSummaries(rows, group: scope.hub)
+            model.keepSeen(in: page)
+        }
+        page.outside = { [weak model] rows in model?.landSessionSummaries(rows, group: scope.hub) }
         sections[scope] = page
         await page.select(scope.query)
     }
@@ -286,6 +307,7 @@ import Observation
         sections = [:]
         aggregates = [:]
         bases = [:]
+        model?.forgetListedRows() // an older pairing's or query's rows are no hub's list any more
         model = nil
     }
 }
@@ -298,7 +320,15 @@ extension AppModel {
         let old = allSessions.filter { $0.group == group }
         let index = Dictionary(old.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         let incoming = rows.map { $0.preservingDetails(from: index[$0.key]) }
-        applySessions(Dictionary(grouping: Self.merging(incoming, into: old), by: \.machineRef))
+        if heldRetryRestoration != nil || !heldRetryReceipts.isEmpty {
+            reconcileHeldRetries(Dictionary(grouping: rows.filter { $0.undelivered != nil }, by: \.machineRef))
+        }
+        applySessions(Dictionary(grouping: Self.merging(incoming, into: old), by: \.machineRef), complete: false)
+        // The lists' rows changed: a pending card's session they no longer hold is looked up (hidden, or off the page),
+        // and the counts read the cards again.
+        rememberListedRows(group)
+        lookUpCardSessions()
+        countBadges()
     }
 
     /// `old` with each row `incoming` has replaced where it is (one copy), then the rows it did not have, in their order.
@@ -330,11 +360,16 @@ extension Session {
         row.background = old.background
         row.subagents = old.subagents
         row.workflows = old.workflows
+        if !row.assistant, row.undelivered == nil { row.undelivered = old.undelivered }
         row.queued = old.queued
         row.ports = old.ports
         row.permissionMode = old.permissionMode
-        row.effort = old.effort
+        row.bypassAvailable = old.bypassAvailable
+        // The pending choice and the confirmed effort come from the same session snapshot.
+        if row.pendingEffort == nil && old.pendingEffort == nil, row.effort == nil { row.effort = old.effort }
         row.efforts = old.efforts
+        row.serviceTier = old.serviceTier
+        row.serviceTiers = old.serviceTiers
         row.ultracode = old.ultracode
         row.launcher = old.launcher
         row.suggestion = old.suggestion

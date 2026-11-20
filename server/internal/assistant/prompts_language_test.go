@@ -69,6 +69,11 @@ func TestGoldenInboxGroupLanguage(t *testing.T) {
 			continue
 		}
 		golden(t, "inbox_group.first.system."+locale, calls[0].System)
+		golden(t, "inbox_group.first.user."+locale, calls[0].User)
+		if len(calls) != 2 {
+			t.Fatalf("%s: %d grouping calls", locale, len(calls))
+		}
+		golden(t, "inbox_group.after_tool.user."+locale, calls[1].User)
 	}
 }
 

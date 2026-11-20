@@ -1,0 +1,4 @@
+{
+  "unverified_after_paste": "The text was pasted, but the Agent could not be verified. It was not submitted: {reason}",
+  "changed_after_paste": "The Agent changed or opened a dialog after the text was pasted. The text was not submitted."
+}

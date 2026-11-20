@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -29,13 +28,14 @@ func (s *Service) closeoutCheck(ctx context.Context, machine string, p assistant
 	if c, ok := s.session(ctx, machine, p.SessionID); ok && c.Assistant {
 		return out
 	}
-	out.Reason = renderCloseoutRequired(answerLanguage(s.hello(ctx).Locale))
+	language := answerLanguage(s.hello(ctx).Locale)
+	out.Reason = renderCloseoutRequired(language, s.closeoutForm(machine, language))
 	s.workEvent(machine, p.SessionID, "closeout_asked", nil)
 	return out
 }
 
-func renderCloseoutRequired(language string) string {
-	return prompts.RenderAgentCloseoutRequired(prompts.AgentCloseoutRequired{Form: closeout.Example, Language: language})
+func renderCloseoutRequired(language, form string) string {
+	return prompts.RenderAgentCloseoutRequired(prompts.AgentCloseoutRequired{Form: form, Language: language})
 }
 
 // closeoutDone is the work state of a turn whose closeout says done: no model is asked. The line is the first thing
@@ -92,17 +92,26 @@ func (s *Service) checkCloseout(ctx context.Context, c *proto.Closeout, artifact
 func closeoutChecked(r deployResult) *proto.CloseoutChecked {
 	switch r.State {
 	case deployIn:
-		return &proto.CloseoutChecked{Merged: proto.CloseoutYes, Deployed: proto.CloseoutYes}
+		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutYes, LocalDeployment: r.Receipt != "" && r.Receipt != r.Merge}
+		if r.Merge != "" {
+			checked.Merged = proto.CloseoutYes
+		} else if r.NotMerged {
+			checked.Merged = proto.CloseoutNo
+		}
+		return checked
 	case deployOut:
 		return &proto.CloseoutChecked{Merged: proto.CloseoutYes, Deployed: proto.CloseoutNo}
 	case deployUnmerged:
 		return &proto.CloseoutChecked{Merged: proto.CloseoutNo, Deployed: proto.CloseoutNo}
 	case deployNotIn:
-		return &proto.CloseoutChecked{Deployed: proto.CloseoutNo}
-	case deployUnverified:
-		if r.Merge != "" { // merged, in a repository the running hub is not built from
-			return &proto.CloseoutChecked{Merged: proto.CloseoutYes}
+		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutNo}
+		if r.Merge != "" {
+			checked.Merged = proto.CloseoutYes
 		}
+		return checked
+	}
+	if r.Merge != "" {
+		return &proto.CloseoutChecked{Merged: proto.CloseoutYes} // upstream merge was found, deployment could not be checked
 	}
 	return nil
 }
@@ -118,6 +127,8 @@ func closeoutDisproved(c proto.Closeout) bool {
 // the same claim in the other form. ok false when the closeout says nothing of merging or deploying and is not done.
 func closeoutDelivery(c proto.Closeout, artifacts []proto.WorkArtifact) (d TodoDelivery, ok bool) {
 	switch {
+	case c.Delivery == deliveryLive || c.Delivery == deliveryPR || c.Delivery == deliveryMerged || c.Delivery == deliveryOff || c.Delivery == deliveryNone:
+		d.State = c.Delivery
 	case c.Deployed == proto.CloseoutYes:
 		d.State = deliveryLive
 	case c.Merged == proto.CloseoutYes:
@@ -131,6 +142,10 @@ func closeoutDelivery(c proto.Closeout, artifacts []proto.WorkArtifact) (d TodoD
 	}
 	if d.State != deliveryLive && d.State != deliveryNone {
 		d.Gate = cmpOr(c.Missing, c.Waiting)
+		d.Unblock = c.Unblock
+		if d.Unblock == "" && (externalDeliveryWait.MatchString(d.Gate) || externalDeliveryWait.MatchString(c.Waiting)) {
+			d.Unblock = unblockOther
+		}
 	}
 	return d, true
 }

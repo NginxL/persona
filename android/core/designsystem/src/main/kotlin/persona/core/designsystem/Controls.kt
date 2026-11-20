@@ -5,6 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale as scaleDraw
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -202,6 +204,7 @@ fun JTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
  * Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square).
  * [badge] is the needs-you dot at the top end; [count], when above 0, a neutral count capsule at the bottom end (how many
  * a control holds, never how many need the user: that is [JBadge]'s, in the needs-you color).
+ * Adjacent home actions can opt out of [expandOnHomePress] to keep the pressed circle clear of its neighbor.
  */
 @Composable
 fun JIconButton(
@@ -215,13 +218,14 @@ fun JIconButton(
     badge: Boolean = false,
     selected: Boolean = false,
     count: Int = 0,
+    expandOnHomePress: Boolean = true,
 ) {
-    if (count <= 0) JIconButtonBox(icon, contentDescription, onClick, modifier, enabled, raised, tint, badge, selected)
+    if (count <= 0) JIconButtonBox(icon, contentDescription, onClick, modifier, enabled, raised, tint, badge, selected, expandOnHomePress)
     else Box(modifier) {
         // The circle clips the button's ripple; the capsule hangs over its edge, so it sits outside that clip.
         val palette = PersonaTheme.palette
         val label = if (count > 99) "99+" else "$count"
-        JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled, raised, tint, badge, selected)
+        JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled, raised, tint, badge, selected, expandOnHomePress)
         Text(label, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold),
             color = palette.ink2, maxLines = 1,
             modifier = Modifier.align(Alignment.BottomEnd).clearAndSetSemantics {}.stableAlpha(if (enabled) 1f else 0.4f)
@@ -233,19 +237,39 @@ fun JIconButton(
 @Composable
 private fun JIconButtonBox(
     icon: PhIcon, contentDescription: String?, onClick: () -> Unit, modifier: Modifier, enabled: Boolean, raised: Boolean,
-    tint: Color?, badge: Boolean, selected: Boolean,
+    tint: Color?, badge: Boolean, selected: Boolean, expandOnHomePress: Boolean,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val color = tint ?: palette.ink
+    val homeAction = raised && style == AppStyle.Glass && LocalHomeNavigationActions.current
+    val interactive = homeAction && enabled && LocalGlassSource.current != null &&
+        PersonaTheme.glass == GlassLevel.Liquid && !PersonaTheme.reduceMotion
+    val pressSource = if (interactive) remember { MutableInteractionSource() } else null
+    val feedback = if (pressSource != null) {
+        val pressed by pressSource.collectIsPressedAsState()
+        val progress = animateFloatAsState(if (pressed) 1f else 0f, PersonaTheme.motion.enter(), label = "home action press")
+        val growth = if (expandOnHomePress) HomeTokens.actionPressScale - 1f else 0f
+        // Draw outside the resting circle. The hit target and Haze capture keep their original coordinates.
+        Modifier.graphicsLayer().drawWithContent {
+            val fraction = progress.value.coerceIn(0f, 1f)
+            if (fraction == 0f) drawContent()
+            else scaleDraw(1f + growth * fraction) {
+                this@drawWithContent.drawContent()
+                drawCircle(Color.White, alpha = HomeTokens.actionPressVeil * fraction)
+            }
+        }
+    } else Modifier
     val surface = when {
         !raised -> Modifier
+        homeAction -> Modifier.size(Tokens.MinTouch.android).then(feedback).homeNavigationGlassSurface(interactive)
         style == AppStyle.Glass -> Modifier.size(44.dp).floatingSurface(CircleShape)
         style == AppStyle.Brief -> Modifier.size(42.dp).clip(CircleShape).background(palette.surface)
         else -> Modifier.size(40.dp).clip(RoundedCornerShape(8.dp.corner)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp.corner))
     }
     Box(
-        modifier.size(48.dp).clip(CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        modifier.size(48.dp).then(if (interactive && expandOnHomePress) Modifier else Modifier.clip(CircleShape))
+            .clickable(interactionSource = pressSource, indication = LocalIndication.current, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
             .stableAlpha(if (enabled) 1f else 0.4f),
         contentAlignment = Alignment.Center,
@@ -754,6 +778,8 @@ fun JChip(
     /** The [count] in a capsule of this state's colours ([JToneCount]: none at 0, 99+ past 99), spoken with the text
      *  ("Needs you, 12"): the Inbox's section bar (#9053). None: quiet digits, as before. */
     countTone: Status? = null,
+    /** Gives a standalone chip an opaque surface using its usual style colors. */
+    opaque: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
@@ -771,7 +797,8 @@ fun JChip(
     Row(
         modifier.heightIn(min = if (tall) JChipTokens.height else JChipTokens.quietHeight)
             .then(if (tall) Modifier.minimumInteractiveComponentSize() else Modifier)
-            .clip(shape).background(fill).border(JChipTokens.border, border, shape)
+            .clip(shape).background(if (opaque) fill.compositeOn(palette.surfaceOpaque) else fill)
+            .border(JChipTokens.border, border, shape)
             .then(when {
                 onClick != null && onLongClick != null ->
                     Modifier.combinedClickable(role = role, onClick = onClick, onLongClick = onLongClick)

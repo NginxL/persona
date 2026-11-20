@@ -35,9 +35,9 @@ The table below is for Orca; where the herdr engine differs is in the table in t
 
 ## Install and start at logon
 
-Releases publish `persona-link-windows-amd64.exe.gz` and `persona-link-windows-arm64.exe.gz` on [GitHub](https://github.com/nwverse/persona/releases/latest). They are single executables compressed with gzip, not ZIP archives. The POSIX `install.sh` is for Linux and macOS, not Windows; use PowerShell on Windows.
+Releases publish `persona-link-windows-amd64.exe.gz` and `persona-link-windows-arm64.exe.gz` on [GitHub](https://github.com/nwverse/persona/releases/latest), together with `personad-windows-<arch>.exe.gz` and `persona-node-windows-<arch>.exe.gz` for the resident node. They are single executables compressed with gzip, not ZIP archives. The POSIX `install.sh` is for Linux and macOS, not Windows; use PowerShell on Windows.
 
-The following downloads the matching architecture, verifies the archive against the release's `SHA256SUMS`, and expands it. It installs only the connector: a computer that should also run Agents needs a resident node, which can be built from source as shown below. Windows `personad` / `persona-node` release assets and their release-feed packages are outside the connector release.
+The following downloads the matching architecture, verifies the archive against the release's `SHA256SUMS`, and expands it. For a computer that runs Agents, repeat the download and decompression with `personad-windows-$arch.exe.gz` (or `persona-node-windows-$arch.exe.gz` for the device's own program), then pass the resulting `personad.exe` to the install command below. `personad` is the full resident-node program, not a native Windows hub.
 
 ```powershell
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
@@ -62,6 +62,7 @@ try {
 } finally { $input.Dispose() }
 
 & "$dir\$name" version
+& "$dir\$name" version -v
 & "$dir\$name" install --no-node --pair '<the persona://link?… link from the hub>'
 & "$env:USERPROFILE\.persona\bin\persona-link.exe" status
 ```
@@ -131,7 +132,7 @@ The hub updates a Windows node the way it updates any other ([node-update.md](no
 - **Stopping the new program on a rollback**: the restarted node is a new process. A build that can take updates here records its pid at startup; one that cannot (a build from before this, which therefore never confirms) does not. The marker also names the supervisor, and after putting the old file back the watchdog stops the supervisor's children that run from the node's file and started before the restore, so the supervisor starts the old program again.
 - **Backups in use**: the watchdog runs from the backup until it sees the update confirmed, so a backup that cannot be deleted yet is moved aside and deleted later.
 
-The first update needs a supervisor that passes `--supervised`: install once with a persona-link and personad from this change on. The hub sends the `personad-windows-<arch>` it finds among its node builds (`~/.persona/bin/nodes`, "Node packages" in [node-update.md](node-update.md)); release feeds do not carry Windows builds yet.
+The first update needs a supervisor that passes `--supervised`: install once with a persona-link and personad from this change on. The hub sends the `personad-windows-<arch>.exe` it finds among its node builds (`~/.persona/bin/nodes`, "Node packages" in [node-update.md](node-update.md)), or the same program's `.exe.gz` from the immutable versioned release manifest. A Windows node's downloaded filename keeps `.exe`, including in the manager's cache.
 
 ## Reconnect without a tray
 
@@ -197,8 +198,9 @@ herdr has a native Windows build since 0.9.5 (ConPTY panes, [official notes](htt
     **The handoff has not been confirmed on a real Windows machine yet**: its quoting and the choice of line are covered by tests on other systems and the Windows build compiles, nothing more. If a start fails in a PowerShell pane, set Git Bash as above and report what the pane showed in #8107.
 
   Which of the two a start uses depends on the shell that will read the typed line. A host that says its new pane runs PowerShell or pwsh gets the handoff; a host that names any other shell is taken at its word. A new pane of classic herdr, which does not say, is asked once for its foreground program; when that is no known shell, `[terminal] default_shell` decides (found the way herdr finds its config: `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, `%APPDATA%\herdr`), and without either it is PowerShell. Git Bash or another POSIX shell gets the command typed directly, with no start file. `cmd.exe` is refused before anything is written or typed, with a message asking for PowerShell or Git Bash.
+  A pane a start adopts (Run Agent Here, a stopped session resumed in the terminal it left, a launcher or engine switch) is read from the programs in front of it, innermost last. When the innermost one is PowerShell or pwsh (`powershell.exe`, `pwsh.exe`, any case), the start takes the same handoff (#9854); Git Bash, including Git Bash started from PowerShell, gets the command it got before. This has not been confirmed on a real Windows machine either. The check that the pane is at a shell prompt, which comes first, is unchanged: it knows `pwsh` but not `powershell` or a name ending in `.exe`, so a pane whose front program herdr reports that way is refused as not at a shell prompt, with nothing typed (which names herdr reports on Windows has not been checked).
   Launcher sync's `"shell": "bash"` and `"rc_file": "~/.bashrc"` describe the Git Bash that reads launcher definitions, not the shell in herdr's pane.
-  **Not covered by the handoff**: a pane of Orca, Tern or herdr-core that names no shell (Orca opens Git Bash itself when it can, #9810); Run Agent Here in a pane that already runs PowerShell; and classic herdr's own restore after it restarts, whose `resume_argv` is still a POSIX `eval` command that PowerShell cannot run. After a herdr restart, use the app's ordinary Resume, which opens a new pane.
+  **Not covered by the handoff**: a pane of Orca, Tern or herdr-core that names no shell (Orca opens Git Bash itself when it can, #9810); and classic herdr's own restore after it restarts, whose `resume_argv` is still a POSIX `eval` command that PowerShell cannot run. After a herdr restart, use the app's ordinary Resume, which opens a new pane.
 - **herdr has to stay resident in the user's desktop session**: a `herdr server` started from an ssh session exits with that session. Run `herdr.exe server` from a scheduled task that starts at logon (current user,
   `Interactive`, no time limit); it's the same kind as the `persona-link install` task.
 - **`syscall.Exec`**: `personad launch` (managed launchers) and `codex-start` / `tab-start` replace themselves with claude / codex. Windows has no exec, so `osproc.Exec` starts a child in the same

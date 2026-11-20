@@ -67,7 +67,7 @@ func preemptService(t *testing.T) (*Service, *fakeHub, string) {
 func TestBackgroundRoundKind(t *testing.T) {
 	notice := prompts.RenderTaskNotice(prompts.TaskNotice{Title: "Build", Machine: "server", State: "done", Text: "Built."})
 	wake := prompts.RenderAgentWake(prompts.AgentWake{Attempt: 1, Wait: "the build"})
-	limit := prompts.RenderAgentLimitContinue()
+	limit := prompts.RenderAgentLimitContinue("")
 	for _, tt := range []struct {
 		name, text string
 		source     *proto.MessageSource
@@ -344,7 +344,7 @@ func TestOwnerPreemptMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	seeStatus(s, f, main, proto.StatusIdle) // that round ended
-	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": main, "text": prompts.RenderAgentLimitContinue()}, nil); err != nil {
+	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": main, "text": prompts.RenderAgentLimitContinue("")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	seeStatus(s, f, main, proto.StatusWorking)

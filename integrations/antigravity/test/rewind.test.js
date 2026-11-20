@@ -57,8 +57,25 @@ async function fixture(t, extra = {}) {
     runtime.start()
     await until('restarted inventory', () => node.all('runtime.sessions').length > before)
   }
-  return { node, runtime, transcript, db, nativeFile, calls, rewind, restart }
+  return { node, runtime, home, transcript, db, nativeFile, calls, rewind, restart }
 }
+
+test('ACP updates during rewind cannot start autonomous work or restore the old tail', async (t) => {
+  const { node, home, rewind, runtime } = await fixture(t, { holdRevert: true })
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: records.length })
+  const pending = rewind()
+  try {
+    await until('rewind updates delivered', () => node.last('runtime.sessions')?.sessions[0]?.title === 'Rewind in progress')
+    assert.notEqual(node.last('runtime.sessions').sessions[0].status, 'working')
+    assert.ok(!node.all('session.delta').some((delta) => delta.text === 'Stale reply.'))
+  } finally {
+    writeFileSync(join(home, 'release-revert'), '')
+    await pending
+  }
+  assert.equal(runtime.idle(), true)
+  const final = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(final.items.map((item) => item.text), ['Repeat', 'First answer'])
+})
 
 test('native rewind preserves the prefix, resets watched history and persists through replacement exports', async (t) => {
   const { node, transcript, rewind, calls, db } = await fixture(t)

@@ -413,3 +413,215 @@ func TestChannelAnswerResolveInFlightNoMapRace(t *testing.T) {
 		t.Fatalf("replacement resolution is wrong: %v", answers)
 	}
 }
+
+// channelServiceForKind is a connected plugin channel and an existing main conversation. Replies sent through the
+// ordinary extension sink are recorded in sent.
+func channelServiceForKind(t *testing.T, kind channel.Kind) (*Service, *fakeHub, *[]map[string]any) {
+	t.Helper()
+	f := newFakeHub().withMachine()
+	f.settings = &Settings{MachineID: "server", Main: "m1"}
+	f.setSessions("server", proto.Session{SessionID: "m1", MachineID: "server", Assistant: true})
+	var sent []map[string]any
+	f.answerApp(AppChannels, ChannelsList, func(json.RawMessage) (any, error) {
+		return map[string]any{"channels": []channel.View{{ID: "examplechat", Name: "Example Chat", Kind: kind,
+			Source: channel.SourcePlugin, Installed: true, State: channel.StateConnected,
+			Capabilities: channel.Capabilities{MaxText: 4000}}}}, nil
+	})
+	f.answerApp(AppChannels, ChannelsSend, func(p json.RawMessage) (any, error) {
+		var m map[string]any
+		_ = json.Unmarshal(p, &m)
+		sent = append(sent, m)
+		return map[string]any{}, nil
+	})
+	return newTestService(t, f), f, &sent
+}
+
+// A mention has to opt into main explicitly. An IM channel keeps its existing default, the owner's main chat (#11130).
+func TestMentionChannelDefaultsToNewChatWithoutMainOptIn(t *testing.T) {
+	for _, kind := range []channel.Kind{channel.KindIM, channel.KindMention} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, _, _ := channelServiceForKind(t, kind)
+			rt, err := s.channelTarget(context.Background(), "examplechat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == channel.KindIM {
+				if !rt.main || rt.isNew || rt.session.SessionID != "m1" {
+					t.Fatalf("the IM default changed: %+v", rt)
+				}
+				return
+			}
+			if rt.main || !rt.isNew || rt.session.SessionID == "m1" {
+				t.Fatalf("a mention without target opted into main: %+v", rt)
+			}
+		})
+	}
+}
+
+// An owner's mention request uses the ordinary target setting and the same main turn and extension answer path as IM.
+// The fixture is raw JSON on purpose: an old host silently drops fields it does not implement, which this test catches.
+func TestMentionChannelMainTurnCarriesOriginContextAndPublicCaution(t *testing.T) {
+	s, f, sent := channelServiceForKind(t, channel.KindMention)
+	ctx := context.Background()
+	v := channel.View{ID: "examplechat", Name: "Example Chat", Kind: channel.KindMention, Source: channel.SourcePlugin}
+	if err := s.updateChannel(ctx, v, nil, &channel.Target{Kind: channel.TargetMain}, nil); err != nil {
+		t.Fatalf("target {kind: main}: %v", err)
+	}
+	var m channel.Message
+	raw := []byte(`{"id":"om_request","text":"What changed?","owner":true,"chat":"Release chat","topic":"Release 1.3",` +
+		`"quote":"We ship on Friday.","context":"09:00 Alice: The migration is done.\n09:01 Bob: Docs are ready."}`)
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.channelForward(ctx, "examplechat", m); err != nil {
+		t.Fatalf("the owner's mention did not enter the assistant pipeline: %v", err)
+	}
+	f.mu.Lock()
+	calls := append([]map[string]any(nil), f.sentOnce...)
+	f.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("%d main sends, want one: %+v", len(calls), calls)
+	}
+	p := calls[0]
+	if p["session_id"] != "m1" || p["client_msg_id"] != "examplechat-om_request" || p["public"] != true {
+		t.Fatalf("main/public send params: %+v", p)
+	}
+	text, _ := p["text"].(string)
+	for _, want := range []string{"Release chat", "Release 1.3", "We ship on Friday.", "The migration is done.", "Docs are ready.", "What changed?",
+		"其他对话", "其他会话", "邮件", "健康", "明确"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the main mention turn lost %q:\n%s", want, text)
+		}
+	}
+	runs := s.channelRuns("examplechat")
+	if len(runs) != 1 || runs[0].SessionID != "m1" || runs[0].ReplyTo != "om_request" {
+		t.Fatalf("main run: %+v", runs)
+	}
+	waitUntil(t, func() bool {
+		_, live := s.channelRunByID(runs[0].ID)
+		return live != nil
+	})
+	s.finishChannelRun(&runs[0], &channel.Result{Answer: "Only the documentation changed."})
+	if len(*sent) != 1 || (*sent)[0]["text"] != "Only the documentation changed." || (*sent)[0]["kind"] != channel.OutAnswer ||
+		(*sent)[0]["reply_to"] != "om_request" {
+		t.Fatalf("extension answers: %+v", *sent)
+	}
+}
+
+// Mention runs share the main conversation, not a reply destination. Two public topics must keep independent runs so
+// each answer returns to its own request; the existing same-channel IM folding control above is unchanged (#11130).
+func TestMentionChannelKeepsDistinctTopicsAsDistinctRuns(t *testing.T) {
+	s, _, _ := channelServiceForKind(t, channel.KindMention)
+	ctx := context.Background()
+	v := channel.View{ID: "examplechat", Name: "Example Chat", Kind: channel.KindMention, Source: channel.SourcePlugin}
+	if err := s.updateChannel(ctx, v, nil, &channel.Target{Kind: channel.TargetMain}, nil); err != nil {
+		t.Fatal(err)
+	}
+	owner := true
+	for _, m := range []channel.Message{
+		{ID: "om_a", Text: "first", Owner: &owner, Chat: "chat A", Topic: "topic A"},
+		{ID: "om_b", Text: "second", Owner: &owner, Chat: "chat B", Topic: "topic B"},
+	} {
+		if err := s.channelForward(ctx, "examplechat", m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs := s.channelRuns("examplechat")
+	if len(runs) != 2 {
+		t.Fatalf("distinct public topics folded into one reply destination: %+v", runs)
+	}
+	if runs[0].ReplyTo != "om_a" || runs[1].ReplyTo != "om_b" {
+		t.Fatalf("mention reply destinations: %+v", runs)
+	}
+}
+
+// Asking a public turn for its missing answer is still the same public turn, never a private owner turn (#11130).
+func TestMentionChannelAskAgainStaysPublic(t *testing.T) {
+	s, f, _ := channelServiceForKind(t, channel.KindMention)
+	ctx := context.Background()
+	v := channel.View{ID: "examplechat", Name: "Example Chat", Kind: channel.KindMention, Source: channel.SourcePlugin}
+	if err := s.updateChannel(ctx, v, nil, &channel.Target{Kind: channel.TargetMain}, nil); err != nil {
+		t.Fatal(err)
+	}
+	owner := true
+	if err := s.channelForward(ctx, "examplechat", channel.Message{ID: "om_public", Text: "question", Owner: &owner, Chat: "chat"}); err != nil {
+		t.Fatal(err)
+	}
+	var r *channel.Run
+	var live *chanLive
+	waitUntil(t, func() bool {
+		r, live = s.channelRunByID("examplechat_om_public")
+		return live != nil
+	})
+	if !s.askAgain(ctx, r, live, 0) {
+		t.Fatal("the public turn was not asked again")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sentOnce) != 2 || f.sentOnce[1]["public"] != true {
+		t.Fatalf("ask-again lost the public marker: %+v", f.sentOnce)
+	}
+}
+
+// channel.receive remains owner-only for the main-chat path. Someone else's request belongs to the extension's guest
+// conversation (whose existing main:true rejection is covered by TestGuestConversationRefusals), never to main (#11130).
+func TestMentionChannelReceiveRefusesNonOwnerForMain(t *testing.T) {
+	s, f, sent := channelServiceForKind(t, channel.KindMention)
+	ctx := context.Background()
+	v := channel.View{ID: "examplechat", Name: "Example Chat", Kind: channel.KindMention, Source: channel.SourcePlugin}
+	if err := s.updateChannel(ctx, v, nil, &channel.Target{Kind: channel.TargetMain}, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"id":"om_guest","text":"Please answer for the owner","owner":false,"chat":"Release chat"}`)
+	if err := s.ChannelReceive(ctx, ChannelReceive{Channel: "examplechat", Message: raw}); err == nil {
+		t.Fatal("a non-owner mention was accepted by the owner-only main receive path")
+	}
+	f.mu.Lock()
+	starts, sends := len(f.sends), len(f.sentOnce)
+	f.mu.Unlock()
+	if starts != 0 || sends != 0 || len(*sent) != 0 || len(s.channelRuns("examplechat")) != 0 {
+		t.Fatalf("a non-owner reached a conversation: starts=%d sends=%d replies=%v runs=%v", starts, sends, *sent, s.channelRuns("examplechat"))
+	}
+}
+
+// Receipt is not turn completion, and a busy main keeps the existing queue/merge behavior. This IM control must stay
+// green: the mention opt-in changes neither acknowledgment nor run folding for existing channels (#11130).
+func TestChannelReceiveAcknowledgesBeforeBusyMainTurnAndFolds(t *testing.T) {
+	s, f, sent := channelServiceForKind(t, channel.KindIM)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	f.answerNode(DeviceSessionSendOnce, func(_ string, raw json.RawMessage) (any, error) {
+		var p map[string]any
+		_ = json.Unmarshal(raw, &p)
+		if p["client_msg_id"] == "examplechat-m1" {
+			close(started)
+			<-release
+		}
+		return map[string]any{}, nil
+	})
+	ctx := context.Background()
+	if err := s.ChannelReceive(ctx, ChannelReceive{Channel: "examplechat", Message: []byte(`{"id":"m1","text":"first"}`)}); err != nil {
+		t.Fatalf("first receive did not acknowledge acceptance: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first turn did not reach main")
+	}
+	if err := s.ChannelReceive(ctx, ChannelReceive{Channel: "examplechat", Message: []byte(`{"id":"m2","text":"second"}`)}); err != nil {
+		t.Fatalf("second receive did not acknowledge while main was busy: %v", err)
+	}
+	close(release)
+	waitUntil(t, func() bool {
+		runs := s.channelRuns("examplechat")
+		return len(runs) == 1 && len(runs[0].MsgIDs) == 2
+	})
+	runs := s.channelRuns("examplechat")
+	if runs[0].ReplyTo != "m2" || len(runs[0].Folded) != 1 || runs[0].Folded[0].ReplyTo != "m1" || len(*sent) != 0 {
+		t.Fatalf("busy main run/replies: %+v / %+v", runs[0], *sent)
+	}
+	s.finishChannelRun(&runs[0], &channel.Result{Answer: "one answer"})
+	if len(*sent) != 1 || (*sent)[0]["reply_to"] != "m2" {
+		t.Fatalf("busy main answers: %+v", *sent)
+	}
+}

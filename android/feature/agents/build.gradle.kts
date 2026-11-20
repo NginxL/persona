@@ -1,5 +1,7 @@
 plugins {
     id("persona.android.library")
+    // Its tests expect CoreText in Simplified Chinese (CoreTextFallback).
+    id("persona.coretext.zh")
     id("persona.compose")
     id("persona.hilt")
 }
@@ -10,8 +12,7 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
-                // RecentSetupsFixtureTest reads spec/fixtures/recents.
-                it.systemProperty("persona.repo.root", rootProject.projectDir.parentFile.absolutePath)
+                // RecentSetupsFixtureTest reads spec/fixtures/recents: persona.android.library passes the repository root.
                 // The screens' screenshots (the to-dos calendar's day, week and month in three styles, dark and light)
                 // share one test process; retain the bounded heap they need rather than the 512 MB default, as feature/settings does.
                 it.maxHeapSize = "1g"

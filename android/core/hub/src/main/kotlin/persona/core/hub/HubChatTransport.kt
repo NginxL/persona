@@ -3,6 +3,7 @@ package persona.core.hub
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -79,6 +80,7 @@ class HubChatTransport internal constructor(
             filter.group?.let { addQueryParameter("group", it) }
             filter.source?.let { addQueryParameter("source", it) }
             filter.provider?.let { addQueryParameter("provider", it) }
+            if (null in filter.hiddenBotmuxHubs) addQueryParameter("exclude_pane_source", "feishu")
             if (filter.query.isNotEmpty()) addQueryParameter("q", filter.query)
             cursor?.let { addQueryParameter("cursor", it) }
             since?.let { addQueryParameter("since", it) }
@@ -128,6 +130,19 @@ class HubChatTransport internal constructor(
             }
         }.build()
         return get(url.encodedPath + "?" + url.encodedQuery)
+    }
+
+    override suspend fun modeChanges(session: SessionKey): List<ModeChange> {
+        val body = request(api("sessions", session.machineId, session.sessionId, "mode-changes"), "GET", null)
+            .use { it.body!!.string() }
+        val root = try { JsonCodec.parseToJsonElement(body) as? JsonObject }
+        catch (error: Exception) { throw HubFailure(HubError.Protocol, retryable = false, cause = error) }
+        val records = root?.get("changes") as? JsonArray ?: return emptyList()
+        return records.mapNotNull { element ->
+            val change = runCatching { JsonCodec.decodeFromJsonElement<ModeChange>(element) }.getOrNull()
+                ?: return@mapNotNull null
+            change.takeIf { it.kind in MODE_CHANGE_KINDS && parseTime(it.at) != null }
+        }
     }
 
     /**
@@ -180,6 +195,7 @@ class HubChatTransport internal constructor(
         get(api("sessions", session.machineId, session.sessionId, "items", itemId, "full"))
 
     companion object {
+        private val MODE_CHANGE_KINDS = setOf("set", "restart_done", "restart_failed", "restart_dropped")
         const val OP_ID_HEADER = "X-Persona-Op-Id"
         const val RESOLVE_RETRY_MILLIS = 60_000L
         /** Between tries: a hub that answers 503 while it stops would otherwise be asked again at once. */

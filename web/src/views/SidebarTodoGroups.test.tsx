@@ -29,7 +29,7 @@ const todos: Todo[] = [
 const sessions = [
   s("a", "working", "/code/weather"),
   s("b", "idle", "/code/weather"),
-  s("c", "idle", "/code/weather", { work: { phase: "blocked", on: "external", line: "CI" } }),
+  s("c", "idle", "/code/weather", { work: { phase: "blocked", on: "external", line: "CI", wait: "CI" } }),
   // on no to-do, started elsewhere and waiting on the user
   s("loose", "needs_you", "/code/report", { pane_id: "botmux:x" }),
   // on no to-do, opened by hand in a terminal
@@ -78,7 +78,9 @@ describe("By to-do's rows (#6458)", () => {
     expect([...host.querySelectorAll("[data-tree-branch-row]")].map((el) => el.textContent).join(" ")).not.toMatch(/weather|report/);
     // count, then state: the to-do's in the To-dos page's word, a group's the most urgent of its agents'
     expect(row("todo:ship").textContent).toMatch(/2 个 Agent工作中$/);
-    expect(row("todo:ci").textContent).toMatch(/1 个 Agent等待中$/);
+    // a waiting one says what it waits on, in the neutral tone: nothing is the owner's (#11090)
+    expect(row("todo:ci").textContent).toMatch(/1 个 Agent等外部$/);
+    expect(row("todo:ci").querySelector("[data-tree-state]")!.className).toContain("text-ink-2");
     expect(row("todo:none").textContent).toMatch(/^没挂待办的.*2 个 Agent需要你$/);
   });
 

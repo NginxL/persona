@@ -139,7 +139,7 @@ export function weeklyQuota(answer: LauncherQuotaAnswer | undefined): WeeklyQuot
   const windows = [...(q.budget ?? []), ...(q.pools ?? []).flatMap((p) => p.windows ?? [])];
   let found: { window: QuotaWindow; used: number } | undefined;
   for (const w of windows) {
-    if (!/week|周|週/i.test(w.label)) continue;
+    if (!/^(?:7d|1w)$|week|周|週/i.test(w.label.trim())) continue;
     let used = w.used_ratio !== undefined && Number.isFinite(w.used_ratio) ? w.used_ratio : undefined;
     if (used === undefined && w.used !== undefined && w.limit !== undefined && Number.isFinite(w.used) && w.used >= 0 && Number.isFinite(w.limit) && w.limit > 0) used = w.used / w.limit;
     if (used === undefined) {

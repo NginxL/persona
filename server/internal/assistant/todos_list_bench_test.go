@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -202,6 +203,100 @@ func BenchmarkSuperviseWatch(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				s.superviseWatch(ctx, now)
+			}
+		})
+	}
+}
+
+// todoFeedForBench gives to-do id n items in its origin conversation's feed, as a long task leaves them: in each four
+// the owner's instruction, two turns of its run and a review, a minute apart; old, turns written before #10465, which
+// name their run's computer only, so that the timeline reads the computers' names. Into s's store when it has one.
+func todoFeedForBench(tb testing.TB, s *Service, id string, n int, old bool) {
+	base := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+	st := s.store()
+	s.tasks.mu.Lock()
+	defer s.tasks.mu.Unlock()
+	for i := range n {
+		var kind string
+		var body any
+		switch i % 4 {
+		case 0:
+			kind, body = feedRouted, map[string]string{"text": "also cover the rotation case, then merge it"}
+		case 1, 2:
+			r := receiptBody{Title: "fix the login crash", State: "done", Machine: "box",
+				Summary: strings.Repeat("Fixed the crash in landscape and added a test. ", 12)}
+			if !old {
+				r.MachineID, r.SessionID = "box", "s000000"
+			}
+			kind, body = feedReceipt, r
+		default:
+			kind, body = feedReview, reviewFeedBody{Title: "fix the login crash", Verdict: reviewRework, Round: i / 4,
+				Note: "the rotation case still crashes"}
+		}
+		raw, _ := json.Marshal(body)
+		it := FeedItem{ID: fmt.Sprintf("feed_%s%06d", strings.TrimPrefix(id, "todo_"), i), Conversation: "conv1",
+			At: base.Add(time.Duration(i) * time.Minute), Kind: kind, Ref: id, Body: raw}
+		if st == nil {
+			s.tasks.feed["conv1"] = append(s.tasks.feed["conv1"], it)
+		} else if err := st.AppendFeed(context.Background(), db.FeedRow{ID: it.ID, Conversation: it.Conversation, At: it.At,
+			Kind: it.Kind, Ref: it.Ref, Body: it.Body}); err != nil {
+			tb.Fatal(err)
+		}
+	}
+}
+
+// todoCopyForBench puts manyTodos's to-do from on s again under a fresh id, which it answers: a database keeps the feed
+// rows a run writes (the feed is never pruned), so each run reads only its own.
+func todoCopyForBench(s *Service, from string) string {
+	id := "todo_" + randomHex(8)
+	s.todos.mu.Lock()
+	t := *s.todos.todos[from]
+	t.ID = id
+	s.todos.todos[id] = &t
+	s.todos.mu.Unlock()
+	s.tbriefs.mu.Lock()
+	s.tbriefs.links[id] = s.tbriefs.links[from]
+	s.tbriefs.mu.Unlock()
+	return id
+}
+
+// BenchmarkTodoItem: GET /api/v1/todos/{id} with 250 finished supervised tasks (manyTodos), the one read having feed
+// items in its conversation: the item route works the view out over the whole list, and with todo_timeline (#10465)
+// reads that to-do's history too, at most todoTimelineFeedCap items of it. old: turns from before #10465, which also
+// read the computers' names, on a manager that carries the fleet as a deployed one does. db: the feed and the
+// decisions read from Postgres (FeedByRef, ListTodoDecisions), as on a hub with a database; skipped without
+// PERSONA_TEST_DATABASE_URL.
+func BenchmarkTodoItem(b *testing.B) {
+	for _, c := range []struct {
+		name          string
+		feed          int
+		old, postgres bool
+	}{{"feed=0", 0, false, false}, {"feed=1000", 1000, false, false}, {"feed=1000,old", 1000, true, false},
+		{"feed=1000,db", 1000, false, true}} {
+		b.Run(c.name, func(b *testing.B) {
+			o := Options{Hub: newFakeHub()}
+			if c.old {
+				d := newFleetDevs()
+				d.add("box", "box")
+				o.Devices = d
+			}
+			if c.postgres {
+				database := todoTestDB(b)
+				o.Store = func() Store { return database }
+			}
+			s := manyTodosOn(250, o)
+			id := "todo_bench000000"
+			if c.postgres {
+				id = todoCopyForBench(s, id)
+			}
+			todoFeedForBench(b, s, id, c.feed, c.old)
+			b.ReportAllocs()
+			for b.Loop() {
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/todos/"+id, nil))
+				if w.Code != 200 {
+					b.Fatalf("GET /api/v1/todos/{id} = %d %s", w.Code, w.Body.String())
+				}
 			}
 		})
 	}

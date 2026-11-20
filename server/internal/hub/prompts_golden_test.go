@@ -248,6 +248,44 @@ func TestGoldenChannelMessage(t *testing.T) {
 		Asks: true, Unsupported: []string{"一段没有转写的语音"}}))
 }
 
+// A mention is public even when its turn runs in the owner's main conversation. Its origin and gathered context are
+// data, and the caution not to disclose private context follows the caller's language (#11130). Decode the fixture as
+// JSON so a host without the new fields fails by losing behavior, rather than by failing to compile this test.
+func TestChannelMentionMessageCarriesOriginAndLocalizedPublicCaution(t *testing.T) {
+	for _, tc := range []struct {
+		name, language string
+		caution        []string
+	}{
+		{"zh-Hans", "", []string{"其他对话", "其他会话", "邮件", "健康", "明确"}},
+		{"en", "English", []string{"other chats", "sessions", "mail", "health", "explicitly"}},
+		{"ja", "日本語", []string{"チャット", "セッション", "メール", "健康", "明示"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, _ := json.Marshal(map[string]any{
+				"Persona": true, "Name": "Example Chat", "Language": tc.language, "Public": true,
+				"Chat": "Release chat", "Topic": "Release 1.3", "Quote": "We ship on Friday.",
+				"Context": "Alice: The migration is done.", "Text": "What changed?",
+			})
+			var in prompts.ChannelMessage
+			if err := json.Unmarshal(fixture, &in); err != nil {
+				t.Fatal(err)
+			}
+			got := prompts.RenderChannelMessage(in)
+			golden(t, "channel_mention_message."+tc.name, got)
+			for _, want := range []string{"Release chat", "Release 1.3", "We ship on Friday.", "The migration is done.", "What changed?"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("origin/context lost %q:\n%s", want, got)
+				}
+			}
+			for _, want := range tc.caution {
+				if !strings.Contains(got, want) {
+					t.Errorf("public caution lost %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 // Closing a finished task (docs/assistant/todos.md "Automatic completion"): the judge's system prompt and its input, with and without hints.
 func TestGoldenTaskDone(t *testing.T) {
 	golden(t, "task_done", prompts.RenderTaskDone(prompts.TaskDone{Owner: "示例用户"}))
@@ -306,6 +344,29 @@ func TestTodoProjectGolden(t *testing.T) {
 		Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Builds run on the second machine.\nAsk before changing the release script.</persona-context>"}}}))
 	golden(t, "todo_project.extensions_only", prompts.RenderTodoProject(prompts.TodoProject{Name: "天气 App",
 		Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Owner: the user."}}}))
+}
+
+func TestTodoProjectMemoryGolden(t *testing.T) {
+	if got := prompts.RenderTodoProjectMemory(prompts.TodoProjectMemory{Name: "x"}); got != "" {
+		t.Fatalf("nothing to say = %q, want nothing", got)
+	}
+	for _, tc := range []struct{ name, language string }{{"legacy", ""}, {"en", "English"}, {"ja", "日本語"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			golden(t, "todo_project_memory."+tc.name, prompts.RenderTodoProjectMemory(prompts.TodoProjectMemory{
+				Language: tc.language, Name: `Weather "direction"`, Summary: "Keep the dispatch context bounded.",
+				Outcomes: []prompts.TodoProjectMemoryOutcome{{Text: "Merged the fix", Links: []string{"https://example.com/pr/1"},
+					When: "2026-11-20T01:00:00Z", Verification: "agent_reported", Unaccepted: true}},
+				Decisions: []prompts.TodoProjectMemoryDecision{
+					{ID: "decision-b", Question: "Which context?", Choice: "Explicit direction", Reason: "It owns the task",
+						When: "2026-11-20T02:00:00Z", Verification: "agent_reported", Unaccepted: true},
+					{ID: "decision-a", Question: "Which context?", Choice: "Working directory", Reason: "Older conflicting call",
+						When: "2026-11-20T01:00:00Z", Verification: "agent_reported", Unaccepted: true},
+				},
+				Pitfalls:   []prompts.TodoProjectMemoryPitfall{{Text: "Never close the context from memory", Verification: "agent_reported", Unaccepted: true}},
+				Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Extension context stays last.</persona-context>"}},
+			}))
+		})
+	}
 }
 
 // The decisions a handoff carries for a todo (todo/decisions, #1618): one by hand with a reason, one from a card.

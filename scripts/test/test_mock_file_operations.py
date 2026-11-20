@@ -1,6 +1,6 @@
-"""Delayed mock copies and archives report progress and cancellation over the real HTTP routes.
+"""Synthetic moves, copies and archives behave like the corresponding HTTP routes.
 
-Run with MOCK_FILES=1 MOCK_FILE_OPS=1 MOCK_FILE_OP_DELAY=3 on a disposable mock hub:
+Run on a disposable mock hub:
 
     python3 scripts/test/test_mock_file_operations.py
 """
@@ -33,7 +33,8 @@ class MockFileOperationTests(unittest.TestCase):
         cls.port = free_port()
         cls.home = tempfile.mkdtemp(prefix="mock-file-operations-")
         env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
-        env.update(HOME=cls.home, PORT=str(cls.port), MOCK_FILES="1", MOCK_FILE_OPS="1", MOCK_FILE_OP_DELAY="3")
+        env.update(HOME=cls.home, PORT=str(cls.port), MOCK_FILES="1", MOCK_FILE_OPS="1", MOCK_FILE_MOVE="1",
+                   MOCK_FILE_OP_DELAY="3")
         cls.proc = subprocess.Popen([sys.executable, str(ROOT / "scripts/mock/mock_hub.py")], env=env,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 30
@@ -54,8 +55,10 @@ class MockFileOperationTests(unittest.TestCase):
         except subprocess.TimeoutExpired:
             cls.proc.kill()
 
-    def call(self, path):
-        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers={"Authorization": "Bearer mock"})
+    def call(self, path, body=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}",
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Authorization": "Bearer mock", "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return resp.status, json.loads(resp.read() or b"null")
@@ -126,6 +129,24 @@ class MockFileOperationTests(unittest.TestCase):
             self.assertIn("progress.zip", self.names())
         finally:
             conn.close()
+
+    def test_move_fixture_conflicts_then_keeps_both(self):
+        cwd = "/Users/me/code/weather"
+        source = cwd + "/Move sample.txt"
+        dest = cwd + "/Tests"
+        move = "/api/v1/machines/macbook/files/move"
+        request = {"paths": [source], "cwd": cwd, "dir": dest}
+        status, answer = self.call(move, request)
+        self.assertEqual((status, answer["code"], answer["name"]), (409, "exists", "Move sample.txt"))
+        status, answer = self.call(move, {**request, "conflict": "keep"})
+        self.assertEqual((status, answer), (200, {"moved": [{"from": source, "to": dest + "/Move sample 2.txt"}]}))
+        for path, expected in ((cwd, {"Package.swift"}), (dest, {"Move sample.txt", "Move sample 2.txt"})):
+            status, answer = self.call(f"/api/v1/machines/macbook/fs?path={path}")
+            self.assertEqual(status, 200, answer)
+            names = {entry["name"] for entry in answer["entries"]}
+            self.assertTrue(expected <= names, names)
+            if path == cwd:
+                self.assertNotIn("Move sample.txt", names)
 
 
 if __name__ == "__main__":

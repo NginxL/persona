@@ -493,6 +493,8 @@ fun ComposerFrame(
     // A tap on the frame's blank space that nothing inside handled (around the field, beside the buttons).
     onBlankTap: (() -> Unit)? = null,
     expanded: Boolean = false,
+    // The compact Agent composer uses the shell's opaque material and a tighter toolbar.
+    useShellSurface: Boolean = false,
     field: @Composable BoxScope.() -> Unit,
 ) {
     val palette = PersonaTheme.palette
@@ -503,45 +505,49 @@ fun ComposerFrame(
     // being cut off or ending there at once (#4210 T3). Brief and Board draw it in one place and invoke it directly.
     val trailingNow by rememberUpdatedState(trailing)
     val movableTrailing = remember { movableContentWithReceiverOf<RowScope> { trailingNow?.invoke(this) } }
-    if (PersonaTheme.style == AppStyle.Glass && LocalHomeChrome.current != null) {
-        val shape = RoundedCornerShape(HomeTokens.composerRadius.bubbleCorner)
-        val fill = if (PersonaTheme.darkTheme) HomeTokens.composerDark else HomeTokens.composerLight
-        val stroke = if (PersonaTheme.darkTheme) HomeTokens.composerStrokeDark else HomeTokens.composerStrokeLight
-        Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
-            .shadow(HomeTokens.composerShadow, shape, clip = false,
-                ambientColor = Color.Black.copy(alpha = HomeTokens.composerShadowAlpha),
-                spotColor = Color.Black.copy(alpha = HomeTokens.composerShadowAlpha))
-            .clip(shape).background(fill).border(HomeTokens.composerStroke, stroke, shape)
-            .then(keepsKeyboard).padding(Tokens.Space.s)) {
-            accessory?.let { Column(Modifier.padding(horizontal = Tokens.Space.s), content = it) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!expanded) leading?.invoke(this)
-                Box(Modifier.weight(1f).heightIn(min = Tokens.MinTouch.android).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.m),
-                    contentAlignment = Alignment.CenterStart, content = field)
-                if (!expanded && trailing != null) movableTrailing(this)
-            }
-            if (expanded) Row(verticalAlignment = Alignment.CenterVertically) {
-                leading?.invoke(this)
-                Spacer(Modifier.weight(1f))
-                if (trailing != null) movableTrailing(this)
-            }
-        }
-        return
-    }
     when (PersonaTheme.style) {
-        AppStyle.Glass -> Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
-            .floatingSurface(RoundedCornerShape(HomeTokens.composerRadius.bubbleCorner)).then(keepsKeyboard).padding(Tokens.Space.s)) {
-            accessory?.let { Column(Modifier.padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs), content = it) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!expanded) leading?.invoke(this)
-                Box(Modifier.weight(1f).heightIn(min = Tokens.MinTouch.ios).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.m),
-                    contentAlignment = Alignment.CenterStart, content = field)
-                if (!expanded && trailing != null) movableTrailing(this)
+        AppStyle.Glass -> {
+            val home = LocalHomeChrome.current != null
+            val shape = RoundedCornerShape(HomeTokens.composerRadius.bubbleCorner)
+            val surface = if (home || useShellSurface) {
+                val fill = if (PersonaTheme.darkTheme) HomeTokens.composerDark else HomeTokens.composerLight
+                val stroke = if (PersonaTheme.darkTheme) HomeTokens.composerStrokeDark else HomeTokens.composerStrokeLight
+                val shadow = Color.Black.copy(alpha = HomeTokens.composerShadowAlpha)
+                Modifier.shadow(HomeTokens.composerShadow, shape, clip = false, ambientColor = shadow, spotColor = shadow)
+                    .clip(shape).background(fill).border(HomeTokens.composerStroke, stroke, shape)
+            } else Modifier.floatingSurface(shape)
+            val fieldHeight = if (home || useShellSurface) Tokens.MinTouch.android else Tokens.MinTouch.ios
+            val accessoryPadding = if (home || useShellSurface) Tokens.Space.flush else Tokens.Space.xs
+            val bodyInsets = when {
+                !useShellSurface -> Modifier.padding(Tokens.Space.s)
+                expanded -> Modifier.padding(start = Tokens.Space.sm, end = Tokens.Space.sm, bottom = Tokens.Space.xs)
+                else -> Modifier.padding(horizontal = Tokens.Space.xxs)
             }
-            if (expanded) Row(verticalAlignment = Alignment.CenterVertically) {
-                leading?.invoke(this)
-                Spacer(Modifier.weight(1f))
-                if (trailing != null) movableTrailing(this)
+            val fieldTop = when {
+                useShellSurface && expanded -> Tokens.Space.s
+                useShellSurface -> Tokens.Space.xs
+                else -> Tokens.Space.m
+            }
+            val fieldBottom = when {
+                useShellSurface && expanded -> Tokens.Space.flush
+                useShellSurface -> Tokens.Space.xs
+                else -> Tokens.Space.m
+            }
+            Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)
+                .then(surface).then(keepsKeyboard).then(bodyInsets)) {
+                accessory?.let { Column(Modifier.padding(horizontal = Tokens.Space.s, vertical = accessoryPadding), content = it) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!expanded) leading?.invoke(this)
+                    Box(Modifier.weight(1f).heightIn(min = fieldHeight)
+                        .padding(start = Tokens.Space.s, top = fieldTop, end = Tokens.Space.s, bottom = fieldBottom),
+                        contentAlignment = Alignment.CenterStart, content = field)
+                    if (!expanded && trailing != null) movableTrailing(this)
+                }
+                if (expanded) Row(verticalAlignment = Alignment.CenterVertically) {
+                    leading?.invoke(this)
+                    if (!useShellSurface || trailing == null) Spacer(Modifier.weight(1f))
+                    if (trailing != null) movableTrailing(this)
+                }
             }
         }
         AppStyle.Brief -> Column(modifier.fillMaxWidth().background(palette.background).then(keepsKeyboard).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s)) {
@@ -689,10 +695,15 @@ fun JumpToLatest(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier)
             .clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = spoken }
             .padding(horizontal = 14.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         val ink = if (style == AppStyle.Brief) palette.onAction else palette.ink
         JIcon(PhIcons.ArrowDown, null, size = 18.dp, tint = ink)
-        if (count > 0) { Spacer(Modifier.width(6.dp.dense)); Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink) }
+        if (count > 0) {
+            Spacer(Modifier.width(6.dp.dense))
+            Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -735,7 +746,8 @@ fun PlanPill(step: Int, total: Int, done: Int, onClick: () -> Unit, modifier: Mo
                     style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
             })
         }
-        Text(stringResource(R.string.designsystem_plan_step, step, total), style = PersonaTheme.type.caption, color = ink, maxLines = 1)
+        Text(stringResource(R.string.designsystem_plan_step, step, total), style = PersonaTheme.type.caption, color = ink,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

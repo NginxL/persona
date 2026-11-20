@@ -30,7 +30,7 @@ func TestInboxRoutesWithoutTheManager(t *testing.T) {
 			t.Fatalf("%s without the manager: %d %v", path, code, out)
 		}
 	}
-	for _, path := range []string{"/api/v1/inbox/refresh", "/api/v1/inbox/x/reply", "/api/v1/inbox/x/suggestion", "/api/v1/inbox/x/handoff", "/api/v1/inbox/done", "/api/v1/translate"} {
+	for _, path := range []string{"/api/v1/inbox/refresh", "/api/v1/inbox/x/reply", "/api/v1/inbox/x/retry", "/api/v1/inbox/x/suggestion", "/api/v1/inbox/x/handoff", "/api/v1/inbox/done", "/api/v1/translate", "/api/v1/translate/message"} {
 		if code, out := call(t, mux, "POST", path, h.cfg.Token, `{"text":"好的"}`); code != http.StatusServiceUnavailable || out["code"] != "assistant_offline" {
 			t.Fatalf("%s without the manager: %d %v", path, code, out)
 		}

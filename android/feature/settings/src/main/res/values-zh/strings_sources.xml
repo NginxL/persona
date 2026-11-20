@@ -2,6 +2,9 @@
 <!-- Settings › Connectors / Channels / Model configuration / New model provider / Claude Code settings / Quota (docs/protocol/i18n.md). Same keys in values, values-zh and values-ja. -->
 <resources>
     <string name="settings_src_just_now">刚刚</string>
+    <plurals name="settings_src_seconds_ago">
+        <item quantity="other">%1$d 秒前</item>
+    </plurals>
     <plurals name="settings_src_minutes_ago">
         <item quantity="other">%1$d 分钟前</item>
     </plurals>
@@ -266,6 +269,28 @@
     <string name="settings_src_model_form_note">留空恢复继承。保存只修改配置，不发起模型请求；会话的临时选择仍可覆盖默认值。</string>
     <string name="settings_src_model_plugin_note">只选择这个扩展提供的模型；不修改扩展自己的供应商或凭据。</string>
     <string name="settings_src_model_plugin_title">扩展模型</string>
+    <string name="settings_candidate_title">候选模型</string>
+    <string name="settings_candidate_extension">使用扩展请求的列表</string>
+    <string name="settings_candidate_off">仅使用此用途的模型</string>
+    <string name="settings_candidate_custom">使用我的列表</string>
+    <string name="settings_candidate_order_hint">按从上到下的顺序尝试模型。模型留空时使用提供方的默认模型。</string>
+    <string name="settings_candidate_number">模型 %1$d</string>
+    <string name="settings_candidate_provider">第 %1$d 个模型的提供方</string>
+    <string name="settings_candidate_model">第 %1$d 个模型的 ID</string>
+    <string name="settings_candidate_select">选择提供方</string>
+    <string name="settings_candidate_up">上移第 %1$d 个模型</string>
+    <string name="settings_candidate_down">下移第 %1$d 个模型</string>
+    <string name="settings_candidate_remove">移除第 %1$d 个模型</string>
+    <string name="settings_candidate_add">添加模型</string>
+    <string name="settings_candidate_count">请选择 1 至 %1$d 个模型。</string>
+    <string name="settings_candidate_duplicate">同一提供方与模型的组合只能出现一次。</string>
+    <string name="settings_candidate_choose_provider">请为每个模型选择一个可用的提供方。</string>
+    <string name="settings_candidate_no_providers">此用途暂无可直接调用的提供方。</string>
+    <string name="settings_candidate_requested">扩展请求的列表（%1$d）</string>
+    <string name="settings_candidate_no_requests">扩展尚未请求模型列表。</string>
+    <string name="settings_candidate_last">上次使用于 %1$s</string>
+    <string name="settings_candidate_unavailable">不可用</string>
+    <string name="settings_candidate_model_id">请输入有效的模型 ID，或留空以使用提供方的默认模型。</string>
     <string name="settings_src_model_restore">恢复继承</string>
     <string name="settings_src_provider_new">新增模型供应商</string>
     <string name="settings_src_provider_new_more">新增模型供应商…</string>
@@ -288,8 +313,8 @@
     <string name="settings_src_provider_preset_note">地址、接入方式和模型由扩展「%1$s」提供；加好以后和自己填写的一样可以编辑。</string>
     <string name="settings_src_provider_extension_default">扩展默认</string>
     <string name="settings_src_provider_model_note">各用途的具体选择在「模型配置」里统一管理；未单独指定时使用这里的默认。</string>
-    <string name="settings_src_provider_api_note">hub 直接请求模型，供分拣、翻译和知识处理等用途选择。</string>
-    <string name="settings_src_provider_launcher_note">在你的电脑上启动 Claude Code，供对话和 Agent 等用途选择。</string>
+    <string name="settings_src_provider_api_note">hub 直接调用这个 API 来起草回复、分拣、翻译或整理知识，无需启动 Agent。</string>
+    <string name="settings_src_provider_launcher_note">对话和 Agent 会在你的电脑上运行 Claude Code。没有可用的「直接 API」供应商时，hub 可用此启动器的 Messages API 地址、密钥和默认模型直接起草回复或分拣，无需启动 Agent。</string>
     <string name="settings_src_provider_base_url_hint">填写所选协议兼容的地址。</string>
     <string name="settings_src_provider_small_model">小模型（可选）</string>
     <string name="settings_src_provider_same_as_above">默认同上</string>

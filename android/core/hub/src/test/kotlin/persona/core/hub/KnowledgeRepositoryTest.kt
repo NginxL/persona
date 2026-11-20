@@ -209,4 +209,28 @@ class KnowledgeRepositoryTest {
             assertEquals(4, server.requestCount)
         }
     }
+
+    /** Topics (docs/assistant/knowledge.md "Topics"): the list's `extra` is the point count; the detail carries its points, unknown kinds and fields kept. */
+    @Test fun topicsDecodeTheirPoints() = runBlocking {
+        MockWebServer().use { server ->
+            val repository = HttpKnowledgeRepository(HubScope("demo", "generation"), server.url("/").toString(),
+                "fixture-token", OkHttpClient(), { true })
+            server.enqueue(MockResponse().setBody("""{"items":[{"kind":"topics","id":"gardening","name":"Gardening","extra":"12"}],"tags":[]}"""))
+            assertEquals("12", repository.list(KnowledgeKind.Topics).items.single().extra)
+            assertEquals("/api/v1/kb/topics", server.takeRequest().path)
+            server.enqueue(MockResponse().setBody("""{"detail":{"kind":"topics","id":"gardening","path":"data/topics/gardening","points":[
+                {"id":"p1","kind":"pitfall","text":"Overwatering rots roots","why":"Soil stays wet","when":"2026-11-02",
+                 "sources":[{"kind":"chats","id":"c1","day":"2026-11-01"}]},
+                {"id":"p2","path":["Soil","Mix"],"kind":"mystery","text":"Add perlite","future":true},
+                {"text":"A bare point"}],"unknown":1}}"""))
+            val points = repository.detail(KnowledgeKind.Topics, "gardening").points.orEmpty()
+            assertEquals(listOf("pitfall", "mystery", ""), points.map { it.kind })
+            assertEquals("2026-11-02", points[0].confirmed)
+            assertEquals("Soil stays wet", points[0].why)
+            assertEquals(listOf("chats" to "c1"), points[0].sources.orEmpty().map { it.kind to it.id })
+            assertEquals(listOf("Soil", "Mix"), points[1].path)
+            assertNull(points[2].why)
+            assertEquals("/api/v1/kb/topics/gardening", server.takeRequest().path)
+        }
+    }
 }

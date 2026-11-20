@@ -87,6 +87,8 @@ enum LauncherName {
     }
 
     let existing: LauncherView?
+    /// The import draft this new wizard opened with (#5428), kept to preserve its connection type and fields on Save.
+    private(set) var imported: ProviderImportProvider?
     var kind: Kind = .custom
     var name = ""
     var baseURL = ""
@@ -236,6 +238,72 @@ enum LauncherName {
         if let s = ProviderScopeForm(view: e) { scope = s }
     }
 
+    /// A provider draft from an import link (#5428), pre-filled as if typed: still a new provider, so Save adds rather
+    /// than edits and nothing is stored until then. Mirrors `init(existing:)`.
+    func applyImport(_ p: ProviderImportProvider) {
+        imported = p
+        name = Self.importID(p)
+        let url = p.baseURL ?? ""
+        kind = url.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")) == Self.anthropicURL ? .anthropic : .custom
+        baseURL = kind == .custom ? url : ""
+        auth = p.auth == "bearer" ? "bearer" : "api_key"
+        apiKey = p.apiKey ?? ""
+        models = p.models ?? []
+        defaultModel = p.model ?? ""
+        if !defaultModel.isEmpty, !models.contains(where: { $0.id == defaultModel }) { models.insert(ProviderModel(id: defaultModel), at: 0) }
+        opusModel = p.opusModel ?? ""
+        sonnetModel = p.sonnetModel ?? ""
+        haikuModel = p.haikuModel ?? ""
+        fableModel = p.fableModel ?? ""
+        smallModel = p.smallModel ?? ""
+        subagentModel = p.subagentModel ?? ""
+        subagentForce = p.subagentForce ?? false
+        effort = p.effort ?? ""
+        proxy = p.proxy ?? ""
+        noProxy = p.noProxy ?? ""
+        proxyMode = Self.proxyMode(proxy: proxy, noProxy: noProxy, gateway: gatewayHost)
+        if proxyMode == .direct { noProxy = "" }
+        timeoutMS = Self.number(p.timeoutMS)
+        compactWindow = Self.number(p.compactWindow)
+        maxContext = Self.number(p.maxContext)
+        headers = p.headers ?? ""
+        env = p.env ?? ""
+    }
+
+    /// Only the user's chosen part of a paste is applied to an existing provider's edit form.
+    func applyPaste(_ draft: ProviderImportDraft, action: ProviderPasteAction) {
+        switch action {
+        case .add:
+            applyImport(draft.provider)
+            if defaultModel.isEmpty { defaultModel = models.first?.id ?? "" }
+        case .merge:
+            var ids = Set(models.map(\.id))
+            models += draft.modelsToAdd.filter { ids.insert($0.id).inserted }
+        case .replaceKey:
+            apiKeyByReference = false
+            apiKey = draft.provider.apiKey ?? ""
+        }
+    }
+
+    /// A new provider's startup id from an import draft (#5428): the draft's own id when it has one, else one made
+    /// from its display name (a cindy link names only a display name), satisfying the wizard's name rule.
+    private static func importID(_ p: ProviderImportProvider) -> String {
+        if let n = p.name?.trimmingCharacters(in: .whitespaces), !n.isEmpty, LauncherName.problem(n) == nil { return n }
+        var id = "", dash = false
+        for c in (p.displayName ?? p.name ?? "").lowercased() {
+            if c.isASCII, c.isLetter || c.isNumber || c == "_" || c == "-" { id.append(c); dash = false }
+            else if !dash { id.append("-"); dash = true }
+        }
+        id = id.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if id.isEmpty, let host = URL(string: p.baseURL ?? "")?.host() {
+            id = host.split(separator: ".").first.map(String.init) ?? ""
+        }
+        if id.isEmpty { id = "provider" }
+        if let f = id.first, !(f.isLetter || f == "_") { id = "p" + id }
+        if LauncherName.problem(id) != nil { id = "p-" + id }
+        return id
+    }
+
     /// The Computers row is offered: a stored provider whose hub returned its scope, a new one when the hub takes scopes
     /// (`launcher_scope`). An older hub sees the wizard as it was, and nothing of the scope is sent.
     var scopeShown: Bool {
@@ -324,7 +392,9 @@ enum LauncherName {
     func model(_ id: String) -> ProviderModel? { models.first { $0.id == id } ?? discovered.first { $0.id == id } }
 
     /// A direct API connection: what the hub calls itself, so it can send through a computer.
-    var isAPI: Bool { existing?.kind == "api" }
+    var providerKind: String { existing?.kind ?? imported?.kind ?? "launcher" }
+    var providerAgent: String? { existing?.agent ?? imported?.agent }
+    var isAPI: Bool { providerKind == "api" }
     /// Send Through's choices: the hub's computers, and the stored one even when the hub no longer lists it.
     var viaChoices: [(id: String, name: String)] {
         let list = deps.machines().map { (id: $0.id, name: $0.name) }
@@ -418,14 +488,16 @@ enum LauncherName {
         let t = { (s: String) in s.trimmingCharacters(in: .whitespaces) }
         let (proxyValue, noProxyValue) = proxyValues
         var input = LauncherInput(name: trimmedName, baseURL: address, model: defaultModel, smallModel: t(smallModel), subagentModel: t(subagentModel),
-                             customModel: e?.customModel ?? "", customModelName: e?.customModelName ?? "",
-                             customModelDescription: e?.customModelDescription ?? "", args: e?.args ?? [],
-                             apiKey: key.isEmpty || apiKeyByReference ? nil : key, kind: e?.kind ?? "launcher", api: "messages", auth: authMode,
+                             customModel: e?.customModel ?? imported?.customModel ?? "", customModelName: e?.customModelName ?? imported?.customModelName ?? "",
+                             customModelDescription: e?.customModelDescription ?? imported?.customModelDescription ?? "", args: e?.args ?? imported?.args ?? [],
+                             apiKey: key.isEmpty || apiKeyByReference ? nil : key, kind: providerKind, api: e?.api ?? imported?.api ?? "messages", auth: authMode,
                              models: models, opusModel: t(opusModel), sonnetModel: t(sonnetModel), haikuModel: t(haikuModel),
                              fableModel: t(fableModel), subagentForce: subagentForce, headers: headersValue, env: envValue, proxy: proxyValue,
                              noProxy: noProxyValue, timeoutMS: Int(t(timeoutMS)) ?? 0, compactWindow: Int(t(compactWindow)) ?? 0,
                              maxContext: Int(t(maxContext)) ?? 0, effort: t(effort))
         if apiKeyByReference, !key.isEmpty { input.apiKeyReference = key }
+        if isNew, let displayName = imported?.displayName, !displayName.isEmpty { input.displayName = displayName }
+        if isNew { input.agent = imported?.agent }
         if scopeShown { scope.apply(to: &input, old: e, machines: deps.machines(), kind: input.kind ?? "launcher") }
         if isAPI, viaMachine != (e?.viaMachine ?? "") { input.viaMachine = viaMachine }
         return input

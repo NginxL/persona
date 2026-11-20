@@ -16,15 +16,16 @@ import (
 // keeps the mark, so the Agent and the shell the tab keeps run with the user's environment. Only start tabs get them:
 // a terminal the user opens, a split, a preview's server never do.
 
-// startShellEnv is the environment ("KEY=VALUE") of a start tab's shell: the Agent mark, oh-my-zsh's update check off
-// (DISABLE_AUTO_UPDATE wins over DISABLE_UPDATE_PROMPT; DISABLE_UPDATE_PROMPT alone would update without asking, a
-// git pull in the tab, so they always go together; oh-my-bash reads DISABLE_AUTO_UPDATE too) and powerlevel10k's
-// configuration wizard off (it would take the typed line as answers and rewrite ~/.zshrc). Nothing that changes what
-// a shell may do.
+// startShellEnv is the environment ("KEY=VALUE") of a start tab's shell: the Agent mark, oh-my-zsh's update check and
+// compfix prompt off (DISABLE_AUTO_UPDATE wins over DISABLE_UPDATE_PROMPT; DISABLE_UPDATE_PROMPT alone would update
+// without asking, a git pull in the tab, so they always go together; oh-my-bash reads DISABLE_AUTO_UPDATE too) and
+// powerlevel10k's configuration wizard off (it would take the typed line as answers and rewrite ~/.zshrc). Nothing that
+// changes what a shell may do.
 var startShellEnv = []string{
 	agentMarkEnv,
 	"DISABLE_AUTO_UPDATE=true",
 	"DISABLE_UPDATE_PROMPT=true",
+	"ZSH_DISABLE_COMPFIX=true",
 	"POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true",
 }
 

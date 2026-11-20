@@ -149,12 +149,13 @@ func (s *Service) todoTitleFromModel(ctx context.Context, prompt string) string 
 	}
 	locale := s.hello(ctx).Locale
 	max := todoTitleMax(locale)
+	language := answerLanguage(locale)
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	// Reasoning models think first: a small max_tokens comes back empty (agents_start.go's tab names).
 	text, err := s.purposeModel("todo.title").Complete(cctx,
-		prompts.RenderTodoTitle(prompts.TodoTitle{Language: answerLanguage(locale), Max: max}),
-		prompts.RenderTodoTitleInput(cutRunes(prompt, 1500)), 200)
+		prompts.RenderTodoTitle(prompts.TodoTitle{Language: language, Max: max}),
+		prompts.RenderTodoTitleInput(cutRunes(prompt, 1500), language), 200)
 	if err != nil {
 		if !ai.IsPaused(err) {
 			s.logf("todo title: %v", err)

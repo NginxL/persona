@@ -12,6 +12,8 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // Launcher health (docs/server/launcher-health.md): every launcher on every machine is checked now and then with the same
@@ -285,7 +287,7 @@ func (s *Service) healthRecords(ctx context.Context, state, machine string) []La
 	out := []LauncherHealth{}
 	for _, r := range b.recs {
 		if (state == "" || r.State == state) && (machine == "" || r.Machine == machine) {
-			out = append(out, *r)
+			out = append(out, cleanHealth(*r))
 		}
 	}
 	b.mu.Unlock()
@@ -302,9 +304,30 @@ func (s *Service) launcherHealth(ctx context.Context, machine, launcher string) 
 	defer b.mu.Unlock()
 	s.healthLoadLocked(ctx)
 	if r := b.recs[healthKey(machine, launcher)]; r != nil {
-		return *r, true
+		return cleanHealth(*r), true
 	}
 	return LauncherHealth{}, false
+}
+
+// cleanHealth is a copy of r whose text is safe to show: records written before the cleanup (an older hub, a raw
+// start's error) can still carry terminal escapes and shell startup noise in Postgres, and every list hands them out.
+func cleanHealth(r LauncherHealth) LauncherHealth {
+	if r.Error != "" {
+		r.Error = textfmt.LauncherErrorSummary(r.Error, 400)
+	}
+	if r.BlockedReason != "" {
+		r.BlockedReason = textfmt.Clip(textfmt.OneLine(textfmt.StripTerminalEscapes(r.BlockedReason)), 600)
+	}
+	return r
+}
+
+// cleanCheck cleans a check's answer as it is handed on: a node from before the cleanup still sends the terminal's
+// escapes and shell startup noise in it.
+func cleanCheck(c *proto.LauncherCheck) {
+	if c.Error != "" {
+		c.Error = textfmt.LauncherErrorSummary(c.Error, 400)
+	}
+	c.Answer = textfmt.StripTerminalEscapes(c.Answer)
 }
 
 // unusable: the record says the launcher does not work (its latest result, failed within healthStale). A usage limit

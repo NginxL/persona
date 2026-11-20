@@ -303,7 +303,7 @@ func (s *Service) applyStartPreset(ctx context.Context, t *PlanTask, caller star
 	}
 	// Start every try from what the task named, so a preset an earlier try picked cannot pin this one; only a new
 	// pick below changes it.
-	params["launcher"], params["model"], params["effort"], params["tier"] = "", "", caller.effort, ""
+	params["launcher"], params["model"], params["effort"], params["speed"], params["tier"] = "", "", caller.effort, caller.speed, ""
 	t.Tier = ""
 	if len(d.Presets) == 0 {
 		return ""
@@ -312,7 +312,7 @@ func (s *Service) applyStartPreset(ctx context.Context, t *PlanTask, caller star
 	if !found {
 		return note
 	}
-	params["launcher"], params["model"], params["effort"], params["tier"] = "", "", caller.effort, name
+	params["launcher"], params["model"], params["effort"], params["speed"], params["tier"] = "", "", caller.effort, caller.speed, name
 	t.Tier = name
 	t.startFilled.preset = true // the preset now decides the launch, from here to the end of this try
 	return note

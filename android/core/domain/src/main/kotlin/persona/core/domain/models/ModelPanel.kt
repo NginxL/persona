@@ -276,7 +276,9 @@ object ModelPanel {
      * started yet), then one group per provider (an emptied group is left out; one whose list is being read shows a
      * spinner). A provider's view: its favorites, then its models. Favorites: the favorites only. Recent: the last setups
      * applied. A search looks through every provider, and a typed model id none of whose models answers is offered as
-     * "Use “…”" in each provider that takes a pick here and takes typed ids.
+     * "Use “…”" in each provider that takes a pick here and takes typed ids. A provider or a model listed twice (Claude
+     * Code lists `default` twice when its settings name it, #9998) is one row, the first: a key used twice in the list
+     * closes the app.
      */
     fun sections(providers: List<PanelProvider>, state: PanelState, chosen: PanelView, query: String, prefs: PanelPrefs): List<PanelSection> {
         val q = query.trim()
@@ -308,11 +310,11 @@ object ModelPanel {
         if (favorites.isNotEmpty()) out += PanelSection("favorites", PanelSection.Kind.Favorites, rows = favorites)
         if (view == PanelView.Favorites) return out
 
-        val shown = providers.filter(::inView)
+        val shown = providers.filter(::inView).distinctBy { it.id }
         val groups = LinkedHashMap<String, List<PanelRow>>()
         for (p in shown) {
             val models = p.models ?: continue
-            groups[p.id] = models.filter { matches(p, it, q) }.map { m ->
+            groups[p.id] = models.distinctBy { it.id }.filter { matches(p, it, q) }.map { m ->
                 val override = prefs.overrides[PanelPrefs.overrideKey(p.id, m.id)]
                 PanelRow("model:${p.id}\n${m.id}", PanelRow.Kind.Model, p, m, rowSetup(p, m, state, override),
                     current = runsNow(p, m, state.current), customized = override != null)

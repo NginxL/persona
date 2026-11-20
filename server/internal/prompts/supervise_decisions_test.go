@@ -51,3 +51,58 @@ func TestSuperviseDecisionInstructionsAppearOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestSuperviseReviewDoesNotAssertCompletion(t *testing.T) {
+	const source = "https://github.com/example/app/pull/12"
+	criteria := []string{
+		"Revalidate and merge the original delivery PR after the prerequisite repair",
+		"Deploy and verify the delivery in production",
+	}
+	for _, role := range []struct {
+		name string
+		data Supervise
+	}{
+		{"main", Supervise{}},
+		{"side", Supervise{Side: true}},
+		{"leader", Supervise{Leader: true}},
+		{"background", Supervise{Leader: true, Background: true}},
+	} {
+		t.Run(role.name, func(t *testing.T) {
+			for _, event := range []struct {
+				name, detail string
+				evidence     []string
+			}{
+				{"prerequisite merged", "PR merged: " + source, nil},
+				{"PR closed", "PR closed: " + source, nil},
+				{"changes requested", "PR changes requested: " + source, []string{"criterion 1 [blocked]: changes requested"}},
+				{"judged done candidate", "The judge found the reported work finished", []string{
+					"criterion 1 [satisfied]: original PR revalidated and merged",
+					"criterion 2 [satisfied]: deployed version and live reading recorded",
+				}},
+				{"recovered review without a reason", "", nil},
+			} {
+				t.Run(event.name, func(t *testing.T) {
+					data := role.data
+					data.Entries = []SuperviseEntry{{
+						ID: "todo_example", Title: "Deliver the original change", Kind: "review",
+						Detail: event.detail, DoneWhen: criteria, Evidence: event.evidence,
+					}}
+					text := RenderSupervise(data)
+					// i18n-ignore: review is a notification, not an acceptance verdict.
+					wants := []string{"signal=review", "待逐项复核，不代表完成", event.detail}
+					wants = append(wants, criteria...)
+					wants = append(wants, event.evidence...)
+					for _, want := range wants {
+						if !strings.Contains(text, want) {
+							t.Errorf("review message lost %q:\n%s", want, text)
+						}
+					}
+					// i18n-ignore: the old blanket completion claim must not return.
+					if strings.Contains(text, "hub 判断做完了") {
+						t.Errorf("a review wake still claims completion:\n%s", text)
+					}
+				})
+			}
+		})
+	}
+}

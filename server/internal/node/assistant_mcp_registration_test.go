@@ -123,7 +123,7 @@ func TestCodexAssistantMCPRegistrationAtStart(t *testing.T) {
 		for _, start := range []string{"new", "resume"} {
 			t.Run(tc.name+"/"+start, func(t *testing.T) {
 				n.hubPersonaContracts.Store(tc.persona)
-				args, started := n.codexAssistantArgs("proc-test", n.dir)
+				args, started := n.codexAssistantArgs("proc-test", n.dir, "")
 				// A hub switch after this start's one decision must not split the args from the spare's recorded policy.
 				n.hubPersonaContracts.Store(!tc.persona)
 				joined := strings.Join(args, " ")

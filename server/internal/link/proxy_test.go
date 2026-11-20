@@ -497,20 +497,44 @@ func TestProxyFailuresNameNeitherTheProxyNorItsCredentials(t *testing.T) {
 	}
 }
 
-// A proxy that opens the tunnel and then says nothing does not hold the hub's handshake forever: the transport gives
-// up after dialTimeout and closes the connection, also once the request itself was given up.
+// A proxy that opens the tunnel and then says nothing does not hold the hub's handshake forever: tlsClient gives up
+// after dialTimeout and closes the connection, also once the request itself was given up.
 func TestProxyStallingInsideTheTunnelIsClosed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("waits out dialTimeout")
 	}
-	stall, err := net.Listen("tcp", "127.0.0.1:0")
+	t.Parallel() // waits out dialTimeout alongside the direct route's test
+	hub, closed := silentHub(t)
+	proxy := newConnectProxy(t, hub, nil)
+	c := &Config{Machine: "laptop", FP: "any", Token: "jd_x", Proxy: proxy.url, Endpoints: []Endpoint{{URL: unroutable, Kind: "ipv4"}}}
+	requireStalledHandshakeClosed(t, closed, func(ctx context.Context) error { _, err := dialProxy(ctx, c); return err })
+}
+
+// A direct candidate whose hub takes the connection and never answers the TLS hello is closed the same way (#11028):
+// the handshake is tlsClient's own DialTLSContext, which the transport's TLSHandshakeTimeout does not cover, and the
+// transport dials under a context a given-up request does not end.
+func TestDirectStalledHandshakeIsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out dialTimeout")
+	}
+	t.Parallel()
+	hub, closed := silentHub(t)
+	c := &Config{Machine: "laptop", FP: "any", Token: "jd_x", Endpoints: []Endpoint{{URL: "https://" + hub, Kind: "lan"}}}
+	requireStalledHandshakeClosed(t, closed, func(ctx context.Context) error { _, err := dial(ctx, c); return err })
+}
+
+// silentHub takes one connection and reads it without ever answering: a hub, or whatever a tunnel reaches, whose TLS
+// never starts. closed is closed once the other side closes the connection.
+func silentHub(t *testing.T) (string, <-chan struct{}) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { stall.Close() })
+	t.Cleanup(func() { l.Close() })
 	closed := make(chan struct{})
 	go func() {
-		c, err := stall.Accept()
+		c, err := l.Accept()
 		if err != nil {
 			return
 		}
@@ -518,12 +542,18 @@ func TestProxyStallingInsideTheTunnelIsClosed(t *testing.T) {
 		close(closed)
 		c.Close()
 	}()
-	proxy := newConnectProxy(t, stall.Addr().String(), nil)
-	c := &Config{Machine: "laptop", FP: "any", Token: "jd_x", Proxy: proxy.url, Endpoints: []Endpoint{{URL: unroutable, Kind: "ipv4"}}}
+	return l.Addr().String(), closed
+}
+
+// requireStalledHandshakeClosed gives try a second, which a silent hub uses up, and then wants the stalled connection
+// closed within dialTimeout (plus slack for a loaded machine): the handshake outlives the given-up request, never
+// the deadline.
+func requireStalledHandshakeClosed(t *testing.T, closed <-chan struct{}, try func(context.Context) error) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := dialProxy(ctx, c); err == nil {
-		t.Fatal("a silent tunnel connected")
+	if err := try(ctx); err == nil {
+		t.Fatal("a silent hub connected")
 	}
 	select {
 	case <-closed:

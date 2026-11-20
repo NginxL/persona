@@ -166,6 +166,18 @@ var (
 	pauseLongest = time.Hour
 )
 
+// rateLimited says whether a failed request ran into a rate limit rather than being refused for good: a 429, or a 403
+// that says "rate limit" (or an older GitHub Enterprise's "abuse detection"), names a Retry-After or has a quota used up
+// (X-RateLimit-Remaining 0). err is the request's error, h its answer's headers.
+func rateLimited(h http.Header, err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, " 429 ") || strings.Contains(message, " 403 ") &&
+		(strings.Contains(message, "rate limit") || strings.Contains(message, "abuse detection") || h.Get("Retry-After") != "" || h.Get("X-RateLimit-Remaining") == "0")
+}
+
 // notePause records the pause GitHub asks for with a rate limit (429, or 403 with "rate limit", Retry-After or
 // X-RateLimit-Remaining 0), as GitHub's docs say: until Retry-After (seconds or an HTTP date); else, with the hour's
 // core requests used up (X-RateLimit-Remaining 0), until X-RateLimit-Reset; else for pauseFirst, doubled while the
@@ -176,11 +188,10 @@ var (
 // pause: noteRate keeps it apart. It only extends a pause, never shortens one; err is the request's error, h its
 // answer's headers.
 func (c *Connector) notePause(h http.Header, err error) {
-	message := strings.ToLower(err.Error())
-	usedUp := h.Get("X-RateLimit-Remaining") == "0"
-	if !strings.Contains(message, " 429 ") && !(strings.Contains(message, " 403 ") && (strings.Contains(message, "rate limit") || h.Get("Retry-After") != "" || usedUp)) {
+	if !rateLimited(h, err) {
 		return
 	}
+	usedUp := h.Get("X-RateLimit-Remaining") == "0"
 	if resource := h.Get("X-RateLimit-Resource"); usedUp && resource != "" && resource != "core" && h.Get("Retry-After") == "" {
 		return
 	}

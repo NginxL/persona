@@ -362,6 +362,23 @@ fun unknownAgentName(agent: String?, label: String?, launcher: String?): String 
     return said?.takeUnless { it.equals(PaseoAgent, ignoreCase = true) } ?: launcher?.trim()?.takeIf(String::isNotEmpty) ?: said ?: agent
 }
 
+/** A permission mode change recorded by the session's manager (GET …/mode-changes, #10297). */
+@Serializable
+data class ModeChange(
+    /** set, restart_done, restart_failed or restart_dropped. */
+    val kind: String = "",
+    val from: String? = null,
+    val to: String? = null,
+    /** For set: now, restart when it takes effect after this turn, or empty from an older node. */
+    val applied: String? = null,
+    /** Who asked: device, hub or extension. */
+    @SerialName("actor_kind") val actorKind: String? = null,
+    @SerialName("device_name") val deviceName: String? = null,
+    /** Why a queued restart finished as it did; a code, not display text. */
+    val reason: String? = null,
+    @WireTime val at: String = "",
+)
+
 @KeepGeneratedSerializer
 @Serializable(with = SessionSerializer::class)
 data class Session(
@@ -435,6 +452,12 @@ data class Session(
      * process by the node; #1379, #3957). False while unknown and from older hubs: then Allow Everything is a start's choice.
      */
     @SerialName("bypass_available") val bypassAvailable: Boolean = false,
+    /**
+     * Allow Everything was picked for this terminal Claude Code while it cannot reach it with shift+tab: the node restarts
+     * the session in it once its turn is over (#6476, docs/integrations/claude-integration.md "Full access by a restart").
+     * Until then the session still runs in [permissionMode]. False from older hubs.
+     */
+    @SerialName("bypass_pending") val bypassPending: Boolean = false,
     @SerialName("assistant") val assistant: Boolean = false,
     /** An assistant conversation put away (POST /api/v1/assistant/conversations/{id}/archive): kept, not listed. */
     @SerialName("archived") val archived: Boolean = false,
@@ -454,6 +477,11 @@ data class Session(
     @SerialName("origin") val origin: String? = null,
     /** What it was opened for: the inbox item, the task, the conversation, the channel, the extension. */
     @SerialName("origin_ref") val originRef: String? = null,
+    /**
+     * The extension whose token opened it (`POST /api/v1/assistant/conversations`, docs/protocol/protocol.md "Origin of
+     * assistant chats"); absent for everyone else and from older hubs. Its mark draws that extension's icon (#10358).
+     */
+    @SerialName("opened_by") val openedBy: String? = null,
     @SerialName("space_id") val spaceId: String? = null,
     @SerialName("space_name") val spaceName: String? = null,
     @SerialName("slot_name") val slotName: String? = null,
@@ -624,6 +652,8 @@ data class Session(
      * waits. [launcher] stays the one it runs on until then. Summary rows leave it out.
      */
     @SerialName("pending_switch") val pendingSwitch: PendingSwitch? = null,
+    /** The manager's current queue. A complete session row without the field has no held messages. */
+    val undelivered: List<HeldAgentMessage>? = null,
 ) {
     val key: SessionKey get() = SessionKey(machineId, sessionId)
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
@@ -868,6 +898,8 @@ data class Item(
     val model: String? = null,
     /** What the model requests this item stands for used (#5426). Older hubs omit it. */
     val usage: List<TokenUsage> = emptyList(),
+    val narration: Boolean? = null,
+    @SerialName("codex_heartbeat_quiet") val codexHeartbeatQuiet: Boolean? = null,
 )
 
 /**
@@ -1092,6 +1124,7 @@ data class Interaction(
     @SerialName("questions") val questions: List<Question>? = null,
     /** The runtime can discard this question without answering or interrupting the task. */
     @SerialName("can_cancel") val canCancel: Boolean? = null,
+    val reversible: Boolean? = null,
     @SerialName("plan") val plan: String? = null,
     @SerialName("plan_then") val planThen: String? = null,
     @SerialName("tool_input") val toolInput: JsonElement? = null,
@@ -1130,6 +1163,8 @@ data class Interaction(
     @SerialName("tool_name_title") val toolNameTitle: String? = null,
     /** The rule a question a supervisor passed up suggests (#4929); the card comes again without it once it was answered. */
     val suggestion: RuleSuggestion? = null,
+    /** A prepared approval whose current deadline is authoritative while the hub keeps it pending; absent on older hubs. */
+    @SerialName("can_clarify") val canClarify: Boolean = false,
 ) {
     val sessionKey: SessionKey get() = SessionKey(machineId, sessionId)
     /** A supported following mode; absent, plan and unknown values keep the legacy approval choices (#3784). */

@@ -750,7 +750,8 @@ func TestSnapshotTaskFollowsTheAgent(t *testing.T) {
 				SessionID: "c1", State: proto.StateWorking, UpdatedAt: now, Activity: "在读 tasks.go", ActivityAt: &started}}, now),
 			got,
 		}}))
-	// #2935: a run in the background shows on its task and in its own line: the turn ended to wait for it.
+	// #2935, #11261: a run in the background shows on its task row (whose turn ended to wait for it), while the Agents
+	// section keeps only the working count.
 	wfLead := proto.Session{MachineID: "mac-a", SessionID: "d4a7f6ff-4a9b", State: proto.StateWorking, UpdatedAt: now,
 		LastText: "审计在后台跑，等结果", Workflows: []proto.Workflow{
 			{TaskID: "w1", Name: "parity-audit", Running: true, Status: proto.WorkflowRunning, Phases: []string{"Audit", "Verify"},
@@ -761,10 +762,8 @@ func TestSnapshotTaskFollowsTheAgent(t *testing.T) {
 	if len(wfTask.Workflows) != 1 || wfTask.Workflows[0].For != "14 分钟" {
 		t.Fatalf("task workflows: %+v", wfTask.Workflows)
 	}
-	running := runningWorkflows(wfLead, now)
-	running[0].Agent, running[0].Machine, running[0].Session = "各端对齐审计", "mac-a", "d4a7f6ff"
 	golden(t, "assistant_snapshot.workflows", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC",
-		Working: []prompts.SnapshotAgent{{Label: "各端对齐审计"}}, Workflows: running, Tasks: []prompts.SnapshotTask{wfTask}}))
+		Working: []prompts.SnapshotAgent{{Label: "各端对齐审计"}}, Tasks: []prompts.SnapshotTask{wfTask}}))
 	linked := got
 	linked.Link = todoLink("https://hub.example.com", "todo_1")
 	golden(t, "assistant_snapshot.links", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC",

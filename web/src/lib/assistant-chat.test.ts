@@ -7,6 +7,8 @@ describe("the assistant's launchers", () => {
     expect(runsAssistant({ name: "claude-fast", agent: "claude" })).toBe(true);
     expect(runsAssistant({ name: "codex", agent: "codex" })).toBe(true);
     expect(runsAssistant({ name: "agy", agent: "agy", assistant: true })).toBe(true);
+    expect(runsAssistant({ name: "agy", source: "zshrc", agent: "agy" })).toBe(false);
+    expect(runsAssistant({ name: "omp", source: "zshrc", agent: "omp" })).toBe(false);
     expect(runsAssistant({ name: "traex", base_url: "(traex)" })).toBe(false);
     expect(runsAssistant({ name: "dsh", agent: "dsh" })).toBe(false);
   });

@@ -129,6 +129,9 @@ func checkModelTiers(tiers map[string]ModelTier) error {
 		if t.Effort != "" && !slices.Contains(proto.EffortLevels, t.Effort) {
 			return profileEffortErr(name, t.Effort, proto.EffortLevels)
 		}
+		if !proto.ValidSpeed(t.Speed) {
+			return i18n.Err("assistant-model_profiles.err_tier_speed", i18n.Args{"tier": name, "speed": t.Speed})
+		}
 		if t.Description = strings.TrimSpace(t.Description); utf8.RuneCountInString(t.Description) > modelTierAbout ||
 			strings.ContainsAny(t.Description, "\r\n\x00") {
 			return i18n.Err("assistant-model_profiles.err_tier_description", i18n.Args{"tier": name, "max": modelTierAbout})

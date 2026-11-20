@@ -11,7 +11,7 @@ const drawn = vi.hoisted(() => [] as { text: string; fade?: boolean }[]);
 vi.mock("../../ui/Markdown", async (load) => {
   const real = await load<typeof import("../../ui/Markdown")>();
   const { createElement } = await import("react");
-  return { ...real, Markdown: (p: ComponentProps<typeof real.Markdown>) => ("fade" in p && drawn.push({ text: p.text, fade: p.fade }), createElement(real.Markdown, p)) };
+  return { ...real, Markdown: (p: ComponentProps<typeof real.Markdown>) => (!p.streaming && "fade" in p && drawn.push({ text: p.text, fade: p.fade }), createElement(real.Markdown, p)) };
 });
 
 import { emptyTaskIndex } from "../../lib/tasks";

@@ -18,17 +18,18 @@ const scheduled = (seq: number, state: "daily" | "once" = "daily"): Item => ({
 });
 const mine = (seq: number, text = "A real request", extra: Partial<Item> = {}): Item => ({ id: `m${seq}#0`, seq, role: "user", kind: "text", text, client_msg_id: `c${seq}`, ...extra });
 const answer = (seq: number, text = "Done."): Item => ({ id: `a${seq}#0`, seq, role: "assistant", kind: "text", text });
+const narration = (seq: number): Item => ({ ...answer(seq, "Checking."), narration: true });
 const call = (seq: number, name: string, tool_input: Record<string, unknown> = {}): Item => ({ id: `t${seq}#0`, seq, role: "assistant", kind: "tool_use", tool_use_id: `call${seq}`, tool_name: name, tool_input });
 const result = (seq: number, use: Item, text = "ok", is_error = false): Item => ({ id: `r${seq}#0`, seq, role: "user", kind: "tool_result", tool_use_id: use.tool_use_id, text, is_error });
 
-const on = { background: true };
+const on = { background: true, main: true };
 const kinds = (lines: ChatLine[]) => lines.map((l) => l.kind);
 const users = (lines: ChatLine[]) => lines.flatMap((l) => l.kind === "segment" ? [l.seg.user] : l.kind === "supervision" ? l.lines.flatMap((c) => c.kind === "segment" ? [c.seg.user] : []) : []);
 
 describe("background rounds in the main conversation", () => {
   it("folds a supervisor's conversation_send round into one line that keeps its whole transcript", () => {
     const read = call(2, "Read");
-    const lines = chatLines([relayed(1), read, result(3, read), answer(4), mine(5), answer(6)], on);
+    const lines = chatLines([relayed(1), read, result(3, read), narration(4), mine(5), answer(6)], on);
     expect(kinds(lines)).toEqual(["supervision", "segment"]);
     const fold = lines[0];
     expect(fold.kind === "supervision" && fold.source).toMatchObject({ kind: "conversation", title: "Release desk" });
@@ -41,12 +42,31 @@ describe("background rounds in the main conversation", () => {
 
   it("folds a scheduled task's and a follow-up's round and never shows their prompt", () => {
     for (const state of ["daily", "once"] as const) {
-      const lines = chatLines([scheduled(1, state), answer(2)], on);
+      const lines = chatLines([scheduled(1, state), answer(2, " \n ")], on);
       expect(kinds(lines)).toEqual(["supervision"]);
       const [user] = users(lines);
       expect(user?.promptHidden).toBe(true);
       expect(user?.text).toBe("Scheduled task “Morning brief” started");
     }
+  });
+
+  it("shows final replies from scheduled runs under the default fold setting", () => {
+    for (const input of [scheduled(1, "daily"), scheduled(1, "once")]) {
+      const reply = answer(2, "The new release is ready.");
+      const [line] = chatLines([input, reply], on);
+      expect(line.kind === "segment" && line.seg.answer).toEqual(reply);
+      expect(users([line])[0]?.promptHidden).toBe(input.injected ? true : undefined);
+    }
+  });
+
+  it("keeps a routine main-conversation relay reply folded and replayable", () => {
+    const reply = answer(2, "The delegated check finished.");
+    const [line] = chatLines([relayed(1), reply], on);
+    expect(line.kind).toBe("supervision");
+    expect(line.kind === "supervision" && line.lines.flatMap((child) => child.kind === "segment" ? [child.seg.answer] : [])).toContainEqual(reply);
+    // The same round in a leader conversation keeps the existing visible-reply behavior.
+    const [leader] = chatLines([relayed(1), reply], { background: true });
+    expect(leader.kind).toBe("segment");
   });
 
   it("keeps a round that asked the user (ask_user) shown, its prompt still hidden", () => {
@@ -59,7 +79,7 @@ describe("background rounds in the main conversation", () => {
     // a pending ask_user while it runs stays visible too
     expect(kinds(chatLines([relayed(1), ask], { ...on, live: true }))).toEqual(["segment"]);
     // a failed ask_user does not promote the round
-    expect(kinds(chatLines([relayed(1), ask, result(3, ask, "error", true), answer(4)], on))).toEqual(["supervision"]);
+    expect(kinds(chatLines([relayed(1), ask, result(3, ask, "error", true)], on))).toEqual(["supervision"]);
   });
 
   it("keeps a round with a task_review verdict card shown", () => {
@@ -89,14 +109,14 @@ describe("background rounds in the main conversation", () => {
   });
 
   it("keeps a queued real message out of a background round", () => {
-    const lines = chatLines([scheduled(1), answer(2), mine(3, "Also check the calendar", { queued: true }), answer(4)], on);
+    const lines = chatLines([scheduled(1), narration(2), mine(3, "Also check the calendar", { queued: true }), answer(4)], on);
     expect(kinds(lines)).toEqual(["supervision", "segment"]);
   });
 
-  it("leaves the user's own rounds and supervision rounds as they were", () => {
+  it("keeps user rounds shown and quiet supervision folded", () => {
     expect(kinds(chatLines([mine(1), answer(2)], on))).toEqual(["segment"]);
     const supervise: Item = { id: "s1#0", seq: 1, role: "user", kind: "text", text: "x", injected: { kind: "system", state: "supervise", level: "triage", line: "Check tasks" } };
-    const [fold] = chatLines([supervise, answer(2)], on);
+    const [fold] = chatLines([supervise], on);
     expect(fold.kind === "supervision" && fold.source).toBeUndefined();
   });
 
@@ -106,7 +126,7 @@ describe("background rounds in the main conversation", () => {
     expect(foldsBackgroundRounds("lead-1", info)).toBe(true);
     expect(foldsBackgroundRounds("side-2", info)).toBe(false);
     // with that option the leader's patrol / relayed rounds fold, the owner's exchange stays open
-    const items = [relayed(1), answer(2), scheduled(3), answer(4), mine(5), answer(6)];
+    const items = [relayed(1), narration(2), scheduled(3), narration(4), mine(5), answer(6)];
     expect(kinds(chatLines(items, { background: foldsBackgroundRounds("lead-1", info) }))).toEqual(["supervision", "supervision", "segment"]);
     // a non-leader side chat keeps every round
     expect(kinds(chatLines(items, { background: foldsBackgroundRounds("side-2", info) }))).toEqual(["segment", "segment", "segment"]);

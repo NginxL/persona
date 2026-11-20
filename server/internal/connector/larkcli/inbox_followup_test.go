@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	adapter "github.com/nwverse/persona/server/internal/larkcli"
+	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 func TestInboxPollFollowupAfterOwnReply(t *testing.T) {
@@ -59,10 +60,12 @@ func TestInboxPollFollowupAfterOwnReply(t *testing.T) {
 					if topic == "" && got.Kind != "dm" {
 						t.Fatalf("history lost direct chat metadata: %+v", got)
 					}
-					// The new messages start at the request, the follow-up only search did not index among them, after
-					// the earlier message as background.
-					if want := contextText(history[3:], "ou_example_user") + "\n" + markNew + "\n" +
-						contextText([]adapter.Message{history[2], history[1], history[0]}, "ou_example_user"); got.Context != want {
+					// The unindexed follow-up is current. The owner's reply and the earlier question are background.
+					want := prompts.RenderLarkCLIInboxContext(prompts.LarkCLIInboxContext{
+						Current: contextLines([]adapter.Message{request, followup}, "ou_example_user", 0),
+						History: contextLines([]adapter.Message{earlier, reply}, "ou_example_user", 0),
+					})
+					if got.Context != want {
 						t.Fatalf("context:\n%s\nwant\n%s", got.Context, want)
 					}
 					if moved, err := c.Poll(context.Background()); err != nil || moved {

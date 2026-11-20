@@ -184,7 +184,8 @@ func fromHerdrAgent(session string, a herdr.Agent) host.Agent {
 	out := host.Agent{Agent: a.Agent, Name: a.Name, AgentStatus: a.AgentStatus, Cwd: a.Cwd, ForegroundCwd: a.ForegroundCwd,
 		PaneID: q(a.PaneID), TabID: q(a.TabID), WorkspaceID: q(a.WorkspaceID), Title: a.Title, RawTitle: a.RawTitle, Tokens: a.Tokens}
 	if a.AgentSession != nil {
-		out.AgentSession = &host.AgentSession{Kind: a.AgentSession.Kind, Value: a.AgentSession.Value}
+		out.AgentSession = &host.AgentSession{Source: a.AgentSession.Source, Agent: a.AgentSession.Agent,
+			Kind: a.AgentSession.Kind, Value: a.AgentSession.Value}
 	}
 	return out
 }

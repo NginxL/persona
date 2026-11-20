@@ -1,5 +1,5 @@
 {
-  "ln_held_notice": "Moved to the briefing (low-distraction mode: only the main conversation or P0 pushes reach the phone). This notice appears in “Needs you” and the briefing, with no alert sound.",
+  "ln_held_notice": "Moved to the briefing (push grading: only the main conversation or P0 pushes reach the phone). This notice appears in “Needs you” and the briefing, with no alert sound.",
   "sent_notice_one": "Notification sent to {count} device.",
   "sent_notice_other": "Notification sent to {count} devices.",
   "kept_notice_one": "Not delivered yet: no device that takes notifications is connected now, so the user has not been alerted. It waits for {count} device and shows when that device connects again within 30 minutes (it is lost if the hub restarts first). A chat channel with pushes on, if one is set up, still gets its copy.",

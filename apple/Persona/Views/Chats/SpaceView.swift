@@ -3,7 +3,22 @@ import SwiftUI
 
 extension EnvironmentValues {
     /// Opens a space's page (its agents) from a chat; set on the dev tab's NavigationStack.
-    @Entry var openSpace: ((String) -> Void)? = nil
+    @Entry var openSpace: SpaceOpener? = nil
+}
+
+/// `\.openSpace`: one object for the life of the page that hands it down, given that page's current closure each time its
+/// body runs (`set`). A closure read from the environment is reported changed each time SwiftUI looks, so the chat that
+/// read it ran its body again, every message in it with it, whenever SwiftUI looked at its inputs again: three or four
+/// times on each switch between the open iPhone Duo's tabs (#10303).
+@MainActor final class SpaceOpener {
+    private var open: (String) -> Void = { _ in }
+
+    func set(_ open: @escaping (String) -> Void) -> SpaceOpener {
+        self.open = open
+        return self
+    }
+
+    func callAsFunction(_ space: String) { open(space) }
 }
 
 /// The space's tabs (its agents) in the chat's header, one capsule each in its state's color (no dots: the pulsing ones
@@ -90,8 +105,9 @@ struct SiblingTabs: View {
 
     private func tab(_ s: Session, role: TabPanes.Role?) -> some View {
         let on = s.key == current
-        let tone = s.stateTone
-        let quiet = s.state == .idle || s.state == .unknown || s.state == .offline
+        let muted = model.isMuted(s)
+        let tone = s.stateTone(muted: muted)
+        let quiet = (s.state == .idle || s.state == .unknown || s.state == .offline) && !s.showsJustFinished(muted: muted)
         let label = TabPanes.tabLabel(s, role: role)
         let launcher = role?.launcher == true
         return Group {
@@ -290,7 +306,7 @@ private struct SiblingList: View {
                     let label = TabPanes.tabLabel(s, role: role)
                     Button { pick(s.key) } label: {
                         HStack(spacing: Theme.Space.m) {
-                            Circle().fill(s.stateTone.dot).scaledFrame(width: Theme.Size.dotL, height: Theme.Size.dotL).scaledFrame(width: Theme.Size.iconS) // a still dot
+                            Circle().fill(s.stateTone(muted: model.isMuted(s)).dot).scaledFrame(width: Theme.Size.dotL, height: Theme.Size.dotL).scaledFrame(width: Theme.Size.iconS) // a still dot
                             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                                 Text(label).font(on ? Theme.Font.secondaryStrong : Theme.Font.secondary).lineLimit(1)
                                 // The state in its color, then the model the tab runs on (2026-10-31: which tab is which model).
@@ -475,7 +491,7 @@ struct SlotCard: View {
                         .padding(.vertical, 2.5)
                         .background(tone.tint, in: .capsule)
                     Spacer(minLength: 4)
-                    StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground)
+                    StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted))
                 }
             }
             Text(session.displayTitle).font(Theme.Font.secondaryStrong).lineLimit(2)
@@ -498,11 +514,11 @@ struct SlotCard: View {
 
     private func header(agent: Bool) -> some View {
         HStack {
-            Chip(text: tabChip, look: .tone(session.stateTone))
+            Chip(text: tabChip, look: .tone(session.stateTone(muted: muted)))
             // Beside its tab mates the tab's chip names the agent already.
             if agent, pane == nil { Chip(text: session.agentLabel, look: .outline) }
             Spacer(minLength: 4)
-            StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground)
+            StatusDot(state: session.state, size: 9, waiting: session.waitsInBackground, justFinished: session.showsJustFinished(muted: muted))
         }
     }
 }

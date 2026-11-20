@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -75,11 +76,25 @@ type upgradeMarket struct {
 	downloads int
 	down      bool
 	srv       *httptest.Server
+
+	hold        atomic.Bool
+	started     chan struct{}
+	release     chan struct{}
+	startOnce   sync.Once
+	releaseOnce sync.Once
 }
 
 func newUpgradeMarket(t *testing.T) *upgradeMarket {
 	mk := &upgradeMarket{t: t, pkgs: map[string][]byte{}}
 	mk.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/plugins/"+extension.IndexFile && mk.hold.Load() {
+			mk.startOnce.Do(func() { close(mk.started) })
+			select {
+			case <-mk.release:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		mk.mu.Lock()
 		defer mk.mu.Unlock()
 		switch {
@@ -97,6 +112,24 @@ func newUpgradeMarket(t *testing.T) *upgradeMarket {
 	}))
 	t.Cleanup(mk.srv.Close)
 	return mk
+}
+
+// holdNextRead blocks the next index read outside mk.mu, so publish and readCount remain usable. It is for one read;
+// releaseRead is idempotent and also runs at cleanup so a failed test cannot leave the server handler blocked.
+func (mk *upgradeMarket) holdNextRead() <-chan struct{} {
+	mk.started = make(chan struct{})
+	mk.release = make(chan struct{})
+	mk.hold.Store(true)
+	mk.t.Cleanup(mk.releaseRead)
+	return mk.started
+}
+
+func (mk *upgradeMarket) releaseRead() {
+	if mk.release == nil {
+		return
+	}
+	mk.hold.Store(false)
+	mk.releaseOnce.Do(func() { close(mk.release) })
 }
 
 // publish makes dir the market's newest version of its plugin.

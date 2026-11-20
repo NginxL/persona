@@ -126,6 +126,37 @@ describe("the scheduled task editor", () => {
     }
   });
 
+  it("keeps edits made during a pending save and takes the returned state note", async () => {
+    const task = { ...taskWithNote(), model_revision: 1 };
+    const newerNote = { text: "newer note", revision: 2, updated_at: "2026-11-14T13:00:00Z" };
+    const puts: Record<string, unknown>[] = [];
+    let answer!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/tasks/scheduled") && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        puts.push(body);
+        if (puts.length === 1) return new Promise<Response>((resolve) => { answer = resolve; });
+        return json({ task: { ...task, title: body.title, model_revision: 2, state_note: newerNote } });
+      }
+      if (path.endsWith("/tasks/scheduled/run")) return json({ error: "Already running" }, 409);
+      return json({ error: "not found" }, 404);
+    }));
+
+    await open(task);
+    type(title(), "Submitted title");
+    act(() => button("立即运行").click());
+    expect(puts).toHaveLength(1);
+    type(title(), "Still editing");
+    await act(async () => answer(json({ task: { ...task, title: "Submitted title", model_revision: 2, state_note: newerNote } })));
+    expect(title().value).toBe("Still editing");
+    expect(stateNote().value).toBe("newer note");
+    await act(async () => button("保存").click());
+    expect(puts[1]).toMatchObject({ title: "Still editing" });
+    expect(puts[1]).not.toHaveProperty("state_text");
+    expect(puts[1]).not.toHaveProperty("state_revision");
+  });
+
   it("saves a changed note with its original revision and keeps the draft if the hub rejects it", async () => {
     const puts: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

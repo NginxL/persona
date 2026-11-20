@@ -1,0 +1,477 @@
+{
+  "version": 1,
+  "counts": {
+    "agents_needs_you": {
+      "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents and directory-hidden sessions left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
+      "pinned_by": "spec/fixtures/needs-you",
+      "waits_on": []
+    },
+    "inbox_unread": {
+      "rule": "Unread open action items, one per item: what every client's Inbox tab counts today.",
+      "pinned_by": null,
+      "waits_on": ["D7"]
+    },
+    "inbox_action": {
+      "rule": "Open action items, read or not, one per item: what the manager tells the roster as inbox_needs_you (tellInboxNeedsYou).",
+      "pinned_by": null,
+      "waits_on": []
+    },
+    "todos_needs_you": {
+      "rule": "N: the to-dos in Needs you, each once, quiet ones and Can wait left out, a step with its parent (TodoCounts.needs_you).",
+      "pinned_by": "spec/fixtures/todo-counts",
+      "waits_on": ["D8"]
+    },
+    "persona_cards": {
+      "rule": null,
+      "pinned_by": null,
+      "waits_on": ["D9"]
+    }
+  },
+  "replays": {
+    "needs-you": {
+      "lanes": ["ios", "android"],
+      "surfaces": {
+        "agents_tab": {"value": "badge", "keys": "badge_rows"},
+        "agents_section": {"value": "rows", "keys": "rows"}
+      }
+    }
+  },
+  "surfaces": [
+    {
+      "client": "ios",
+      "surface": "agents_tab",
+      "label": "Agents that need you",
+      "shown_on": "the Agents tab's badge, the top switch and the sidebar",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [
+        {"file": "apple/Persona/Views/Chats/AgentsNeedsYouRows.swift", "symbol": "AgentsNeedsYou.badge"},
+        {"file": "apple/Persona/App/AppModel.swift", "symbol": "AppModel.countBadges"}
+      ],
+      "tests": [{"file": "apple/PersonaTests/AgentsNeedsYouFixtureTests.swift", "symbol": "AgentsNeedsYouFixtureTests"}],
+      "status": "differs",
+      "decisions": ["D1"],
+      "why": "On a hub with bounded lists, a session that waits with no card counts only if its row is loaded, and a card in a muted space counts while its row is not loaded."
+    },
+    {
+      "client": "ios",
+      "surface": "agents_section",
+      "label": "Agents that need you",
+      "shown_on": "the Agents list's Needs you section header and filter",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Persona/Views/Chats/AgentsNeedsYouRows.swift", "symbol": "AgentsNeedsYou.rows"}],
+      "tests": [{"file": "apple/PersonaTests/AgentsNeedsYouFixtureTests.swift", "symbol": "AgentsNeedsYouFixtureTests"}],
+      "status": "differs",
+      "decisions": ["D6"],
+      "why": "It keeps muted agents and quiet tasks' agents as rows, which the count leaves out."
+    },
+    {
+      "client": "ios",
+      "surface": "home_agents_widget",
+      "label": "Agents that need you",
+      "shown_on": "the Home Screen Agents widget",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Persona/App/HomeWidgetWriter.swift", "symbol": "AppModel.homeSnapshot"}],
+      "tests": [{"file": "apple/PersonaTests/HomeWidgetTests.swift", "symbol": "needsYouIsTheAgentsBadge"}],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "It draws the Agents badge's rows, with the badge's difference on hubs with bounded lists; its scope outside the app is D2's."
+    },
+    {
+      "client": "ios",
+      "surface": "watch",
+      "label": "Agents that need you",
+      "shown_on": "the watch's frog and complication",
+      "count": ["agents_needs_you"],
+      "scope": "unscoped",
+      "code": [{"file": "apple/Shared/WatchPet.swift", "symbol": "WatchPet.status"}],
+      "tests": [{"file": "apple/PersonaTests/WatchPetTests.swift", "symbol": "WatchPetTests"}],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "It counts the sessions with a card plus those in needs_you, muted agents and Persona conversations included, for every assistant."
+    },
+    {
+      "client": "ios",
+      "surface": "siri",
+      "label": "Agents that need you",
+      "shown_on": "what Siri's Persona status reads out as waiting",
+      "count": ["agents_needs_you"],
+      "scope": "all_hubs",
+      "code": [{"file": "apple/Persona/Intents/IntentSupport.swift", "symbol": "IntentPicker.waiting"}],
+      "tests": [{"file": "apple/PersonaTests/IntentsTests.swift", "symbol": "IntentPicker.waiting"}],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "It counts cards, one each, Persona conversations' included, on every paired hub."
+    },
+    {
+      "client": "android",
+      "surface": "agents_tab",
+      "label": "Agents that need you",
+      "shown_on": "the Agents tab's badge",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "android/app/src/main/java/persona/android/ui/ShellCounts.kt", "symbol": "ShellCounts.agentRows"}],
+      "tests": [
+        {"file": "android/app/src/test/java/persona/android/ui/ShellCountsTest.kt", "symbol": "ShellCountsTest"},
+        {"file": "android/core/domain/src/test/kotlin/persona/core/domain/sort/AgentsNeedsYouFixtureTest.kt", "symbol": "AgentsNeedsYouFixtureTest"}
+      ],
+      "status": "differs",
+      "decisions": ["D1"],
+      "why": "It reads no hidden_by_directory, so a directory-hidden session's cards count on every hub; on hubs with bounded lists it counts over the 50 rows it holds until the Agents page is shown."
+    },
+    {
+      "client": "android",
+      "surface": "agents_section",
+      "label": "Agents that need you",
+      "shown_on": "the Agents page's Needs you header and filter",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsListInfo.kt", "symbol": "agentNeedsYouRows"}],
+      "tests": [{"file": "android/feature/agents/src/test/kotlin/persona/feature/agents/AgentsListInfoTest.kt", "symbol": "agentNeedsYouRows"}],
+      "status": "differs",
+      "decisions": ["D6", "D1"],
+      "why": "It keeps muted agents and quiet tasks' agents as rows, which the count leaves out, and, reading no hidden_by_directory, a directory-hidden session that waits (the needs-you fixture's Android mark, D1)."
+    },
+    {
+      "client": "web",
+      "surface": "agents_unscoped",
+      "label": "Agents that need you",
+      "shown_on": "the browser tab's title and the favicon",
+      "count": ["agents_needs_you"],
+      "scope": "unscoped",
+      "code": [
+        {"file": "web/src/lib/sessions.ts", "symbol": "stateCounts"},
+        {"file": "web/src/lib/sessions.ts", "symbol": "useCounts"},
+        {"file": "server/internal/sessionlist/query.go", "symbol": "addCount"}
+      ],
+      "tests": [{"file": "web/src/lib/attention-fixture.test.ts", "symbol": "stateCounts"}],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "Without bounded lists it counts muted agents and no card on no session; with them (the default) it draws the hub's state count, quiet and muted agents in."
+    },
+    {
+      "client": "web",
+      "surface": "agents_scoped",
+      "label": "Agents that need you",
+      "shown_on": "the sidebar's Home row and the shell switch",
+      "count": ["agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "web/src/lib/current-assistant.ts", "symbol": "useScopedCounts"}],
+      "tests": [],
+      "status": "differs",
+      "decisions": ["D1"],
+      "why": "The unscoped rule, over the current assistant's sessions."
+    },
+    {
+      "client": "desktop",
+      "surface": "dock",
+      "label": "Agents that need you",
+      "shown_on": "the Dock and the taskbar",
+      "count": ["agents_needs_you"],
+      "scope": "unscoped",
+      "code": [{"file": "desktop/src/badge.ts", "symbol": "setBadge"}],
+      "tests": [],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "It shows the web's unscoped number (web agents_unscoped)."
+    },
+    {
+      "client": "desktop",
+      "surface": "island",
+      "label": "Agents that need you",
+      "shown_on": "the notch island's Needs you number",
+      "count": ["agents_needs_you"],
+      "scope": "unscoped",
+      "code": [{"file": "web/src/lib/desktop-island.ts", "symbol": "islandState"}],
+      "tests": [{"file": "web/src/lib/desktop-island.test.ts", "symbol": "islandState"}],
+      "status": "differs",
+      "decisions": ["D1", "D2"],
+      "why": "It counts the sessions in needs_you, quiet and muted agents included, and no card on no session."
+    },
+    {
+      "client": "server",
+      "surface": "live_activity",
+      "label": "Agents that need you",
+      "shown_on": "the Live Activity, the open Apple and Android apps' fleet line, and Android's ongoing notification, widget and tile",
+      "count": ["agents_needs_you"],
+      "scope": "default_manager",
+      "code": [
+        {"file": "server/internal/assistant/fleet_live.go", "symbol": "needsYou"},
+        {"file": "server/internal/assistant/fleet_live.go", "symbol": "liveCounts"},
+        {"file": "server/internal/assistant/fleet_live.go", "symbol": "cardStands"}
+      ],
+      "tests": [{"file": "server/internal/assistant/fleet_attention_test.go", "symbol": "TestLiveActivityKeepsItsOwnCount"}],
+      "status": "differs",
+      "decisions": ["D4", "D1", "D2"],
+      "why": "A Persona conversation counts by a standing card, an elicitation does not stand, a card on no session does not count, and only the default manager's agents are in it."
+    },
+    {
+      "client": "server",
+      "surface": "link",
+      "label": "Agents that need you",
+      "shown_on": "Persona Link's Needs you summary",
+      "count": ["agents_needs_you"],
+      "scope": "manager",
+      "code": [{"file": "server/internal/assistant/fleet_attention.go", "symbol": "linkAttention"}],
+      "tests": [{"file": "server/internal/assistant/fleet_attention_test.go", "symbol": "TestLinkAttentionFollowsTheSharedFixtures"}],
+      "status": "differs",
+      "decisions": ["D3", "D1"],
+      "why": "It counts muted agents and no card on no session, by the web badge's rule (spec/fixtures/attention)."
+    },
+    {
+      "client": "harmony",
+      "surface": "agents_section",
+      "label": "Agents that need you",
+      "shown_on": "HarmonyOS's Agents group headers",
+      "count": ["agents_needs_you"],
+      "scope": "list",
+      "code": [{"file": "native/app-core/crates/persona-core/src/sort/mod.rs", "symbol": "counts"}],
+      "tests": [{"file": "native/app-core/crates/persona-core/tests/sort_projection.rs", "symbol": "agents_list_projection_replays_every_fixture"}],
+      "status": "differs",
+      "decisions": ["D6"],
+      "why": "It counts muted agents and reads no quiet field."
+    },
+    {
+      "client": "ios",
+      "surface": "switcher",
+      "label": "Assistant switcher",
+      "shown_on": "the assistant switcher and the avatar's dot, with several assistants",
+      "count": ["agents_needs_you", "inbox_action"],
+      "local": "Persona conversations with a pending card, by today's rule until D9 (the plan's section 3.3, item 7)",
+      "scope": "each_assistant",
+      "code": [
+        {"file": "apple/Persona/App/AssistantScope.swift", "symbol": "AssistantBadges.waiting"},
+        {"file": "apple/Persona/App/AssistantScope.swift", "symbol": "AssistantBadges.counts"}
+      ],
+      "tests": [{"file": "apple/PersonaTests/AssistantBadgesTests.swift", "symbol": "AssistantBadgesTests"}],
+      "status": "differs",
+      "decisions": ["D1"],
+      "why": "It counts each card on the session it names, so a waiting child counts apart from its parent."
+    },
+    {
+      "client": "android",
+      "surface": "switcher",
+      "label": "Assistant switcher",
+      "shown_on": "the assistant switcher and the sidebar button's dot, with several assistants",
+      "count": ["agents_needs_you", "inbox_action"],
+      "local": "Persona conversations with a pending card, by today's rule until D9 (the plan's section 3.3, item 7)",
+      "scope": "each_assistant",
+      "code": [{"file": "android/app/src/main/java/persona/android/ui/ShellCounts.kt", "symbol": "ShellCounts.waiting"}],
+      "tests": [{"file": "android/app/src/test/java/persona/android/ui/ShellCountsTest.kt", "symbol": "ShellCountsTest"}],
+      "status": "differs",
+      "decisions": ["D1"],
+      "why": "Outside the 50 rows it holds on a hub with bounded lists, it counts a session's cards one each; it keeps directory-hidden sessions."
+    },
+    {
+      "client": "web",
+      "surface": "switcher",
+      "label": "Assistant switcher",
+      "shown_on": "the assistant switcher, with several assistants",
+      "count": ["agents_needs_you", "inbox_action"],
+      "local": "Persona conversations with a pending card, by today's rule until D9 (the plan's section 3.3, item 7)",
+      "scope": "each_assistant",
+      "code": [{"file": "web/src/lib/manager-attention.ts", "symbol": "waitingAgents"}],
+      "tests": [{"file": "web/src/lib/current-assistant.test.tsx", "symbol": "waitingAgents"}],
+      "status": "matches",
+      "why": "Sessions once from the complete list, children folded, a card on no session 1, quiet, muted and directory-hidden ones out: the count's rule (the plan's step 10)."
+    },
+    {
+      "client": "server",
+      "surface": "roster_inbox",
+      "label": "Assistant switcher, its Inbox part",
+      "shown_on": "every client's assistant switcher, as the roster's inbox_needs_you",
+      "count": ["inbox_action"],
+      "scope": "each_assistant",
+      "code": [{"file": "server/internal/assistant/inbox_store.go", "symbol": "tellInboxNeedsYou"}],
+      "tests": [{"file": "server/internal/assistant/inbox_needs_you_test.go", "symbol": "TestInboxNeedsYouToldToTheHub"}],
+      "status": "matches",
+      "why": "The count is this function's rule (the plan's section 3.1)."
+    },
+    {
+      "client": "ios",
+      "surface": "inbox_tab",
+      "label": "Inbox",
+      "shown_on": "the Inbox tab and the drawer's Inbox row",
+      "count": ["inbox_unread"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Persona/App/InboxStore.swift", "symbol": "InboxStore.unreadCount"}],
+      "tests": [{"file": "apple/PersonaTests/InboxTests.swift", "symbol": "unreadBadgePreservesReadPendingItemsAcrossDecoding"}],
+      "status": "matches",
+      "why": "Unread open action items."
+    },
+    {
+      "client": "ios",
+      "surface": "inbox_widget",
+      "label": "Inbox",
+      "shown_on": "the Inbox widget's Need You number and the dot on the persona's face",
+      "count": ["inbox_unread"],
+      "scope": "assistant",
+      "code": [
+        {"file": "apple/Persona/App/InboxStore.swift", "symbol": "InboxStore.actionCount"},
+        {"file": "apple/Persona/App/HomeWidgetWriter.swift", "symbol": "HomeInbox.build"}
+      ],
+      "tests": [],
+      "status": "differs",
+      "decisions": ["D7"],
+      "why": "It counts open action items, read or not."
+    },
+    {
+      "client": "android",
+      "surface": "inbox_row",
+      "label": "Inbox",
+      "shown_on": "the sidebar's Inbox row",
+      "count": ["inbox_unread"],
+      "scope": "assistant",
+      "code": [{"file": "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxNeedsYou.kt", "symbol": "inboxUnreadCount"}],
+      "tests": [{"file": "android/feature/inbox/src/test/kotlin/persona/feature/inbox/InboxUnreadBadgeTest.kt", "symbol": "inboxUnreadCount"}],
+      "status": "matches",
+      "why": "Unread open action items; a conversation read on this device counts as read before the hub's list says so (the owner's own act)."
+    },
+    {
+      "client": "web",
+      "surface": "inbox_row",
+      "label": "Inbox",
+      "shown_on": "the sidebar's Inbox row",
+      "count": ["inbox_unread"],
+      "scope": "assistant",
+      "code": [{"file": "web/src/lib/inbox.ts", "symbol": "badgeCount"}],
+      "tests": [{"file": "web/src/lib/inbox.test.ts", "symbol": "badgeCount"}],
+      "status": "matches",
+      "why": "Unread open action items."
+    },
+    {
+      "client": "ios",
+      "surface": "todos_row",
+      "label": "To-dos",
+      "shown_on": "the drawer's and the sidebar's To-dos row",
+      "count": ["todos_needs_you"],
+      "scope": "assistant",
+      "code": [
+        {"file": "apple/Persona/Features/Todos/TodosV1.swift", "symbol": "TodoStore.sidebarCount"},
+        {"file": "apple/Persona/App/TodoStore.swift", "symbol": "TodoStore.badgeCount"}
+      ],
+      "tests": [{"file": "apple/PersonaTests/QuietTasksTests.swift", "symbol": "badgeCount"}],
+      "status": "differs",
+      "decisions": ["D8"],
+      "why": "Release builds count every open to-do that is not quiet, in any section; the hub's N only behind the V1 gate (TodoFeatures.released is false)."
+    },
+    {
+      "client": "ios",
+      "surface": "todos_widget",
+      "label": "To-dos",
+      "shown_on": "the Home Screen To-dos widget",
+      "count": ["todos_needs_you"],
+      "scope": "unscoped",
+      "code": [{"file": "apple/Persona/App/HomeWidgetWriter.swift", "symbol": "HomeTodos.build"}],
+      "tests": [{"file": "apple/PersonaTests/HomeWidgetTests.swift", "symbol": "todosAreTodaysOpenOnes"}],
+      "status": "differs",
+      "decisions": ["D8", "D2"],
+      "why": "It counts the to-dos due today or overdue, of every assistant."
+    },
+    {
+      "client": "android",
+      "surface": "todos_row",
+      "label": "To-dos",
+      "shown_on": "the sidebar's To-dos row",
+      "count": ["todos_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "android/app/src/main/java/persona/android/ui/ShellCounts.kt", "symbol": "ShellCounts.todos"}],
+      "tests": [{"file": "android/app/src/test/java/persona/android/ui/ShellCountsTest.kt", "symbol": "ShellCountsTest"}],
+      "status": "differs",
+      "decisions": ["D8"],
+      "why": "It counts every open to-do that is not quiet."
+    },
+    {
+      "client": "web",
+      "surface": "todos_row",
+      "label": "To-dos",
+      "shown_on": "the sidebar's To-dos row",
+      "count": ["todos_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "web/src/lib/todo-triage.ts", "symbol": "ownerBadge"}],
+      "tests": [{"file": "web/src/lib/todo-triage.badge.test.ts", "symbol": "ownerBadge"}],
+      "status": "differs",
+      "decisions": ["D8"],
+      "why": "It counts what waits on the owner (#11085)."
+    },
+    {
+      "client": "server",
+      "surface": "todo_counts",
+      "label": "To-dos",
+      "shown_on": "iOS's To-dos row and pages behind the V1 gate (TodoCountsSource), as GET /api/v1/todos sends them",
+      "count": ["todos_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "server/internal/assistant/todo/projection/list.go", "symbol": "Counts"}],
+      "tests": [{"file": "server/internal/assistant/todo/projection/fixtures_test.go", "symbol": "TestProjectionFollowsTheCountsCases"}],
+      "status": "matches",
+      "why": "The count's rule is this function's N; the app counts the current assistant's again where the hub adds several up."
+    },
+    {
+      "client": "server",
+      "surface": "direction_tree",
+      "label": "A direction's to-dos that need you",
+      "shown_on": "the web's and Android's leader rows",
+      "count": ["todos_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "server/internal/assistant/direction_tree.go", "symbol": "treeCounts"}],
+      "tests": [{"file": "server/internal/assistant/direction_tree_test.go", "symbol": "TestDirectionTreeTaskStatesAndCounts"}],
+      "status": "differs",
+      "decisions": ["D16"],
+      "why": "It counts tasks by tree state, quiet tasks included."
+    },
+    {
+      "client": "ios",
+      "surface": "persona_tab",
+      "label": "Persona",
+      "shown_on": "the Persona tab's badge (iPad, visionOS, iPhone Duo)",
+      "count": ["persona_cards"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Persona/App/AppModel.swift", "symbol": "AppModel.countBadges"}],
+      "tests": [{"file": "apple/PersonaTests/AssistantScopeTests.swift", "symbol": "theTabBadgesCountTheCurrentAssistantsCards"}],
+      "status": "differs",
+      "decisions": ["D9"],
+      "why": "Cards on Persona conversations and on quiet tasks' agents, one each; which cards the tab counts is D9's."
+    },
+    {
+      "client": "android",
+      "surface": "persona_tab",
+      "label": "Persona",
+      "shown_on": "the Persona tab's badge (not drawn on Glass)",
+      "count": ["persona_cards"],
+      "scope": "assistant",
+      "code": [{"file": "android/app/src/main/java/persona/android/ui/Root.kt", "symbol": "assistantRequests"}],
+      "tests": [],
+      "status": "differs",
+      "decisions": ["D9"],
+      "why": "Cards on Persona conversations only; which cards the tab counts is D9's."
+    },
+    {
+      "client": "ios",
+      "surface": "app_icon",
+      "label": "App icon",
+      "shown_on": "the app icon on the Home Screen",
+      "count": ["persona_cards", "agents_needs_you", "inbox_unread"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Persona/App/AppIconBadge.swift", "symbol": "AppIconBadge.count"}],
+      "tests": [{"file": "apple/PersonaTests/AppIconBadgeTests.swift", "symbol": "AppIconBadgeTests"}],
+      "status": "differs",
+      "decisions": ["D9", "D1", "D12"],
+      "why": "The tabs' badges added up, the Agents badge's difference on hubs with bounded lists included (ios.agents_tab, D1), set by the app only, so it goes stale while the app is not running."
+    },
+    {
+      "client": "ios",
+      "surface": "vision_ornament",
+      "label": "Vision Pro ornament",
+      "shown_on": "the tab ornament on Apple Vision Pro",
+      "count": ["persona_cards", "agents_needs_you"],
+      "scope": "assistant",
+      "code": [{"file": "apple/Vision/App/VisionShell.swift", "symbol": "VisionShell"}],
+      "tests": [],
+      "status": "differs",
+      "decisions": ["D9", "D1"],
+      "why": "The Persona and Agents tabs' badges added up, the Agents badge's difference on hubs with bounded lists included (ios.agents_tab, D1)."
+    }
+  ]
+}

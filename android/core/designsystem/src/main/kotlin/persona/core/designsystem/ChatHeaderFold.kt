@@ -1,5 +1,6 @@
 package persona.core.designsystem
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -100,9 +101,9 @@ private fun Modifier.takesNoTouches(): Modifier = pointerInput(Unit) {
 }
 
 /**
- * The folded header (iOS `compactChrome`): back, and in the middle a glass capsule with the agent's mark, the state's dot and
+ * The folded header (iOS `compactChrome`): back, and in the middle a capsule with the agent's mark, the state's dot and
  * the [title], or while the hub is out of reach a spinner and [linkText]; a tap on the capsule opens the header again
- * ([onOpen], said as [openLabel]). Nothing on the right: a space as wide as back keeps the capsule in the middle. [waiting]:
+ * ([onOpen], said as [openLabel]). The [trailing] control has the same space as back to keep the capsule in the middle. [waiting]:
  * the agent works only because its background work waits, so the dot is the clock (iOS `StatusDot(waiting:)`).
  */
 @Composable
@@ -116,8 +117,11 @@ fun ChatSlimBar(
     agentMark: AgentMarkSpec? = null,
     linkText: String? = null,
     waiting: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
+    val chip = (if (palette.dark) Tokens.Common.Dark.Fill.chip else Tokens.Common.Light.Fill.chip)
+        .compositeOn(palette.surfaceOpaque)
     Row(modifier.fillMaxWidth().statusBarsPadding().heightIn(min = Tokens.Size.slimBar).padding(horizontal = Tokens.Space.xs),
         verticalAlignment = Alignment.CenterVertically) {
         val side = Modifier.width(Tokens.MinTouch.android)
@@ -128,9 +132,7 @@ fun ChatSlimBar(
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(
-                // The open header's floating glass, as `JLinkPill`: iOS's chip fill sits on its bar's material, and
-                // the chat here has no bar behind the header, only the page's fading edge.
-                Modifier.heightIn(min = Tokens.Size.wellXS).floatingSurface(CircleShape).clip(CircleShape)
+                Modifier.heightIn(min = Tokens.Size.wellXS).clip(CircleShape).background(chip)
                     .clickable(role = Role.Button, onClick = onOpen).semantics(mergeDescendants = true) { contentDescription = openLabel }
                     .padding(horizontal = Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
@@ -139,7 +141,7 @@ fun ChatSlimBar(
                 val words = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold)
                 if (linkText != null) {
                     JSpinner(Modifier.size(Tokens.Size.markXS), stroke = Tokens.Space.Standard.xxs)
-                    Text(linkText, style = words, color = palette.ink2, maxLines = 1)
+                    Text(linkText, style = words, color = palette.ink, maxLines = 1)
                 } else {
                     agentMark?.let { JAgentMark(it, size = Tokens.Size.markXS) }
                     status?.let { JStateDot(it, Tokens.Size.dotS, waiting) }
@@ -147,6 +149,6 @@ fun ChatSlimBar(
                 }
             }
         }
-        Spacer(side)
+        if (trailing == null) Spacer(side) else Box(side, contentAlignment = Alignment.Center) { trailing() }
     }
 }

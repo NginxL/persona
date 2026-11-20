@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"hash/crc32"
@@ -8,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -422,4 +424,37 @@ func (f *File) LastSeq() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lines
+}
+
+// End identifies the last complete line read from the file and the history its sequence counts in.
+func (f *File) End() Span {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return Span{History: f.history(), To: f.lines}
+}
+
+// CoversClosedTurnAfter reports whether the checked end still covers every line after seq in history and the latest
+// turn ended after the send. An open turn or a closing record on a discarded branch cannot establish that.
+func (f *File) CoversClosedTurnAfter(end Span, history string, seq int, sentAt time.Time) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.meta.TurnClosed || f.meta.turnEndSeq <= seq || !f.meta.turnEndedAt.After(sentAt) ||
+		f.tree != nil && f.tree.hidden[f.meta.turnEndLine] {
+		return false
+	}
+	if history == "" || history != end.History || end.History != f.history() || end.To != f.lines || f.base > seq || seq > f.lines || len(f.partial) != 0 {
+		return false
+	}
+	fh, err := os.Open(f.Path)
+	if err != nil {
+		return false
+	}
+	defer fh.Close()
+	// A rewrite that grew the same inode can look like an append to the incremental parser.
+	first, err := bufio.NewReaderSize(fh, 64<<10).ReadSlice('\n')
+	if err != nil || crc32.ChecksumIEEE(first[:len(first)-1]) != f.firstHash {
+		return false
+	}
+	st, err := os.Stat(f.Path)
+	return err == nil && unchanged(st, f.offset, f.ino)
 }

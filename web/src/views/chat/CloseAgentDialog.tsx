@@ -8,7 +8,7 @@ import { navigate, parse, showsSession } from "../../lib/router";
 import { getSession, getState, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Button, cx, Dialog, toast } from "../../ui/atoms";
-import { cleanupReady, KEEP, runCleanup, useAgentWorktree, WorktreeCleanup, type Cleanup } from "./SessionDialogs";
+import { cleanupReady, KEEP, runCleanup, useAgentWorktree, WorktreeCleanup, type Cleanup } from "./SessionWorktreeCleanup";
 
 // "Close…" (#7125): the one way the web closes an Agent. Its row menu, the chat's ⋯ and "Close pane" on its pane all
 // ask here (lib/close-agent.ts; views/CloseAgentHost.tsx loads this chunk on that intent), reading the agent's latest row as it changes:

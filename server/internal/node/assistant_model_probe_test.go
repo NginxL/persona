@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -71,8 +72,14 @@ func TestLauncherModelProbeUserAgent(t *testing.T) {
 			if tc.want == "" && len(got.Values("User-Agent")) != 0 {
 				t.Errorf("empty User-Agent should not be sent, got %q", got.Values("User-Agent"))
 			}
-			if got.Get("X-Unrelated") != "" || got.Get("X-Api-Key") != "probe-key" {
-				t.Errorf("unexpected custom headers or credential: %v", got)
+			wantUnrelated := ""
+			for _, configured := range []string{tc.launcherHeaders, tc.userHeaders, tc.flagHeaders} {
+				if strings.Contains(configured, "X-Unrelated:") {
+					wantUnrelated = "private"
+				}
+			}
+			if got.Get("X-Unrelated") != wantUnrelated || got.Get("X-Api-Key") != "probe-key" {
+				t.Errorf("custom headers or credential: %v", got)
 			}
 		})
 	}

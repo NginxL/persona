@@ -48,8 +48,9 @@ const (
 	// MethodKeepUndelivered: KeepUndeliveredParams → {undelivered}: the owner's message to one of its conversations
 	// went nowhere (nothing was typed: its process did not start, its computer was away), its transport outcome is
 	// unknown, or SendParams answered CodeUndeliveredAhead. The manager keeps it and sends it again by itself, once
-	// (#10194); an unknown first attempt is checked in the transcript before any retry. An older manager answers
-	// "unknown method": the hub answers the app with the failure, as before.
+	// (#10194); an unknown first attempt is only looked for in the transcript, never sent again by itself, and left to
+	// the owner's Retry or Delete when it is not found (#10669). An older manager answers "unknown method": the hub
+	// answers the app with the failure, as before.
 	MethodKeepUndelivered = "assistant.keep_undelivered"
 )
 
@@ -58,13 +59,15 @@ const (
 const CodeUndeliveredAhead = "undelivered_ahead"
 
 // CodeDeliveryUnknown: the node connection or caller's wait ended before a send's result was known. The first attempt
-// may have typed the message, so the manager looks for it in the transcript before trying again.
+// may have typed the message, so the manager only looks for it in the transcript and leaves it to the owner when it
+// is not found, never sending it again by itself (#10669).
 const CodeDeliveryUnknown = "delivery_unknown"
 
 // The node's methods the assistant calls for its directory, its conversations and its settings
 // (docs/protocol/protocol.md "hub ↔ node"), passed through by the hub's device.call like the others.
 const (
-	// DeviceAssistantPrepare: {dir, claude_md, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
+	DeviceAssistantDirectory = "assistant.directory" // {path} -> {cwd}; validates an existing directory without writes
+	// DeviceAssistantPrepare: {dir, claude_md, work_guide_md?, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
 	DeviceAssistantPrepare   = "assistant.prepare"
 	DeviceAssistantExecution = "assistant.execution" // {session_id} → proto.AssistantExecution
 	// DeviceAssistantGuestPrepare: {dir, claude_md} → {cwd}: a guest conversation's directory (assistant/guest.go), only
@@ -99,13 +102,17 @@ const ConfigDirClaudeOnly = "config_dir is only supported for Claude assistant c
 
 // StartParams is assistant.start's params.
 type StartParams struct {
-	Text           string        `json:"text"`
-	Images         []proto.Image `json:"images,omitempty"`
-	Launcher       string        `json:"launcher,omitempty"`
-	Model          string        `json:"model,omitempty"`      // the first message's model, picked as a message's is (#5033)
-	ConfigDir      string        `json:"config_dir,omitempty"` // Claude profile on the target machine; "" private, "legacy" old resolution, "default" unset
-	PermissionMode string        `json:"permission_mode,omitempty"`
-	Effort         string        `json:"effort,omitempty"`
+	TaskModel           *ModelBinding `json:"-"`
+	Cwd                 string        `json:"-"` // internal scheduled task directory; validated on the target computer
+	TaskExecution       bool          `json:"-"` // refuse execution substitutions
+	LegacyTaskExecution bool          `json:"-"` // an unconfigured scheduled turn may use an older node
+	Text                string        `json:"text"`
+	Images              []proto.Image `json:"images,omitempty"`
+	Launcher            string        `json:"launcher,omitempty"`
+	Model               string        `json:"model,omitempty"`      // the first message's model, picked as a message's is (#5033)
+	ConfigDir           string        `json:"config_dir,omitempty"` // Claude profile on the target machine; "" private, "legacy" old resolution, "default" unset
+	PermissionMode      string        `json:"permission_mode,omitempty"`
+	Effort              string        `json:"effort,omitempty"`
 	// ServiceTier: the native speed for a new Codex conversation, acknowledged before its first turn. Independent of Effort.
 	ServiceTier string `json:"service_tier,omitempty"`
 	Purpose     string `json:"purpose,omitempty"`    // the model configuration's purpose; "" is the main chat's
@@ -115,6 +122,9 @@ type StartParams struct {
 	Space string `json:"space,omitempty"`
 	// Main: it becomes the main conversation (what the old one left goes before Text).
 	Main bool `json:"main,omitempty"`
+	// Public: the first message answers in someone else's chat. It suppresses the owner's live snapshot for this turn
+	// only; never over the bus or accepted from an app's conversation-start request.
+	Public bool `json:"-"`
 	// Untitled: not one of the conversations it names and lists as its own (the inbox's AI twin: its result is the
 	// draft in the inbox).
 	Untitled bool `json:"untitled,omitempty"`
@@ -133,9 +143,8 @@ type StartParams struct {
 	// ClientMsgID: the first message's client_msg_id (with NewSessionID: the node sends it once and its transcript
 	// item carries it, as a send's; without, the node ties it to the new conversation's first line). Never over the bus.
 	ClientMsgID string `json:"-"`
-	// Human: a person's own app opens it, as the hub vouched (HTTPRequest.Human): its first message gets a
-	// client_msg_id (FirstMessageIDPrefix) and counts as theirs, as a send the hub vouched for does (SendParams.Human).
-	// Never over the bus.
+	// Human attributes the first message to an app start vouched for by the hub. It is used for missing replies.
+	// The node adds no client message ID to that input. Never over the bus.
 	Human bool `json:"-"`
 }
 
@@ -156,21 +165,29 @@ type SendParams struct {
 	// the manager's own sends (channels, the inbox, meetings) never set it, and an older hub never sends it. A hand-off's
 	// Always rule spares the card only for a turn of such messages (assistant secret_handoff.go).
 	Human bool `json:"human,omitempty"`
+	// VerbatimText is internal-only: an approval clarification keeps the owner's
+	// exact question instead of expanding workspace mentions or main-chat handoff.
+	VerbatimText bool `json:"-"`
+	// ReplyInput is a direct app send authenticated by the hub's legacy owner credential. It only qualifies for
+	// missing-reply recovery. Internal sends and other roles cannot set it, and it does not authorize a hand-off.
+	ReplyInput bool `json:"reply_input,omitempty"`
 }
 
 // KeepUndeliveredParams is assistant.keep_undelivered's params. Params are the app's message as it came (text, images,
 // launcher, model; never what SendParams made of it): a retry runs SendParams again. Human is SendParams.Human for it;
 // Error the failure the owner is told, Code its code ("" for none).
 type KeepUndeliveredParams struct {
-	MachineID string         `json:"machine_id"`
-	SessionID string         `json:"session_id"`
-	Params    map[string]any `json:"params"`
-	Human     bool           `json:"human,omitempty"`
-	Lang      string         `json:"lang,omitempty"`
-	Code      string         `json:"code,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	// TriedAt is when the first send began for CodeDeliveryUnknown. Zero means nothing was typed, so no landed-check is
-	// needed before a retry. The original start, not when the connection ended, covers a slow first attempt.
+	MachineID    string         `json:"machine_id"`
+	SessionID    string         `json:"session_id"`
+	Params       map[string]any `json:"params"`
+	Human        bool           `json:"human,omitempty"`
+	Lang         string         `json:"lang,omitempty"`
+	Code         string         `json:"code,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	CredentialID string         `json:"credential_id,omitempty"`
+	// TriedAt is when the first send began for CodeDeliveryUnknown: its line is looked for from then on. Zero means
+	// nothing was typed, so the message is simply sent again. The original start, not when the connection ended,
+	// covers a slow first attempt.
 	TriedAt time.Time `json:"tried_at,omitempty"`
 }
 

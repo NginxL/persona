@@ -418,9 +418,8 @@ func unsafeHeaderValue(v string) bool {
 
 // setHeaders sorts a paste's headers (name, value) into the draft's ("Name: value" lines) and the ones left out with
 // why: request basics (when protocol: a curl command's, a cindy endpoint's), credentials by name or value
-// (secretHeader), values a line would not keep (unsafe), and every other header of a direct API provider, which takes
-// none. A name that is no plain token is neither kept nor named: header_unreadable, once. At most pasteSkippedMost are
-// named.
+// (secretHeader), and values a line would not keep (unsafe). A name that is no plain token is neither kept nor named:
+// header_unreadable, once. At most pasteSkippedMost are named.
 func (d *pasteDraft) setHeaders(hs [][2]string, protocol bool) {
 	var lines []string
 	for _, h := range hs {
@@ -435,8 +434,6 @@ func (d *pasteDraft) setHeaders(hs [][2]string, protocol bool) {
 			why = headerSkipCredential
 		case unsafeHeaderValue(h[1]):
 			why = headerSkipUnsafe
-		case d.Provider.Kind == "api":
-			why = headerSkipUnsupported
 		}
 		if why == "" {
 			lines = append(lines, h[0]+": "+h[1])

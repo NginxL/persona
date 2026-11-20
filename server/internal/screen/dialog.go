@@ -38,6 +38,10 @@ var numberedRE = lazyre.New(`^(\s*)(?:([❯›>])\s*)?(\d)\.\s+(\S.*)$`)
 // cursorRE is the selected row of an unnumbered list: `❯ No, exit`.
 var cursorRE = lazyre.New(`^(\s*)❯\s+(\S.*)$`)
 
+// angleCursorRE is the selected row of an unnumbered list drawn with a `>` cursor: `> Yes, I trust this folder`. A
+// `> text` row is also what a prompt box or quoted output looks like, so unnumbered reads it only under navFooterRE.
+var angleCursorRE = lazyre.New(`^(\s*)>\s+(\S.*)$`)
+
 // boxRE is a multi-select option's check box before its label: `[ ] Phone`, `[✔] Computer`.
 var boxRE = lazyre.New(`^\[([ ✔✓xX])\]\s*(.*)$`)
 
@@ -291,9 +295,25 @@ func unnumbered(lines []string) *Dialog {
 	top := dialogTop(lines)
 	cur := -1
 	indent := 0
+	// A `>` cursor counts only under an arrow-key footer in the last rows.
+	angle := false
+	for i, seen := len(lines)-1, 0; i >= 0 && seen < 4; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		seen++
+		if navFooterRE.MatchString(lines[i]) {
+			angle = true
+			break
+		}
+	}
 	// The cursor is near the bottom; the options above it may run higher (a long list).
 	for i := len(lines) - 1; i >= max(top, len(lines)-30); i-- {
-		if m := cursorRE.FindStringSubmatch(lines[i]); m != nil {
+		m := cursorRE.FindStringSubmatch(lines[i])
+		if m == nil && angle {
+			m = angleCursorRE.FindStringSubmatch(lines[i])
+		}
+		if m != nil {
 			cur, indent = i, len([]rune(m[1]))+2
 			break
 		}
@@ -317,7 +337,10 @@ func unnumbered(lines []string) *Dialog {
 	}
 	d := &Dialog{}
 	for i := first; i <= last; i++ {
-		label := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "❯"))
+		label := strings.TrimSpace(lines[i])
+		if i == cur {
+			label = strings.TrimSpace(strings.TrimLeft(label, "❯>"))
+		}
 		var keys []string
 		for k := cur; k < i; k++ {
 			keys = append(keys, "down")

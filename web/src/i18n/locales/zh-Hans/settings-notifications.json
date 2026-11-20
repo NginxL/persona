@@ -65,9 +65,9 @@
   "island_hint": "刘海两侧显示需要你、工作中和做完未看的 Agent 数，鼠标移上去展开列表",
   "island_footer": "只在这台 Mac 的 Persona 桌面 App 里生效。点列表里的一行，打开那个 Agent。",
   "island_failed": "没改成：{error}",
-  "low_distraction": "低打扰模式",
+  "low_distraction": "推送分级",
   "low_distraction_hint": "只提醒要你处理的事，其余留给简报",
   "low_distraction_footer": "对你所有的设备生效。开启后，要你回答、批准或拍板的事、你设的提醒和主对话的通知照常提醒；任务结论、「请验收」和其他对话的通知留给简报和「被拦推送」，Agent 做完不再提醒。",
-  "low_distraction_load_failed": "读不到低打扰模式",
-  "low_distraction_unsupported": "这台 hub 还不支持低打扰模式，更新 hub 后可以在这里开启"
+  "low_distraction_load_failed": "读不到推送分级",
+  "low_distraction_unsupported": "这台 hub 还不支持推送分级，更新 hub 后可以在这里开启"
 }

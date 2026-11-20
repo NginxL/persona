@@ -56,7 +56,7 @@ func TestGoalReportsDecisionIsItsOwnCard(t *testing.T) {
 	waitFor(t, "the question's card", func() bool { return len(posts()) == 1 })
 	waitReportQueue(t, s)
 	got := posts()
-	if len(got) != 1 || !strings.Contains(got[0], `"a":"ix"`) || strings.Contains(got[0], "📋") {
+	if len(got) != 1 || !strings.Contains(got[0], `"a":"ix"`) || strings.Contains(got[0], `"content":"汇报"}`) {
 		t.Fatalf("posts:\n%s", strings.Join(got, "\n---\n"))
 	}
 }
@@ -70,13 +70,13 @@ func TestGoalReportsStuckSaysGoalNowEvidence(t *testing.T) {
 	s.taskReport(todo, reportFailed, "box", [2]string{}, "那台电脑离线", nil)
 	waitFor(t, "the stuck card", func() bool { return len(posts()) == 1 })
 	card := posts()[0]
-	for _, want := range []string{"🎯 1 件事的目标卡住了", "**🎯 目标**：修登录崩溃", "**现在**：⚠️ 卡住了，没开起来",
+	for _, want := range []string{"[Persona] 修登录崩溃 · 1 件事的目标卡住了", "**目标**：修登录崩溃", "**现在**：卡住了，没开起来",
 		"**证据**：那台电脑离线 [去看看](https://hub.example.com/todos/" + todo.ID + ")"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("card lacks %q:\n%s", want, card)
 		}
 	}
-	for _, not := range []string{"📋", "✅开发", "⚪部署", "这一轮做完"} {
+	for _, not := range []string{`"content":"汇报"}`, "✅开发", "⚪部署", "这一轮做完"} {
 		if strings.Contains(card, not) {
 			t.Errorf("card has %q:\n%s", not, card)
 		}
@@ -118,7 +118,7 @@ func TestReportStepsSwitchBringsBackTheOldCard(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "好的，收工。临时 worktree 清掉了", 0)
 	waitFor(t, "the report", func() bool { return len(posts()) == 1 })
-	if card := posts()[0]; !strings.Contains(card, "📋") || !strings.Contains(card, "这一轮做完") || !strings.Contains(card, "收工") {
+	if card := posts()[0]; !strings.Contains(card, `"content":"汇报"}`) || !strings.Contains(card, "这一轮做完</text_tag>") || !strings.Contains(card, "收工") {
 		t.Fatalf("card:\n%s", card)
 	}
 }
@@ -132,7 +132,7 @@ func TestConclusionCardSaysGoalNowEvidence(t *testing.T) {
 		"checks": completeReviewChecks(todoNow(s, todo.ID))})
 	waitFor(t, "the conclusion card", func() bool { return len(cardsWith(posts(), "结论：")) == 1 })
 	card := cardsWith(posts(), "结论：")[0]
-	for _, want := range []string{"**🎯 目标**：修登录崩溃", "**现在**：✅ 做完了：登录不再崩溃 · 已上线并实测", "**证据**：[https://hub.example.com/s/box/s1]"} {
+	for _, want := range []string{"**目标**：修登录崩溃", "**现在**：✅ 做完了：登录不再崩溃 · 已上线并实测", "**证据**：[https://hub.example.com/s/box/s1]"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("card lacks %q:\n%s", want, card)
 		}

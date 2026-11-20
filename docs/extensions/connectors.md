@@ -61,6 +61,18 @@ unknown capabilities, or kinds without an Inbox capability all fail registration
 | `login` | `Login` | Stepwise login | Telegram, larkcli |
 | `threads` | `Threads` | Opens an Inbox conversation as a chat page in the App: `Thread(thread, before, limit)` returns a page of messages (sender, avatar, media, references, cursor); `Media(ref)` supplies avatar/media bytes. Read-only; replies use the action named in `ThreadChat.Reply` (gated). The App selects a page by `ThreadChat.Kind`: bubbles for dm / group / channel, GitHub layout for pr / issue. A message whose `format` is `markdown` is drawn from its Markdown, and lark-cli's envelope for one interactive message (`<card title="…">…</card>`) as a card under its title. lark-cli's page takes its kind from the chat's own record (`docs/protocol/protocol.md`); a Lark page with an empty kind (a hub before that) is a chat too | Telegram (#1054), GitHub (#1055, `docs/plans/plan-connectors.md` ("Conversation page")), Lark via lark-cli |
 
+**Thread media** (#10974). `GET /api/v1/connectors/{id}/media?ref=` checks the bytes before serving them, including
+previously cached bodies; the connector's `Media.Mime` does not select the response type. Images are limited to JPEG,
+PNG, GIF and WebP (`image/jpeg`, `image/png`, `image/gif`, `image/webp`). The route also accepts recognized passive
+audio/video containers: `audio/aiff`, `audio/mpeg`, `audio/midi`, `audio/wave`, `video/avi`, `video/mp4`, `video/webm`
+and `application/ogg`. Conversation pages use media for pictures, stickers, avatars and video thumbnails; voice
+messages and files remain descriptions. HTML, SVG and other unsupported bytes receive 415 in the usual JSON error
+body, whatever MIME the connector declared. An empty connector answer or one over 4 MiB still receives 502.
+Invalid fresh bodies are not cached; a cached body that fails the check is refused. Responses written by the media
+handler, including its errors, carry `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'; sandbox`. Accepted bodies keep the byte-derived `Content-Type` and
+existing private immutable caching; a ref must still name the same bytes.
+
 `Runner` (its own loop) and `Machines` (a computer connected) describe how it runs, not capabilities, and still use type assertions. Inbox tiers are `connector.Tier` (`TierAction`, `TierFYI`, `TierNoise`);
 the hub drops unknown tiers and leaves classification to the model.
 
@@ -156,6 +168,12 @@ The connector provides `InboxThing` (one thing: `Thread` is its key, `Kind` its 
 each round, the hub hands candidates to the manager (`inbox.collected` on the bus, `docs/assistant/inbox.md` ("Who owns what")). The manager (`applyConnector` in `assistant/inbox_connectors.go`)
 merges subsequent activity for the same `Thread` into an open item. Classification, AI twin, completion and retention then belong to the manager and are the same for every source; replies, `Settle` and tools derived from events
 are still dispatched to connectors by the hub (the manager asks through `app.call inbox.*`). Items use a generic block (`InboxConnector`), so the App can render them without knowing the source.
+
+A thing may name its thread's picture in `avatar` (#10923): the other person of a private chat, a group's own. Its value is one of the connector's own media refs (the same ref its conversation page's `ThreadChat.avatar` carries, its bytes from `Media(ref)`) or an `https` address; either always names the same bytes, so a changed picture gets a new value. The manager keeps it on the item's connector block and lists it as `connector.avatar_url`, the avatars route's path (`GET /api/v1/avatars/{source}/{value}`), never as the value: the manager draws the picture again from the connector's bytes, or fetches the address on the open internet only (`docs/protocol/protocol.md` ("Avatars (#10923)")). An open item takes a new picture without waiting for a new move. Without one (a connector that sends none, an older hub) the row draws the initial; an older hub ignores the field. Telegram sends its conversations' pictures (nwverse/persona-extensions#670); GitHub does not yet (#10931).
+
+For `thread.page`, provide `avatar` on the chat, its author and any message sender with a picture. The extension manager adds the app-facing `avatar_url` to each record when it serves `GET /api/v1/connectors/{id}/thread`. It retains the original `avatar` for older apps. New clients use the listed path and the item's manager; when talking to an older hub they can still request the original ref through connector media. Listing the page does not fetch any images.
+
+Android uses the same authenticated loader and encoded-byte / decoded-image caches as its Lark rows. The item's manager stays on deferred reads and cache keys, and the row asks for and decodes the picture at its avatar's actual dp size times display density. The initial remains while loading, without a picture or on failure, the source badge is unchanged, and scrolling a loaded row back does not request its picture again (#10932).
 
 The built-in `larkcli` connector keeps its cursor, bounded message-id overlap set and topic-participation set in the manager's Postgres settings store. Its `inbox.collect` implementation only returns the connector's in-memory round; the subprocess is called by the connector watcher, which emits `changed {scope: inbox}` after a round with a new item. A two-minute poll is the default (configurable under `lark.cli`, never below one minute), and no lark-cli Inbox read runs while an available Lark gateway is the preferred source.
 

@@ -3,7 +3,8 @@
 // events can be another later (an entry with an end), and nothing here needs to change for it. iOS / Mac:
 // apple/Shared/TodoCalendar.swift, the same rules.
 import { formatDate } from "../i18n";
-import { isOverdue, todoDueDay, todoStatus, todoStatusLabel, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { isOverdue, todoDueDay, todoStatus, type SessionLookup, type Todo, type TodoStatus, type TodoTone } from "./todos";
+import { todoLook, waitOf } from "./todo-wait-reason";
 
 export type CalendarMode = "day" | "week" | "month";
 
@@ -19,9 +20,11 @@ export interface CalendarEntry {
   /** When it ends: none for a to-do, which is due at a moment; an event's end. */
   end?: number;
   allDay: boolean;
-  /** Its state, colored and named as in the list. */
+  /** Its state, colored and named as in the list: a waiting one's word and tone say what it waits on (#11090, todoLook);
+   *  without `tone`, its status's. */
   status: TodoStatus;
   statusLabel: string;
+  tone?: TodoTone;
   done: boolean;
   overdue: boolean;
   high: boolean;
@@ -37,6 +40,7 @@ export function todoEntry(todo: Todo, lookup?: SessionLookup, now = Date.now()):
   const start = allDay ? day : at;
   if (start === undefined) return undefined;
   const status = todoStatus(todo, lookup);
+  const look = todoLook(todo, status, waitOf(todo, status, lookup), status);
   const done = Boolean(todo.done_at);
   return {
     id: `todo:${todo.id}`,
@@ -45,7 +49,8 @@ export function todoEntry(todo: Todo, lookup?: SessionLookup, now = Date.now()):
     start,
     allDay,
     status,
-    statusLabel: todoStatusLabel(todo, status),
+    statusLabel: look.label,
+    tone: look.tone,
     done,
     overdue: isOverdue(todo, now),
     high: todo.priority === "high" && !done,

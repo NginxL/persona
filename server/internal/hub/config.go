@@ -61,6 +61,8 @@ type MachineConfig struct {
 	CodexServers     []proto.CodexServer `json:"codex_servers,omitempty"`
 	// Launchers adds configured wrappers or overrides the type reported by the node.
 	Launchers []assistantwire.ConfiguredLauncher `json:"launchers,omitempty"`
+	// LauncherRecovery bounds rediscovery of a missing Assistant launcher and names its only permitted substitutes.
+	LauncherRecovery *assistantwire.LauncherRecovery `json:"launcher_recovery,omitempty"`
 	// Botmux false: the machine's node does not list botmux's sessions and never runs botmux (docs/integrations/engines.md "botmux");
 	// unset lists them, as before.
 	Botmux *bool `json:"botmux,omitempty"`
@@ -87,6 +89,9 @@ type MachineConfig struct {
 	// computer, docs/protocol/file-transfer.md): "~/" is the remote home, or an absolute folder in it. Unset,
 	// proto.DefaultInboxDir. The node refuses a folder the phone may not write to.
 	InboxDir string `json:"inbox_dir,omitempty"`
+	// ExtraPath are directories the machine's node puts in front of its PATH, for the tools a service's PATH lacks
+	// (#10127): "~/" is the remote home, or absolute. The node adds mise's and asdf's shims by itself.
+	ExtraPath []string `json:"extra_path,omitempty"`
 }
 
 // NodePackagesConfig is where the manager fetches the node builds for the computers that the hub has none of its own

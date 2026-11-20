@@ -35,7 +35,7 @@ func (s *Service) startPresetRoutes() {
 		for _, t := range tiers {
 			_, unavailable := s.launcherUnusable(ctx, machine, t.Launcher)
 			out = append(out, workerPreset{
-				Name: t.Name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort,
+				Name: t.Name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed,
 				Description: t.Description, Unavailable: unavailable,
 			})
 		}
@@ -51,6 +51,7 @@ type workerPreset struct {
 	Launcher    string `json:"launcher"`
 	Model       string `json:"model,omitempty"`
 	Effort      string `json:"effort,omitempty"`
+	Speed       string `json:"speed,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Unavailable: the launcher's latest check says it does not work right now (for example a usage limit with a
 	// reset still ahead); absent check results leave it false, so an unchecked preset is offered.

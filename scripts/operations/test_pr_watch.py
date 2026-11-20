@@ -68,12 +68,8 @@ class WatcherTests(unittest.TestCase):
         self.github = patch.object(pr_watch, "run", return_value=subprocess.CompletedProcess([], 0, "{}", ""))
         self.github = self.github.start()
         self.addCleanup(self.github.stop)
-        # These unit tests do not perform real GitHub calls. Keep the three
-        # read-only activity APIs empty unless a stale-specific test supplies
-        # its own observations; the production parser still fails on bad data.
-        self.activity = patch.object(self.watcher, "stale_progress_at", side_effect=lambda repo, number, snapshot, old, **kwargs: pr_watch_common.progress_timestamp(snapshot, [], [], []))
-        self.activity.start()
-        self.addCleanup(self.activity.stop)
+        # Stale tests provide their own activity observations. Do not replace
+        # the whole activity method here: that would hide the reader under test.
 
     def test_stale_metadata_does_not_erase_completed_exact_head_evidence(self):
         old_base = "d" * 40
@@ -92,35 +88,104 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(after["findings"], [finding])
         self.assertEqual(after["repair_rounds"], 2)
 
-    def test_snapshot_resolves_live_base_instead_of_recorded_base_oid(self):
+    def test_snapshot_resolves_live_base_in_one_graphql_request(self):
         # GitHub's baseRefOid is the base recorded at the PR's last sync, not
         # the branch tip that the watcher fetches (#10568).
         fields = dict(pr(), baseRefOid=SHA_A)
-        with patch.object(pr_watch_common, "run", side_effect=[
-                subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
-                subprocess.CompletedProcess([], 0, SHA_BASE + "\n", "")]) as execute:
+        fields["baseRefName"] = "develop"
+        response = {"data": {"repository": {"pullRequest": dict(fields, baseRef={"target": {"oid": SHA_BASE}})}}}
+        with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess(
+                [], 0, json.dumps(response), "")) as execute:
             result = pr_watch_common.pr_snapshot("example/one", 7)
         self.assertEqual(result["baseRefOid"], SHA_BASE)
-        view, base = (call.args[0] for call in execute.call_args_list)
-        self.assertEqual(view[:3], ["gh", "pr", "view"])
-        self.assertNotIn("baseRefOid", view[-1])
-        self.assertEqual(base[:3], ["gh", "api", "repos/example/one/commits/main"])
+        execute.assert_called_once()
+        argv = execute.call_args.args[0]
+        self.assertEqual(argv[:2], ["gh", "api"])
+        self.assertEqual(argv[2:], ["graphql", "--input", "-"])
+        payload = json.loads(execute.call_args.kwargs["input_text"])
+        query = payload["query"]
+        self.assertIn("baseRef { target { oid } }", query)
+        self.assertNotIn("baseRefOid", query)
+        self.assertEqual(payload["variables"],
+                         {"owner": "example", "name": "one", "number": 7})
+        self.assertEqual(result["baseRefName"], "develop")
+
+    def test_snapshot_rejects_missing_or_invalid_live_base(self):
+        fields = dict(pr(), baseRefOid=None)
+        for base in (None, "", "0" * 40, "not-a-sha"):
+            with self.subTest(base=base):
+                response = {"data": {"repository": {"pullRequest": dict(fields, baseRef={"target": {"oid": base}})}}}
+                with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, json.dumps(response), "")):
+                    with self.assertRaises(pr_watch_common.WatchError):
+                        pr_watch_common.pr_snapshot("example/one", 7)
 
     def test_snapshot_rejects_gh_errors(self):
         with patch.object(pr_watch_common, "run", return_value=subprocess.CompletedProcess([], 1, "", "network unavailable")):
             with self.assertRaises(pr_watch_common.WatchError):
                 pr_watch_common.pr_snapshot("example/one", 7)
 
-    def test_snapshot_rejects_invalid_live_base(self):
-        fields = pr()
-        fields.pop("baseRefOid")
-        for base in ("", "0" * 40, "not-a-sha"):
-            with self.subTest(base=base), \
-                    patch.object(pr_watch_common, "run", side_effect=[
-                        subprocess.CompletedProcess([], 0, json.dumps(fields), ""),
-                        subprocess.CompletedProcess([], 0, base + "\n", "")]):
-                with self.assertRaises(pr_watch_common.WatchError):
-                    pr_watch_common.pr_snapshot("example/one", 7)
+    def test_existing_continuation_contains_the_fork_head(self):
+        # Separate watchers keep private state; GitHub is the shared record (#10881).
+        title = "fix: continue #7 verification repair"
+        listed = [{"number": 30, "title": title, "state": "CLOSED", "headRefOid": SHA_B},
+                  {"number": 31, "title": "fix: continue #77 verification repair", "state": "OPEN", "headRefOid": SHA_B},
+                  {"number": 32, "title": title, "state": "MERGED", "headRefOid": SHA_B}]
+        for status, expected in (("ahead", 32), ("identical", 32), ("behind", None), ("diverged", None)):
+            with self.subTest(status=status), \
+                    patch.object(pr_watch_repair, "gh_json", return_value=listed) as search, \
+                    patch.object(pr_watch_repair, "checked", return_value=status + "\n") as compare:
+                self.assertEqual(pr_watch_repair.existing_continuation("example/one", pr(isCrossRepository=True)), expected)
+            self.assertIn('"%s" in:title' % title, search.call_args.args[0])
+            self.assertEqual(compare.call_count, 1)
+            self.assertEqual(compare.call_args.args[0][:3], ["gh", "api", "repos/example/one/compare/%s...%s" % (SHA_A, SHA_B)])
+
+    def test_existing_continuation_prefers_open_and_matches_an_identical_head(self):
+        title = "fix: continue #7 verification repair"
+        listed = [{"number": 40, "title": title, "state": "MERGED", "headRefOid": SHA_B},
+                  {"number": 41, "title": title, "state": "OPEN", "headRefOid": SHA_A}]
+        with patch.object(pr_watch_repair, "gh_json", return_value=listed), \
+                patch.object(pr_watch_repair, "checked") as compare:
+            self.assertEqual(pr_watch_repair.existing_continuation("example/one", pr(isCrossRepository=True)), 41)
+        compare.assert_not_called()
+        with patch.object(pr_watch_repair, "gh_json", return_value=[]):
+            self.assertIsNone(pr_watch_repair.existing_continuation("example/one", pr(isCrossRepository=True)))
+
+    def test_fork_with_another_watchers_continuation_is_left_to_it(self):
+        with patch.object(self.watcher, "mark_and_close_stale", return_value=False), \
+                patch.object(pr_watch, "pr_snapshot", return_value=pr(isCrossRepository=True)), \
+                patch.object(pr_watch_repair, "existing_continuation", return_value=42) as lookup, \
+                patch.object(self.watcher, "worktree", side_effect=AssertionError("no review or repair")), \
+                patch.object(self.watcher, "comment", side_effect=AssertionError("no comment")):
+            self.watcher.process("example/one", 7)
+        lookup.assert_called_once()
+        state = self.watcher.state.get("example/one", 7)
+        self.assertEqual((state["outcome"], state["continuation"], state.get("repair_rounds")), ("continuation", 42, 0))
+        with patch.object(self.watcher, "mark_and_close_stale", return_value=False), \
+                patch.object(pr_watch, "pr_snapshot", return_value=pr(isCrossRepository=True)), \
+                patch.object(pr_watch_repair, "existing_continuation") as again:
+            self.watcher.process("example/one", 7)
+        again.assert_not_called()
+
+    def test_fork_continuation_lookup_failure_does_not_review_or_repair(self):
+        with patch.object(self.watcher, "mark_and_close_stale", return_value=False), \
+                patch.object(pr_watch, "pr_snapshot", return_value=pr(isCrossRepository=True)), \
+                patch.object(pr_watch_repair, "existing_continuation", side_effect=pr_watch_common.WatchError("offline")), \
+                patch.object(self.watcher, "worktree", side_effect=AssertionError("no review or repair")):
+            with self.assertRaises(pr_watch_common.WatchError):
+                self.watcher.process("example/one", 7)
+        self.assertNotEqual(self.watcher.state.get("example/one", 7).get("outcome"), "continuation")
+
+    def test_same_repository_pr_skips_the_continuation_lookup(self):
+        with patch.object(self.watcher, "mark_and_close_stale", return_value=False), \
+                patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                patch.object(pr_watch_repair, "existing_continuation") as lookup, \
+                patch.object(self.watcher, "worktree", side_effect=pr_watch_common.WatchError("stop here")):
+            try:
+                self.watcher.process("example/one", 7)
+            except pr_watch_common.WatchError:
+                pass
+        lookup.assert_not_called()
 
     def test_stale_failure_does_not_overwrite_terminal_outcome(self):
         self.watcher.state.put("example/one", 7, SHA_A,
@@ -147,7 +212,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_same_head_replacement_push_refreshes_stale_activity(self):
         snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-16T00:00:00Z")
-        with patch.object(pr_watch, "gh_json", side_effect=[[], [], []]):
+        with patch.object(pr_watch.Watcher, "stale_activity", return_value={"comments": [], "reviews": [], "inline": []}):
             progress = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot,
                                                          {"stale_head": SHA_A, "stale_updated_at": pr_watch_common.github_time("2026-11-15T00:00:00Z")})
         self.assertEqual(progress, pr_watch_common.github_time("2026-11-01T00:00:00Z"))
@@ -238,20 +303,14 @@ class WatcherTests(unittest.TestCase):
 
     def test_stale_multiple_activity_records_use_real_queries_and_ignore_only_own_notice(self):
         config = dict(self.watcher.config["repositories"][0], close_stale=True)
-        snapshot = pr(createdAt="2026-11-01T00:00:00.123Z")
+        snapshot = pr(createdAt="2026-11-01T00:00:00.123Z", updatedAt="2026-11-01T00:00:00.123Z")
         old = pr_watch_common.github_time("2026-11-01T00:00:00.123Z")
         now = old + 8 * 86400
-        comments = [{"createdAt": "2026-11-01T01:00:00Z", "body": "old review"},
-                    {"createdAt": "2026-11-02T01:00:00.456Z", "body": "another old comment"}]
         current = dict(snapshot)
         calls = []
-        def activity(argv, **kwargs):
-            calls.append(argv)
-            if "issues/7/comments" in argv[1]:
-                return comments + ([{"createdAt": "2026-11-08T00:00:00Z", "body": self.comments[-1]}] if len(self.comments) else [])
-            if "pulls/7/reviews" in argv[1]:
-                return [{"createdAt": "2026-11-01T02:00:00Z"}]
-            return [{"committedDate": "2026-11-01T03:00:00Z"}, {"committedDate": "2026-11-02T03:00:00Z"}]
+        def activity(repo, number, snapshot, old, **kwargs):
+            calls.append((repo, number))
+            return pr_watch_common.github_time(snapshot["createdAt"]) + (0 if kwargs.get("ignore_notice") else 1)
         def github(argv, **kwargs):
             if argv[1:3] == ["pr", "edit"]:
                 return subprocess.CompletedProcess(argv, 0, "", "")
@@ -259,30 +318,207 @@ class WatcherTests(unittest.TestCase):
                 current["state"] = "CLOSED"
                 return subprocess.CompletedProcess(argv, 0, "", "")
             self.fail(argv)
-        with patch.object(pr_watch, "gh_json", side_effect=activity), \
+        with patch.object(self.watcher, "stale_progress_at", side_effect=activity), \
                 patch.object(pr_watch, "pr_snapshot", side_effect=lambda *args: dict(current)), \
                 patch.object(pr_watch, "run", side_effect=github), \
                 patch.object(pr_watch.time, "time", return_value=now):
             self.assertTrue(self.watcher.mark_and_close_stale(config, snapshot, {}))
         self.assertEqual(current["state"], "CLOSED")
-        self.assertTrue(all(".[] |" in call[-1] for call in calls))
+        self.assertEqual(len(calls), 2)
         self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "stale_closed")
 
+    def test_stale_activity_graphql_paginates_every_collection(self):
+        def connection(nodes, next_cursor):
+            return {"nodes": nodes, "pageInfo": {"hasNextPage": next_cursor is not None,
+                                                   "endCursor": next_cursor}}
+        pages = {
+            "comments": {
+                None: connection([{"createdAt": "2026-11-01T01:00:00Z", "body": "one"}], "comments-1"),
+                "comments-1": connection([{"createdAt": "2026-11-02T01:00:00Z", "body": "two"}], None),
+            },
+            "reviews": {
+                None: connection([{"createdAt": "2026-11-01T02:00:00Z"}], "reviews-1"),
+                "reviews-1": connection([{"createdAt": "2026-11-03T02:00:00Z"}], "reviews-2"),
+                "reviews-2": connection([{"createdAt": "2026-11-05T02:00:00Z"}], None),
+            },
+            "reviewThreads": {
+                None: connection([], "threads-1"),
+                "threads-1": connection([{"comments": connection(
+                    [{"createdAt": "2026-11-04T03:00:00Z", "body": "inline"}], None)}], "threads-2"),
+                "threads-2": connection([{"comments": connection(
+                    [{"createdAt": "2026-11-06T03:00:00Z", "body": "later inline"}], None)}], None),
+            },
+        }
+        calls = []
+        def response(argv, **kwargs):
+            self.assertEqual(argv, ["api", "graphql", "--input", "-"])
+            payload = json.loads(kwargs["input_text"])
+            variables = payload["variables"]
+            calls.append(payload)
+            data = {}
+            for field, needed, collection in (("comments", "needComments", "comments"),
+                                              ("reviews", "needReviews", "reviews"),
+                                              ("threads", "needThreads", "reviewThreads")):
+                if variables[needed]:
+                    data[collection] = pages[collection][variables[field + "Cursor"]]
+            return {"data": {"repository": {"pullRequest": data}}}
+        with patch.object(pr_watch, "gh_json", side_effect=response):
+            activity = self.watcher.stale_activity("example/one", 7)
+        self.assertEqual([len(activity[key]) for key in ("comments", "reviews", "inline")], [2, 3, 2])
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all("comments(first: $pageSize" in call["query"] for call in calls))
+        self.assertIsNone(calls[0]["variables"]["commentsCursor"])
+        self.assertEqual(calls[1]["variables"]["commentsCursor"], "comments-1")
+        self.assertEqual(calls[-1]["variables"]["threadsCursor"], "threads-2")
+        self.assertTrue(any(not call["variables"]["needComments"] for call in calls[1:]))
+        self.assertEqual(calls[-1]["variables"]["reviewsCursor"], "reviews-2")
+
+    def test_stale_activity_does_not_restart_completed_collections(self):
+        calls = []
+        def response(argv, **kwargs):
+            payload = json.loads(kwargs["input_text"])
+            calls.append(payload)
+            data = {}
+            if payload["variables"]["needComments"]:
+                done = payload["variables"]["commentsCursor"] == "comments-1"
+                data["comments"] = {"nodes": [] if done else [{"createdAt": "2026-11-01T01:00:00Z", "body": "one"}],
+                                    "pageInfo": {"hasNextPage": False,
+                                                 "endCursor": None if done else "comments-1"}}
+            if payload["variables"]["needReviews"]:
+                done = payload["variables"]["reviewsCursor"] == "reviews-1"
+                data["reviews"] = {"nodes": [] if done else [{"createdAt": "2026-11-01T02:00:00Z"}],
+                                   "pageInfo": {"hasNextPage": False,
+                                                "endCursor": None if done else "reviews-1"}}
+            if payload["variables"]["needThreads"]:
+                done = payload["variables"]["threadsCursor"] == "threads-1"
+                data["reviewThreads"] = {"nodes": [] if done else [{"comments": {
+                    "nodes": [{"createdAt": "2026-11-01T03:00:00Z", "body": "inline"}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None}}}],
+                    "pageInfo": {"hasNextPage": False if done else True,
+                                 "endCursor": None if done else "threads-1"}}
+            return {"data": {"repository": {"pullRequest": data}}}
+        with patch.object(pr_watch, "gh_json", side_effect=response):
+            activity = self.watcher.stale_activity("example/one", 7)
+        self.assertEqual([len(activity[key]) for key in ("comments", "reviews", "inline")], [1, 1, 1])
+        self.assertEqual(calls[-1]["variables"]["needComments"], False)
+        self.assertEqual(calls[1]["variables"]["needReviews"], False)
+        self.assertEqual(calls[-1]["variables"]["threadsCursor"], "threads-1")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all("needComments" in call["variables"] for call in calls))
+        self.assertTrue(all("needReviews" in call["variables"] for call in calls))
+        self.assertTrue(all("needThreads" in call["variables"] for call in calls))
+        self.assertEqual([call["variables"]["commentsCursor"] for call in calls],
+                         [None, False])
+
+    def test_stale_activity_requires_complete_cursor_pages(self):
+        response = {"data": {"repository": {"pullRequest": {
+            "comments": {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": None}},
+            "reviews": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+            "reviewThreads": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+        }}}}
+        with patch.object(pr_watch, "gh_json", return_value=response):
+            with self.assertRaisesRegex(pr_watch_common.WatchError, "pagination"):
+                self.watcher.stale_activity("example/one", 7)
+
+    def test_stale_enabled_settled_heads_still_need_cleanup(self):
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        self.watcher.repositories["example/one"]["close_stale"] = True
+        self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                               base=SHA_BASE, format=1, outcome="repair_exhausted",
+                               repair_exhausted=True, failure_posted=True)
+        self.assertFalse(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_A))
+        self.watcher.state.annotate("example/one", 7, outcome="merged")
+        self.assertTrue(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_A))
+
+    def test_review_only_blocking_findings_can_still_stale_close(self):
+        self.watcher.repositories["example/one"].update(merge=False, close_stale=True)
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        finding = {"path": "x.py", "line": 1, "severity": "P0", "summary": "blocking", "suggestion": "fix"}
+        self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                               base=SHA_BASE, format=1, outcome="findings", semantic="findings",
+                               findings=[finding], review_posted=True)
+        old = pr_watch_common.github_time("2026-11-01T00:00:00Z")
+        snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-01T00:00:00Z")
+        current = dict(snapshot)
+        def github(argv, **kwargs):
+            if argv[1:3] == ["pr", "edit"]:
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            if argv[1:3] == ["pr", "close"]:
+                current["state"] = "CLOSED"
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            self.fail(argv)
+        with patch.object(self.watcher, "stale_progress_at", return_value=old) as activity, \
+                patch.object(pr_watch, "pr_snapshot", side_effect=lambda *args: dict(current)), \
+                patch.object(pr_watch, "run", side_effect=github), \
+                patch.object(pr_watch.time, "time", return_value=old + 8 * 86400):
+            self.watcher.process("example/one", 7)
+        self.assertEqual(activity.call_count, 2)
+        self.assertEqual(current["state"], "CLOSED")
+        self.assertEqual(self.watcher.state.get("example/one", 7)["outcome"], "stale_closed")
+
+    def test_discovery_skips_settled_heads_but_retries_expired_and_new_heads(self):
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        for outcome in ("merged", "continuation", "repair_published"):
+            self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                                   base=SHA_BASE, format=1, outcome=outcome)
+            self.assertTrue(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_A))
+            self.assertFalse(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_B))
+        self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                               base=SHA_BASE, format=1, outcome="retry", retry_after=time.time() - 1)
+        self.assertFalse(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_A))
+        self.watcher.state.annotate("example/one", 7, retry_after=time.time() + 60)
+        self.assertTrue(self.watcher.unchanged_head_complete_or_waiting("example/one", 7, SHA_A))
+        with patch.object(pr_watch, "gh_json", return_value=[pr(isDraft=False)]) as listing, \
+                patch.object(self.watcher, "enqueue") as enqueue:
+            self.watcher.discover()
+        listing.assert_called_once()
+        enqueue.assert_not_called()
+        with patch.object(pr_watch, "gh_json", return_value=[pr(SHA_B, isDraft=False)]), \
+                patch.object(self.watcher, "enqueue") as enqueue:
+            self.watcher.discover()
+        enqueue.assert_called_once_with("example/one", 7, SHA_B, "poll")
+
+    def test_same_head_backoff_and_terminal_records_skip_stale_activity(self):
+        evidence_key = "example/one#7@" + SHA_BASE + ".." + SHA_A
+        cases = [
+            {"outcome": "merge_failed", "retry_after": time.time() + 300},
+            {"outcome": "merge_failed", "blocking": True},
+            {"outcome": "merged"},
+            {"outcome": "repair_exhausted", "repair_exhausted": True},
+            {"outcome": "repair_published"},
+        ]
+        for record in cases:
+            with self.subTest(outcome=record["outcome"]):
+                self.watcher.state.put("example/one", 7, SHA_A, evidence_key=evidence_key,
+                                       base=SHA_BASE, **record)
+                with patch.object(pr_watch, "pr_snapshot", return_value=pr()), \
+                        patch.object(self.watcher, "stale_progress_at") as activity, \
+                        patch.object(pr_watch, "semantic_review") as review:
+                    self.watcher.process("example/one", 7)
+                activity.assert_not_called()
+                review.assert_not_called()
+
     def test_stale_pr_with_multiple_activity_records_closes_despite_its_own_notice_extra(self):
+
         config = dict(self.watcher.config["repositories"][0], close_stale=True)
-        snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-08T00:00:00Z")
+        snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-01T00:00:00Z")
         old = pr_watch_common.github_time("2026-11-01T00:00:00Z")
         notice = "This PR has had no substantive progress for more than seven days"
         comments = [{"createdAt": "2026-11-08T00:00:00Z", "body": notice},
                     {"createdAt": "2026-11-08T00:00:01Z", "body": "I am still working on this"}]
-        with patch.object(pr_watch, "gh_json", side_effect=[comments, [], []]):
+        with patch.object(self.watcher, "stale_activity", side_effect=[
+                {"comments": comments, "reviews": [], "inline": []},
+                {"comments": comments, "reviews": [], "inline": []}]):
             activity = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot,
                                                          {"stale_head": SHA_A}, ignore_notice=notice)
-        self.assertEqual(activity, pr_watch_common.github_time("2026-11-08T00:00:01Z"))
-        with patch.object(pr_watch, "gh_json", side_effect=[comments[:1], [], []]):
+            self.assertEqual(activity, pr_watch_common.github_time("2026-11-08T00:00:01Z"))
             activity = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot,
                                                          {"stale_head": SHA_A}, ignore_notice=notice)
-        self.assertEqual(activity, pr_watch_common.github_time("2026-11-01T00:00:00Z"))
+            self.assertEqual(activity, pr_watch_common.github_time("2026-11-08T00:00:01Z"))
+        with patch.object(self.watcher, "stale_activity", return_value={"comments": comments[:1], "reviews": [], "inline": []}):
+            activity = self.watcher.stale_progress_at("example/one", 7, snapshot,
+                                                     {"stale_head": SHA_A}, ignore_notice=notice)
+            self.assertEqual(activity, pr_watch_common.github_time("2026-11-01T00:00:00Z"))
 
     def test_recent_pr_activity_prevents_stale_close(self):
         self.github_pr = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-14T00:00:00Z")
@@ -309,14 +545,14 @@ class WatcherTests(unittest.TestCase):
         old = time.time() - 8 * 86400
         snapshot = pr(createdAt=datetime.fromtimestamp(old - 86400, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                       updatedAt=datetime.fromtimestamp(time.time(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        with patch.object(pr_watch, "gh_json", side_effect=[[], [], []]):
+        with patch.object(pr_watch.Watcher, "stale_activity", return_value={"comments": [], "reviews": [], "inline": []}):
             progress = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot, {})
         self.assertGreater(time.time() - progress, 0)
         self.assertLess(time.time() - progress, 60)
 
     def test_stale_marker_does_not_change_activity_without_new_work(self):
         snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-16T00:00:00Z")
-        with patch.object(pr_watch, "gh_json", side_effect=[[], [], []]):
+        with patch.object(pr_watch.Watcher, "stale_activity", return_value={"comments": [], "reviews": [], "inline": []}):
             progress = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot,
                                                          {"stale_head": SHA_A, "last_progress_at": pr_watch_common.github_time("2026-11-08T00:00:00Z")})
         self.assertEqual(progress, pr_watch_common.github_time("2026-11-08T00:00:00Z"))
@@ -324,7 +560,7 @@ class WatcherTests(unittest.TestCase):
     def test_stale_review_comments_count_as_progress(self):
         snapshot = pr(createdAt="2026-11-01T00:00:00Z", updatedAt="2026-11-16T00:00:00Z")
         inline = [{"createdAt": "2026-11-15T00:00:00Z", "body": "**P1** — newly published failure"}]
-        with patch.object(pr_watch, "gh_json", side_effect=[[], [], inline]):
+        with patch.object(pr_watch.Watcher, "stale_activity", return_value={"comments": [], "reviews": [], "inline": inline}):
             progress = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot,
                                                          {"stale_head": SHA_A})
         self.assertEqual(progress, pr_watch_common.github_time("2026-11-15T00:00:00Z"))
@@ -335,7 +571,7 @@ class WatcherTests(unittest.TestCase):
         old_state = {"stale_head": snapshot["headRefOid"], "stale_notice": notice,
                      "last_progress_at": pr_watch_common.github_time("2026-11-08T00:00:00Z")}
         comments = [{"createdAt": "2026-11-08T00:00:00Z", "body": notice}]
-        with patch.object(pr_watch, "gh_json", side_effect=[comments, [], []]):
+        with patch.object(pr_watch.Watcher, "stale_activity", return_value={"comments": comments, "reviews": [], "inline": []}):
             progress = pr_watch.Watcher.stale_progress_at(self.watcher, "example/one", 7, snapshot, old_state)
         self.assertEqual(progress, pr_watch_common.github_time("2026-11-08T00:00:00Z"))
 
@@ -371,8 +607,12 @@ class WatcherTests(unittest.TestCase):
         with patch.object(pr_watch_common, "checked", return_value=""):
             with self.assertRaises(pr_watch_common.WatchError):
                 pr_watch_common.gh_json(["pr", "view", "7"])
-        with patch.object(pr_watch, "gh_json", side_effect=pr_watch_common.WatchError("gh returned an empty response")):
-            self.assertEqual(self.watcher.stale_activity_json("example/one", 7, "issues", "comments", ".created_at"), [])
+        empty = {"data": {"repository": {"pullRequest": {
+            key: {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}
+            for key in ("comments", "reviews", "reviewThreads")}}}}
+        with patch.object(pr_watch, "gh_json", return_value=empty):
+            self.assertEqual(self.watcher.stale_activity("example/one", 7),
+                             {"comments": [], "reviews": [], "inline": []})
 
     def test_paginated_json_records_and_page_arrays_are_flattened(self):
         text = '{"createdAt": "2026-11-01T00:00:00Z"}\n{"createdAt": "2026-11-02T00:00:00Z"}\n'
@@ -573,6 +813,43 @@ class WatcherTests(unittest.TestCase):
         finding_calls = [call for call in self.github.call_args_list
                          if call.args[0][:2] == ["gh", "api"]]
         self.assertEqual(len(finding_calls), 1)
+
+    def test_moved_base_does_not_republish_reviews_on_an_unchanged_head(self):
+        # A merge-blocked PR is re-reviewed whenever main moves; the same head
+        # must not collect a new copy of the same reviews each time (#11738).
+        reworded = [{"path": "x.py", "line": 2, "severity": "P2", "summary": "note %d" % n, "suggestion": "consider"}
+                    for n in range(3)]
+        other_base = "d" * 40
+        with patch.object(pr_watch, "semantic_review", side_effect=[[f] for f in reworded]) as review, \
+                patch.object(pr_watch, "verify", return_value=[{"name": "test", "ok": True}]), \
+                patch.object(self.watcher, "merge", side_effect=pr_watch_common.WatchError("ratchet: 1 time.Sleep call")):
+            for base in (SHA_BASE, other_base, SHA_BASE):
+                with patch.object(pr_watch, "pr_snapshot", return_value=pr(baseRefOid=base)):
+                    self.watcher.process("example/one", 7)
+                self.watcher.state.annotate("example/one", 7, retry_after=0)
+        self.assertEqual(review.call_count, 3)  # each new base is still reviewed
+        findings = [c for c in self.github.call_args_list if c.args[0][:2] == ["gh", "api"]]
+        success = [c for c in self.github.call_args_list if c.args[0][:3] == ["gh", "pr", "review"]]
+        self.assertEqual((len(findings), len(success)), (1, 1))
+
+    def test_a_new_finding_on_the_same_head_is_still_published(self):
+        first = {"path": "x.py", "line": 2, "severity": "P2", "summary": "note", "suggestion": "consider"}
+        moved = dict(first, summary="same place, new words")
+        new = {"path": "y.py", "line": 9, "severity": "P1", "summary": "another", "suggestion": "fix"}
+        snapshot = {"head": SHA_A}
+        for findings in ([first], [moved], [moved, new]):
+            self.watcher.comment_findings("example/one", 7, snapshot, findings)
+        posted = [c for c in self.github.call_args_list if c.args[0][:2] == ["gh", "api"]]
+        self.assertEqual(len(posted), 2)
+        self.assertIn("y.py", posted[1].kwargs["input_text"])
+        anchors = {(f["path"], f["line"]) for f in self.watcher.head_publication("example/one", 7, SHA_A)["published_findings"]}
+        self.assertEqual(anchors, {("x.py", 2), ("y.py", 9)})
+
+    def test_success_review_is_posted_once_per_head(self):
+        for head in (SHA_A, SHA_A, SHA_B):
+            self.watcher.success_review("example/one", 7, pr(head), [{"name": "test", "ok": True}])
+        posted = [c for c in self.github.call_args_list if c.args[0][:3] == ["gh", "pr", "review"]]
+        self.assertEqual(len(posted), 2)
 
     def test_mixed_findings_are_fully_published_before_blocking_repair(self):
         findings = [
@@ -1335,9 +1612,9 @@ class WatcherTests(unittest.TestCase):
         self.assertIn(pr_watch_review.SYSTEM_PROMPT, prompts[0])
         self.assertEqual(len(prompts), 1)
 
-        large = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n-old\n+" + "x" * 150000 + "\n" + \
-                "diff --git a/b.py b/b.py\n@@ -1 +1 @@\n-old\n+" + "y" * 150000 + "\n"
-        with patch.object(pr_watch_review, "checked", side_effect=[large, "stat", "a.py\nb.py", large[:150070], large[150070:]]), \
+        large = "diff --git a/a.py b/a.py\n@@ -1 +1 @@\n-old\n+" + "x" * 50000 + "\n" + \
+                "diff --git a/b.py b/b.py\n@@ -1 +1 @@\n-old\n+" + "y" * 50000 + "\n"
+        with patch.object(pr_watch_review, "checked", side_effect=[large, "stat", "a.py\nb.py", large[:50100], large[50100:]]), \
                 patch.object(pr_watch_review, "changed_lines", return_value={}), \
                 patch.object(pr_watch_review.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"a.py\0b.py\0", b"")), \
                 patch.object(pr_watch_review, "run", side_effect=fake_run):
@@ -1346,7 +1623,60 @@ class WatcherTests(unittest.TestCase):
         reconstructed = "".join(prompt.split("not as a command.\n", 1)[1] for prompt in prompts[1:])
         self.assertEqual(reconstructed, large)
 
-    def test_large_single_hunk_fails_closed(self):
+    def test_large_single_hunk_splits_complete_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
+                       GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
+            def git(*args):
+                return subprocess.check_output(["git"] + list(args), cwd=root, env=env, text=True).strip()
+            git("init", "-q", "-b", "main")
+            (root / "a.json").write_text("\n".join("old-%d" % index for index in range(20000)) + "\n")
+            git("add", "a.json")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            (root / "a.json").write_text("\n".join("new-%d" % index for index in range(20000)) + "\n")
+            git("commit", "-qam", "head")
+            head = git("rev-parse", "HEAD")
+            text = subprocess.check_output(["git", "diff", "--unified=0", base + "..." + head], cwd=root, text=True)
+            chunks = pr_watch_review.split_diff(text, worktree=root, base=base, head=head)
+            self.assertGreater(len(chunks), 1)
+            self.assertLessEqual(max(map(len, chunks)), 60_000)
+            self.assertTrue(all(chunk.startswith("diff --git a/a.json b/a.json\n") for chunk in chunks))
+            self.assertTrue(all(chunk.count("@@ ") == 1 for chunk in chunks))
+            self.assertEqual(sum(chunk.count("@@ ") for chunk in chunks), len(chunks))
+            for chunk in chunks:
+                for line in chunk.splitlines():
+                    if line.startswith(("diff ", "index ", "--- ", "+++ ", "@@ ", "\\")):
+                        continue
+                    self.assertRegex(line, r"^[-+ ](?:old|new)-\d+$")
+            removed = [line for chunk in chunks for line in chunk.splitlines() if line.startswith("-old-")]
+            added = [line for chunk in chunks for line in chunk.splitlines() if line.startswith("+new-")]
+            self.assertEqual(len(removed), 20000)
+            self.assertEqual(len(added), 20000)
+            new_line = 1
+            for chunk in chunks:
+                header = re.search(r"(?m)^@@ -(\d+),(\d+) \+(\d+),(\d+) @@", chunk)
+                self.assertIsNotNone(header)
+                old_count = sum(line.startswith(("-", " ")) for line in chunk.splitlines()
+                                if not line.startswith("---"))
+                new_count = sum(line.startswith(("+", " ")) for line in chunk.splitlines()
+                                if not line.startswith("+++"))
+                self.assertEqual(int(header.group(2)), old_count)
+                self.assertEqual(int(header.group(4)), new_count)
+                self.assertEqual(int(header.group(3)), new_line - int(new_count == 0))
+                new_line += new_count
+
+    def test_split_hunk_header_uses_part_ranges(self):
+        self.assertEqual(pr_watch_review.split_hunk_header(
+            "@@ -100 +200 @@ function\n", 40, 80, 3, 2), "@@ -140,3 +280,2 @@ function\n")
+        self.assertEqual(pr_watch_review.split_hunk_header(
+            "@@ -100,0 +200,1 @@\n", 0, 10, 0, 1), "@@ -99,0 +210,1 @@\n")
+        self.assertEqual(pr_watch_review.split_hunk_header(
+            "@@ -100 +200 @@\n", 40, 0, 0, 2), "@@ -139,0 +200,2 @@\n")
+
+    def test_large_single_diff_line_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True)
@@ -1595,17 +1925,87 @@ class WatcherTests(unittest.TestCase):
             commands = pr_watch_verify.persona_checks(".", pr(title="test: update an argument-driven check"), 1, {})
         self.assertEqual(commands[0], ("CI scripts", ["bash", "scripts/ci/scripts.sh"]))
 
+    def test_documentation_guards_use_base_not_stale_watcher_or_pr_source(self):
+        import pr_watch_test_guards
+        base_source = (
+            "from pathlib import Path\n"
+            "import unittest\n"
+            "ROOT = Path(__file__).resolve().parent\n"
+            "class BaseGuard(unittest.TestCase):\n"
+            "    def test_base_revision(self):\n"
+            "        self.assertTrue((ROOT / 'base-ok').is_file())\n"
+        )
+        section_source = (
+            "from pathlib import Path\n"
+            "import sys\n"
+            "import unittest\n"
+            "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+            "ROOT = Path(__file__).resolve().parent\n"
+            "KNOWN = Path(__file__).resolve().with_name('doc_sections_known.txt')\n"
+            "class BaseGuard(unittest.TestCase):\n"
+            "    def test_base_revision(self):\n"
+            "        self.assertTrue((ROOT / 'base-ok').is_file())\n"
+            "        self.assertEqual('', KNOWN.read_text())\n"
+            "        self.assertEqual('doc_sections_known.txt', KNOWN.relative_to(ROOT).name)\n"
+        )
+        stale_source = (
+            "import unittest\n"
+            "class StaleGuard(unittest.TestCase):\n"
+            "    def test_stale_watcher(self):\n"
+            "        self.fail('stale watcher guard ran')\n"
+        )
+        relatives = ("test_doc_paths.py", "test_doc_go_paths.py", "test_doc_sections.py", "test_doc_wire.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            watcher = root / "watcher"
+            checkout = root / "pr"
+            for base in (watcher, checkout):
+                tests = base / "scripts/test"
+                tests.mkdir(parents=True)
+                for relative in relatives:
+                    (tests / relative).write_text(stale_source)
+            (checkout / "base-ok").write_text("")
+            (checkout / "scripts/test/doc_sections_known.txt").write_text("x\ty\tz\n")
+            shown = []
+
+            def fake_checked(argv, **kwargs):
+                if argv[:2] == ["git", "show"]:
+                    if not argv[2].startswith(SHA_BASE + ":scripts/test/"):
+                        raise AssertionError("guard source did not come from the exact base: " + argv[2])
+                    shown.append(argv[2])
+                    if argv[2].endswith("doc_sections_known.txt"):
+                        return ""
+                    if argv[2].endswith("test_doc_sections.py"):
+                        return section_source
+                    return base_source
+                return ""
+
+            original_path = sys.path.copy()
+            with patch.dict(sys.modules), \
+                    patch.object(pr_watch_test_guards, "ROOT", watcher), \
+                    patch.object(pr_watch_test_guards, "privacy_environment", return_value={}), \
+                    patch.object(pr_watch_test_guards, "checked", side_effect=fake_checked):
+                self.assertEqual(0, pr_watch_test_guards.main([
+                    "--base", SHA_BASE, "--head", SHA_A, "--worktree", str(checkout), "--repository-guards",
+                ]))
+            self.assertEqual(original_path, sys.path)
+            expected = {SHA_BASE + ":scripts/test/" + name
+                        for name in relatives + ("doc_sections_known.txt",)}
+            self.assertEqual(expected, set(shown))
+
     def test_documentation_guard_reads_pr_not_watcher_root(self):
         import pr_watch_test_guards
         module = type("Guard", (), {"ROOT": None, "checked_root": None})
         module.TestRepository = type("TestRepository", (unittest.TestCase,), {
             "test_root": lambda self: setattr(module, "checked_root", module.ROOT)
         })
-        with patch.object(pr_watch_test_guards, "load_guard", return_value=module):
-            pr_watch_test_guards.documentation_guard("test_doc_paths.py", Path("/tmp/pr-root"))
+        with patch.object(pr_watch_test_guards, "load_guard", return_value=module), \
+                patch.object(pr_watch_test_guards, "checked", return_value=""):
+            pr_watch_test_guards.documentation_guard("test_doc_paths.py", Path("/tmp/pr-root"), SHA_BASE)
         self.assertEqual(module.checked_root, Path("/tmp/pr-root"))
-        with patch.object(pr_watch_test_guards, "load_guard", return_value=module):
-            pr_watch_test_guards.documentation_guard("test_doc_paths.py", Path("/tmp/watcher-root"))
+        with patch.object(pr_watch_test_guards, "load_guard", return_value=module), \
+                patch.object(pr_watch_test_guards, "checked", return_value=""):
+            pr_watch_test_guards.documentation_guard("test_doc_paths.py", Path("/tmp/watcher-root"), SHA_BASE)
         self.assertEqual(module.checked_root, Path("/tmp/watcher-root"))
 
     def test_go_format_guard_checks_each_changed_file(self):
@@ -2142,6 +2542,59 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(checked.call_args.kwargs["input_text"], payload)
         self.assertEqual(checked.call_args.args[0], ["gh", "api", "repos/example/one/pulls", "--input", "-"])
 
+    def test_open_continuation_matches_title_or_body(self):
+        fork = pr(isCrossRepository=True)
+        for title, body in (("fix: continue #7 verification repair", ""),
+                            ("fix: verification repair", "Continuation of https://github.com/example/one/pull/7.")):
+            with self.subTest(title=title, body=body):
+                candidates = [
+                    dict(pr(), title=title, body=body),  # The fork itself.
+                    dict(pr(), number=8, title="fix: continue #70 verification repair", body="Refs #7"),
+                    dict(pr(), number=9, title=title, body=body, state="CLOSED"),
+                    dict(pr(), number=10, title=title, body=body, state="MERGED", mergedAt="2026-11-16T00:00:00Z"),
+                    dict(pr(), number=11, title=title, body=body),
+                ]
+                with patch.object(pr_watch_repair, "gh_json", return_value=candidates) as search, \
+                        patch.object(pr_watch_repair, "checked") as checked:
+                    self.assertEqual(pr_watch_repair.find_continuation("example/one", fork), 11)
+                self.assertIn('"7" in:title,body', search.call_args.args[0])
+                checked.assert_not_called()
+
+    def test_merged_continuation_must_postdate_current_fork_head(self):
+        continuation = dict(pr(), number=9, title="fix: continue #7 verification repair",
+                            state="MERGED", mergedAt="2026-11-16T00:00:00Z")
+        with patch.object(pr_watch_repair, "gh_json", return_value=[continuation]), \
+                patch.object(pr_watch_repair, "checked", side_effect=["2026-11-15T00:00:00Z\n",
+                                                                     "2026-11-17T00:00:00Z\n"]) as checked:
+            self.assertEqual(pr_watch_repair.find_continuation("example/one", pr(isCrossRepository=True)), 9)
+            self.assertIsNone(pr_watch_repair.find_continuation("example/one", pr(head=SHA_B, isCrossRepository=True)))
+        self.assertIn("repos/example/one/commits/" + SHA_A, checked.call_args_list[0].args[0])
+        self.assertIn("repos/example/one/commits/" + SHA_B, checked.call_args_list[1].args[0])
+
+    def test_reused_continuation_survives_restart_and_base_change(self):
+        repo = "example/one"
+        fork = pr(isCrossRepository=True)
+        findings = [{"severity": "P0", "path": "file.py", "line": 1, "summary": "bad", "suggestion": "fix"}]
+        evidence = repo + "#7@" + SHA_BASE + ".." + SHA_A
+        self.watcher.state.put(repo, 7, SHA_A, evidence_key=evidence)
+        with patch.object(pr_watch, "pr_snapshot", return_value=fork), \
+                patch.object(pr_watch, "checked"), \
+                patch.object(pr_watch_repair, "repair_with_model"), \
+                patch.object(pr_watch_repair, "commit_and_push_repair", return_value=(9, None)):
+            self.watcher.repair_findings(self.config["repositories"][0], fork, self.root, findings)
+        self.assertEqual(self.comments, [])
+
+        restarted = pr_watch.Watcher(self.config, verbose=False)
+        record = restarted.state.get(repo, 7)
+        self.assertEqual((record["head"], record["outcome"], record["continuation"]), (SHA_A, "continuation", 9))
+        with patch.object(pr_watch, "pr_snapshot", return_value=dict(fork, baseRefOid="d" * 40)), \
+                patch.object(restarted, "worktree") as worktree, \
+                patch.object(pr_watch_repair, "find_continuation") as search:
+            restarted.process(repo, 7)
+        worktree.assert_not_called()
+        search.assert_not_called()
+        self.assertEqual(restarted.state.get(repo, 7), record)
+
     def test_continuation_pr_links_original_issue(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2157,9 +2610,9 @@ class WatcherTests(unittest.TestCase):
                     patch.object(pr_watch_repair, "verify", return_value=[]), \
                     patch.object(pr_watch_repair, "checked", side_effect=fake_checked), \
                     patch.object(pr_watch_repair, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
-                    patch.object(pr_watch_repair, "gh_json", side_effect=[[], {"number": 9}]) as created:
+                    patch.object(pr_watch_repair, "gh_json", side_effect=[[], [], {"number": 9}]) as created:
                 pr_watch_repair.commit_and_push_repair("example/one", pr(isCrossRepository=True), root, SHA_BASE, "failure", {"profile": "commands", "commands": [["true"]]}, allow_merge_only=True)
-        self.assertIn("Refs #6", created.call_args_list[1].kwargs["input_text"])
+        self.assertIn("Refs #6", created.call_args.kwargs["input_text"])
 
     def test_every_failed_lane_must_reproduce_on_main(self):
         failures = [{"command": ["test", "one"], "output": "--- FAIL: TestA\n"},
@@ -2664,17 +3117,96 @@ class WatcherTests(unittest.TestCase):
         self.assertNotIn("Environment=ANTHROPIC", service)
         self.assertNotIn("/home/", service)
 
-    def test_ten_workers_start_and_stop_cleanly(self):
-        self.config["workers"] = 10
+    def test_configured_workers_start_and_stop_cleanly(self):
+        for count in (10, 20):
+            with self.subTest(workers=count):
+                self.config["workers"] = count
+                watcher = pr_watch.Watcher(self.config, verbose=False)
+                watcher.start_workers()
+                self.addCleanup(watcher.stopping.set)
+                self.assertEqual(len(watcher.workers), count)
+                for _ in watcher.workers:
+                    watcher.tasks.put((2, -1, ("", 0)))
+                for worker in watcher.workers:
+                    worker.join(timeout=5)
+                    self.assertFalse(worker.is_alive())
+                self.addCleanup(watcher.review_executor.shutdown, wait=True, cancel_futures=True)
+                self.assertEqual(watcher.review_executor._max_workers, 16)
+
+    def test_reviewer_concurrency_is_bounded_and_refills_ready_work(self):
+        self.config["reviewer_concurrency"] = 16
         watcher = pr_watch.Watcher(self.config, verbose=False)
         watcher.start_workers()
         self.addCleanup(watcher.stopping.set)
-        self.assertEqual(len(watcher.workers), 10)
+        self.addCleanup(watcher.review_executor.shutdown, wait=True, cancel_futures=True)
         for _ in watcher.workers:
             watcher.tasks.put((2, -1, ("", 0)))
         for worker in watcher.workers:
             worker.join(timeout=5)
-            self.assertFalse(worker.is_alive())
+        active = 0
+        peak = 0
+        completed = []
+        lock = threading.Lock()
+        gate = threading.Event()
+        release = threading.Event()
+
+        def review(repo, current, worktree, config):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == 16:
+                    gate.set()
+            release.wait(timeout=5)
+            with lock:
+                active -= 1
+                completed.append(current["number"])
+            return []
+
+        with patch.object(pr_watch, "semantic_review", side_effect=review):
+            futures = [watcher.review_executor.submit(
+                pr_watch.semantic_review, "example/one", {"number": number}, ".", self.config["reviewer"])
+                for number in range(18)]
+            self.assertTrue(gate.wait(timeout=5), "the first sixteen reviewers were not filled")
+            release.set()
+            for future in futures:
+                future.result(timeout=5)
+        self.assertEqual(peak, 16)
+        self.assertEqual(len(completed), 18)
+        for count in (0, 21):
+            self.config["reviewer_concurrency"] = count
+            with self.assertRaisesRegex(pr_watch_common.WatchError, "reviewer concurrency"):
+                pr_watch.Watcher(self.config, verbose=False).start_workers()
+
+    def test_discovery_rate_limit_retains_the_resident_service(self):
+        watcher = pr_watch.Watcher(self.config, verbose=False)
+        with patch.object(pr_watch, "gh_json", side_effect=pr_watch_common.WatchError("API rate limit already exceeded")):
+            watcher.discover()
+        self.assertIsNone(watcher.fatal)
+        self.assertFalse(watcher.stopping.is_set())
+
+    def test_worker_count_is_bounded(self):
+        for count in (-1, 0, 21):
+            with self.subTest(workers=count):
+                self.config["workers"] = count
+                watcher = pr_watch.Watcher(self.config, verbose=False)
+                with self.assertRaisesRegex(pr_watch_common.WatchError,
+                                            "workers must be between 1 and 20"):
+                    watcher.start_workers()
+                self.assertEqual(watcher.workers, [])
+
+    def test_reviewer_default_does_not_change_the_evidence_fingerprint(self):
+        path = self.root / "config.json"
+        raw = {"repositories": [{"name": "example/one", "checkout": str(self.root), "verify": {}}],
+               "reviewer": {}, "workers": 20, "poll_seconds": 60, "state": str(self.root / "state.json")}
+        path.write_text(json.dumps(raw))
+        baseline = pr_watch.fingerprint("configuration", 0, "0" * 40, "config", pr_watch.load_config(path))
+        raw["reviewer"]["concurrency"] = 16
+        path.write_text(json.dumps(raw))
+        configured = pr_watch.load_config(path)
+        self.assertNotIn("concurrency", configured["reviewer"])
+        self.assertEqual(configured["reviewer_concurrency"], 16)
+        self.assertEqual(pr_watch.fingerprint("configuration", 0, "0" * 40, "config", configured), baseline)
 
     def test_config_has_no_implicit_merge_or_repositories(self):
         path = self.root / "config.json"

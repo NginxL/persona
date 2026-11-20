@@ -83,6 +83,10 @@ export function searchFields(item: Item): [SearchCategory, string][] {
     case "recap":
       add("event", item.text);
       break;
+    case "visualization":
+      // the card's header is all of it the chat shows as words; the fragment's bytes are not searched
+      add("event", item.visualization?.title);
+      break;
     default:
       return out;
   }

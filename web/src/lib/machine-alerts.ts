@@ -6,6 +6,8 @@
 // warning, needs you, version mismatch, then the rest in the hub's order. Pure: no requests, no React.
 import { t } from "../i18n";
 import { isPending, neverConnected } from "./add-computer";
+import { stripAnsi } from "./ansi";
+import { disconnectExpected } from "./machine-deploy";
 import { level, memPercent, percent, type Level } from "./machine-detail";
 import { classifyConnection } from "./node-health";
 import type { Machine, MachineMetrics } from "./types";
@@ -48,6 +50,12 @@ export interface LauncherHealthRecord {
 /** A record that says the launcher does not work on its computer now. */
 export const launcherFailing = (r: Pick<LauncherHealthRecord, "state">): boolean => r.state === "failing" || r.state === "blocked";
 
+/** A record's error text without terminal escapes or shell startup noise around it (an older hub keeps them). */
+export const launcherErrorText = (r: Pick<LauncherHealthRecord, "error">): string => stripAnsi(r.error ?? "").trim();
+
+/** A record's blocked reason without terminal escapes (an older hub keeps them). */
+export const launcherBlockedReason = (r: Pick<LauncherHealthRecord, "blocked_reason">): string => stripAnsi(r.blocked_reason ?? "").trim();
+
 export interface AlertInput {
   machine: Machine;
   metrics?: MachineMetrics;
@@ -86,10 +94,10 @@ export function readings(machine: Machine, metrics: MachineMetrics | undefined):
  *  disk, CPU, load, launchers, the version). */
 export function machineAlerts({ machine: m, metrics, launchers = 0, managerOffline }: AlertInput): MachineAlert[] {
   if (isPending(m) || neverConnected(m) || managerOffline) return [];
-  // lib/machine-deploy.ts's busy and expectedDisconnect, read here directly: the page orders its cards by these alerts
-  // on every push, and a card counts its deployment reads (MachinesCardMemo.test.tsx)
+  // lib/machine-deploy.ts's busy and expectedDisconnect, read here without machineDeployment: the page orders its cards by
+  // these alerts on every push, and a card counts its deployment reads (MachinesCardMemo.test.tsx)
   const busy = !!(m.deploying || m.deploy_phase);
-  const expectedDisconnect = !m.online && !m.deploy_error && (m.deploy_phase === "restarting" || m.deploy_phase === "confirming");
+  const expectedDisconnect = disconnectExpected(m);
   const out: MachineAlert[] = [];
   const online = m.online && metrics?.online !== false;
   if (!m.online && !expectedDisconnect) out.push({ kind: "offline", severity: "critical", reason: offlineReason(m) });

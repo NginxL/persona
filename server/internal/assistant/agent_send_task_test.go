@@ -15,6 +15,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // secretary is an agent the main conversation did not hand out (a long-lived one the user opened), working on no todo.
@@ -239,6 +240,52 @@ func TestAgentSendTaskFailedSend(t *testing.T) {
 	}
 	if todo := onlyTodo(s); todo.DoneAt != nil || len(todo.Agents) != 1 || feedKinds(s, "conv1") != "task" {
 		t.Fatalf("unknown: %+v, feed %q", todo, feedKinds(s, "conv1"))
+	}
+}
+
+func TestAgentSendReportsUncertainDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		uncertain bool
+	}{
+		{"relayed deadline", relayedDeadline, true},
+		{"node failed after writing", nodeAfterWrite, true},
+		{"could not read the write receipt", nil, true},
+		{"node refused before writing", nodeRefused, false},
+		{"request never written", rpc.NotSent(context.DeadlineExceeded), false},
+	} {
+		for _, handoff := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/handoff=%t", tc.name, handoff), func(t *testing.T) {
+				s, f := newQuietService(t)
+				secretary(f)
+				failSends(f, tc.err)
+				if tc.err == nil {
+					f.answerNode(DeviceSessionSend, unreadableWriteReceipt)
+				}
+				args := map[string]any{"machine": "box", "session_id": "sec00001", "text": "Check the weekly figures"}
+				if handoff {
+					args["task"] = map[string]any{"title": "Weekly figures"}
+				}
+				_, err := runJSON(t, s, "conv1", "agent_send", args)
+				if err == nil || tc.err != nil && !errors.Is(err, tc.err) || strings.Contains(err.Error(), "check with agent_read before sending again") != tc.uncertain {
+					t.Errorf("agent_send returned %v; uncertain = %t", err, tc.uncertain)
+				}
+				if n := sessionSends(f); n != 1 {
+					t.Errorf("sent %d times", n)
+				}
+				_, kept := s.openTodoOfAgent("box", "sec00001")
+				if want := handoff && tc.uncertain; kept != want || (feedKinds(s, "conv1") == "task") != want {
+					t.Errorf("handoff kept = %v, feed = %q; want card = %v", kept, feedKinds(s, "conv1"), want)
+				}
+				if !tc.uncertain {
+					failSends(f, nil)
+					if _, err := runJSON(t, s, "conv1", "agent_send", args); err != nil || len(sentToAgent(f)) != 1 {
+						t.Errorf("retry after a definite refusal: %v; delivered = %v", err, sentToAgent(f))
+					}
+				}
+			})
+		}
 	}
 }
 

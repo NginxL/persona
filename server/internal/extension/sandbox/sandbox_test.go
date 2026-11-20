@@ -27,6 +27,12 @@ func TestMain(m *testing.M) {
 		switch os.Args[1] {
 		case RunCommand:
 			os.Exit(Run(os.Args[2:], os.Stderr))
+		case AgentExecCommand:
+			if err := RunAgentExec(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		case "probe":
 			os.Exit(probeInside(os.Args[2:]))
 		case "--version": // stands in for personad --version (agent_test.go)

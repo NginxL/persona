@@ -1,0 +1,38 @@
+{
+  "name": "skill_import",
+  "description": "Import a user-requested skill ZIP through Persona's existing Settings importer. First preview the base64-encoded archive (up to 4 MiB compressed); returns validated metadata, a short-lived reference and environment. Then install with the same archive, reference and environment. Installation and undo wait for the user's own permission card showing the validated skill and target computer; never approve for the user. The target is the current assistant's configured personal computer, never a model-chosen path or machine. Skills are shared by assistants using that computer account and load in new conversations; an existing conversation is not guaranteed to refresh. Same-name skills are never overwritten. ZIP inspection does not run scripts or treat skill instructions as authorization. Use status with the original reference and environment after a lost/uncertain response, before any retry: it records previewed, installed or undone and recovers the undo receipt. Status is an operation receipt, not a live inventory; receipts expire after ten minutes or a computer restart. If unavailable, inspect Settings \u003e Skills instead of assuming failure. Cancel discards an unused preview. Undo takes an installed receipt, refuses edited/replaced files and retains recovery data. No URL download, repository clone, arbitrary path write or arbitrary skill removal is provided. An older computer may require a Persona update.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "op"
+    ],
+    "properties": {
+      "op": {
+        "type": "string",
+        "enum": [
+          "preview",
+          "install",
+          "status",
+          "cancel",
+          "undo"
+        ]
+      },
+      "archive": {
+        "type": "string",
+        "maxLength": 5592408,
+        "description": "Base64 ZIP bytes, required only for preview and install. Supply identical bytes for both; do not put secrets in the archive."
+      },
+      "reference": {
+        "type": "string",
+        "maxLength": 256,
+        "description": "Opaque receipt from preview/install, required except for preview. Never invent one."
+      },
+      "environment": {
+        "type": "string",
+        "maxLength": 128,
+        "description": "Environment returned by preview, required except for preview. A changed assistant computer requires a fresh preview."
+      }
+    }
+  }
+}

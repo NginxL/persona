@@ -7,7 +7,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { credentialOwner, subscribeCredentialOwner, enc, api } from "../lib/api";
 import { machineWithHub } from "../lib/mesh";
 import { createPortal } from "react-dom";
-import { ago, sessionTitle, shortPath, stateOf, tabLabel } from "../lib/format";
+import { ago, sessionDisplayTab, sessionTitle, sessionTitleDetail, shortPath, stateOf, tabLabel } from "../lib/format";
+import { useHerdrTabName } from "../lib/agents-display";
 import { appCommands, commandKeys, contextCommands, filterCommands, inboxHits, matchPaletteWords, orderGroups, parseQuery, placeHits, openPaletteWith, setPaletteQuery, terminalHits, usePalette, type InboxHit, type MachinePanes, type PaletteCommand, type PlaceHit, type PlaceInput, type TerminalHit } from "../lib/palette";
 import { isDone, itemRoute, useInbox, type InboxItem } from "../lib/inbox";
 import { useNavPages } from "./Sidebar";
@@ -34,6 +35,7 @@ import { CARD_OUT, EASE, EXIT_MS, IconButton, Kbd, toast, useExit } from "../ui/
 import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { useEscapeClose, useModalFocus } from "../ui/overlay";
+import { useCloseOnBack } from "../lib/back-close";
 import { copyFileMention, FilesHeading, FilesNotice, FileResultRow, openFileHit, usePaletteFiles, type FileRow } from "./palette/FilesSection";
 import { AgentConditions } from "./palette/AgentConditions";
 import { useSavedSearches, type SavedSearchPanel } from "./palette/SavedSearches";
@@ -43,7 +45,7 @@ import { t } from "../i18n";
 import { byTime } from "../lib/times";
 import { STATE_LABEL } from "../lib/state-labels";
 import { plainMarkdown } from "../lib/plain-markdown";
-import { PHONE, useMedia } from "../lib/viewport";
+import { NARROW, PHONE, useMedia } from "../lib/viewport";
 import type { AssistantSearchAnswer, AssistantSearchHit } from "../lib/assistant-search";
 
 interface Hit {
@@ -113,12 +115,12 @@ function sections(items: Section[], listId: string): ReactNode[] {
 
 /** What a row calls a chat: a Persona chat by its readable title as the sidebar does (a `<persona-context>` tag read,
  *  "New chat" for none), an Agent by its session's. */
-const chatTitle = (s: Session, persona: boolean, main = false) => (main ? t("sidebar.main_chat") : persona ? conversationTitle(s) : sessionTitle(s));
+const chatTitle = (s: Session, persona: boolean, main = false, preferTab = false) => (main ? t("sidebar.main_chat") : persona ? conversationTitle(s) : sessionTitle(s, preferTab));
 
 /** A chat's match by its title (starting with what was typed 100, containing it 80), then every word in its folder,
  *  computer or last line (40): a Persona chat's, and an Agent's until lib/agent-search.ts has loaded. */
-function score(s: Session, q: string, machine: string, persona = false): number {
-  return matchPaletteWords(chatTitle(s, persona), q, [s.cwd, s.space_name, s.slot_name, machine, s.last_text].join(" "));
+function score(s: Session, q: string, machine: string, persona = false, preferTab = false): number {
+  return matchPaletteWords(chatTitle(s, persona, false, preferTab), q, [s.title, s.cwd, s.space_name, s.slot_name, machine, s.last_text].join(" "));
 }
 
 const HOME: Route = { name: "home" };
@@ -139,6 +141,7 @@ function previousChat(recent: { entries: string[]; current: string }, sessions: 
 
 /** `listShown`: the sidebar's column, with its Agents list, is on screen (not a narrow screen's drawer or the rail). */
 export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listShown = true }: { open: boolean; onClose: () => void; onNewAgent: () => void; pane?: { mid: string; sid: string }; route?: Route; listShown?: boolean }) {
+  const preferTab = useHerdrTabName();
   // what is typed lives in the store (lib/palette.ts): the shortcuts open it in a mode (`>` for commands) and read it
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
   const manager = useShownManager();
@@ -274,7 +277,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     // an Agent as the list's search found it: its operators, then its name, its project or computer, what is inside it
     const ctx = { machines, pins, interactions, now: Date.now() };
     for (const s of sessions) {
-      const found = agentSearch ? agentSearch.agentSearchHit(s, text, ctx) : { score: score(s, query, machineWithHub(s.machine_id, machines)), snippet: undefined };
+      const found = agentSearch ? agentSearch.agentSearchHit(s, text, ctx, preferTab) : { score: score(s, query, machineWithHub(s.machine_id, machines), false, preferTab), snippet: undefined };
       if (found.score) out.push({ key: `s:${runtimeSearchKey(s)}`, s, to: { name: "session", mid: s.machine_id, sid: s.session_id }, score: found.score + (stateOf(s) === "offline" ? 0 : 5), evidence: found.snippet });
     }
     // The server's grouped matches and evidence are never matched again against truncated summaries.
@@ -323,7 +326,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     let others = 0;
     const window = all.filter((row) => remoteKeys.has(row.key) || others++ < 40);
     return [...recentRows, ...savedRows, ...orderGroups<Row & { score: number }>([window, mail, go]).flat()];
-  }, [mode, text, operators, agentSearch, sessions, assistant, machines, pins, interactions, machinePanes, inboxItems, places, recentChats, answer, saved.state.document, saved.state.unsupported, runtimeSearch.hits, runtimeSearch.loaded, runtimeSearch.supported, runtimeSearch.loading, runtimeSearch.loadingMore, runtimeSearch.hasMore, runtimeSearch.error, runtimeSearch.moreError, runtimeSearch.mergeHits, revision]);
+  }, [mode, text, operators, agentSearch, sessions, assistant, machines, pins, interactions, machinePanes, inboxItems, places, recentChats, answer, saved.state.document, saved.state.unsupported, runtimeSearch.hits, runtimeSearch.loaded, runtimeSearch.supported, runtimeSearch.loading, runtimeSearch.loadingMore, runtimeSearch.hasMore, runtimeSearch.error, runtimeSearch.moreError, runtimeSearch.mergeHits, revision, preferTab]);
 
   // command mode: what other modules offer for here, then the registered commands with their shortcuts
   const commands = useMemo((): Row[] => {
@@ -334,14 +337,14 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     // Go back to the previous conversation (#2191): the newest opened here other than the one on the page that still exists
     const back = previousChat(recentChats, sessions, assistant?.conversations ?? []);
     const extra: PaletteCommand[] = [
-      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: chatTitle(back.s, back.to.name === "persona"), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
+      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: chatTitle(back.s, back.to.name === "persona", false, preferTab), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
       { id: "app:new-agent", title: t("palette.new_agent"), section: SCOPE_LABEL.global, icon: "plus", keywords: "new agent", run: onNewAgent },
       { id: "app:new-conversation", title: t("palette.new_conversation"), section: SCOPE_LABEL.global, icon: "chat", keywords: "persona new", run: () => navigate({ name: "persona-new" }) },
     ];
     const all = [...contextCommands({ route, pane }), ...appCommands({ bindings, available: (id) => Boolean(handlerOf(id)), run, machines: machines.map((m) => ({ id: m.id, name: m.name })), extra })];
     return filterCommands(all, text).map((cmd) => ({ kind: "command" as const, key: cmd.id, cmd }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `route` is parsed anew each render; its path says it all
-  }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent, recentChats, sessions, assistant]);
+  }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent, recentChats, sessions, assistant, preferTab]);
   // the files under the directory of the page (#2438): listed after the conversations and panes
   const files = usePaletteFiles({ open: open && !managing, jump: mode === "jump" && !operators, text, route, pane, machinePanes });
   const shown = useMemo(() => (mode === "command" ? commands : [...hits, ...files.rows]), [mode, commands, hits, files.rows]);
@@ -378,6 +381,9 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
   // Esc closes it wherever the focus is in it (the field, a row Tab reached, the Filter), and only it: a Dialog under it
   // stays open, a menu over it (the Filter's) closes first
   useEscapeClose(open && !managing, onClose);
+  // on a narrow screen Back closes it first, as it does the drawer and the sheets (lib/back-close.ts); a pick that goes
+  // to a page takes its entry over, and a sheet opened from it (Saved searches, a command's) reuses it
+  useCloseOnBack(open && !managing, onClose, useMedia(NARROW));
   // the field takes the focus on every open (opened again on its way out, it is not mounted anew)
   useEffect(() => {
     if (open && !managing) input.current?.focus({ preventScroll: true });
@@ -414,12 +420,15 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
     if (!listShown) navigate({ name: "agent-list" });
   };
 
+  // On a narrow screen it sits in the part a soft keyboard leaves (--kb-top / --kb-h, lib/viewport.ts), the card no
+  // taller than that: the list scrolls its last row above the keyboard. With no keyboard that part is the whole screen
+  // and the gap under the card is 0, so a card that fits stays where it was.
   return createPortal(
-    <div ref={backdrop} data-closing={exit.leaving || undefined} inert={exit.leaving || undefined} className="fixed inset-0 z-40 flex items-start justify-center bg-black/20 px-4 pt-[14vh] backdrop-blur-[2px] dark:bg-black/45" style={{ animation: "fade-in 120ms ease-out both" }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={card} role="dialog" aria-modal="true" tabIndex={-1} data-shortcut-layer={open || undefined} aria-label={label} className="w-full max-w-[560px] overflow-hidden rounded-[14px] bg-surface shadow-overlay outline-none" style={{ animation: `slide-up 200ms ${EASE} both` }}>
+    <div ref={backdrop} data-closing={exit.leaving || undefined} inert={exit.leaving || undefined} className="fixed inset-0 z-40 flex items-start justify-center bg-black/20 px-4 pt-[14vh] backdrop-blur-[2px] dark:bg-black/45 max-lg:top-(--kb-top) max-lg:bottom-auto max-lg:h-(--kb-h) max-lg:pb-[min(0.75rem,calc(100dvh-var(--kb-h)))]" style={{ animation: "fade-in 120ms ease-out both" }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={card} role="dialog" aria-modal="true" tabIndex={-1} data-shortcut-layer={open || undefined} aria-label={label} className="w-full max-w-[560px] overflow-hidden rounded-[14px] bg-surface shadow-overlay outline-none max-lg:flex max-lg:max-h-full max-lg:flex-col" style={{ animation: `slide-up 200ms ${EASE} both` }}>
         {/* on the way out it shows what it showed when open: closed, the lists below come back empty */}
         {open ? (kept.current = <>
-        <label className="flex h-12 items-center gap-2.5 border-b border-line px-4">
+        <label className="flex h-12 shrink-0 items-center gap-2.5 border-b border-line px-4">
           <Icon name="search" size={15} stroke={2} className="text-ink-3" />
           <input
             ref={input}
@@ -562,7 +571,9 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
             const isMain = Boolean(h.assistant && h.s.session_id === assistant?.main && h.s.machine_id === assistant.machine_id);
             // a Persona chat says what was said last (its folder is the assistant's own, the same for every chat); an Agent
             // where it runs
-            const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [[machineWithHub(h.s.machine_id, machines), h.s.space_name, tabLabel(h.s)].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
+            const cli = h.assistant ? "" : sessionTitleDetail(h.s, preferTab);
+            const tab = sessionDisplayTab(h.s, preferTab) ? "" : tabLabel(h.s);
+            const meta = h.assistant ? plainMarkdown(h.s.last_text) || "Persona" : [cli, [machineWithHub(h.s.machine_id, machines), h.s.space_name, tab].filter(Boolean).join(" › "), shortPath(h.s.cwd)].filter(Boolean).join(" · ");
             return {
               key: h.key,
               heading: sessionsHeading,
@@ -572,7 +583,7 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME, listSho
                 <span className="flex size-5 shrink-0 items-center justify-center">{h.assistant ? <Icon name={isMain ? "home" : "spark"} size={14} className="text-ink-3" /> : <StatusMark state={st} />}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-ink">{chatTitle(h.s, Boolean(h.assistant), isMain)}</span>
+                    <span className="truncate text-[13px] font-medium text-ink" title={cli || undefined}>{chatTitle(h.s, Boolean(h.assistant), isMain, preferTab)}</span>
                     {r.previous && <span className="shrink-0 rounded-[5px] bg-field px-1.5 text-[10.5px] text-ink-3 shadow-hairline">{t("palette.previous")}</span>}
                   </span>
                   {h.evidence ? (

@@ -171,7 +171,7 @@ func (s *Service) switchItems(ctx context.Context, a agentsSwitchArgs, t switchT
 				continue
 			}
 			own := cmp.Or(c.Launcher, "claude")
-			if own == t.Launcher || from != "" && own != from {
+			if own == t.Launcher && !c.OffLauncher || from != "" && own != from { // off it: a switch back (#11792)
 				continue
 			}
 			out = append(out, s.switchPlan(ctx, m, c, t))
@@ -250,7 +250,7 @@ func (s *Service) switchNowOrQueue(ctx context.Context, it *switchItem, t switch
 	}
 	text := ""
 	if it.plan == switchContinued {
-		text = prompts.RenderAgentLimitContinue()
+		text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
 		if _, theirs, err := s.supervisedElsewhere(ctx, self, it.m, it.c); err == nil && theirs {
 			text = prompts.RenderSideConversation(text)
 		}
@@ -452,7 +452,7 @@ func (s *Service) runSwitchQueue(ctx context.Context, machine string) {
 			drop = "queued over a day ago"
 		case !ok || switchStopped(c) && !c.StartedByPersona:
 			drop = "it stopped or is gone"
-		case cmp.Or(c.Launcher, "claude") == w.Launcher:
+		case cmp.Or(c.Launcher, "claude") == w.Launcher && !c.OffLauncher: // off it: the switch back (#11792)
 			drop = "it runs there already"
 		case cmp.Or(c.Launcher, "claude") != w.From:
 			drop = "it moved to another launcher meanwhile"
@@ -509,7 +509,7 @@ func (s *Service) runQueuedSwitch(ctx context.Context, w queuedSwitch, c proto.S
 		err = s.retargetStopped(ctx, m, c, t)
 	} else {
 		if limitStopped(c) {
-			text = prompts.RenderAgentLimitContinue()
+			text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
 		}
 		err = s.moveAgent(ctx, m, c, t, text)
 	}

@@ -1,3 +1,6 @@
+import persona.buildlogic.FileContentProperty
+import persona.buildlogic.LocationProperty
+
 plugins {
     id("persona.jvm.library")
     id("org.jetbrains.kotlin.plugin.serialization")
@@ -47,12 +50,19 @@ dependencies {
 }
 
 // The test compilation is a friend of the separately compiled observer, not a public API relaxation in production.
+// friendPaths, not an -Xfriend-paths= argument: the argument's absolute path would be part of the cache key (#10712).
 tasks.named("compileShadowTestKotlin", org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile::class.java).configure {
-    compilerOptions.freeCompilerArgs.add(provider {
-        "-Xfriend-paths=" + layout.buildDirectory.dir("classes/kotlin/shadow").get().asFile.absolutePath
-    })
+    friendPaths.from(shadowSource.output.classesDirs)
 }
 
+// The host build of the Rust core that both shadow suites load (:core:rustcore's buildHostCore, for this OS).
+val hostCore = configurations.create("hostCore") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+dependencies { add(hostCore.name, project(path = ":core:rustcore", configuration = "hostCoreElements")) }
+
+// The repository root and the fixture domains the shadow sources read come from persona.jvm.library, as for test.
 val shadowTest = tasks.register<Test>("shadowTest") {
     description = "Runs the DEBUG-only answer observer and both Kotlin/JNI fixture replays on the host JVM."
     testClassesDirs = shadowTestSource.output.classesDirs
@@ -60,19 +70,7 @@ val shadowTest = tasks.register<Test>("shadowTest") {
     useJUnit()
     maxParallelForks = 1
     forkEvery = 1
-    val repositoryRoot = providers.gradleProperty("personaRepoRoot")        .getOrElse(rootProject.layout.projectDirectory.dir("..").asFile.absolutePath)
-    systemProperty("persona.repo.root", repositoryRoot)
-    val hostLibrary = rootProject.layout.projectDirectory.dir("../native/app-core").file(
-        "target/debug/" + when {
-            org.gradle.internal.os.OperatingSystem.current().isMacOsX -> "libpersona_core.dylib"
-            org.gradle.internal.os.OperatingSystem.current().isWindows -> "persona_core.dll"
-            else -> "libpersona_core.so"
-        },
-    )
-    systemProperty("persona.core.library", hostLibrary.asFile.absolutePath)
-    dependsOn(":core:rustcore:buildHostCore")
-    inputs.files(fileTree(File(repositoryRoot, "spec/fixtures/answer")) { include("*.json") })
-        .withPropertyName("answerFixtures").withPathSensitivity(PathSensitivity.RELATIVE)
+    jvmArgumentProviders.add(FileContentProperty("persona.core.library", hostCore))
     testLogging {
         events("failed", "skipped", "passed")
         showStandardStreams = true
@@ -86,11 +84,7 @@ val shadowCounterTest = tasks.register<Test>("shadowCounterTest") {
     useJUnit()
     maxParallelForks = 1
     forkEvery = 1
-    dependsOn(":core:rustcore:buildHostCore")
-    systemProperty("persona.repo.root", providers.gradleProperty("personaRepoRoot")
-        .getOrElse(rootProject.layout.projectDirectory.dir("..").asFile.absolutePath))
-    systemProperty("persona.core.library", rootProject.layout.projectDirectory.dir("../native/app-core")
-        .file("target/debug/libpersona_core.so").asFile.absolutePath)
+    jvmArgumentProviders.add(FileContentProperty("persona.core.library", hostCore))
     filter { includeTestsMatching("persona.core.domain.answer.ShadowAnswerGlobalCounterTest") }
     testLogging { events("failed", "skipped", "passed") }
 }
@@ -98,6 +92,18 @@ tasks.named("test") { dependsOn(shadowCounterTest) }
 tasks.named("check") { dependsOn(shadowTest) }
 // The repository's standard root `test` and Android CI must run the observer and its real-JNI fixture replay too.
 tasks.named("test") { dependsOn(shadowTest) }
+
+// The counts report switch (spec/fixtures/counts/README.md, "Lane reports"): with PERSONA_COUNTS_REPORT set to a
+// directory (relative to the repository root, or absolute), the needs-you replay writes the Android lane's report there.
+// A run with the switch on always runs, and leaves nothing in the build cache, so the report is that run's own.
+providers.environmentVariable("PERSONA_COUNTS_REPORT").orNull?.takeIf { it.isNotBlank() }?.let { report ->
+    val directory = rootProject.layout.projectDirectory.dir("..").asFile.resolve(report).normalize()
+    tasks.named<Test>("test") {
+        jvmArgumentProviders.add(LocationProperty("persona.counts.report", directory))
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("the counts report is written outside the build") { true }
+    }
+}
 
 // The app's DEBUG variant uses the same observer class as host tests, without putting it in domain.jar. Kotlin's friend
 // path grants access to domain internals without making shadow or native types part of the public production contract.

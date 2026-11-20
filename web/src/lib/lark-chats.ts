@@ -55,6 +55,7 @@ export interface LarkConversation {
   id: string;
   name: string;
   avatar?: string;
+  avatar_url?: string;
   is_group: boolean;
   is_topic?: boolean;
   unread: number;

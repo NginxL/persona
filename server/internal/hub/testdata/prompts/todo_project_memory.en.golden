@@ -1,0 +1,19 @@
+<persona-context kind="context" title="Project · Weather &quot;direction&quot; · Direction memory" url="">
+This is the record of the task's explicit project and direction. Read the summary, outcomes, decisions with reasons, and pitfalls in that order. agent_reported means the supervisor has not accepted the report.
+
+Project summary:
+Keep the dispatch context bounded.
+
+Recent outcomes (newest first):
+- Merged the fix https://example.com/pr/1 · 2026-11-20T01:00:00Z · agent_reported · not supervisor-accepted
+
+Effective decisions and reasons (newest first; conflicting decisions with distinct IDs are kept):
+- [decision-b] Which context? → Explicit direction; reason: It owns the task · 2026-11-20T02:00:00Z · agent_reported · not supervisor-accepted
+- [decision-a] Which context? → Working directory; reason: Older conflicting call · 2026-11-20T01:00:00Z · agent_reported · not supervisor-accepted
+
+Pitfalls (newest first):
+- Never close the context from memory · agent_reported · not supervisor-accepted
+
+Project background from extension “Notes”:
+Extension context stays last.
+</persona-context>

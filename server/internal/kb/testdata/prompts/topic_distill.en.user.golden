@@ -1,0 +1,9 @@
+Project: 项目 p
+Goal: 把它做完
+
+# Timeline (lines 1–2 of 2)
+- 2026-11-09 10:00 · Agent · 定下每轮最多重写 3 个项目
+- 2026-11-09 10:01 · Agent · 测了搜索：热搜索 85ms
+
+# Existing topics
+- 知识库（KB）: 知识库怎么整理

@@ -36,10 +36,15 @@ async function exactLookup(mid: string, sid: string, signal?: AbortSignal): Prom
 /** A `sessions_list` hint; `since` and `changed` only from a hub that was asked for them (SESSIONS_LIST_CHANGES_FEATURE). */
 export interface ListHint { revision?: unknown; since?: unknown; changed?: unknown }
 
-export interface DetailState { loading: boolean; error: string; missing: boolean; legacy: boolean }
+/** `ready`: an answer (the full row, or the legacy route's) arrived for this chat at least once. */
+export interface DetailState { loading: boolean; error: string; missing: boolean; legacy: boolean; ready?: boolean }
 
 /** The wait before a failed read's quiet retry: 2 s, doubling, then every minute. */
 const detailRetryMs = (failures: number) => Math.min(60_000, 2_000 * 2 ** Math.max(0, failures - 1));
+
+/** Reads again after the exact lookup found no row: a runtime that is reconnecting or restarting lists its sessions
+ *  again within moments. 2 s doubling, five times (about a minute), then only a list hint, a reconnect or Retry reads. */
+export const MISSING_RETRIES = 5;
 
 /** One request in flight, one trailing invalidation, and no writes from a prior chat/login generation. */
 export class SessionDetailLoader {
@@ -52,6 +57,9 @@ export class SessionDetailLoader {
   private last = "";
   private gone = false;
   private failures = 0;
+  /** Lookups in a row that found no row (MISSING_RETRIES). */
+  private misses = 0;
+  private ready = false;
   private retryTimer?: ReturnType<typeof setTimeout>;
   /** The index revision the exact lookup's last answer stands at: "" when there is none to build on. */
   private at = "";
@@ -74,7 +82,7 @@ export class SessionDetailLoader {
         this.at = "";
         this.controller = new AbortController();
         // an earlier failure's words, or "no such session", stay until an answer replaces them
-        this.emit({ loading: true, error: this.last, missing: this.gone, legacy: this.legacy || !this.lookup() });
+        this.emit({ loading: true, error: this.last, missing: this.gone, legacy: this.legacy || !this.lookup(), ready: this.ready });
         if (this.stopped || generation !== this.generation) return;
         try {
           if (this.lookup() && !this.legacy) {
@@ -86,7 +94,10 @@ export class SessionDetailLoader {
             this.at = revision;
             this.gone = !row;
             this.last = row ? "" : t("runtime-session.missing");
-            this.emit({ loading: false, error: this.last, missing: this.gone, legacy: false });
+            if (row) this.ready = true;
+            this.emit({ loading: false, error: this.last, missing: this.gone, legacy: false, ready: this.ready });
+            if (row) this.misses = 0;
+            else this.missed();
           } else {
             await this.readLegacy(generation);
           }
@@ -108,20 +119,27 @@ export class SessionDetailLoader {
     const cached = this.cache();
     if (cached && typeof cached.waiting !== "boolean") {
       this.answered();
-      this.emit({ loading: false, error: "", missing: false, legacy: true });
+      this.ready = true;
+      this.emit({ loading: false, error: "", missing: false, legacy: true, ready: true });
       return;
     }
     // Older/unlisted chats already use this configuration route and the transcript. Never refetch /sessions here.
     await api(`${sessionPath(this.mid, this.sid)}/info`, { signal: this.controller?.signal });
     if (this.stopped || generation !== this.generation) return;
     this.answered();
-    this.emit({ loading: false, error: cached ? "" : t("runtime-session.metadata_unavailable"), missing: false, legacy: true });
+    this.ready = true;
+    this.emit({ loading: false, error: cached ? "" : t("runtime-session.metadata_unavailable"), missing: false, legacy: true, ready: true });
   }
   private answered() {
     this.last = "";
     this.gone = false;
     this.failures = 0;
     clearTimeout(this.retryTimer);
+  }
+  /** No row this time: the chat may be back in a moment (a runtime reconnecting), so ask again a few times. */
+  private missed() {
+    if (this.misses >= MISSING_RETRIES) return;
+    this.retryTimer = setTimeout(() => void this.load(), detailRetryMs(++this.misses));
   }
   private failed(error: unknown, legacy: boolean) {
     if (error instanceof ApiError && error.code === "conversation_deleted") {
@@ -130,7 +148,7 @@ export class SessionDetailLoader {
       return;
     }
     this.last = errorText(error);
-    this.emit({ loading: false, error: this.last, missing: this.gone, legacy });
+    this.emit({ loading: false, error: this.last, missing: this.gone, legacy, ready: this.ready });
     clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => void this.load(), detailRetryMs(++this.failures));
   }
@@ -145,6 +163,13 @@ export class SessionDetailLoader {
     }
     void this.load();
   }
+  /** The person's Retry: read now, and give a chat that is still missing its few quiet retries again. */
+  retry() {
+    if (this.stopped) return Promise.resolve();
+    clearTimeout(this.retryTimer);
+    this.misses = 0;
+    return this.load();
+  }
   /** Read without the exact lookup: an older hub, or one that turned the lookup down. */
   get onLegacy() {
     return this.legacy || !this.lookup();
@@ -154,6 +179,7 @@ export class SessionDetailLoader {
     this.generation++;
     clearTimeout(this.retryTimer);
     this.failures = 0;
+    this.misses = 0;
     this.controller?.abort();
     this.inFlight = undefined;
     this.queued = false;
@@ -180,7 +206,7 @@ export function useRuntimeSession(mid: string, sid: string, enabled = true) {
     const loader = new SessionDetailLoader(mid, sid, () => getState().features.includes(SESSIONS_LOOKUP_FEATURE), () => getSession(mid, sid), (row) => applyCompleteSessions([row]), setDetail);
     let live = true;
     const read = () => { if (live && document.visibilityState !== "hidden") void loader.load(); };
-    setRetry(() => read);
+    setRetry(() => () => { if (live) void loader.retry(); });
     read();
     const offHello = onHubEvent("hello", () => { if (live && document.visibilityState !== "hidden") void loader.restart(); });
     const offList = onHubEvent("sessions_list", (msg) => { if (live && document.visibilityState !== "hidden") loader.hint(msg as ListHint); });

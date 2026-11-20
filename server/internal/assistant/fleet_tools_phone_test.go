@@ -131,3 +131,165 @@ func TestPhoneToolsNoneBeforeTheHubAnswered(t *testing.T) {
 		t.Fatalf("a cancelled request asked %d times, want 1", n)
 	}
 }
+
+// The model-facing create result names the attested phone that executed it, without losing the quick-result payload.
+func TestPhoneCreateResultsNameExecutingDevice(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, payload        string
+		sourceName, sourcePlatform string
+	}{
+		{
+			name: "Android calendar", tool: "phone_calendar_create_event",
+			payload:        `{"id":"E1","title":"Dentist","start":"2026-11-13T15:30:00Z","end":"2026-11-13T16:00:00Z","calendar":"Personal"}`,
+			sourceName:     "Pixel 9",
+			sourcePlatform: "android",
+		},
+		{
+			name: "iOS reminder", tool: "phone_reminders_create",
+			payload:        `{"id":"R1","title":"Call","due":"2026-11-13T15:30:00Z","list":"Personal"}`,
+			sourceName:     "Work iPhone",
+			sourcePlatform: "ios",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFakeHub()
+			h.answerApp(assistantwire.AppPhone, assistantwire.PhoneCall, func(json.RawMessage) (any, error) {
+				return map[string]any{
+					"content":                []proto.Content{{Type: "text", Text: tc.payload}},
+					"is_error":               false,
+					"source_device_name":     tc.sourceName,
+					"source_device_platform": tc.sourcePlatform,
+				}, nil
+			})
+			s := newTestService(t, h)
+			result := s.mcpCall(context.Background(), "server", "s1", tc.tool, json.RawMessage(`{}`), false)
+			if result.IsError || len(result.Content) != 1 || result.Content[0].Type != "text" {
+				t.Fatalf("create result = %+v", result)
+			}
+			var got, want map[string]any
+			if err := json.Unmarshal([]byte(toolText(result)), &got); err != nil {
+				t.Fatalf("create result text is not JSON: %q: %v", toolText(result), err)
+			}
+			if err := json.Unmarshal([]byte(tc.payload), &want); err != nil {
+				t.Fatal(err)
+			}
+			want["source_device_name"], want["source_device_platform"] = tc.sourceName, tc.sourcePlatform
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Fatalf("create result text = %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+// Attribution never turns a failure, receipt, legacy response, or another tool's response into a successful create.
+func TestPhoneCreateResultSourceLeavesOtherResultsUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, text  string
+		isError, attested bool
+	}{
+		{"legacy create", "phone_calendar_create_event", `{"id":"E1","title":"Dentist"}`, false, false},
+		{"malformed JSON", "phone_calendar_create_event", `{"id":`, false, true},
+		{"non-object JSON", "phone_reminders_create", `["created"]`, false, true},
+		{"failed create", "phone_reminders_create", `{"error":"denied"}`, true, true},
+		{"queued create", "phone_reminders_create", `{"id":"queue-1","tool":"phone_reminders_create","args":{"title":"Later"},"state":"queued"}`, false, true},
+		{"unrelated tool", "phone_device_info", `{"id":"phone-1","name":"Pixel 9"}`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFakeHub()
+			h.answerApp(assistantwire.AppPhone, assistantwire.PhoneCall, func(json.RawMessage) (any, error) {
+				response := map[string]any{
+					"content":  []proto.Content{{Type: "text", Text: tc.text}},
+					"is_error": tc.isError,
+				}
+				if tc.attested {
+					response["source_device_name"] = "Pixel 9"
+					response["source_device_platform"] = "android"
+				}
+				return response, nil
+			})
+			s := newTestService(t, h)
+			result := s.mcpCall(context.Background(), "server", "s1", tc.tool, json.RawMessage(`{}`), false)
+			if result.IsError != tc.isError || len(result.Content) != 1 ||
+				result.Content[0].Type != "text" || result.Content[0].Text != tc.text {
+				t.Fatalf("result changed:\n got  %+v\n want text %q, is_error %t", result, tc.text, tc.isError)
+			}
+		})
+	}
+}
+
+// Only the hub's selected-device attribution may name a source; payload claims are not independently trusted.
+func TestPhoneCreateResultUsesOnlyAttestedSource(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, payload        string
+		attested                   bool
+		sourceName, sourcePlatform string
+		wantName, wantPlatform     string
+	}{
+		{
+			name: "platform replaces an unattested name", tool: "phone_calendar_create_event",
+			payload: `{"id":"42","title":"Dentist","source_device_name":"Work iPhone"}`, attested: true,
+			sourcePlatform: "android", wantPlatform: "android",
+		},
+		{
+			name: "name replaces an unattested platform", tool: "phone_calendar_create_event",
+			payload: `{"id":"42","title":"Dentist","source_device_platform":"ios"}`, attested: true,
+			sourceName: "Pixel 9", wantName: "Pixel 9",
+		},
+		{
+			name: "an old hub drops a claimed identity", tool: "phone_calendar_create_event",
+			payload: `{"id":"42","title":"Dentist","source_device_name":"Work iPhone","source_device_platform":"ios"}`,
+		},
+		{
+			name: "blank attribution drops a claimed identity", tool: "phone_calendar_create_event",
+			payload: `{"id":"42","title":"Dentist","source_device_name":"Work iPhone","source_device_platform":"ios"}`, attested: true,
+			sourceName: "  ", sourcePlatform: "\t",
+		},
+		{
+			name: "a queued receipt drops a claimed identity", tool: "phone_reminders_create",
+			payload: `{"id":"queue-1","state":"queued","args":{"title":"Later"},"source_device_name":"Work iPhone","source_device_platform":"ios"}`, attested: true,
+			sourceName: "Pixel 9", sourcePlatform: "android",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFakeHub()
+			h.answerApp(assistantwire.AppPhone, assistantwire.PhoneCall, func(json.RawMessage) (any, error) {
+				response := map[string]any{
+					"content": []proto.Content{{Type: "text", Text: tc.payload}}, "is_error": false,
+				}
+				if tc.attested {
+					response["source_device_name"] = tc.sourceName
+					response["source_device_platform"] = tc.sourcePlatform
+				}
+				return response, nil
+			})
+			s := newTestService(t, h)
+			result := s.mcpCall(context.Background(), "server", "s1", tc.tool, json.RawMessage(`{}`), false)
+			var got, original map[string]any
+			if err := json.Unmarshal([]byte(toolText(result)), &got); err != nil {
+				t.Fatalf("result text is not JSON: %q: %v", toolText(result), err)
+			}
+			if err := json.Unmarshal([]byte(tc.payload), &original); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]any{}
+			for key, value := range original {
+				if key != "source_device_name" && key != "source_device_platform" {
+					want[key] = value
+				}
+			}
+			if tc.wantName != "" {
+				want["source_device_name"] = tc.wantName
+			}
+			if tc.wantPlatform != "" {
+				want["source_device_platform"] = tc.wantPlatform
+			}
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Fatalf("result text = %s, want only attested source fields %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}

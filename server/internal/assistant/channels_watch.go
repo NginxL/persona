@@ -121,7 +121,7 @@ func (s *Service) channelProgressTick(id string) {
 	}
 	defer prog.mu.Unlock()
 	c.mu.Lock()
-	card, started, held := r.Ext["card"]+r.Ext["cot"], r.Started, r.Held
+	card, started, held := r.Ext["card"]+r.Ext["cot"], r.WaitFrom(), r.Held
 	c.mu.Unlock()
 	after, idle := channel.ProgressAfter, channel.ProgressIdle
 	if pa, ok := sink.(interface {
@@ -163,28 +163,39 @@ func (s *Service) SessionItems(ctx context.Context, p SessionItems) {
 	l := s.botLang(ctx) // before s.chans.mu
 	c := &s.chans
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if len(c.live) == 0 {
+		c.mu.Unlock()
 		return
 	}
+	var unrelated []string
 	for _, r := range c.st.Runs {
 		if r.MachineID != p.MachineID || r.SessionID != p.SessionID {
 			continue
 		}
 		if lp := c.live[r.ID]; lp != nil {
-			noteRunItems(l, r, lp, p.Items, c.clock())
+			if noteRunItems(l, r, lp, p.Items, c.clock()) {
+				unrelated = append(unrelated, r.ID)
+			}
 		}
+	}
+	c.mu.Unlock()
+	for _, id := range unrelated {
+		s.finishUnrelatedChannelRun(id)
 	}
 }
 
 // noteRunItems notes a run's new items as its steps, only from its own message on: a message queued behind another
-// turn would show that turn's steps. Under c.mu.
-func noteRunItems(l i18n.Lang, r *channel.Run, lp *chanLive, items []proto.Item, now time.Time) {
+// turn would show that turn's steps. It reports an ordinary user item that supersedes a held run, before any of that
+// turn's text can become channel progress. Under c.mu.
+func noteRunItems(l i18n.Lang, r *channel.Run, lp *chanLive, items []proto.Item, now time.Time) bool {
 	items = slices.DeleteFunc(slices.Clone(items), func(it proto.Item) bool { return it.Seq <= max(r.Base, lp.upTo) })
+	if r.Held && channel.UnrelatedHeldTurn(items) {
+		return true
+	}
 	if lp.from == 0 {
 		i, ok := r.Find(items, nil)
 		if !ok || len(items) == 0 {
-			return
+			return false
 		}
 		items, lp.from = items[i:], max(items[i].Seq, 1)
 	}
@@ -206,6 +217,7 @@ func noteRunItems(l i18n.Lang, r *channel.Run, lp *chanLive, items []proto.Item,
 	if len(lp.steps) > 200 {
 		lp.steps = lp.steps[len(lp.steps)-200:]
 	}
+	return false
 }
 
 // locateRun looks for a run's message in the conversation when the followed items have not shown it (it went in
@@ -235,7 +247,8 @@ func (s *Service) locateRun(ctx context.Context, r *channel.Run, prog *chanLive)
 	c.mu.Unlock()
 }
 
-// SessionDelta is session.delta: the text a followed conversation is writing right now.
+// SessionDelta is session.delta: the text a followed conversation is writing right now. A held run has no live text
+// until its first transcript items arrive: before that, a delta could already belong to an unrelated user's turn.
 func (s *Service) SessionDelta(_ context.Context, p SessionDelta) {
 	c := &s.chans
 	c.mu.Lock()
@@ -245,7 +258,7 @@ func (s *Service) SessionDelta(_ context.Context, p SessionDelta) {
 	}
 	for _, r := range c.st.Runs {
 		if r.MachineID == p.MachineID && r.SessionID == p.SessionID {
-			if lp := c.live[r.ID]; lp != nil && lp.live != p.Text {
+			if lp := c.live[r.ID]; lp != nil && (!r.Held || lp.from != 0) && lp.live != p.Text {
 				lp.live, lp.dirty = p.Text, true
 			}
 		}

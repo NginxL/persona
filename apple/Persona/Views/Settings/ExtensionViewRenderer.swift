@@ -384,6 +384,16 @@ struct ExtensionItemRow: View {
                 .listRowBackground(Color.clear)
                 // Its own page margin lines its first tile up with the rows' words; it scrolls to the section's edges.
                 .listRowInsets(EdgeInsets(top: Theme.Space.s, leading: Theme.Space.flush, bottom: Theme.Space.s, trailing: Theme.Space.flush))
+        case .graph(let graph):
+            #if os(iOS)
+            ExtensionGraph(graph: graph, controller: model, link: $link)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: Theme.Space.s, leading: Theme.Space.flush,
+                                          bottom: Theme.Space.s, trailing: Theme.Space.flush))
+            #else
+            // The frozen Mac app and other older surfaces report an older UI version, so the hub sends rows.
+            EmptyView()
+            #endif
         // UI version 6's picture (`ExtensionMedia.swift`).
         case .image(let i): ExtensionImageItem(item: i, model: model)
         case .divider, .unknown: EmptyView()
@@ -782,6 +792,7 @@ struct ExtensionLauncherSections: View {
         ForEach(page.shown) { entry in
             if let v = entry.model.view {
                 ExtensionViewRenderer(view: v, model: entry.model, heading: entry.place.title, link: $link)
+                    .environment(\.pluginUICompact, true)
                     .pluginRefresh(entry.model)
             } else {
                 Section {

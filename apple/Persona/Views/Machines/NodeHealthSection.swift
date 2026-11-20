@@ -28,7 +28,7 @@ struct NodeHealthSection: View {
             guard machine.online else { m.reset(); return }
             await m.check()
         }
-        .confirmationDialog("Regenerate Persona's Files", isPresented: $confirmsFix, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Regenerate Persona's Files", isPresented: $confirmsFix, titleVisibility: .visible, hasCancel: true) {
             Button("Repair") { Task { await fix() } }
             Button("Cancel", role: .cancel) {}
         } message: {

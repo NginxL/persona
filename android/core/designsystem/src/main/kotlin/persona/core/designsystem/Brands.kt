@@ -16,6 +16,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -60,17 +61,25 @@ fun JBrandMark(brand: Brand, size: Dp, modifier: Modifier = Modifier, contentDes
  * Where something comes from, as a square mark: the product's own [brand] on a quiet tile, or the first character of
  * [name] when the design system has no mark for it. [MarkSize.Inline] draws the brand bare, sized like the text
  * beside it. Read out as [name].
+ *
+ * [picture]: the source's own icon (an extension's, #10358), drawn instead of either in the tile's box and corner, on
+ * the light backing third-party logos keep in both appearances (`catalogLogoBackground`), at every size.
  */
 @Composable
-fun JSourceMark(name: String, modifier: Modifier = Modifier, brand: Brand? = null, size: MarkSize = MarkSize.Row) {
+fun JSourceMark(name: String, modifier: Modifier = Modifier, brand: Brand? = null, size: MarkSize = MarkSize.Row,
+                picture: ImageBitmap? = null) {
     val palette = PersonaTheme.palette
     val box = size.box
     val described = modifier.clearAndSetSemantics { contentDescription = name }
+    val shape = RoundedCornerShape(box * if (PersonaTheme.style == AppStyle.Board) TileCornerBoard else TileCorner)
+    if (picture != null) {
+        Image(picture, null, described.size(box).clip(shape).background(palette.catalogLogoBackground), contentScale = ContentScale.Fit)
+        return
+    }
     if (brand != null && size == MarkSize.Inline) {
         JBrandMark(brand, box, described, contentDescription = null)
         return
     }
-    val shape = RoundedCornerShape(box * if (PersonaTheme.style == AppStyle.Board) TileCornerBoard else TileCorner)
     Box(described.size(box).clip(shape).background(palette.surfaceStrong), contentAlignment = Alignment.Center) {
         if (brand != null) JBrandMark(brand, box * BrandInTile, contentDescription = null)
         else Text(
@@ -92,6 +101,15 @@ fun channelBrand(id: String): Brand? = when (id) {
     else -> null
 }
 
+/**
+ * The brand of a connector or a messaging source an extension brings, by its id (the web's `connectorBrand`): Lark's
+ * for `lark` and `larkcli`; null for every other one.
+ */
+fun connectorBrand(id: String): Brand? = when (id) {
+    "lark", "larkcli" -> Brand.Lark
+    else -> null
+}
+
 /** A channel's mark (docs/extensions/channels.md "UI"): its product's own, else the first character of its name. */
 @Composable
 fun JChannelMark(channel: HubChannel, modifier: Modifier = Modifier, size: MarkSize = MarkSize.Row) =
@@ -101,8 +119,14 @@ fun JChannelMark(channel: HubChannel, modifier: Modifier = Modifier, size: MarkS
 @Composable
 fun JChannelSource(channel: HubChannel, modifier: Modifier = Modifier) {
     val text = stringResource(R.string.designsystem_channel_source, channel.label)
+    JSourceLine(text, modifier) { JChannelMark(channel, size = MarkSize.Inline) }
+}
+
+/** A message's source mark and words, read together once under its bubble. */
+@Composable
+fun JSourceLine(text: String, modifier: Modifier = Modifier, mark: @Composable () -> Unit) {
     Row(modifier.readAs(text), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically) {
-        JChannelMark(channel, size = MarkSize.Inline)
+        mark()
         Text(text, style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

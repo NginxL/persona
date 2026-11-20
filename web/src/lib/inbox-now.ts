@@ -2,7 +2,7 @@
 // translations and the shared examples live in spec/fixtures/inbox/now.json; an older hub's missing key, or a newer
 // hub's unknown one, leaves each existing state line on its own words.
 import { formatDate, t } from "../i18n";
-import { fromLine, type InboxItem } from "./inbox";
+import { fromLine, sourceMailbox, type InboxItem } from "./inbox";
 import { hm } from "./routines";
 import { stateName } from "./state-labels";
 
@@ -12,12 +12,13 @@ const NOW_KEYS = new Set([
   "needs_you", "fyi", "folded", "done_replied", "done_manager", "done_user", "done_read", "done_dismissed", "done_muted", "done_superseded",
 ]);
 
-/** The row's third line and the detail header's small line: where, then who said the newest line and what.
- *  A direct chat names the person once. Without `where` (an older hub, mail), today's line stays unchanged. */
-export function rowMeta(it: InboxItem): string {
-  if (!it.where) return fromLine(it);
-  const latest = it.sender && it.preview ? t("lib-inbox.sender_line", { sender: it.sender, text: it.preview }) : it.sender || it.preview;
-  return it.sender === it.where ? latest : [it.where, latest].filter(Boolean).join(" · ");
+/** Where the item came from, then who said what. A direct chat names the sender once. */
+export function rowMeta(it: InboxItem, translatedPreview?: string): string {
+  const place = it.where || sourceMailbox(it);
+  if (!place) return fromLine(it, translatedPreview);
+  const preview = translatedPreview || it.preview;
+  const latest = it.sender && preview ? t("lib-inbox.sender_line", { sender: it.sender, text: preview }) : it.sender || preview;
+  return it.sender === place ? latest : [place, latest].filter(Boolean).join(" · ");
 }
 
 /** A follow-up moment in the local zone: "09:00" today, "tomorrow 09:00", then a date and the 24-hour clock. */

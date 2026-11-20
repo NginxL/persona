@@ -25,6 +25,12 @@ func preparedTestConversation(ft *fleetTest) {
 		Agent: "claude", Status: proto.StatusIdle, State: proto.StateIdle}
 	ft.f.setSessions("mac", sess)
 	ft.d.setSessions("mac", []proto.Session{sess})
+	ft.f.mu.Lock()
+	if ft.f.known == nil {
+		ft.f.known = map[string]bool{}
+	}
+	ft.f.known["s1"] = true // the listed conversation also accepts resume_only delivery
+	ft.f.mu.Unlock()
 }
 
 func startPreparedTest(t *testing.T, ft *fleetTest, id, replacement string, apply func(context.Context, proto.Resolution) (string, error)) <-chan preparedTestResult {

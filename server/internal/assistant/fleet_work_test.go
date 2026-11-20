@@ -412,7 +412,7 @@ func TestSnapshotNeedsYouIsTheState(t *testing.T) {
 	putPending(s, &pending{ix: proto.Interaction{ID: "own", MachineID: "mac", SessionID: "cccccccc-3", Kind: proto.IxQuestion,
 		Questions: []proto.Question{{Question: "删掉这个分支吗？"}}}})
 
-	needs, unread, awaiting, waiting, _, _, _, _ := s.snapshotAgents(context.Background(), ft.f.devices, "")
+	needs, unread, awaiting, waiting, _, _, _ := s.snapshotAgents(context.Background(), ft.f.devices, "")
 	if live := s.fleetSnapshot().NeedsYou; len(needs) != live || live != 1 || needs[0].Session != "cccccccc" {
 		t.Fatalf("需要你: snapshot %+v, Live Activity %d; want the one asking", needs, live)
 	}
@@ -450,7 +450,7 @@ func TestSnapshotLeavesMutedAgentsOut(t *testing.T) {
 			Questions: []proto.Question{{Question: "删掉这个分支吗？"}}}})
 	}
 
-	needs, unread, _, _, _, muted, working, _ := s.snapshotAgents(context.Background(), ft.f.devices, "")
+	needs, unread, _, _, _, muted, working := s.snapshotAgents(context.Background(), ft.f.devices, "")
 	live := s.fleetSnapshot()
 	if len(needs) != live.NeedsYou || live.NeedsYou != 1 || needs[0].Session != "aaaaaaaa" {
 		t.Fatalf("需要你: snapshot %+v, Live Activity %d; want only the agent not muted", needs, live.NeedsYou)

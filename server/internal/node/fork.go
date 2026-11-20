@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -23,20 +24,27 @@ import (
 // `claude --resume --fork-session` copies the whole conversation only, and --resume-session-at, which would cut it,
 // is not honoured by an interactive claude (tried 2026-11-05), so the node makes the copy itself.
 
-// forkable: the session is a Claude Code conversation whose transcript the node can copy. Codex, a compatible CLI, runtimes and
-// other tools' sources have their own ids and files; the client hides "Branch to New Chat" for them. A runtime's session
-// whose conversation is a Claude transcript on this machine (Paseo's agents running Claude Code, #6298) is copied from that
-// transcript (forkRuntime).
+// forkable checks for a native fork or a local Claude transcript that the node can copy.
 func (n *Node) forkable(s proto.Session) bool {
-	if s.SourceKind == proto.SourceRuntime {
-		t := n.runtimes.transcriptOf(s.SessionID)
-		return t != "" && !s.IsSubagent && !strings.Contains(s.SessionID, subagentSep) && (s.Agent == "" || s.Agent == "claude") &&
-			!n.runtimeAssistant(s.SessionID) && !s.Starting && n.claudeTranscript(t, false) != ""
+	if !forkTarget(s) {
+		return false
 	}
-	if _, codex := n.codexSource(s.SessionID); codex || s.SourceKind != "" || (s.Agent != "" && s.Agent != "claude") || !validID(s.SessionID) || n.runtimeAssistant(s.SessionID) || s.Starting {
+	if s.SourceKind == proto.SourceRuntime {
+		if s.Capabilities != nil && s.Capabilities.Fork {
+			return true
+		}
+		t := n.runtimes.transcriptOf(s.SessionID)
+		return t != "" && (s.Agent == "" || s.Agent == "claude") &&
+			!n.runtimeAssistant(s.SessionID) && n.claudeTranscript(t, false) != ""
+	}
+	if _, codex := n.codexSource(s.SessionID); codex || s.SourceKind != "" || (s.Agent != "" && s.Agent != "claude") || !validID(s.SessionID) || n.runtimeAssistant(s.SessionID) {
 		return false
 	}
 	return n.claudeTranscript(s.SessionID, false) != ""
+}
+
+func forkTarget(s proto.Session) bool {
+	return !s.Starting && !s.Archived && !s.IsSubagent && !strings.Contains(s.SessionID, subagentSep) && s.Agent != "codex"
 }
 
 // claudeTranscript is session id's own Claude transcript (<id>.jsonl), or "". look: find it when it is not known yet;
@@ -59,8 +67,14 @@ func (n *Node) claudeTranscript(id string, look bool) string {
 // fork copies session id's transcript up to the turn of item at (a transcript item id, "<uuid>#<n>"; empty: all of
 // it) into a new session and returns the new session's id.
 func (n *Node) fork(ctx context.Context, id, at string) (string, error) {
-	if s, _, ok := n.runtimes.rowOf(id); ok {
-		return n.forkRuntime(s, at)
+	if h, _, _ := n.runtimes.belongs(id); h != nil {
+		s, ok := h.row(id)
+		if !ok {
+			h.mu.Lock()
+			s = proto.Session{SessionID: id, SourceKind: proto.SourceRuntime, Agent: h.hello.Agent}
+			h.mu.Unlock()
+		}
+		return n.forkRuntime(ctx, s, at)
 	}
 	if !validID(id) {
 		return "", fmt.Errorf("invalid session id %q", id)
@@ -95,14 +109,25 @@ func (n *Node) fork(ctx context.Context, id, at string) (string, error) {
 	return newID, nil
 }
 
-// forkRuntime branches a runtime's session from the Claude transcript its runtime names (#6298): the copy is of that
+// forkRuntime delegates to a runtime that can fork, or copies the Claude transcript it names (#6298). The copy is of that
 // transcript, under a new Claude session id, named after the session. Like any branch it is an offline Claude session;
 // its first message continues it with the machine's engine (on a Paseo machine Paseo takes it over, runtimecontrol.go).
 // The node keeps state for it (its directory, model and launcher): the copy reads like the runtime's own runs of Claude
 // Code's command line, which the offline list leaves out, and a session the node keeps state for is listed
 // (claude_oneshot.go). The launcher is the one the session ran on (Paseo: its provider), which the takeover asks for:
 // without it Paseo went on with whichever Claude provider ran last, maybe another account's (#8130).
-func (n *Node) forkRuntime(s proto.Session, at string) (string, error) {
+func (n *Node) forkRuntime(ctx context.Context, s proto.Session, at string) (string, error) {
+	if h, _, _ := n.runtimes.belongs(s.SessionID); h != nil {
+		h.mu.Lock()
+		caps := h.hello.Caps
+		h.mu.Unlock()
+		if caps.Fork {
+			if !forkTarget(s) {
+				return "", refusal("fork_unsupported", "This session cannot be forked", nil)
+			}
+			return n.forkOnRuntime(ctx, h, s, at)
+		}
+	}
 	t := n.runtimes.transcriptOf(s.SessionID)
 	src := ""
 	if t != "" {
@@ -130,6 +155,42 @@ func (n *Node) forkRuntime(s proto.Session, at string) (string, error) {
 	n.state.put(newID, sessionState{Launcher: s.Launcher, Cwd: s.Cwd, Model: s.Model})
 	n.forkMade(newID, dst)
 	return newID, nil
+}
+
+func (n *Node) forkOnRuntime(ctx context.Context, h *runtimeConn, source proto.Session, at string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
+	defer cancel()
+	var out struct {
+		ID      string         `json:"session_id"`
+		Session *proto.Session `json:"session"`
+	}
+	assistant := n.runtimeAssistant(source.SessionID)
+	if err := h.peer.Call(ctx, "session.fork", map[string]any{"session_id": source.SessionID, "at_item_id": at, "assistant": assistant}, &out); err != nil {
+		return "", err
+	}
+	if !runtimeIDRe.MatchString(out.ID) || out.ID == source.SessionID || out.Session != nil && out.Session.SessionID != out.ID {
+		return "", errors.New("runtime returned an invalid forked session")
+	}
+	n.runtimes.claim(h, out.ID)
+	if assistant || out.Session != nil && identity.IsAssistantDir(out.Session.Cwd) {
+		st, _ := n.state.get(source.SessionID)
+		st.Cwd = firstNonEmpty(st.Cwd, source.Cwd)
+		st.Launcher = firstNonEmpty(st.Launcher, source.Launcher)
+		st.Model = firstNonEmpty(st.Model, source.Model)
+		if out.Session != nil {
+			st.Cwd = firstNonEmpty(st.Cwd, out.Session.Cwd)
+			st.Launcher = firstNonEmpty(st.Launcher, out.Session.Launcher)
+		}
+		n.state.put(out.ID, sessionState{Cwd: st.Cwd, Launcher: st.Launcher, Model: st.Model,
+			ModelFingerprint: st.ModelFingerprint, ModelEffort: st.ModelEffort, AppMode: st.AppMode, AppEffort: st.AppEffort,
+			Origin: st.Origin, OriginKnown: true, StartedAt: time.Now().UTC()})
+	}
+	if out.Session != nil {
+		if _, err := n.listStarted(h, *out.Session, ""); err != nil {
+			return "", err
+		}
+	}
+	return out.ID, nil
 }
 
 // forkMade lists a new branch at once: its transcript, however short, and its first message starting it.

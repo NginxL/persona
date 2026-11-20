@@ -160,6 +160,9 @@
     <string name="assistant_settings_quiet_caption">主对话派出去的任务不进实时活动、推送和角标，做完、等你回答或出错时由 Persona 在主对话里告诉你。只影响之后派的任务。</string>
     <string name="assistant_settings_background_folded">后台轮次默认折叠</string>
     <string name="assistant_settings_background_folded_caption">主对话和主管对话里，由别的对话、定时任务或跟进发起的轮次折成一行，点开能看全部；问过你或通知过你的轮次照常显示。</string>
+    <string name="assistant_settings_recent_task_chats_title">侧栏「最近」</string>
+    <string name="assistant_settings_recent_task_chats">显示定时任务的对话</string>
+    <string name="assistant_settings_recent_task_chats_caption">定时任务和后台督办开的对话，也按时间排进侧栏的「最近」。你的所有设备都会跟着变。</string>
     <string name="assistant_settings_next_suggestions">建议下一句</string>
     <string name="assistant_settings_next_suggestions_caption">在你打开的对话里，每次回复后由小模型在空输入框上方建议你可能要发的下一句。终端里的 Claude Code 仍用它自己的建议。每次回复多一次模型调用；所用模型在「模型配置 › 下一句建议」里设置。</string>
     <string name="assistant_settings_supervise_header">任务跟进</string>

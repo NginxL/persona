@@ -70,6 +70,38 @@ func TestHerdrCoreListsClaudeTerminals(t *testing.T) {
 	}
 }
 
+// A terminal another terminal started is a side session under the session of its nearest listed ancestor terminal
+// (terminal.parent): it keeps its own state, and the manager draws it under that row.
+func TestHerdrCoreLinksStartedTerminals(t *testing.T) {
+	n, _, hc, home := hcNode(t)
+	for _, id := range []string{sidA, sidB, sidC} {
+		writeTranscript(t, home, hcCwd, id, time.Now().Add(-time.Minute), `{"type":"custom-title","customTitle":"x"}`)
+	}
+	writeClaudePID(t, home, 4242, sidA)
+	writeClaudePID(t, home, 4343, sidB)
+	writeClaudePID(t, home, 4444, sidC)
+	lead := hcTerminal("t1", "claude-code", "idle", 4242, "claude", hcCwd, "", "", "")
+	shell := hcTerminal("t2", "", "", 5000, "zsh", hcCwd, "", "", "")
+	shell["parent"] = "t1"
+	child := hcTerminal("t3", "claude-code", "working", 4343, "claude", hcCwd, "", "", "")
+	child["parent"] = "t2"
+	grandchild := hcTerminal("t4", "claude-code", "done", 4444, "claude", hcCwd, "", "", "")
+	grandchild["parent"] = "t3"
+	hc.setTerminals(lead, shell, child, grandchild)
+
+	m := byID(listSessions(t, n))
+	leadRow, childRow, grandchildRow := m[sidA], m[sidB], m[sidC]
+	if got := childRow.ParentAgentID(); got != sidA {
+		t.Errorf("child parent_agent_id = %q, want %q", got, sidA)
+	}
+	if got := grandchildRow.ParentAgentID(); got != sidB {
+		t.Errorf("grandchild parent_agent_id = %q, want %q", got, sidB)
+	}
+	if got := leadRow.ParentAgentID(); got != "" {
+		t.Errorf("lead parent_agent_id = %q", got)
+	}
+}
+
 func TestHerdrCoreStatusAndAgent(t *testing.T) {
 	cases := []struct {
 		app, state, fg string // fg: the foreground's argv[0], "" for none
@@ -388,6 +420,50 @@ func TestHerdrCoreSkipsANestedHerdr(t *testing.T) {
 		if a := fromTerminal(tm); a.Agent != "" {
 			t.Errorf("%+v: agent %q", fg, a.Agent)
 		}
+	}
+}
+
+// herdr-core opens Windows PowerShell by default on Windows: its terminal is a shell to start in and to type into.
+func TestHerdrCoreWindowsPowerShellIsAShell(t *testing.T) {
+	for _, name := range []string{"powershell.exe", `C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe`, "pwsh.exe", "PowerShell.EXE", "zsh", "-bash"} {
+		if !hcShell(name) {
+			t.Errorf("hcShell(%q) = false", name)
+		}
+	}
+	for _, name := range []string{"claude.exe", "node", "cmd.exe", ""} {
+		if hcShell(name) {
+			t.Errorf("hcShell(%q) = true", name)
+		}
+	}
+	fg := herdrcore.Foreground{Pid: 1, Name: "powershell.exe", Argv: []string{`C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe`, "-NoExit"}}
+	if !isShell(&fg) {
+		t.Errorf("isShell(%+v) = false", fg)
+	}
+}
+
+// On Windows herdr-core names the first program below the shell as in front: a start's claude runs three bash deep.
+// The nearest agent below it is found in the process table, and its terminal is claude's (#11214).
+func TestHerdrCoreAgentBelowTheReportedForeground(t *testing.T) {
+	procs := map[int]proc{
+		10: {cmd: "powershell.exe"},
+		20: {ppid: 10, cmd: "bash.exe"}, 21: {ppid: 20, cmd: "bash.exe"}, 22: {ppid: 21, cmd: "bash.exe"},
+		30: {ppid: 22, cmd: "claude.exe"}, 31: {ppid: 30, cmd: "claude.exe"}, 32: {ppid: 30, cmd: "bash.exe"},
+		40: {ppid: 10, cmd: "node.exe"},
+	}
+	children := procChildren(procs)
+	if got := agentBelow(procs, children, 20); got != 30 {
+		t.Errorf("agentBelow(20) = %d, want 30 (the nearest claude)", got)
+	}
+	if got := agentBelow(procs, children, 40); got != 0 {
+		t.Errorf("agentBelow(40) = %d, want none", got)
+	}
+	cycle := map[int]proc{1: {ppid: 2, cmd: "bash.exe"}, 2: {ppid: 1, cmd: "bash.exe"}}
+	if got := agentBelow(cycle, procChildren(cycle), 1); got != 0 {
+		t.Errorf("agentBelow in a cycle = %d", got)
+	}
+	tm := herdrcore.Terminal{Address: "t3", State: "live", Foreground: &herdrcore.Foreground{Pid: 30, Name: "claude.exe", Argv: []string{"claude.exe"}}}
+	if a := fromTerminal(tm); a.Agent != "claude" {
+		t.Errorf("claude.exe in front: agent %q", a.Agent)
 	}
 }
 

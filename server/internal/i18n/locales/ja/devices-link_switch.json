@@ -1,0 +1,7 @@
+{
+  "forbidden": "このコンピューターを Persona Link に切り替えられるのは、フルアクセスのデバイスか管理ページだけです",
+  "in_progress": "このコンピューターはすでに Persona Link への切り替え中です",
+  "unavailable": "このコンピューターは今は Persona Link に切り替えられません",
+  "save_failed": "Persona Link への切り替えの記録を保存できなかったため、切り替えは始まっていません。もう一度お試しください",
+  "deploy_refused": "このコンピューターは Persona Link への切り替え中です。終わってからノードを更新してください"
+}

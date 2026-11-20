@@ -9,5 +9,9 @@
   "dur_minutes_seconds": "{m}m {s}s",
   "dur_minutes": "{m}m",
   "dur_hours_minutes": "{h}時間{m}分",
-  "dur_days_hours_minutes": "{d}日{h}時間{m}分"
+  "dur_days_hours_minutes": "{d}日{h}時間{m}分",
+  "actions_read": "{count} 個のファイルを読取",
+  "actions_edit": "{count} 個のファイルを編集",
+  "actions_run": "{count} 個のコマンドを実行",
+  "actions_search": "{count} 回検索"
 }

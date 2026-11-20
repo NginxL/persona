@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { lostWith } from "./dock-focus";
+import { COMPOSER_INPUT, focusTaken, lostWith } from "./dock-focus";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -46,5 +46,19 @@ describe("lostWith (#5154)", () => {
 
   it("is not lost when nothing above the composer had the focus", () => {
     expect(lostWith(null, document.body, document.body)).toBe(false);
+  });
+});
+
+describe("focusTaken (#11237)", () => {
+  it("is taken by another field or a dialog, not by the body or the composer itself", () => {
+    document.body.innerHTML = `<textarea id="own" data-composer-input></textarea><input id="other" /><div role="dialog"><button id="in-dialog">OK</button></div><button id="plain">Go</button>`;
+    const own = document.getElementById("own");
+    const at = (id: string) => document.getElementById(id);
+    expect(focusTaken(document.body, own)).toBe(false);
+    expect(focusTaken(own, own)).toBe(false);
+    expect(focusTaken(at("other"), own)).toBe(true);
+    expect(focusTaken(at("in-dialog"), own)).toBe(true);
+    expect(focusTaken(at("plain"), own)).toBe(false);
+    expect(document.querySelector(COMPOSER_INPUT)).toBe(own);
   });
 });

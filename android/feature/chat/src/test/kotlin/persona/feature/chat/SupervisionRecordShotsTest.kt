@@ -50,7 +50,7 @@ class SupervisionRecordShotsTest {
         Item("answer", 6, ts = at(6), role = "assistant", kind = "text", text = "Yes, it was merged this morning."),
         Item("digest", 7, ts = at(7), role = "user", kind = "text", text = "Supervision: 2 tasks running, nothing needs the owner.",
             injected = Injected("system", "supervise", "Supervision")),
-        Item("quiet", 8, ts = at(8), role = "assistant", kind = "text", text = "Nothing needs the owner right now."),
+        Item("quiet", 8, ts = at(8), role = "assistant", kind = "text", text = "Nothing needs the owner right now.", narration = true),
         Item("next", 9, ts = at(9), role = "user", kind = "text", text = "Thanks"),
         Item("welcome", 10, ts = at(10), role = "assistant", kind = "text", text = "You're welcome."),
     )

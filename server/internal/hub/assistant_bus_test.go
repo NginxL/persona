@@ -95,7 +95,13 @@ func dialAssistantWithStore(t *testing.T, h *Hub, url string, schedule bool, sto
 		}
 		s, _ := h.store.(assistant.Store)
 		return s
-	}, KB: testKBOf(h)}) // the knowledge base a test gave it (kb_test.go)
+	}, KB: testKBOf(h), AgentDirs: testAgentDirsOf(h)}) // the knowledge base and hidden folders a test gave it
+	if d, ok := testAgentDirs.Load(h); ok {
+		d := d.(*hubAgentDirs)
+		d.mu.Lock()
+		d.changed = svc.HiddenAgentDirsChanged
+		d.mu.Unlock()
+	}
 	svc.SetExtensions(fakeExtOf(h)) // the extensions' tools, the manager's (faked)
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &testAssistant{svc: svc, bh: bh, stop: cancel, done: make(chan struct{}), token: tok}

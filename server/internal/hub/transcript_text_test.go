@@ -2,12 +2,24 @@ package hub
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
+
+func TestAgyPaneNoticeLocalization(t *testing.T) {
+	const key = "node-engine.agy_pane_integration"
+	notice := proto.Item{ID: "agy#0", Seq: 1, Role: "system", Kind: proto.KindNotice, Text: i18n.T(i18n.Default, key)}
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		got := localizedItems(lang, []proto.Item{notice})[0].Text
+		if got != i18n.T(lang, key) || !strings.Contains(got, "herdr integration install antigravity-cli") {
+			t.Errorf("%s: unexpected pane notice %q", lang, got)
+		}
+	}
+}
 
 // userLine is a transcript line with a user message saying s, as Claude Code writes it.
 func userLine(t *testing.T, s string) []proto.Item {
@@ -142,7 +154,7 @@ func TestLocalizedNotices(t *testing.T) {
 		{"/loop 到点，开始新一轮：check the build", "/loop is due, starting a new round: check the build"},
 		{"Codex 事件：mcp_progress（完整记录在原会话中）", "Codex event: mcp_progress (the full record is in the original session)"},
 		{"Codex 扩展事件：x.y（完整记录在原会话中）", "Codex extension event: x.y (the full record is in the original session)"},
-		{transcript.OmpStoppedNotice, "This omp session has stopped. For now you can only continue it on the computer (omp --resume); messages can’t be sent to it from here yet."},
+		{transcript.OmpStoppedNotice, "This omp session has stopped. Send a message to continue it on the computer, in a new terminal tab (omp --resume)."},
 		{"上下文已压缩", "上下文已压缩"},                                   // the apps find the compaction divider by it
 		{"API 错误：Overloaded（正在重试）", "API 错误：Overloaded（正在重试）"}, // the apps' API error card parses it
 		{"something else", "something else"},
@@ -221,6 +233,38 @@ func TestLocalizedRuntimeBridgeLines(t *testing.T) {
 		if got := tt(i18n.ZhHans, key, i18n.Args{"error": "x", "code": "3"}); got != zh {
 			t.Errorf("%s: zh-Hans %q, the bridges write %q", key, got, zh)
 		}
+	}
+}
+
+func TestLocalizedAgyWakeNotice(t *testing.T) {
+	items := []proto.Item{
+		{Role: "system", Kind: proto.KindNotice, Text: transcript.BackgroundTaskUpdate, Wake: true},
+		{Role: "system", Kind: proto.KindNotice, Text: transcript.BackgroundTaskUpdate},
+	}
+	for lang, want := range map[i18n.Lang]string{
+		i18n.En: "A background task has an update", i18n.Ja: "バックグラウンドタスクに更新があります", i18n.ZhHans: transcript.BackgroundTaskUpdate,
+	} {
+		got := localizedItems(lang, items)
+		if got[0].Text != want || !got[0].Wake || got[1].Text != transcript.BackgroundTaskUpdate {
+			t.Errorf("%s: %+v", lang, got)
+		}
+	}
+}
+
+func TestLocalizedAgyAutoRefusalNotice(t *testing.T) {
+	const zh = "agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求"
+	items := []proto.Item{{Role: "system", Kind: proto.KindNotice, Text: zh}}
+	for lang, want := range map[i18n.Lang]string{
+		i18n.ZhHans: zh,
+		i18n.En:     "agy refused Auto mode; Persona is automatically approving permission requests instead",
+		i18n.Ja:     "agy が Auto モードを拒否したため、Persona が権限リクエストを自動承認します",
+	} {
+		if got := localizedItems(lang, items)[0].Text; got != want {
+			t.Errorf("%s: %q, want %q", lang, got, want)
+		}
+	}
+	if items[0].Text != zh {
+		t.Fatal("localization mutated the runtime's notice")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -145,7 +146,8 @@ func TestOmpOfflineRowAndCalls(t *testing.T) {
 	if err != nil || !strings.Contains(fmt.Sprint(res), transcript.OmpStoppedNotice) {
 		t.Fatalf("items %v %v", res, err)
 	}
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "go on", "client_msg_id": "m-1"}); !isRefusal(err, "omp_resume_unknown") {
+	// A send resumes it in herdr (ompresume.go); this session's directory is gone, so it is refused before a tab.
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "go on", "client_msg_id": "m-1"}); !isRefusal(err, "not_running") {
 		t.Fatalf("send: %v", err)
 	}
 	if got := f.trace(); len(got) != 0 {
@@ -251,7 +253,7 @@ func TestOmpDiskKeepsAPaneWhoseIDWentMissing(t *testing.T) {
 	onlyRow(t, listSessions(t, n), id) // its session reported: the live row
 	seedAgents(t, n, f, ompPaneAgent("w1:p31", cwd, ""))
 	for _, s := range listSessions(t, n) {
-		if s.SessionID == id {
+		if s.SessionID == id && s.Status == proto.StatusOffline { // the pane keeps the session it ran (placement.go)
 			t.Fatalf("the file a live pane runs was listed as stopped once its id went missing: %+v", s)
 		}
 	}
@@ -301,7 +303,8 @@ func TestOmpDiskCustomAgentDir(t *testing.T) {
 		t.Fatalf("rows from a custom agent directory: %+v", rows)
 	}
 	onlyRow(t, listSessions(t, n), id)
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "hi"}); err == nil || !strings.Contains(err.Error(), "omp") {
+	// Its file is accepted for a resume (under the custom directory's sessions); its directory is gone, so no tab opens.
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": id, "text": "hi"}); !isRefusal(err, "not_running") {
 		t.Fatalf("a send to a stopped session in a custom directory: %v", err)
 	}
 }
@@ -317,9 +320,9 @@ func TestOmpOfflineLookupOnlyForItsCalls(t *testing.T) {
 		defer n.mu.Unlock()
 		return n.ompDisk != nil
 	}
-	_, _ = request(t, n, "session.interrupt", map[string]any{"session_id": id})
+	_, _ = request(t, n, "session.keys", map[string]any{"session_id": id, "keys": "x"})
 	if scanned() {
-		t.Fatal("an interrupt scanned omp's session files")
+		t.Fatal("a key press scanned omp's session files")
 	}
 	if _, err := request(t, n, "session.items", map[string]any{"session_id": id}); err != nil {
 		t.Fatal(err)

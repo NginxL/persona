@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"sort"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -39,8 +41,10 @@ type echoRecord struct {
 	Literal     string    `json:"literal,omitempty"` // its raw start when clipping a text-only send left Text empty
 	Images      int       `json:"images,omitempty"`
 	SentAt      time.Time `json:"sent_at"`
-	AfterSeq    int       `json:"after_seq"`      // the session's last item before it was typed (counted in In)
-	Line        string    `json:"line,omitempty"` // the line found: its items' id before "#" (one of In's)
+	AfterSeq    int       `json:"after_seq"`          // the session's last item before it was typed (counted in In)
+	Line        string    `json:"line,omitempty"`     // the line found: its items' id before "#" (one of In's)
+	History     string    `json:"history,omitempty"`  // the transcript version AfterSeq counts in
+	Accepted    bool      `json:"accepted,omitempty"` // acknowledged by the send path, including queued input
 	// In is where AfterSeq and Line count: echoInTranscript or echoInRuntime. A record sent after nothing (a start's
 	// first message) or handed back by a hub from before #8358 has none: it is looked for and tagged wherever the
 	// items come from, as before, and counts where it is found from then on.
@@ -124,6 +128,9 @@ func (l *echoLog) expect(r echoRecord) bool {
 			if o.Line == "" && r.Line != "" {
 				o.Line, o.In = r.Line, r.In
 			}
+			if o.SentAt.Equal(r.SentAt) {
+				o.Accepted = o.Accepted || r.Accepted
+			}
 			return false
 		}
 	}
@@ -136,6 +143,40 @@ func (l *echoLog) expect(r echoRecord) bool {
 	}
 	l.recs[r.SessionID] = list
 	return true
+}
+
+// retry replaces the checked attempt with the new send's baseline. A match made since the check wins over retry.
+func (l *echoLog) retry(previous, next echoRecord) proto.SessionEchoState {
+	next.clip()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	list := l.recs[previous.SessionID]
+	for i, r := range list {
+		if r.ClientMsgID != previous.ClientMsgID {
+			continue
+		}
+		if r.Line != "" {
+			return proto.EchoSeen
+		}
+		if r.Accepted || !r.SentAt.Equal(previous.SentAt) || time.Since(r.SentAt) > echoWithin || next.History != r.History {
+			break
+		}
+		copy(list[i:], list[i+1:])
+		list[len(list)-1] = &next
+		return proto.EchoKnownUnseen
+	}
+	return proto.EchoUnknown
+}
+
+func (l *echoLog) accept(id, clientMsgID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.recs[id] {
+		if r.ClientMsgID == clientMsgID {
+			r.Accepted = true
+			return
+		}
+	}
 }
 
 // record is the session's record of clientMsgID as it is now.
@@ -204,10 +245,15 @@ func (l *echoLog) match(id, in string, items []proto.Item) []echoRecord {
 			}
 			taken[ln.key] = true
 			for _, r := range recs {
-				if r.ClientMsgID == it.ClientMsgID && r.Line == "" {
-					r.Line, r.In = ln.key, in
-					found = append(found, *r)
+				if r.ClientMsgID != it.ClientMsgID || r.Line == ln.key {
+					continue
 				}
+				if r.Line != "" && (in != echoInRuntime || !r.foundIn(in) ||
+					slices.ContainsFunc(lines, func(other echoLine) bool { return other.key == r.Line })) {
+					continue
+				}
+				r.Line, r.In = ln.key, in
+				found = append(found, *r)
 			}
 		}
 	}
@@ -448,8 +494,9 @@ func echoFits(r *echoRecord, line []proto.Item) bool {
 // echoAfter is where a session's items end before a send: the seq of the last one, and where it counts
 // (echoRecord.In). The zero value is after nothing, wherever the items come from.
 type echoAfter struct {
-	seq int
-	in  string
+	seq     int
+	in      string
+	history string
 }
 
 // echoBase is where the session's transcript ends before a send is typed (what it has so far is read, and pushed to
@@ -459,8 +506,11 @@ func (n *Node) echoBase(id string) echoAfter {
 	if err != nil {
 		return echoAfter{in: echoInTranscript}
 	}
-	n.refresh(id, f)
-	return echoAfter{seq: f.LastSeq(), in: echoInTranscript}
+	if err := n.refresh(id, f); err != nil {
+		return echoAfter{seq: f.LastSeq(), in: echoInTranscript}
+	}
+	end := f.End()
+	return echoAfter{seq: end.To, in: echoInTranscript, history: end.History}
 }
 
 // sendEchoed runs send and records it to tie; once it reached the pane, or may have, the hub is told (it hands the
@@ -470,20 +520,40 @@ func (n *Node) echoBase(id string) echoAfter {
 // a watch that pushed it before the send returned sent it without its client_msg_id, never to carry it in a push
 // again (the app's bubble then waited for a page).
 func (n *Node) sendEchoed(id, clientMsgID, text string, images int, after echoAfter, send func() error) error {
+	return n.sendWithEcho(id, clientMsgID, text, images, after, nil, send)
+}
+
+func (n *Node) sendWithEcho(id, clientMsgID, text string, images int, after echoAfter, retry *echoRecord, send func() error) error {
 	if clientMsgID == "" {
 		return send()
 	}
-	r := echoRecord{SessionID: id, ClientMsgID: clientMsgID, Text: text, Images: images, SentAt: time.Now(), AfterSeq: after.seq, In: after.in}
-	fresh := n.echoes.expect(r)
-	err := send()
-	if !fresh {
-		return err
+	if strings.HasPrefix(clientMsgID, "model-retry:") {
+		if r, known := n.echoes.record(id, clientMsgID); known && r.Line != "" {
+			return nil // a restored transcript receipt proves this continuation arrived
+		}
 	}
-	if err == nil || maybeDelivered(err) {
+	r := echoRecord{SessionID: id, ClientMsgID: clientMsgID, Text: text, Images: images, SentAt: time.Now(), AfterSeq: after.seq, In: after.in, History: after.history}
+	fresh := true
+	if retry == nil {
+		fresh = n.echoes.expect(r)
+	} else {
+		switch n.echoes.retry(*retry, r) {
+		case proto.EchoSeen:
+			return nil
+		case proto.EchoKnownUnseen:
+		default:
+			return echoUnconfirmed()
+		}
+	}
+	err := send()
+	if err == nil {
+		n.echoes.accept(id, clientMsgID)
+	}
+	if err == nil || fresh && maybeDelivered(err) {
 		if cur, ok := n.echoes.record(id, clientMsgID); ok {
 			n.notifyEcho(cur) // found already (a push ran meanwhile): the hub hears the line too
 		}
-	} else {
+	} else if fresh {
 		n.echoes.forget(id, clientMsgID)
 	}
 	return err
@@ -508,6 +578,99 @@ func (n *Node) notifyEcho(r echoRecord) {
 	_ = n.peer.Notify("session.echo", r)
 }
 
+type echoCheck struct {
+	state    proto.SessionEchoState
+	record   echoRecord
+	previous *sendRecord
+	after    echoAfter
+}
+
+// checkEcho reads the evidence for a send and checks that its RPC attempt is no longer in flight.
+func (n *Node) checkEcho(ctx context.Context, id, clientMsgID string) echoCheck {
+	check := n.readEcho(ctx, id, clientMsgID)
+	if check.state == proto.EchoKnownUnseen {
+		previous, canRetry := n.sends.completed(clientMsgID)
+		if !canRetry {
+			return echoCheck{state: proto.EchoUnknown}
+		}
+		check.previous = previous
+	}
+	return check
+}
+
+// readEcho requires a live, idle agent and a complete transcript through a turn that ended after the send before
+// reporting absence. A queued prompt can be written only when the turn ends.
+func (n *Node) readEcho(ctx context.Context, id, clientMsgID string) echoCheck {
+	unknown := echoCheck{state: proto.EchoUnknown}
+	r, ok := n.echoes.record(id, clientMsgID)
+	if !ok || time.Since(r.SentAt) > echoKeep {
+		return unknown
+	}
+	if r.Line != "" {
+		return echoCheck{state: proto.EchoSeen}
+	}
+	if r.In != echoInTranscript || time.Since(r.SentAt) > echoWithin {
+		return unknown
+	}
+	f, err := n.file(id)
+	if err != nil || n.refresh(id, f) != nil {
+		return unknown
+	}
+	end := f.End()
+	n.echoed(id, f, nil)
+	current, ok := n.echoes.record(id, clientMsgID)
+	if !ok || !current.SentAt.Equal(r.SentAt) {
+		return unknown
+	}
+	if current.Line != "" {
+		return echoCheck{state: proto.EchoSeen}
+	}
+	// Runtime and terminal-only sends can take paths that do not write to this transcript. Commands can succeed
+	// without a user line, and an unmatchable input cannot prove its own absence.
+	if _, _, runtime := n.runtimes.belongs(id); runtime || isCodexWaitID(id) || n.isAssistantSession(id) ||
+		strings.HasPrefix(strings.TrimSpace(r.Text), "/") || len(echoWords(r.Text)) == 0 && r.Images == 0 && r.Literal == "" {
+		return unknown
+	}
+	if _, terminalOnly := n.terminalOnly(id); terminalOnly {
+		return unknown
+	}
+	a, live := n.agent(id)
+	if !live || a.AgentStatus != proto.StatusIdle || a.Agent == cursorAgent || a.Agent == agyAgent {
+		return unknown
+	}
+	if current.Accepted || ctx.Err() != nil || !f.CoversClosedTurnAfter(end, r.History, r.AfterSeq, r.SentAt) {
+		return unknown
+	}
+	return echoCheck{
+		state: proto.EchoKnownUnseen, record: current,
+		after: echoAfter{seq: end.To, in: echoInTranscript, history: end.History},
+	}
+}
+
+// sendUnseen checks the original attempt again after acquiring the input lock. Another send can start a turn while
+// this one waits for that lock.
+func (n *Node) sendUnseen(ctx context.Context, id, text string, images []proto.Image, opts sendOpts, previous echoRecord) error {
+	unlock, err := n.inputTurn(ctx, id)
+	if err != nil {
+		return echoUnconfirmed()
+	}
+	defer unlock()
+	check := n.readEcho(ctx, id, opts.ClientMsgID)
+	if check.state == proto.EchoSeen {
+		return nil
+	}
+	if check.state != proto.EchoKnownUnseen || !check.record.SentAt.Equal(previous.SentAt) {
+		return echoUnconfirmed()
+	}
+	return n.sendWithEcho(id, opts.ClientMsgID, text, len(images), check.after, &check.record, func() error {
+		return n.sendLocked(ctx, id, text, images, opts)
+	})
+}
+
+func echoUnconfirmed() error {
+	return &rpc.Error{Code: proto.CodeEchoUnconfirmed, Message: "the node could not confirm that the held message was unseen"}
+}
+
 // echoed ties the session's expected sends to its transcript (f; nil when it is not open) and returns items with the
 // client_msg_ids of the lines found. A record looked for from the start (movesTo) may have its line past the first
 // page of a long transcript: the pages go on to its end, each line looked at once (scanned).
@@ -525,7 +688,11 @@ func (n *Node) echoed(id string, f *transcript.File, items []proto.Item) []proto
 			break
 		}
 	}
-	return n.echoes.tag(id, echoInTranscript, items)
+	items = n.echoes.tag(id, echoInTranscript, items)
+	if f != nil && n.isAssistantSession(id) {
+		items = f.FoldBackgroundPlaceholders(items)
+	}
+	return items
 }
 
 // restoreEchoes takes back the records the hub kept (session.echoes, after the node started).

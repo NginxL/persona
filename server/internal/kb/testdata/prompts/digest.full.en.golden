@@ -1,0 +1,7 @@
+Key projects (knowledge base projects/):
+- 示例发布 [P0 relevance 95] 周五灰度（projects/a）
+- 示例基建 [P2 relevance 40] 迁移中（projects/e）
+- 没打标的 [- relevance 0] （projects/b）
+Key chats (knowledge base chats/):
+- 发布群 [P1 relevance 70] 在推发布（chats/lark-f1）
+- 李四 [- relevance 0] 约饭（chats/lark-f3）

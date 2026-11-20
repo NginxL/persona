@@ -38,7 +38,7 @@ func golden(t *testing.T, name, got string) {
 }
 
 // The MCP tools of the manager's the hub offers (hubConnectorTools: the connectors', Cua's, ego's and the
-// subscriptions'), as they go over the wire (the golden is indented for reading). The hub lists them with its own (its mcp_tools golden):
+// subscriptions'), as they go over the wire (the golden is indented for reading). The hub lists them with its own (its mcp_tools goldens):
 // tools for every agent, assistant_tools after the assistant's own.
 func TestGoldenConnectorTools(t *testing.T) {
 	h := newTestManager(t)

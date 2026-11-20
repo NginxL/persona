@@ -308,6 +308,48 @@ func TestSweepTerminalUploads(t *testing.T) {
 	}
 }
 
+// A file a task's Agent handed to its conversation (dest=file) lands under the node's uploads/files/<date>/: kept like
+// the chat's images, apart from the terminal pastes a sweep removes, and two files of the same name do not replace
+// each other.
+func TestFileUploadLandsUnderUploadsFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	home := t.TempDir()
+	n := &Node{dir: home, logger: log.New(io.Discard, "", 0)}
+	data := []byte("# manual\n")
+	out, err := callUpload(t, n, proto.UploadDestFile, "manual.md", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDir := fileUploadDir(home, time.Now())
+	if !filepath.IsAbs(out.Path) || filepath.Dir(out.Path) != wantDir {
+		t.Fatalf("path %s, want it in %s", out.Path, wantDir)
+	}
+	if b := filepath.Base(out.Path); !regexp.MustCompile(`^[0-9a-f]{16}-manual\.md$`).MatchString(b) {
+		t.Fatalf("name %q", b)
+	}
+	if got, _ := os.ReadFile(out.Path); !bytes.Equal(got, data) || out.Size != int64(len(data)) {
+		t.Fatal("content differs")
+	}
+	if st, _ := os.Stat(out.Path); st.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode %v", st.Mode())
+	}
+	if st, _ := os.Stat(wantDir); st.Mode().Perm() != 0o700 {
+		t.Fatalf("dir mode %v", st.Mode())
+	}
+	if ents, _ := os.ReadDir(tmp); len(ents) != 0 {
+		t.Fatalf("temp dir has %v", ents)
+	}
+	// Apart from the terminal pastes, which are swept: nothing here removes it.
+	if root := terminalUploadRoot(home); strings.HasPrefix(out.Path, root+string(filepath.Separator)) {
+		t.Fatalf("a handed-over file landed under %s", root)
+	}
+	again, err := callUpload(t, n, proto.UploadDestFile, "manual.md", data)
+	if err != nil || again.Path == out.Path {
+		t.Fatalf("again: %v %v", again.Path, err)
+	}
+}
+
 // A report for the health space (dest=health) lands in the health directory's reports/ under its own name plus the
 // time, and stays there: no part file beside it, nothing in the temp directory.
 func TestHealthUploadLandsInReports(t *testing.T) {

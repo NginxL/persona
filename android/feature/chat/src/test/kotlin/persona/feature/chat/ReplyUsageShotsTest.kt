@@ -3,18 +3,23 @@ package persona.feature.chat
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -22,6 +27,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import coil3.ImageLoader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -30,9 +36,12 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.Item
+import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
+import persona.core.domain.lines.ChatLine
+import persona.core.domain.lines.ChatRow
 import persona.core.domain.lines.ModelTokens
 import persona.core.domain.lines.Subagents
 import persona.core.domain.lines.TurnCost
@@ -55,6 +64,45 @@ class ReplyUsageShotsTest {
     @get:Rule val rule = createComposeRule()
 
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/reply-usage-shots").also { it.mkdirs() }
+
+    @Test fun transcriptPlacesTheUsageBelowTheReply() = transcriptUsage("default")
+
+    @Config(fontScale = 2f)
+    @Test fun transcriptPlacesTheUsageBelowTheReplyAtLargeText() = transcriptUsage("large")
+
+    private fun transcriptUsage(size: String) {
+        val words = "The weather widget now uses the shared forecast for both sizes, and refreshes after the next update."
+        val answer = Item("reply", role = "assistant", kind = "text", text = words, ts = "2026-11-12T01:59:01Z")
+        val line = ChatLine.Row(ChatRow("reply", answer.asLineItem()))
+        val usage = ReplyUsageView("1.2k tokens", listOf("1,200 tokens"), "Reply details")
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(true)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                val context = LocalContext.current
+                val loader = remember { ImageLoader.Builder(context).build() }
+                // The transcript's search highlight hosts each row in a Box.
+                Box(Modifier.testTag("transcript-usage").width(320.dp).background(PersonaTheme.palette.background)
+                    .padding(Tokens.Space.l)) {
+                    CompositionLocalProvider(LocalReplyUsage provides mapOf(answer.id to usage)) {
+                        ChatLineContent(line, SessionKey("box", "s1"), loader, recordedDuration = null,
+                            onToggle = {}, onFold = {}, folding = emptySet(), foldErrors = emptyMap(), onFullText = {})
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(true, false)) {
+            style = s
+            dark = d
+            rule.waitForIdle()
+            val bitmap = rule.onNodeWithTag("transcript-usage").captureToImage().asAndroidBitmap()
+            File(out(), "transcript-usage-${s.name.lowercase()}-${if (d) "dark" else "light"}-$size.png").outputStream()
+                .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val reply = rule.onNodeWithText(words, useUnmergedTree = true).getUnclippedBoundsInRoot()
+            val footer = rule.onNodeWithText(usage.label, useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertTrue("$s dark=$d $size: footer $footer overlaps reply $reply", footer.top >= reply.bottom)
+        }
+    }
 
     @Test fun costOrTokensUnderTheReply() {
         val opus = ModelTokens("claude-opus-5-5", input = 2, output = 3400, cacheRead = 1_200_000, cacheWrite = 9000)

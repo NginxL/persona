@@ -23,7 +23,9 @@ values to the schema and the generated types read them back unchanged (the tests
   project's slug, and a place is titled by its project.
 - `expected.counts`: the `TodoCounts`. `expected.places`: the `TodoPlaces` answer, whose `counts` equal
   `expected.counts`. Compare as JSON values.
-- `expected.order` (optional, added here): every to-do of the list by its view's section, in the order of its `rank`.
+- `expected.order` (added here): every to-do of the list by its view's section, in the order of its `rank`. Required
+  for every case with to-dos (optional only for an empty list): the iOS app files rows from it to replay the counts
+  (`apple/PersonaTests/TodoCountsFallbackTests.swift`), and the hub's projection test checks it against the ranks.
 
 All data is made up.
 

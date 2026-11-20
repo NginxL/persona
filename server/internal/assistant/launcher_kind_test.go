@@ -14,7 +14,7 @@ import (
 
 // A launcher of the other agent kind picked for a message in an existing conversation is refused with
 // launcher_other_kind, not replaced on the node while the app shows the pick (#4662). Same-kind picks, the Main chat
-// setting (nothing picked), runtimes and anything unknown go as before.
+// setting (nothing picked), and unknown agent kinds still go through.
 func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 	ctx := context.Background()
 	s, f := mainChatFixture(t)
@@ -25,6 +25,9 @@ func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 		proto.Session{SessionID: "claude-side", Agent: "claude", Launcher: "claude", Assistant: true},
 		proto.Session{SessionID: "codex-side", Agent: "codex", Launcher: "cx", Assistant: true},
 		proto.Session{SessionID: "rt-side", Agent: "agy", Launcher: "agy-rt", Assistant: true})
+	f.launcherList = append(f.launcherList,
+		proto.Launcher{Name: "agy", Source: "agy", Agent: "agy", Assistant: true},
+		proto.Launcher{Name: "unknown-rt", Source: "example-runtime", Agent: "unknown", Assistant: true})
 	send := func(sid, launcher, lang string) (map[string]any, error) {
 		p := map[string]any{"text": "hi"}
 		if launcher != "" {
@@ -37,6 +40,9 @@ func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 		{"codex-side", "claude", "codex", "claude"}, // plain claude in a Codex one
 		{"codex-side", "gw", "codex", "claude"},     // a managed Claude launcher
 		{"main", "gw", "codex", "claude"},           // picked in the main chat's chip
+		{"rt-side", "cx", "agy", "codex"},
+		{"codex-side", "agy-rt", "codex", "agy"},
+		{"claude-side", "agy", "claude", "agy"},
 	} {
 		_, err := send(c.sid, c.launcher, "en")
 		var re *rpc.Error
@@ -55,10 +61,15 @@ func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 	if _, err := send("claude-side", "cx", "zh-Hans"); err == nil || !strings.Contains(err.Error(), "「cx」跑的是 Codex") || !strings.Contains(err.Error(), "跑在 Claude Code 上") {
 		t.Fatalf("localized: %v", err)
 	}
+	if _, err := send("rt-side", "cx", "zh-Hans"); err == nil || !strings.Contains(err.Error(), "跑在 Antigravity 上") {
+		t.Fatalf("localized Antigravity name: %v", err)
+	}
 	for _, c := range []struct{ sid, launcher string }{
-		{"claude-side", "gw"},   // same kind
-		{"codex-side", "cx"},    // same kind
-		{"rt-side", "cx"},       // a runtime's conversation: the node decides
+		{"claude-side", "gw"}, // same kind
+		{"codex-side", "cx"},  // same kind
+		{"rt-side", "agy-rt"},
+		{"rt-side", "agy"},
+		{"rt-side", "unknown-rt"},
 		{"not-listed", "cx"},    // a conversation the machine doesn't list (yet)
 		{"main", ""},            // the Main chat setting, nothing picked: the node's swap is the backstop
 		{"claude-side", "nope"}, // a launcher the list doesn't have: not refused on a guess
@@ -68,8 +79,8 @@ func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 		if errors.As(err, &re) && re.Code == assistantwire.CodeLauncherOtherKind {
 			t.Fatalf("%s with %q refused: %v", c.sid, c.launcher, err)
 		}
-		if c.launcher == "cx" && c.sid != "not-listed" && (err != nil || p["launcher"] != "cx") {
-			t.Fatalf("%s with cx: %v %v", c.sid, p, err)
+		if c.sid == "rt-side" && (err != nil || p["launcher"] != c.launcher) {
+			t.Fatalf("%s with %q: %v %v", c.sid, c.launcher, p, err)
 		}
 	}
 	f.launcherList = nil // the machine's list can't be read: its Codex alias isn't known to be one

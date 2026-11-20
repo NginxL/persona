@@ -1,0 +1,18 @@
+{
+  "no_session": "找不到这个 Agent 会话。",
+  "session_busy": "这个 Agent 正在工作，等它停下来再审查。",
+  "review_running": "这个会话已经有一场独立审查在进行。",
+  "no_change": "这个目录里没有可审查的改动。",
+  "no_change_not_git": "这个目录不是 Git 仓库，没有可审查的改动。",
+  "read_only_unsupported": "{agent} 没法以强制只读方式启动独立审查；独立审查需要 Claude Code 的计划模式。",
+  "not_supported": "这台电脑现在没法启动独立审查。",
+  "start_failed": "独立审查启动失败：{error}",
+  "store_failed": "审查状态读取或保存失败，请重试。",
+  "send_failed": "审查发现没能发给原来的 Agent：{error}",
+  "card_title": "独立审查",
+  "review_complete": "审查完成",
+  "finding_one": "1 条发现",
+  "findings": "{count} 条发现",
+  "send_to_agent": "发给 Agent",
+  "dismiss": "不发了"
+}

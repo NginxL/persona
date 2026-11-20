@@ -11,9 +11,10 @@ import (
 type toolsListedKey struct{}
 
 type toolSnapshot struct {
-	Tools    []map[string]any
-	Revision string
-	Session  string
+	Tools     []map[string]any
+	WorkGuide map[string]bool
+	Revision  string
+	Session   string
 }
 
 // Ignore ordering, but not schema/description changes. A task update that did not
@@ -22,7 +23,12 @@ func (s toolSnapshot) fingerprint() string {
 	items := make([]string, 0, len(s.Tools))
 	for _, tool := range s.Tools {
 		b, _ := json.Marshal(tool)
-		items = append(items, string(b))
+		name, _ := tool["name"].(string)
+		item := string(b)
+		if s.WorkGuide[name] {
+			item = "discover:" + item
+		}
+		items = append(items, item)
 	}
 	slices.Sort(items)
 	return strings.Join(items, "\n")

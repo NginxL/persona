@@ -147,4 +147,82 @@ final class ShellRaceTests: XCTestCase {
             app.terminate()
         }
     }
+
+    private struct AssistantChat: Decodable { var key: String }
+
+    /// A fresh Agents launch for #10227: Assistant has not been built. Each return-tap delay gets a new process so one
+    /// round cannot warm Assistant or change the next round's list.
+    @MainActor private func launchAgentsWithColdAssistant(hub: String) -> Bool {
+        app = XCUIApplication()
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        app.launchArguments = ["-pairURL", pair, "-app.tab", "chats", "-tab", "dev", "-dev.openChat", "",
+                               "-app.navigation", "separate", "-openAgentsFresh", "YES", "-dev.grouping", "repo",
+                               "-probes", "YES"]
+        app.launchPinned(navigation: false)
+        acceptIconAlert()
+        guard app.buttons["agents.filter.all"].waitForExistence(timeout: 25) else {
+            attachScreen("no Agents list for cold Assistant")
+            XCTFail("no Agents list for the cold-Assistant round")
+            return false
+        }
+        sleep(2) // the initial empty-field fold has finished
+        finger = ShellFinger(app)
+        return true
+    }
+
+    /// The same pull and long scroll as AgentsSearchVisibilityUITests, without typing a query.
+    @MainActor private func revealAndScrollColdAgents() -> Bool {
+        let field = app.revealAgentsSearch()
+        guard field.exists && field.isHittable else { return false }
+        let window = app.windows.firstMatch.frame
+        let list = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.exists && $0.frame.minX <= window.minX + 1 && $0.frame.height > window.height * 0.4
+        }) ?? app.collectionViews.firstMatch
+        guard list.exists else { XCTFail("no Agents results list after revealing search"); return false }
+        for _ in 0..<7 {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.78))
+            let to = list.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.22))
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0.1)
+        }
+        sleep(1)
+        return true
+    }
+
+    @MainActor private func coldAssistantReturnRound(hub: String, delay: Double) {
+        let what = "cold Assistant, Agents return \(delay)s after Assistant settled"
+        let launched = launchAgentsWithColdAssistant(hub: hub)
+        defer { app.terminate() }
+        guard launched, revealAndScrollColdAgents() else { return }
+        XCTAssertNil(app.probeEnvelope("chat", page: "assistant"),
+                     "Assistant's conversation was built before the switch (\(what))")
+
+        // The first switch returns only after Assistant settles. The return delay starts there, with an immediate case
+        // plus the full 0.3–1.2 s post-settle range; every tap uses the same fixed coordinates.
+        guard finger.switchTo(agents: false, "助手 settled before \(what)", limit: 5) else { return }
+        if delay > 0 { usleep(useconds_t(delay * 1_000_000)) }
+        // The same cached points for both taps; the return is tapped once and must win within the ordinary deadline.
+        finger.switchTo(agents: true, what)
+        XCTAssertEqual(app.shellValue("workRoot"), "1", "Agents did not return to its list (\(what)) \(app.shellTrace)")
+        let chat = app.probe("chat", as: AssistantChat.self, page: "assistant")
+        XCTAssertEqual(chat?.key, "server/b2e4d6f8-0000-4000-8000-000000000001",
+                       "the Agents return replaced Assistant's main conversation (\(what)) \(app.shellTrace)")
+        let trace = app.shellTrace
+        XCTAssertFalse(trace.contains("new conversation from"),
+                       "the Agents return tap invoked New Chat (\(what)) \(trace)")
+    }
+
+    /// #10227: after a revealed search and a long Agents scroll, returning just after cold Assistant settles can lose
+    /// the second tap or deliver it to New Chat. Both taps use the same fixed switch coordinates on every cold launch.
+    @MainActor func testColdAssistantReturnTapAfterSearchAndLongScroll() throws {
+        guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else {
+            throw XCTSkip("needs scripts/mock/mock_hub.py (PERSONA_MOCK_HUB)")
+        }
+        // Earlier cases may have left a new conversation selected. Reset it in a separate process once; every round below
+        // still launches a fresh Agents process with Assistant unbuilt. The race is intermittent, so repeat the immediate
+        // cold return as well as covering the full post-settle delay range.
+        AssistantUITestReset.toDefaultMain(hub: hub)
+        for delay in [0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.6, 0.9, 1.2] {
+            coldAssistantReturnRound(hub: hub, delay: delay)
+        }
+    }
 }

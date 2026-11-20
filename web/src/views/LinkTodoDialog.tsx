@@ -13,15 +13,13 @@ import {
   linkSpaceToTodo,
   makeSessionLookup,
   resolveLinkCurrentTodoId,
-  shownStatus,
   todoStatus,
-  todoStatusLabel,
-  TODO_STATUS_INFO,
   TODO_TONE_CLASS,
   unlinkAgentFromTodo,
   unlinkSpaceFromTodo,
   type Todo,
 } from "../lib/todos";
+import { todoLook, waitOf } from "../lib/todo-wait-reason";
 import type { Session } from "../lib/types";
 import { hasFinePointer } from "../lib/viewport";
 import { Button, cx, Dialog, toast, useNow } from "../ui/atoms";
@@ -302,7 +300,8 @@ function TodoChoices({ todos, currentTodoId, busy, onPick }: { todos: Todo[]; cu
           {shown.map((todo) => {
             const isCurrent = todo.id === currentTodoId;
             const status = todoStatus(todo, lookup);
-            const tone = TODO_STATUS_INFO[shownStatus(todo, status)].tone;
+            // a waiting one's word says what it waits on, attention only on the owner (#11090)
+            const look = todoLook(todo, status, waitOf(todo, status, lookup));
             const where = [todo.project ? project(todo.project) : "", ago(todo.updated_at, now, "narrow")].filter(Boolean);
             return (
               <button
@@ -318,7 +317,7 @@ function TodoChoices({ todos, currentTodoId, busy, onPick }: { todos: Todo[]; cu
                 <span className="min-w-0 flex-1">
                   <span className={cx("block truncate text-meta", isCurrent && "font-medium")}>{todo.title}</span>
                   <span className="block truncate text-xs text-ink-3">
-                    <span className={TODO_TONE_CLASS[tone]}>{todoStatusLabel(todo, status)}</span>
+                    <span className={TODO_TONE_CLASS[look.tone]}>{look.label}</span>
                     {where.map((part) => ` · ${part}`).join("")}
                   </span>
                 </span>

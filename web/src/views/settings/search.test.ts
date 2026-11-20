@@ -68,6 +68,27 @@ function rowLabelKeys(source: string): string[] {
 }
 
 const labels = [...new Set(PAGES.flatMap((p) => rowLabelKeys(read(p))))].filter((k) => !(k in NOT_SETTINGS));
+const views = new URL("../", import.meta.url);
+const sources = (readdirSync(views, { recursive: true }) as string[])
+  .filter((f) => f.endsWith(".tsx") && !f.includes(".test."))
+  .map((f) => readFileSync(new URL(f, views), "utf8"))
+  .join("\n");
+
+// The index reads t() at module scope, just as it does after the page loads its catalog. Build an independent
+// fixture for each language during collection; these tests check the index, not cold module-loading latency.
+async function inLanguage(lang: string) {
+  vi.resetModules();
+  const { initI18n, t } = await import("../../i18n");
+  await initI18n(lang);
+  const { SEARCH_INDEX, searchSettings } = await import("./search");
+  return { lang, t, SEARCH_INDEX, searchSettings };
+}
+const languages: Awaited<ReturnType<typeof inLanguage>>[] = [];
+// resetModules changes the registry: constructing these fixtures concurrently would mix their catalogs.
+for (const lang of ["en", "zh-Hans", "ja"]) languages.push(await inLanguage(lang));
+const [english, chinese] = languages;
+const { LOCAL_SHORTCUTS, SHORTCUTS } = await import("../../lib/shortcuts");
+const { TERMINAL_LABS_ID } = await import("../../lib/labs-terminal");
 
 describe("the settings search's index", () => {
   it("reads the pages' row labels (the scan finds what it should)", () => {
@@ -79,21 +100,13 @@ describe("the settings search's index", () => {
     expect(labels.length).toBeGreaterThan(60);
   });
 
-  it.each(["en", "zh-Hans", "ja"])("has every fixed row label of the pages it covers in %s", async (lang) => {
-    vi.resetModules();
-    const { initI18n, t } = await import("../../i18n");
-    await initI18n(lang);
-    const { SEARCH_INDEX } = await import("./search");
+  it.each(languages)("has every fixed row label of the pages it covers in $lang", ({ t, SEARCH_INDEX }) => {
     const words = new Set(SEARCH_INDEX.flatMap((g) => [...g.group.split(/ › | \/ /), ...(g.hint?.split(" / ") ?? [])]));
     const missing = labels.filter((k) => !words.has(t(k)));
     expect(missing).toEqual([]);
   });
 
-  it.each(["en", "zh-Hans", "ja"])("finds the words the audit searched for, and each label's own words, in %s", async (lang) => {
-    vi.resetModules();
-    const { initI18n, t } = await import("../../i18n");
-    await initI18n(lang);
-    const { searchSettings } = await import("./search");
+  it.each(languages)("finds the words the audit searched for, and each label's own words, in $lang", ({ lang, t, searchSettings }) => {
     const finds = (q: string, tab: string, anchor: string) => expect(searchSettings(q).groups, q).toContainEqual(expect.objectContaining({ tab, anchor }));
     finds(t("lib-agent-settings.setting_effortLevel"), "agents", "settings-claude");
     finds(t("lib-agent-settings.setting_model_reasoning_effort"), "agents", "settings-codex");
@@ -116,48 +129,36 @@ describe("the settings search's index", () => {
     if (lang !== "ja") finds("token", "devices", "devices");
   });
 
-  it("finds the words people searched for in Chinese (audit item 18), each under a label that says it", async () => {
-    vi.resetModules();
-    const { initI18n } = await import("../../i18n");
-    await initI18n("zh-Hans");
-    await import("./search").then(({ searchSettings }) => {
-      const found = (q: string) => searchSettings(q).groups.map((g) => `${g.tab}/${g.anchor}/${g.group}`);
-      for (const q of ["主题", "主题色", "深色", "字号", "语言", "思考强度", "思考", "时区", "token", "API Key", "密钥", "撤销", "退出", "免打扰", "自动更新", "默认权限", "出错自动继续"])
-        expect(found(q), q).not.toEqual([]);
-      expect(found("思考强度")).toEqual(expect.arrayContaining([
-        "agents/settings-claude/Claude Code › 思考强度", "agents/settings-codex/Codex › 思考强度", "models/settings-model-config/模型配置 › 思考强度",
-      ]));
-      expect(found("时区")).toContain("persona/runs-on/时区");
-      // Revoke is named Revoke, not Connect a new device; the API key is found as a key and a secret
-      expect(found("撤销")).toEqual(["devices/devices/撤销"]);
-      expect(found("密钥")).toEqual(expect.arrayContaining(["extensions/extensions/密钥", "models/settings-providers/新增供应商"]));
-      expect(found("token")).toEqual(expect.arrayContaining(["devices/devices/设备 token", "extensions/market/管理市场"]));
-    });
+  it("finds the words people searched for in Chinese (audit item 18), each under a label that says it", () => {
+    const { searchSettings } = chinese;
+    const found = (q: string) => searchSettings(q).groups.map((g) => `${g.tab}/${g.anchor}/${g.group}`);
+    for (const q of ["主题", "主题色", "深色", "字号", "语言", "思考强度", "思考", "时区", "token", "API Key", "密钥", "撤销", "退出", "免打扰", "自动更新", "默认权限", "出错自动继续"])
+      expect(found(q), q).not.toEqual([]);
+    expect(found("思考强度")).toEqual(expect.arrayContaining([
+      "agents/settings-claude/Claude Code › 思考强度", "agents/settings-codex/Codex › 思考强度", "models/settings-model-config/模型配置 › 思考强度",
+    ]));
+    expect(found("时区")).toContain("persona/runs-on/时区");
+    // Revoke is named Revoke, not Connect a new device; the API key is found as a key and a secret
+    expect(found("撤销")).toEqual(["devices/devices/撤销"]);
+    expect(found("密钥")).toEqual(expect.arrayContaining(["extensions/extensions/密钥", "models/settings-providers/新增供应商"]));
+    expect(found("token")).toEqual(expect.arrayContaining(["devices/devices/设备 token", "extensions/market/管理市场"]));
   });
 
-  it("finds a label typed without its spaces, or with other case", async () => {
-    vi.resetModules();
-    const { initI18n } = await import("../../i18n");
-    await initI18n("en");
-    const { searchSettings } = await import("./search");
+  it("finds a label typed without its spaces, or with other case", () => {
+    const { searchSettings } = english;
     expect(searchSettings("timezone").groups).toContainEqual(expect.objectContaining({ anchor: "runs-on" }));
     expect(searchSettings("QUIET HOURS").groups).toContainEqual(expect.objectContaining({ anchor: "notify-quiet" }));
     expect(searchSettings("effort").groups.map((g) => g.anchor)).toEqual(expect.arrayContaining(["settings-claude", "settings-codex", "settings-model-config"]));
   });
 
-  it("lands every entry on something a page draws, and lists each once", async () => {
-    const { SEARCH_INDEX } = await import("./search");
-    const { LOCAL_SHORTCUTS, SHORTCUTS } = await import("../../lib/shortcuts");
-    const views = new URL("../", import.meta.url);
-    const sources = (readdirSync(views, { recursive: true }) as string[])
-      .filter((f) => f.endsWith(".tsx") && !f.includes(".test."))
-      .map((f) => readFileSync(new URL(f, views), "utf8"))
-      .join("\n");
+  it("lands every entry on something a page draws, and lists each once", () => {
+    const { SEARCH_INDEX } = english;
     // anchors a page writes from a value: each one's source, and the values it takes
     const made: [RegExp, string, (rest: string) => boolean][] = [
       [/^shortcut-(.+)$/, "anchor={`shortcut-${s.id}`}", (id) => [...SHORTCUTS, ...LOCAL_SHORTCUTS].some((s) => s.id === id)],
       [/^knowledge-(.+)$/, "anchor={`knowledge-${kind}`}", (kind) => kind === "messages" || kind === "docs"],
       [/^settings-(.+)$/, "id={`settings-${id}`}", (id) => ["claude", "codex", "agy", "omp", "grok"].includes(id)],
+      [/^configuration-(.+)$/, "data-settings-row={`configuration-${doc.id}-${field.id}`}", (id) => id === `${TERMINAL_LABS_ID}-renderer` || id === "assistant-work-work_guide"],
     ];
     const drawn = (anchor: string) =>
       new RegExp(`\\b(anchor|data-settings-row|data-settings-group|id)="${anchor}"`).test(sources) ||

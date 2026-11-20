@@ -7,7 +7,7 @@ import persona.core.designsystem.LocalizedFormats
 import java.util.Locale
 
 /**
- * Hub features behind the main conversation's "Compact context" and "New main chat" (docs/assistant/assistant.md, #1727)
+ * Hub features behind "Compact context" and the main conversation's "New main chat" (docs/assistant/assistant.md, #1727)
  * and "Clear context" (#5095, the apps' side #5100).
  */
 internal const val CompactFeature = "assistant_compact"
@@ -21,7 +21,7 @@ internal data class MainActions(val compact: Boolean, val newMain: Boolean, val 
     }
 }
 
-/** What the line over the main conversation says about a compaction. */
+/** What the line over the selected Assistant conversation says about a compaction. */
 internal sealed interface CompactionLine {
     data object Running : CompactionLine
     data object Done : CompactionLine

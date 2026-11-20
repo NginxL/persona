@@ -72,7 +72,7 @@ struct GitBranchesSheet: View {
             .toolbar {
                 SheetClose(disabled: switching) { dismiss() }
             }
-            .confirmationDialog(Text(asking.map { $0.create ? String(localized: "Create \($0.branch)?") : String(localized: "Switch to \($0.branch)?") } ?? ""),
+            .accessibleConfirmationDialog(Text(asking.map { $0.create ? String(localized: "Create \($0.branch)?") : String(localized: "Switch to \($0.branch)?") } ?? ""),
                                 isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
                                 titleVisibility: .visible, presenting: asking) { a in
                 Button { Task { await go(a.branch, create: a.create) } } label: { Text(a.create ? "Create" : "Switch").lineLimit(1) }
@@ -223,7 +223,7 @@ struct GitStashesSheet: View {
             .toolbar {
                 SheetClose(disabled: stashing) { dismiss() }
             }
-            .confirmationDialog(Text("Drop This Stash?"), isPresented: Binding(get: { dropping != nil }, set: { if !$0 { dropping = nil } }),
+            .accessibleConfirmationDialog(Text("Drop This Stash?"), isPresented: Binding(get: { dropping != nil }, set: { if !$0 { dropping = nil } }),
                                 titleVisibility: .visible, presenting: dropping) { e in
                 Button(role: .destructive) { Task { await act(.drop(e)) } } label: { Text("Drop").lineLimit(1) }
                     .accessibilityIdentifier("git.stash.dropConfirm")

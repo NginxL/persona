@@ -98,12 +98,69 @@ func (n *Node) skillCatalog(ctx context.Context, in skillCatalogRequest) (assist
 	return out, nil
 }
 
+// claudeLinuxManagedSettings and claudeLinuxManagedSettingsDirs are claudeManagedSettings and claudeManagedSettingsDirs
+// on Linux and WSL.
+var (
+	claudeLinuxManagedSettings     = []string{"/etc/claude-code/managed-settings.json"}
+	claudeLinuxManagedSettingsDirs = []string{"/etc/claude-code/managed-settings.d"}
+)
+
+// readClaudeManagedSettings reads the administrator's settings files for Claude Code on every system, each system's in
+// the order Claude Code merges them: managed-settings.json, then the *.json files in managed-settings.d alphabetically,
+// hidden ones left out. A missing file or directory holds no policy; one that cannot be read, or holds no JSON object, is
+// an error.
+func readClaudeManagedSettings() ([]map[string]any, error) {
+	systems := [][2][]string{{claudeManagedSettings, claudeManagedSettingsDirs}, {claudeLinuxManagedSettings, claudeLinuxManagedSettingsDirs}}
+	if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+		root := filepath.Join(programFiles, "ClaudeCode")
+		systems = append(systems, [2][]string{{filepath.Join(root, "managed-settings.json")}, {filepath.Join(root, "managed-settings.d")}})
+	}
+	var out []map[string]any
+	for _, system := range systems {
+		files := append([]string{}, system[0]...)
+		for _, dir := range system[1] {
+			entries, err := os.ReadDir(dir) // sorted by name
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			for _, e := range entries {
+				if name := e.Name(); strings.HasSuffix(name, ".json") && !strings.HasPrefix(name, ".") {
+					files = append(files, filepath.Join(dir, name))
+				}
+			}
+		}
+		for _, file := range files {
+			// readSettingsFile gives a missing file as an empty map (no policy) and nil only for a file that holds null.
+			settings, err := readSettingsFile(file)
+			if err == nil && settings == nil {
+				err = errors.New(file + " is not a JSON object")
+			}
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, settings)
+		}
+	}
+	return out, nil
+}
+
 func visibleClaudeSkills(entries []assistantskills.Entry, profile, cwd string, launcherSettings ...map[string]any) ([]assistantskills.Entry, error) {
-	// A bounded local adapter cannot establish the effective managed policy. Check presence only:
-	// never execute a policy helper or read a server-policy cache that may contain credentials.
-	policies := claudePolicyPaths(profile)
-	for _, file := range policies {
-		if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+	// Never read the server-policy cache, which may contain credentials: its presence alone refuses.
+	if _, err := os.Stat(filepath.Join(profile, "remote-settings.json")); !errors.Is(err, os.ErrNotExist) {
+		return nil, errors.New("skill catalog is unavailable while a managed policy may apply")
+	}
+	// The administrator's files go through the same checks as every other layer below (#9862), so one that only sets
+	// hooks restricts nothing. Failing to read one refuses, as does a policy helper: its output would replace them, and
+	// this adapter never runs it.
+	managed, err := readClaudeManagedSettings()
+	if err != nil {
+		return nil, errors.New("skill catalog is unavailable while a managed policy cannot be read")
+	}
+	for _, settings := range managed {
+		if settings["policyHelper"] != nil {
 			return nil, errors.New("skill catalog is unavailable while a managed policy may apply")
 		}
 	}
@@ -116,10 +173,11 @@ func visibleClaudeSkills(entries []assistantskills.Entry, profile, cwd string, l
 		layers = append(layers, settings)
 	}
 	overrides := map[string]string{}
-	for _, settings := range append(layers, launcherSettings...) {
-		strict, _ := settings["strictPluginOnlyCustomization"].([]any)
-		enabled, _ := settings["strictPluginOnlyCustomization"].(bool)
-		if enabled || len(strict) > 0 {
+	// Lowest first, so a later layer's skillOverrides entry replaces an earlier one's and the managed ones, last, win.
+	for _, settings := range append(append(layers, launcherSettings...), managed...) {
+		// true or a non-empty list; a value Claude Code cannot read may lock too.
+		strict := settings["strictPluginOnlyCustomization"]
+		if list, ok := strict.([]any); strict != nil && strict != false && (!ok || len(list) > 0) {
 			// Do not bypass policies whose effective roots this bounded adapter cannot establish.
 			return nil, errors.New("skill catalog is unavailable under this customization policy")
 		}
@@ -138,7 +196,9 @@ func visibleClaudeSkills(entries []assistantskills.Entry, profile, cwd string, l
 		}
 		if values, _ := settings["skillOverrides"].(map[string]any); values != nil {
 			for key, value := range values {
-				overrides[key], _ = value.(string)
+				if state, ok := value.(string); ok { // Claude Code drops an entry it cannot read
+					overrides[key] = state
+				}
 			}
 		}
 	}

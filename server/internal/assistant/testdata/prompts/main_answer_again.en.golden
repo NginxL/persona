@@ -1,0 +1,2 @@
+<persona-answer-again />
+Persona is asking again because the last turn did not give the user a written answer. Answer directly in the user's language using the results already available. Do not call tools, repeat completed actions, or make changes. If you lack enough information, say what is missing in one sentence.

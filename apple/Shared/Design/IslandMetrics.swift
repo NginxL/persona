@@ -84,6 +84,18 @@ nonisolated enum IslandMetrics {
     /// The Lock Screen's inset from the activity's edges.
     static let lockPadding: CGFloat = 16
 
+    // MARK: Alarms and timers (docs/apple/live-activity.md「Alarms and timers (AlarmKit)」)
+
+    /// The compact island's countdown: room for "1:23:45" at `timerNumber`, no more.
+    static let alarmTimerWidth: CGFloat = 54
+    /// The expanded island's countdown, at `.title3`: "1:23:45" whole.
+    static let alarmExpandedTimerWidth: CGFloat = 92
+    /// The Lock Screen's countdown, at `.title2` (capped at the default text size there): "1:23:45" whole, with margin.
+    /// Fixed, as `Text(timerInterval:)` takes all the width it is offered.
+    static let alarmLockTimerWidth: CGFloat = 100
+    /// The expanded island's button row's inset from its sides, so the capsules clear the rounded bottom corners.
+    static let alarmIslandButtonsInset: CGFloat = 12
+
     // MARK: The settings page's picture of the island
 
     /// The pill, as wide as the island with both sides showing.

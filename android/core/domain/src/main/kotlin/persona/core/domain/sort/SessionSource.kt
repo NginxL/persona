@@ -45,9 +45,10 @@ val Session.listedModes: List<String>? get() = capabilities?.permissionModes
 val Session.canSwitchListedModes: Boolean get() = isLive && canSend && listedModes != null
 /**
  * Only the effort changes, among the session's own [Session.efforts]: a Codex thread the hub drives through its
- * app-server (the hub lists the levels only then; the iOS `Session.setsEffortOnly`).
+ * app-server (the hub lists the levels only then; the iOS `Session.setsEffortOnly`). A runtime that declares
+ * `capabilities.modes` (such as Antigravity) changes both and is not effort-only.
  */
-val Session.canChangeEffortOnly: Boolean get() = isLive && !isClaude && !assistant && canSend && efforts.isNotEmpty()
+val Session.canChangeEffortOnly: Boolean get() = isLive && !isClaude && !assistant && !canChangeModes && canSend && efforts.isNotEmpty()
 /** /model and /clear are typed into Claude's pane: Claude in a terminal engine, not Persona's conversations. */
 val Session.canTypeClaudeCommands: Boolean get() = canChangeModes && !assistant && !paneId.isNullOrBlank() && canTerminal
 /**

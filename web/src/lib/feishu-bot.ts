@@ -21,9 +21,20 @@ export interface BotFeatures {
   report_steps?: boolean;
   /** A finished run's answer is posted as a new card and the progress card folds (#5396); a hub from before leaves it out. */
   answer_new_card?: boolean;
+  /** A topic run also shows thinking and tools in a native agent message beside the progress card. */
+  topic_cot?: boolean;
+}
+
+export interface BotTopicChat {
+  chat_id: string;
+  name?: string;
+  home?: boolean;
+  require_owner_mention?: boolean;
+  added_at?: number;
 }
 
 export interface FeishuBotStatus {
+  topic_chats?: BotTopicChat[];
   enabled: boolean;
   app_id: string;
   /** The open platform's URL the hub resolved (feishu / lark / a custom one). */
@@ -66,6 +77,7 @@ export interface LarkCLIStatus {
 
 /** The edit sent to PUT: only what is set changes. */
 export interface FeishuBotUpdate {
+  topic_chats?: BotTopicChat[];
   enabled?: boolean;
   app_id?: string;
   app_secret?: string;
@@ -78,7 +90,7 @@ export interface FeishuBotUpdate {
   larkcli_profile?: string;
 }
 
-export const DEFAULT_FEATURES: BotFeatures = { main: true, cards: true, all_cards: false, pushes: false, sync: false, agents: false, reports: true, board: false, only_conclusions: false, workbench: false, report_steps: false, answer_new_card: false };
+export const DEFAULT_FEATURES: BotFeatures = { main: true, cards: true, all_cards: false, pushes: false, sync: false, agents: false, reports: true, board: false, only_conclusions: false, workbench: false, report_steps: false, answer_new_card: false, topic_cot: true };
 
 /** What a hub from before the setting does: nudge after an hour. */
 export const DEFAULT_NUDGE_AFTER = 60;

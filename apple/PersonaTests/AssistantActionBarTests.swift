@@ -3,9 +3,9 @@ import Testing
 @testable import Persona
 import PersonaWire
 
-/// The action bar above the assistant's composer (#3393): what its two trays, Needs You and In Progress, list and count
-/// (each thing in one of them at most, finished things in neither), and its entries drawn exactly as low as the dock's
-/// capsules they replace.
+/// The action bar above the assistant's composer (#3393): what its trays, Needs You and In Progress, list and count (each
+/// thing in one of them at most, finished things in neither), what Finished lists (#10922), and its entries drawn exactly
+/// as low as the dock's capsules they replace.
 @MainActor
 struct AssistantActionBarTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -47,8 +47,15 @@ struct AssistantActionBarTests {
 
     private func ids(_ rows: [AssistantEntries.Row]) -> [String] { rows.map(\.id) }
 
-    @Test func twoEntriesOnly() {
-        #expect(ActionTray.allCases == [.needsYou, .running])
+    /// Needs You and In Progress always; Finished only while it lists something, or while its tray is open (#10922).
+    @Test func finishedIsTheThirdEntryOnlyWhileItListsSomething() {
+        #expect(ActionTray.allCases == [.needsYou, .running, .finished])
+        let empty = ActionTrayContent(split([]))
+        #expect(empty.entries(open: nil) == [.needsYou, .running])
+        #expect(empty.entries(open: .running) == [.needsYou, .running])
+        #expect(empty.entries(open: .finished) == [.needsYou, .running, .finished])
+        let finished = ActionTrayContent(split([todo("done", done: true)]))
+        #expect(finished.entries(open: nil) == [.needsYou, .running, .finished])
     }
 
     /// A task waiting for a decision or review is only in Needs You; once answered it is back in In Progress.
@@ -133,7 +140,7 @@ struct AssistantActionBarTests {
         #expect(ids(done.running) == ["agent:mac/p"])
     }
 
-    /// Finished things are in neither entry.
+    /// Finished things are in neither entry; the ones handed out in the last day are under Finished (#10922).
     @Test func finishedThingsAreInNeither() {
         let r = split([todo("done", agent: "a", done: true), todo("accepted", agent: "b", done: true, supervision: "accepted")],
                       [session("a", "idle"), session("b", "idle")],
@@ -141,11 +148,14 @@ struct AssistantActionBarTests {
         #expect(r.needsYou.isEmpty)
         #expect(r.running.isEmpty)
         #expect(r.shelved.isEmpty)
+        // the same moment: by id, as on the web and Android
+        #expect(r.finished.map(\.id) == ["task:accepted", "task:done"])
     }
 
-    /// Handed-out tasks that finished in the last day and were not opened since are a group under In Progress, newest
-    /// first and not counted (#8237); one seen since, one closed days ago and a to-do made by hand are not in it.
-    @Test func justFinishedTasksAreAnUncountedGroupUnderInProgress() {
+    /// Finished (#10922) lists the handed-out tasks that finished in the last day, seen or not, newest finished first, and
+    /// counts them; the ones nobody opened since they finished are new. One closed 24 hours ago or more, a to-do made by
+    /// hand and another conversation's work are not in it, and none of it is in Needs You or In Progress.
+    @Test func finishedListsTheLastDaySeenOrNot() {
         var older = todo("older", agent: "a", done: true)
         older.doneAt = now - 3 * 60
         let newer = todo("newer", agent: "b", done: true)
@@ -153,15 +163,26 @@ struct AssistantActionBarTests {
         seen.seenAt = now
         var stale = todo("stale", agent: "d", done: true)
         stale.doneAt = now - 48 * 3600
+        var day = todo("day", agent: "f", done: true)
+        day.doneAt = now - 24 * 3600
+        var almost = todo("almost", agent: "g", done: true)
+        almost.doneAt = now - 24 * 3600 + 1
         let byHand = todo("byHand", agent: "e", origin: "", done: true)
-        let r = split([older, newer, seen, stale, byHand], ["a", "b", "c", "d", "e"].map { session($0, "idle") })
-        #expect(ids(r.justFinished) == ["task:newer", "task:older"])
+        let r = split([older, newer, seen, stale, day, almost, byHand], ["a", "b", "c", "d", "e", "f", "g"].map { session($0, "idle") })
+        #expect(r.finished.map(\.id) == ["task:newer", "task:seen", "task:older", "task:almost"])
+        #expect(r.finished.map(\.fresh) == [true, false, true, true])
+        #expect(r.finished.first?.at == newer.doneAt)
         #expect(r.needsYou.isEmpty && r.running.isEmpty && r.shelved.isEmpty)
         let content = ActionTrayContent(r)
-        #expect(content.justFinished.map(\.id) == ["task:newer", "task:older"])
+        #expect(content.finished.map(\.id) == ["task:newer", "task:seen", "task:older", "task:almost"])
+        #expect(content.count(.finished) == 4)
         #expect(content.count(.running) == 0)
+        // opening the new one keeps it, as seen
+        var opened = newer
+        opened.seenAt = now
+        #expect(split([opened], [session("b", "idle")]).finished.map { [$0.id, "\($0.fresh)"] } == [["task:newer", "false"]])
         // another conversation lists only the finished work it handed out
-        #expect(ids(split([newer], [session("b", "idle")], conversation: "side").justFinished).isEmpty)
+        #expect(split([newer], [session("b", "idle")], conversation: "side").finished.isEmpty)
     }
 
     private func plan(_ id: String, _ state: TaskPlan.State, tasks: Int, at: Double) -> TaskPlan {
@@ -191,6 +212,7 @@ struct AssistantActionBarTests {
 
     @Test func emptyConversationCountsNothing() {
         let content = ActionTrayContent(split([]))
+        #expect(content.finished.isEmpty)
         for tray in ActionTray.allCases {
             #expect(content.rows(tray).isEmpty)
             #expect(content.count(tray) == 0)

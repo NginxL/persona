@@ -137,7 +137,11 @@ func TestIrreversibleDecisionIsOnlyRemindedAtTheDeadline(t *testing.T) {
 	if n := deadlinePushes(f, todo.ID); n != pushes+1 {
 		t.Fatalf("reminded %d times, want once", n-pushes)
 	}
-	// The owner can still take it.
+	// A day later the old round is back for rechecking, not reminded again. Re-issue it with current facts; then the
+	// owner can still take it.
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "删不删旧表", "recommend": "删掉旧表",
+		"deadline": "1h", "reversible": false})
+	a = askOf(s, todo.ID)
 	asked, _ := json.Marshal(a.AskedAt)
 	if rec := acceptAt(s, todo.ID, strings.Trim(string(asked), `"`)); rec.Code != 200 {
 		t.Fatalf("OK after the deadline: %d %s", rec.Code, rec.Body.String())

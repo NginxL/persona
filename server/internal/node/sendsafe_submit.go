@@ -170,37 +170,39 @@ const stuckPromptMessage = "消息已经打进电脑上 Claude 的输入框，�
 const guideTries = 2
 
 // afterPrompt follows a prompt typed into Claude in pane at typedAt: ensureSubmitted, then the guide check above.
-// watch reads the transcript from where it ended before the typing (nil: nothing to watch).
-func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt time.Time, watch *promptWatch) error {
+// watch reads the transcript from where it ended before the typing (nil: nothing to watch). The result reports whether
+// the final watch, including a guide retry's, actually saw the prompt; ordinary pane sends retain their legacy nil-error
+// outcomes without it, while a route that requires proof of user input can insist on it (#5965).
+func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt time.Time, watch *promptWatch) (bool, error) {
 	for try := 1; ; try++ {
 		s, err := n.ensureSubmitted(ctx, pane, text, typedAt, watch)
 		if err != nil {
-			return err
+			return false, err
 		}
 		plain := screen.Plain(s) // no screen: as before, nothing says it was lost
 		guide := screen.Guide(plain)
 		if guide == "" {
-			return nil
+			return watch.took(), nil
 		}
 		head := screen.DialogHead(plain)
 		if n.logger != nil {
 			n.logger.Printf("a guide opened in %s as a message was submitted, declining it: %s", pane, head)
 		}
 		if err := n.declineGuide(ctx, pane); err != nil {
-			return uncertain(fmt.Errorf(guideStuckMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideStuckMessage, clipDialog(head, 120)))
 		}
 		if watch.took() {
-			return nil // it went in before the guide opened
+			return true, nil // it went in before the guide opened
 		}
 		if n.transcriptPath(id) == "" || try == guideTries {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
 		}
 		s, err = n.readPaneANSI(ctx, pane, "visible", 60)
 		if err != nil {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120)))
 		}
 		if code, _ := screen.CheckClaude(s); code != "" {
-			return uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120))) // the box is not empty: not typed again
+			return false, uncertain(fmt.Errorf(guideLostMessage, clipDialog(head, 120))) // the box is not empty: not typed again
 		}
 		if n.logger != nil {
 			n.logger.Printf("the message did not reach the transcript of %s, typing it again", id)
@@ -209,9 +211,9 @@ func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt t
 		typedAt = time.Now()
 		if err := n.prompt(ctx, pane, text); err != nil {
 			if r := deliveryRefusal(err); r != nil {
-				return r
+				return false, r
 			}
-			return uncertain(err)
+			return false, uncertain(err)
 		}
 		n.typing.typed(pane, text)
 	}

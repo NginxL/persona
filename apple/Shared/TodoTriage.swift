@@ -33,7 +33,7 @@ nonisolated enum TodoSection: String, CaseIterable, Sendable {
         switch self {
         case .waiting: StateName.needsYou.text
         case .working: StateName.working.text
-        case .justDone: String(localized: "Just Finished")
+        case .justDone: StateName.justFinished.text
         case .pr: String(localized: "PR to Merge")
         case .other: String(localized: "Other Open")
         case .shelved: String(localized: "Shelved")
@@ -200,7 +200,7 @@ nonisolated enum TodoTriageLogic {
             return concern ? at(.other, .rest) : at(.done, .failedStart)
         }
         if status == .needsYou || status == .interrupted { return at(.waiting, .agentAsks) }
-        if todo.doneAt == nil, review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot" {
+        if todo.doneAt == nil, todo.delivery?.waitsForOwner == true || review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot" {
             return at(.waiting, .ownerDecides)
         }
         if status == .working { return at(.working, .agentRunning) }
@@ -219,6 +219,20 @@ nonisolated enum TodoTriageLogic {
         if finished, !concern { return at(.done, .seen) }
         if shelvable(todo, now: now, calendar: calendar), now.timeIntervalSince(last) >= shelveAfter { return at(.shelved, .stale) }
         return at(.other, .rest)
+    }
+
+    /// When a to-do the triage filed with the finished ones (Just Finished or Done) finished: the moment its rule reads
+    /// above — its close, its accepting review, its deploy — else its last move (a finished turn the owner has seen since).
+    /// The Assistant's Finished entry lists what finished less than `justDone` ago, seen or not (#10922; the web's
+    /// `finishedAt`). `distantPast` when nothing says.
+    static func finishedAt(_ todo: TodoItem, _ t: TodoTriage) -> Date {
+        switch t.rule {
+        case .closed: todo.doneAt ?? .distantPast
+        case .accepted: todo.supervision?.latestReview?.at ?? .distantPast
+        case .deployed: todo.delivery?.at ?? t.last
+        case .superseded: todo.doneAt ?? t.last
+        default: t.last
+        }
     }
 
     /// Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A

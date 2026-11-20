@@ -4,12 +4,17 @@
   "running": "This agent is running or waiting for an answer. Finish or stop it before archiving",
   "storage": "Could not save or load agent archives. Please try again",
   "upgrade": "Update the assistant to use agent archives",
-  "close_busy": "This agent is busy (working, waiting for an answer, running a loop, queued messages or a server). Archive it without closing, or wait until it is done",
+  "close_busy": "The computer reports that this agent is busy. Inspect it there and finish or stop its work safely before retrying.",
   "close_offline": "Its computer is offline, so the agent is still open there",
   "close_engine": "Its engine or another tool keeps this session, so it was left open on the computer",
   "close_not_resumable": "It could not be resumed after closing, so it was left open on the computer",
   "close_node_old": "Update Persona on that computer to close agents from here",
   "close_refused": "The computer would not close this agent, so it is still open",
   "close_failed": "Closing the agent on its computer failed, so it may still be open",
-  "close_upgrade": "Update the assistant to archive and close agents"
+  "close_upgrade": "Update the assistant to archive and close agents",
+  "waiting_recovery": "This agent is waiting at a dialog or for input; that does not necessarily mean it needs approval. Inspect it on its computer. If a read-only screen such as Settings or Status is open, dismiss it without approving anything. Let queued messages finish or explicitly cancel only the messages you intend to cancel, then exit the agent when safe and retry archiving. Nothing was approved or removed from its queue; its transcript is kept.",
+  "close_only_busy": "Closing this agent would stop its loop, queued messages or server. Archive it without close or force to keep those running, or wait until they finish.",
+  "force_unverified": "The current session state could not be verified on its computer. Reconnect the computer and retry; nothing was closed or archived.",
+  "force_question": "This agent has a pending question that force archive cannot cancel. Answer or dismiss that question, then retry; nothing was closed or archived.",
+  "force_not_blocked": "Force archive only cancels a confirmation-blocked agent. This agent is not blocked; retry ordinary archive without force. Nothing was closed or archived."
 }

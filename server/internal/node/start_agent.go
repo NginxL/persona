@@ -35,6 +35,20 @@ func launcherAgentType(name string) string {
 	return "claude"
 }
 
+// Managed wrappers need not be named after the CLI they run. An explicit type wins.
+func (n *Node) startAgentType(launcher, declared string) string {
+	if declared != "" {
+		return declared
+	}
+	if l, ok := n.managedLauncher(launcher); ok && l.AgentType() == traexAgent {
+		return traexAgent
+	}
+	if n.agentKindOf(launcher, "") == agyAgent {
+		return agyAgent
+	}
+	return launcherAgentType(launcher)
+}
+
 func typedLaunchers(list []proto.Launcher) []agentLauncher {
 	out := make([]agentLauncher, 0, len(list))
 	seen := map[string]bool{}
@@ -92,6 +106,15 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 		existing[id] = true
 	}
 	n.mu.Unlock()
+	if kind == traexAgent && resume == "" {
+		// The host may report an old conversation before the new process claims its own.
+		for id := range n.traexThreads() {
+			existing[id] = true
+		}
+		for _, r := range rollouts(n.traexHome()) {
+			existing[r.id] = true
+		}
+	}
 	if err := n.settleShell(ctx, pane); err != nil { // the fresh shell at rest first (shellsettle.go, #2570)
 		return nil, n.startTabFailed(ctx, launch, created, ws, resume, err)
 	}
@@ -104,7 +127,7 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 	if !n.typesStartFile(launch, shells...) {
 		argShells = nil
 	}
-	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(launcher, resume, prompt, argShells...))
+	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(n.launcherCommand(launcher), resume, prompt, argShells...))
 	// Not in the agent sandbox (agentsandbox.go).
 	n.notePaneStart(launcher)
 	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentStartCommand(cmd, shellQuote, shells...), shells...) // typedstart.go
@@ -125,11 +148,16 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 		if err := n.refreshHosts(ctx); err != nil {
 			continue
 		}
+		confirmed := ""
+		if kind == traexAgent {
+			confirmed = n.traexLiveThread(pane, resume)
+		}
 		n.mu.Lock()
 		var id string
 		var agent host.Agent
 		for candidate, a := range n.agents {
 			if a.PaneID == pane && a.Agent == kind && candidate != "" &&
+				(kind != traexAgent || candidate == confirmed) &&
 				((resume == "" && !existing[candidate]) || candidate == resume) {
 				id, agent = candidate, a
 				break
@@ -148,7 +176,7 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 				continue
 			}
 		}
-		n.state.put(id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC()})
+		n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC()})
 		n.bindPane(pane, id)
 		session := n.sessionFor(id, agent)
 		session.Agent = kind

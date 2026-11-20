@@ -126,6 +126,8 @@ object PersonaIcons {
     val forkChat: PhIcon get() = PhIcons.GitBranch
     /** SF Symbol `chevron.forward`. */
     val forward: PhIcon get() = PhIcons.CaretRight
+    /** SF Symbol `arrowshape.turn.up.right`. */
+    val forwardMessage: PhIcon get() = PhIcons.ArrowBendUpRight
     /** SF Symbol `arrow.triangle.branch`. */
     val gitBranch: PhIcon get() = PhIcons.GitBranch
     /** SF Symbol `star`. */
@@ -176,6 +178,8 @@ object PersonaIcons {
     val keyboard: PhIcon get() = PhIcons.Keyboard
     /** SF Symbol `books.vertical`. */
     val knowledge: PhIcon get() = PhIcons.BookOpen
+    /** SF Symbol `map`. */
+    val knowledgeMap: PhIcon get() = PhIcons.TreeStructure
     /** SF Symbol `laptopcomputer`. */
     val laptop: PhIcon get() = PhIcons.Laptop
     /** SF Symbol `sun.max`. */
@@ -342,6 +346,8 @@ object PersonaIcons {
     val today: PhIcon get() = PhIcons.Sun
     /** SF Symbol `checklist`. */
     val todo: PhIcon get() = PhIcons.ListChecks
+    /** SF Symbol `lightbulb.2`. */
+    val topic: PhIcon get() = PhIcons.Lightbulb
     /** SF Symbol `translate`. */
     val translate: PhIcon get() = PhIcons.Translate
     /** SF Symbol `tray.and.arrow.up`. */

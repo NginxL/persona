@@ -7,5 +7,8 @@
   "container": "容器 {name}",
   "offline": "主对话 · 离线",
   "stopped": "主对话 · 已停止",
-  "last_location": "上次运行于 {location}"
+  "last_location": "上次运行于 {location}",
+  "interactive": "{harness}（交互式）",
+  "print": "{harness}（打印模式）",
+  "print_note": "交互式 Claude Code 没有启动起来：{reason}"
 }

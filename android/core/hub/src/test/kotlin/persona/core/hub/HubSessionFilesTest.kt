@@ -8,6 +8,8 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.contracts.api.SessionMoveConflictPolicy
+import persona.core.contracts.api.SessionMovedFile
 
 class HubSessionFilesTest {
     @Test fun fileAndGitRequestsEncodePathsAndAcceptEmptyAndPartialResponses() = runBlocking {
@@ -260,5 +262,32 @@ class HubSessionFilesTest {
         assertFalse(api.editsFiles("m"))
         features = setOf("git_blob", "file_edit")
         assertTrue(api.editsFiles("m"))
+    }
+
+    @Test fun movePostsOnePathAndOnlyAnExplicitConflictPolicy(): Unit = runBlocking {
+        val posts = mutableListOf<Pair<String, String>>()
+        val api = HubSessionFiles({ error("GET used for a change") }, editPost = { path, body ->
+            posts += path to body
+            val initial = posts.size == 1
+            val answer = if (initial) """{"error":"taken","code":"exists","name":"a.txt"}"""
+                else """{"moved":[{"from":"~/a.txt","to":"~/b c/a 2.txt"}]}"""
+            Response.Builder().request(Request.Builder().url("https://example.com$path").build())
+                .protocol(Protocol.HTTP_1_1).code(if (initial) 409 else 200).message("response").body(answer.toResponseBody()).build()
+        })
+        try { api.move("machine/segment", "/w", "~/a.txt", "~/b c"); fail("Expected conflict") }
+        catch (failure: HubFailure) {
+            assertEquals(409, failure.status)
+            assertEquals("exists", failure.code)
+        }
+        assertEquals(1, posts.size)
+        for (policy in listOf(SessionMoveConflictPolicy.KeepBoth, SessionMoveConflictPolicy.Replace)) {
+            assertEquals(SessionMovedFile("~/a.txt", "~/b c/a 2.txt"), api.move("machine/segment", "/w", "~/a.txt", "~/b c", policy))
+        }
+        assertEquals(List(3) { "/api/v1/machines/machine%2Fsegment/files/move" }, posts.map { it.first })
+        assertEquals(listOf(
+            """{"paths":["~/a.txt"],"cwd":"/w","dir":"~/b c"}""",
+            """{"paths":["~/a.txt"],"cwd":"/w","dir":"~/b c","conflict":"keep"}""",
+            """{"paths":["~/a.txt"],"cwd":"/w","dir":"~/b c","conflict":"replace"}""",
+        ), posts.map { it.second })
     }
 }

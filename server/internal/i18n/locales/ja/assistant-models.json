@@ -17,7 +17,7 @@
   "name_kb_moments": "社内タイムラインの関連付け",
   "name_kb_topics": "トピック別の知識ポイント",
   "name_assistant_title": "チャットのタイトル",
-  "name_assistant_route": "新しいチャットの振り分け",
+  "name_assistant_route": "新しいエージェントの担当方向",
   "name_agent_title": "エージェントのタブ名",
   "name_todo_title": "ToDo のタイトル",
   "name_meeting_title": "会議のタイトル",
@@ -38,7 +38,7 @@
   "desc_inbox_judge": "受信トレイの項目を AI分身に任せるかを判定します。",
   "desc_agent_triage": "エージェントが止まった理由を判定します。完了したのか、何かを待っているのか、あなたが必要なのか。",
   "desc_inbox_draft": "あなたが確認して送る返信を下書きします。",
-  "desc_translate": "テキストとメールを翻訳します。",
+  "desc_translate": "独立した低コストのデフォルトモデルでテキストとメールを翻訳します。",
   "desc_kb_compress": "長いチャットを圧縮し、タグを付けてナレッジに保存します。",
   "desc_kb_project": "新しく分かったことをもとに、ナレッジ内のプロジェクト記録を書き直します。",
   "desc_kb_dedupe": "ナレッジ内で実は同じものであるプロジェクトを見つけます。",
@@ -46,7 +46,7 @@
   "desc_kb_moments": "社内タイムラインの投稿を、ナレッジにある内容と関連付けます。",
   "desc_kb_topics": "知識ポイントをトピック別に整理します。",
   "desc_assistant_title": "Persona とのチャットにタイトルを付けます。",
-  "desc_assistant_route": "新しいチャットが方向に属するか、クイックチャットかを判定します。",
+  "desc_assistant_route": "新しいエージェントをどの方向で監督するか提案します。",
   "desc_agent_title": "エージェントの作業内容からタブ名を付けます。",
   "desc_todo_title": "タスクの ToDo にタイトルを付けます。",
   "desc_meeting_title": "録音中に、話した内容から会議やメモにタイトルを付けます。",
@@ -145,5 +145,8 @@
   "err_candidates_extension_only": "候補モデルを持てるのは拡張機能の用途だけです",
   "err_candidates_invalid": "候補モデル：「extension」「off」「custom」のいずれかを選び、「custom」のときだけプロバイダーとモデルを重複なく並べてください",
   "err_candidates_count": "候補モデル：1〜{most} 個並べてください",
-  "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください"
+  "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください",
+  "candidate_not_offered": "設定済みのモデルプロバイダーはこのモデルを提供していません",
+  "candidate_not_direct": "プロバイダー {provider} は直接呼び出せません",
+  "candidate_provider_gone": "プロバイダー {provider} は削除されたか、直接呼び出せません"
 }

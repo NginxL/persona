@@ -1,8 +1,9 @@
 import { t } from "../i18n";
-import type { AgentGroup, AgentMutes } from "./agent-groups";
+import { splitAgentSessions, type AgentGroup, type AgentMutes } from "./agent-groups";
 import { repoOf } from "./agent-repos";
 import { backgroundWaiting, stateOf } from "./format";
-import { buildTodoAgentGroups, interruptedAgent, todoStatus, todoStatusLabel, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { buildTodoAgentGroups, interruptedAgent, makeSessionLookup, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { todoLook, waitOf, type WaitReason } from "./todo-wait-reason";
 import { usageLimitAgent } from "./usage-limit";
 import type { Machine, Session } from "./types";
 import { stateName } from "./state-labels";
@@ -36,9 +37,12 @@ export interface TreeTodo {
   todoId?: string;
   name: string;
   status?: TodoStatus;
-  /** A to-do's state in the To-dos page's word (todoStatusLabel), said in place of `state`'s, so the two pages agree
-   *  (#6458: a to-do waiting on CI read "Done" here and "Waiting" there). `state` still ranks, folds and colors it. */
+  /** A to-do's state in the To-dos page's word (todoLook), said in place of `state`'s, so the two pages agree
+   *  (#6458: a to-do waiting on CI read "Done" here and "Waiting" there). `state` still ranks, folds and colors it, but
+   *  for a waiting one's word (#11090): attention on the owner, neutral otherwise (`wait`). */
   statusLabel?: string;
+  /** What it waits on while its status is Waiting (#11090, lib/todo-wait-reason.ts waitOf). */
+  wait?: WaitReason;
   state: TreeState;
   /** A task of the direction tree (#4352): its state as the hub decided it, shown in place of `state`'s word. */
   taskState?: DirectionTaskState;
@@ -215,6 +219,8 @@ const LOOSE_GROUPS = [
  */
 export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[], mutes?: AgentMutes, now = Date.now(), { keepEmpty = false }: { keepEmpty?: boolean } = {}): TodoTree {
   const groups = buildTodoAgentGroups(all, machines, todos, mutes);
+  // the sessions its groups' statuses were read from, for what a waiting one waits on
+  const lookup = makeSessionLookup(splitAgentSessions(all, machines).live);
   const byId = new Map(todos.map((td) => [td.id, td]));
   const tree: TreeTodo[] = [];
   const loose = new Map<string, AgentGroup>();
@@ -226,12 +232,14 @@ export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[]
     const todo = byId.get(g.todoId);
     const status = g.todoStatus as TodoStatus | undefined;
     const state = status ? todoTreeState(status, g.sessions) : worst(g.sessions.map(agentTreeState));
+    const wait = todo && status ? waitOf(todo, status, lookup) : undefined;
     tree.push({
       key: `todo-tree:todo:${g.todoId}`,
       todoId: g.todoId,
       name: g.name,
       status,
-      ...(todo && status && { statusLabel: todoStatusLabel(todo, status) }),
+      ...(todo && status && { statusLabel: todoLook(todo, status, wait).label }),
+      ...(wait && { wait }),
       state,
       agents: nestAgents(g.sessions, todo, now),
       sessions: g.sessions,

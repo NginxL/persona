@@ -15,6 +15,7 @@ import { conversationModelPath, dropConversationPick } from "../../lib/assistant
 import { modelSupportsFast } from "../../lib/launcher-models";
 import { useChosenManager } from "../../lib/manager-choice";
 import type { PanelConfig } from "../../lib/model-panel";
+import { usePanelQuotas } from "../../lib/panel-quotas";
 import { TYPED_MODELS_FEATURE } from "../../lib/model-id";
 import { providerTitle } from "../../lib/provider-names";
 import { speedStep } from "../../lib/session-panel";
@@ -178,6 +179,8 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   const row = providers.find((p) => p.id === setup.provider)?.models?.find((m) => m.id === state.current?.model);
   const named = [launcher ? providerTitle(launcher) : setup.provider, row?.name].filter(Boolean).join(" · ");
 
+  const quotas = usePanelQuotas(mid, providers, info?.launchers);
+
   return (
     <ModelPanel
       anchor={anchor}
@@ -185,6 +188,7 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
       providers={providers}
       state={state}
       scope="assistant"
+      quotas={quotas}
       onPick={onPick}
       onApplyCurrent={onApplyCurrent}
       onReload={onReload}

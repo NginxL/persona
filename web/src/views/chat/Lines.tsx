@@ -71,7 +71,7 @@ function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, 
           live={line.live}
           mid={mid}
           sid={sid}
-          streaming={line.live ? streaming : undefined}
+          streaming={streaming}
           batchedWords={!assistant}
           expandFold={expandFold}
           offscreen={offscreen}
@@ -119,7 +119,7 @@ function SupervisionLine({ line, ...props }: LineProps & { line: Extract<ChatLin
         <Icon name="chevronRight" size={14} className="shrink-0" style={{ transform: open ? "rotate(90deg)" : undefined }} />
       </button>
       {open && <div className="flex min-w-0 flex-col gap-3 border-l-2 border-tool-rail pl-3" data-supervision-trace>
-        {line.lines.map((child) => <LineBody key={child.id} {...props} line={child} trace />)}
+        {line.lines.map((child) => <LineBody key={child.id} {...props} line={child} streaming={child === line.lines.at(-1) || (child.kind === "segment" && child.live) ? props.streaming : undefined} trace />)}
       </div>}
     </section>
   );

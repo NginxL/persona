@@ -71,7 +71,7 @@ struct ComputerSection: View {
             oneTap = ScreenUnlock.isOn(ref)
             if model.screenOpen == nil, online, shown.enabled { await refresh() }
         }
-        .confirmationDialog("Turn On \(Self.oneTapTitle)?", isPresented: $askOneTap, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Turn On \(Self.oneTapTitle)?", isPresented: $askOneTap, titleVisibility: .visible, hasCancel: true) {
             Button(String(localized: "action.turnOn", defaultValue: "Turn On")) {
                 ScreenUnlock.set(true, for: ref)
                 oneTap = true
@@ -319,7 +319,7 @@ struct ComputerSection: View {
         .disabled(saving)
         .accessibilityIdentifier("computer-no-lock")
         .padding(.top, Theme.Space.xs)
-        .confirmationDialog("Turn On “Don't Auto-Lock While On”?", isPresented: $askNoLock, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Turn On “Don't Auto-Lock While On”?", isPresented: $askNoLock, titleVisibility: .visible, hasCancel: true) {
             Button(String(localized: "action.turnOn", defaultValue: "Turn On")) { Task { await setNoLock(true) } }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -358,7 +358,7 @@ struct ComputerSection: View {
         .disabled(saving)
         .accessibilityIdentifier("computer-x264")
         .padding(.top, Theme.Space.xs)
-        .confirmationDialog("Turn On x264 for the Live Screen?", isPresented: $askX264, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Turn On x264 for the Live Screen?", isPresented: $askX264, titleVisibility: .visible, hasCancel: true) {
             Button(String(localized: "action.turnOn", defaultValue: "Turn On")) { Task { await setX264(true) } }
             Button("Cancel", role: .cancel) {}
         } message: {

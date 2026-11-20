@@ -136,8 +136,8 @@ func (s *Service) sweepWaitingDecisions(now time.Time) {
 		a := held[id]
 		why := waitOver(&a, briefed, now)
 		t, ok := s.todoNow(id)
-		if why == "" || !ok || acceptAskEnded(&a, t) || acceptAskStale(&a, t) {
-			continue // it still waits, or it is over: nothing to push
+		if why == "" || !ok || acceptAskEnded(&a, t) || acceptAskStale(&a, t) || !a.RecheckAt.IsZero() {
+			continue // it still waits, is over, or is back with its supervisor for fresh facts
 		}
 		dismissed, err := s.decisionDismissed(ctx, t)
 		if err != nil {

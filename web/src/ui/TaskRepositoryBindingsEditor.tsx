@@ -1,11 +1,13 @@
 // Repositories and their Issue/PR links: the to-do detail shows them as rows (the Agent keeps this store), and editing
 // opens a dialog. The store is metadata only: nothing here creates folders or moves a task's stage.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRepositoryRequestContext as useRequestContext } from "../lib/use-repository-request-context";
 import { t } from "../i18n";
 import { ApiError, errorText } from "../lib/api";
 import {
   cleanRepositoryDraft, isExtensionProvider, loadRepositoryCatalog, loadTaskRepositories, repositoryDraft, repositoryLinkKindLabel,
-  repositoryLinkView, repositoryProviderName, repositoryRequestContext, saveTaskRepositories, validRepositoryAlias,
+  repositoryLinkView, repositoryProviderName, saveTaskRepositories, validRepositoryAlias,
+  validRepositoryDraft, validRequestedRef, repositoryDuplicateLink,
   type CreateRepositoryBindings, type RepositoryCatalog, type RepositoryRequestContext, type RepositoryLinkInput, type RequestedRef,
   type RepositoryLinkLabel, type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositoryLink, type TaskRepositorySet,
 } from "../lib/task-repositories";
@@ -15,14 +17,6 @@ import { Button, Collapse, Dialog, IconButton, Loading, Menu, toast, useMenu } f
 import { Icon } from "./icons";
 import { RepositoryMark } from "./RepositoryMark";
 import { SearchField } from "./SearchField";
-
-function useRequestContext(manager: string, owner: string) {
-  const alive = useRef(true);
-  const identity = useRef("");
-  identity.current = `${manager}:${owner}`;
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  return useMemo(() => repositoryRequestContext(manager, owner, () => alive.current && identity.current === `${manager}:${owner}`), [manager, owner]);
-}
 
 const hostOf = (identity: RepositoryIdentity) => { try { return new URL(identity.instance_url).host; } catch { return identity.instance_url; } };
 const linkTag = (identity: RepositoryIdentity, view: RepositoryLinkView) => `${identity.provider === "gitlab" && view.kind === "pull_request" ? "!" : "#"}${view.number}`;
@@ -133,15 +127,16 @@ function AddLink({ identity, links, saved, pending, unavailable, onAdd }: {
 }
 
 /** One repository being edited: its row, its links, and the source options most people never open. */
-function RepositoryDraftRow({ row, entry, saved, pending, onChange, onRemove }: {
+function RepositoryDraftRow({ row, entry, saved, pending, duplicateAlias, onChange, onRemove }: {
   row: TaskRepositoryInput; entry?: RepositoryCatalog["repositories"][number]; saved?: TaskRepository; pending?: boolean;
-  onChange: (patch: Partial<TaskRepositoryInput>) => void; onRemove: () => void;
+  duplicateAlias?: boolean; onChange: (patch: Partial<TaskRepositoryInput>) => void; onRemove: () => void;
 }) {
   const menu = useMenu();
   const identity = saved?.source_snapshot.identity ?? entry;
   const ref = row.requested_ref ?? { kind: "default" };
   const links = row.links ?? [];
   const aliasValid = validRepositoryAlias(row.directory_alias ?? "");
+  const refValid = validRequestedRef(ref);
   if (!identity) return null;
   const name = entry && entry.canonical_url === identity.canonical_url ? entry.name || identity.path : identity.path;
   const source = extensionSource(identity, saved?.source_snapshot.provider_name ?? entry?.provider_name, saved?.provider_state);
@@ -179,6 +174,7 @@ function RepositoryDraftRow({ row, entry, saved, pending, onChange, onRemove }: 
             onChange={(e) => onChange({ directory_alias: e.target.value })} />
         </label>
         {!aliasValid && <p role="alert" className="text-red">{t("task-repositories.alias_invalid")}</p>}
+        {aliasValid && duplicateAlias && <p role="alert" className="text-red">{t("task-repositories.alias_duplicate")}</p>}
         <label className="block">{t("task-repositories.source")}
           <select className={`${settingsInputClass} mt-1 min-h-11`} value={ref.kind} disabled={pending}
             onChange={(e) => onChange({ requested_ref: e.target.value === "default" ? { kind: "default" } : { kind: "branch", value: "" } })}>
@@ -188,9 +184,10 @@ function RepositoryDraftRow({ row, entry, saved, pending, onChange, onRemove }: 
           </select>
         </label>
         {ref.kind !== "default" && <label className="block">{t("task-repositories.ref_value")}
-          <input className={`${settingsInputClass} mt-1 min-h-11`} value={ref.value} disabled={pending}
+          <input className={`${settingsInputClass} mt-1 min-h-11`} value={ref.value} aria-invalid={!refValid} disabled={pending}
             onChange={(e) => onChange({ requested_ref: { kind: ref.kind, value: e.target.value } as RequestedRef })} />
         </label>}
+        {ref.kind !== "default" && !refValid && <p role="alert" className="text-red">{t("task-repositories.ref_invalid")}</p>}
       </div>
     </details>
   </Group>;
@@ -249,6 +246,11 @@ export type TaskRepositoryBindingsEditorProps = { catalog: RepositoryCatalog; va
 export function TaskRepositoryBindingsEditor({ catalog, value, snapshots = [], pending, onChange }: TaskRepositoryBindingsEditorProps) {
   const latest = useRef({ value, pending });
   latest.current = { value, pending };
+  const aliasCounts = new Map<string, number>();
+  for (const row of value) {
+    const key = row.directory_alias?.toLowerCase();
+    if (key) aliasCounts.set(key, (aliasCounts.get(key) ?? 0) + 1);
+  }
   const remove = (index: number) => {
     const removed = value[index];
     onChange(value.filter((_, i) => i !== index));
@@ -264,6 +266,7 @@ export function TaskRepositoryBindingsEditor({ catalog, value, snapshots = [], p
     {value.map((row, index) => <Fragment key={row.repo_id}>
       <RepositoryDraftRow row={row} entry={catalog.repositories.find((r) => r.id === row.repo_id)}
         saved={snapshots.find((r) => r.repo_id === row.repo_id)} pending={pending}
+        duplicateAlias={!!row.directory_alias && (aliasCounts.get(row.directory_alias.toLowerCase()) ?? 0) > 1}
         onChange={(patch) => onChange(value.map((r, i) => i === index ? { ...r, ...patch } : r))}
         onRemove={() => remove(index)} />
     </Fragment>)}
@@ -295,6 +298,12 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [unsupported, setUnsupported] = useState(false);
+  const identities = useMemo(() => {
+    const map = new Map<string, RepositoryIdentity>();
+    for (const entry of catalog?.repositories ?? []) map.set(entry.id, entry);
+    for (const row of saved?.repositories ?? []) map.set(row.repo_id, row.source_snapshot.identity);
+    return map;
+  }, [catalog, saved]);
   const lock = useRef(false);
   const loads = useRef(0);
   const editingNow = useRef(editing);
@@ -417,11 +426,13 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
   };
   const save = async () => {
     if (lock.current || !saved || !catalog || !context.isCurrent()) return;
+    const clean = cleanRepositoryDraft(draft);
+    if (!validRepositoryDraft(clean, identities, saved.repositories)) return;
     lock.current = true;
     const busy = beginBusy();
     setError("");
     try {
-      const result = await saveTaskRepositories(context, todoId, saved.revision, catalog.catalog_revision, cleanRepositoryDraft(draft));
+      const result = await saveTaskRepositories(context, todoId, saved.revision, catalog.catalog_revision, clean);
       if (!context.isCurrent()) return;
       setSaved(result); setDraft(repositoryDraft(result.repositories)); setEditing(false);
       toast(t("task-repositories.saved"), "ok");
@@ -429,7 +440,9 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
     finally { lock.current = false; endBusy(busy); }
   };
   const repositories = saved?.repositories ?? [];
-  const dirty = !!saved && JSON.stringify(cleanRepositoryDraft(draft)) !== JSON.stringify(repositoryDraft(saved.repositories));
+  const cleanDraft = cleanRepositoryDraft(draft);
+  const duplicateLinks = repositoryDuplicateLink(cleanDraft, identities, saved?.repositories);
+  const dirty = !!saved && JSON.stringify(cleanDraft) !== JSON.stringify(repositoryDraft(saved.repositories));
   if (unsupported && !legacyPRs.length) return null;
   return <section className="mt-6" data-todo-repositories>
     <Group title={t("task-repositories.section")} right={!unsupported &&
@@ -469,10 +482,11 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
     <Dialog open={editing} onClose={() => { if (!busy) setEditing(false); }} title={t("task-repositories.manage")} width={480}
       footer={<>
         <Button disabled={busy} onClick={() => setEditing(false)}>{t("common.cancel")}</Button>
-        <Button tone="primary" busy={busy} disabled={!catalog || !dirty || !draft.every((r) => validRepositoryAlias(r.directory_alias ?? ""))} onClick={() => void save()}>{t("common.save")}</Button>
+        <Button tone="primary" busy={busy} disabled={!catalog || !dirty || !validRepositoryDraft(cleanDraft, identities, saved?.repositories)} onClick={() => void save()}>{t("common.save")}</Button>
       </>}>
       <p className="mb-4 text-submeta leading-relaxed text-ink-3">{t("task-repositories.hint")}</p>
       {catalog && <TaskRepositoryBindingsEditor catalog={catalog} value={draft} snapshots={saved?.repositories} pending={busy} onChange={setDraft} />}
+      {!validRepositoryDraft(cleanDraft, identities, saved?.repositories) && <p role="alert" className="mt-3 text-submeta text-red">{t(duplicateLinks ? "task-repositories.duplicate_link" : "task-repositories.save_invalid")}</p>}
       {busy && !catalog && <Loading />}
       {error && <div className="mt-3 space-y-2">
         <p role="alert" className="text-submeta text-red">{error}</p>
@@ -483,8 +497,9 @@ function TodoRepositoryBindingsSession({ manager, owner, todoId, legacyPRs = [],
 }
 
 /** Creation remains one POST: the parent sends this optional controlled draft. */
-export function NewTodoRepositoryBindings({ context, value, onChange, pending }: {
+export function NewTodoRepositoryBindings({ context, value, onChange, pending, onCatalog }: {
   context: RepositoryRequestContext; value?: CreateRepositoryBindings; onChange: (value: CreateRepositoryBindings | undefined) => void; pending: boolean;
+  onCatalog?: (catalog: RepositoryCatalog) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [catalog, setCatalog] = useState<RepositoryCatalog>();
@@ -493,8 +508,10 @@ export function NewTodoRepositoryBindings({ context, value, onChange, pending }:
   const load = async () => {
     if (busy || !context.isCurrent()) return;
     setBusy(true); setError("");
-    try { const result = await loadRepositoryCatalog(context); if (context.isCurrent()) setCatalog(result); }
-    catch { if (context.isCurrent()) setError(t("task-repositories.failed")); }
+    try {
+      const result = await loadRepositoryCatalog(context);
+      if (context.isCurrent()) { setCatalog(result); onCatalog?.(result); }
+    } catch { if (context.isCurrent()) setError(t("task-repositories.failed")); }
     finally { if (context.isCurrent()) setBusy(false); }
   };
   const rows = value?.repositories ?? [];

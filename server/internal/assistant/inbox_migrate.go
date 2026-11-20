@@ -315,7 +315,7 @@ func (s *Service) replyMigrated(ctx context.Context, r inboxReplyReq) (bool, err
 			clientID = namedClientID(r.id + "\n" + r.text)
 		}
 		b.mu.Lock()
-		sent := r.once.repeated(r.live, clientID)
+		sent := !suggestionSendOnly(ctx) && r.once.repeated(r.live, clientID)
 		b.mu.Unlock()
 		if sent {
 			return true, nil

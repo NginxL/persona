@@ -66,7 +66,7 @@ func TestSkillImportBrowserHarness(t *testing.T) {
 			}
 			apierr.WriteJSON(w, map[string]bool{"stopped": true})
 		case "/api/v1/skills":
-			apierr.WriteJSON(w, map[string]any{"machine": "Example computer", "skills": assistantskills.List(assistantskills.UserDir(), nil)})
+			apierr.WriteJSON(w, map[string]any{"machine": "Example computer", "skills": assistantskills.List(assistantskills.UserDir(), assistantskills.Selection{})})
 		case "/api/v1/skills/import":
 			r.Header.Set(RoleHeader, roleFull)
 			s.ServeHTTP(w, r)

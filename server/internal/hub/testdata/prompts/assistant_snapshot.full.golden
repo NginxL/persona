@@ -5,7 +5,6 @@
 - Agents：需要你 1 个，完成未看 1 个，工作中 10 个（详情用 agents_list）
   - 需要你：修登录（server，session_id=aaaaaaaa，链接 http://hub.example.com:18660/s/server/aaaaaaaa-1111）
   - 完成未看：写文档（server，session_id=bbbbbbbb，链接 http://hub.example.com:18660/s/server/bbbbbbbb-2222）
-  - 工作中：示例空间 › 测试「跑测试」；wa；wb；wc；wd；we；wf；wg 等 10 个
 - iPhone：App 不在前台，phone_* 工具会先尝试在后台唤醒 App，失败就请用户打开 App；要手机确认的写操作可以带 queue_if_offline 先排队（phone_write_queue_list 查看）
 - 知识库（kb_get 看详情）：
   重点项目（知识库 projects/）：

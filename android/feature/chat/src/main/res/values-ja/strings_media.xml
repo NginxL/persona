@@ -18,4 +18,5 @@
     <string name="chat_share_card_share_text">テキストを共有</string>
     <string name="chat_share_card_light">ライト</string>
     <string name="chat_share_card_dark">ダーク</string>
+    <string name="chat_reply_image_original">元の画像を開く</string>
 </resources>

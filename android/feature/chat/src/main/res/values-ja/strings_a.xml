@@ -111,8 +111,8 @@
     <string name="chat_answered_separator">、</string>
     <string name="chat_answered_labeled">%1$s：%2$s</string>
     <string name="chat_answered_mode_accept_edits">編集を自動承認</string>
-    <string name="chat_answered_mode_bypass">すべて許可</string>
-    <string name="chat_answered_mode_default">毎回確認</string>
+    <string name="chat_answered_mode_bypass">フルアクセス</string>
+    <string name="chat_answered_mode_default">デフォルト権限</string>
     <string name="chat_context_ai_edit">AIで修正</string>
     <string name="chat_context_linked">関連コンテキスト</string>
     <string name="chat_context_web_selection">Webページの選択範囲</string>
@@ -273,11 +273,11 @@
     <string name="chat_tasks_collapsed">折りたたみ済み</string>
     <string name="chat_tasks_open_task">タスクを開く</string>
     <string name="chat_tasks_answered_default">回答済み</string>
-    <string name="chat_tasks_permission_accept_edits">ファイル編集可</string>
-    <string name="chat_tasks_permission_plan">先にプラン</string>
-    <string name="chat_tasks_permission_auto">自動判断</string>
-    <string name="chat_tasks_permission_bypass">すべて許可</string>
-    <string name="chat_tasks_permission_default">毎回確認</string>
+    <string name="chat_tasks_permission_accept_edits">編集を自動承認</string>
+    <string name="chat_tasks_permission_plan">計画モード</string>
+    <string name="chat_tasks_permission_auto">自動レビュー</string>
+    <string name="chat_tasks_permission_bypass">フルアクセス</string>
+    <string name="chat_tasks_permission_default">デフォルト権限</string>
     <plurals name="chat_tasks_plan_started">
         <item quantity="other">✓ %1$d件のタスクを開始</item>
     </plurals>
@@ -291,6 +291,8 @@
     </plurals>
     <string name="chat_tasks_plan_single">この内容で開始</string>
     <string name="chat_tasks_default_model">デフォルトモデル</string>
+    <string name="chat_tasks_preset">プリセット %1$s</string>
+    <string name="chat_tasks_launcher_preset">%1$s · %2$s</string>
     <string name="chat_tasks_read_only">読み取り専用を要求</string>
     <string name="chat_tasks_plan_remember">今後このフォルダ以下はすぐに開始</string>
     <plurals name="chat_tasks_plan_start_count">

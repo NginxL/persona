@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -169,6 +171,11 @@ func (s *Service) deleteConversation(ctx context.Context, machine, id string) er
 	cfg := s.settings(ctx)
 	if cfg.Main == id || s.isBackground(ctx, id) {
 		return &rpc.Error{Code: "conversation_protected", Message: i18n.T(s.lang(ctx), "assistant-conversation_delete.protected")}
+	}
+	if slices.Contains(cfg.Leaders, id) {
+		// A current direction's lead conversation (#11392): unpinning it (…/end) ends the direction, after which it
+		// deletes as any other conversation.
+		return &rpc.Error{Code: "conversation_protected", Message: i18n.T(s.lang(ctx), "assistant-conversation_delete.lead_protected")}
 	}
 	c, found := s.session(ctx, machine, id)
 	if !found || !c.Assistant {
@@ -332,7 +339,11 @@ func (s *Service) writeConversationJSON(ctx context.Context, w http.ResponseWrit
 }
 
 func conversationWrite(method string) bool {
-	return method == "assistant.send" || method == "session.send" || method == "session.start" || method == "session.resume" || method == "session.fork" || method == "session.rewind"
+	switch method {
+	case "assistant.send", "session.send", DeviceSessionSendOnce, "session.start", "session.resume", "session.fork", "session.rewind", assistantwire.DeviceAssistantAnswerAgain:
+		return true
+	}
+	return false
 }
 
 // Check every referenced identity: a resume may name both a new session id and

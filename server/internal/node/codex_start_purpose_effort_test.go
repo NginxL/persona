@@ -141,7 +141,10 @@ func TestCodexEffortInheritedChecksTheLaunchEnvironment(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}
-	n, home := testNode(t)
+	n, outer := testNode(t)
+	home := mkdir(t, filepath.Join(outer, "home"))
+	n.home = home
+	writeFile(t, filepath.Join(outer, ".codex", "config.toml"), "model_reasoning_effort = \"low\"\n")
 	t.Setenv("HOME", home)
 	t.Setenv("ZDOTDIR", home)
 	t.Setenv("SHELL", "/bin/bash")
@@ -153,6 +156,8 @@ fi
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_reasoning_effort = \"high\"\n")
 	codexOnPath(t, home)
 	cwd := mkdir(t, filepath.Join(home, "repo"))
+	// Keep ancestor config outside this checkout's launch-environment check.
+	writeFile(t, filepath.Join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n")
 	for _, on := range []bool{false, true} {
 		argv := []string{"codex"}
 		if on {

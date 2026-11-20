@@ -3,6 +3,7 @@ package kb
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -112,6 +113,24 @@ func (s *Store) putEntity(kind, id string, v any, t *Tagging, manual bool) (err 
 		return nil
 	} // forgotten during an external call
 	incoming := protectedEntity(v, t, current, manual)
+	if kind == KindProject && exists {
+		// Only a digest commit or a summary write can change the field records.
+		// Other project writers may have read their copy while a digest was running.
+		keys := []string{"field_coverage", "one_line_needs_summary_review", "one_line"}
+		if !manual {
+			keys = append(keys, "project_mode", "source_urls")
+			if string(current["project_mode"]) == `"reference-only"` {
+				keys = append(keys, "goal", "my_role", "note", "keywords", "status", "kind")
+			}
+		}
+		for _, key := range keys {
+			if value, ok := current[key]; ok {
+				incoming[key] = value
+			} else {
+				delete(incoming, key)
+			}
+		}
+	}
 	before, _ := json.Marshal(current)
 	after, _ := json.Marshal(incoming)
 	changed = !exists || !bytes.Equal(before, after)
@@ -177,7 +196,7 @@ func protectedEntity(v any, t *Tagging, current map[string]json.RawMessage, manu
 		raw, _ := json.Marshal(current)
 		_ = json.Unmarshal(raw, &protected)
 		if !manual {
-			for _, field := range append([]string{"pinned", "locked_fields", "locked", "provenance"}, protected.LockedFields...) {
+			for _, field := range append([]string{"pinned", "locked_fields", "locked", "provenance", "excluded"}, protected.LockedFields...) {
 				key := fieldKey(field)
 				if value, ok := current[key]; ok {
 					incoming[key] = value
@@ -194,12 +213,24 @@ func protectedEntity(v any, t *Tagging, current map[string]json.RawMessage, manu
 					}
 				}
 			}
+			// The links the user removed stay out; the rest of each list is the write's (exclude.go).
+			for list, ids := range protected.Excluded {
+				var have []string
+				if raw, ok := incoming[list]; !ok || json.Unmarshal(raw, &have) != nil {
+					continue
+				}
+				if kept := removeStrings(have, ids); len(kept) == 0 {
+					delete(incoming, list)
+				} else if len(kept) != len(have) {
+					incoming[list], _ = json.Marshal(kept)
+				}
+			}
 		}
 	}
 	return incoming
 }
 
-func (s *Store) putSummary(kind, id, text string, manual bool) error {
+func (s *Store) putSummary(kind, id, text string, manual bool, writer ...string) error {
 	if s.readOnly {
 		return ErrReadOnly
 	}
@@ -220,11 +251,16 @@ func (s *Store) putSummary(kind, id, text string, manual bool) error {
 	var t struct {
 		Tagging
 		Status string `json:"status"`
+		Mode   string `json:"project_mode"`
 	}
 	exists, err := readJSON(s.entityPath(kind, id), &t)
 	if err != nil {
 		unlock()
 		return err
+	}
+	if kind == KindProject && t.Mode == referenceOnly {
+		unlock()
+		return fmt.Errorf("%w: cannot save summary", ErrReferenceOnly)
 	}
 	if !manual && (!exists || t.fieldLocked("summary") || (kind == KindPerson && t.Status == "ignored")) {
 		unlock()
@@ -237,9 +273,30 @@ func (s *Store) putSummary(kind, id, text string, manual bool) error {
 	if changed {
 		err = writeFile(path, next)
 	}
+	metaChanged := false
+	if err == nil && changed && kind == KindProject {
+		if p, ok := s.Project(id); ok {
+			if len(writer) > 0 {
+				p.recordProjectField("summary", string(next), writer[0], "kb.update", nil)
+			} else {
+				delete(p.FieldCoverage, "summary")
+			}
+			if p.OneLine != "" && (len(writer) > 0 || len(old) > 0) {
+				p.OneLineNeedsReview = true
+				if len(writer) > 0 && !p.fieldLocked("one_line") {
+					p.Dirty = true
+				}
+			}
+			err = writeJSON(s.entityPath(kind, id), p)
+			metaChanged = err == nil
+		}
+	}
 	unlock()
 	if err == nil && changed {
 		s.notify(kind, id, "summary")
+	}
+	if metaChanged {
+		s.notify(kind, id, "metadata")
 	}
 	return err
 }
@@ -248,7 +305,7 @@ func removeStrings(list, remove []string) []string {
 	return slices.DeleteFunc(slices.Clone(list), func(v string) bool { return slices.Contains(remove, v) })
 }
 
-func protectUpdate(u Update, t *Tagging) {
+func protectUpdate(u Update, t *Tagging, le linkEdit) {
 	fields := []string{}
 	for key, set := range map[string]bool{
 		"name": u.Name != "", "project_kind": u.Kind != "", "status": u.Status != "", "goal": u.Goal != "", "my_role": u.MyRole != "", "note": u.Note != "", "summary": u.Summary != "",
@@ -260,7 +317,7 @@ func protectUpdate(u Update, t *Tagging) {
 		}
 	}
 	for _, field := range fields {
-		if u.Lock == nil || *u.Lock {
+		if le.locks(u, field) {
 			t.LockedFields = addUnique(t.LockedFields, field)
 		}
 	}
@@ -270,82 +327,130 @@ func protectUpdate(u Update, t *Tagging) {
 	}
 }
 
-// unlink removes the reverse side of explicit removals; it never deletes an entity.
-func (e *Engine) unlink(kind, id string, u Update) error {
+// unlink removes the reverse side of explicit removals, and of the user's, keeps the links out of automatic writes
+// there too (exclude.go); it never deletes an entity. It also lifts the reverse side of what the user allowed again.
+func (e *Engine) unlink(kind, id string, u Update, le linkEdit) error {
 	lock := func(t *Tagging, field string) {
-		if u.Lock == nil || *u.Lock {
+		if le.lockLists {
 			t.LockedFields = addUnique(t.LockedFields, field)
 		}
 	}
+	allowed := func(list, other string) bool { return slices.Contains(le.allow[list], other) }
+	person := func(pid string, edit func(p *Person)) error {
+		p, _, err := e.Store.updatePerson(pid, true, nil, func(p *Person) bool {
+			edit(p)
+			return true
+		})
+		if err == nil && p != nil {
+			e.WritePersonSummary(p.ID)
+		}
+		return err
+	}
+	chat := func(cid string, edit func(c *Chat)) error {
+		_, _, err := e.Store.editChat(cid, edit)
+		return err
+	}
 	if kind == KindProject {
 		for _, pid := range u.RemovePeople {
-			p, _, err := e.Store.updatePerson(pid, true, nil, func(p *Person) bool {
+			if err := person(pid, func(p *Person) {
 				p.Projects = removeStrings(p.Projects, []string{id})
 				lock(&p.Tagging, "projects")
-				return true
-			})
-			if err != nil {
+				le.removed(&p.Tagging, "projects", id)
+			}); err != nil {
 				return err
-			}
-			if p != nil {
-				e.WritePersonSummary(p.ID)
 			}
 		}
 		for _, cid := range u.RemoveChats {
-			if _, _, err := e.Store.editChat(cid, func(c *Chat) {
+			if err := chat(cid, func(c *Chat) {
 				c.Projects = removeStrings(c.Projects, []string{id})
 				lock(&c.Tagging, "projects")
+				le.removed(&c.Tagging, "projects", id)
 			}); err != nil {
+				return err
+			}
+		}
+		for _, pid := range le.allow["people"] {
+			if err := person(pid, func(p *Person) { p.include("projects", id) }); err != nil {
+				return err
+			}
+		}
+		for _, cid := range le.allow["chats"] {
+			if err := chat(cid, func(c *Chat) { c.include("projects", id) }); err != nil {
 				return err
 			}
 		}
 	}
 	if kind == KindChat {
 		for _, pid := range u.RemovePeople {
-			p, _, err := e.Store.updatePerson(pid, true, nil, func(p *Person) bool {
+			if err := person(pid, func(p *Person) {
 				p.Chats = removeStrings(p.Chats, []string{id})
 				lock(&p.Tagging, "chats")
-				return true
-			})
-			if err != nil {
+				le.removed(&p.Tagging, "chats", id)
+			}); err != nil {
 				return err
 			}
-			if p != nil {
-				e.WritePersonSummary(p.ID)
+		}
+		for _, pid := range le.allow["people"] {
+			if err := person(pid, func(p *Person) { p.include("chats", id) }); err != nil {
+				return err
 			}
 		}
 	}
 	if kind == KindPerson {
 		for _, cid := range u.RemoveChats {
-			if _, _, err := e.Store.editChat(cid, func(c *Chat) {
+			if err := chat(cid, func(c *Chat) {
 				c.People = removeStrings(c.People, []string{id})
 				lock(&c.Tagging, "people")
+				le.removed(&c.Tagging, "people", id)
 			}); err != nil {
 				return err
 			}
 		}
-	}
-	for _, slug := range u.RemoveProjects {
-		if p, ok := e.Store.Project(slug); ok {
-			switch kind {
-			case KindChat:
-				p.Chats = removeStrings(p.Chats, []string{id})
-				lock(&p.Tagging, "chats")
-			case KindPerson:
-				p.People = removeStrings(p.People, []string{id})
-				lock(&p.Tagging, "people")
-			case KindDoc, KindMeeting, KindEvent, KindRecording:
-				p.Items = removeStrings(p.Items, []string{kind + "/" + SafeID(id)})
-				lock(&p.Tagging, "items")
-			default:
-				continue
-			}
-			if err := e.Store.putEntity(KindProject, p.Slug, p, &p.Tagging, true); err != nil {
+		for _, cid := range le.allow["chats"] {
+			if err := chat(cid, func(c *Chat) { c.include("people", id) }); err != nil {
 				return err
 			}
 		}
 	}
+	for _, slug := range append(slices.Clone(u.RemoveProjects), le.allow["projects"]...) {
+		p, ok := e.Store.Project(slug)
+		if !ok {
+			continue
+		}
+		var list, member string
+		switch kind {
+		case KindChat:
+			list, member = "chats", id
+		case KindPerson:
+			list, member = "people", id
+		case KindDoc, KindMeeting, KindEvent, KindRecording:
+			list, member = "items", kind+"/"+SafeID(id)
+		default:
+			continue
+		}
+		if allowed("projects", slug) && !slices.Contains(u.RemoveProjects, slug) {
+			p.include(list, member)
+		} else {
+			*p.list(list) = removeStrings(*p.list(list), []string{member})
+			lock(&p.Tagging, list)
+			le.removed(&p.Tagging, list, member)
+		}
+		if err := e.Store.putEntity(KindProject, p.Slug, p, &p.Tagging, true); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// list is the project's list of links by its name ("people", "chats", "items").
+func (p *Project) list(name string) *[]string {
+	switch name {
+	case "people":
+		return &p.People
+	case "chats":
+		return &p.Chats
+	}
+	return &p.Items
 }
 
 func (e *Engine) pinnedPeople(ids []string) []prompts.KBPinnedPerson {

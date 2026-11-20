@@ -1,19 +1,4 @@
 {
-  "agents": {
-    "count": 10,
-    "files": [
-      "agents/answer.md",
-      "agents/auth_relayed.md",
-      "agents/delegate.md",
-      "agents/delegate_input.md",
-      "agents/limit_continue.md",
-      "agents/peer_message.md",
-      "agents/readonly_task.md",
-      "agents/reanswer.md",
-      "agents/report_line_input.md",
-      "agents/triage_input.md"
-    ]
-  },
   "assistant": {
     "count": 56,
     "files": [
@@ -75,103 +60,27 @@
       "assistant/workspace_mention.md"
     ]
   },
-  "bot": {
-    "count": 1,
-    "files": [
-      "bot/message.md"
-    ]
-  },
-  "channel": {
-    "count": 2,
-    "files": [
-      "channel/answer_again.md",
-      "channel/message.md"
-    ]
-  },
-  "inbox": {
-    "count": 16,
-    "files": [
-      "inbox/agent.md",
-      "inbox/agent_ref.md",
-      "inbox/agent_title.md",
-      "inbox/draft_input.md",
-      "inbox/extension_context.md",
-      "inbox/folders_input.md",
-      "inbox/group_input.md",
-      "inbox/handoff.md",
-      "inbox/handoff_note.md",
-      "inbox/item.md",
-      "inbox/judge.md",
-      "inbox/judge_input.md",
-      "inbox/merge_title_input.md",
-      "inbox/settled.md",
-      "inbox/settled_input.md",
-      "inbox/tiers.md"
-    ]
-  },
-  "inbox/handling": {
-    "count": 11,
-    "files": [
-      "inbox/handling/agent_started.md",
-      "inbox/handling/agent_stopped.md",
-      "inbox/handling/check.md",
-      "inbox/handling/closed.md",
-      "inbox/handling/handback.md",
-      "inbox/handling/instructed.md",
-      "inbox/handling/new_messages.md",
-      "inbox/handling/rejected.md",
-      "inbox/handling/self_read.md",
-      "inbox/handling/self_replied.md",
-      "inbox/handling/sent.md"
-    ]
-  },
-  "inbox/kinds": {
-    "count": 4,
-    "files": [
-      "inbox/kinds/github.md",
-      "inbox/kinds/imessage.md",
-      "inbox/kinds/larkcli.md",
-      "inbox/kinds/subscription.md"
-    ]
-  },
   "kb": {
-    "count": 29,
+    "count": 13,
     "files": [
-      "kb/compress.md",
-      "kb/compress_input.md",
       "kb/day_recap_day.md",
       "kb/day_recap_input.md",
       "kb/day_recap_merge_input.md",
-      "kb/dedupe.md",
-      "kb/dedupe_input.md",
-      "kb/dedupe_side.md",
-      "kb/digest.md",
-      "kb/items.md",
-      "kb/items_input.md",
       "kb/known_projects.md",
       "kb/minutes_card.md",
       "kb/minutes_input.md",
       "kb/minutes_marks.md",
       "kb/minutes_meeting.md",
       "kb/minutes_merge_input.md",
-      "kb/moments_link.md",
-      "kb/moments_link_input.md",
-      "kb/project.md",
-      "kb/project_input.md",
       "kb/readme.md",
       "kb/recording_input.md",
       "kb/recording_title_input.md",
-      "kb/topic_distill.md",
-      "kb/topic_distill_input.md",
-      "kb/topic_merge.md",
-      "kb/topic_merge_input.md",
       "kb/topic_summary.md"
     ]
   },
   "mcp/agents": {
-    "count": 12,
+    "count": 11,
     "files": [
-      "mcp/agents/agent_send.md",
       "mcp/agents/agent_start.md",
       "mcp/agents/ask_escalate.md",
       "mcp/agents/direction_name.md",
@@ -220,25 +129,6 @@
       "mcp/voice/meeting_delegate_task.md",
       "mcp/voice/search_knowledge.md",
       "mcp/voice/send_to_agent.md"
-    ]
-  },
-  "shared": {
-    "count": 2,
-    "files": [
-      "shared/kb_blocks.md",
-      "shared/user_rules.md"
-    ]
-  },
-  "todo": {
-    "count": 7,
-    "files": [
-      "todo/decisions.md",
-      "todo/outcome.md",
-      "todo/outcome_input.md",
-      "todo/project.md",
-      "todo/thread_open.md",
-      "todo/thread_reply.md",
-      "todo/title_input.md"
     ]
   }
 }

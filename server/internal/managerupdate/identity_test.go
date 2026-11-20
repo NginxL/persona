@@ -66,6 +66,46 @@ func TestIdentityRejectsMissingOrConflictingTargetFields(t *testing.T) {
 	}
 }
 
+func TestEmptyInventoryRequiresExplicitUnassignedPlan(t *testing.T) {
+	c, p := fixture(t)
+	p = identityOnly(p)
+	stop := errors.New("ownership verification sentinel")
+	calls := 0
+	c.FileCheck = func(string, int) error { calls++; return stop }
+	before := tree(t, c.Home)
+	if _, err := c.ReadIdleEvidence(context.Background(), p, "", "", ""); err == nil || calls != 0 {
+		t.Fatalf("empty flags without an unassigned plan reached authority: calls=%d err=%v", calls, err)
+	}
+	p.Unassigned = true
+	if _, err := c.ReadIdleEvidence(context.Background(), p, "", "", ""); !errors.Is(err, stop) || calls != 1 {
+		t.Fatalf("explicit unassigned plan did not reach its own authority read: calls=%d err=%v", calls, err)
+	}
+	if !reflect.DeepEqual(before, tree(t, c.Home)) {
+		t.Fatal("empty inventory preflight wrote state")
+	}
+}
+
+func TestInventoryOnlyIdentityCannotActivate(t *testing.T) {
+	for _, change := range []func(*Plan){
+		func(p *Plan) { p.Unassigned = true },
+		func(p *Plan) { p.Main, p.MachineID, p.MachineUID = "main", "box", "uid" },
+	} {
+		_, p := fixture(t)
+		change(&p)
+		if err := p.validateShape(); err == nil {
+			t.Fatal("inventory-only identity fields were accepted in an activation plan")
+		}
+	}
+}
+
+func TestInventoryMainRequiresDeliberatelyEmptyFlags(t *testing.T) {
+	c, _ := fixture(t)
+	err := Main(context.Background(), c.Build, []string{"inventory", "--plan", "-"}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "deliberately empty") {
+		t.Fatalf("omitted identity flags were not rejected explicitly: %v", err)
+	}
+}
+
 func TestInventoryAcceptsStrictIdentityOnStdinOnly(t *testing.T) {
 	_, full := fixture(t)
 	want := identityOnly(full)

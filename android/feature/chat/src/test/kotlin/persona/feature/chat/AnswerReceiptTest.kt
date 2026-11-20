@@ -39,7 +39,7 @@ class AnswerReceiptTest {
         assertEquals("已允许：./gradlew test", sent(bash, Resolution(allow = true)))
         assertEquals("已总是允许：./gradlew test", sent(bash, Resolution(allow = true, always = true)))
         assertEquals("已拒绝：rm -rf build", sent(rm, Resolution(allow = false)))
-        assertEquals("已批准计划（自动接受编辑）：Use Kotlin", sent(plan, Resolution(approve = true, mode = "acceptEdits")))
+        assertEquals("已批准计划（允许编辑）：Use Kotlin", sent(plan, Resolution(approve = true, mode = "acceptEdits")))
         assertEquals("已打回计划：shorter", sent(plan, Resolution(approve = false, feedback = "shorter")))
         assertEquals("已回答：用 Kotlin", sent(question, Resolution(answers = mapOf("Which language?" to "用 Kotlin"))))
         assertEquals("已回答：No", sent(dialog, Resolution(option = "2")))
@@ -49,7 +49,7 @@ class AnswerReceiptTest {
     @Config(qualifiers = "zh")
     @Test fun planAndDialogSayWhatTheyWereAbout() {
         assertEquals("已批准计划：Use Kotlin", sent(plan, Resolution(approve = true)))
-        assertEquals("已批准计划（全部放行）", sent(Interaction("p0", kind = "plan"), Resolution(approve = true, mode = "bypassPermissions")))
+        assertEquals("已批准计划（完全访问）", sent(Interaction("p0", kind = "plan"), Resolution(approve = true, mode = "bypassPermissions")))
         assertEquals("已批准计划", sent(Interaction("p0", kind = "plan", plan = "\n  \n"), Resolution(approve = true, mode = "plan")))
         val long = "x".repeat(80)
         assertEquals("已批准计划：" + "x".repeat(60) + "…", sent(Interaction("p1", kind = "plan", plan = "# $long\nmore"), Resolution(approve = true)))
@@ -73,7 +73,7 @@ class AnswerReceiptTest {
     @Test fun englishAndJapaneseReadInTheirOwnWords() {
         assertEquals("Allowed: ./gradlew test", sent(bash, Resolution(allow = true)))
         assertEquals("Plan approved: Use Kotlin", sent(plan, Resolution(approve = true)))
-        assertEquals("Plan approved, auto-accept edits: Use Kotlin", sent(plan, Resolution(approve = true, mode = "acceptEdits")))
+        assertEquals("Plan approved, Auto accept edits: Use Kotlin", sent(plan, Resolution(approve = true, mode = "acceptEdits")))
         assertEquals("Answered “Do you want to make this edit to Main.kt?”: No", sent(asked, Resolution(option = "2")))
         assertEquals("Handed back to the computer", sent(bash, Resolution(dismiss = true)))
     }

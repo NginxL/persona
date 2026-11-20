@@ -356,6 +356,8 @@ struct AssistantModelChoiceTests {
         #expect(Launcher(name: "shell-claude", agent: "claude", source: "zshrc").runsAssistant)
         #expect(Launcher(name: "managed-claude", agent: "claude", source: "persona").runsAssistant)
         #expect(!Launcher(name: "managed-codex", agent: "codex", source: "persona").runsAssistant)
+        #expect(!Launcher(name: "agy", agent: "agy", source: "zshrc").runsAssistant)
+        #expect(Launcher(name: "agy", agent: "agy", assistant: true, source: "agy").runsAssistant)
         #expect(!Launcher(name: "runtime-codex", agent: "codex", source: "paseo").runsAssistant)
         #expect(!Launcher(name: "runtime-claude", agent: "claude", source: "paseo").runsAssistant)
     }

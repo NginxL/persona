@@ -479,14 +479,16 @@ public actor ScreenLinkSession {
                 pump(e.channel)
             }
         case let .close(ch, off):
+            guard chans[ch] != nil else { return }
             chans[ch]?.closeAt = off
+            out(id, .closeAck(channel: ch, offset: off))
             finishIfClosed(ch)
         case let .reset(ch, off):
             resetChannel(ch, to: off)
             if let c = chans[ch] { out(id, .ack(channel: ch, offset: c.receiver.offset)) }
         case let .udpReady(r):
             udpReady(r, from: id)
-        case .use, .attach, .ping, .unknown, .udpOpen:
+        case .use, .attach, .ping, .unknown, .udpOpen, .closeAck:
             break // the node's to receive, or a type this side doesn't know
         }
     }

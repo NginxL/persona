@@ -12,9 +12,12 @@ Sending files to your computers to keep, and between them, over the connections 
 | Phone → folder the file browser shows | `…/files?dest=dir&dir=…` | that folder ([protocol.md](protocol.md) "Changing files") |
 | Computer → phone | `GET /api/v1/machines/{mid}/file/download` (Range) | the phone |
 | Computer → computer | `POST /api/v1/files/transfer` | the target's receive folder |
+| Agent's computer → its conversation's computer (a task's file, #10511) | the assistant manager: `file.chunk` + `file.upload dest=file` | the conversation computer's `uploads/files/<date>/`, kept |
 | Computer → phone, started on the computer | not yet: needs node → hub notifications and a push; evaluated separately | |
 
 The app side (share sheet "Send to <computer>", "Send file to computer", "Save to phone / Send to another computer" in the file preview, Shortcuts) is separate work on top of these endpoints.
+
+The task-file copy (#10511) is not a person's transfer and is not gated by the switch below: the assistant manager copies a file a task's Agent handed over to the computer of the conversation that hears of the task, with the same `file.chunk` / `file.upload` RPCs the user's attachments use in the other direction, and it lands in that computer's `uploads/files/<date>/`, not the receive folder. Only files a task's Agent named in its final reply are taken, and the node's read guard refuses credentials and iCloud ([agent-work.md](../assistant/agent-work.md) "Files a task hands over").
 
 ## The switch: off until turned on
 

@@ -36,6 +36,8 @@ const (
 type AskRequest struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options,omitempty"` // none: allow / deny
+	// Format opts the question's card into rich rendering. Only "markdown" is preserved; everything else stays plain.
+	Format string `json:"format,omitempty"`
 	// TimeoutSeconds: 0 is HookTimeout.
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 	Cwd            string `json:"cwd,omitempty"` // where the caller runs: names the card when no session does
@@ -44,6 +46,10 @@ type AskRequest struct {
 // Normalize trims the question and the options (empty and repeated ones go) and says what is wrong with the request.
 func (a *AskRequest) Normalize() error {
 	a.Question = strings.TrimSpace(a.Question)
+	a.Format = strings.TrimSpace(a.Format)
+	if a.Format != "markdown" {
+		a.Format = ""
+	}
 	switch {
 	case a.Question == "":
 		return errors.New("the question is empty")

@@ -1,0 +1,390 @@
+package archguard
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// The Inbox is becoming the first vertical domain slice (docs/plans/plan-inbox-vertical-slice.md, #11309). While its
+// code moves behind a module boundary (the plan's steps S4-S9), these tests keep code from flowing the other way: no
+// other file of internal/assistant starts reaching the Inbox's in-memory state, and the central lists the moves empty
+// gain no Inbox entry. They parse source only, like the rest of archguard.
+
+const (
+	assistantDir = serverDir + "/internal/assistant"
+	inboxPlan    = "docs/plans/plan-inbox-vertical-slice.md"
+)
+
+// inboxBridge says whether a file of internal/assistant is the task bridge's (the plan's section 2): To-dos code that
+// consumes Inbox events and writes task links onto items. An inbox-prefixed file that is the bridge's is not the Inbox
+// core's. S7 renames the bridge's files out of the inbox prefix; drop the names and the prefix here then.
+func inboxBridge(name string) bool {
+	return strings.HasPrefix(name, "inbox_task_") ||
+		slices.Contains([]string{"inbox_no_output.go", "inbox_todo.go", "supervise_inbox.go", "tasks_inbox.go"}, name)
+}
+
+// inboxCore says whether a file of internal/assistant is the Inbox core's: inbox*.go, less the bridge's.
+func inboxCore(name string) bool { return strings.HasPrefix(name, "inbox") && !inboxBridge(name) }
+
+// inboxBookBridge are the bridge's files that reach the book, by name: they read items and write task links onto them
+// under the book's lock (the plan's section 3.1). S7 renames them (task_inbox_*, todo_inbox): rename the entry with its
+// file and add none. They leave the list when S9 gives the bridge the Links surface. Never add one.
+var inboxBookBridge = []string{
+	"inbox_task_links.go",
+	"inbox_task_recheck.go",
+	"inbox_todo.go",
+	"supervise_inbox.go",
+	"tasks_inbox.go",
+}
+
+// inboxBookReaders are the other files that reach the book today (the plan's section 1), each with how many places it
+// does and the seam that replaces them (the plan's section 3.1). Shrink-only: lower a count when a place goes, drop the
+// entry when the last one does, and never add an entry or raise a count.
+var inboxBookReaders = map[string]struct {
+	sites int
+	seam  string
+}{
+	"context.go":               {3, "followingInboxItems: the Reader's following items"},
+	"feishu_workbench.go":      {1, "workbenchItem: the Reader's item copy, and Actions for the workbench's writes"},
+	"origins.go":               {1, "gatherOriginEvidence: the Reader's origin evidence"},
+	"service.go":               {2, "the inbox field, and s.inbox.lang until the #8584 repair PRs land (step S4)"},
+	"tasks_draft_decisions.go": {5, "the Reader's card-send lock and item copy (deferred from step S3)"},
+}
+
+// inboxBookOpenPRs are files open PRs add that reach the book, with their counts, so that those PRs merge without
+// touching this file; review each in its PR. When its PR lands, move an entry to inboxBookReaders (a reader) or
+// inboxBookBridge (the bridge's); drop it when the PR closes or stops reaching the book.
+var inboxBookOpenPRs = map[string]struct {
+	sites int
+	seam  string
+}{
+	"outbound_messages.go":    {1, "#9782: autoSendSuggestion reads an item under the book's lock; the Reader's item copy"},
+	"tasks_inbox_existing.go": {2, "#9744: the task bridge links an existing task's item, as tasks_inbox.go does"},
+}
+
+const inboxBookHint = "reach the Inbox through a method of the Inbox core (an inbox*.go file) instead: the Reader " +
+	"(following items, an item copy, the card-send lock, origin evidence), Actions for the Lark workbench, or Policy; " +
+	"the task bridge's own reads and writes wait for S9's Links (" + inboxPlan + ", sections 3.1 and 4)"
+
+// The Inbox's in-memory state (inboxBook, the Service's inbox field) is reached only from the Inbox core, the task
+// bridge's named files and the readers' shrink-only list. Test files are out of scope: S9 moves those with a fake Host.
+func TestInboxBookStaysInTheInbox(t *testing.T) {
+	fset := token.NewFileSet()
+	files := assistantFiles(t, fset)
+	fields, funcs := inboxBookNames(slices.Collect(maps.Values(files)))
+	reached := map[string]int{}
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		sites := inboxBookSites(files[name], fields, funcs)
+		if len(sites) == 0 {
+			continue
+		}
+		reached[name] = len(sites)
+		r, reader := inboxBookReaders[name]
+		if pr, ok := inboxBookOpenPRs[name]; ok && !reader {
+			r, reader = pr, true
+		}
+		switch {
+		case inboxCore(name) || slices.Contains(inboxBookBridge, name):
+		case reader && len(sites) <= r.sites:
+		case reader:
+			for _, s := range sites {
+				t.Errorf("%s: %s reaches the Inbox's book; %s has %d such places, inboxBookReaders allows %d (%s): %s",
+					pos(fset, s.node), s.what, name, len(sites), r.sites, r.seam, inboxBookHint)
+			}
+		case inboxBridge(name):
+			for _, s := range sites {
+				t.Errorf("%s: %s reaches the Inbox's book from a task bridge file inboxBookBridge does not name: %s",
+					pos(fset, s.node), s.what, inboxBookHint)
+			}
+		default:
+			for _, s := range sites {
+				t.Errorf("%s: %s reaches the Inbox's book from outside the Inbox: %s", pos(fset, s.node), s.what, inboxBookHint)
+			}
+		}
+	}
+	for _, name := range inboxBookBridge {
+		if reached[name] == 0 {
+			t.Errorf("inboxBookBridge names %s, which no longer reaches the book (renamed or moved?): rename or drop the entry", name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(inboxBookReaders)) {
+		if r, n := inboxBookReaders[name], reached[name]; n < r.sites {
+			t.Errorf("inboxBookReaders allows %s %d places, and it has %d now: lower the count (drop the entry at zero)",
+				name, r.sites, n)
+		}
+	}
+}
+
+// assistantFiles are internal/assistant's production files, parsed, by name.
+func assistantFiles(t *testing.T, fset *token.FileSet) map[string]*ast.File {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(assistantDir, "*.go"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no files in %s: %v", assistantDir, err)
+	}
+	files := map[string]*ast.File{}
+	for _, p := range paths {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := parser.ParseFile(fset, p, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[filepath.Base(p)] = f
+	}
+	return files
+}
+
+// inboxBookNames are the package's names that hold or hand out the book: the struct fields of type inboxBook or a
+// pointer to it (the Service's inbox), and the functions and methods that return one.
+func inboxBookNames(files []*ast.File) (fields, funcs map[string]bool) {
+	fields, funcs = map[string]bool{}, map[string]bool{}
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.StructType:
+				for _, fl := range n.Fields.List {
+					if namesBook(fl.Type) {
+						for _, id := range fl.Names {
+							fields[id.Name] = true
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				if n.Type.Results != nil && slices.ContainsFunc(n.Type.Results.List, func(r *ast.Field) bool { return namesBook(r.Type) }) {
+					funcs[n.Name.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	return fields, funcs
+}
+
+// namesBook says whether a type expression mentions inboxBook.
+func namesBook(e ast.Expr) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == "inboxBook" {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+type inboxBookSite struct {
+	node ast.Node
+	what string // as written: s.inbox.items, &s.inbox, inboxBook, s.book()
+}
+
+// inboxBookSites are the places f reaches the book: a selector through one of fields (s.inbox.items, s.inbox.mu.Lock(),
+// a method value s.inbox.add), the address of one (b := &s.inbox), a call of one of funcs, and the name inboxBook itself
+// (a method on *inboxBook; a parameter, field, variable or conversion of it). Parse-only, so a field of another type
+// that shares a name with one in fields counts too when used the same way; an index or a plain assignment
+// (ev.inbox[id], r.inbox = …) never does.
+func inboxBookSites(f *ast.File, fields, funcs map[string]bool) []inboxBookSite {
+	var sites []inboxBookSite
+	add := func(n ast.Node, e ast.Expr) { sites = append(sites, inboxBookSite{n, types.ExprString(e)}) }
+	book := func(e ast.Expr) bool {
+		sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+		return ok && fields[sel.Sel.Name]
+	}
+	var visit func(ast.Node) bool
+	visit = func(n ast.Node) bool {
+		switch e := n.(type) {
+		case *ast.UnaryExpr:
+			if e.Op == token.AND && book(e.X) {
+				add(e, e)
+				return false
+			}
+		case *ast.SelectorExpr:
+			if book(e.X) {
+				add(e, e)
+				return false
+			}
+		case *ast.CallExpr:
+			switch fn := ast.Unparen(e.Fun).(type) {
+			case *ast.Ident:
+				if funcs[fn.Name] {
+					add(e, e.Fun)
+				}
+			case *ast.SelectorExpr:
+				if funcs[fn.Sel.Name] {
+					add(e, e.Fun)
+				}
+			}
+		case *ast.Ident:
+			if e.Name == "inboxBook" {
+				add(e, e)
+			}
+		}
+		return true
+	}
+	for _, d := range f.Decls {
+		ast.Inspect(d, visit)
+	}
+	return sites
+}
+
+// inboxBookSites finds every way of reaching the book and nothing else.
+func TestInboxBookSites(t *testing.T) {
+	for _, c := range []struct {
+		src  string
+		want []string
+	}{
+		{`func (s *Service) f() { s.inbox.mu.Lock(); defer s.inbox.mu.Unlock(); for range s.inbox.items {} }`,
+			[]string{"s.inbox.mu", "s.inbox.mu", "s.inbox.items"}},
+		{`func (s *Service) f() { b := &s.inbox; b.mu.Lock() }`, []string{"&s.inbox"}},
+		{`func (h *Handler) f() { _ = h.svc.inbox.cardSends; _ = (&h.svc.inbox).add }`, []string{"h.svc.inbox.cardSends", "&h.svc.inbox"}},
+		{`func (b *inboxBook) fileTodo() {}`, []string{"inboxBook"}},
+		{`func f(b *inboxBook) {}`, []string{"inboxBook"}},
+		{`type Service struct { inbox inboxBook }; func (s *Service) book() *inboxBook { return &s.inbox }; func g(s *Service) { _ = s.book().items }`,
+			[]string{"inboxBook", "inboxBook", "&s.inbox", "s.book"}},
+		{`func f(ev *originEvidence, r *fleetRead) { ev.inbox[k] = v; r.inbox = map[string]bool{}; _ = r.inbox[k] }`, nil},
+		{`func f(s *Service) { s.followingInboxItems(); _ = s.inboxReport() }`, nil},
+	} {
+		f, err := parser.ParseFile(token.NewFileSet(), "x.go", "package assistant; "+c.src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields, funcs := inboxBookNames([]*ast.File{f})
+		fields["inbox"] = true // the Service's field, declared in another file
+		var got []string
+		for _, s := range inboxBookSites(f, fields, funcs) {
+			got = append(got, s.what)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: found %q, want %q", c.src, got, c.want)
+		}
+	}
+}
+
+// inboxTools are the Inbox's tools toolNames (internal/assistant/tools.go) may list: main's, and those open PRs add.
+// An Inbox tool is one named inbox_* or described in prompts/mcp/inbox.
+var inboxTools = []string{
+	"inbox_draft", "inbox_folders", "inbox_move", "inbox_post", "inbox_suggest",
+	"inbox_replay", // #6539
+	"message_send", // #9782: described in prompts/mcp/inbox, it stays in toolNames when S5 moves the others
+}
+
+// inboxScopes are the Inbox routes RouteScopes (internal/extwire/scopes.go) may give a scope: main's, and those open
+// PRs add. An Inbox route is under /api/v1/inbox or /api/v1/translate, or needs an Inbox scope.
+var inboxScopes = []string{
+	"GET /api/v1/inbox", "GET /api/v1/inbox/done", "GET /api/v1/inbox/done/days", "GET /api/v1/inbox/{id}",
+	"GET /api/v1/inbox/mutes", "GET /api/v1/inbox/policies", "POST /api/v1/inbox/done", "POST /api/v1/inbox/bulk",
+	"POST /api/v1/inbox/merge", "POST /api/v1/inbox/merge/undo", "POST /api/v1/inbox/todo",
+	"POST /api/v1/inbox/todo/undo", "POST /api/v1/inbox/{id}/done", "POST /api/v1/inbox/{id}/draft",
+	"POST /api/v1/inbox/{id}/reply", "POST /api/v1/inbox/{id}/retry", "POST /api/v1/inbox/{id}/suggestion",
+	"POST /api/v1/inbox/{id}/handoff", "POST /api/v1/inbox/{id}/task-link/recheck", "POST /api/v1/inbox/{id}/doc/status",
+	"PUT /api/v1/inbox/{id}/parent", "PUT /api/v1/inbox/{id}/folder", "GET /api/v1/inbox/folders",
+	"PUT /api/v1/inbox/folders", "GET /api/v1/inbox/tree/{kind}/{id...}", "POST /api/v1/inbox/mutes",
+	"DELETE /api/v1/inbox/mutes/{id}", "POST /api/v1/inbox/policies", "PATCH /api/v1/inbox/policies/{id}",
+	"DELETE /api/v1/inbox/policies/{id}", "POST /api/v1/inbox/refresh",
+	"POST /api/v1/inbox/{id}/tier", "GET /api/v1/inbox/rules", "PUT /api/v1/inbox/rules", // #4512
+}
+
+// toolNames and RouteScopes gain no Inbox entry: S5 registers the Inbox's tools with the Inbox and S6 moves its scopes
+// to an extwire file of its own, and both lists keep only what is there now and what open PRs add. An entry the move
+// took (or a PR that closed) leaves its allowance with it.
+func TestCentralListsGainNoInboxEntry(t *testing.T) {
+	described, err := filepath.Glob(filepath.Join(serverDir, "internal", "prompts", "mcp", "inbox", "*.md"))
+	if err != nil || len(described) == 0 {
+		t.Fatalf("no Inbox tool descriptions in prompts/mcp/inbox: %v", err)
+	}
+	for i, p := range described {
+		described[i] = strings.TrimSuffix(filepath.Base(p), ".md")
+	}
+	fset := token.NewFileSet()
+	for _, e := range stringListVar(t, fset, filepath.Join(assistantDir, "tools.go"), "toolNames") {
+		name, _ := strconv.Unquote(e.Value)
+		if (strings.HasPrefix(name, "inbox_") || slices.Contains(described, name)) && !slices.Contains(inboxTools, name) {
+			t.Errorf("%s: toolNames gains the Inbox tool %s: register it with the Inbox's own tools (step S5 of %s); "+
+				"before S5 lands, list it in inboxTools with its PR, so that the move takes it along", pos(fset, e), name, inboxPlan)
+		}
+	}
+	for _, kv := range mapVar(t, fset, filepath.Join(serverDir, "internal", "extwire", "scopes.go"), "RouteScopes") {
+		key, ok := kv.Key.(*ast.BasicLit)
+		if !ok {
+			t.Errorf("%s: a RouteScopes key that is no string literal: this guard reads only those", pos(fset, kv))
+			continue
+		}
+		route, _ := strconv.Unquote(key.Value)
+		_, p, _ := strings.Cut(route, " ")
+		inbox := strings.HasPrefix(types.ExprString(kv.Value), "ScopeInbox")
+		for _, under := range []string{"/api/v1/inbox", "/api/v1/translate"} {
+			inbox = inbox || p == under || strings.HasPrefix(p, under+"/")
+		}
+		if inbox && !slices.Contains(inboxScopes, route) {
+			t.Errorf("%s: RouteScopes gains the Inbox route %q: give it its scope in the Inbox's own extwire file "+
+				"(step S6 of %s); before S6 lands, list it in inboxScopes with its PR, so that the move takes it along",
+				pos(fset, kv), route, inboxPlan)
+		}
+	}
+}
+
+// stringListVar is the string literals of the package-level variable name in the file at path.
+func stringListVar(t *testing.T, fset *token.FileSet, path, name string) []*ast.BasicLit {
+	t.Helper()
+	var out []*ast.BasicLit
+	ast.Inspect(varValue(t, fset, path, name), func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			out = append(out, lit)
+		}
+		return true
+	})
+	return out
+}
+
+// mapVar is the entries of the map literal the package-level variable name in the file at path is set to.
+func mapVar(t *testing.T, fset *token.FileSet, path, name string) []*ast.KeyValueExpr {
+	t.Helper()
+	lit, ok := varValue(t, fset, path, name).(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("%s: %s is no map literal", path, name)
+	}
+	var out []*ast.KeyValueExpr
+	for _, e := range lit.Elts {
+		if kv, ok := e.(*ast.KeyValueExpr); ok {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// varValue is the expression the package-level variable name in the file at path is set to.
+func varValue(t *testing.T, fset *token.FileSet, path, name string) ast.Expr {
+	t.Helper()
+	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range f.Decls {
+		if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.VAR {
+			for _, s := range g.Specs {
+				v := s.(*ast.ValueSpec)
+				for i, n := range v.Names {
+					if n.Name == name && i < len(v.Values) {
+						return v.Values[i]
+					}
+				}
+			}
+		}
+	}
+	t.Fatalf("%s: no package-level var %s = …", path, name)
+	return nil
+}

@@ -62,13 +62,45 @@ func TestUserPromptSubmitPausesPendingAgentDecision(t *testing.T) {
 	if !s.NodeEvent(a.MachineID, "hook.event", params) {
 		t.Fatal("hook event was not accepted")
 	}
-	if got := askOf(s, todo.ID); got == nil || got.AgentReply == nil || got.AgentReply.MachineID != a.MachineID || got.AgentReply.SessionID != a.SessionID || got.DueAt.IsZero() {
-		t.Fatalf("hook did not pause the decision: %+v", got)
-	}
+	waitFor(t, "the decision hook to pause", func() bool {
+		got := askOf(s, todo.ID)
+		return got != nil && got.AgentReply != nil && got.AgentReply.MachineID == a.MachineID && got.AgentReply.SessionID == a.SessionID && !got.DueAt.IsZero()
+	})
 	waitFor(t, "the decision reply signal", func() bool { return signalled(s, f, todo.ID, sigDecisionReply, "task_decided") })
 	if todoNow(s, todo.ID).Supervision.State != reviewNeedsUser || askOf(s, todo.ID).Chosen != "" {
 		t.Fatal("hook guessed an option or ended the pending decision")
 	}
+}
+
+// An accept holds its todo's action lock across session.send. Its own UserPromptSubmit must not wait for that lock on
+// the manager's read loop: the event returns now and the ordered decision work runs once the send has completed.
+func TestDecisionPromptDoesNotBlockOnAcceptActionLock(t *testing.T) {
+	s, _, todo := decisionAgentReplyService(t)
+	a := askOf(s, todo.ID)
+	params, _ := json.Marshal(map[string]any{"session_id": a.SessionID, "event": "UserPromptSubmit", "prompt_source": "user"})
+	s.reviewDismissals.actions.acquire(todo.ID)
+	locked := true
+	defer func() {
+		if locked {
+			s.reviewDismissals.actions.release(todo.ID)
+		}
+	}()
+	answered := make(chan bool, 1)
+	go func() { answered <- s.NodeEvent(a.MachineID, "hook.event", params) }()
+	select {
+	case accepted := <-answered:
+		if !accepted {
+			t.Fatal("hook event was not accepted")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("NodeEvent waited for the accept action lock on the read loop")
+	}
+	s.reviewDismissals.actions.release(todo.ID)
+	locked = false
+	waitFor(t, "the ordered decision hook", func() bool {
+		got := askOf(s, todo.ID)
+		return got != nil && got.AgentReply != nil && !got.DueAt.IsZero()
+	})
 }
 
 func TestDecisionAgentReplyIgnoresUntrustedOrStaleEvents(t *testing.T) {

@@ -252,6 +252,7 @@ func (s *Service) fileBatch(ctx context.Context, batch []*InboxItem) error {
 		return nil
 	}
 	hello := s.hello(ctx)
+	in.Language = answerLanguage(hello.Locale)
 	system := prompts.RenderInboxFolders(prompts.InboxFolders{Owner: hello.Owner, FolderRules: cfg.Rules,
 		Rules: s.inboxConfig(ctx).Rules, Language: answerLanguage(hello.Locale), MaxDepth: 4})
 	var out struct {

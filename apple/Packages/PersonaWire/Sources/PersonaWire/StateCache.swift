@@ -33,12 +33,16 @@ public nonisolated enum StateCache {
     }
 
     public static func save<T: Encodable & Sendable>(_ name: String, _ value: T, in folder: URL? = nil) {
-
         Task.detached(priority: .utility) {
-            guard let url = url(name, in: folder), let data = try? JSON.encoder.encode(value) else { return }
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: url, options: .atomic)
+            saveNow(name, value, in: folder)
         }
+    }
+
+    /// Writes before returning, for a background actor which serializes its own writes. Never call this on the main actor.
+    public static func saveNow<T: Encodable & Sendable>(_ name: String, _ value: T, in folder: URL? = nil) {
+        guard let url = url(name, in: folder), let data = try? JSON.encoder.encode(value) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 }
 

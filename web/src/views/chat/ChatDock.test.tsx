@@ -8,7 +8,7 @@ import { Header, spaceAgentsItem } from "./ChatView";
 import { HEADER_SLOT, HEADER_SLOT_END, HEADER_SLOT_START } from "./header";
 import { Composer } from "./Composer";
 import { PendingCards, permissionFrom } from "./Interactions";
-import { restoreQueued } from "./QueueStrip";
+import { restoreQueued } from "./queue-restore";
 import { getComposerFiles, removeFile } from "../../lib/composer-files";
 import { QueuePanel } from "./QueuePanel";
 import { onDraftEvent, type DraftEvent } from "../../lib/drafts";
@@ -405,7 +405,8 @@ describe("tap areas", () => {
 
   it("covers an attachment's remove button", () => {
     const html = renderToStaticMarkup(<AttachmentTray attachments={[{ id: "a", name: "a.png", url: "blob:a" }]} onRemove={() => {}} />);
-    expect(hit(html, "移除 a.png")).toBe(true);
+    // grown out of the tile's corner, not centred on it: the picture's middle stays the picture's (ui/AttachmentTray.test.tsx)
+    expect(html).toMatch(/<button[^>]*aria-label="移除 a.png"[^>]*class="touch-hit-corner /);
     // its tile does not clip the area
     expect(html).not.toMatch(/group\/att relative overflow-hidden/);
   });
@@ -514,17 +515,25 @@ describe("QueuePanel (#5327, cindy's pending queue)", () => {
   const withPhotos = `[Image #1] [Image #2]\n\n\n把这两张截图对一下\n<attached_images>\npath: ${photo("a1")}\npath: ${photo("b2")}\n</attached_images>`;
 
   it("shows a queued message's words and a mark per kind of attachment, never Claude's queue text (#3032)", () => {
-    const photoOnly = `[Image #3] 请看图片\n\n<attached_images>\npath: ${photo("c3")}\n</attached_images>`;
-    const html = panel({ session: { ...session, queued: [withPhotos, photoOnly] } as Session });
-    expect(html).toContain("把这两张截图对一下");
-    expect(html).not.toContain("[Image #");
-    expect(html).not.toContain("attached_images");
-    expect(html).not.toContain("path: ");
-    expect(html).not.toContain("请看图片");
-    expect(html.match(/data-queue-mark="photo"/g)).toHaveLength(2);
-    // the label says what came with it
-    expect(html).toContain('aria-label="排队的第 1 条：把这两张截图对一下 · 2 张图片"');
-    expect(html).toContain('aria-label="排队的第 2 条：1 张图片"');
+    vi.stubGlobal("localStorage", { getItem: () => "tok", setItem: () => {}, removeItem: () => {} });
+    try {
+      const photoOnly = `[Image #3] 请看图片\n\n<attached_images>\npath: ${photo("c3")}\n</attached_images>`;
+      const html = panel({ session: { ...session, queued: [withPhotos, photoOnly] } as Session });
+      expect(html).toContain("把这两张截图对一下");
+      expect(html).not.toContain("[Image #");
+      expect(html).not.toContain("attached_images");
+      expect(html).not.toContain("path: ");
+      expect(html).not.toContain("请看图片");
+      expect(html.match(/data-queue-mark="photo"/g)).toHaveLength(2);
+      expect(html.match(/data-queue-photo-thumb/g)).toHaveLength(3);
+      expect(html).toContain('data-queue-header="true"');
+      expect(html).toContain("已排队，尚未发送");
+      // the label says what came with it
+      expect(html).toContain('aria-label="排队的第 1 条：把这两张截图对一下 · 2 张图片"');
+      expect(html).toContain('aria-label="排队的第 2 条：1 张图片"');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

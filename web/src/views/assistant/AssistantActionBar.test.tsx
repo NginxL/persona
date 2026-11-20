@@ -2,7 +2,7 @@
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { t } from "../../i18n";
+import { formatDate, t } from "../../i18n";
 import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
@@ -92,7 +92,7 @@ const entry = (key: string) => host.querySelector<HTMLButtonElement>(`[data-assi
 /** Opens the Needs you rows the tray folds to a line (#5569); a row with its key opens that one. */
 const openRows = (key?: string) => act(async () => host.querySelectorAll<HTMLButtonElement>(`button[data-needs-row${key ? `="${key}"` : ""}][aria-expanded="false"]`).forEach((b) => b.click()));
 
-const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), review: t("assistant-tasks.tray_review"), parked: t("todos.section_parked") };
+const label = { needs: t("assistant-tasks.tray_needs_you"), running: t("assistant-tasks.tray_running"), review: t("assistant-tasks.tray_review"), parked: t("todos.section_parked"), finished: t("assistant-tasks.tray_finished") };
 // where a click went as a page (set to Full page, #5096); the side panel, the default, says so itself (getPanel)
 const opened = () => location.pathname + location.search;
 const trays = () => host.querySelector("[data-assistant-actionbar]")!.textContent;
@@ -231,6 +231,20 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(row().textContent).toContain(usageLimitLabel(limited, now.getTime())!);
     act(() => upsertSession({ ...limited, turn_error: undefined, turn_error_kind: undefined, turn_error_resets_at: undefined, state: "working", status: "working" }));
     expect(status().className).toContain("text-ink-2");
+  });
+
+  it("names what a waiting task waits on in its status column, in the neutral color (#11090)", () => {
+    act(() => entry("running").click());
+    const status = () => host.querySelector("[data-task-slot]")!.querySelector<HTMLElement>("[data-task-status]")!;
+    const worker: Session = { machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", status: "idle", state: "idle", updated_at: at };
+    act(() => upsertSession({ ...worker, work: { phase: "blocked", on: "external", wait: "CI on main", line: "Wait for CI on main" } }));
+    expect(status().dataset.taskStatus).toBe("waiting");
+    expect(status().dataset.taskWait).toBe("external");
+    expect(status().textContent).toBe(t("lib-state-labels.waits_external"));
+    expect(status().className).toContain("text-ink-2");
+    expect(status().className).not.toContain("text-attention");
+    act(() => upsertSession({ ...worker, work: { phase: "blocked", on: "agent", wait: "the other Agent's merge", line: "Wait for the other Agent" } }));
+    expect(status().textContent).toBe(t("lib-state-labels.waits_prerequisite"));
   });
 
   it("says Starting, not Not started, on a task whose Agent is not up yet", async () => {
@@ -504,7 +518,7 @@ describe("Assistant Needs you / In progress trays", () => {
     expect(row.querySelector("[data-task-todo-state]")).toBeNull();
   });
 
-  it("updates the same row while it runs, opens the task, and moves it under Just finished once it is accepted", () => {
+  it("updates the same row while it runs, opens the task, and moves it to Finished once it is accepted", () => {
     act(() => entry("running").click());
     const row = host.querySelector("[data-task-slot]");
     act(() => putTodo({ ...todo, supervision: { ...todo.supervision!, progress: { kind: "blocked", step: 3, steps: 5, text: "Waiting for a decision" } } }));
@@ -523,14 +537,53 @@ describe("Assistant Needs you / In progress trays", () => {
     act(() => (host.querySelector("[data-task-slot]") as HTMLButtonElement).click());
     expect(opened()).toBe("/s/demo/worker");
     act(() => putTodo({ ...todo, done_at: at, supervision: { ...todo.supervision!, state: "accepted" } }));
-    // finished: counted in neither entry; In progress lists it under Just finished, not as work going on (#8237)
+    // finished: counted in neither entry and no longer work going on; the Finished entry lists it, new till it is opened
+    // (#8237, #10922)
     expect(entry("running").textContent).toBe(label.running);
     expect(entry("needs").textContent).toBe(label.needs);
     expect(host.textContent).toContain(t("assistant-tasks.tray_empty_progress"));
-    expect(host.querySelector("[data-progress-just-finished]")?.textContent).toBe(`${stateName("just_finished")}1`);
-    const finished = host.querySelector("[data-task-slot]")!;
+    expect(host.querySelector("[data-task-slot]")).toBeNull();
+    expect(entry("finished").textContent).toBe(`${label.finished}1`);
+    act(() => entry("finished").click());
+    const finished = host.querySelector("[data-tray-finished] [data-task-slot]")!;
     expect(finished.getAttribute("data-counts-open")).toBe("false");
-    expect(finished.querySelector("[data-task-mark]")?.getAttribute("data-task-mark")).toBe("done");
+    expect(finished.querySelector("[data-task-mark]")?.getAttribute("data-task-mark")).toBe("just_finished");
+    expect(finished.querySelector("[data-task-status]")?.textContent).toBe(stateName("just_finished"));
+  });
+
+  it("lists what finished in the last day under Finished, seen or not, newest first; opening a new one marks it seen and keeps it (#10922)", async () => {
+    const done = (id: string, title: string, doneAt: string, extra: Partial<Todo> = {}): Todo => ({ id, title, origin: conversation, created_at: "2026-11-09T07:00:00Z", updated_at: doneAt, done_at: doneAt, agents: [], ...extra });
+    moreTodos = [
+      done("f-seen", "Fix the export button", "2026-11-10T08:10:00Z", { seen_at: "2026-11-10T08:20:00Z" }),
+      done("f-new", "Rename the settings tab", "2026-11-10T08:30:00Z"),
+      done("f-old", "Move the docs", "2026-11-09T08:00:00Z"),
+    ];
+    await act(async () => refreshTodos());
+    // after the unfinished work, drawn quiet, with the done check's green mark; counted by its rows, not as open work
+    expect(entries().map((b) => b.dataset.trayEntry)).toEqual(["needs", "running", "finished"]);
+    expect(entry("finished").textContent).toBe(`${label.finished}2`);
+    expect(entry("finished").className).toContain("text-ink-2");
+    expect(entry("finished").querySelector(".bg-green")).not.toBeNull();
+    expect(entry("running").textContent).toBe(`${label.running}1`);
+    act(() => entry("finished").click());
+    const rows = () => [...host.querySelectorAll<HTMLButtonElement>("[data-tray-finished] [data-task-slot]")];
+    expect(rows().map((row) => row.dataset.taskSlot)).toEqual(["task:f-new", "task:f-seen"]);
+    expect(rows().map((row) => row.querySelector("[data-task-status]")!.getAttribute("data-task-status"))).toEqual(["just_finished", "done"]);
+    expect(rows()[0].querySelector('[data-state="just_finished"]')).not.toBeNull();
+    // opening the new one opens the task and marks it seen where the hub keeps the mark: it stays, as a seen row
+    Object.assign(getState() as unknown as Record<string, unknown>, { features: ["todo_seen"] });
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes("/todos/f-new/seen")) return answer(url, init);
+      writes.push(`${init?.method} ${String(url)}`);
+      return new Response(JSON.stringify({ todo: { ...moreTodos[1], seen_at: now.toISOString() } }), { headers: { "Content-Type": "application/json" } });
+    });
+    await act(async () => rows()[0].click());
+    expect(getPanel()).toEqual({ kind: "task", todo: "f-new" });
+    expect(writes.filter((path) => path.includes("/seen"))).toEqual([expect.stringMatching(/^PUT .*\/todos\/f-new\/seen$/)]);
+    expect(rows().map((row) => row.dataset.taskSlot)).toEqual(["task:f-new", "task:f-seen"]);
+    expect(rows().map((row) => row.querySelector("[data-task-status]")!.getAttribute("data-task-status"))).toEqual(["done", "done"]);
+    expect(entry("finished").textContent).toBe(`${label.finished}2`);
   });
 
   it("reuses round-bound owner acceptance and deduplicates its supervision decision", async () => {
@@ -711,6 +764,55 @@ describe("Assistant Needs you / In progress trays", () => {
       upsertSession({ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "working", status: "working", updated_at: "2026-11-10T08:05:00Z" });
     });
     expect(entries().map((button) => button.textContent)).toEqual([label.needs, `${label.running}1`]);
+  });
+
+  it("shows a released worker's verified pending prompt once and answers its exact card with its existing defer action", async () => {
+    const interactionID = "ix_read_only_permission";
+    const question = "Allow read-only access to the connector?";
+    const deadline = "2026-11-10T15:00:00Z";
+    todo = {
+      ...todo,
+      agents: [{ machine_id: "demo", session_id: "worker", linked_at: at, released_at: "2026-11-10T08:30:00Z" }],
+      supervision: {
+        supervisor: conversation, state: "parked",
+        parked: {
+          reason: "The connector preflight needs the owner's read-only decision", until: "2026-11-14T09:00:00Z", waiting_on: "external_event", count: 1,
+          evidence: { kind: "external_event", target: "Read-only connector preflight", url: "https://example.test/connector/permissions/4", wake: "The owner answers the existing prompt", interaction_id: interactionID },
+        },
+      },
+    } as unknown as Todo;
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "idle", status: "idle", updated_at: at } as Session];
+    moreInteractions = [{
+      id: interactionID, machine_id: "demo", session_id: "worker", kind: "question", created_at: at,
+      questions: [{ question, options: [{ label: "Allow read-only" }, { label: "Later", action: "defer" }] }],
+      delegate: { what: "Read-only connector preflight", deadline },
+    } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    act(() => entry("needs").click());
+    await openRows("task:tray-task");
+    expect(host.querySelectorAll('[data-needs-row="task:tray-task"]')).toHaveLength(1);
+    expect(host.querySelectorAll(`[data-card="${interactionID}"]`)).toHaveLength(1);
+    expect(host.querySelector("[data-parked-task-row]")).toBeNull();
+    const card = host.querySelector<HTMLElement>(`[data-card="${interactionID}"]`)!;
+    expect(card.textContent).toContain(question);
+    expect(card.querySelector("[data-delegate-context]")!.textContent).toContain(formatDate(deadline, { dateStyle: "medium", timeStyle: "short" }));
+    const defer = [...card.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Later")!;
+    const beforeAnswer = writes.length;
+    await act(async () => {
+      defer.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(beforeAnswer)).toEqual([`/api/v1/interactions/${interactionID}/resolve`]);
+    const answer = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${interactionID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(answer?.[1]?.body))).toEqual({ answers: { [question]: "Later" } });
+    expect(todo.done_at).toBeUndefined();
+    expect(todo.supervision?.state).toBe("parked");
   });
 
   it("counts and lists an Agent's question once when two to-dos list that Agent, under the one the hub ties it to", async () => {

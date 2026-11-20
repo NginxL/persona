@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 
@@ -34,10 +35,11 @@ import (
 // and preview; opening the mail finds the whole translation there (storedMailTranslation).
 
 const (
-	translateBatch    = 30    // texts in one request
-	translateText     = 2000  // characters of one short text
-	translateMailText = 12000 // characters of a mail body translated
-	translateCacheMax = 4000
+	translateBatch       = 30    // texts in one request
+	translateText        = 2000  // characters of one short text
+	translateMailText    = 12000 // characters of a mail body translated
+	translateMessageText = 32000 // a complete reply; longer messages are refused, never silently clipped
+	translateCacheMax    = 4000
 )
 
 type translateCache struct {
@@ -74,6 +76,10 @@ func (s *Service) translateFingerprint(ctx context.Context) (string, error) {
 
 // translateTexts translates short texts, keeping their order; cached ones are not sent again.
 func (s *Service) translateTexts(ctx context.Context, texts []string, target string) ([]string, error) {
+	return s.translateTextsLimit(ctx, texts, target, translateText)
+}
+
+func (s *Service) translateTextsLimit(ctx context.Context, texts []string, target string, limit int) ([]string, error) {
 	lang, ok := assistantwire.TranslateLanguages[target]
 	if !ok {
 		return nil, i18n.ErrEnglish("inbox-errors.translation_target", i18n.Args{"target": strconv.Quote(target)})
@@ -84,13 +90,18 @@ func (s *Service) translateTexts(ctx context.Context, texts []string, target str
 	}
 	b := &s.inbox
 	out := make([]string, len(texts))
+	source := make([]string, len(texts))
 	var todo []int
 	for i, t := range texts {
-		t = strings.TrimSpace(t)
-		if t == "" {
+		// A reply's leading indentation can be Markdown code, unlike a normalized short text.
+		if limit == translateText {
+			t = strings.TrimSpace(t)
+		}
+		source[i] = t
+		if strings.TrimSpace(t) == "" {
 			continue
 		}
-		if v, ok := b.translations.get(translateKey("t", fingerprint, target, t)); ok {
+		if v, ok := b.translations.get(translateKey("t", strconv.Itoa(limit), fingerprint, target, t)); ok {
 			out[i] = v
 		} else {
 			todo = append(todo, i)
@@ -102,7 +113,7 @@ func (s *Service) translateTexts(ctx context.Context, texts []string, target str
 	in := make([]string, len(todo))
 	total := 0
 	for j, i := range todo {
-		in[j] = clip(strings.TrimSpace(texts[i]), translateText)
+		in[j] = clip(source[i], limit)
 		total += len([]rune(in[j]))
 	}
 	body, _ := json.Marshal(map[string]any{"texts": in})
@@ -119,10 +130,13 @@ func (s *Service) translateTexts(ctx context.Context, texts []string, target str
 		return nil, i18n.ErrEnglish("inbox-errors.translation_count", i18n.Args{"actual": len(res.Texts), "expected": len(in)})
 	}
 	for j, i := range todo {
-		v := strings.TrimSpace(res.Texts[j])
+		v := res.Texts[j]
+		if limit == translateText {
+			v = strings.TrimSpace(v)
+		}
 		out[i] = v
-		if v != "" {
-			b.translations.put(translateKey("t", fingerprint, target, strings.TrimSpace(texts[i])), v)
+		if strings.TrimSpace(v) != "" {
+			b.translations.put(translateKey("t", strconv.Itoa(limit), fingerprint, target, source[i]), v)
 		}
 	}
 	return out, nil
@@ -159,7 +173,11 @@ func (s *Service) translateMailFresh(ctx context.Context, ref assistantwire.Inbo
 		return mailTranslation{}, i18n.ErrEnglish("inbox-errors.translation_target", i18n.Args{"target": strconv.Quote(target)})
 	}
 	b := &s.inbox
-	key := translateKey("m", fingerprint, ref.AccountID, ref.Mailbox, fmt.Sprint(ref.UID), target)
+	folder := assistantwire.MailFolderKey(ref.AccountID, ref.Mailbox)
+	b.mu.Lock()
+	generation := b.mailBaselines[folder+"#e"]
+	b.mu.Unlock()
+	key := translateKey("m", fingerprint, folder, fmt.Sprint(generation), fmt.Sprint(ref.UID), target)
 	if v, ok := b.translations.get(key); ok {
 		var t mailTranslation
 		if json.Unmarshal([]byte(v), &t) == nil {
@@ -209,6 +227,26 @@ func writeTranslateError(w http.ResponseWriter, err error) {
 
 // translateRoutes are the translation's routes (InboxRoutes).
 func (s *Service) translateRoutes() {
+	s.handle("POST /api/v1/translate/message", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text   string `json:"text"`
+			Target string `json:"target"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" || utf8.RuneCountInString(in.Text) > translateMessageText {
+			apierr.Write(w, http.StatusBadRequest, i18n.ErrEnglish("inbox-errors.translation_message_size", i18n.Args{"max": translateMessageText}))
+			return
+		}
+		out, err := s.translateTextsLimit(r.Context(), []string{in.Text}, in.Target, translateMessageText)
+		if err != nil {
+			writeTranslateError(w, err)
+			return
+		}
+		if strings.TrimSpace(out[0]) == "" {
+			writeTranslateError(w, i18n.ErrEnglish("inbox-errors.translation_empty"))
+			return
+		}
+		apierr.WriteJSON(w, map[string]string{"text": out[0]})
+	})
 	s.handle("POST /api/v1/translate", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Texts  []string `json:"texts"`
@@ -384,9 +422,10 @@ func (s *Service) storedMailTranslation(ctx context.Context, ref assistantwire.I
 	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	folder := assistantwire.MailFolderKey(ref.AccountID, ref.Mailbox)
 	for _, it := range b.items {
 		m := it.Mail
-		if m == nil || m.AccountID != ref.AccountID || len(m.UIDs) == 0 || m.UIDs[len(m.UIDs)-1] != ref.UID || (ref.Mailbox != "" && m.Mailbox != ref.Mailbox) {
+		if m == nil || m.folderKey() != folder || len(m.UIDs) == 0 || m.UIDs[len(m.UIDs)-1] != ref.UID {
 			continue
 		}
 		if t := it.Translations[target]; t != nil && t.Of == it.Last && t.Text != "" && t.ModelFingerprint == fingerprint {

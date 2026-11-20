@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -90,6 +91,8 @@ class StandaloneScheduledChatTest {
             style = candidate
             Snapshot.sendApplyNotifications()
             rule.waitForIdle()
+            // Projection and list placement finish off the main thread; Compose idle does not cover that work (#10747).
+            rule.waitUntil(20_000) { rule.onNodeWithText("Daily briefing pushed to your phone.").isDisplayed() }
             rule.onNodeWithText("Daily briefing pushed to your phone.").assertIsDisplayed()
         }
     }
@@ -101,15 +104,19 @@ class StandaloneScheduledChatTest {
                 text = "Supervision: 1 task running",
                 injected = Injected("system", "supervise", "Supervision")),
             Item("a2", 2, ts = "2026-11-18T09:00:02Z", role = "assistant", kind = "text",
-                text = "Nothing needs the owner right now."),
-            Item("u3", 3, ts = "2026-11-18T09:05:00Z", role = "user", kind = "text",
+                text = "Nothing needs the owner right now.", narration = true),
+            Item("quiet-finish", 3, ts = "2026-11-18T09:00:03Z", role = "assistant", kind = "tool_use",
+                toolUseId = "quiet-finish", toolName = "mcp_persona_0c671287_supervision_finish"),
+            Item("quiet-receipt", 4, ts = "2026-11-18T09:00:04Z", role = "user", kind = "tool_result",
+                toolUseId = "quiet-finish", text = """{"visibility":"silent"}"""),
+            Item("u3", 5, ts = "2026-11-18T09:05:00Z", role = "user", kind = "text",
                 text = "Supervision: deployment finished",
                 injected = Injected("system", "supervise", "Supervision")),
-            Item("use4", 4, ts = "2026-11-18T09:05:01Z", role = "assistant", kind = "tool_use",
+            Item("use4", 6, ts = "2026-11-18T09:05:01Z", role = "assistant", kind = "tool_use",
                 toolUseId = "call4", toolName = "mcp_persona_0c671287_notify_user"),
-            Item("res5", 5, ts = "2026-11-18T09:05:02Z", role = "user", kind = "tool_result",
+            Item("res5", 7, ts = "2026-11-18T09:05:02Z", role = "user", kind = "tool_result",
                 toolUseId = "call4", text = "Notification sent."),
-            Item("a6", 6, ts = "2026-11-18T09:05:03Z", role = "assistant", kind = "text",
+            Item("a6", 8, ts = "2026-11-18T09:05:03Z", role = "assistant", kind = "text",
                 text = "Deployment finished and pushed."),
         )
         var style by mutableStateOf(AppStyle.Glass)
@@ -133,6 +140,8 @@ class StandaloneScheduledChatTest {
             style = candidate
             Snapshot.sendApplyNotifications()
             rule.waitForIdle()
+            // Projection and list placement finish off the main thread; Compose idle does not cover that work.
+            rule.waitUntil(20_000) { rule.onNodeWithText("Deployment finished and pushed.").isDisplayed() }
             rule.onNodeWithText("Deployment finished and pushed.").assertIsDisplayed()
             rule.onNodeWithText("Nothing needs the owner right now.").assertDoesNotExist()
         }

@@ -245,6 +245,10 @@
       "sf": "chevron.forward",
       "phosphor": "caret-right"
     },
+    "forwardMessage": {
+      "sf": "arrowshape.turn.up.right",
+      "phosphor": "arrow-bend-up-right"
+    },
     "gitBranch": {
       "sf": "arrow.triangle.branch",
       "phosphor": "git-branch"
@@ -344,6 +348,10 @@
     "knowledge": {
       "sf": "books.vertical",
       "phosphor": "book-open"
+    },
+    "knowledgeMap": {
+      "sf": "map",
+      "phosphor": "tree-structure"
     },
     "laptop": {
       "sf": "laptopcomputer",
@@ -664,6 +672,10 @@
     "time": {
       "sf": "clock",
       "phosphor": "clock"
+    },
+    "topic": {
+      "sf": "lightbulb.2",
+      "phosphor": "lightbulb"
     },
     "today": {
       "sf": "sun.max.fill",

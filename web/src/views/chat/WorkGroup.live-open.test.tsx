@@ -43,6 +43,11 @@ const detail = () => host.querySelector("[data-work-detail]");
 const detailText = () => detail()?.textContent ?? "";
 const slot = () => host.querySelector("[data-latest-text]");
 const tap = () => act(() => header().click());
+const openInnerRuns = () => {
+  for (const b of host.querySelectorAll<HTMLButtonElement>("[data-work-detail] [data-work-group] > button")) {
+    if (b.getAttribute("aria-expanded") === "false") act(() => b.click());
+  }
+};
 const running = [tool(1), words(2, "First progress."), tool(3), words(4, "Latest progress."), tool(5, false)];
 const finished = [...running.slice(0, -1), tool(5), words(9, "Final result.")];
 
@@ -67,6 +72,7 @@ describe.each(["assistant", "agents"] as const)("%s compact execution", (style) 
     tap();
     expect(detailText()).toContain("First progress.");
     expect(detailText()).toContain("Latest progress.");
+    openInnerRuns();
     for (const n of [1, 3, 5, 7]) expect(detailText()).toContain(`echo ${n}`);
   });
   it("folds long intermediate Markdown too, keeping only the final result", () => {
@@ -148,7 +154,7 @@ describe.each(["assistant", "agents"] as const)("%s compact execution", (style) 
   it("jump-to-call opens a running summary and completion still collapses it", () => {
     draw(style, seg(running), true);
     const id = host.querySelector<HTMLElement>("[data-work-group]")!.dataset.groupId!;
-    act(() => openExpanded([`x:${id}`]));
+    act(() => openExpanded([`x:${id}`, "x:work-1.0"]));
     expect(header().getAttribute("aria-expanded")).toBe("true");
     expect(detailText()).toContain("echo 1");
     draw(style, seg(finished), false);
@@ -231,6 +237,7 @@ describe.each(["assistant", "agents"] as const)("%s folded history", (style) => 
     tap();
     await settle();
     expect(new Set(chat.expand.mock.calls.map(([f]) => f.seq))).toEqual(new Set([1, 5]));
+    openInnerRuns();
     for (const n of [1, 2, 3, 5, 6, 7]) expect(detailText()).toContain(`echo ${n}`);
     expect(detailText()).toContain("Earlier progress.");
     expect(host.querySelectorAll('[data-work-group] > button span[style*="width: 11px"]')).toHaveLength(0);

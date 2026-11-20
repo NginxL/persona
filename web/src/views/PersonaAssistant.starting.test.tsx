@@ -179,8 +179,7 @@ describe("新对话页：第一条消息发出、会话还没开起来 (#1697)",
     await act(async () => pill.click());
     await act(async () => vi.dynamicImportSettled());
     await flush();
-    const rail = document.querySelector<HTMLButtonElement>('[data-rail-cell="recent"]')!;
-    await act(async () => rail.click());
+    expect(document.querySelector("[data-panel-quick]")).not.toBeNull();
     await flush();
     const recent = document.querySelector<HTMLElement>('[data-panel-row="recent:0"]')!;
     expect(recent.getAttribute("aria-disabled")).toBeNull();

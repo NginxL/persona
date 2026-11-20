@@ -90,7 +90,7 @@ struct LarkProfileView: View {
                 .frame(maxWidth: .infinity)
                 .clipped()
                 .padding(.horizontal, -16)
-                LarkAvatarImage(name: displayName, url: profile?.avatarUrl ?? person.avatar, size: 80)
+                LarkAvatarImage(name: displayName, url: profile?.picture ?? person.avatar, size: 80)
                     .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 3))
                     .offset(y: 40)
             }
@@ -131,7 +131,7 @@ struct LarkProfileView: View {
                 defer { opening = false }
                 do {
                     let feed = try await api.larkDirectChat(person.id)
-                    var chat = LarkConversation(id: feed, name: displayName, avatar: profile?.avatarUrl ?? person.avatar, isGroup: false)
+                    var chat = LarkConversation(id: feed, name: displayName, avatar: profile?.picture ?? person.avatar, isGroup: false)
                     chat.account = account
                     push(.chat(chat, manager: manager)) // a pushed page doesn't inherit this one's manager
                 } catch {

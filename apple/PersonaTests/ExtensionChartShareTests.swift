@@ -35,4 +35,14 @@ struct ExtensionChartShareTests {
     @Test func aZeroValuePartStillLinesUpWithTheOtherShares() {
         #expect(DataChart.isSingleCategoryShare(kind: .bar, stacked: true, series: series([0, 100])))
     }
+
+    @Test func finiteValuesWhoseSumOverflowsStillShareTheBar() {
+        let shares = DataChart.singleCategoryShares(kind: .bar, stacked: true, series: series([Double.greatestFiniteMagnitude, Double.greatestFiniteMagnitude]))
+        #expect(shares == [0.5, 0.5])
+    }
+
+    @Test func nonFiniteValuesStayAsTheyAre() {
+        #expect(!DataChart.isSingleCategoryShare(kind: .bar, stacked: true, series: series([Double.nan, 1])))
+        #expect(!DataChart.isSingleCategoryShare(kind: .bar, stacked: true, series: series([Double.infinity, 1])))
+    }
 }

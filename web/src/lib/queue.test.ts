@@ -2,7 +2,7 @@
 // shapes Claude Code keeps them (server/internal/transcript/testdata/claude-queued-images.jsonl, node keepImagePaths).
 import { describe, expect, it } from "vitest";
 import { contextXML, withContexts } from "./links";
-import { parseQueued, queuedDraft, queuedMarks } from "./queue";
+import { pairPhotoOnly, parseQueued, queuedDraft, queuedMarks } from "./queue";
 
 const A = "/Users/me/.persona/uploads/2026-11-10/aaaa1111.jpg";
 const B = "/Users/me/.persona/uploads/2026-11-10/bbbb2222.jpg";
@@ -82,5 +82,35 @@ describe("queuedMarks", () => {
       { kind: "context", count: 1 },
     ]);
     expect(queuedMarks(parseQueued("just words"))).toEqual([]);
+  });
+});
+
+describe("pairPhotoOnly (#10871)", () => {
+  const photos = (...paths: string[]) => `${paths.map((_, i) => `[Image #${i + 1}]`).join(" ")}\n<attached_images>\n${paths.map((p) => `path: ${p}`).join("\n")}\n</attached_images>`;
+  const C = "/Users/me/.persona/uploads/2026-11-10/cccc3333.jpg";
+  it("pairs a photo-only message with the queued entry of as many photos, with or without the stand-in words", () => {
+    expect([...pairPhotoOnly([photos(A)], [{ text: "", images: 1 }])]).toEqual([[0, 0]]);
+    expect(pairPhotoOnly([`[Image #1] 请看图片\n<attached_images>\npath: ${A}\n</attached_images>`], [{ text: "", images: 1 }]).size).toBe(1);
+    expect(pairPhotoOnly([photos(A, B)], [{ text: "", images: 2 }]).size).toBe(1);
+  });
+  it("pairs one to one, in order: an entry hides one message, and a message is hidden by one entry", () => {
+    expect([...pairPhotoOnly([photos(A)], [{ text: "", images: 1 }, { text: "", images: 1 }])]).toEqual([[0, 0]]);
+    expect([...pairPhotoOnly([photos(A), photos(B)], [{ text: "", images: 1 }, { text: "", images: 1 }])]).toEqual([[0, 0], [1, 1]]);
+    expect([...pairPhotoOnly([photos(A), photos(B), photos(C)], [{ text: "", images: 1 }])]).toEqual([[0, 0]]);
+  });
+  it("pairs repeated empty runtime rows with distinct local photo messages", () => {
+    expect([...pairPhotoOnly(["", "text", "", ""], [
+      { text: "", images: 0 }, { text: "text", images: 1 }, { text: "", images: 2 },
+      { text: "", images: 1, carries: true }, { text: "", images: 1 },
+    ])]).toEqual([[0, 2], [2, 4]]);
+  });
+  it("leaves out what is not a photo-only message on either side", () => {
+    expect(pairPhotoOnly([photos(A, B)], [{ text: "", images: 1 }]).size).toBe(0); // another number of photos
+    expect(pairPhotoOnly([`[Image #1]\n\nPlease check this screen\n<attached_images>\npath: ${A}\n</attached_images>`], [{ text: "", images: 1 }]).size).toBe(0);
+    expect(pairPhotoOnly([photos(A)], [{ text: "请看图片", images: 1 }]).size).toBe(0); // words typed: matched by its words
+    expect(pairPhotoOnly([photos(A)], [{ text: "", images: 1, carries: true }]).size).toBe(0); // a file or context beside
+    expect(pairPhotoOnly([photos(A)], [{ text: "", images: 0 }]).size).toBe(0);
+    expect(pairPhotoOnly(["[Image #1]\n<attached_images>\n</attached_images>"], [{ text: "", images: 1 }]).size).toBe(0); // no real path
+    expect(pairPhotoOnly(["Please check this screen"], [{ text: "", images: 1 }]).size).toBe(0);
   });
 });

@@ -124,3 +124,32 @@ func TestSupervisorResumeAfterFinishedTerminalClosed(t *testing.T) {
 		t.Errorf("typed %q", typed)
 	}
 }
+
+// An Agent's tab opening in its worktree's workspace closes the worktree's first shell at once: the workspace keeps
+// only the Agent's tab, named for the task, not an empty "1" beside it until the Agent finishes. A shell the user
+// opened there, or the first shell of another workspace, stays.
+func TestAgentTabReplacesItsWorktreeShell(t *testing.T) {
+	n, f, home := herdrNode(t)
+	f.reply("session.snapshot", snapshot(nil, nil, nil, []any{
+		worktreeShell("w1:p1", "w1:t1", "w1", home), shellPane("w1:p3", "w1:t3", "w1", home, ""),
+		worktreeShell("w4:p1", "w4:t1", "w4", home)}))
+	if err := n.refreshHosts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
+	if _, err := n.newTab(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, "w1", "fix-login", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.trace("tab.create"); len(got) != 1 || !strings.Contains(got[0], `"label":"fix-login"`) {
+		t.Fatalf("the Agent's tab is named for its task: %q", got)
+	}
+	closed := strings.Join(f.trace("tab.close", "pane.close"), "\n")
+	if !strings.Contains(closed, "w1:t1") && !strings.Contains(closed, "w1:p1") {
+		t.Fatalf("the worktree's empty first shell stayed: %q", closed)
+	}
+	for _, kept := range []string{"w1:t2", "w1:p2", "w1:t3", "w1:p3", "w4:t1", "w4:p1"} {
+		if strings.Contains(closed, `"`+kept+`"`) {
+			t.Fatalf("closed %s: %q", kept, closed)
+		}
+	}
+}

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify Windows release ZIPs natively, then bind their check receipts to uploaded bytes.
+"""Verify Windows CLI ZIPs and gzip executables natively before release upload.
 
 Receipts are outputs of the trusted release process, not remote attestations. The
-uploader checks identity and hashes so old results cannot verify a different ZIP.
+uploader checks identity and hashes so old results cannot verify different bytes.
 """
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -23,6 +24,9 @@ from server_test_env import clean_environment
 ARCHIVE = re.compile(r"Persona-([0-9A-Za-z][0-9A-Za-z._-]*)-windows-(amd64|arm64)\.zip\Z")
 ARCHIVE_FAMILY = re.compile(r"Persona-.*-windows-.*\.zip\Z", re.IGNORECASE)
 PROGRAMS = ("persona-link.exe", "personad.exe")
+# The current CLI release keeps each Go executable in its own .exe.gz. The historical two-program ZIP remains
+# supported so an old receipt cannot bypass its original checks.
+GZIP = re.compile(r"(personad|persona-node|persona-link)-(windows)-(amd64|arm64)\.exe\.gz\Z")
 MAX_BINARY_SIZE = 512 * 1024 * 1024
 COMMAND_TIMEOUT = 20
 
@@ -42,7 +46,10 @@ def check_pe_header(header, target):
 
 
 def report_name(name):
-    return name.removesuffix(".zip") + ".verification.json"
+    for suffix in (".zip", ".exe.gz"):
+        if name.endswith(suffix):
+            return name[:-len(suffix)] + ".verification.json"
+    raise WindowsReleaseError("Windows artifact must be a ZIP or .exe.gz")
 
 
 def fingerprint(path):
@@ -115,6 +122,68 @@ def inspect_archive(path, version, destination=None):
     return {"name": path.name, **before}, members
 
 
+def gzip_identity(name):
+    match = GZIP.fullmatch(name)
+    if match is None:
+        raise WindowsReleaseError("Windows executable name does not match a supported release program")
+    return match[1], match[2] + "-" + match[3]
+
+
+def expected_channel(version):
+    # A beta manifest has its own feed. Keep the binary's existing release-channel stamp: beta is a distribution
+    # prerelease, not a new Go runtime channel. The receipt records the selected feed independently.
+    return "release"
+
+
+def check_gzip_manifest(path, program, target, version, build, manifest_path):
+    if program == "persona-link":
+        return
+    if manifest_path is None or not manifest_path.is_file():
+        raise WindowsReleaseError("Windows node executable requires latest.json in the artifact receipt")
+    metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if metadata.get("version") != version or metadata.get("build") != build:
+        raise WindowsReleaseError("latest.json does not identify the Windows node release")
+    entry = metadata.get("files", {}).get(target) if program == "personad" else metadata.get("nodes", {}).get(program, {}).get(target)
+    if not isinstance(entry, dict) or entry.get("name") != path.name or entry.get("sha256") != fingerprint(path)["sha256"]:
+        raise WindowsReleaseError("latest.json does not list this exact Windows node executable")
+    with tempfile.TemporaryFile() as unpacked:
+        with gzip.open(path, "rb") as source:
+            while chunk := source.read(1 << 20):
+                unpacked.write(chunk)
+        unpacked.seek(0)
+        inner = hashlib.file_digest(unpacked, "sha256").hexdigest()
+    if entry.get("binary_sha256") != inner:
+        raise WindowsReleaseError("latest.json's Windows executable digest differs from its bytes")
+
+
+def inspect_gzip(path, program, target, destination=None):
+    before = fingerprint(path)
+    if not 0 < before["size"] <= MAX_BINARY_SIZE:
+        raise WindowsReleaseError("Invalid Windows gzip executable size")
+    digest, size, header = hashlib.sha256(), 0, b""
+    output = (Path(destination) / (program + ".exe")).open("wb") if destination is not None else None
+    try:
+        with gzip.open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                if not header:
+                    header = chunk
+                size += len(chunk)
+                if size > MAX_BINARY_SIZE:
+                    raise WindowsReleaseError("Windows executable exceeds the size limit")
+                digest.update(chunk)
+                if output is not None:
+                    output.write(chunk)
+    finally:
+        if output is not None:
+            output.close()
+    if not 0 < size <= MAX_BINARY_SIZE:
+        raise WindowsReleaseError("Invalid Windows executable size")
+    check_pe_header(header, target)
+    if fingerprint(path) != before:
+        raise WindowsReleaseError("Windows executable archive changed during verification")
+    return {"name": path.name, **before}, {program + ".exe": {"size": size, "sha256": digest.hexdigest()}}
+
+
 def expected_build(assets, version):
     """Either release index may provide the build; all supplied indexes must agree."""
     builds = []
@@ -141,7 +210,7 @@ def check_outputs(outputs, version, build, platform_name):
     expected = {
         "link_version": version,
         "personad_version": version,
-        "personad_verbose": "%s\nchannel release, build %d" % (version, build),
+        "personad_verbose": "%s\nchannel %s, build %d" % (version, expected_channel(version), build),
         "node_check": {"version": version, "os": "windows",
                        "arch": platform_name.removeprefix("windows-"), "program": "personad"},
     }
@@ -177,6 +246,83 @@ def check_windows_archives(assets, expected_version):
         check_outputs(report.get("outputs"), expected_version, build, target)
 
 
+def check_gzip_outputs(outputs, program, version, build, target):
+    expected = {
+        "version": version,
+        "verbose": "%s\nchannel %s, build %d" % (version, expected_channel(version), build),
+    }
+    if program in ("personad", "persona-node"):
+        expected["node_check"] = {"version": version, "os": "windows",
+                                  "arch": target.removeprefix("windows-"), "program": program}
+    if not isinstance(outputs, dict) or outputs != expected:
+        raise WindowsReleaseError("Windows executable command outputs differ from the requested release")
+
+
+def check_gzip_executables(assets, expected_version):
+    """Require a native report for each current .exe.gz, bound to the exact compressed and executable bytes."""
+    executables = [asset for asset in assets if GZIP.fullmatch(asset["name"])]
+    if not executables:
+        return
+    by_name = {asset["name"]: Path(asset["path"]) for asset in assets}
+    if len(by_name) != len(assets):
+        raise WindowsReleaseError("Duplicate asset names in Windows release receipt")
+    build = expected_build(by_name, expected_version)
+    for asset in executables:
+        name, path = asset["name"], Path(asset["path"])
+        program, target = gzip_identity(name)
+        if path.name != name:
+            raise WindowsReleaseError("Windows executable path and asset name differ")
+        report_path = by_name.get(report_name(name))
+        if report_path is None:
+            raise WindowsReleaseError("Windows executable requires its native verification report: " + report_name(name))
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if (not isinstance(report, dict) or type(report.get("schema")) is not int or report["schema"] != 2
+                or report.get("version") != expected_version or report.get("build") != build
+                or report.get("platform") != target or report.get("program") != program
+                or report.get("channel") != ("beta" if "-beta." in expected_version else "release")):
+            raise WindowsReleaseError("Windows executable verification report has the wrong release identity")
+        check_gzip_manifest(path, program, target, expected_version, build, by_name.get("latest.json"))
+        archive, members = inspect_gzip(path, program, target)
+        if report.get("archive") != archive or report.get("binaries") != members:
+            raise WindowsReleaseError("Windows executable verification report hashes do not match the archive")
+        check_gzip_outputs(report.get("outputs"), program, expected_version, build, target)
+
+
+def check_windows_artifacts(assets, expected_version):
+    check_windows_archives(assets, expected_version)
+    check_gzip_executables(assets, expected_version)
+
+
+def verify_gzip_native(path, program, target, version, build):
+    if type(build) is not int or not re.fullmatch(r"[0-9]{12}", str(build)):
+        raise WindowsReleaseError("Expected Windows build must be a twelve-digit number")
+    with tempfile.TemporaryDirectory(prefix="persona-windows-release-check-") as directory:
+        archive, members = inspect_gzip(path, program, target, directory)
+        executable = Path(directory) / (program + ".exe")
+        environment = clean_environment(os.environ)
+        home = Path(directory) / "home"
+        home.mkdir()
+        for name in ("AppData", "LocalAppData"):
+            (home / name).mkdir()
+        environment.update(HOME=str(home), USERPROFILE=str(home), APPDATA=str(home / "AppData"),
+                           LOCALAPPDATA=str(home / "LocalAppData"), PERSONA_HOME=str(home / ".persona"))
+        outputs = {
+            "version": command_output(executable, ["version"], directory, environment),
+            "verbose": command_output(executable, ["version", "-v"], directory, environment),
+        }
+        if program in ("personad", "persona-node"):
+            node_check = json.loads(command_output(executable, ["node-update-check"], directory, environment))
+            if not isinstance(node_check, dict):
+                raise WindowsReleaseError("Node self-check did not return an object")
+            outputs["node_check"] = {key: node_check.get(key) for key in ("version", "os", "arch", "program")}
+        check_gzip_outputs(outputs, program, version, build, target)
+    if fingerprint(path) != {key: archive[key] for key in ("size", "sha256")}:
+        raise WindowsReleaseError("Windows executable archive changed while its program was checked")
+    return {"schema": 2, "version": version, "build": build, "platform": target,
+            "channel": "beta" if "-beta." in version else "release", "program": program,
+            "archive": archive, "binaries": members, "outputs": outputs}
+
+
 def command_output(path, arguments, directory, environment):
     result = subprocess.run([str(path), *arguments], capture_output=True, text=True,
                             encoding="utf-8", timeout=COMMAND_TIMEOUT, check=True,
@@ -189,9 +335,17 @@ def command_output(path, arguments, directory, environment):
 def verify_native(path, version, build):
     """Run only version/self-check commands on the archive's matching native Windows host."""
     path = Path(path)
-    target = archive_identity(path.name, version)
     machine = platform.machine().lower()
     architecture = {"amd64": "amd64", "x86_64": "amd64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
+    if platform.system() != "Windows":
+        raise WindowsReleaseError("Windows artifacts must be verified on their matching native Windows architecture")
+    gzip_match = GZIP.fullmatch(path.name)
+    if gzip_match:
+        program, target = gzip_identity(path.name)
+        if target != "windows-" + str(architecture):
+            raise WindowsReleaseError("Windows executable must be verified on its matching native Windows architecture")
+        return verify_gzip_native(path, program, target, version, build)
+    target = archive_identity(path.name, version)
     if platform.system() != "Windows" or target != "windows-" + str(architecture):
         raise WindowsReleaseError("Windows archive must be verified on its matching native Windows architecture")
     if type(build) is not int or not re.fullmatch(r"[0-9]{12}", str(build)):
@@ -234,7 +388,7 @@ def main(argv=None):
     output = args.archive.with_name(report_name(args.archive.name))
     temporary = None
     try:
-        # A failed recheck must not leave an earlier successful report beside this ZIP.
+        # A failed recheck must not leave an earlier successful report beside this artifact.
         if output.exists() or output.is_symlink():
             output.unlink()
         report = verify_native(args.archive, args.version, args.build)
@@ -244,7 +398,7 @@ def main(argv=None):
             json.dump(report, stream, indent=2)
             stream.write("\n")
         temporary.replace(output)
-    except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, zipfile.BadZipFile, gzip.BadGzipFile, EOFError, subprocess.SubprocessError) as error:
         # Child stdout/stderr and operating-system errors may contain machine paths.
         reason = "invalid release data"
         if isinstance(error, WindowsReleaseError):

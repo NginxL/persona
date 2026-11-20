@@ -96,6 +96,7 @@ type claudePeer struct {
 	socket   string // messagingSocketPath
 	protocol int    // peerProtocol
 	keyDir   string // the sessions directory its key file is in
+	source   bool   // source-attested Agent text is never described as the owner's words
 	fromMode string // the class the node states in the envelope's from-mode (peerAttest); "" states none
 }
 
@@ -172,7 +173,7 @@ func peerSendAt(ctx context.Context, p claudePeer, sessionID, text, priority str
 		}
 		token = "" // auth is optional on this platform: an inbox whose key file is missing takes the line without it
 	}
-	msg, err := peerMessageAt(sessionID, text, priority, p.fromMode)
+	msg, err := peerMessageFor(sessionID, text, priority, p.fromMode, agentPromptLanguage(ctx), p.source)
 	if err != nil {
 		return &errPeer{code: peerUnsupported, msg: peerNoInboxMsg, cause: err}
 	}
@@ -214,12 +215,31 @@ func peerMessage(sessionID, text string) ([]byte, error) {
 
 // peerMessageAt is peerMessage at priority, stating fromMode in the envelope ("" for none).
 func peerMessageAt(sessionID, text, priority, fromMode string) ([]byte, error) {
+	return peerMessageFor(sessionID, text, priority, fromMode, "", false)
+}
+
+// peerMessageIn is peerMessageAt with the owner preface rendered in language ("" for the default).
+func peerMessageIn(sessionID, text, priority, fromMode, language string) ([]byte, error) {
+	return peerMessageFor(sessionID, text, priority, fromMode, language, false)
+}
+
+// peerMessageForSource is peerMessageAt for source-attested Agent text when source is set: the body goes as it is,
+// without the owner-only phone-message preface.
+func peerMessageForSource(sessionID, text, priority, fromMode string, source bool) ([]byte, error) {
+	return peerMessageFor(sessionID, text, priority, fromMode, "", source)
+}
+
+func peerMessageFor(sessionID, text, priority, fromMode, language string, source bool) ([]byte, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("empty message")
 	}
+	body := text
+	if !source {
+		body = prompts.RenderPeerMessage(prompts.PeerMessage{Language: language, Text: text})
+	}
 	return marshalNoEscape(map[string]any{
 		"type":       "user",
-		"message":    map[string]string{"role": "user", "content": peerEnvelope(prompts.RenderPeerMessage(prompts.PeerMessage{Text: text}), fromMode)},
+		"message":    map[string]string{"role": "user", "content": peerEnvelope(body, fromMode)},
 		"priority":   priority,
 		"msgV":       1,
 		"msg_id":     peerMsgID(),

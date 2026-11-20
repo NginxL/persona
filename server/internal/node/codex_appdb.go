@@ -45,6 +45,8 @@ type codexAppThread struct {
 	// history in the App's database says neither. Empty in a schema without them.
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
+	// Terminal CLIs have no app-server stream: include the stored items of their running turn too.
+	includeRunning bool
 }
 
 func (t codexAppThread) updated() time.Time { return time.UnixMilli(t.UpdatedAtMs) }

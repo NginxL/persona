@@ -629,7 +629,7 @@ struct AssistantTaskEditor: View {
                 }
             }
         }
-        .confirmationDialog("Delete “\(AssistantScheduleText.title(draft))”?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete “\(AssistantScheduleText.title(draft))”?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 guard let s = saved else { return }
                 deleted = true
@@ -1228,7 +1228,7 @@ struct AssistantMemoryView: View {
             }
         }
         .pageTitle(health ? String(localized: "Health Memory") : String(localized: "Memory [Assistant Profile View 7a6335]"))
-        .confirmationDialog("Delete This Memory?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+        .accessibleConfirmationDialog("Delete This Memory?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible, presenting: pendingDelete) { e in
             Button("Delete", role: .destructive) { Task { await delete(e) } }
         } message: { e in

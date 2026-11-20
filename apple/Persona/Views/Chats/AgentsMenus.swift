@@ -34,34 +34,43 @@ struct AgentsListMenu: View {
     @Environment(AppModel.self) private var model
     var actions: Actions
 
-    /// Kept current by the list (`update`), read when an item is tapped.
-    @MainActor final class Actions {
-        private(set) var sections: [String] = []
-        private var foldAll: ([String]) -> Void = { _ in }
-        private var unfoldAll: () -> Void = {}
+    /// Kept current by the list (`update`), read when an item is tapped. Only `showingHidden` is observed: the menu's
+    /// reveal item names what a tap does next, and nothing else here redraws it (the menu stays out of each push's redraw).
+    @Observable @MainActor final class Actions {
+        @ObservationIgnored private(set) var sections: [String] = []
+        @ObservationIgnored private var foldAll: ([String]) -> Void = { _ in }
+        @ObservationIgnored private var unfoldAll: () -> Void = {}
         /// Not `openMonitor` / `openMachines`: a stored property's name is in the Release binary, and those are DEBUG
         /// launch arguments the release check looks for (TestFlight 50 stopped on one).
-        private var onMachines: () -> Void = {}
-        private var onTerminals: () -> Void = {}
+        @ObservationIgnored private var onMachines: () -> Void = {}
+        @ObservationIgnored private var onTerminals: () -> Void = {}
+        private(set) var showingHidden = false
+        @ObservationIgnored private var toggleHidden: () -> Void = {}
 
         /// `sections`: the fold ids of what the list shows now.
         func update(sections: [String], foldAll: @escaping ([String]) -> Void, unfoldAll: @escaping () -> Void,
-                    onMachines: @escaping () -> Void, onTerminals: @escaping () -> Void = {}) {
+                    onMachines: @escaping () -> Void, onTerminals: @escaping () -> Void = {},
+                    showingHidden: Bool = false, toggleHidden: @escaping () -> Void = {}) {
             self.sections = sections
             self.foldAll = foldAll
             self.unfoldAll = unfoldAll
             self.onMachines = onMachines
             self.onTerminals = onTerminals
+            if self.showingHidden != showingHidden { self.showingHidden = showingHidden }
+            self.toggleHidden = toggleHidden
         }
 
         func collapse() { foldAll(sections) }
         func expand() { unfoldAll() }
         func machinesPage() { onMachines() }
         func terminalsPage() { onTerminals() }
+        func toggleHiddenSessions() { toggleHidden() }
     }
 
     @StoredValue("dev.machineFilter") private var machineFilter = ""
-    @StoredValue(HubFilter.key) private var hubFilter = ""
+    @StoredValue(HubFilter.key) private var storedHubFilter = ""
+    /// The group the list shows when narrowed: the current hub's (`HubFilter.shown`, #11657).
+    private var hubFilter: String { HubFilter.shown(storedHubFilter, current: model.hub?.group) }
     @StoredValue("dev.grouping") private var grouping: DevGrouping = .standard
     /// The grouping the list shows: a stored By To-do is By Project on a hub without todos (`DevGrouping.resolved`).
     private var shownGrouping: DevGrouping { DevGrouping.resolvedNow(grouping) }
@@ -130,14 +139,23 @@ struct AgentsListMenu: View {
                 }
             }
             if model.isMultiHub {
-                // Several groups of hubs (docs/protocol/multi-hub.md「What the user sees」): one group's agents only.
-                Picker("hub", selection: Binding(get: { hubFilter }, set: { hubFilter = $0; machineFilter = "" })) {
+                // Several groups of hubs (docs/protocol/multi-hub.md「What the user sees」): one group's agents only. That
+                // group is the current hub (#11657): picking it here makes it current, so Persona's sidebar, the Inbox and
+                // the hub's settings show it too; All Hubs leaves the current hub as it is.
+                Picker("hub", selection: Binding(get: { hubFilter }, set: { pick in
+                    storedHubFilter = pick
+                    machineFilter = ""
+                    if let g = HubFilter.group(pick) { model.selectHub(g) }
+                })) {
                     Label("All Hubs", systemImage: Theme.Icon.hubGroup).tag("")
                     ForEach(model.groupIDs, id: \.self) { g in
                         Label(model.groupName(g), systemImage: Theme.Icon.hubGroup).tag(HubFilter.value(g))
                     }
                 }
             }
+            Button(actions.showingHidden ? String(localized: "Hide directory matches") : String(localized: "Show hidden sessions")) {
+                actions.toggleHiddenSessions()
+            }.lineLimit(1)
             Picker("Machines", selection: $machineFilter) {
                 Label("All Machines", systemImage: Theme.Icon.allMachines).tag("")
                 ForEach(machines.filter { m in HubFilter.matches(hubFilter, MachineRef(path: m.id).group) }) { m in
@@ -178,6 +196,22 @@ struct AgentsListMenu: View {
             }
     }
 }
+
+#if os(iOS)
+/// The Sidebar layout's Agents heading's ⋯ (#10738): `AgentsListMenu` in a view graph of its own (`MenuIsland`). In the
+/// sidebar's list the list's updates reached the menu several times a second while agents worked, and SwiftUI handed its
+/// items to UIKit again each time: open and scrolled down, it jumped back to its top.
+struct SidebarAgentsListMenu: View, Equatable {
+    let actions: AgentsListMenu.Actions
+
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.actions === b.actions }
+
+    var body: some View {
+        AgentsListMenu(actions: actions)
+            .accessibilityIdentifier("sidebar-agents-menu")
+    }
+}
+#endif
 
 #if !os(iOS)
 /// A row's long-press menu in Agents. Equal while the facts it shows are: the row's session changes with every push
@@ -326,7 +360,7 @@ extension AgentRowMenu {
         self.init(key: s.key, pinned: model.isPinned(s.key), muted: model.isMuted(s), looping: s.loop != nil, live: s.state.isLive,
                   terminal: s.canTerminal, renamable: s.canRename, closable: s.canClose, attachable: s.canAttach, deletable: s.canDelete,
                   paneActions: NodeMenu.offersPaneActions(s),
-                  interruptible: (s.state == .working || s.state == .needsYou) && s.canInterrupt, unread: s.state == .unread,
+                  interruptible: (s.state == .working || s.state == .needsYou) && s.canInterrupt, unread: s.needsSeen(muted: model.isMuted(s)),
                   takeoverAvailable: s.isCodex && !s.canSend && s.capabilities?.takeover?.canResume == true,
                   continueAvailable: s.isCodex && !s.canSend && s.capabilities?.takeover != nil,
                   actions: actions)
@@ -350,9 +384,9 @@ struct SpaceHeaderMenu: View, Equatable {
     var open: () -> Void
     var linkTodo: (() -> Void)?
 
-    init(group: SpaceGroup, rename: @escaping () -> Void, open: @escaping () -> Void, linkTodo: (() -> Void)? = nil) {
+    init(group: SpaceGroup, isMuted: (Session) -> Bool, rename: @escaping () -> Void, open: @escaping () -> Void, linkTodo: (() -> Void)? = nil) {
         id = group.id + "|" + group.spaceID + "|" + group.name
-        unread = group.sessions.filter { $0.state == .unread }.map(\.key)
+        unread = group.sessions.filter { $0.needsSeen(muted: isMuted($0)) }.map(\.key)
         nodeActions = NodeMenu.offersSpaceActions(group)
         self.group = group
         self.rename = rename
@@ -371,9 +405,12 @@ struct SpaceHeaderMenu: View, Equatable {
 }
 
 /// The grouping, one tap away under the quick filters (#5766), in a cell without the search input. The same stored
-/// choice as the ⋯ menu's (`dev.grouping`), kept across launches. Reads nothing that a hub push changes.
-struct AgentsGroupingMenu: View {
+/// choice as the ⋯ menu's (`dev.grouping`), kept across launches. Reads nothing that a hub push changes. Equal while
+/// it is drawn the same way: in the list it sits in a `MenuIsland` (#10738), as the list's updates replaced it while open.
+struct AgentsGroupingMenu: View, Equatable {
     var iconOnly = false
+
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.iconOnly == b.iconOnly }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StoredValue("dev.grouping") private var grouping: DevGrouping = .standard
     private var shown: DevGrouping { DevGrouping.resolvedNow(grouping) }

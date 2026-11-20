@@ -114,26 +114,41 @@ final class DuoTabSwitchTests: XCTestCase {
         shot("switch")
     }
 
-    /// Each segment goes to its page at once; the chosen one shows it. (Not Agents on the outer display in Chinese: the
-    /// Agents list's header can loop its layout there, #2352, which this switch does not touch.)
+    /// Each segment goes to its page at once; the chosen one shows it, including Agents on the outer display (#2352).
     @MainActor func testEachSegmentGoesToItsPage() {
+        verifyEachSegmentGoesToItsPage()
+    }
+
+    /// English control for the outer display's Assistant → Agents → Assistant navigation (#2352).
+    @MainActor func testOuterDisplayAgentsNavigationInEnglish() throws {
+        guard posture == .outer else { throw XCTSkip("the English control needs iPhone Duo's outer display") }
+        app.terminate()
+        launch(["-AppleLanguages", "(en)", "-AppleLocale", "en_US"])
+        verifyEachSegmentGoesToItsPage()
+    }
+
+    @MainActor private func verifyEachSegmentGoesToItsPage() {
         let assistant = element("shell-assistant"), agents = element("shell-agents"), messages = element("shell-feishu")
         XCTAssertTrue(messages.waitForExistence(timeout: 10), "no Messages segment:\n\(app.debugDescription)")
         messages.tap()
         XCTAssertTrue(element("feishu-conversations").waitForExistence(timeout: 10), "Messages did not open:\n\(app.debugDescription)")
         XCTAssertTrue(messages.isSelected, "Messages is not the chosen one")
         shot("messages")
-        if posture != .outer {
-            agents.tap()
-            let chosen = NSPredicate { _, _ in agents.isSelected }
-            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: NSNull())], timeout: 10), .completed,
-                           "Agents is not the chosen one:\n\(app.debugDescription)")
-            // On its side the Agents' column is beside the page; upright it lies over the page and starts away.
-            if posture == .side {
-                XCTAssertTrue(element("sidebar-agents-new").waitForExistence(timeout: 10), "Agents did not open:\n\(app.debugDescription)")
-            }
-            shot("agents")
+        if posture == .outer {
+            assistant.tap()
+            let assistantFirst = NSPredicate { _, _ in assistant.isSelected }
+            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: assistantFirst, object: NSNull())], timeout: 10), .completed,
+                           "Assistant did not open before the direct switch to Agents:\n\(app.debugDescription)")
         }
+        agents.tap()
+        let chosen = NSPredicate { _, _ in agents.isSelected }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: NSNull())], timeout: 10), .completed,
+                       "Agents is not the chosen one:\n\(app.debugDescription)")
+        // On its side the Agents' column is beside the page; upright it lies over the page and starts away.
+        if posture == .side {
+            XCTAssertTrue(element("sidebar-agents-new").waitForExistence(timeout: 10), "Agents did not open:\n\(app.debugDescription)")
+        }
+        shot("agents")
         assistant.tap()
         let back = NSPredicate { _, _ in assistant.isSelected }
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: back, object: NSNull())], timeout: 10), .completed,

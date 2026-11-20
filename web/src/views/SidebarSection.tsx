@@ -105,11 +105,13 @@ export function SidebarGroup({ heading, children, className }: { heading: React.
 }
 
 /** A sidebar group: its heading folds it. The heading selects no text, so a press-and-drag over the list paints no
- *  selection behind it (#6458); what a group holds, when its name does not say, is an ⓘ in `right` (InfoTip). */
-export function Section({ title, children, folded, onToggle, right, onMenu, first }: { title: React.ReactNode; children: React.ReactNode; folded: boolean; onToggle: () => void; right?: React.ReactNode; onMenu?: (at: MenuAt, el: HTMLElement) => void; first?: boolean }) {
+ *  selection behind it (#6458); what a group holds, when its name does not say, is an ⓘ in `right` (InfoTip).
+ *  `top`: one of the sidebar's top-level headings (Pages, Persona chats, Personal Agents), whose row is the Agents
+ *  title row's box, `sidebar-heading` (#10637), whatever `right` carries; a group's heading inside a list keeps its own. */
+export function Section({ title, children, folded, onToggle, right, onMenu, first, top }: { title: React.ReactNode; children: React.ReactNode; folded: boolean; onToggle: () => void; right?: React.ReactNode; onMenu?: (at: MenuAt, el: HTMLElement) => void; first?: boolean; top?: boolean }) {
   return (
     <SidebarGroup className={first ? "mt-1" : "mt-3"} heading={
-      <div className="group/sec relative flex select-none items-center gap-1 px-2 pb-1" {...(onMenu ? contextMenuProps(onMenu) : {})}>
+      <div className={cx("group/sec relative flex select-none items-center gap-1 px-2 pb-1", top && "sidebar-heading")} {...(onMenu ? contextMenuProps(onMenu) : {})}>
         <button type="button" aria-expanded={!folded} onClick={onToggle} className="touch-hit relative z-10 flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap text-left text-[11px] font-semibold text-ink-3 hover:text-ink-2">
           <span className="min-w-0 truncate">{title}</span>
           <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 transition-transform" style={{ ...sidebarFoldMotion(!folded), transform: folded ? "rotate(-90deg)" : "none" }} />

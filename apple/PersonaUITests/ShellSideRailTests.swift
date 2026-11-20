@@ -29,8 +29,8 @@ final class ShellSideRailTests: XCTestCase {
         XCTAssertTrue(messages.waitForExistence(timeout: 20), "Messages is on and the mock hub has Lark chats")
 
         let window = app.windows.firstMatch.frame
-        // Not Agents yet: in zh-Hans its header spins in a layout loop on the outer display (#2352).
-        let pages = [(messages, "feishu-sidebar"), (assistant, "assistant-sidebar-button")]
+        let pages = [(messages, "feishu-sidebar"), (assistant, "assistant-sidebar-button"),
+                     (agents, "work-sidebar-button"), (assistant, "assistant-sidebar-button")]
         for (segment, faceID) in pages {
             segment.tapCenter()
             let face = app.buttons.matching(identifier: faceID).firstMatch

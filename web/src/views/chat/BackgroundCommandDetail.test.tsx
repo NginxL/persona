@@ -274,3 +274,39 @@ it.each(["owner", "manager", "session"])("fences stale Copy and Open handlers at
   });
   await flush(); expect(writeText).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
 });
+
+const monitor: BackgroundTask = { id: "monitor-a", kind: "monitor", description: "Synthetic monitor", command: "tail -f sample.log | grep warning" };
+
+it("shows a Monitor with no output file yet, then switches to its output in place once the file arrives (#10852)", async () => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  const startedAt = new Date(Date.now() - 5000).toISOString();
+  draw({ task: { ...monitor, started_at: startedAt } }); await flush();
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("chat-subagentcard.status_running");
+  expect(host.querySelector("[data-command-runtime]")?.textContent).toBe("5s");
+  expect(host.querySelector("[data-command-started]")?.textContent).toBe(startedAt);
+  expect(host.querySelector("[data-command-full]")?.textContent).toBe(monitor.command);
+  expect(text()).toBe("chat-activity.output_empty_running");
+  expect(host.querySelector("[data-bg-open-file]")).toBeNull(); expect(host.querySelector("[data-command-lines]")).toBeNull();
+  expect(document.activeElement).toBe(button("chat-activity.back"));
+  act(() => button("chat-activity.copy_command").click()); await flush(); expect(writeText).toHaveBeenCalledWith(monitor.command);
+  await tick(6000); expect(fetcher).not.toHaveBeenCalled(); expect(host.querySelector("[data-command-runtime]")?.textContent).toBe("11s");
+  // The reader unfolds the command and moves on to Copy; the first event names the file.
+  act(() => button("chat-activity.command_show_more").click());
+  const copy = button("chat-activity.copy_command"); act(() => copy.focus());
+  draw({ task: { ...monitor, started_at: startedAt, output_file: "/tmp/monitor.log" } }); await flush();
+  expect(fetcher.mock.calls[0][0]).toBe("/api/v1/machines/machine-a/file/download?path=%2Ftmp%2Fmonitor.log&cwd=%2Ftmp");
+  expect(text()).toBe("sample output"); expect(host.querySelector("[data-command-lines]")?.textContent).toBe("lines:1");
+  expect(document.activeElement).toBe(copy); expect(button("chat-activity.command_show_less")).toBeDefined();
+  act(() => button("chat-activity.open_output_file").click()); expect(open).toHaveBeenCalledOnce();
+  await tick(); expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("says an ended task that never named an output file had no output, without reading anything", async () => {
+  draw({ running: false, task: { ...monitor, status: "completed", started_at: "2026-11-18T09:59:48Z", ended_at: "2026-11-18T10:00:00Z" } });
+  await flush();
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("chat-subagentcard.status_completed");
+  expect(host.querySelector("[data-command-runtime]")?.textContent).toBe("12s");
+  expect(text()).toBe("chat-activity.output_empty_ended"); expect(host.querySelector("[data-bg-open-file]")).toBeNull();
+  await tick(10_000); expect(fetcher).not.toHaveBeenCalled();
+});

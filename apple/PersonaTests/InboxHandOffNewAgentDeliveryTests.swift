@@ -53,8 +53,15 @@ struct InboxHandOffNewAgentDeliveryTests {
         return model
     }
 
-    private func app(_ hub: FakeHub) -> AppModel {
+    /// A model whose requests go to `hub`. `paired`: `hub` is also its hub-level group, with no socket, as in the other
+    /// `refreshAssistant` tests, so the Persona page is `hub`'s default assistant and what `refreshAssistant` reads lands
+    /// (`showsPage(of:)`), whether the simulator restored another pairing or none (#10987).
+    private func app(_ hub: FakeHub, paired: Bool = false) -> AppModel {
         let model = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        if paired {
+            model.linkHooksForTests = (transport: hub.client.transport!, socket: { SyncSocket() })
+            model.connectOnly(.demo)
+        }
         model.forgetRestoredForTests()
         model.apiForTests = hub.client
         model.linksUpForTests = true
@@ -194,6 +201,9 @@ struct InboxHandOffNewAgentDeliveryTests {
     }
 
     @Test func olderHubMessageOverridesSurviveRetryAndClearWithoutChangingAssistantConfig() async throws {
+        // Reading the assistant can make its main conversation the current one, which is kept for the next launch.
+        let savedCurrent = UserDefaults.standard.object(forKey: "assistant.current")
+        defer { UserDefaults.standard.set(savedCurrent, forKey: "assistant.current") }
         let hub = FakeHub(), path = "/api/v1/sessions/m/\(key.sessionID)/messages"
         var attempts = 0
         hub.on("POST", path) { _ in
@@ -208,11 +218,14 @@ struct InboxHandOffNewAgentDeliveryTests {
         {"machine_id":"m","launcher":"saved-launcher","cwd":"/tmp/p","main":"\(key.sessionID)",
          "timezone_picked":true,"conversations":[]}
         """)
-        let app = app(hub)
-        defer { app.outboxRetry.values.forEach { $0.cancel() } }
+        let app = app(hub, paired: true)
+        defer {
+            app.outboxRetry.values.forEach { $0.cancel() }
+            for link in app.links { link.live.disconnect() }
+        }
         await app.refreshAssistant()
         let savedLauncher = app.assistantConfig?.launcher
-        #expect(savedLauncher != nil)
+        #expect(savedLauncher == "saved-launcher", "the settings are this test's hub's, not a hub the simulator kept")
         app.assistantLaunchers[key] = "team-api"
         app.assistantModels[key] = "claude-sonnet-5-5"
 

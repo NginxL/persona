@@ -51,7 +51,7 @@ import java.io.File
 /**
  * A running chat of Paseo's provider that lists its permission modes (#8261, Grok): the mode control (the header's on Brief
  * and Board, the composer's on Glass) with its two rows, its own approval under the plain shield, never Claude Code's
- * modes; going into Allow everything asks first, leaving it does not; Brief and Board's Mode sheet with the same rows
+ * modes; going into Full access asks first, leaving it does not; Brief and Board's Mode sheet with the same rows
  * and its model's efforts; Session info without the counts nobody gives. Every style, light and dark. PNGs
  * `paseo-modes-*` in `build/paseo-modes-shots/` (or `-Dpersona.shots=<dir>`).
  */
@@ -122,7 +122,7 @@ class PaseoPermissionModesShotsTest {
 
     /** None of Claude Code's own modes: those are not this agent's. */
     private fun noClaudeModes() {
-        for (w in listOf("Ask first", "Plan only", "Auto-edit files")) assertFalse("$w is Claude Code's", has(w))
+        for (w in listOf("Default permissions", "Plan mode", "Auto accept edits")) assertFalse("$w is Claude Code's", has(w))
     }
 
     private fun scene(name: String, style: AppStyle, dark: Boolean) {
@@ -131,7 +131,7 @@ class PaseoPermissionModesShotsTest {
                 show(style, dark, 520) { chrome -> Moded(grok(null), chrome) }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
-                assertTrue(has("Permission mode: Follow launcher") && has("Allow everything"))
+                assertTrue(has("Permission mode: Follow launcher") && has("Full access"))
                 assertTrue(has("may already allow everything") && has("can be switched back"))
                 noClaudeModes()
                 save(name, style, dark, withPopup())
@@ -140,25 +140,25 @@ class PaseoPermissionModesShotsTest {
                 show(style, dark, 520) { chrome -> Moded(grok(null), chrome) }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
-                rule.onNode(hasText("Allow everything") and hasAnyAncestor(isPopup())).performClick()
+                rule.onNode(hasText("Full access") and hasAnyAncestor(isPopup())).performClick()
                 rule.waitForIdle()
-                assertTrue(has("Allow everything?"))
+                assertTrue(has("Full access?"))
                 assertTrue("nothing sent before the answer", actions.asked.isEmpty())
                 save(name, style, dark, rule.onNode(isDialog()).captureToImage().asAndroidBitmap())
-                rule.onNode(hasText("Allow everything") and hasAnyAncestor(isDialog())).performClick()
+                rule.onNode(hasText("Full access") and hasAnyAncestor(isDialog())).performClick()
                 rule.waitForIdle()
                 assertEquals(listOf(ChatAction.Modes(permissionMode = "bypassPermissions")), actions.asked)
             }
             "leave" -> {
-                // In Allow everything: the danger shield; back to its own approval without a question, since it can come back.
+                // In Full access: the danger shield; back to its own approval without a question, since it can come back.
                 show(style, dark, 520) { chrome -> Moded(grok("bypassPermissions"), chrome) }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
-                assertTrue(has("Permission mode: Allow everything"))
+                assertTrue(has("Permission mode: Full access"))
                 save(name, style, dark, withPopup())
                 rule.onNode(hasText("Follow launcher") and hasAnyAncestor(isPopup())).performClick()
                 rule.waitForIdle()
-                assertFalse(has("Leave Allow everything?"))
+                assertFalse(has("Leave Full access?"))
                 rule.waitUntil(5_000) { actions.asked.isNotEmpty() }
                 assertEquals(listOf(ChatAction.Modes(permissionMode = "default")), actions.asked)
             }
@@ -166,7 +166,7 @@ class PaseoPermissionModesShotsTest {
                 show(style, dark, 900) { chrome -> ChatModeBar(grok(null), chrome, online = true) }
                 rule.onNodeWithContentDescription("Mode").performClick()
                 rule.waitForIdle()
-                for (text in listOf("File permissions", "Follow launcher", "Allow everything", "Thinking effort", "Low", "High")) {
+                for (text in listOf("File permissions", "Follow launcher", "Full access", "Thinking effort", "Low", "High")) {
                     assertTrue("$text in the sheet", rule.onAllNodes(hasText(text) and hasAnyAncestor(isDialog()), useUnmergedTree = true)
                         .fetchSemanticsNodes().isNotEmpty())
                 }

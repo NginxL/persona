@@ -527,7 +527,7 @@ func TestHubJobReopenedAndIdle(t *testing.T) {
 	h.tr.set(func(f *fakeTranscriber) { f.live = jobScript{lines: mixedLines, dropAt: 2.5} })
 	h.hubUpload(meetingRec, 1, nil)
 	p, _ := h.open(meetingRec, 0, nil)
-	p.audio(2.6)
+	p.audio(2.5)
 	p.wait("line", 1)
 	waitFor(t, "the job dropped", func() bool {
 		r := h.s.hubRunOf(meetingRec)

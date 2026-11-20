@@ -116,6 +116,19 @@ func TestTaskRepositoryTransportAndLayouts(t *testing.T) {
 	}
 }
 
+func TestAliasReservedDeviceNames(t *testing.T) {
+	for _, name := range []string{"CON", "prn.txt", "Aux.tar.gz", "nUl", "COM1", "com9.txt", "LPT1", "lpt9.txt"} {
+		if err := ValidateAlias(name); err == nil {
+			t.Errorf("accepted reserved alias %q", name)
+		}
+	}
+	for _, name := range []string{"console", "NUL-backup", "AUX_1", "COM0", "COM10.txt", "LPT0", "LPT10", "prefix.NUL"} {
+		if err := ValidateAlias(name); err != nil {
+			t.Errorf("rejected ordinary alias %q: %v", name, err)
+		}
+	}
+}
+
 func TestTaskRepositorySameNumberAcrossRepositories(t *testing.T) {
 	web, _ := Parse("https://github.com/example/web", "")
 	api, _ := Parse("https://github.com/example/api", "")

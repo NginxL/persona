@@ -1,0 +1,5 @@
+Example ownerがソースで返信しました（original reply）。
+
+現在の状態を確認し、解決済みなら inbox_suggest で conclusion（outcome done）。相手待ちなら recap と follow だけを渡します（kind はなし。follow に待つ相手、次の手順、再確認時刻を示す）。新たな提案は不要です。
+
+このターンで Agent の起動、送信、他人に見える操作の直接実行はできません。調査は読み取り専用ツールだけで行い、提案はExample ownerが確認した後にプログラムが実行します。

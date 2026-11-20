@@ -70,7 +70,9 @@ nonisolated struct MeetingHandoff: Decodable, Equatable, Sendable {
 
     /// `POST /api/v1/recordings/{id}/handoff`: the try as the hub kept it, sent or failed with its problem.
     static func send(_ recording: UUID, _ body: Body, api: APIClient) async throws -> MeetingHandoff? {
+        #if os(iOS)
         try MeetingConversation.refuseReplayed(recording)
+        #endif
         let answer: Answer = try await api.post("/api/v1/recordings/\(recording.uuidString.lowercased())/handoff", body: body)
         return answer.handoff
     }

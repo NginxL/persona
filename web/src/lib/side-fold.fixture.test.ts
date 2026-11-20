@@ -1,7 +1,7 @@
 // The shared side-fold fixtures (spec/fixtures/side-fold, #7944): the rows the hub sends (the input with the manager's
 // fold applied, or a paged list's rows as they come) go through the web's list choke point (foldRows); the rows left and
 // each one's folded state, and each card's home and chat, must be the fixture's. The server reads the same cases
-// (server/internal/assistant/fleet_fold_test.go).
+// (server/internal/assistant/fleet_side_fold_test.go).
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { requestHome } from "./child-sessions";

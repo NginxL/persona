@@ -34,7 +34,7 @@ struct ExtensionAuthSection: View {
         .task(id: model.prompt.flatMap(ExtensionSignIn.pollKey)) {
             _ = await model.waitForAuthorization()
         }
-        .confirmationDialog("Sign out of \(auth.title)? [Extension Auth Views fd7af9]", isPresented: $confirmLogout, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Sign out of \(auth.title)? [Extension Auth Views fd7af9]", isPresented: $confirmLogout, titleVisibility: .visible, hasCancel: true) {
             Button(role: .destructive) { Task { await model.logout() } } label: { Text("Sign Out [Connector Sign In Views 3ab8cc]").lineLimit(1) }
                 .accessibilityIdentifier("extension-auth-logout-confirm")
             Button("Cancel", role: .cancel) {}

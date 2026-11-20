@@ -68,7 +68,7 @@ fun Todo.triageStatus(lookup: (SessionKey) -> Session?, now: Long = System.curre
         }
     }
     return when {
-        interrupted -> TriageStatus.Interrupted
+        interrupted && !working && supervision?.state != "parked" -> TriageStatus.Interrupted
         limit -> TriageStatus.UsageLimit
         unread -> TriageStatus.Unread
         working -> TriageStatus.Working
@@ -162,7 +162,9 @@ fun Todo.triage(
         return at(TriageSection.Done, TriageRule.FailedStart)
     }
     if (status == TriageStatus.NeedsYou || status == TriageStatus.Interrupted) return at(TriageSection.Waiting, TriageRule.AgentAsks)
-    if (!isDone && (review == "needs_user" || ask?.outcome == "decide" || ask?.outcome == "cannot")) return at(TriageSection.Waiting, TriageRule.OwnerDecides)
+    if (!isDone && (hold?.unblock == HoldUnblock.User || review == "needs_user" || ask?.outcome == "decide" || ask?.outcome == "cannot")) {
+        return at(TriageSection.Waiting, TriageRule.OwnerDecides)
+    }
     if (status == TriageStatus.Working) return at(TriageSection.Working, TriageRule.AgentRunning)
     if (isDone) return at(if (fresh(ms(doneAt))) TriageSection.JustDone else TriageSection.Done, TriageRule.Closed)
     if (!concern && acceptanceStands) return at(if (fresh(ms(supervision?.latestReview?.at))) TriageSection.JustDone else TriageSection.Done, TriageRule.Accepted)
@@ -186,6 +188,20 @@ fun Todo.countsAsOpen(t: Triage): Boolean {
     if (t.rule == TriageRule.FailedStart) return t.section == TriageSection.Waiting
     if (isDone || t.section == TriageSection.Shelved || t.section == TriageSection.Done) return false
     return t.rule != TriageRule.Accepted && t.rule != TriageRule.Deployed
+}
+
+/**
+ * When a to-do the triage filed with the finished ones (Just finished or Done) finished, epoch ms: the moment its rule
+ * reads in [triage] — its close, its accepting review, its deploy — else its last move (a finished turn the owner has
+ * seen since). The Assistant's Finished entry lists what finished less than [JUST_DONE_MS] ago, seen or not (#10922; web
+ * `finishedAt`). 0 when nothing says.
+ */
+fun Todo.finishedAt(t: Triage): Long = when (t.rule) {
+    TriageRule.Closed -> ms(doneAt)
+    TriageRule.Accepted -> ms(supervision?.latestReview?.at)
+    TriageRule.Deployed -> ms(delivery?.at).takeIf { it > 0 } ?: t.last
+    TriageRule.Superseded -> ms(doneAt).takeIf { it > 0 } ?: t.last
+    else -> t.last
 }
 
 /** Where a to-do stands for every count of open work (#3331): open counts, shelved folds, closed is finished. */

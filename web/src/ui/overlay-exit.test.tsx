@@ -178,11 +178,21 @@ describe("toasts' motion and hold", () => {
   it("holds its time while the pointer is on it, and runs out after", () => {
     act(() => void toast("没发出去", "error"));
     act(() => void vi.advanceTimersByTime(1000));
-    act(() => void rows()[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    act(() => void rows()[0].dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
     act(() => void vi.advanceTimersByTime(6000));
     expect(rows()).toHaveLength(1);
-    act(() => void rows()[0].dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
+    act(() => void rows()[0].dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "mouse", relatedTarget: document.body })));
     act(() => void vi.advanceTimersByTime(4199));
+    expect(rows()).toHaveLength(1);
+    act(() => void vi.advanceTimersByTime(1));
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("is not held by a finger: a tap's compatibility mouseover has no mouseout to follow, so its time runs on", () => {
+    act(() => void toast("触摸一下", "error"));
+    act(() => void rows()[0].dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "touch" })));
+    act(() => void rows()[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    act(() => void vi.advanceTimersByTime(5199));
     expect(rows()).toHaveLength(1);
     act(() => void vi.advanceTimersByTime(1));
     expect(rows()).toHaveLength(0);

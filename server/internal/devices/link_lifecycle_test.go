@@ -59,6 +59,13 @@ func dialTestLink(t *testing.T, d *Devices, id string) (*testLinkClient, *mgrLin
 // dialTestLinkHello is dialTestLink with this hello.
 func dialTestLinkHello(t *testing.T, d *Devices, hello link.Message) (*testLinkClient, *mgrLink) {
 	t.Helper()
+	return dialTestLinkOpening(t, d, hello, nil)
+}
+
+// dialTestLinkOpening is dialTestLinkHello whose Persona Link runs open (when not nil) for each stream the manager
+// asks for, in a goroutine of its own; the link it waits for is the one of this hello's version.
+func dialTestLinkOpening(t *testing.T, d *Devices, hello link.Message, open func(c *testLinkClient, id string)) (*testLinkClient, *mgrLink) {
+	t.Helper()
 	id := hello.Machine
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -91,6 +98,9 @@ func dialTestLinkHello(t *testing.T, d *Devices, hello link.Message) (*testLinkC
 			}
 			var m link.Message
 			if json.Unmarshal(data, &m) == nil {
+				if m.Type == "open" && open != nil {
+					go open(c, m.ID)
+				}
 				select {
 				case c.msgs <- m:
 				default:
@@ -101,7 +111,7 @@ func dialTestLinkHello(t *testing.T, d *Devices, hello link.Message) (*testLinkC
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if m := d.cfgMachine(id); m != nil {
-			if l := m.currentLink(); l != nil {
+			if l := m.currentLink(); l != nil && l.version == hello.Version {
 				return c, l
 			}
 		}

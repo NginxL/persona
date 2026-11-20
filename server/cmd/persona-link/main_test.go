@@ -391,6 +391,12 @@ hub：「家里」，互联组共 3 台 hub
 func TestUninstall(t *testing.T) {
 	f := newFakeEnv(t)
 	f.pairHere(t)
+	routeFile := link.RouteHintPath(f.configPath())
+	for _, p := range []string{routeFile, routeFile + ".tmp"} {
+		if err := os.WriteFile(p, []byte("route hint"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	_ = os.MkdirAll(filepath.Dir(f.unitPath()), 0o755)
 	_ = os.WriteFile(f.unitPath(), []byte("x"), 0o644)
 	if _, _, err := f.installBinary(); err != nil {
@@ -399,7 +405,8 @@ func TestUninstall(t *testing.T) {
 	if err := uninstall(f.env, nil); err != nil {
 		t.Fatal(err)
 	}
-	if fileExists(f.unitPath()) || !fileExists(f.configPath()) || !fileExists(f.binPath()) {
+	if fileExists(f.unitPath()) || !fileExists(f.configPath()) || !fileExists(f.binPath()) ||
+		!fileExists(routeFile) || !fileExists(routeFile+".tmp") {
 		t.Fatal("uninstall takes the service away, nothing else")
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "systemctl --user disable --now persona-link.service") ||
@@ -418,7 +425,7 @@ func TestUninstall(t *testing.T) {
 	if err := uninstall(f.env, []string{"--purge"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{f.configPath(), link.StatusPath(f.configPath()), f.logPath(), f.binPath()} {
+	for _, p := range []string{f.configPath(), link.StatusPath(f.configPath()), f.logPath(), f.binPath(), routeFile, routeFile + ".tmp"} {
 		if fileExists(p) {
 			t.Errorf("%s still there", p)
 		}

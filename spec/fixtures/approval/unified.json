@@ -555,7 +555,8 @@
             "requires_unlock": false,
             "available_now": true,
             "requirements": [
-              "single_question_single_choice"
+              "single_question_single_choice",
+              "question_not_irreversible"
             ],
             "max_options": 3
           },
@@ -593,7 +594,8 @@
             "requires_unlock": true,
             "available_now": false,
             "requirements": [
-              "single_question_single_choice"
+              "single_question_single_choice",
+              "question_not_irreversible"
             ],
             "max_options": 3
           },

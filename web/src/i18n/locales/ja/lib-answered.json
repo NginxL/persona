@@ -1,7 +1,7 @@
 {
   "mode_accept_edits": "編集を自動承認",
   "mode_bypass": "フルアクセス",
-  "mode_default": "毎回確認",
+  "mode_default": "デフォルト権限",
   "dismissed": "コンピューターに戻しました",
   "by_assistant": "アシスタントが代わりに回答しました",
   "unanswered": "（未回答）",

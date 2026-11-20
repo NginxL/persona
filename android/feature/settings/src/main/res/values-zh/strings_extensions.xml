@@ -268,6 +268,10 @@
     <string name="settings_ext_token_changed">已换 token</string>
     <string name="settings_ext_remove_market_title">删除 %1$s？</string>
     <string name="settings_ext_remove_market_text">hub 不再读这个市场。从它装的扩展留着，但不再升级，直到用同样的地址把市场加回来。</string>
+    <plurals name="settings_ext_remove_market_affected">
+        <item quantity="other">hub 不再读这个市场。从它装的 %1$d 个扩展留着，但不再升级，直到用同样的地址把市场加回来。</item>
+    </plurals>
+    <string name="settings_ext_remove_market_unused">hub 不再读这个市场。没有扩展是从它装的。</string>
     <string name="settings_ext_remove">删除</string>
     <string name="settings_ext_market_removed">已删除市场</string>
     <string name="settings_ext_market_address">地址</string>
@@ -404,4 +408,16 @@
     <plurals name="settings_ext_node_stopped">
         <item quantity="other">%1$d 台机器已停止</item>
     </plurals>
+    <string name="settings_ext_graph">关系图</string>
+    <string name="settings_ext_graph_zoom_out">缩小</string>
+    <string name="settings_ext_graph_zoom_in">放大</string>
+    <string name="settings_ext_graph_fit">适应窗口</string>
+    <string name="settings_ext_graph_full_screen">全屏</string>
+    <string name="settings_ext_graph_open">全屏打开关系图</string>
+    <string name="settings_ext_graph_fold">折叠</string>
+    <plurals name="settings_ext_graph_show_hidden">
+        <item quantity="other">显示 %1$d 个隐藏节点</item>
+    </plurals>
+    <string name="settings_ext_graph_under">位于 %1$s 下</string>
+    <string name="settings_ext_graph_progress">%1$d%%</string>
 </resources>

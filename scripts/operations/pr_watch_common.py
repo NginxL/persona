@@ -241,18 +241,34 @@ def gh_json(argv, timeout=90, environ=None, input_text=None):
 
 
 def pr_snapshot(repo, number, timeout=90, environ=None):
-    # Do not ask gh for baseRefOid: GitHub reports the base recorded at the
-    # PR's last synchronization, not the base branch's current tip, and only
-    # some gh releases expose it. Every gate compares against a fresh fetch of
-    # the base branch, so always resolve the live tip (#10568).
-    data = gh_json(["pr", "view", str(number), "--repo", repository(repo), "--json", PR_FIELDS],
-                   timeout=timeout, environ=environ)
+    # Resolve the live base in the same query as the PR. The PR's recorded
+    # baseRefOid is not necessarily its base branch's current tip (#10568).
+    owner, name = repository(repo).split("/", 1)
+    query = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number title body state isDraft headRefOid headRefName baseRefName
+      baseRef { target { oid } }
+      isCrossRepository mergeable mergeStateStatus reviewDecision url createdAt updatedAt
+    }
+  }
+}
+"""
+    payload = {"query": query, "variables": {"owner": owner, "name": name, "number": number}}
+    response = gh_json(["api", "graphql", "--input", "-"], input_text=json.dumps(payload),
+                       timeout=timeout, environ=environ)
+    if not isinstance(response, dict):
+        raise WatchError("GitHub returned an invalid PR snapshot")
+    try:
+        repository_data = response["data"]["repository"]
+        data = repository_data["pullRequest"]
+        base = data["baseRef"]["target"]["oid"]
+    except (KeyError, TypeError) as error:
+        raise WatchError("GitHub returned an incomplete PR snapshot") from error
     if not isinstance(data, dict) or data.get("number") != number:
         raise WatchError("unexpected PR snapshot")
-    if not isinstance(data.get("baseRefName"), str) or not data["baseRefName"]:
-        raise WatchError("PR snapshot has no valid baseRefName")
-    data["baseRefOid"] = checked(["gh", "api", "repos/%s/commits/%s" % (repo, data["baseRefName"]),
-                                  "--jq", ".sha"], timeout=timeout, environ=environ).strip()
+    data["baseRefOid"] = base
     for field in ("headRefOid", "baseRefOid"):
         if not isinstance(data.get(field), str) or not SHA.fullmatch(data[field]):
             raise WatchError("PR snapshot has no valid %s" % field)

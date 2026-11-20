@@ -19,7 +19,7 @@ import persona.core.contracts.TodoAgent
 import persona.core.contracts.UsageLimitWhen
 import persona.core.contracts.WorkState
 
-/** #8312: receipts, reports and reviews stay in the feed and are not drawn; Just finished and a usage limit. */
+/** #8312: receipts, reports and reviews stay in the feed and are not drawn; Finished (#10922) and a usage limit. */
 class QuietTasksTest {
     private val now = Instant.parse("2026-11-10T09:00:00Z")
     private val nowMs = now.toEpochMilli()
@@ -111,22 +111,46 @@ class QuietTasksTest {
         assertFalse(working.interrupted)
     }
 
-    @Test fun justFinishedIsNewestFirstAndLeavesTheCountedRows() {
-        fun done(id: String, at: String, origin: String? = "main", seenAt: String? = null) =
-            Todo(id, title = id, origin = origin, doneAt = at, seenAt = seenAt, createdAt = at)
+    private fun done(id: String, at: String, origin: String? = "main", seenAt: String? = null) =
+        Todo(id, title = id, origin = origin, doneAt = at, seenAt = seenAt, createdAt = at)
+
+    private fun finished(todos: List<Todo>, conversation: String = "main", at: Long = nowMs) =
+        assistantEntries(conversation, "main", todos, emptyList(), emptyList(), emptyList(), emptyList(), at)
+
+    @Test fun finishedListsTheLastDayNewestFirstSeenOrNotAndCountsNone() {
         val older = done("older", "2026-11-10T08:00:00Z")
         val newer = done("newer", "2026-11-10T08:30:00Z")
         val seen = done("seen", "2026-11-10T08:10:00Z", seenAt = "2026-11-10T08:20:00Z")
         val stale = done("stale", "2026-11-08T08:00:00Z")
         val blank = done("blank", "2026-11-10T08:15:00Z", origin = "")
-        val got = assistantEntries("main", "main", listOf(older, newer, seen, stale, blank), emptyList(), emptyList(),
-            emptyList(), emptyList(), nowMs)
-        assertEquals(listOf("task:newer", "task:older"), got.justFinished.map { it.key })
+        val got = finished(listOf(older, newer, seen, stale, blank))
+        assertEquals(listOf("task:newer", "task:seen", "task:older"), got.finished.map { it.key })
+        assertEquals(listOf(true, false, true), got.finished.map { it.fresh })
+        assertEquals(listOf("2026-11-10T08:30:00Z", "2026-11-10T08:10:00Z", "2026-11-10T08:00:00Z").map { Instant.parse(it).toEpochMilli() },
+            got.finished.map { it.at })
         assertTrue(got.needsYou.isEmpty())
         assertTrue(got.running.isEmpty())
         assertTrue(got.shelved.isEmpty())
-        val side = assistantEntries("side", "main", listOf(newer), emptyList(), emptyList(), emptyList(), emptyList(), nowMs)
-        assertTrue(side.justFinished.isEmpty())
+    }
+
+    @Test fun anOpenedFinishedRowStaysAndOnlyStopsBeingNew() {
+        val task = done("opened", "2026-11-10T08:30:00Z")
+        assertEquals(listOf("task:opened" to true), finished(listOf(task)).finished.map { it.key to it.fresh })
+        assertEquals(listOf("task:opened" to false),
+            finished(listOf(task.copy(seenAt = "2026-11-10T08:50:00Z"))).finished.map { it.key to it.fresh })
+    }
+
+    @Test fun aFinishedRowGoesOnceItFinishedADayAgoSeenOrNot() {
+        val task = done("day", "2026-11-09T09:00:00Z")
+        assertEquals(listOf("task:day"), finished(listOf(task), at = nowMs - 1000).finished.map { it.key })
+        assertTrue(finished(listOf(task)).finished.isEmpty())
+        assertEquals(listOf(false), finished(listOf(task.copy(seenAt = "2026-11-09T10:00:00Z")), at = nowMs - 1000).finished.map { it.fresh })
+    }
+
+    @Test fun anotherConversationListsOnlyTheFinishedWorkItHandedOut() {
+        assertTrue(finished(listOf(done("newer", "2026-11-10T08:30:00Z")), conversation = "side").finished.isEmpty())
+        assertEquals(listOf("task:side"),
+            finished(listOf(done("side", "2026-11-10T08:30:00Z", origin = "side")), conversation = "side").finished.map { it.key })
     }
 
     @Test fun anOpenUnseenFinishStaysInProgressAndAFailedStartIsNotNews() {
@@ -137,7 +161,7 @@ class QuietTasksTest {
         val failed = Todo("failed", "Did not start", origin = "main", startError = "rpc: connection closed",
             doneAt = "2026-11-10T08:50:00Z", createdAt = "2026-11-10T08:50:00Z")
         val got = assistantEntries("main", "main", listOf(open, failed), listOf(session), emptyList(), emptyList(), emptyList(), nowMs)
-        assertTrue(got.justFinished.isEmpty())
+        assertTrue(got.finished.isEmpty())
         assertEquals(listOf("task:open"), got.running.map { it.key })
         assertEquals(listOf("task:failed"), got.needsYou.map { it.key })
     }

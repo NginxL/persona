@@ -1,0 +1,18 @@
+{
+  "no_session": "そのAgentセッションは利用できません。",
+  "session_busy": "このAgentは実行中です。停止してからレビューしてください。",
+  "review_running": "このセッションではすでに独立レビューが実行されています。",
+  "no_change": "このディレクトリーにはレビューする変更がありません。",
+  "no_change_not_git": "このディレクトリーはGitリポジトリーではないため、レビューする変更がありません。",
+  "read_only_unsupported": "{agent}では強制的な読み取り専用レビューを開始できません。独立レビューにはClaude Codeのプランモードが必要です。",
+  "not_supported": "このコンピューターでは独立レビューを開始できません。",
+  "start_failed": "独立レビューを開始できませんでした：{error}",
+  "store_failed": "レビューの状態を読み取りまたは保存できませんでした。もう一度試してください。",
+  "send_failed": "レビュー結果を元のAgentに送信できませんでした：{error}",
+  "card_title": "独立レビュー",
+  "review_complete": "レビュー完了",
+  "finding_one": "1件の指摘",
+  "findings": "{count}件の指摘",
+  "send_to_agent": "Agentに送信",
+  "dismiss": "閉じる"
+}

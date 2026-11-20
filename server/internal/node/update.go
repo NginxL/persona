@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"slices"
 
 	"github.com/nwverse/persona/server/internal/nodeupdate"
@@ -82,28 +81,21 @@ func updateWouldCut(assistantsBusy bool, sessions []proto.Session, starting ...[
 	return false
 }
 
-// RPC writes each response in one Write. Observe the successful transport write,
-// rather than guessing a delay or restarting from inside a request handler.
-type updateResponseWriter struct {
-	io.Writer
-	responseWritten func(string)
-}
-
-func (w *updateResponseWriter) Write(b []byte) (int, error) {
-	n, err := w.Writer.Write(b)
-	if err == nil && n != len(b) {
-		err = io.ErrShortWrite
+// updateResponseWritten is the node connection's rpc.Peer.LineWritten when it can update itself: told of each line once
+// all of it is written, it observes the accepted commit's answer reaching the transport, rather than guessing a delay or
+// restarting from inside a request handler.
+func updateResponseWritten(responseWritten func(string)) func([]byte) {
+	return func(b []byte) {
+		if !bytes.Contains(b, []byte(`"accepted":true`)) {
+			return
+		}
+		var response struct {
+			ID     string                       `json:"id"`
+			Result proto.NodeUpdateCommitResult `json:"result"`
+			Error  json.RawMessage              `json:"error"`
+		}
+		if json.Unmarshal(b, &response) == nil && response.ID != "" && len(response.Error) == 0 && response.Result.Accepted {
+			responseWritten(response.Result.ID)
+		}
 	}
-	if err != nil || !bytes.Contains(b, []byte(`"accepted":true`)) {
-		return n, err
-	}
-	var response struct {
-		ID     string                       `json:"id"`
-		Result proto.NodeUpdateCommitResult `json:"result"`
-		Error  json.RawMessage              `json:"error"`
-	}
-	if json.Unmarshal(b, &response) == nil && response.ID != "" && len(response.Error) == 0 && response.Result.Accepted {
-		w.responseWritten(response.Result.ID)
-	}
-	return n, err
 }

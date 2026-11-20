@@ -1,5 +1,6 @@
 {
   "search_empty": "Nothing in the knowledge base matches “{query}”.",
   "search_empty_no_query": "The knowledge base has no matching content.",
-  "list_empty": "The knowledge base is empty so far."
+  "list_empty": "The knowledge base is empty so far.",
+  "needs_review": "Needs review"
 }

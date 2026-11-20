@@ -72,11 +72,17 @@ const piNoExtension = "这个 pi 没有装 Persona 的扩展：手机上只能�
 // of the engine, waits for the pi it starts to list the session, and sends the phone's message there. Without an engine
 // that can start it: refused, nothing sent (it is not handed to pi-web).
 func (n *Node) resumeInEngine(ctx context.Context, h *runtimeConn, id string, argv []string, params json.RawMessage) (any, error) {
+	row, _ := h.row(id)
+	return n.resumeInTerminal(ctx, row.Cwd, argv, id, params, func(owner *runtimeConn) bool { return owner != h })
+}
+
+// resumeInTerminal resumes a stopped session in a new tab of the engine, running argv there, waits until a runtime
+// other than isNewOwner's owns the session, and sends the phone's message there. The pi family (pi.go, ompdisk.go)
+// uses it: a pi from its runtime's resume_argv, an omp from the session file on disk.
+func (n *Node) resumeInTerminal(ctx context.Context, cwd string, argv []string, id string, params json.RawMessage, isNewOwner func(*runtimeConn) bool) (any, error) {
 	if n.defaultKind() == proto.EngineOrca { // it would start in the default host: Orca cannot reopen one
 		return nil, refusal("orca_resume", "Orca 会话请在电脑上恢复：这次没有启动，也没有发送。", nil)
 	}
-	row, _ := h.row(id)
-	cwd := row.Cwd
 	if st, err := os.Stat(cwd); cwd == "" || err != nil || !st.IsDir() {
 		return nil, refusal("not_running", "这个会话的目录不在了，没法在终端里接着它，这次没有发送。", nil)
 	}
@@ -129,8 +135,11 @@ func (n *Node) resumeInEngine(ctx context.Context, h *runtimeConn, id string, ar
 	}
 	deadline := time.Now().Add(piResumeWait)
 	for {
-		if r, owner, ok := n.runtimes.rowOf(id); ok && owner != h && r.Status != proto.StatusOffline {
+		if r, owner, ok := n.runtimes.rowOf(id); ok && isNewOwner(owner) && r.Status != proto.StatusOffline {
 			_ = n.refreshHosts(ctx)
+			if params == nil { // started to be watched, not sent to
+				return nil, nil
+			}
 			res, err, _ := n.runtimeHandle(ctx, owner, "session.send", params)
 			return res, err
 		}

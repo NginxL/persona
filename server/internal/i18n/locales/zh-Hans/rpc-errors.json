@@ -1,4 +1,5 @@
 {
+  "task_instructions_resume": "这个启动器无法在仅恢复会话时保留任务约定。请发送一条继续消息，或选回原来的启动器。本次没有启动或发送任何内容。",
   "skill_unavailable": "所选技能已不可用或执行环境已变化，请移除后重新选择。消息未发送。",
   "readonly_unsupported": "此启动方式无法应用只读模式。请选择支持只读且没有冲突权限参数的终端启动器。",
   "launcher_kind_missing": "那台电脑的引擎里没有能跑这类 Agent 的 provider，没有启动，也没有改用别的。选它的一个 provider，或在它的设置里打开一个。",
@@ -44,6 +45,7 @@
   "open_elsewhere_agents_list": "这个标签停在 Claude Code 的 agents 列表上：打开终端，用方向键选中一个会话、回车进去后再发。这次没有发送。",
   "modes_on_computer": "这个 Claude 会话运行在电脑上的 Claude 里（桌面 App 或其他终端），它的模式、思考强度和模型请在那里改。",
   "modes_not_running": "这个 Agent 没在运行。先在它的终端页点「恢复」，再改这一项。",
+  "effort_change_pending": "思考强度变更尚未确认，消息未发送。如果变更失败，请重新选择思考强度。",
   "agent_stopped": "这个 Agent 已经停了。对话和终端还在，它不再收消息，这次没有发送。要它接着做，在它的终端页点「恢复」。",
   "resume_not_allowed": "这个 Agent 不能自动恢复。请在它的终端页点「恢复」。",
   "stop_not_saved": "未能保存停止记录。这次没有启动或停止 Agent，也没有关闭终端，请重试。",
@@ -57,6 +59,7 @@
   "codex_not_ready": "电脑上的 Codex 还没到输入框（还在加载，或开着别的界面），这次什么都没发出去，请稍后再试。",
   "codex_first_text": "Codex 的第一条消息只能是文字：去掉照片或文件后再发。",
   "codex_first_unconfirmed": "消息已经输入 Codex，但它的会话没有及时出现。再发之前先在电脑上看看。",
+  "codex_compact_busy": "Codex 正在运行这一轮，等它结束再压缩。这次什么都没发出去。",
   "codex_waiting": "Codex 还没收到第一条消息，等它有了会话才能这样做。",
   "codex_no_box": "Codex 已经在电脑上的新标签里打开了，但一分钟内没看到它的输入框。",
   "codex_no_box_here": "Codex 已经在你选的窗格里启动了，但一分钟内没看到它的输入框。窗格保持原样。",
@@ -83,8 +86,19 @@
   "assistant_service_tier_start_only": "Fast 只能在新建对话时随第一条消息选择。已有对话请直接调整速度。",
   "assistant_service_tier_unsupported": "只有提供 Fast 的 Codex 模型才能从第一条消息起使用 Fast。这次没有发送。",
   "assistant_service_tier_refused": "Codex 没能在第一条消息前启用 Fast。这次没有发送，请重试或改用 Standard。",
+  "agent_speed_unsupported": "这个启动器不能以该速度启动 Agent：{reason}",
+  "agent_speed_start_only": "更快的速度只能在启动新 Agent 时选择：{reason}",
+  "agent_speed_model": "这个模型未提供该 Codex 速度：{reason}",
+  "agent_speed_invalid": "Agent 速度无效：{reason}",
   "assistant_supervision_busy": "这个对话的任务跟进职责变了。请等它当前的工作结束后再试，这次没有发送。",
   "assistant_supervision_runtime": "请用 Claude Code 或 Codex 对话跟进任务。这个 Agent 不支持独立的跟进指令，这次没有启动或发送任何内容。",
   "assistant_supervision_node_outdated": "请先更新这台电脑的 Persona Link，再在这里跟进任务。当前版本不能应用独立的任务指令，这次没有启动或发送任何内容。",
-  "omp_resume_unknown": "Persona 还不能从这里恢复这个 omp 会话，请在电脑上用 omp --resume 接着它。这次没有发送。"
+  "omp_resume_unknown": "找不到这个 omp 会话的文件，Persona 没法从这里恢复它：请在电脑上用 omp --resume 接着它。这次没有发送。",
+  "held_ahead": "这个 Agent 还有更早的消息在等待发送，请等它们发出后再发这条。",
+  "held_not_kept": "前面的消息还在等待发送，这条没能保存下来。请稍后再试。",
+  "held_full": "等待发给这个 Agent 的消息太多了。请先删掉一些，或等电脑回来后再发这条。",
+  "assistant_launcher_profile_switch": "无法将此对话切换到所选连接，消息未发送。请选择上一个连接继续此对话，或使用所选连接及其模型新建对话。",
+  "codex_writer_busy": "这个 Codex 会话正由电脑上的另一个进程写入，这次没有发送：请在原 Codex 窗口或终端里继续；如果那边已退出，等它断开后刷新再试。",
+  "turn_over_background": "这一轮已经结束了，没有中断任何内容。后台任务还在运行，要结束它请到那台电脑的终端里操作。",
+  "omp_stopped": "这个 omp 会话已停止，没有这个操作：发一条消息会在电脑上接着它运行。"
 }

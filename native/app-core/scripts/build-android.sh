@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build persona_core for Android with the pinned NDK's LLVM tools, without cargo-ndk.
 # The raw libraries retain symbols; the packaged copies are stripped and linked for 16 KB pages.
+# PERSONA_ANDROID_CARGO_PROFILE picks the cargo profile (release by default; debug packages use android-dev) and
+# PERSONA_ANDROID_ABIS the ABIs (default "arm64-v8a x86_64").
 set -euo pipefail
 
 WORKSPACE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -9,6 +11,21 @@ OUTPUT=${1:-"$WORKSPACE/build/android"}
 SYMBOLS=${2:-"$WORKSPACE/build/android-symbols"}
 REPORTS=${3:-"$WORKSPACE/build/android-reports"}
 CARGO_FEATURES=${PERSONA_ANDROID_CARGO_FEATURES:-}
+PROFILE=${PERSONA_ANDROID_CARGO_PROFILE:-release}
+case $PROFILE in
+  release|android-dev) ;;
+  *) printf 'Android core build: FAILED (cargo profile must be release or android-dev, got %s)\n' "$PROFILE" >&2; exit 2 ;;
+esac
+read -r -a ABIS <<< "${PERSONA_ANDROID_ABIS:-arm64-v8a x86_64}"
+[[ ${#ABIS[@]} -gt 0 ]] || { printf 'Android core build: FAILED (no ABI selected)\n' >&2; exit 2; }
+PAIRS=()
+for abi in "${ABIS[@]}"; do
+  case $abi in
+    arm64-v8a) PAIRS+=('arm64-v8a:aarch64-linux-android') ;;
+    x86_64) PAIRS+=('x86_64:x86_64-linux-android') ;;
+    *) printf 'Android core build: FAILED (unsupported ABI %s; use arm64-v8a or x86_64)\n' "$abi" >&2; exit 2 ;;
+  esac
+done
 [[ $OUTPUT != "$SYMBOLS" && $OUTPUT != "$REPORTS" && $SYMBOLS != "$REPORTS" ]] || {
   printf 'Android core build: FAILED (jni, symbols and reports need distinct output roots)\n' >&2; exit 2;
 }
@@ -29,7 +46,8 @@ EXPECTED=$(sed -n 's/^Pkg.Revision = //p' "$NDK/source.properties")
   printf 'Android core build: FAILED (the reviewed toolchain is Rust 1.98.0)\n' >&2; exit 2;
 }
 command -v rustup >/dev/null || { printf 'Android core build: FAILED (rustup is required)\n' >&2; exit 2; }
-for target in aarch64-linux-android x86_64-linux-android; do
+for pair in "${PAIRS[@]}"; do
+  target=${pair#*:}
   rustup target list --installed --toolchain 1.98.0 | grep -Fx "$target" >/dev/null ||
     rustup target add --toolchain 1.98.0 "$target"
 done
@@ -51,6 +69,13 @@ SYMBOLS=$(cd "$SYMBOLS" && pwd)
 REPORTS=$(cd "$REPORTS" && pwd)
 # This task owns its output: do not leave an old unstripped copy or report in the packaging directory.
 for abi in arm64-v8a x86_64; do
+  selected=false
+  for wanted in "${ABIS[@]}"; do [[ $wanted != "$abi" ]] || selected=true; done
+  # An ABI this build skips must not be packaged from an earlier build.
+  if [[ $selected == false ]]; then
+    [[ ! -e $OUTPUT/$abi ]] || rm -R -- "$OUTPUT/$abi"
+    continue
+  fi
   # Keep only the packaged ABI directory and its stripped library; no symbol or report file is a JNI input.
   for stale in "$OUTPUT/$abi"/*; do
     [[ -e $stale ]] || continue
@@ -71,12 +96,13 @@ export CARGO_TARGET_X86_64_LINUX_ANDROID_AR=$LLVM/bin/llvm-ar
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS='-Clink-arg=-Wl,-z,max-page-size=16384'
 export CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS='-Clink-arg=-Wl,-z,max-page-size=16384'
 
-for pair in 'arm64-v8a:aarch64-linux-android' 'x86_64:x86_64-linux-android'; do
+for pair in "${PAIRS[@]}"; do
   abi=${pair%%:*}
   target=${pair#*:}
-  printf 'Android core build: building %s (%s)\n' "$abi" "$target"
-  (cd "$WORKSPACE" && cargo +1.98.0 build --locked --release --target "$target" -p persona-core-ffi ${CARGO_FEATURES:+--features "$CARGO_FEATURES"})
-  raw=$CARGO_OUTPUT/$target/release/libpersona_core.so
+  printf 'Android core build: building %s (%s, profile %s)\n' "$abi" "$target" "$PROFILE"
+  (cd "$WORKSPACE" && cargo +1.98.0 build --locked --profile "$PROFILE" --target "$target" -p persona-core-ffi ${CARGO_FEATURES:+--features "$CARGO_FEATURES"})
+  # A custom profile's output directory is its name, like release's.
+  raw=$CARGO_OUTPUT/$target/$PROFILE/libpersona_core.so
   destination=$OUTPUT/$abi
   mkdir -p "$destination" "$SYMBOLS/$abi" "$REPORTS"
   cp "$raw" "$SYMBOLS/$abi/libpersona_core.so"
@@ -101,5 +127,5 @@ print('Android core build: ELF PASS (%s, %d LOAD segments, align 0x4000)' % (abi
 PY
   # ELF reports and stripped libraries are evidence; unstripped symbols are retained separately for release archival.
 done
-printf 'Android core build: PASSED (arm64-v8a and x86_64; NDK %s; Rust 1.98.0)\n' "$NDK_VERSION"
+printf 'Android core build: PASSED (%s; profile %s; NDK %s; Rust 1.98.0)\n' "${ABIS[*]}" "$PROFILE" "$NDK_VERSION"
 printf 'Android core size: use android-package-report.py with the assembled APK for raw, stripped, gzip and package bytes.\n'

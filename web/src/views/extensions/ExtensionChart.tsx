@@ -110,7 +110,8 @@ function XYChart({ item, compact }: { item: UIItem; compact?: boolean }) {
   // not tweened.
   const values = useMemo(() => series.flatMap((s) => s.points.map((p) => p.value)), [series]);
   const shape = `${kind}${stacked ? "+" : ""}\n${series.map((s) => s.points.length).join(",")}\n${labels.join("\n")}`;
-  const tween = kind === "candlestick" ? null : useTween(values, shape);
+  // called for every kind, as the chart stays mounted when its kind changes; a candlestick jumps to its new numbers
+  const tween = useTween(values, shape, { jump: kind === "candlestick" ? () => true : undefined });
   const marks = useMemo(() => {
     if (!tween || tween.length !== values.length) return series;
     let at = 0;

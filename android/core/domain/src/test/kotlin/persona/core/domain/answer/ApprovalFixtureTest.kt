@@ -30,7 +30,7 @@ class ApprovalFixtureTest(private val name: String, private val input: JsonObjec
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
         fun cases(): List<Array<Any>> {
-            val all = fixtures("approval")
+            val all = fixtures("spec/fixtures/approval")
             fun key(input: JsonObject) = listOf(input.text("entry"), input.text("kind"), input.flag("locked").toString())
             val unified = all.filter { it.input.text("profile") == "unified" }.associateBy { key(it.input) }
             check(unified.size == AnswerEntry.entries.size * 4 * 2) { "Incomplete unified approval matrix" }

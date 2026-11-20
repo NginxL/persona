@@ -102,6 +102,28 @@ describe("recorded external wait information", () => {
     expect(taskWait({ ...implicit, pr_status: { ...pr, checked_at: iso(10) } }, now, [pr])?.since).toBeUndefined();
   });
 
+  it("uses the current park evidence rather than an unrelated task PR as its source", () => {
+    const todo = make("bound-event");
+    const bound = "https://github.com/example/demo/pull/73";
+    todo.pr_url = pr.url;
+    todo.pr_status = pr;
+    todo.supervision!.parked!.evidence = { kind: "external_event", target: "Review of the new PR", url: bound, wake: "A review arrives" };
+    expect(taskWait(todo, now, [pr])?.sources).toEqual([bound]);
+  });
+
+  it.each([undefined, "", "javascript:alert(1)"])("does not replace a park's missing or unsafe evidence URL with another PR: %s", (url) => {
+    const todo = make("missing-source");
+    todo.supervision!.parked!.evidence = { kind: "external_event", target: "Published version", url, wake: "The version changes" };
+    expect(taskWait(todo, now, [pr])?.sources).toEqual([]);
+  });
+
+  it("keeps every eligible merge source when no explicit wait evidence is recorded", () => {
+    const another = { ...pr, url: "https://github.com/example/demo/pull/8" };
+    const todo = { ...make("merge-only"), supervision: undefined, pr_url: pr.url, pr_status: pr, other_prs: [another] };
+    expect(taskWait(todo, now, [pr, another, pr])?.sources).toEqual([pr.url, another.url]);
+    expect(taskWait(make("legacy"), now, [pr, another])?.sources).toEqual([pr.url, another.url]);
+  });
+
   it("can display a legacy park time without calling it a sent request", () => {
     const todo = make("legacy-with-history");
     todo.supervision!.reviews = [{ at: iso(18), verdict: "parked", reason: todo.supervision!.parked!.reason, waiting_on: "someone_else", parks: 1 }];

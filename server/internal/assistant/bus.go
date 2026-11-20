@@ -85,6 +85,7 @@ type BusHub struct {
 	helloOnce sync.Once
 
 	events  chan busEvent // the hub's events, taken in the order they came
+	conns   atomic.Uint64 // the connections whose hello was answered: the current one's number (busEvent.conn)
 	pending atomic.Int64  // events received and not yet taken
 	// answering: the hub's requests being answered now (a tool call, an app's call): idle (idle.go) waits for them.
 	answering atomic.Int64
@@ -101,6 +102,21 @@ type BusHub struct {
 type busEvent struct {
 	name   string
 	params json.RawMessage
+	conn   uint64 // the connection it came on (BusHub.conns as it was read)
+}
+
+// hubConnKey holds, in a ctx, the connection to the hub an event came on (busEvent.conn).
+type hubConnKey struct{}
+
+// ctx is ctx for handling ev: it says which connection ev came on (hubConnOf).
+func (ev busEvent) ctx(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hubConnKey{}, ev.conn)
+}
+
+// hubConnOf is the connection to the hub the event ctx handles came on: 0 for one that did not come over the bus.
+func hubConnOf(ctx context.Context) uint64 {
+	conn, _ := ctx.Value(hubConnKey{}).(uint64)
+	return conn
 }
 
 var _ Hub = (*BusHub)(nil)
@@ -120,8 +136,10 @@ func NewBusHub(o BusOptions) *BusHub {
 		id = assistantwire.AssistantID
 	}
 	b.client = &bus.Client{
-		// The manager's extensions stop waiting for a card when their caller does (extmgr's interactions.wait).
-		Cancels: map[string]bool{assistantwire.MethodApp: true},
+		// The manager's extensions stop waiting for a card when their caller does (extmgr's interactions.wait). A switch
+		// to Persona Link that gave up on the hub's begin (its time ran out) has the hub give it up too, so it changes
+		// nothing the manager no longer waits for (internal/devices link_switch.go).
+		Cancels: map[string]bool{assistantwire.MethodApp: true, devicewire.MethodLinkSwitchBegin: true},
 		Hub:     o.Hub, Token: o.Token, HTTPClient: o.HTTPClient, Logf: o.Logf, Backoff: o.Backoff,
 		StopWhenRevoked: o.StopWhenRevoked, StopWhenRejected: o.StopWhenRejected,
 		// The hub's own manager (its child, or the built-in one's service dialing the hub's local address) is on the
@@ -134,14 +152,19 @@ func NewBusHub(o BusOptions) *BusHub {
 					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
+					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
 					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
-					assistantwire.CapabilityTodoPlaces, devicewire.SharingCapability}}
+					assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability}}
 		},
 		OnHello: b.onHello,
 		// A node's tool call that its caller stopped waiting for ends at the hub too (fleet_tools.go).
 		OnRequest: b.answer,
 		OnEvent: func(event string, params json.RawMessage) {
+			// Credential revocation goes to both managers and can write to their stores.
+			if event == bus.EventCredentialRevoked {
+				b.queueEvent(event, params)
+				return
+			}
 			if o.Devices != nil && o.Devices.Event(event, params) {
 				return // the computers' (devices.go), in the order they came
 			}
@@ -192,9 +215,15 @@ func (b *BusHub) Serve(ctx context.Context, svc *Service) error {
 // Connected: the connection to the hub is up now (the knowledge base closes while it is not, kb.go).
 func (b *BusHub) Connected() bool { return b.client.Peer() != nil }
 
+// CredentialRevoked checks the hub's credential status for a kept message's sender.
+func (b *BusHub) CredentialRevoked(ctx context.Context, id string) (bool, error) {
+	return bus.CredentialRevoked(ctx, b.client.Call, id)
+}
+
 // onHello keeps the hub's answer to manager.hello. A new connection: the hub shows nothing of the assistant until it
 // reports the whole of it again.
 func (b *BusHub) onHello(res json.RawMessage) error {
+	b.conns.Add(1) // what the hub's events say of the hub is that connection's (busEvent.conn)
 	var h Hello
 	if err := json.Unmarshal(res, &h); err != nil {
 		return err
@@ -517,7 +546,11 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 		defer memtrim.AfterLarge(len(p.Body))
 		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
 	case assistantwire.MethodTools:
-		return map[string]any{"tools": s.Tools(ctx)}, nil
+		var target SessionRef
+		if err := decode(&target); err != nil {
+			return nil, err
+		}
+		return map[string]any{"tools": s.ToolsFor(ctx, target.MachineID, target.SessionID)}, nil
 	case assistantwire.MethodTool:
 		var p ToolCall
 		if err := decode(&p); err != nil {
@@ -567,11 +600,19 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			return nil, &rpc.Error{Code: assistantwire.CodeUndeliveredAhead, Message: "older messages to this conversation wait to go in"}
 		}
 		ctx, note := withLauncherNote(ctx)
+		// The owner's message, which the hub sends and reports: its parameters may move a direction's notes block
+		// (direction_notes.go), settled by the hub's notice, or now when they are refused and nothing is sent. A
+		// message they were already given for is the hub's retry, which moves nothing: it is tied to its first attempt
+		// while that one waits for its notice (notesOwnerCarry).
+		msg, _ := p.Params["client_msg_id"].(string)
+		ctx, carry := s.notesOwnerCarry(ctx, p.SessionID, msg)
 		params, err := s.SendParams(ctx, p)
 		if err != nil {
+			s.notesOwnerRefused(ctx, carry)
 			s.appSendRefused(p.MachineID, p.SessionID, err) // the hub sends nothing: no ConversationSent (north_star.go)
 			return nil, err
 		}
+		s.notesOwnerSent(ctx, carry, msg)
 		if *note != "" {
 			return map[string]any{"params": params, "launcher_note": *note}, nil
 		}
@@ -710,14 +751,23 @@ func serveHTTP(ctx context.Context, s http.Handler, p assistantwire.HTTPRequest,
 	if p.ShareAuthority != nil {
 		ctx = devicewire.WithShareAuthority(ctx, *p.ShareAuthority)
 	}
+	if p.ModeActor != nil {
+		ctx = devicewire.WithModeActor(ctx, p.ModeActor)
+	}
 	if p.OwnerAnswer {
 		ctx = devicewire.WithOwnerAnswer(ctx)
+	}
+	if p.ClarificationProof != "" {
+		ctx = assistantwire.WithClarificationProof(ctx, p.ClarificationProof)
 	}
 	if p.HandoffApprover != nil { // set by the hub only, never from a header (secret_handoff.go there)
 		ctx = assistantwire.WithHandoffApprover(ctx, *p.HandoffApprover)
 	}
 	if p.Human { // the same: a new conversation a person's own app opens (start.go's route)
 		ctx = assistantwire.WithHumanStart(ctx)
+	}
+	if p.ReplyInput {
+		ctx = assistantwire.WithReplyInput(ctx)
 	}
 	r, err := http.NewRequestWithContext(ctx, p.Method, target, bytes.NewReader(p.Body))
 	if err != nil {
@@ -816,6 +866,17 @@ func (b *BusHub) event(ctx context.Context, ev busEvent) error {
 	s := b.service()
 	decode := func(v any) error { return json.Unmarshal(ev.params, v) }
 	switch ev.name {
+	case bus.EventCredentialRevoked:
+		var p bus.DeviceCredential
+		if err := decode(&p); err != nil {
+			return err
+		}
+		if p.ID != "" {
+			s.undeliveredCredentialRevoked(ctx, p.ID)
+			if b.opts.Devices != nil {
+				b.opts.Devices.Event(ev.name, ev.params)
+			}
+		}
 	case assistantwire.EventUserSpoke:
 		var p assistantwire.UserSpokeParams
 		if err := decode(&p); err != nil {
@@ -857,7 +918,7 @@ func (b *BusHub) event(ctx context.Context, ev busEvent) error {
 		if err := decode(&p); err != nil {
 			return err
 		}
-		go s.ConversationSent(context.WithoutCancel(ctx), p)
+		go s.ConversationSent(ev.ctx(context.WithoutCancel(ctx)), p) // with the connection it came on (direction_notes.go)
 	case assistantwire.EventInteractionResolved:
 		var p InteractionResolved
 		if err := decode(&p); err != nil {

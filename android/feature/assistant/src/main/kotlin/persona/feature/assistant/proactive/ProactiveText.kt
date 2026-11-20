@@ -346,6 +346,8 @@ internal fun summaryLine(say: ProactiveText, tasks: List<ScheduledTask>?, now: I
 
 /** A permission mode's name ("" is "Default"). */
 @StringRes internal fun permissionModeTitle(mode: String): Int = when (mode) {
+    "" -> R.string.assistant_proactive_mode_unset
+    "default" -> R.string.assistant_proactive_mode_default
     "acceptEdits" -> R.string.assistant_proactive_mode_accept_edits
     "plan" -> R.string.assistant_proactive_mode_plan
     "auto" -> R.string.assistant_proactive_mode_auto

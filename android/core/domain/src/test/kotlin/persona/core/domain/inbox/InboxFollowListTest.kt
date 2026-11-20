@@ -14,7 +14,7 @@ class InboxFollowListTest {
         buildInboxList(items, settings = InboxListSettings(query = query)).groups.flatMap { it.rows }.map { it.id }
 
     @Test fun whereExtendsSearchWithoutReadingContextOrReason() {
-        val fixture = listFixtures("inbox").asSequence().map { it[0] as ListFixture }
+        val fixture = listFixtures("spec/fixtures/inbox").asSequence().map { it[0] as ListFixture }
             .single { it.name == "filters.json/search_four_fields_only" }
         val items = fixture.input.objects("items").map { value ->
             InboxItem(

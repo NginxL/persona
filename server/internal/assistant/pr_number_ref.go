@@ -10,6 +10,7 @@ import (
 	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // A PR an agent names by number alone (#7921): "PR #7350", or "pushed to #7350" in a reply that speaks of a PR. prLink
@@ -88,12 +89,15 @@ func closeoutPRRef(text string) string {
 // deliveryCloseout accepts the reply's own final record, not a quoted example or an earlier reference.
 // The general closeout parser intentionally also serves transcripts and does not impose these ownership rules.
 func deliveryCloseout(text string) string {
+	if report, ok := textfmt.FinalWorkReport(text); ok {
+		return text[report.Start:report.End]
+	}
 	if !strings.Contains(text, "<closeout") {
 		return ""
 	}
-	text = strings.TrimSpace(text)
+	text = strings.TrimRight(text, " \t\r\n") // keep first-line indentation: an indented example is not the reply
 	if footer := strings.LastIndex(text, "\n<oai-mem-citation>"); footer >= 0 && strings.HasSuffix(text, "</oai-mem-citation>") {
-		text = strings.TrimSpace(text[:footer]) // runtime citation metadata may follow the agent's final record
+		text = strings.TrimRight(text[:footer], " \t\r\n") // runtime citation metadata may follow the agent's final record
 	}
 	var lines []string
 	fence := ""
@@ -136,6 +140,30 @@ func deliveryCloseout(text string) string {
 		return ""
 	}
 	return block
+}
+
+// closeoutExplicitlyNA distinguishes an explicit n/a from absent, repeated, or unrecognized facts.
+func closeoutExplicitlyNA(block string) bool {
+	if report, ok := textfmt.FinalWorkReport(block); ok {
+		return report.Merged == "n/a" && report.Deployed == "n/a"
+	}
+	end := strings.IndexByte(block, '>')
+	if end < 0 {
+		return false
+	}
+	mergedNA, deployedNA := false, false
+	attrs := closeoutApplicability.FindAllStringSubmatch(block[:end], -1)
+	if len(attrs) != 2 {
+		return false
+	}
+	for _, a := range attrs {
+		if a[1] == "merged" {
+			mergedNA = strings.EqualFold(a[2], "n/a")
+		} else {
+			deployedNA = strings.EqualFold(a[2], "n/a")
+		}
+	}
+	return mergedNA && deployedNA
 }
 
 // githubRepoIn is the one GitHub repository ("owner/repo") the texts link an issue or PR of; "" for none or several.
@@ -268,22 +296,12 @@ func (s *Service) reportedTaskPR(ctx context.Context, t Todo, current string) (p
 			return "", false, fmt.Errorf("task %s: its explicit delivery PR artifact is incomplete or ambiguous", t.ID)
 		}
 		if ref == "" {
-			mergedNA, deployedNA, hasPR := false, false, false
-			mergedCount, deployedCount := 0, 0
-			for _, a := range closeoutApplicability.FindAllStringSubmatch(block[:strings.IndexByte(block, '>')], -1) {
-				if a[1] == "merged" {
-					mergedCount++
-					mergedNA = strings.EqualFold(a[2], "n/a")
-				} else {
-					deployedCount++
-					deployedNA = strings.EqualFold(a[2], "n/a")
-				}
-			}
+			hasPR := false
 			for _, a := range artifacts {
 				hasPR = hasPR || a.Kind == "pr"
 			}
 			noPR = noPR && !hasPR && len(artifacts) > 0 && c.Status == proto.CloseoutDone &&
-				c.Merged == "" && c.Deployed == "" && mergedNA && deployedNA && mergedCount == 1 && deployedCount == 1
+				c.Merged == "" && c.Deployed == "" && closeoutExplicitlyNA(block)
 			continue
 		}
 		noPR = false

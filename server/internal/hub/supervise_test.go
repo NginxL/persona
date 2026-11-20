@@ -152,7 +152,7 @@ func TestSupervisedTaskOverTheBus(t *testing.T) {
 	agent(proto.StatusWorking, "")
 	agent(proto.StatusDone, "按 A 部署好了")
 	eventually(t, 10*time.Second, "the review message", func() bool { return len(digests()) == 2 })
-	if d := digests()[1]; !strings.Contains(d, "hub 判断做完了，等你验收（已部署）") {
+	if d := digests()[1]; !strings.Contains(d, "待逐项复核，不代表完成（已部署）") {
 		t.Fatalf("message:\n%s", d)
 	}
 	todo := todoOf()

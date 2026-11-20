@@ -448,7 +448,7 @@ func uninstall(e *env, args []string) error {
 	cfg := e.configPath()
 	var gone []string
 	files := []string{cfg, cfg + ".lock", cfg + ".run", cfg + ".tmp", link.StatusPath(cfg), link.StatusPath(cfg) + ".tmp",
-		e.logPath(), e.logPath() + ".1", e.binPath()}
+		link.RouteHintPath(cfg), link.RouteHintPath(cfg) + ".tmp", e.logPath(), e.logPath() + ".1", e.binPath()}
 	if e.goos == "windows" { // the supervisor's (winservice.go); a running persona-link.exe cannot remove itself
 		files = append(files, e.serviceLog(), e.serviceLog()+".1", filepath.Join(e.personaDir(), "link-service.run"))
 	}

@@ -102,4 +102,14 @@ class ChartMathTest {
     @Test fun aZeroValuePartStillLinesUpWithTheOtherShares() {
         assertEquals(listOf(0.0, 1.0), ChartMath.singleCategoryShares(shareData(values = listOf(listOf(0.0), listOf(100.0)))))
     }
+
+    @Test fun finiteValuesWhoseSumOverflowsStillShareTheBar() {
+        val shares = ChartMath.singleCategoryShares(shareData(values = listOf(listOf(Double.MAX_VALUE), listOf(Double.MAX_VALUE))))
+        assertEquals(listOf(0.5, 0.5), shares)
+    }
+
+    @Test fun nonFiniteValuesStayColumns() {
+        assertNull(ChartMath.singleCategoryShares(shareData(values = listOf(listOf(Double.NaN), listOf(1.0)))))
+        assertNull(ChartMath.singleCategoryShares(shareData(values = listOf(listOf(Double.POSITIVE_INFINITY), listOf(1.0)))))
+    }
 }

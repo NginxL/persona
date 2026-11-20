@@ -7,12 +7,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.Item
 import persona.core.contracts.Session
-import persona.core.contracts.SessionKey
 import persona.core.contracts.api.DeliveryState
-import persona.core.contracts.api.DraftSnapshot
-import persona.core.contracts.api.MainConversationSender
-import persona.core.contracts.api.OutboxMessage
-import persona.core.contracts.api.PendingMainConversation
 import persona.core.designsystem.ErrorTag
 import persona.core.designsystem.ErrorTagTone
 import persona.core.domain.lines.ApiErrorInfo
@@ -21,11 +16,6 @@ import persona.core.domain.lines.LineItem
 import persona.core.domain.lines.chatLines
 import persona.feature.chat.MessageAction.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -34,7 +24,7 @@ import org.junit.Test
 import java.time.Instant
 import java.time.ZoneOffset
 
-/** The long-press menu (R4), "Hand to Persona", the API error card's rules (D6), recaps and Claude's suggestion (X1). */
+/** The long-press menu (R4) with Forward (#3901), the API error card's rules (D6), recaps and Claude's suggestion (X1). */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -42,9 +32,12 @@ class MessageMenuTest {
     private val res = ApplicationProvider.getApplicationContext<Context>().resources
     @Test fun theMenuOffersWhatTheConversationAllows() {
         val mine = MessageTarget("m", "你好", user = true)
-        assertEquals(listOf(Copy, Select, Quote, Share, HandToPersona, Context, Edit), messageActions(mine, writes = true, handOff = true))
-        // Read-only (a sub-agent, history): nothing that changes the composer.
-        assertEquals(listOf(Copy, Select, Share), messageActions(mine, writes = false, handOff = false))
+        // Forward right after Quote (#3901); it took Hand to Persona's place.
+        assertEquals(listOf(Copy, Select, Quote, Forward, Share, Context, Edit), messageActions(mine, writes = true, forward = true))
+        assertEquals(listOf(Copy, Select, Quote, Share, Context, Edit), messageActions(mine, writes = true, forward = false))
+        // Read-only (a sub-agent, history): nothing that changes the composer; Forward changes another chat's, so it stays.
+        assertEquals(listOf(Copy, Select, Share), messageActions(mine, writes = false, forward = false))
+        assertEquals(listOf(Copy, Select, Forward, Share), messageActions(mine, writes = false, forward = true))
         // An agent's reply cannot be edited.
         assertEquals(listOf(Copy, Select, Quote, Share, Context), messageActions(MessageTarget("a", "回复", user = false), true, false))
         // "Branch to new chat" on a reply that is a transcript line; "Rewind to here" on yours, only where the composer is the user's.
@@ -52,7 +45,7 @@ class MessageMenuTest {
         assertEquals(listOf(Copy, Select, Quote, Share, Context, Fork), messageActions(MessageTarget("u#1", "回复", user = false), true, false, extras))
         assertEquals(listOf(Copy, Select, Quote, Share, Context), messageActions(MessageTarget("line3", "回复", user = false), true, false, extras))
         assertEquals(listOf(Copy, Select, Quote, Share, Context, Edit, Rewind), messageActions(mine, true, false, extras))
-        assertEquals(listOf(Copy, Select, Share), messageActions(mine, writes = false, handOff = false, extras))
+        assertEquals(listOf(Copy, Select, Share), messageActions(mine, writes = false, forward = false, extras))
         // Only on this phone (#4645): Copy, Select, Share, then Delete ("Cancel send" while it waits) where the page deletes;
         // nothing that treats it as a transcript line (Quote, Context, Edit, Rewind).
         val deletes = MessageExtras(fork = true, rewind = true, delete = true)
@@ -60,7 +53,7 @@ class MessageMenuTest {
             val pending = mine.copy(pending = state)
             assertEquals("$state", listOf(Copy, Select, Share, Delete), messageActions(pending, true, true, deletes))
             assertEquals("$state", listOf(Copy, Select, Share), messageActions(pending, true, true, extras))
-            assertEquals("$state", listOf(Copy, Select, Share), messageActions(pending, writes = false, handOff = true, deletes))
+            assertEquals("$state", listOf(Copy, Select, Share), messageActions(pending, writes = false, forward = true, extras = deletes))
         }
         // The hub may have it: no Delete.
         for (state in listOf(DeliveryState.Sending, DeliveryState.Sent, DeliveryState.Unknown, DeliveryState.Verifying, DeliveryState.NeedsConfirmation))
@@ -81,50 +74,9 @@ class MessageMenuTest {
             linkMessage("mine", quotes, res))
     }
 
-    @Test fun handingToPersonaSendsTheMessageAsContext() {
-        assertEquals("<persona-context kind=\"context\" title=\"修复登录 · 消息\" url=\"\">\n原文\n</persona-context>\n\n看看这条消息，告诉我该怎么处理。",
-            handoffMessage("修复登录", "原文", res))
+    @Test fun useAsContextTakesTheMessageTitledByItsChat() {
         val context = messageContext("修复登录", "原文", res)
         assertEquals(listOf("context", "修复登录 · 消息", "", "原文"), listOf(context.kind, context.title, context.url, context.text))
-    }
-
-    private class FakeMain : MainConversationSender {
-        override val outbox = MutableStateFlow<List<OutboxMessage>>(emptyList())
-        val sent = mutableListOf<String>()
-        override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) {
-            sent += clientMessageId
-            outbox.value = outbox.value + OutboxMessage(clientMessageId, PendingMainConversation, text,
-                DeliveryState.WaitingForNetwork, mainTarget = true)
-        }
-    }
-
-    @Test fun handingToPersonaOpensTheMainConversationOnceItIsKnown() = runTest {
-        val main = FakeMain()
-        val events = mutableListOf<String>()
-        val pending = launch {
-            handToPersona(main, "看看", "op-1", onQueued = { events += "persona" }, onBound = { events += "open:${it.path}" })
-        }
-        runCurrent()
-        assertEquals(listOf("op-1"), main.sent)
-        assertEquals(listOf("persona"), events)
-        val target = SessionKey("server", "main")
-        main.outbox.value = main.outbox.value.map { it.copy(session = target) }
-        pending.join()
-        assertEquals("open:${target.path}", events.last())
-        // The same operation again does not send twice.
-        handToPersona(main, "看看", "op-1", onQueued = {}, onBound = {})
-        assertEquals(listOf("op-1"), main.sent)
-    }
-
-    @Test fun handingToPersonaStopsFollowingWhenTheConversationNeverComes() = runTest {
-        val main = FakeMain()
-        var bound: SessionKey? = null
-        var result: SessionKey? = SessionKey("x", "y")
-        val pending = launch { result = handToPersona(main, "看看", "op-2", onQueued = {}, onBound = { bound = it }) }
-        advanceTimeBy(60_001)
-        pending.join()
-        assertNull(result)
-        assertNull(bound)
     }
 
     private var n = 0

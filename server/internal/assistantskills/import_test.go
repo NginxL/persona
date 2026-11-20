@@ -107,13 +107,13 @@ func TestImportPreviewInstallListAndRuntimeSync(t *testing.T) {
 			if installed.Reference == "" || installed.Reference == preview.Reference || !hasSkill(UserDir(), preview.Name) {
 				t.Fatalf("install: %+v", installed)
 			}
-			if !slices.ContainsFunc(List(UserDir(), nil), func(s Skill) bool { return s.Name == preview.Name && s.Source == "user" }) {
+			if !slices.ContainsFunc(List(UserDir(), Selection{}), func(s Skill) bool { return s.Name == preview.Name && s.Source == "user" }) {
 				t.Fatal("new skill missing from existing list")
 			}
 			// Contract smoke: use the same Sync as the existing Claude and Codex provisioning paths.
 			for _, runtime := range []string{".claude", ".agents"} {
 				dir := filepath.Join(target.Cwd, runtime, "skills")
-				if err := Sync(dir, UserDir(), nil, quiet); err != nil {
+				if err := Sync(dir, UserDir(), Selection{}, quiet); err != nil {
 					t.Fatal(err)
 				}
 				data, err := os.ReadFile(filepath.Join(dir, preview.Name, "references", "notes.txt"))

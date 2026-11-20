@@ -18,7 +18,7 @@ import { ExtensionThemePicker } from "../ui/ExtensionThemePicker";
 import { setTheme, useTheme, type Theme } from "./theme";
 import { Group, Row, Pill, RowConfirm, Switch } from "./settings/SettingsParts";
 import { LanguageRow } from "./settings/LanguageRow";
-import { RecentChatsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
+import { FontRows, RecentChatsRow, SidebarIconsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
 import { setReplyMotionEnabled, useReplyMotionSetting } from "../ui/stream/motion";
 import { setAgentDetails, useAgentDetails } from "../lib/context-usage";
 import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
@@ -29,9 +29,11 @@ import { SavedPrompts } from "./settings/SavedPrompts";
 import { SourcesUI } from "./subscriptions/SourcesUI";
 import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
+import { HiddenAgentDirs } from "./settings/HiddenAgentDirs";
 import { AgentSettings } from "./settings/AgentSettings";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
 import { StartPageGroup } from "./settings/StartPage";
+import { AgentsDisplayRow } from "./settings/AgentsDisplayRow";
 import { AgentGroup } from "./settings/AgentGroup";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { PersonaPicker } from "./assistant/Persona";
@@ -119,6 +121,7 @@ interface DeviceToken {
   name: string;
   kind: string;
   role: string;
+  scopes?: string[];
   created_at?: string;
   last_seen?: string;
   /** Set once revoked: the hub keeps listing it (lib/devices.ts). */
@@ -146,6 +149,8 @@ export function tokens(n: number): string {
 // the sidebar (NavRow). Every other category draws with the Settings chunk as before.
 const Extensions = lazyPage(() => import("./settings/Extensions").then((m) => m.Extensions));
 const Connectors = lazyPage(() => import("./settings/Connectors").then((m) => m.Connectors));
+// Labs and its configuration form come with their own chunk, on first open (src/startup-preload.ts FIRST_SCREEN_BUDGET)
+const LabsSettings = lazyPage(() => import("./settings/Labs").then((m) => m.LabsSettings));
 const TAB_PAGES: Partial<Record<Tab, { preload: () => Promise<unknown> }>> = { extensions: Extensions, connectors: Connectors };
 // a failed load is not kept (lazyPage): opening the page asks again, and PageBoundary shows the failure then
 const preloadTab = (k: Tab) => void TAB_PAGES[k]?.preload().catch(() => {});
@@ -357,7 +362,10 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                   <ModelConfiguration open={sub} onOpen={(id) => pick("models", id)} onProviders={() => pick("models", null, "providers")} />
                 </section>
               </>}
-              {tab === "agents" && <AgentSections section={at.section} />}
+              {tab === "agents" && <>
+                <Group title={t("settings.agent_preferences")} anchor="agents-display"><AgentsDisplayRow /></Group>
+                <AgentSections section={at.section} />
+              </>}
               {tab === "channels" && (sub ? (twoCol ? (
                 <div className="flex gap-6">
                   <div className="w-[300px] shrink-0"><ChannelList openBeside={sub} onOpen={(id) => pick("channels", id)} onMarketItem={(market, id) => pick("extensions", routeSub({ kind: "item", market, id }))} /></div>
@@ -391,6 +399,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                 <Extensions open={sub} headerBack={phone} onOpen={(id) => pick("extensions", id)} onChannel={(id, manager) => pick("channels", ownedSub(id, manager))} onConnector={(id, manager) => pick("connectors", ownedSub(id, manager))} />
               )}</Suspense>}
               {tab === "shortcuts" && <ShortcutSettings />}
+              {tab === "labs" && <Suspense fallback={<Loading />}><LabsSettings /></Suspense>}
               {tab === "devices" && <Devices />}
               {tab === "hub" && <>
                 <HubSettings />
@@ -446,6 +455,7 @@ function AgentSections({ section }: { section: SettingsSection | null }) {
   };
   return (
     <>
+      <HiddenAgentDirs />
       {AGENT_KINDS.map((id) => {
         const shown = !closed.has(id);
         return (
@@ -639,11 +649,13 @@ function General({ onModel }: { onModel: () => void }) {
         <ThemeColorPicker />
         <ExtensionThemePicker />
         <TextSizeRow />
+        <FontRows />
         <LanguageRow />
         <Row label={t("settings.reply_motion")} hint={t("settings.reply_motion_hint")} wrapHint anchor="reply-motion">
           <Switch on={replyMotion} onChange={setReplyMotionEnabled} label={t("settings.reply_motion")} />
         </Row>
         <RecentChatsRow />
+        <SidebarIconsRow />
       </Group>
 
       <DesktopSettings />
@@ -1356,6 +1368,7 @@ function Devices() {
     }
   };
   const kind: Record<string, string> = { phone: t("settings.kind_phone"), watch: t("settings.kind_watch"), other: t("settings.kind_cli"), web: t("settings.kind_web") };
+  const roles: Record<string, string> = { answer: t("settings.role_answer"), scoped: t("settings.role_scoped") };
   const { active, revoked } = splitDevices(data?.tokens ?? [], data?.current);
 
   // A revoked credential is shown greyed, with when it was revoked and no "Revoke" (iOS DeviceCredentials.swift).
@@ -1366,7 +1379,7 @@ function Devices() {
         <div className="flex items-center gap-2">
           <span className={cx("truncate text-[13px]", gone ? "text-ink-3" : "text-ink")}>{tok.name || tok.id}</span>
           {tok.id === data?.current && <Pill tone="green">{t("settings.this_browser")}</Pill>}
-          {tok.role !== "full" && <Pill>{tok.role === "answer" ? t("settings.role_answer") : tok.role}</Pill>}
+          {tok.role !== "full" && <Pill>{roles[tok.role] ?? tok.role}</Pill>}
         </div>
         <div className="mt-0.5 truncate text-[11.5px] text-ink-3">
           {kind[tok.kind] ?? tok.kind}
@@ -1374,6 +1387,9 @@ function Devices() {
           {!gone && tok.last_seen ? ` · ${t("settings.used_ago", { time: ago(tok.last_seen) })}` : ""}
           {tok.created_at ? ` · ${t("settings.added_ago", { time: ago(tok.created_at) })}` : ""}
         </div>
+        {tok.scopes?.length ? (
+          <div className="mt-0.5 break-words text-xs text-ink-3">{tok.scopes.join(" · ")}</div>
+        ) : null}
       </div>
       {!gone && tok.id !== data?.current && (
         <RowConfirm

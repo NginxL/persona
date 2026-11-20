@@ -309,10 +309,12 @@ type humanSends struct {
 }
 
 type humanSend struct {
-	words string // the text sent, its words joined by single spaces, at most humanWordsMost bytes
-	at    time.Time
-	line  string // the transcript line it counted for (handoffLine), once one was read
-	void  bool   // sent again by someone else, or with other words: it counts for nothing
+	words      string // the text sent, its words joined by single spaces, at most humanWordsMost bytes
+	at         time.Time
+	line       string // the transcript line it counted for (handoffLine), once one was read
+	void       bool   // sent again by someone else, or with other words: it counts for nothing
+	replyAsked bool   // the manager already tried the follow-up (missing_reply.go)
+	replyOnly  bool   // an app start or legacy owner send, usable only for missing-reply recovery
 }
 
 // withoutContext is a vouched message's words, or its line's, compared without any context block: the ones the
@@ -353,6 +355,14 @@ const (
 )
 
 func (h *humanSends) note(session, id, text string) {
+	h.record(session, id, text, false)
+}
+
+func (h *humanSends) noteForReply(session, id, text string) {
+	h.record(session, id, text, true)
+}
+
+func (h *humanSends) record(session, id, text string, replyOnly bool) {
 	if session == "" || id == "" {
 		return
 	}
@@ -363,12 +373,13 @@ func (h *humanSends) note(session, id, text string) {
 	if sent, ok := ids[id]; ok { // the same id again: the same message (the node sends it once), else nothing
 		if sent.words != words {
 			sent.void = true
-			ids[id] = sent
 		}
+		sent.replyOnly = sent.replyOnly || replyOnly
+		ids[id] = sent
 		return
 	}
 	makeRoomLocked(ids, true)
-	ids[id] = humanSend{words: words, at: time.Now()}
+	ids[id] = humanSend{words: words, at: time.Now(), replyOnly: replyOnly}
 }
 
 // voidSend: a send into session carried id, and it is not one that counts (the hub did not vouch for it, or it carries
@@ -459,26 +470,47 @@ func makeRoomLocked(ids map[string]humanSend, vouched bool) bool {
 // the transcript line it counts for: the first one it was read on (a picture of it, picture, is tied by the id alone,
 // on the same line).
 func (h *humanSends) has(session, id, text string, picture bool, line string) bool {
-	if session == "" || id == "" || line == "" {
+	if session == "" || id == "" || id == firstReplySendID {
 		return false
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	sent, ok := h.m[session][id]
-	if !ok || sent.void || time.Since(sent.at) > humanSendsKeep {
+	if !ok || sent.replyOnly || !sent.matches(text, picture, line) {
 		return false
 	}
-	if !picture && !strings.Contains(humanWords(withoutContext(text), 1<<20), sent.words) {
-		return false
-	}
-	switch sent.line {
-	case "":
+	if sent.line == "" {
 		sent.line = line
 		h.m[session][id] = sent
-	case line:
-	default:
-		return false // the id on a second line: it counted for its first already
 	}
+	return true
+}
+
+func (sent humanSend) matches(text string, picture bool, line string) bool {
+	return line != "" && !sent.void && time.Since(sent.at) <= humanSendsKeep &&
+		(sent.line == "" || sent.line == line) &&
+		(picture || strings.Contains(humanWords(withoutContext(text), 1<<20), sent.words))
+}
+
+// claimReply checks the input and records the attempt together, independently of other chats.
+// The caller accepts an ID-less input only on the conversation's first transcript page.
+func (h *humanSends) claimReply(session string, owner proto.Item) bool {
+	id := owner.ClientMsgID
+	if id == firstReplySendID {
+		return false
+	}
+	if id == "" {
+		id = firstReplySendID
+	}
+	line := handoffLine(owner.ID)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sent, ok := h.m[session][id]
+	if !ok || sent.replyAsked || !sent.matches(owner.Text, false, line) {
+		return false
+	}
+	sent.line, sent.replyAsked = line, true
+	h.m[session][id] = sent
 	return true
 }
 

@@ -1,7 +1,9 @@
 package assistantwire
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"iter"
 	"strings"
 	"time"
 
@@ -26,6 +28,7 @@ var InboxRoutes = []string{
 	"POST /api/v1/inbox/{id}/done",
 	"POST /api/v1/inbox/{id}/draft",
 	"POST /api/v1/inbox/{id}/reply",
+	"POST /api/v1/inbox/{id}/retry",
 	"POST /api/v1/inbox/{id}/suggestion",
 	"POST /api/v1/inbox/{id}/handoff",
 	"POST /api/v1/inbox/{id}/task-link/recheck",
@@ -50,6 +53,7 @@ var InboxRoutes = []string{
 	"PATCH /api/v1/inbox/policies/{id}",
 	"DELETE /api/v1/inbox/policies/{id}",
 	"POST /api/v1/translate",
+	"POST /api/v1/translate/message",
 	"POST /api/v1/translate/mail",
 }
 
@@ -241,13 +245,11 @@ const (
 	ReadLoginRefused = "login_refused"
 )
 
-// InboxMailRead is a round's mail: each account's latest inbox page (an account that could not be read is left out).
+// InboxMailRead contains the latest pages from each account's eligible mailboxes.
 type InboxMailRead struct {
 	Accounts []InboxMailAccount `json:"accounts"`
-	// Failed are the accounts this round could not read, with why (#1849). They are still left out of Accounts, so a
-	// manager that does not know this field reads the round as before; one an earlier round read while the manager
-	// was away is in Accounts too, with what that round read (mergeRounds). Absent when the sender does not know it:
-	// no account is said to have failed.
+	// Failed names accounts with a discovery or page read error (#1849). Accounts may also include their successful
+	// pages and pages held while the manager was away (mergeRounds).
 	Failed []InboxMailFailed `json:"failed,omitempty"`
 }
 
@@ -261,9 +263,42 @@ type InboxMailFailed struct {
 
 // InboxMailAccount is one mail account and its latest messages.
 type InboxMailAccount struct {
-	ID       string             `json:"id"`
-	Email    string             `json:"email"`
-	Messages []InboxMailSummary `json:"messages"`
+	ID               string             `json:"id"`
+	Email            string             `json:"email"`
+	Messages         []InboxMailSummary `json:"messages"`
+	UIDValidity      uint32             `json:"uid_validity,omitempty"`
+	InboxUnavailable bool               `json:"inbox_unavailable,omitempty"`
+	Folders          []InboxMailFolder  `json:"folders,omitempty"` // Other successfully read mailboxes, including their empty pages.
+}
+
+// InboxMailFolder is a single selectable IMAP folder and its most recent page.
+type InboxMailFolder struct {
+	Name        string             `json:"name"`
+	UIDValidity uint32             `json:"uid_validity,omitempty"`
+	Messages    []InboxMailSummary `json:"messages"`
+}
+
+// Mailboxes yields the successful pages, including empty ones. Older hubs send only Messages.
+func (a InboxMailAccount) Mailboxes() iter.Seq[InboxMailFolder] {
+	return func(yield func(InboxMailFolder) bool) {
+		if !a.InboxUnavailable && !yield(InboxMailFolder{Name: "INBOX", UIDValidity: a.UIDValidity, Messages: a.Messages}) {
+			return
+		}
+		for _, f := range a.Folders {
+			if !yield(f) {
+				return
+			}
+		}
+	}
+}
+
+// MailFolderKey preserves the account-only identity of historical INBOX data. Other IMAP names are case-sensitive
+// and may contain the delimiters used in an Inbox item ID or an archive cursor.
+func MailFolderKey(account, mailbox string) string {
+	if mailbox == "" || strings.EqualFold(mailbox, "INBOX") {
+		return account
+	}
+	return account + ":m:" + base64.RawURLEncoding.EncodeToString([]byte(mailbox))
 }
 
 // MailAddress is a mail's sender or recipient (mail.Address).
@@ -402,7 +437,8 @@ type InboxMute struct {
 }
 
 // InboxNeedsYou is EventInboxNeedsYou's params: how many open items are in "Needs you" (status action; the ones not
-// triaged yet count), the connectors' among them: the number the apps' Inbox badge shows of this manager's list.
+// triaged yet count), the connectors' among them, read or not: this manager's inbox part of the switchers' badges. The
+// apps' Inbox badge is not this number: it counts only the unread ones.
 type InboxNeedsYou struct {
 	Count int `json:"count"`
 }

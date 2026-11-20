@@ -1,9 +1,9 @@
-# Assistant entry fixtures (Needs you / In progress)
+# Assistant entry fixtures (Needs you / In progress / Finished)
 
 Above the Assistant's composer there are two entries (#3387): **Needs you** lists everything waiting on the user, **In
-progress** everything running that does not. These cases pin which entry each thing goes to, so the web app, Android
-and iOS / Mac split the same input the same way. Rows and wording are each platform's own; the split and the counts are
-not.
+progress** everything running that does not; **Finished** (#10922) lists what the conversation handed out that finished
+in the last 24 hours. These cases pin which entry each thing goes to, so the web app, Android and iOS / Mac split the
+same input the same way. Rows and wording are each platform's own; the split and the counts are not.
 
 | Rule | Source | Cases |
 | --- | --- | --- |
@@ -14,6 +14,7 @@ not.
 | Once answered it goes back to In progress. | | `answered_task_back_in_progress` |
 | A failed start whose work finished in a related to-do is closed, as the To-dos page has it (rule 1a, #3713): in neither entry; another failed start still needs the user. | `supersededFailedStarts` | `superseded_failed_start_in_neither` |
 | Otherwise a task is in In progress when the To-dos page counts it open (`todoBucket` open, #3331), folded under it and not counted when shelved, and in neither when closed (done, cancelled, accepted). | `web/src/lib/todo-triage.ts` `todoBucket` | `finished_tasks_in_neither`, `stale_task_folded_not_counted` |
+| A closed task the conversation handed out (`origin`; the main conversation: any conversation's) is under Finished while it finished less than 24 hours ago (`JUST_DONE_MS`), seen or not: the To-dos page's Just finished or Done section, never a failed start, finished at the moment its rule reads (`finishedAt`: its close, its accepting review, its deploy, else its last move). Newest finished first, the same moment by id. It is new while the owner has not opened it since (the To-dos page's Just finished). Exactly 24 hours is out. A to-do made by hand is not listed. | `assistantEntries` `finished` (web, Android), `AssistantEntries.split` (iOS / Mac), `finishedAt` | `finished_tasks_in_neither`, `finished_lists_the_last_day_seen_or_not`, `finished_only_the_conversations_own`, `superseded_failed_start_in_neither` |
 | The main conversation has every task; another conversation only the tasks it dispatched (`origin`). | `taskCardSlots` (`everyTodo`) | `main_conversation_watches_every_task`, `manual_agents_only_in_the_main_conversation` |
 | In the main conversation an Agent that belongs to no task (`dockAgents`) is a row: Needs you while it asks, In progress while it works; idle, unread and the assistant's own sessions are in neither. Other conversations have no such rows. | `dockAgents` | `manual_agent_question_only_in_needs_you`, `manual_agent_working_only_in_progress`, `manual_agents_only_in_the_main_conversation` |
 | A plan waiting for Start is one Needs you row, whatever its task count; a message card waiting for Send (not sent, not filed) is one too. | | `plan_and_message_wait_for_the_user` |
@@ -26,8 +27,13 @@ not.
   `message:<feed item id>`. `needs_you`: asking tasks and Agents first (oldest card first), then plans, then the tasks
   waiting for a decision (the To-dos page's rank, newest first), then message cards. `running`: tasks (the To-dos page's
   rank, newest first), then Agents. `shelved`: folded, not counted.
+- `expected.finished` (optional, absent means none; #10922): the Finished rows, task keys in order;
+  `expected.finished_new` (optional, absent means none): those of them nobody has opened since they finished, in the
+  same order. Finished rows are in no other entry, and the entries' counts do not include them.
 - `expected.supervisor_review` (optional, absent means none): the `running` rows that say "Awaiting supervisor
   review", in order: tasks there because their supervisor's review is under way while nothing of them runs or asks.
+- `expected.web_parked` (optional, absent means none; web only): rows from `running` that the web places in its
+  separate Parked tray. An old interrupted conversation cannot bring a parked task back to Needs you.
 - `expected.web_review` (optional, absent means none; web only, #8678): the rows the web lists under Persona
   reviewing, in its order, instead of the `needs_you` or `running` rows above: every task waiting for its supervisor's
   review with nothing of it running or asking, however long it has waited. The web checks `needs_you`, `running` and

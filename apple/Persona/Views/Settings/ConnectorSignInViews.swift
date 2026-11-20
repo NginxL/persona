@@ -265,7 +265,7 @@ struct ConnectorFeedsSection: View {
             } footer: {
                 Text(model.archiveDeleted ?? footer)
             }
-            .confirmationDialog("Delete what \(connector.name) saved to Knowledge?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            .accessibleConfirmationDialog("Delete what \(connector.name) saved to Knowledge?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     Task {
                         await model.deleteArchive()
@@ -338,7 +338,7 @@ struct ConnectorDataSection: View {
                 Text("Deletes its chats and people in Knowledge and its Inbox items, and turns off syncing. The sign-in isn't affected.")
             }
         }
-        .confirmationDialog("Sign out of \(connector.name)? [Connector Sign In Views b5b019]", isPresented: $confirmLogout, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Sign out of \(connector.name)? [Connector Sign In Views b5b019]", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("Sign Out [Connector Sign In Views 3ab8cc]", role: .destructive) {
                 Task {
                     await model.logout()
@@ -348,7 +348,7 @@ struct ConnectorDataSection: View {
         } message: {
             Text(ConnectorText.logoutMessage(connector))
         }
-        .confirmationDialog("Delete data saved from \(connector.name)?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Delete data saved from \(connector.name)?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
                     await model.deleteData()

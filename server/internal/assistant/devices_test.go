@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"net/http"
 	"testing"
 	"time"
@@ -65,6 +66,7 @@ func (f *fakeDevices) Sessions(string) ([]proto.Session, bool) { return nil, fal
 func (f *fakeDevices) AppendSessions(dst []proto.Session, _ string) ([]proto.Session, bool) {
 	return dst, false
 }
+func (f *fakeDevices) Shown(string) (devices.Shown, bool) { return devices.Shown{}, false }
 func (f *fakeDevices) SessionsWhere(string, func(*proto.Session) bool) ([]proto.Session, bool) {
 	return nil, false
 }
@@ -76,6 +78,14 @@ func (f *fakeDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot {
 	return proto.CapacitySnapshot{}
 }
 
+func (f *fakeDevices) GatewayRetryAt(string, string, time.Time) time.Time { return time.Time{} }
+
 func (f *fakeDevices) Follow(context.Context, string, string, bool) error   { return nil }
 func (f *fakeDevices) SetAttention(link.Attention)                          {}
 func (f *fakeDevices) LinkRang(context.Context, string, time.Duration) bool { return false }
+
+func (f *fakeDevices) HeldMessages(string, i18n.Lang) map[string][]proto.UndeliveredMessage {
+	return nil
+}
+func (f *fakeDevices) HeldRetry(context.Context, string, string) (bool, error)  { return false, nil }
+func (f *fakeDevices) HeldDelete(context.Context, string, string) (bool, error) { return false, nil }

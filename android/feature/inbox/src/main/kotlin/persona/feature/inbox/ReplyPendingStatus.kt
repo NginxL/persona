@@ -10,7 +10,7 @@ internal fun DeliveryState.pendingStatus(): PendingStatus? = when (this) {
     DeliveryState.Verifying -> PendingStatus.Verifying
     DeliveryState.NeedsConfirmation -> PendingStatus.NeedsReview
     DeliveryState.Refused, DeliveryState.Rejected -> PendingStatus.Refused
-    DeliveryState.Sent -> null
+    DeliveryState.Sent, DeliveryState.Held -> null
 }
 
 internal fun ReplyDelivery.pendingStatus(): PendingStatus? = when (this) {

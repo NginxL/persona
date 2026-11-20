@@ -371,7 +371,14 @@ var ClearKeys = []string{"ctrl+k", "ctrl+u"}
 var selectedRE = lazyre.New(`^\s*[❯›>]\s*\d+\.\s+\S`)
 
 // footerRE is a dialog's key hint line: `Enter to confirm · Esc to cancel`, `Esc to cancel` under a picker.
-var footerRE = lazyre.New(`(?i)\b(?:esc to (?:cancel|go back|close)|enter to (?:confirm|select|set))\b`)
+var footerRE = lazyre.New(`(?i)\b(?:esc to (?:cancel|go back|close)|enter to (?:confirm|select|set))\b|` + navFooter)
+
+// navFooter is the key hint of a list moved with the arrow keys: `↑/↓ Navigate · enter Confirm` (Antigravity CLI's
+// trust prompt). It names both the move and the confirm, which text typed into a prompt box never does.
+const navFooter = `[↑↓]/[↑↓]\s+navigate\b.*\benter\s+confirm\b`
+
+// navFooterRE matches that footer alone: a `> label` cursor is read as a choice only under it.
+var navFooterRE = lazyre.New(`(?i)` + navFooter)
 
 // Choosing: the bottom of the screen is a dialog — a key hint footer, or a numbered choice with a cursor below the
 // last rule (above it is history: an old message may read `❯ 1. …`) — where typed text would pick an option or land

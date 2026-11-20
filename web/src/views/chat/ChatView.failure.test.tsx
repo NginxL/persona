@@ -6,7 +6,7 @@ import { act, useEffect, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Outgoing } from "./Composer";
-import type { Session } from "../../lib/types";
+import type { Machine, Session } from "../../lib/types";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -27,14 +27,16 @@ vi.mock("./ChatSearch", async load => {
 const captured = vi.hoisted(() => ({
   onSend: undefined as ((out: Outgoing) => Promise<boolean>) | undefined,
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle" } as Session | undefined,
-  composer: undefined as { placeholder?: string; disabled?: boolean; blocked?: { label: string } } | undefined,
+  composer: undefined as { placeholder?: string; disabled?: boolean; blocked?: { label: string }; onSendNow?: () => Promise<void> } | undefined,
   // set: the hub answers the exact-session lookup (useRuntimeSession) and the page is connected
   features: [] as string[],
+  // set: the computers the page knows (an Agent's computer away, #10661)
+  machines: undefined as Machine[] | undefined,
 }));
 
 vi.mock("./Composer", async (importOriginal) => ({
   ...await importOriginal<typeof import("./Composer")>(),
-  Composer: ({ onSend, ...props }: { onSend: (out: Outgoing) => Promise<boolean>; placeholder?: string; disabled?: boolean; blocked?: { label: string } }) => {
+  Composer: ({ onSend, ...props }: NonNullable<typeof captured.composer> & { onSend: (out: Outgoing) => Promise<boolean> }) => {
     captured.onSend = onSend;
     captured.composer = props;
     return null;
@@ -53,7 +55,8 @@ vi.mock("../../lib/store", async (importOriginal) => {
     useStore: <T,>(select: (s: ReturnType<typeof store.getState>) => T) => {
       const [, changed] = useReducer((n: number) => n + 1, 0);
       useEffect(() => store.subscribe(changed), []);
-      return select({ ...store.getState(), sessions: { hub: captured.session ? [captured.session] : [] }, ...(captured.features.length ? { features: captured.features, conn: "online" as const } : {}) });
+      return select({ ...store.getState(), sessions: { hub: captured.session ? [captured.session] : [] }, ...(captured.features.length ? { features: captured.features, conn: "online" as const } : {}),
+        ...(captured.machines ? { machines: captured.machines } : {}) });
     },
   };
 });
@@ -357,6 +360,19 @@ describe("a message that did not go, in an agent's chat (#1122)", () => {
     expect(host.querySelector('[data-testid="readiness-failure"]')).toBeNull(); // the bubble says why: no card over the box
   });
 
+  it("a Codex writer conflict keeps the follow-up and its recovery with Retry and Delete", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    reply = () => json({ error: "请在原 Codex 窗口继续，这次没有发送", code: "codex_writer_busy", delivered: "none" }, 409);
+    await act(async () => void (await captured.onSend!({ text: "继续上一次修改", images: [] })));
+    await flush();
+    expect(failed()?.textContent).toContain("继续上一次修改");
+    expect(host.querySelector("[data-outbox] [role=alert]")?.textContent).toContain("请在原 Codex 窗口继续，这次没有发送");
+    expect(button("重试")).toBeDefined();
+    expect(button("删除")).toBeDefined();
+    expect(getState().outbox["hub/c1"]?.[0]).toMatchObject({ text: "继续上一次修改", state: "failed" });
+  });
+
   it("Retry sends it again, under a new id (the hub keeps its answer to the first), and the bubble waits for the transcript", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();
@@ -391,7 +407,12 @@ describe("a message that did not go, in an agent's chat (#1122)", () => {
     await act(async () => void (await captured.onSend!({ text: "你好", images: [] })));
     await flush();
     const words = [...host.querySelectorAll<HTMLElement>("[data-outbox] [data-user-bubble] *")].filter((el) => el.textContent === "你好").at(-1)!;
-    act(() => void words.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })));
+    // The message menu is a lazy chunk since #8714: wait for it, as MessagePick.test.tsx does.
+    await act(async () => {
+      words.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await import("./ReplyBar");
+      await vi.dynamicImportSettled();
+    });
     const last = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].at(-1)!;
     expect(last.textContent?.trim()).toBe("删除");
     act(() => last.click());
@@ -961,6 +982,67 @@ describe("sending in order, and with no row yet", () => {
     }
   });
 
+  it("keeps a Retry on the page for a gone chat, and it reads the chat once more (#11237)", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle" } as Session;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(json(String(input).includes("/sessions?") ? { sessions: [], remove: [], has_more: false, revision: "r", total: 0 } : {}))));
+    const lookups = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("/sessions?")).length;
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      // the box says why nothing goes and looks as it did; the notice above it has the way on
+      expect(captured.composer?.blocked).toEqual({ label: t("chat-chatview.session_gone") });
+      const retry = [...host.querySelectorAll("button")].find((b) => b.textContent === t("sidebar.retry"));
+      expect(retry).toBeTruthy();
+      const before = lookups();
+      act(() => retry!.click());
+      await flush();
+      expect(lookups()).toBe(before + 1);
+    } finally {
+      captured.features = [];
+    }
+  });
+
+  it("keeps a runtime's list row typeable while its full detail loads, and holds Send until it answers (#11237)", async () => {
+    const summary = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle", state: "idle", source_kind: "antigravity" } as Session;
+    captured.session = summary;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    let answer!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/sessions?") ? new Promise<Response>((r) => (answer = r)) : Promise.resolve(json({}))));
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: false, blocked: { label: t("chat-chatview.connecting") } });
+      let sent: boolean | undefined;
+      await act(async () => void (sent = await captured.onSend!({ text: "too early", images: [] })));
+      expect(sent).toBe(false);
+      expect(bodies).toEqual([]);
+      // the full row says what it can do: Send is open
+      const full = { ...summary, capabilities: { read: true, send: true } };
+      captured.session = full;
+      await act(async () => answer(json({ sessions: [full], remove: [], has_more: false, revision: "r", total: 1 })));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: false });
+      expect(captured.composer?.blocked).toBeUndefined();
+    } finally {
+      captured.features = [];
+    }
+  });
+
+  it("holds a runtime's box to its full row once that row says it takes no messages", async () => {
+    const full = { machine_id: "hub", session_id: "c1", title: "Runtime chat", cwd: "/code", status: "idle", state: "idle", source_kind: "antigravity", capabilities: { read: true } } as Session;
+    captured.session = full;
+    captured.features = [SESSIONS_LOOKUP_FEATURE];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(json(String(input).includes("/sessions?") ? { sessions: [full], remove: [], has_more: false, revision: "r", total: 1 } : {}))));
+    try {
+      act(() => root.render(<ChatView mid="hub" sid="c1" />));
+      await flush();
+      expect(captured.composer).toMatchObject({ disabled: true });
+    } finally {
+      captured.features = [];
+    }
+  });
+
   it.each([false, true])("calls a chat the hub has no such conversation for, with nothing of it here, not found, never by its id (assistant=%s)", async (assistant) => {
     captured.session = undefined;
     captured.features = [SESSIONS_LOOKUP_FEATURE];
@@ -1058,6 +1140,50 @@ describe("sending in order, and with no row yet", () => {
   });
 });
 
+// A message Claude queued shows in the queue strip, not as a sending bubble too, a photo-only one included (#10871):
+// Claude's queue holds it as `[Image #1]` and its path, which no text matches.
+describe("a queued message is not drawn as a sending bubble too", () => {
+  const photo = { mime: "image/png", data: "iVBORw0KGgo=" };
+  const queued = (q: string[]) => ({ machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", state: "working", status: "working", queued: q }) as unknown as Session;
+  it.each([
+    ["with words", "Please check this screen", "[Image #1]\n\nPlease check this screen\n<attached_images>\npath: /tmp/a.png\n</attached_images>"],
+    ["a photo only", "", "[Image #1]\n<attached_images>\npath: /tmp/a.png\n</attached_images>"],
+    ["a photo only without paths", "", ""],
+  ])("%s", async (_, text, raw) => {
+    captured.session = queued([]);
+    reply = () => json({});
+    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
+    await act(async () => void (await captured.onSend!({ text, images: [photo] }))); await flush();
+    expect(host.querySelector("[data-user-bubble][data-send-state]")).not.toBeNull(); // sending, until the queue says where it is
+    captured.session = queued([raw]);
+    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
+    expect(host.querySelector("[data-user-bubble][data-send-state]")).toBeNull();
+  });
+  it("one queued photo hides one of two photo-only sends, not both", async () => {
+    captured.session = queued([]);
+    reply = () => json({});
+    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
+    await act(async () => void (await captured.onSend!({ text: "", images: [photo] }))); await flush();
+    await act(async () => void (await captured.onSend!({ text: "", images: [photo] }))); await flush();
+    expect(host.querySelectorAll("[data-user-bubble][data-send-state]")).toHaveLength(2);
+    captured.session = queued(["[Image #1]\n<attached_images>\npath: /tmp/a.png\n</attached_images>"]);
+    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
+    expect(host.querySelectorAll("[data-user-bubble][data-send-state]")).toHaveLength(1);
+  });
+});
+
+it.each([false, true])("wires runtime steering for the composer (assistant=%s)", async (assistant) => {
+  const session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "working", source_kind: "runtime", agent: "agy", assistant } as Session;
+  captured.session = { ...session, capabilities: { send: true, queue_send_now: false } };
+  act(() => root.render(<ChatView mid="hub" sid="c1" assistant={assistant} />)); await flush();
+  expect(captured.composer?.onSendNow).toBeUndefined();
+  captured.session = { ...session, capabilities: { send: true, queue_send_now: true } };
+  act(() => root.render(<ChatView mid="hub" sid="c1" assistant={assistant} />)); await flush();
+  expect(captured.composer?.onSendNow).toBeTypeOf("function");
+  await act(async () => captured.composer!.onSendNow!());
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/sessions/hub/c1/queue/send-now"))).toBe(true);
+});
+
 // The assistant could not start (#10194): the hub answers 202 delivered "later" and the manager keeps the message. The
 // page drops its own sending bubble and draws the row's kept message, on this device as on any other, marked not
 // delivered and sent by itself; a bare operation receipt (202 {"state":"unknown"}) is no delivery and stays in doubt.
@@ -1111,5 +1237,120 @@ describe("a message the assistant keeps after it could not go in", () => {
     await act(async () => void (await sent)); await flush();
     expect(host.querySelector("[data-outbox] [data-in-doubt]")?.getAttribute("data-in-doubt")).toBe("unknown");
     expect(host.textContent).toContain("Synthetic replayed message");
+  });
+  it.each([true, false])("shows a signed-out device's reason and only Delete (assistant: %s)", async (assistant) => {
+    const error = "Not sent: the device that sent it was signed out";
+    captured.session = {
+      machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle", assistant,
+      undelivered: [{ ...kept, state: "failed", delete_only: true, error, computer: assistant ? undefined : "Synthetic laptop" }],
+    } as Session;
+    await letKeptChunkIn();
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant={assistant} />)); await flush();
+    const line = host.querySelector('[data-undelivered="k1"] [role="alert"]');
+    expect(line?.querySelector("span")?.textContent).toBe(error);
+    expect([...line!.querySelectorAll("button")].map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.delete")]);
+  });
+});
+
+// An Agent whose computer is away, on a hub that holds what is sent meanwhile (#10661): the box stays open and says the
+// messages go once it is back; a send the hub holds (202 delivered "later") leaves the page's own bubble for the row's,
+// whose line is the manager's own words, with Delete while it waits and Retry and Delete once it stopped, both on the
+// session's held routes. Without the feature, a Persona chat, or a computer that is online: the box as before.
+describe("a message to an Agent whose computer is away", () => {
+  const laptop = { id: "hub", name: "Synthetic laptop", online: false } as Machine;
+  const agentRow = { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "unknown", state: "unknown" } as Session;
+  const held = { id: "k1", text: "Synthetic held message", at: "2026-11-19T08:00:00Z", state: "waiting" as const, error: "Will send when Synthetic laptop is back", computer: "Synthetic laptop" };
+  const awayLine = async () => (await import("./UndeliveredBubbles")).heldPlaceholder("Synthetic laptop");
+  const shown = async (assistant = false) => {
+    await letKeptChunkIn();
+    await act(async () => root.render(<ChatView mid="hub" sid="c1" assistant={assistant} />)); await flush();
+  };
+  const fetched = () => vi.mocked(fetch).mock.calls.map(([input, init]) => ({ url: String(input), method: (init?.method ?? "GET").toUpperCase() }));
+  afterEach(() => {
+    captured.features = [];
+    captured.machines = undefined;
+  });
+
+  it("keeps the box open and says the messages go once the computer is back", async () => {
+    captured.session = agentRow;
+    captured.machines = [laptop];
+    captured.features = ["agent_message_hold"];
+    await shown();
+    expect(captured.composer?.placeholder).toBe(await awayLine());
+    expect(captured.composer?.disabled).toBe(false);
+    // back online, in the same open chat: the box says what it said before
+    captured.machines = [{ ...laptop, online: true }];
+    await shown();
+    expect(captured.composer?.placeholder).toBe(t("chat-chatview.agent_placeholder"));
+  });
+
+  it("leaves the box as before without the feature, for a Persona chat, or with the computer online", async () => {
+    captured.session = agentRow;
+    captured.machines = [laptop];
+    captured.features = ["sessions_delta"];
+    await shown();
+    expect(captured.composer?.placeholder).toBe(t("chat-chatview.agent_placeholder"));
+    expect(captured.composer?.disabled).toBe(false);
+    captured.features = ["agent_message_hold"];
+    captured.machines = [{ ...laptop, online: true }];
+    await shown();
+    expect(captured.composer?.placeholder).toBe(t("chat-chatview.agent_placeholder"));
+    captured.machines = [laptop];
+    captured.session = { ...agentRow, title: "Persona", assistant: true };
+    await shown(true);
+    expect(captured.composer?.placeholder).not.toBe(await awayLine());
+  });
+
+  it("a held send shows on the row with the manager's line, Delete while it waits, and nothing left in the outbox", async () => {
+    captured.session = agentRow;
+    captured.machines = [laptop];
+    captured.features = ["agent_message_hold"];
+    reply = () => json({ delivered: "later", undelivered: held }, 202);
+    await shown();
+    let sent!: Promise<boolean>;
+    act(() => { sent = captured.onSend!({ text: "Synthetic held message", images: [] }); }); await flush();
+    let kept: boolean | undefined;
+    await act(async () => void (kept = await sent)); await flush();
+    expect(kept).toBe(true);
+    // the send declares the feature itself: a page whose socket is down has no client_hello for the hub to go by
+    const post = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith("/messages"));
+    expect(new Headers(post?.[1]?.headers).get("X-Persona-Features")).toBe("agent_message_hold");
+    expect(Object.values(getState().outbox).flat()).toHaveLength(0);
+    expect(host.querySelector("[data-outbox]")).toBeNull();
+    // the row has it at once, before the hub's next list carries it
+    expect(getState().sessions.hub?.find((s) => s.session_id === "c1")?.undelivered).toEqual([held]);
+    expect(captured.composer?.disabled).toBe(false);
+    captured.session = { ...agentRow, undelivered: [held] };
+    await shown();
+    const bubble = host.querySelector('[data-undelivered="k1"]');
+    expect(bubble?.hasAttribute("data-undelivered-held")).toBe(true);
+    expect(bubble?.getAttribute("data-undelivered-state")).toBe("waiting");
+    expect(host.querySelectorAll("[data-user-bubble]")).toHaveLength(1);
+    const line = bubble?.querySelector('[role="status"] span');
+    expect(line?.textContent).toBe(held.error);
+    expect(line?.className).toContain("text-orange");
+    expect([...bubble!.querySelectorAll('[role="status"] button')].map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.delete")]);
+    await act(async () => (bubble!.querySelector('[role="status"] button') as HTMLButtonElement).click()); await flush();
+    expect(fetched().at(-1)).toEqual({ url: "/api/v1/sessions/hub/c1/held/k1", method: "DELETE" });
+  });
+
+  it("one that stopped says why in red, with Retry and Delete on the held routes", async () => {
+    const stopped = { ...held, state: "failed" as const, error: "Might not have arrived. Retry checks the chat first." };
+    captured.session = { ...agentRow, undelivered: [stopped] };
+    captured.machines = [laptop];
+    captured.features = ["agent_message_hold"];
+    await shown();
+    const bubble = host.querySelector('[data-undelivered="k1"]');
+    const line = bubble?.querySelector('[role="alert"] span');
+    expect(line?.textContent).toBe(stopped.error);
+    expect(line?.className).toContain("text-red");
+    const buttons = [...bubble!.querySelectorAll<HTMLButtonElement>('[role="alert"] button')];
+    expect(buttons.map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.retry"), t("chat-outboxbubbles.delete")]);
+    await act(async () => buttons[0].click()); await flush();
+    expect(fetched().at(-1)).toEqual({ url: "/api/v1/sessions/hub/c1/held/k1/retry", method: "POST" });
+    // without the manager's words: the plain line in the page's language
+    captured.session = { ...agentRow, undelivered: [{ ...held, error: undefined }] };
+    await shown();
+    expect(host.querySelector('[data-undelivered="k1"] [role="status"] span')?.textContent).toBe(t("chat-undeliveredbubbles.held_waiting", { computer: "Synthetic laptop" }));
   });
 });

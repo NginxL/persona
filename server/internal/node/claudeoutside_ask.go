@@ -137,7 +137,7 @@ func (n *Node) outsideAnswer(ctx context.Context, session, id string, r proto.Re
 	if card == nil {
 		return refusal(screen.PromptChanged, outsideAskGone, nil)
 	}
-	text := outsideAnswerText(*card, r)
+	text := outsideAnswerTextIn(*card, r, agentPromptLanguage(ctx))
 	if text == "" {
 		return fmt.Errorf("没有回答任何一道题")
 	}
@@ -157,7 +157,11 @@ const outsideAskGone = "Claude 已经不在等这个回答了（可能在电脑�
 // outsideAnswerText is the user's answers as the message the session takes for them (agents/answer), "" when the
 // resolution answers none of the card's questions.
 func outsideAnswerText(ix proto.Interaction, r proto.Resolution) string {
-	a := prompts.AgentAnswer{ByAssistant: r.AnsweredBy == proto.AnsweredByAssistant}
+	return outsideAnswerTextIn(ix, r, "")
+}
+
+func outsideAnswerTextIn(ix proto.Interaction, r proto.Resolution, language string) string {
+	a := prompts.AgentAnswer{Language: language, ByAssistant: r.AnsweredBy == proto.AnsweredByAssistant}
 	if a.ByAssistant {
 		a.Reason = oneLineText(r.Reason)
 	}

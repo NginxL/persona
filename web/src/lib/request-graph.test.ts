@@ -40,7 +40,7 @@ describe("requests", () => {
     expect(r.edges.map((e) => `${e.from}>${e.to}`)).toEqual(["root>todo:a", "todo:a>todo:b", "todo:a>todo:c", "todo:b>todo:d", "todo:c>todo:d"]);
     // a is done: b and c are ready (nobody took them); d waits for both
     expect([node(r, "a").state, node(r, "b").state, node(r, "c").state, node(r, "d").state]).toEqual(["done", "ready", "ready", "queued"]);
-    expect(node(r, "d").waitsFor).toEqual(["todo:b", "todo:c"]);
+    expect(node(r, "d").waitsFor).toEqual([{ key: "todo:b", title: "b" }, { key: "todo:c", title: "c" }]);
     expect(r.edges.filter((e) => e.dashed).map((e) => e.to)).toEqual(["todo:d", "todo:d"]);
   });
 
@@ -359,6 +359,47 @@ describe("the queue", () => {
     expect(rows.map((q) => [q.kind, q.title])).toEqual([["ready", "f"], ["ready", "c"], ["after", "b"]]);
     expect(rows[2].waits.map((n) => n.key)).toEqual(["todo:a"]);
     expect(rows[2].request.key).toBe("todo:req");
+  });
+
+  it("uses the hub's blockers for strict pieces, including an empty list, without changing layout or legacy readiness", () => {
+    const todos = [
+      todo("req"),
+      todo("cancelled", { title: "Cancelled task", part_of: "req", done_at: at(2), done_by: "review", supervision: { supervisor: "main", state: "cancelled" } }),
+      todo("reopened", { title: "Reopened task", part_of: "req", reopened_at: at(3) }),
+      todo("known-elsewhere", { title: "Another request" }),
+      todo("legacy", { part_of: "req", after: ["cancelled", "missing"] }),
+      todo("strict-ready", { part_of: "req", after: ["reopened"], prerequisite_blockers: [] }),
+      todo("strict-blocked", { part_of: "req", after: ["cancelled", "reopened", "missing"], prerequisite_blockers: ["cancelled", "missing", "reopened", "known-elsewhere"] }),
+    ];
+    const result = graph(todos);
+    const request = result.active.find((entry) => entry.key === "todo:req")!;
+    expect(node(request, "legacy").state).toBe("ready");
+    expect(node(request, "strict-ready")).toMatchObject({ state: "ready", layer: 2, waitsFor: [] });
+    expect(node(request, "strict-blocked")).toMatchObject({ state: "queued", layer: 2, after: ["todo:cancelled", "todo:reopened"] });
+    expect(request.edges.filter((edge) => edge.to === "todo:strict-blocked")).toEqual([
+      { from: "todo:cancelled", to: "todo:strict-blocked", dashed: true },
+      { from: "todo:reopened", to: "todo:strict-blocked", dashed: true },
+    ]);
+    expect(request.edges.find((edge) => edge.to === "todo:strict-ready")).toEqual({ from: "todo:reopened", to: "todo:strict-ready", dashed: false });
+    expect(queuedRows(result).find((row) => row.key === "todo:strict-blocked")?.waits.map((wait) => wait.title)).toEqual([
+      "Cancelled task", "missing", "Reopened task", "Another request",
+    ]);
+  });
+
+  it("does not replace working, stopped, finished, or open plan states with prerequisite waiting", () => {
+    const strictPiece = { part_of: "req", after: ["missing"], prerequisite_blockers: ["missing"] };
+    const todos = [
+      todo("req"),
+      todo("working", { ...strictPiece, agents: [link("running")] }),
+      todo("stopped", { ...strictPiece, agents: [link("idle")] }),
+      todo("finished", { ...strictPiece, done_at: at(2) }),
+    ];
+    const open = plan("open", "open", [task("Unstarted plan task")]);
+    const result = graph(todos, [session("running"), session("idle", { state: "idle", status: "idle" })], { open });
+    const request = result.active.find((entry) => entry.key === "todo:req")!;
+    expect([node(request, "working").state, node(request, "stopped").state, node(request, "finished").state]).toEqual(["working", "stopped", "done"]);
+    expect(result.active.find((entry) => entry.plan === open)?.nodes[0]).toMatchObject({ state: "queued", waitsStart: true, waitsFor: [] });
+    expect(queuedRows(result)).toEqual([]);
   });
 });
 

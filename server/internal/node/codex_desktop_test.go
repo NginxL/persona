@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -223,6 +224,48 @@ func TestCodexDesktopTurnFromRolloutTail(t *testing.T) {
 	write(`{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	if got := n.codexDesktopTurn(p); got != proto.StatusDone {
 		t.Fatalf("finished turn = %s", got)
+	}
+}
+
+func TestCodexDesktopLongTurnKeepsItsState(t *testing.T) {
+	n := &Node{}
+	p := filepath.Join(t.TempDir(), "rollout.jsonl")
+	start := "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n"
+	work := "{\"type\":\"response_item\",\"payload\":{\"text\":\"" + strings.Repeat("x", 300<<10) + "\"}}\n"
+	if err := os.WriteFile(p, []byte(start+work), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.codexDesktopTurn(p); got != proto.StatusWorking {
+		t.Fatalf("running turn whose start is outside the tail = %s", got)
+	}
+	appendText := func(text string) {
+		t.Helper()
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendText(work)
+	if got := n.codexDesktopTurn(p); got != proto.StatusWorking {
+		t.Fatalf("appended work lost the running state = %s", got)
+	}
+	appendText(`{"type":"event_msg","payload":{"type":"task_comp`)
+	if got := n.codexDesktopTurn(p); got != proto.StatusWorking {
+		t.Fatalf("partial event changed the running state = %s", got)
+	}
+	appendText("lete\"}}\n" + work)
+	if got := n.codexDesktopTurn(p); got != proto.StatusDone {
+		t.Fatalf("completed turn whose end is outside the tail = %s", got)
+	}
+	if err := os.WriteFile(p, []byte(start), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.codexDesktopTurn(p); got != proto.StatusWorking {
+		t.Fatalf("truncated rollout kept the previous state = %s", got)
 	}
 }
 

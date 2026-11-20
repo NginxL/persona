@@ -325,7 +325,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.codexSeen = nil // an item repeats only within its turn: a long rollout keeps no ids of the turns before
 		return nil
 	case "task_complete":
-		meta.TurnOpen, meta.TurnClosed = false, true
+		meta.endTurn(seq, l.Timestamp)
 		// A turn the model service failed writes no answer: its error is here (Codex 0.166, #2185).
 		meta.clearTurnError()
 		if meta.TurnError, meta.TurnErrorKind = CodexTurnError(p.Error); meta.TurnError != "" {
@@ -347,7 +347,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		it.Usage = usage // the turn's requests, summed (item_usage.go)
 		return []proto.Item{it}
 	case "turn_aborted":
-		meta.TurnOpen, meta.TurnClosed = false, true
+		meta.endTurn(seq, l.Timestamp)
 		meta.clearTurnError() // stopped by the user: no failure
 		meta.turnWorked = false
 		it := mk(0, "", "system", proto.KindNotice)
@@ -474,8 +474,8 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		if it.Phase == "final_answer" {
 			text, quiet = codexHeartbeatAnswer(text)
 		}
-		text = codexThreadLinks(text)
-		if text == "" {
+		text, vizRefs := splitVisualizations(codexThreadLinks(text))
+		if text == "" && len(vizRefs) == 0 {
 			return nil
 		}
 		// AgentMessage is what Codex said, including narration between tool calls; only Reasoning is thinking.
@@ -483,11 +483,21 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 			meta.LastText = t
 			meta.turnSaid(t)
 		}
-		a := mk(0, it.ID, "assistant", proto.KindText)
-		a.Narration = it.Phase == "commentary"
-		a.CodexHeartbeatQuiet = quiet
-		a.Text = clip(text)
-		return []proto.Item{a}
+		var out []proto.Item
+		if text != "" {
+			a := mk(0, it.ID, "assistant", proto.KindText)
+			a.Narration = it.Phase == "commentary"
+			a.CodexHeartbeatQuiet = quiet
+			a.Text = clip(text)
+			out = append(out, a)
+		}
+		for _, ref := range vizRefs {
+			v := mk(len(out), it.ID, "assistant", proto.KindVisualization)
+			v.Narration = it.Phase == "commentary"
+			v.Visualization = &proto.Visualization{Path: ref.Path, Mode: ref.Mode, Title: ref.Title}
+			out = append(out, v)
+		}
+		return out
 	case "Reasoning":
 		text := strings.TrimSpace(strings.Join(it.SummaryText, "\n\n"))
 		if text == "" {

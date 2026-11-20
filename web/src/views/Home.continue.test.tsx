@@ -44,7 +44,7 @@ vi.mock("../lib/outbox", async (importOriginal) => ({
   discardOutbox: fake.discard,
   outboxEntry: (_mid: string, _sid: string, id: string) => fake.entries.get(id),
 }));
-vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null }));
+vi.mock("./extensions/ExtensionSlots", () => ({ OverviewCards: () => null, OverviewArrangeButton: () => null, OverviewArranging: () => null }));
 
 const { Home } = await import("./Home");
 

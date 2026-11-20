@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // claude.auth_status (docs/assistant/onboarding.md 4.3): whether Claude Code is signed in, as the launcher runs it, without a
@@ -33,6 +34,18 @@ func (n *Node) claudeAuthStatus(ctx context.Context, name string) (proto.ClaudeA
 	if name == "" {
 		name = "claude"
 	}
+	return n.claudeAuthStatusCommand(ctx, name, n.launcherCommand(name))
+}
+
+// claudeAuthStatusProfile checks the exact profile a new conversation selected, not the machine's default login.
+func (n *Node) claudeAuthStatusProfile(ctx context.Context, name, selected string) (proto.ClaudeAuthStatus, error) {
+	return n.claudeAuthStatusCommand(ctx, name, n.launcherCommandIn(name, n.assistantConfigDir(name, selected), scriptPath))
+}
+
+func (n *Node) claudeAuthStatusCommand(ctx context.Context, name, command string) (proto.ClaudeAuthStatus, error) {
+	if name == "" {
+		name = "claude"
+	}
 	if err := n.runnableLauncher(ctx, name, false); err != nil {
 		return proto.ClaudeAuthStatus{}, err // a word that is no launcher here would run as a command
 	}
@@ -47,9 +60,8 @@ func (n *Node) claudeAuthStatus(ctx context.Context, name string) (proto.ClaudeA
 			return unknown(proto.ClaudeAuthNotClaude), nil // Codex, a compatible CLI: they have no `claude auth`
 		}
 	}
-	// The login shell's claude, as the self-check reads it (cached). It is the one plain claude and a ~/.zshrc
-	// function run, and the one `personad launch` finds on that shell's PATH. Not read: asked anyway, and what it
-	// prints decides.
+	// The login shell's claude, as the self-check reads it (cached). An older known CLI is not asked because it
+	// would reject `claude auth`.
 	version := n.claudeV.get(ctx)
 	if version != "" && !versionAtLeast(version, claudeAuthMinVersion) {
 		st := unknown(proto.ClaudeAuthOld)
@@ -69,7 +81,8 @@ func (n *Node) claudeAuthStatus(ctx context.Context, name string) (proto.ClaudeA
 	// and `claude auth status` itself takes no --settings.
 	cctx, cancel := context.WithTimeout(ctx, claudeAuthTimeout)
 	defer cancel()
-	cmd := loginShell(cctx, n.launcherInDirScript(name, dir, scriptSettingsFlag(n.claudeSettings(ctx, name, ours, dir))+` auth status --json`))
+	cmd := loginShell(cctx, "cd "+scriptPath(dir)+" && "+command+
+		scriptSettingsFlag(n.claudeSettings(ctx, name, ours, dir))+` auth status --json`+" </dev/null")
 	killGroupOnCancel(cmd)
 	out, _ := cmd.CombinedOutput() // not signed in exits 1, with the same JSON
 	if cctx.Err() != nil {
@@ -83,6 +96,32 @@ func (n *Node) claudeAuthStatus(ctx context.Context, name string) (proto.ClaudeA
 	}
 	st.Version = version
 	return st, nil
+}
+
+// assistantNewProfileAuth refuses a new automatically selected private profile only when Claude Code explicitly says
+// it is signed out. Explicit or launcher-owned profiles, managed providers and resumes keep their existing behavior.
+// Unknown status (old Claude Code, an unreadable answer or a timeout) fails open; the turn retains its own error handling.
+func (n *Node) assistantNewProfileAuth(ctx context.Context, launcher, asked, selected string) error {
+	if asked != "" || n.sessionScope != nil {
+		return nil
+	}
+	if _, managed := n.managedLauncher(launcher); managed {
+		return nil
+	}
+	if n.assistantLauncherProfile(ctx, launcher) != "" ||
+		!sameAssistantProfile(selected, n.assistantConfigDir(launcher, "")) {
+		return nil
+	}
+	st, err := n.claudeAuthStatusProfile(ctx, launcher, selected)
+	if err != nil || st.State != proto.ClaudeNotLoggedIn {
+		return nil
+	}
+	dir := n.assistantConfigDir(launcher, selected)
+	message := "the new conversation's dedicated Claude Code profile is not signed in; on this computer run " +
+		"CLAUDE_CONFIG_DIR=" + shellQuote(dir) + " " + launcher +
+		` and sign in, or start a new conversation with config_dir "legacy" to reuse an existing login`
+	data, _ := json.Marshal(map[string]any{"delivered": "none", "retryable": false, "launcher": launcher})
+	return &rpc.Error{Code: proto.TurnErrorNotLoggedIn, Message: message, Data: data}
 }
 
 // parseClaudeAuthStatus reads `claude auth status --json`'s object out of what the shell printed (an interactive zsh

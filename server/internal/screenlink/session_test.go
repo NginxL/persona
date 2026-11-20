@@ -27,8 +27,9 @@ var testLimits = Limits{
 // rejects gaps, and a video message assembler that a reset ahead of the receiver starts over. Complete messages
 // received in order are in got; failures are kept for a test to inspect.
 type phone struct {
-	t   *testing.T
-	ack bool // acknowledge what arrives
+	t        *testing.T
+	ack      bool // acknowledge what arrives
+	ackClose bool // send close_ack after every applied close; false models a legacy phone
 
 	mu          sync.Mutex
 	got         map[byte][]byte
@@ -84,7 +85,7 @@ type carrier struct {
 }
 
 func newPhone(t *testing.T, ack bool) *phone {
-	return &phone{t: t, ack: ack, got: map[byte][]byte{}, recv: map[byte]uint64{}, tcpData: map[byte]int{},
+	return &phone{t: t, ack: ack, ackClose: true, got: map[byte][]byte{}, recv: map[byte]uint64{}, tcpData: map[byte]int{},
 		parsers: map[byte]*phoneVideoParser{}, closeAt: map[byte]uint64{}, ended: map[byte]bool{},
 		drops: map[byte]bool{}, resetDrops: map[byte]bool{}, flowParents: map[byte]*carrier{}, msgs: make(chan msg, 1024)}
 }
@@ -136,7 +137,11 @@ func (p *phone) carry(conn io.ReadWriteCloser) *carrier {
 				p.mu.Lock()
 				p.closeAt[id] = off
 				p.finishIfClosedLocked(id)
+				ackClose := p.ack && p.ackClose
 				p.mu.Unlock()
+				if ackClose {
+					c.send(closeAckTypeForTest, chanOffset(id, off))
+				}
 				p.msgs <- msg{typ, body, c}
 			default:
 				p.msgs <- msg{typ, body, c}

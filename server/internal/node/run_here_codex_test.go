@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -87,7 +88,7 @@ func TestRunCodexInAShellPane(t *testing.T) {
 			f.setScreen("w1:p2", codexHereHistory+"codex\n"+cxReady)
 			f.reply("session.snapshot", codexHereLayout(cwd))
 		case c.Method == "pane.send_text":
-			f.setScreen("w1:p2", codexHereHistory+"codex\n› [Pasted Content 9035 chars]\n\n  gpt-6 xhigh · /tmp/proj\n")
+			f.setScreen("w1:p2", codexHereHistory+fmt.Sprintf("codex\n› [Pasted Content %d chars]\n\n  gpt-6 xhigh · /tmp/proj\n", len([]rune(specialPrompt))))
 		case c.Method == "pane.send_keys" && slices.Equal(keysOf(c), []string{"enter"}):
 			f.setScreen("w1:p2", codexHereHistory+"codex\n› fix\n\n• Working (0s • esc to interrupt)\n\n› Ask Codex to do anything\n")
 			writeWaitRollout(t, home, cwd, startThread, time.Now(), specialPrompt)

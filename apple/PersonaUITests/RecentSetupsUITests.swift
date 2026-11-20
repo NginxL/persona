@@ -182,7 +182,7 @@ final class RecentSetupsUITests: XCTestCase {
             "blog, the folder MacBook remembers", timeout: 15)
         see(app.buttons["newChat.model"], "模型 row", timeout: 15).tap()
         see(app.buttons["newChat.model.opus"], "opus").tap()
-        pickMenu("权限模式", "全部放行")
+        pickMenu("权限模式", "完全访问")
         pickMenu("思考强度", "高")
         start("the MacBook setup")
         XCTAssertEqual(started.last?["model"] as? String, "opus")
@@ -227,10 +227,10 @@ final class RecentSetupsUITests: XCTestCase {
         XCTAssertTrue(lab.label.contains("shop-api") && lab.label.contains("实验室主机"), lab.label)
         let codex = see(card(1), "the Codex card")
         XCTAssertTrue(codex.label.contains("weather") && codex.label.contains("codex") && codex.label.contains("gpt-5.5-codex"), codex.label)
-        XCTAssertFalse(codex.label.contains("全部放行"), "a Codex card says no Claude mode")
+        XCTAssertFalse(codex.label.contains("完全访问"), "a Codex card says no Claude mode")
         let bypass = see(card(2), "the Allow Everything card")
         XCTAssertTrue(bypass.label.contains("blog") && bypass.label.contains("MacBook") && bypass.label.contains("opus")
-                      && bypass.label.contains("全部放行") && bypass.label.contains("高"), bypass.label)
+                      && bypass.label.contains("完全访问") && bypass.label.contains("高"), bypass.label)
         XCTAssertFalse(card(3).exists, "at most three")
         shot("recents-cards")
 
@@ -262,7 +262,7 @@ final class RecentSetupsUITests: XCTestCase {
         let launcherRow = reveal(app.buttons["newChat.launcher"], "启动器 row")
         wait("follows Model Configuration again") { !says(launcherRow).isEmpty && !says(launcherRow).contains("codex") }
         let modeRow = reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '权限模式'")).firstMatch, "权限模式 row")
-        wait("Allow Everything") { modeRow.exists && modeRow.staticTexts["全部放行"].exists }
+        wait("Allow Everything") { modeRow.exists && modeRow.staticTexts["完全访问"].exists }
         let effortRow = reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '思考强度'")).firstMatch, "思考强度 row")
         wait("High") { effortRow.exists && effortRow.staticTexts["高"].exists }
         XCTAssertTrue(started.isEmpty, "a card only fills the form")

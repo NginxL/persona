@@ -11,6 +11,7 @@
 import { t } from "../i18n";
 import { agentId, agentName, providerAgent } from "./agent-kind";
 import { ALL_EFFORTS, defaultModel, launcherAgent, modelName, typedModelOffered, type AgentModel, type LauncherModels } from "./launcher-models";
+import { launcherBlock } from "./launcher-health";
 import { validModelId } from "./model-id";
 import { cleanSetup, type PanelConfig, type PanelModel, type PanelProvider, type PanelState } from "./model-panel";
 import { canSwitchModel, isCurrentModel, modelBusy, sessionLauncher } from "./model-switch";
@@ -101,7 +102,10 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
     // another launcher of the engine, on a hub that switches to it with the next message; or one of the other engine, on
     // a hub that moves the conversation there (#5054)
     const other = !mine && ((switching && kind === engine) || switchesEngine(s, kind, o));
-    const p: PanelProvider = { id: name, name: launcherTitle(name, all), engine: kind, models: null };
+    const launcher = all.find((l) => l.name === name);
+    const defaultRow = currentModelRow(e.list?.models ?? [], launcher?.model) ?? defaultModel(e.list?.models ?? []);
+    const defaultName = defaultRow ? (defaultRow.resolved ? modelLabel(defaultRow.resolved) : modelName(defaultRow)) : launcher?.model ? modelLabel(launcher.model) : undefined;
+    const p: PanelProvider = { id: name, name: launcherTitle(name, all), engine: kind, models: null, defaultModel: defaultName, status: launcherBlock(launcher)?.reason };
     // the session's own provider is called what its row calls it (a Paseo provider's label, #8142)
     if (mine && s.agent_label) p.engineLabel = s.agent_label;
     if (e.list === undefined) {

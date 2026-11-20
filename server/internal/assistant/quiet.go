@@ -36,6 +36,8 @@ type quietNotice struct {
 	earlier []string
 	ask     string
 	text    string
+	files   []taskFile // what a done turn handed over (task_files.go)
+	card    string     // needs: the card it stands for (quietCard), whose push goes out if the notice is refused for good
 }
 
 type quietBook struct {
@@ -47,8 +49,9 @@ type quietBook struct {
 var noticeStates = map[string]string{"done": "做完过一次", "needs": "等过用户", "interrupted": "被打断过", "failed": "没开起来过"}
 
 // quietNotify tells the main conversation about quiet task t (a no-op for any other): state, and what it asks (needs)
-// or what its agent last said (text). machine is where its agent runs (a name).
-func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, text string) {
+// or what its agent last said (text); files: what a done turn handed over, on the conversation's computer (task_files.go).
+// machine is where its agent runs (a name).
+func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, text string, files []taskFile) {
 	if !t.Quiet || t.Origin == "" {
 		return
 	}
@@ -64,7 +67,7 @@ func (s *Service) quietNotify(ctx context.Context, t Todo, machine, state, ask, 
 	} else if n.state != state {
 		n.earlier = appendOnce(n.earlier, noticeStates[n.state])
 	}
-	n.todo, n.machine, n.state, n.ask, n.text = t, machine, state, ask, text
+	n.todo, n.machine, n.state, n.ask, n.text, n.files, n.card = t, machine, state, ask, text, files, ""
 	b.mu.Unlock()
 	if !waiting {
 		time.AfterFunc(quietNoticeDelay, func() { s.sendQuietNotice(t.ID) })
@@ -121,7 +124,8 @@ func (s *Service) sendQuietNotice(id string) {
 			retryWith = p.Tasks[i].RetryWith[0]
 		}
 	}
-	msg := relayMsg{From: id, FromTitle: "任务「" + n.todo.Title + "」", Tool: noticeTool, Text: renderNotice(n, reporting, retryWith), At: time.Now().UTC(), State: n.state}
+	msg := relayMsg{From: id, FromTitle: "任务「" + n.todo.Title + "」", Tool: noticeTool, Text: renderNotice(n, reporting, retryWith), At: time.Now().UTC(), State: n.state,
+		Card: n.card}
 	if s.replaceQueuedNotice(to, msg) {
 		s.publish(ctx)
 		return
@@ -137,7 +141,10 @@ func (s *Service) sendQuietNotice(id string) {
 		}
 		return
 	}
-	if err := s.deliverRelay(ctx, machine, to, msg); err != nil {
+	if err := s.tryDirectRelay(ctx, machine, to, &msg); err != nil {
+		if s.refusedDirect(ctx, machine, to, msg, err) {
+			return // refused for good: it is not queued, and a needs or failed notice's push goes out (relayRefused)
+		}
 		s.logf("task %s: quiet notice: %v; queued", id, err)
 		if s.queueNotice(id, n, to, msg) {
 			s.publish(ctx)
@@ -167,6 +174,9 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 			earlier = appendOnce(earlier, e)
 		}
 		cur.earlier = earlier
+		if len(n.files) > 0 { // the newer state may be one that carries no files (a question): keep what came
+			cur.files = n.files
+		}
 	} else {
 		b.pending[id] = n
 	}
@@ -184,7 +194,7 @@ func (s *Service) queueNotice(id string, n *quietNotice, to string, msg relayMsg
 // retryWith: a failed start's launcher its card offers instead.
 func renderNotice(n *quietNotice, reporting bool, retryWith string) string {
 	return prompts.RenderTaskNotice(prompts.TaskNotice{Title: n.todo.Title, Machine: n.machine, State: n.state, Earlier: n.earlier,
-		Ask: n.ask, Text: n.text, Reporting: reporting, RetryWith: retryWith})
+		Ask: n.ask, Text: n.text, Files: taskFilePrompts(n.files), Reporting: reporting, RetryWith: retryWith})
 }
 
 // replaceQueuedNotice: a notice about the same task still waits in the queue: msg takes its place (true).
@@ -258,7 +268,7 @@ func (s *Service) dropQueuedNeeds(todoID string) bool {
 // stays an agent of its own (false). While assistant.agent_tasks is on (#3617, agent_tasks.go) an agent any other
 // conversation starts is a quiet task too, whatever main_tasks_quiet says: supervised by that conversation when it is
 // a leader, else by the main one. told is who hears of the task, as agent_start's answer says it.
-func (s *Service) quietAgentTask(ctx context.Context, conversation string, m Device, cwd, prompt string, tab any, sid string) (told string, ok bool) {
+func (s *Service) quietAgentTask(ctx context.Context, conversation string, m Device, cwd, prompt string, tab any, sid, agent string) (told string, ok bool) {
 	if sid == "" {
 		return "", false
 	}
@@ -300,7 +310,7 @@ func (s *Service) quietAgentTask(ctx context.Context, conversation string, m Dev
 		s.superviseTodo(ctx, todo.ID, supervisor, nil, 0)
 	}
 	s.briefFor(ctx, s.callerOrigin(ctx, conversation), todo, nil, 0) // who asked, before its agent is linked (task_brief.go)
-	if err := s.linkTodoAgent(ctx, todo.ID, m.ID, sid, title, cwd, ""); err != nil {
+	if err := s.linkTodoAgent(ctx, todo.ID, m.ID, sid, title, cwd, agent); err != nil {
 		s.logf("agent_start %s: link %s: %v", short(sid), todo.ID, err)
 	}
 	if _, err := s.appendFeed(ctx, conversation, feedTask, todo.ID, nil); err != nil {
@@ -332,8 +342,20 @@ func (s *Service) InteractionRaised(ctx context.Context, r InteractionRaised) {
 		name = m.Name
 	}
 	s.taskNotice(ctx, t, name, "needs", noticeAsk(ix), "")
+	s.quietCard(t.ID, ix.ID)
 	if t.Quiet { // any other task's card is in the next report already (taskAsks)
 		s.taskReport(t, reportNeeds, name, [2]string{ix.MachineID, ix.SessionID}, noticeAsk(ix), &ix)
+	}
+}
+
+// quietCard notes card as the one task id's waiting needs notice stands for: the card whose push the notice replaced,
+// pushed after all if the notice is refused for good (quietNoticeRefused).
+func (s *Service) quietCard(id, card string) {
+	b := &s.quiet
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n := b.pending[id]; n != nil && n.state == "needs" {
+		n.card = card
 	}
 }
 
@@ -353,6 +375,11 @@ func noticeAsk(ix proto.Interaction) string {
 			}
 			b.WriteByte('\n')
 		}
+	case terminalQuestion(ix):
+		if title := clip(oneLine(ix.SessionTitle), 70); title != "" {
+			b.WriteString(title + " · ")
+		}
+		b.WriteString(terminalQuestionText(ix))
 	case ix.Kind == proto.IxPlan:
 		b.WriteString("批准它的计划：\n" + clipMarkdown(ix.Plan, 1200))
 	default:

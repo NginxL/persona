@@ -885,4 +885,103 @@ struct TodosLogicTests {
         #expect(day["due_date"] as? String == "2026-12-01" && day["priority"] as? String == "low" && day["due_at"] == nil && day["remind_at"] == nil)
         #expect(try body(APIClient.TodoPlanChange()).isEmpty)
     }
+
+    // MARK: The V1 routes (#10465)
+
+    /// The item and places routes of a hub from before them answer 405 (`PATCH` / `DELETE /api/v1/todos/{id}` match the
+    /// path) and the others 404: both "not there". A 404 that says `todo_not_found` is the to-do gone, not the route.
+    @Test func a405IsNotThere() {
+        #expect(TodoNotThere.matches(APIError(status: 405, message: "method not allowed")))
+        #expect(TodoNotThere.matches(APIError(status: 404, message: "no route")))
+        #expect(TodoNotThere.matches(APIError(status: 404, message: "not found", fields: ["code": "not_found"])))
+        let gone = APIError(status: 404, message: "gone", fields: ["code": TodoNotThere.goneCode])
+        #expect(!TodoNotThere.matches(gone) && TodoNotThere.gone(gone))
+        #expect(!TodoNotThere.matches(APIError(status: 503, message: "offline")))
+        #expect(!TodoNotThere.matches(URLError(.notConnectedToInternet)) && !TodoNotThere.gone(URLError(.timedOut)))
+        #expect(!TodosLogic.isOldHub(APIError(status: 405, message: "x")), "the list's own route: today's rule stands")
+    }
+
+    /// One to-do read alone: its row and view, an id with a slash escaped in the path; a view that does not decode is
+    /// none, never the row lost.
+    @Test func theItemRouteReadsTheRowAndItsView() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos/a%2Fb", json: #"{"todo":{"id":"a/b","title":"Slash","part_of":"p","view":{"phase":"working","section":"working","reason":"agent_running","rank":2}}}"#)
+        hub.on("GET", "/api/v1/todos/bad", json: #"{"todo":{"id":"bad","title":"Bad","view":"not a view"}}"#)
+        let read = try await hub.client.todo(id: "a/b")
+        #expect(read.todo.title == "Slash" && read.todo.partOf == "p" && read.view?.section == TodoListSection.working && read.view?.rank == 2)
+        let bad = try await hub.client.todo(id: "bad")
+        #expect(bad.todo.title == "Bad" && bad.view == nil)
+        hub.on("GET", "/api/v1/todos/places", json: #"{"places":[{"id":"all","kind":"all","title":"","needs_you":1},{"id":"project:kyoto","kind":"project","title":"Kyoto","project":"kyoto","needs_you":1}],"counts":{"needs_you":1}}"#)
+        let places = try await hub.client.todoPlaces()
+        #expect(places.places.map(\.id) == ["all", "project:kyoto"] && places.counts.needsYou == 1)
+    }
+
+    /// Someday, back from Someday and Restore go to the to-do's own manager and take the answer's row; the list is read
+    /// again for its view.
+    @Test func somedayAndRestoreWrites() async throws {
+        let hub = FakeHub()
+        // The hub's list follows each write, as the confirming read finds it.
+        var marks = ""
+        hub.on("GET", "/api/v1/todos") { _ in Data(#"{"todos":[{"id":"t1","title":"Later","manager":"work"\#(marks)}]}"#.utf8) }
+        hub.on("PUT", "/api/v1/todos/t1/someday") { _ in
+            marks = #","someday_until":"2026-12-01T09:00:00Z""#
+            return Data(#"{"todo":{"id":"t1","title":"Later","someday_until":"2026-12-01T09:00:00Z"}}"#.utf8)
+        }
+        hub.on("DELETE", "/api/v1/todos/t1/someday") { _ in
+            marks = ""
+            return Data(#"{"todo":{"id":"t1","title":"Later"}}"#.utf8)
+        }
+        hub.on("PUT", "/api/v1/todos/t1/restored") { _ in
+            marks = #","restored_at":"2026-11-19T09:00:00Z""#
+            return Data(#"{"todo":{"id":"t1","title":"Later","restored_at":"2026-11-19T09:00:00Z"}}"#.utf8)
+        }
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {},
+                              managers: .init(scope: { nil }, naming: { $0 }))
+        defer { store.forget() }
+        await store.refresh(api: hub.client)
+        let until = try #require(ISO8601DateFormatter().date(from: "2026-12-01T09:00:00Z"))
+        try await store.setSomeday(id: "t1", until: until, api: hub.client)
+        let put = try #require(hub.sent("PUT", "/api/v1/todos/t1/someday").first)
+        let body = try JSONSerialization.jsonObject(with: try #require(put.body)) as? [String: Any]
+        #expect(body?["until"] as? String == "2026-12-01T09:00:00Z")
+        #expect(put.headers[APIClient.managerHeader] == "work", "to its own manager")
+        #expect(store.todo(id: "t1")?.somedayUntil == until && store.todo(id: "t1")?.manager == "work")
+        #expect(hub.sent("GET", "/api/v1/todos").count == 2, "read again for the view")
+
+        try await store.setSomeday(id: "t1", until: nil, api: hub.client)
+        let noDay = try #require(hub.sent("PUT", "/api/v1/todos/t1/someday").last?.body)
+        #expect((try JSONSerialization.jsonObject(with: noDay) as? [String: Any])?.isEmpty == true, "no set day: no until")
+        try await store.clearSomeday(id: "t1", api: hub.client)
+        #expect(hub.sent("DELETE", "/api/v1/todos/t1/someday").count == 1)
+        try await store.restore(id: "t1", api: hub.client)
+        #expect(hub.sent("PUT", "/api/v1/todos/t1/restored").count == 1)
+        #expect(store.todo(id: "t1")?.restoredAt == ISO8601DateFormatter().date(from: "2026-11-19T09:00:00Z"))
+        hub.on("PUT", "/api/v1/todos/t1/restored") { _ in throw APIError(status: 404, message: "not found", fields: ["code": "not_found"]) }
+        await #expect(throws: APIError.self) { try await store.restore(id: "t1", api: hub.client) }
+        // The to-do itself gone (or another manager's): told apart from a hub without the route.
+        hub.on("PUT", "/api/v1/todos/t1/someday") { _ in
+            throw APIError(status: 404, message: "not found", fields: ["code": TodoNotThere.goneCode])
+        }
+        do {
+            try await store.setSomeday(id: "t1", until: nil, api: hub.client)
+            Issue.record("a gone to-do is refused")
+        } catch {
+            #expect(TodoNotThere.gone(error) && !TodoNotThere.matches(error))
+        }
+    }
+
+    /// A message to a to-do's work through its origin route carries its op id and, for a decision's round, its
+    /// `asked_at`, and waits longer than the hub's five-minute relay.
+    @Test func theOriginRouteCarriesItsOpID() async throws {
+        let hub = FakeHub()
+        hub.on("POST", "/api/v1/assistant/conversations/main/route", json: #"{"item":{"id":"r1","conversation":"main","at":"2026-11-18T10:01:00Z","kind":"routed","ref":"t1","body":{"text":"Hanami"}}}"#)
+        let op = UUID()
+        let item = try await hub.client.route(conversation: "main", todoID: "t1", text: "Hanami", askedAt: "2026-11-18T10:00:00Z", opID: op)
+        #expect(item.kind == .routed && item.ref == "t1")
+        let sent = try #require(hub.sent("POST", "/api/v1/assistant/conversations/main/route").first)
+        let body = try JSONSerialization.jsonObject(with: try #require(sent.body)) as? [String: Any]
+        #expect(body?["todo_id"] as? String == "t1" && body?["asked_at"] as? String == "2026-11-18T10:00:00Z")
+        #expect(sent.headers[OpRetry.header] == op.uuidString.lowercased())
+        #expect(sent.timeout > 300)
+    }
 }

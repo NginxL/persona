@@ -3,7 +3,7 @@
 // never from what an agent says about itself. The rules are the SOP's table, in its order; the first that holds wins.
 
 import { acceptanceStands, decisionDismissed, latestReview, reviewState } from "./supervision";
-import { openAsk, todoDueBy, todoStatus, type PRFacts, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { heldDelivery, openAsk, todoDueBy, todoStatus, type PRFacts, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 
 /** Where a to-do shows. */
 export type TriageSection = "waiting" | "working" | "parked" | "just_done" | "other" | "shelved" | "done";
@@ -22,7 +22,7 @@ export const SHELVE_AFTER_MS = 48 * 3600_000;
 export const JUST_DONE_MS = 24 * 3600_000;
 export const PR_STATUS_FRESH_MS = 15 * 60_000;
 
-function normalizedPR(url: string | undefined): string {
+export function normalizedPR(url: string | undefined): string {
   return (url ?? "").trim().replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
 }
 
@@ -67,6 +67,7 @@ export type TriageRule =
   | "superseded"
   | "agent_asks"
   | "owner_decides"
+  | "delivery_ok"
   | "agent_running"
   | "parked"
   | "closed"
@@ -131,7 +132,7 @@ function shelvable(todo: Todo, now: number): boolean {
  *  1. failed_start    the task's agent never started                    → Waiting on you (retry or remove), Done after 48 h;
  *     superseded      … and a related to-do (its row) really finished   → Just finished (24 h), then Done (#3713)
  *  2. agent_asks      an agent asks (question, approval) or was cut off → Waiting on you
- *  3. owner_decides   review says needs_user, or a decision / "cannot" ask → Waiting on you
+ *  3. owner_decides   review says needs_user, a decision / "cannot" ask, or delivery_ok → Waiting on you
  *  4. agent_running   an agent is working or starting                   → Working
  *  5. closed          done_at set                                       → Just finished (24 h), then Done
  *  6. accepted        the latest review accepted it (even reopened)     → Just finished (24 h), then Done
@@ -165,8 +166,8 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
     return at("done", "failed_start");
   }
   if (status === "needs_you" || status === "interrupted") return at("waiting", "agent_asks");
-  // a decision the owner chose Don't handle on no longer waits on them (decisionDismissed)
   if (!todo.done_at && !decisionDismissed(todo) && (reviewState(todo) === "needs_user" || ask?.outcome === "decide" || ask?.outcome === "cannot")) return at("waiting", "owner_decides");
+  if (heldDelivery(todo)?.unblock === "user") return at("waiting", "delivery_ok");
   // rule 8's signals, read here so rule 9 yields to them: a turn or review nobody has looked at stays Just finished
   const finished = status === "unread" || reviewState(todo) === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done";
   // a parked hold is its supervisor's reading of the latest turn: an agent session left unread does not hide its PR
@@ -189,6 +190,20 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
   return at("other", "rest");
 }
 
+/** When a to-do the triage filed with the finished ones (Just finished or Done) finished, ms: the moment its rule reads
+ *  above — its close, its accepting review, its deploy — else its last move (a finished turn the owner has seen since).
+ *  The Assistant's Finished entry lists what finished less than JUST_DONE_MS ago, seen or not (#10922). 0 when nothing
+ *  says. */
+export function finishedAt(todo: Todo, t: Triage): number {
+  switch (t.rule) {
+    case "closed": return ms(todo.done_at);
+    case "accepted": return ms(latestReview(todo.supervision)?.at);
+    case "deployed": return ms(todo.delivery?.at) || t.last;
+    case "superseded": return ms(todo.done_at) || t.last;
+    default: return t.last;
+  }
+}
+
 /** Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A finished
  *  turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do. One the owner
  *  has seen since (rule 9a, in Done) does not. */
@@ -208,6 +223,96 @@ export function todoBucket(todo: Todo, lookup: SessionLookup | undefined, now: n
   const t = triage(todo, lookup, now, restoredAt, superseded);
   if (countsAsOpen(todo, t)) return "open";
   return t.section === "shelved" ? "shelved" : "closed";
+}
+
+// ── Waiting on the owner, and the sidebar's badge ─────────────
+
+/** What a to-do waits on its owner for (waitsOnOwner): its Agent never started and is theirs to retry (rule 1), an Agent
+ *  of it asks something (a question, an approval) or was cut off (rule 2), a decision or review only they can make
+ *  (rule 3), or its finished work is held short of live for their OK (`delivery.unblock` user, heldDelivery). */
+export type OwnerWait = "failed_start" | "agent_asks" | "owner_decides" | "delivery_ok";
+
+/**
+ * Whether a to-do waits on its owner in person, and for what: the one reading of "it needs you" that the sidebar's
+ * badge (ownerBadge) and the To-dos page's labels share, so a to-do that says it waits for you is the one the badge
+ * counts. Pure: it reads only the to-do and its placement.
+ *
+ * @param todo the to-do
+ * @param t    its placement: `triage(todo, …)`, or the page's `TriageGroup.triage.get(todo.id)`
+ * @returns    what it waits on the owner for, or null when it does not wait on them (closed, shelved, superseded, or
+ *             waiting on an Agent, a PR's reviewers, CI or anyone else). Only an open to-do (countsAsOpen) waits.
+ */
+export function waitsOnOwner(todo: Todo, t: Triage): OwnerWait | null {
+  if (!countsAsOpen(todo, t)) return null;
+  const rule = t.rule;
+  if (t.section === "waiting" && (rule === "failed_start" || rule === "agent_asks" || rule === "owner_decides" || rule === "delivery_ok")) return rule;
+  return heldDelivery(todo)?.unblock === "user" ? "delivery_ok" : null;
+}
+
+/** Whether an Agent is on it: the page files it under Working (rule 4), so one of its own Agents is working or starting,
+ *  or waits for something other than the owner to bring it back. A stopped, finished or archived Agent is not on it. */
+export function agentOnIt(t: Triage): boolean {
+  return t.section === "working";
+}
+
+/** Why the sidebar's To-dos badge counts a to-do (ownerNeeds): what it waits on the owner for (rule 1, OwnerWait), or
+ *  `unattended`, no Agent is on it and none of its pieces carries it (rule 4). The To-dos page says it on the row's mark
+ *  (#11838); a later reason is one more member here, decided in ownerNeeds, so the badge and the mark keep one rule. */
+export type OwnerNeed = OwnerWait | "unattended";
+
+/**
+ * The to-dos the sidebar's To-dos badge counts (#11085), by id, each with why (OwnerNeed): the open ones (countsAsOpen)
+ * that need the owner, not those Agents are on. Quiet tasks (#1731) are left out, as before. Among the rest, the first
+ * rule that holds wins:
+ *
+ *  1. it waits on the owner (waitsOnOwner)                                          → counts, for what it waits on
+ *  2. one of its own Agents is on it (agentOnIt)                                    → does not count
+ *  3. its pieces carry it: a to-do under it (`part_of`, at any depth) has an Agent on it or waits on the owner,
+ *     and a piece that waits counts by itself, so the request is not counted twice   → does not count
+ *  4. anything else: a personal to-do no Agent was ever on, and whatever has no sign of an Agent on it (its Agents
+ *     stopped, finished work nobody has looked at, a PR waiting on others)           → counts, `unattended`
+ *
+ * The page's "Not done" stays countsAsOpen, so the badge is never more than it. A `part_of` loop is walked once. Its
+ * size is the badge's number, and the To-dos page marks exactly these rows (lib/todo-owner-needs.ts reads it for both).
+ */
+export function ownerNeeds(todos: Todo[], lookup: SessionLookup | undefined, now: number, restored: ReadonlyMap<string, number> = new Map()): ReadonlyMap<string, OwnerNeed> {
+  // decided on every to-do, as the page decides it (quiet ones too: their Agents and asks still carry a request)
+  const superseded = supersededFailedStarts(todos);
+  const placed = new Map(todos.map((td) => [td.id, triage(td, lookup, now, restored.get(td.id) ?? 0, superseded.has(td.id))]));
+  const pieces = new Map<string, Todo[]>();
+  for (const td of todos) {
+    if (!td.part_of) continue;
+    const list = pieces.get(td.part_of);
+    if (list) list.push(td);
+    else pieces.set(td.part_of, [td]);
+  }
+  const carried = (id: string): boolean => {
+    const seen = new Set([id]);
+    const stack = [...(pieces.get(id) ?? [])];
+    while (stack.length) {
+      const td = stack.pop()!;
+      if (seen.has(td.id)) continue;
+      seen.add(td.id);
+      const t = placed.get(td.id)!;
+      if (agentOnIt(t) || waitsOnOwner(td, t)) return true;
+      stack.push(...(pieces.get(td.id) ?? []));
+    }
+    return false;
+  };
+  const counted = new Map<string, OwnerNeed>();
+  for (const td of todos) {
+    const t = placed.get(td.id)!;
+    if (td.quiet || !countsAsOpen(td, t)) continue;
+    const wait = waitsOnOwner(td, t);
+    if (wait) counted.set(td.id, wait);
+    else if (!agentOnIt(t) && !carried(td.id)) counted.set(td.id, "unattended");
+  }
+  return counted;
+}
+
+/** The ids ownerNeeds counts: the badge's to-dos, its number their count. */
+export function ownerBadge(todos: Todo[], lookup: SessionLookup | undefined, now: number, restored: ReadonlyMap<string, number> = new Map()): ReadonlySet<string> {
+  return new Set(ownerNeeds(todos, lookup, now, restored).keys());
 }
 
 /** Whether a to-do's checkbox shows it open: not closed, or a failed start still waiting on the owner (rule 1), which
@@ -303,7 +408,7 @@ const ORDER = new Map(TRIAGE_SECTIONS.map((s, i) => [s, i]));
  * merged into open ones' rows: a group is open members only, or closed members only. An open concern always has a row of
  * its own. A group takes its most urgent member's section (a superseded failed start never leads); rows in a section go
  * most recently active first. `quiet: false` leaves quiet tasks (#1731) out,
- * as the sidebar's badge does; the page lists them.
+ * as the sidebar's badge (ownerBadge) does; the page lists them.
  */
 export function triageTodos(
   todos: Todo[],

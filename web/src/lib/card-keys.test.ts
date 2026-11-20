@@ -16,7 +16,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   document.body.innerHTML = `
-    <main><div data-chat-dock><textarea id="composer"></textarea></div></main>
+    <main><div data-chat-dock><textarea id="quote-note"></textarea><textarea id="composer" data-composer-input></textarea></div></main>
     <div id="card" data-card-keys tabindex="-1">
       <button id="deny">Deny</button>
       <input id="field" />
@@ -98,7 +98,7 @@ describe("a waiting card's keys", () => {
 });
 
 describe("where focus goes", () => {
-  it("Esc's target: the chat's composer in its dock (not a textarea elsewhere on the page)", () => {
+  it("Esc's target: the chat's composer in its dock (not a textarea elsewhere on the page, nor a quote's note before it)", () => {
     const stray = document.createElement("textarea");
     stray.id = "stray";
     document.getElementById("other")!.append(stray);

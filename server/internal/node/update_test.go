@@ -5,55 +5,76 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
+// The accepted commit's answer signals the restart once the whole of it reached the transport, never when its write
+// failed or fell short: a line on its own, or the last frame of a framed connection.
 func TestUpdateRestartsOnlyAfterSuccessfulRPCResponseWrite(t *testing.T) {
-	reply := []byte(`{"id":"h1","result":{"accepted":true,"id":"upload-1"}}` + "\n")
-	for _, tc := range []struct {
-		name    string
-		writer  io.Writer
-		want    int
-		wantErr bool
-	}{
-		{"written", new(bytes.Buffer), 1, false},
-		{"failed", updateFailWriter{}, 0, true},
-		{"short", updateShortWriter{}, 0, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			calls := 0
-			w := updateResponseWriter{Writer: tc.writer, responseWritten: func(id string) {
-				calls++
-				if id != "upload-1" {
-					t.Fatal("wrong transaction acknowledged")
-				}
-				if b, ok := tc.writer.(*bytes.Buffer); ok && !bytes.Equal(b.Bytes(), reply) {
-					t.Fatal("restart signaled before complete reply reached transport")
-				}
-			}}
-			_, err := w.Write(reply)
-			if (err != nil) != tc.wantErr || calls != tc.want {
-				t.Fatalf("write error=%v restart calls=%d", err, calls)
+	for _, framed := range []bool{false, true} {
+		for _, tc := range []struct {
+			name   string
+			writer io.Writer
+			want   int
+		}{
+			{"written", new(bytes.Buffer), 1},
+			{"failed", updateFailWriter{}, 0},
+			{"short", updateShortWriter{}, 0},
+		} {
+			if framed && tc.want == 0 {
+				continue // a writer that fails cannot take the switch: framed, it is the line case again
 			}
-		})
+			t.Run(fmt.Sprintf("%s framed=%t", tc.name, framed), func(t *testing.T) {
+				var calls atomic.Int32
+				p := rpc.New("n", tc.writer)
+				p.LineWritten = updateResponseWritten(func(id string) {
+					calls.Add(1)
+					if id != "upload-1" {
+						t.Fatal("wrong transaction acknowledged")
+					}
+					if b, ok := tc.writer.(*bytes.Buffer); ok && !bytes.Contains(b.Bytes(), []byte(`"accepted":true,"id":"upload-1"`)) {
+						t.Fatal("restart signaled before complete reply reached transport")
+					}
+				})
+				p.TrackReplies = true
+				replied := make(chan struct{})
+				p.OnRequest = func(ctx context.Context, _ string, _ json.RawMessage) (any, error) {
+					rpc.AfterReply(ctx, func() { close(replied) }) // once the answer's write returned, LineWritten told or not
+					return proto.NodeUpdateCommitResult{Accepted: true, ID: "upload-1"}, nil
+				}
+				send, end := servePeer(t, p, framed)
+				send(`{"id":"h1","method":"node.update.commit","params":{}}`)
+				defer end()
+				select {
+				case <-replied:
+				case <-time.After(5 * time.Second):
+					t.Fatal("no answer")
+				}
+				if int(calls.Load()) != tc.want {
+					t.Fatalf("restart calls=%d, want %d", calls.Load(), tc.want)
+				}
+			})
+		}
 	}
 }
-func TestUpdateResponseWriterIgnoresEventsErrorsAndOrdinaryResults(t *testing.T) {
+func TestUpdateResponseWrittenIgnoresEventsErrorsAndOrdinaryResults(t *testing.T) {
 	for _, reply := range []string{
 		`{"event":"event","params":{"accepted":true,"id":"upload-1"}}`,
 		`{"id":"h1","error":{"message":"bad"},"result":{"accepted":true,"id":"upload-1"}}`,
 		`{"id":"h1","result":{"accepted":false,"id":"upload-1"}}`,
 		`{"id":"h1","result":{"ok":true}}`,
 	} {
-		w := updateResponseWriter{Writer: io.Discard, responseWritten: func(string) { t.Fatalf("nonacceptance signaled resident restart: %s", reply) }}
-		if _, err := w.Write([]byte(reply + "\n")); err != nil {
-			t.Fatal(err)
-		}
+		updateResponseWritten(func(string) { t.Fatalf("nonacceptance signaled resident restart: %s", reply) })([]byte(reply + "\n"))
 	}
 }
 func TestStdioNodeRefusesRemoteUpdateWithoutResidentManager(t *testing.T) {
@@ -137,4 +158,24 @@ func TestSessionsListReportsUpdateBusy(t *testing.T) {
 	if out, _ := request(t, n, "sessions.list", map[string]any{}); out["update_busy"] != false {
 		t.Fatalf("an idle conversation reported update_busy: %v", out["update_busy"])
 	}
+}
+
+// servePeer serves p on a pipe the test feeds lines into (send); framed, it first asks p for lanes as a manager does
+// (rpc.Peer.EnableLanes) and waits until p writes frames. end closes the input and waits for Serve.
+func servePeer(t *testing.T, p *rpc.Peer, framed bool) (send func(line string), end func()) {
+	t.Helper()
+	r, w := io.Pipe()
+	done := make(chan struct{})
+	go func() { _ = p.Serve(context.Background(), r); close(done) }()
+	send = func(line string) {
+		if _, err := w.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if framed {
+		p.EnableLanes(nodeproto.ControlLane, nodeproto.BulkLane)
+		send(`{"id":"h0","method":"rpc.lanes","params":{"versions":[1]}}`)
+		waitFor(t, "the output framed", p.Framed)
+	}
+	return send, func() { w.Close(); <-done }
 }

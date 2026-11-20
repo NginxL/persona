@@ -108,7 +108,7 @@ func (n *Node) runtimeTranscript(id string) string {
 }
 
 // transcriptCalls are the calls about a session that its transcript answers when the runtime names one.
-var transcriptCalls = map[string]bool{"session.items": true, "session.item": true, "session.image": true}
+var transcriptCalls = map[string]bool{"session.items": true, "session.item": true, "session.image": true, "session.visualization": true}
 
 // runtimeTranscriptCall serves the watch and the session info of a session of h whose conversation is a transcript
 // here (runtimeTranscript); handled is false for the calls the runtime answers as for any of its sessions.
@@ -123,7 +123,7 @@ func (n *Node) runtimeTranscriptCall(ctx context.Context, h *runtimeConn, method
 			return nil, err, true
 		}
 		if !sub {
-			attempt := n.runtimes.watch(h, p.SessionID, 0, connCtx)
+			attempt := n.runtimes.watch(h, p.SessionID, 0, "", connCtx)
 			if _, err := call("session.watch", map[string]any{"session_id": p.SessionID, "since_seq": 0, "transcript": true}); err != nil {
 				n.logf("runtime %s: watch %s: %v", h.id(), p.SessionID, err)
 				n.runtimes.watchFailed(h, p.SessionID, attempt.token)
@@ -174,7 +174,7 @@ func (n *Node) transcriptMoved(h *runtimeConn, id string) {
 			n.logf("runtime %s: watch %s's transcript: %v", h.id(), id, err)
 		}
 	}
-	attempt := n.runtimes.watch(h, id, 0, parent)
+	attempt := n.runtimes.watch(h, id, 0, "", parent)
 	go func() {
 		if err := n.runtimeWatch(h, id, attempt.since); err != nil {
 			n.runtimes.watchFailed(h, id, attempt.token)
@@ -231,7 +231,7 @@ func (n *Node) mergeRuntimeTranscript(s *proto.Session) string {
 	if s.PermissionMode == "" && s.Effort == "" {
 		s.PermissionMode, s.Effort = n.currentModes(s.SessionID, m)
 	}
-	setRuntimeContext(s, m)
+	n.setRuntimeSessionContext(s, m)
 	s.ModelFallback = m.modelFallback
 	s.LastText, s.Rev = snippet(m.lastText), st.Size()
 	if u := lastUsed(m, st); u.After(s.UpdatedAt) {

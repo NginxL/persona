@@ -394,4 +394,5 @@
     <string name="designsystem_shortcuts_help_keys">Ctrl + /</string>
     <string name="designsystem_shortcuts_terminal">ターミナルが優先するキー</string>
     <string name="designsystem_shortcuts_terminal_keys">Esc、Tab、Shift + Tab、Ctrl + C、矢印キー</string>
+    <string name="designsystem_load_image">画像を読み込む</string>
 </resources>

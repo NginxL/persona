@@ -54,6 +54,9 @@
     <string name="settings_paste_format_curl">一条 curl 请求</string>
     <string name="settings_paste_format_cindy">一个 cindy 供应商</string>
     <string name="settings_paste_format_link">一个供应商导入链接</string>
+    <string name="settings_provider_import_link_unsupported">这个 hub 还无法打开导入链接，请更新 hub 后再试。</string>
+    <string name="settings_paste_link_opened">已从链接打开。检查并点击保存之前，不会保存任何内容。</string>
+    <string name="settings_paste_something_else">改为粘贴其他配置</string>
     <string name="settings_paste_nothing">这段内容里没有找到供应商。</string>
     <plurals name="settings_paste_several">
         <item quantity="other">找到 %1$d 个供应商，请选择一个。</item>

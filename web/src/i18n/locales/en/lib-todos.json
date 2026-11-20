@@ -24,5 +24,9 @@
   "orphaned": "Nobody is working on this",
   "orphaned_error": "closed after an error",
   "orphaned_closed": "closed",
-  "orphaned_offline": "computer offline"
+  "orphaned_offline": "computer offline",
+  "create_unconfirmed": "The hub hasn't confirmed this create yet. Check its result before creating another one.",
+  "images_not_saved": "The hub didn't save the images. Your draft is still here; try again.",
+  "images_cleanup_failed": "The hub created a to-do without its images and couldn't remove it. Your draft is still here; check the to-do list.",
+  "images_unsupported": "This hub doesn't support to-do images. Update every assistant to add them."
 }

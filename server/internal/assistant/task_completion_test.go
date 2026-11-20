@@ -51,7 +51,7 @@ func TestTaskCompletionLimitContinueNeedsNoReport(t *testing.T) {
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login regression test passes"}, 0)
 			s.taskWorking(ctx, "box", "s1")
-			continuation := proto.Item{Kind: proto.KindText, Role: "user", Text: prompts.RenderAgentLimitContinue()}
+			continuation := proto.Item{Kind: proto.KindText, Role: "user", Text: prompts.RenderAgentLimitContinue("")}
 			if parsed {
 				continuation.Injected = prompts.ParseInjected(continuation.Text)
 			}

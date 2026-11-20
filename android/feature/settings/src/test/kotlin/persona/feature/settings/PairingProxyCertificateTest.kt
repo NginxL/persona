@@ -114,4 +114,62 @@ class PairingProxyCertificateTest {
         assertEquals(PairingAttemptStep.Tls, pairingStep(failure))
         assertFalse(PairingFailure.ProxyCertificate.recovery() == PairingRecovery.Scan)
     }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w400dp-h1000dp-xhdpi")
+    fun cutShortTlsHandshakeShowsReachAddressStepAndTryAgainInLightDarkAndLargestText() {
+        val cutShortPairing = object : PairingService {
+            override val isPaired = MutableStateFlow(false)
+            override suspend fun pair(request: PairingRequest) = pair(request) {}
+            override suspend fun pair(request: PairingRequest, progress: (persona.core.contracts.api.PairingProgress) -> Unit) {
+                progress(persona.core.contracts.api.PairingProgress(
+                    persona.core.contracts.api.PairingStage.Probe,
+                    candidates = listOf(persona.core.contracts.api.ConnectionCandidate(
+                        address, "lan", persona.core.contracts.CoreText.plain("Connection failed")
+                    )),
+                ))
+                val eof = javax.net.ssl.SSLHandshakeException("Remote host terminated the handshake").apply {
+                    initCause(java.io.EOFException("SSL peer shut down incorrectly"))
+                }
+                val hubFailure = persona.core.hub.HubFailure.from(eof)
+                throw PairingException(pairingFailure(hubFailure)).apply { initCause(hubFailure) }
+            }
+            override suspend fun unpair() = Unit
+        }
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.setContent {
+            val scale = if (large) 2f else 1f
+            val configuration = android.content.res.Configuration(androidx.compose.ui.platform.LocalConfiguration.current).apply {
+                fontScale = scale
+                uiMode = (uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+            }
+            val density = androidx.compose.ui.unit.Density(androidx.compose.ui.platform.LocalDensity.current.density, scale)
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalConfiguration provides configuration,
+                androidx.compose.ui.platform.LocalDensity provides density,
+            ) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(960.dp).background(PersonaTheme.palette.background)) {
+                        key(dark, large) { PairingScreen(cutShortPairing, sessions, initialLink = link, onReady = {}, onDiagnostics = {}) }
+                    }
+                }
+            }
+        }
+        val expectedStep = text(R.string.settings_pairing_stopped_at, text(R.string.settings_pairing_step_network))
+        val wrongStep = text(R.string.settings_pairing_stopped_at, text(R.string.settings_pairing_step_tls))
+        for (big in listOf(false, true)) for (d in listOf(false, true)) {
+            dark = d; large = big
+            rule.waitForIdle()
+            rule.onNode(hasText(text(R.string.settings_pairing_confirm)) and hasClickAction()).performClick()
+            rule.waitUntil(5_000) { rule.onAllNodesWithText(text(R.string.settings_pairing_failed_title)).fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(rule.onAllNodesWithText(expectedStep).fetchSemanticsNodes().isNotEmpty())
+            assertTrue(rule.onAllNodesWithText(wrongStep).fetchSemanticsNodes().isEmpty())
+            assertTrue(rule.onAllNodesWithText(text(R.string.settings_pairing_recovery_retry)).fetchSemanticsNodes().isNotEmpty())
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(out(), "pairing-cut-short-tls-${if (d) "dark" else "light"}-${if (big) "large" else "default"}.png").outputStream()
+                .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
 }

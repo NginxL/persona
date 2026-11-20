@@ -41,4 +41,8 @@
     <string name="chat_host_open_feishu">Open in Lark</string>
     <string name="chat_suggestion_send">Send now</string>
     <string name="chat_suggestion_fill">Put in the box</string>
+    <string name="chat_slash_permissions_detail">Switch permission mode</string>
+    <string name="chat_modes_bypass_restart">Restarts the session to apply it once this turn ends; the conversation carries on</string>
+    <string name="chat_modes_bypass_pending">The session restarts in Full access once this turn ends</string>
+    <string name="chat_modes_bypass_next_message">Takes effect from the next message</string>
 </resources>

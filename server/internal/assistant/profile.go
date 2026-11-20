@@ -18,6 +18,7 @@ import (
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
 // The assistant's own settings (settings `assistant`, docs/assistant/assistant.md "Boundary with hub"): the machine its
@@ -44,8 +45,10 @@ const settingsFresh = 5 * time.Second
 
 // Settings are the assistant's settings, as saved.
 type Settings struct {
-	MachineID string `json:"machine_id"`
-	Launcher  string `json:"launcher"`
+	// WorkspaceRules are used only by explicit backend preparation.
+	WorkspaceRules workspacenaming.Rules `json:"workspace_rules,omitempty"`
+	MachineID      string                `json:"machine_id"`
+	Launcher       string                `json:"launcher"`
 	// DefaultPermissionMode applies only to new non-guest conversations without an explicit mode.
 	// Empty keeps the runtime's existing default; it never changes an existing conversation.
 	DefaultPermissionMode string `json:"default_permission_mode,omitempty"`
@@ -94,6 +97,7 @@ type Settings struct {
 	// too, by last activity with the others (#8324; since #6228 they are only in All chats). Display only, one value
 	// for every device. nil is off (the default).
 	RecentTaskChats *bool `json:"recent_task_chats,omitempty"`
+	WorkGuide       *bool `json:"work_guide,omitempty"`
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
@@ -158,6 +162,11 @@ type Settings struct {
 	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the
 	// user did not start is moved to the background by their message either way (owner_preempt.go).
 	InterjectBackground *bool `json:"interject_background,omitempty"`
+	// ClaudeInteractive: a Claude assistant conversation runs in interactive Claude Code instead of `claude -p`
+	// (#10058, node/assistant_tui.go). nil is off (the default). Observed, not documented by Anthropic: a Claude
+	// subscription's 5-hour window lasts longer in interactive use; driving the interactive program from Persona may also
+	// be read as a different kind of use than it is, so it is the owner's opt-in.
+	ClaudeInteractive *bool `json:"claude_interactive,omitempty"`
 	// LoadAllTools: every Persona tool of an assistant conversation is loaded up front, as before #7317. nil is off
 	// (the default): only the frequently used ones are, the rest wait behind ToolSearch (tool_loading.go).
 	LoadAllTools *bool `json:"load_all_tools,omitempty"`
@@ -168,6 +177,9 @@ type Settings struct {
 	// MainSupervisesOwnTasks: the main conversation follows up the tasks no leader supervises itself. nil is off (the
 	// default, #4927): the background supervisor does (supervise_background.go).
 	MainSupervisesOwnTasks *bool `json:"main_supervises_own_tasks,omitempty"`
+	// SupervisionBatchMinutes independently batches routine supervision per final recipient, anchored at its first
+	// routine signal. Nil or 0 preserves the legacy shared gather and spacing. Immediate signals bypass the batch.
+	SupervisionBatchMinutes *int `json:"supervision_batch_minutes,omitempty"`
 	// BackgroundSupervisorKeepsContext: the background supervisor is one long conversation again from its next round,
 	// keeping each later round in context, as before #7315 (rounds already run from the first turn stay on their own
 	// branches). nil is off (the default): each round starts from its first turn with only that round's facts and tools
@@ -257,6 +269,8 @@ func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) 
 	return v, nil
 }
 
+func (v Settings) workGuideOn() bool { return v.WorkGuide != nil && *v.WorkGuide }
+
 // settings are the settings in effect, what the rest of the package reads (the main conversation, the machine, the time
 // zone; isMain and mainTasksQuiet for short): the machine one the hub has (else the hub's default), the launcher the
 // assistant's own (else hub.json's, else claude; Model configuration › Main chat goes over it: launcherNow). A read that fails once
@@ -284,6 +298,9 @@ func (s *Service) effective(ctx context.Context, v Settings) Settings {
 	if v.Launcher == "" {
 		v.Launcher = "claude"
 	}
+	if def.SupervisionBatchMinutes != nil {
+		v.SupervisionBatchMinutes = def.SupervisionBatchMinutes
+	}
 	return v
 }
 
@@ -305,6 +322,12 @@ func (s *Service) mainTasksQuiet(ctx context.Context) bool {
 // interjectBackground: a message sent while a conversation answers moves its foreground work to the background
 // (interject_background, off by default). The owner's message to a round they did not start does so whatever this says
 // (owner_preempt.go).
+// claudeInteractive: Claude assistant conversations run in interactive Claude Code (claude_interactive, off by default).
+func (s *Service) claudeInteractive(ctx context.Context) bool {
+	v := s.settings(ctx).ClaudeInteractive
+	return v != nil && *v
+}
+
 func (s *Service) interjectBackground(ctx context.Context) bool {
 	v := s.settings(ctx).InterjectBackground
 	return v != nil && *v
@@ -446,8 +469,9 @@ func (s *Service) launcherNow(ctx context.Context) string {
 }
 
 // profile is what the hub's features need of the settings (Snapshot.Profile); tasks are the scheduled tasks and todos
-// the open todos' agents as reported (either nil: unreadable, and Keep is left out, so the nodes keep what they list).
-// nil when the settings could not be read.
+// the open todos' agents as reported (either nil: unreadable, and Keep is left out, so the nodes keep what they list;
+// Keep is left out too when what places the directions' sessions cannot be read, directionKeep). nil when the
+// settings could not be read.
 func (s *Service) profile(ctx context.Context, tasks []TaskView, todos *TodoReport) *Profile {
 	saved, ok := s.savedSettings(ctx)
 	if !ok {
@@ -456,18 +480,25 @@ func (s *Service) profile(ctx context.Context, tasks []TaskView, todos *TodoRepo
 	v := s.effective(ctx, saved)
 	p := &Profile{MachineID: v.MachineID, Main: v.Main, MainMachineID: v.MainMachineID, Launcher: v.Launcher, Timezone: v.Timezone}
 	if tasks != nil && todos != nil {
-		p.Keep = keptSessions(v, tasks, todos.Links)
+		if placed, err := s.directionKeep(ctx, v); err != nil {
+			s.logf("assistant: keep: %v", err)
+		} else {
+			p.Keep = keptSessions(v, tasks, todos.Links, s.leadSessions(ctx, v), placed)
+		}
 	}
 	return p
 }
 
 // keptSessions are the conversations their machines list however long they have been quiet: the main conversation,
-// the main ones it replaced, scheduled tasks' own, and the agents of open todos. Otherwise a busy machine's 80 newest
-// transcripts crowd them out of the list and the Persona tab has no main chat (2026-11-01: the main one, quiet for two
-// days, was gone), a weekly task's conversation drops out in between, with the app's link to it and the check that its
-// last run still goes, and an open task whose agent finished and exited shows "Starting Agent" for ever: its todo
-// names a session the list no longer has (#4510).
-func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
+// the main ones it replaced, scheduled tasks' own, the agents of open todos and the current leaders (leads). Otherwise
+// a busy machine's 80 newest transcripts crowd them out of the list and the Persona tab has no main chat (2026-11-01:
+// the main one, quiet for two days, was gone), a weekly task's conversation drops out in between, with the app's link
+// to it and the check that its last run still goes, an open task whose agent finished and exited shows "Starting
+// Agent" for ever: its todo names a session the list no longer has (#4510), and a direction the owner leaves alone for
+// a week loses its Pinned row and its tasks' supervision messages go to the main chat (#11392). Last come the sessions
+// placed under the current directions (placed, directionKeep), or a quiet one reads not_listed in its direction and can
+// no longer be moved (#11515). Keeping a row listed does not keep its transcript file.
+func keptSessions(v Settings, tasks []TaskView, links []TodoLink, leads, placed []SessionRef) []SessionRef {
 	out := []SessionRef{}
 	add := func(machine, id string) {
 		if machine != "" && id != "" && !slices.Contains(out, SessionRef{MachineID: machine, SessionID: id}) {
@@ -486,6 +517,37 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 	}
 	// The background supervisor: quiet between tasks, still the one their signals go to (supervise_background.go).
 	add(v.BackgroundSupervisorMachineID, v.BackgroundSupervisor)
+	for _, l := range leads {
+		add(l.MachineID, l.SessionID)
+	}
+	for _, p := range placed {
+		add(p.MachineID, p.SessionID)
+	}
+	return out
+}
+
+// leadSessions are the current leaders' conversations (assistant.leaders without the main one), each on the computer
+// its direction record names, else the assistant's (a leader not recorded yet, or the records unreadable). An ended
+// direction is no longer in assistant.leaders, so its conversation leaves the set.
+func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
+	if len(v.Leaders) == 0 {
+		return nil
+	}
+	b := &s.directions
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	loaded := s.directionsLocked(ctx)
+	out := make([]SessionRef, 0, len(v.Leaders))
+	for _, id := range v.Leaders {
+		if id == "" || id == v.Main {
+			continue
+		}
+		machine := v.MachineID
+		if d := b.m[id]; loaded && d != nil && d.MachineID != "" {
+			machine = d.MachineID
+		}
+		out = append(out, SessionRef{MachineID: machine, SessionID: id})
+	}
 	return out
 }
 
@@ -493,6 +555,7 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 func (s *Service) settingsChanged(ctx context.Context) {
 	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
+	s.revalidateFailedStartDeferrals(ctx)
 	s.publish(ctx)
 }
 
@@ -516,6 +579,8 @@ func stateDirOn(home, dataDir, name string) string {
 }
 
 type assistantView struct {
+	WorkspaceNamingVersion  string                `json:"workspace_naming_version"`
+	EffectiveWorkspaceRules workspacenaming.Rules `json:"effective_workspace_rules"`
 	Settings
 	Manager                string             `json:"manager"`
 	PermissionDefaults     permissionDefaults `json:"permission_defaults"`
@@ -541,6 +606,7 @@ type assistantView struct {
 	MainBackgroundFolded bool `json:"main_background_folded"`
 	// RecentTaskChats is in effect, like DoneNeedsDelivery.
 	RecentTaskChats bool `json:"recent_task_chats"`
+	WorkGuide       bool `json:"work_guide"`
 	// MeetingAttendanceDefault is in effect (off until changed).
 	MeetingAttendanceDefault      string   `json:"meeting_attendance_default"`
 	MeetingTranscriptionDefault   string   `json:"meeting_transcription_default"`
@@ -555,6 +621,8 @@ type assistantView struct {
 	ReviewSamplePercent int `json:"review_sample_percent"`
 	// InterjectBackground is in effect, like DoneNeedsDelivery.
 	InterjectBackground bool `json:"interject_background"`
+	// ClaudeInteractive is in effect, like DoneNeedsDelivery.
+	ClaudeInteractive bool `json:"claude_interactive"`
 	// AgentTasks is in effect, like DoneNeedsDelivery.
 	AgentTasks bool `json:"agent_tasks"`
 	// CloseEndedTerminals is in effect, like DoneNeedsDelivery.
@@ -568,7 +636,8 @@ type assistantView struct {
 	NextSuggestions bool `json:"next_suggestions"`
 	// MainSupervisesOwnTasks is in effect, like DoneNeedsDelivery: false means the background supervisor follows up
 	// the tasks no leader supervises.
-	MainSupervisesOwnTasks bool `json:"main_supervises_own_tasks"`
+	MainSupervisesOwnTasks  bool `json:"main_supervises_own_tasks"`
+	SupervisionBatchMinutes int  `json:"supervision_batch_minutes"`
 }
 
 // view is GET /api/v1/assistant; withArchived lists archived conversations too (flagged `archived`). It lists the
@@ -585,7 +654,8 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		v.MainMachineID = s.confirmedMainMachine(ctx, v)
 	}
 	v.Launcher = s.launcherNow(ctx)
-	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
+	effectiveRules, _ := workspacenaming.Effective(v.WorkspaceRules, workspacenaming.Rules{})
+	out := assistantView{WorkspaceNamingVersion: workspacenaming.Version, EffectiveWorkspaceRules: effectiveRules, Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
 		IdleAutoCompact: s.idleAutoCompact(ctx), IdleAutoCompactMinutes: s.idleAutoCompactMinutes(ctx), IdleAutoCompactTokens: s.idleAutoCompactTokens(ctx),
 		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
@@ -594,18 +664,21 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
 		ReadonlyMode:            readonlyModeOf(v),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
+		WorkGuide:               v.workGuideOn(),
 		RecentTaskChats:         v.RecentTaskChats != nil && *v.RecentTaskChats,
 		DoneNeedsDelivery:       v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
 		ArchiveClosedDays:            int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
 		ReviewSamplePercent:          s.reviewSamplePercent(ctx),
 		InterjectBackground:          v.InterjectBackground != nil && *v.InterjectBackground,
+		ClaudeInteractive:            v.ClaudeInteractive != nil && *v.ClaudeInteractive,
 		AgentTasks:                   v.AgentTasks != nil && *v.AgentTasks,
 		CloseEndedTerminals:          v.CloseEndedTerminals != nil && *v.CloseEndedTerminals,
 		AgentAutoNaming:              quietOn(v.AgentAutoNaming),
 		AgentAutoNamingMax:           agentNamingLimit(v),
 		AgentAutoNamingIntervalHours: agentNamingInterval(v),
 		InboxSignals:                 v.InboxSignals != nil && *v.InboxSignals, MainSupervisesOwnTasks: !s.backgroundOn(v),
-		NextSuggestions: v.NextSuggestions != nil && *v.NextSuggestions}
+		SupervisionBatchMinutes: supervisionBatchMinutesOf(v),
+		NextSuggestions:         v.NextSuggestions != nil && *v.NextSuggestions}
 	if d, ok := s.device(ctx, v.MachineID); ok {
 		out.Cwd = s.spaceCwd(d, sp)
 		var list []proto.Session
@@ -756,7 +829,7 @@ func (s *Service) warm(launcher string) {
 	}
 	// The spare is adopted only by a new conversation in the same profile (node/assistant_spare.go), and a new one is
 	// started in the main chat's, on a carried pick too (startMain, startOn).
-	profiled := s.withNewConversationProfile(ctx, machine, "assistant", params)
+	profiled := s.withNewConversationProfile(ctx, machine, params)
 	ctx = context.WithValue(ctx, supervisionStartup{}, cfg.MainSupervisesOwnTasks != nil && *cfg.MainSupervisesOwnTasks)
 	err = s.call(ctx, machine, DeviceAssistantWarm, params, nil)
 	if profiled && (nodeOutdated(err) || profileRefused(err)) { // as startOn: an old node, or another agent than Claude Code

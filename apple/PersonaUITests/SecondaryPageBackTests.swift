@@ -44,6 +44,42 @@ final class SecondaryPageBackTests: XCTestCase {
         try cardPushes(sideBars: true)
     }
 
+    /// The sidebar's one selected row stays the main conversation's while a task's card pushes its Agent's chat on it
+    /// (#11032): a drill-down, not a pick; the Agent's row is not selected. Read where the column stays beside the page
+    /// (the iPad, the open Duo on its side), and everywhere once Back has returned and the sidebar is brought out.
+    @MainActor func testAnAgentPushedFromTheMainConversationLeavesItSelected() throws {
+        launch(sideBars: false)
+        let main = app.descendants(matching: .any)["sidebar-main"].firstMatch
+        // Beside the page only: a drawer or a column over the page would cover the card.
+        if main.waitForExistence(timeout: 5), main.isHittable {
+            app.assertOneSelectedSidebarRow("sidebar-main", "the main conversation at launch")
+            // Laid over the page (the open Duo upright), it covers the card: slid away with its own button first.
+            let fold = app.descendants(matching: .any)["sidebar-fold-column"].firstMatch
+            if !conversation.isHittable, fold.exists, fold.isHittable {
+                fold.tap()
+                let deadline = Date.now.addingTimeInterval(5)
+                while Date.now < deadline, !conversation.isHittable { usleep(200_000) }
+            }
+        }
+        shot("selection-0-main")
+        let before = page()
+        link("todo_task_widget").tap()
+        assertChat(Self.widgetAgent)
+        if let before {
+            let pushed = settledPage { $0.path == before.path + 1 }
+            XCTAssertEqual(pushed?.root, before.root, "the card changed the sidebar's root: \(before) → \(pushed.map(\.description) ?? "-")")
+        }
+        if main.exists && main.isHittable {
+            app.assertOneSelectedSidebarRow("sidebar-main", "an Agent pushed from the main conversation")
+        }
+        shot("selection-1-pushed")
+        oneBack("the Agent's chat").tap()
+        assertConversation("Back from the Agent's chat")
+        bringOutSidebar("back on the main conversation")
+        app.assertOneSelectedSidebarRow("sidebar-main", "back on the main conversation")
+        shot("selection-2-back")
+    }
+
     /// Under side bars Back is where the Agent's chat has it before the Agent is up: the task's starting page has it in the
     /// system's bar, at the same place, and no ‹ of its own at the top left.
     @MainActor func testUnderSideBarsBackStaysPutWhileTheAgentStarts() throws {
@@ -206,6 +242,24 @@ final class SecondaryPageBackTests: XCTestCase {
         app.launchEnvironment["PERSONA_UI_TEST_SESSION"] = "1"
         app.launchPinned()
         XCTAssertTrue(conversation.waitForExistence(timeout: 20), app.debugDescription)
+    }
+
+    /// The sidebar brought out where it is away: laid over the page (the open Duo upright) or a phone's drawer.
+    @MainActor private func bringOutSidebar(_ step: String) {
+        let main = app.descendants(matching: .any)["sidebar-main"].firstMatch
+        if main.exists && main.isHittable { return }
+        let openers = app.buttons.matching(NSPredicate(format: "identifier IN %@ OR label IN %@",
+                                                       ["assistant-sidebar-button", "sidebar-drawer-button", "chat-sidebar-button",
+                                                        "sidebar-show-button", "ToggleSidebar"],
+                                                       ["Show Sidebar", "显示边栏", "显示侧边栏"]))
+        // Right after a pop the button can read as not hittable for a moment: after the pop has settled, at its frame.
+        let deadline = Date.now.addingTimeInterval(3)
+        while Date.now < deadline, !openers.allElementsBoundByIndex.contains(where: { $0.exists && $0.isHittable }) { usleep(200_000) }
+        let opener = openers.allElementsBoundByIndex.first { $0.exists && $0.isHittable } ?? openers.firstMatch
+        if let frame = (try? opener.snapshot())?.frame, !frame.isEmpty {
+            app.windows.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        }
+        XCTAssertTrue(main.waitForExistence(timeout: 5) && main.isHittable, "\(step): the sidebar did not come out:\n\(app.debugDescription)")
     }
 
     /// The task's page while its Agent starts: its message, which the conversation's card does not have (the card says

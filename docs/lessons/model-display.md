@@ -11,6 +11,14 @@
 
 If Android's existing input bar has no model list / current-model data, do not add a new query and selection flow just for a display change. Reuse the session model already passed in, and preserve the existing fallback when it is missing.
 
+## Gateway reply names are not launch selections (#10125)
+
+A gateway can echo a different model ID from the one the launcher accepted. Keep the launch ID in node state and use it for assistant carry-over; leave the echoed name available for display. Distinguish an explicitly empty launch model (launcher default) from missing metadata on an older node. Configuration and conversation picks still take precedence.
+
+Do not fold `Session.Model` back to a bare declared launcher ID in node decoration or strip `/` routing prefixes in display helpers (`modelShort`, `modelLabel`, `pillView`): upstream gateway route prefixes (`route-a/model-x`) show which channel actually served the turn. Keep `/` suffix and `[1m]` matching strictly in carry-over validation (`resolveLauncherModel`, `SameLauncherModel`), context-window detection, and picker active-row matching (`isCurrentModel`, `currentModelRow`), while clearing only angle-bracketed stand-ins (`<synthetic>`).
+
+Session metadata has two encoders: adding a field to `proto.Session` also requires its line and layout hash in `session_wire.go`. Run the wire/reflection equality and allocation tests together; falling back to reflection preserves data but can break otherwise unrelated session-list allocation budgets.
+
 ## Display text is not a wire model (#4663)
 
 - A launcher that names no model sends an empty `model`, not a localized placeholder. Normalize the legacy placeholder at the pure display/fallback boundary too: older nodes still send it, and an empty-catalog fallback must not turn it into a concrete row or a model pick.

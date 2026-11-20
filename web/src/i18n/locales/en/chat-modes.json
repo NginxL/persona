@@ -9,6 +9,7 @@
   "restart_dropped": "Called off, won't restart in “{to}”",
   "restart_dropped_why": "Called off, won't restart in “{to}”: {why}",
   "why_replaced": "another switch took its place",
+  "why_cancelled": "the session stays in its current mode",
   "why_process_exited": "the process it was picked for has exited",
   "why_process_replaced": "the session runs in another process now",
   "why_process_unknown": "it couldn't tell which process to restart",

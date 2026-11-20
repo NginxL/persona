@@ -10,7 +10,7 @@ import { requestHome } from "./child-sessions";
 import { useShownManager } from "./manager-choice";
 import { installedManagers, multiManager, ownerIn, useRoster, type ManagerList } from "./managers";
 import { isMuted } from "./session-actions";
-import { useFullAgentSessions } from "./sessions";
+import { directoryVisibleCards, useFullAgentSessions } from "./sessions";
 import { useStore } from "./store";
 import type { Interaction, Session } from "./types";
 
@@ -63,7 +63,7 @@ export function useManagerBadges(): Record<string, number> {
   const roster = useRoster();
   const several = multiManager(roster);
   const { sessions } = useFullAgentSessions(several);
-  const interactions = useStore((s) => s.interactions);
+  const interactions = useStore((s) => directoryVisibleCards(s.interactions));
   const mutes = useStore((s) => s.mutes);
   return useMemo(() => (several ? managerBadges(roster, sessions, interactions, mutes) : NONE), [several, roster, sessions, interactions, mutes]);
 }

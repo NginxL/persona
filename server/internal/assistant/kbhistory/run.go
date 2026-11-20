@@ -49,7 +49,7 @@ func (d *historyDriver) step(ctx context.Context, w historyWork) (bool, error) {
 	case d.info.HistoryAnchors:
 		if st.Positions == nil && st.Filter == nil {
 			d.initPositions(e, w, &st)
-			if err := d.saveState(e, w, &st); err != nil {
+			if err := d.saveState(ctx, e, w, &st); err != nil {
 				return false, err
 			}
 			if st.Finished() {
@@ -85,10 +85,10 @@ func (d *historyDriver) loadState(e *kb.Engine, w historyWork) (kb.HistoryState,
 	return st, nil
 }
 
-func (d *historyDriver) saveState(e *kb.Engine, w historyWork, st *kb.HistoryState) error {
+func (d *historyDriver) saveState(ctx context.Context, e *kb.Engine, w historyWork, st *kb.HistoryState) error {
 	st.UpdatedAt = d.now().UTC()
 	if err := e.Store.PutHistoryState(w.id, *st); err != nil {
-		return halt(true, "state_save_failed", "class", errClass(err))
+		return failed(ctx, "state_save_failed", err)
 	}
 	return nil
 }
@@ -224,7 +224,7 @@ func (d *historyDriver) answered(ctx context.Context, e *kb.Engine, w historyWor
 	c Call, callErr error, unreadable func() error) (handled, done bool, err error) {
 	if callErr != nil {
 		st.State, st.LastError = kb.HistoryPaused, "stopped"
-		if serr := d.saveState(e, w, st); serr != nil {
+		if serr := d.saveState(ctx, e, w, st); serr != nil {
 			return true, false, serr
 		}
 		return true, false, callErr
@@ -236,7 +236,7 @@ func (d *historyDriver) answered(ctx context.Context, e *kb.Engine, w historyWor
 	if p := page.Pace; p != nil {
 		if p.Stop {
 			st.State, st.LastError = kb.HistoryPaused, "source_stop"
-			if err := d.saveState(e, w, st); err != nil {
+			if err := d.saveState(ctx, e, w, st); err != nil {
 				return true, false, err
 			}
 			return true, false, historySourceStop(p)
@@ -263,7 +263,7 @@ func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork
 	switch o {
 	case historyPauseIt:
 		st.State, st.LastError = kb.HistoryPaused, code
-		if err := d.saveState(e, w, st); err != nil {
+		if err := d.saveState(ctx, e, w, st); err != nil {
 			return true, false, err
 		}
 		if c.stop != nil { // the call was also the second very slow one
@@ -275,7 +275,7 @@ func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork
 		return true, false, d.after(ctx, c)
 	case StopIt:
 		st.State, st.LastError = kb.HistoryPaused, code
-		if err := d.saveState(e, w, st); err != nil {
+		if err := d.saveState(ctx, e, w, st); err != nil {
 			return true, false, err
 		}
 		return true, false, HaltWhy(true, c.stopWhy(code))
@@ -289,7 +289,7 @@ func (d *historyDriver) outcome(ctx context.Context, e *kb.Engine, w historyWork
 	default:
 		st.State, st.LastError = kb.HistoryError, code
 	}
-	if err := d.saveState(e, w, st); err != nil {
+	if err := d.saveState(ctx, e, w, st); err != nil {
 		return true, false, err
 	}
 	return true, true, d.after(ctx, c)
@@ -308,7 +308,8 @@ func (d *historyDriver) pauseWait(code string) time.Duration {
 // write writes msgs of the chat (WriteHistory, with the source's images when it hands them over). When an image's
 // download was cut short (a stop, a pause that ran out, the import turned off), nothing of the page is written: the
 // caller returns the halt without saving its state, so the page is read again on resume and its images with it (the
-// ones already saved are not downloaded twice).
+// ones already saved are not downloaded twice). A write cut off by the run's context ending (a shutdown) ends the run
+// the same way, with no stop (failed).
 func (d *historyDriver) write(ctx context.Context, e *kb.Engine, w historyWork, msgs []kb.SourceMessage, near map[string]bool) (int, error) {
 	if len(msgs) == 0 {
 		return 0, nil
@@ -321,7 +322,7 @@ func (d *historyDriver) write(ctx context.Context, e *kb.Engine, w historyWork, 
 	if len(near) > 0 {
 		opt.NearMine = func(m kb.SourceMessage) bool { return near[historyKey(m)] }
 	}
-	added, err := e.WriteHistory(ctx, d.kbChat(w), msgs, opt)
+	added, err := historyWriteKB(e, ctx, d.kbChat(w), msgs, opt)
 	if errors.Is(err, kb.ErrDownloadAborted) {
 		if h := d.takeHalt(); h != nil {
 			return 0, h
@@ -329,7 +330,7 @@ func (d *historyDriver) write(ctx context.Context, e *kb.Engine, w historyWork, 
 		return 0, halt(false, "image_aborted")
 	}
 	if err != nil {
-		return added, halt(true, "write_failed", "class", errClass(err))
+		return added, failed(ctx, "write_failed", err)
 	}
 	return added, nil
 }
@@ -369,7 +370,7 @@ func (d *historyDriver) stepBackwards(ctx context.Context, e *kb.Engine, w histo
 	} else {
 		st.State, st.Cursor = kb.HistoryRunning, page.Older
 	}
-	if err := d.saveState(e, w, st); err != nil {
+	if err := d.saveState(ctx, e, w, st); err != nil {
 		return false, err
 	}
 	if h := d.takeHalt(); h != nil {

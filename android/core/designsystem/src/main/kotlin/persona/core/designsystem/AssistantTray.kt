@@ -23,13 +23,15 @@ object AssistantTrayTokens {
     const val expandedRotation = 180f
 }
 
-enum class AssistantTrayTone { Pending, Progress, Agents }
+/** An entry's mark: [Pending] waits on the user, [Progress] is work under way, [Finished] the tasks that finished in the
+ *  last 24 hours (#10922), in the done green of a finished row's check; [Agents] is the old Agents entry's. */
+enum class AssistantTrayTone { Pending, Progress, Agents, Finished }
 
 @Composable
 fun assistantTrayColor(tone: AssistantTrayTone): Color = when (tone) {
     AssistantTrayTone.Pending -> PersonaTheme.palette.caution
     AssistantTrayTone.Progress -> PersonaTheme.palette.sourceFeishu.dot
-    AssistantTrayTone.Agents -> PersonaTheme.palette.positive
+    AssistantTrayTone.Agents, AssistantTrayTone.Finished -> PersonaTheme.palette.positive
 }
 
 /**

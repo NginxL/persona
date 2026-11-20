@@ -70,6 +70,8 @@ func TestMain(m *testing.M) {
 	// Nor the user's Codex catalog: a model recovery on a Codex list runs no `codex debug models` (a test that wants
 	// windows gives its own, assistant_fallback_window.go).
 	codexDebugModels = func(context.Context, *Node, string) ([]byte, error) { return nil, errors.New("no codex in tests") }
+	// Subscription usage tests provide their own app-server instead of polling a real account.
+	codexUsageCLI = func() (string, error) { return "", errors.New("no codex in tests") }
 	// Nor the ChatGPT app's bundled codex: a test that wants one sets its own (codex_bundled_test.go).
 	bundledCodexCLI = func() string { return "" }
 	// Nor the user's Paseo: its home points nowhere (a test that wants one sets its own).

@@ -189,6 +189,14 @@ function itemSource(row: ResourceRow, detail: Record<string, Object> = row.data(
   return Object.keys(Wire.object(detail, 'connector')).length ? 'connector' : '';
 }
 
+/** Account and source folder as shown on both the inbox row and its detail header. */
+export function inboxRowSourceLabel(data: Record<string, Object>, source: string): string {
+  const account = Wire.text(data, 'account_name', Wire.text(data, 'account'));
+  const mailbox = Wire.text(Wire.object(data, 'mail'), 'mailbox');
+  const label = source + ' · ' + account;
+  return mailbox && mailbox.toLowerCase() !== 'inbox' ? label + ' · ' + mailbox : label;
+}
+
 function updateResourceList(rows: ResourceRow[], updated: ResourceRow): ResourceRow[] {
   const index = rows.findIndex((item: ResourceRow) => item.key() === updated.key());
   if (index < 0) return rows;

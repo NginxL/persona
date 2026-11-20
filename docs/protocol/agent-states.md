@@ -17,6 +17,8 @@ whether there's a pending interaction, and whether the user has looked at it in 
 | `interrupted` Interrupted by restart | Was running before a restart, and the restart took herdr's panes with it (#1917) | — | The record has a pane, the start time is earlier than this node's start, and there's no live agent now | Light gray, with "Continue" |
 | `unknown` Unknown | The host recognized the agent but can't tell its state | `unknown` | — | Gray |
 
+A dispatched session with an unknown host status reads as `state unknown` in `dispatch_read`. Its last reply may be partial. A session marked `offline` on a connected computer is interrupted. When the computer itself is offline, the manager reports `computer offline` and leaves the transcript unread.
+
 List order (each client's rank: web `lib/format.ts`, iOS / Mac `AgentListOrder.rank`, Android `agentRank`): Needs you → Unread → Awaiting reply → Working → Just finished → Seen → Unknown → Not running.
 
 Sort priority of a folded row or tab (which agent it speaks for and which pane it opens on; web `lib/herdr-tree.ts`, Android `tabUrgency`): Needs you → Working → Unread → Seen → Unknown → Not running, with Awaiting reply and then Just finished right after Unread on Android.
@@ -95,9 +97,8 @@ session therefore carries `work.just_finished` (`state` is unchanged; older apps
   meeting or a stretch of focused work; the setting changes it.
 - **Not counted**: no push, badge, Needs you count, Live Activity or widget count changes, and the assistant's snapshot
   still lists these turns under "Done (within 24 hours)".
-- **Clients** (#9751): the web, and Android (#9786, `docs/android/android-design.md` 2.4), whose open chat keeps its row in
-  this place until it is left, as it keeps an Unread one. The shared Rust sort core with HarmonyOS and iOS / Mac follow
-  in their own issues; until then they show these rows as Seen, as before.
+- **Clients** (#9751): the web, Android (#9786), iOS and Mac (#9787) and the shared Rust sort core use this rank.
+  Android and Apple keep an open chat's row in its original place until the chat is left.
 
 ### Codex (#4865)
 
@@ -207,7 +208,7 @@ State computation takes it into account: **done**, or **blocked on something the
 for a decision you need to make, the hub opens a question card, so it's `needs_you`. Anything not triaged (just stopped, model failure, can't tell) stays `unread`.
 There is only one set of colors: `apple/Shared/StatusPalette.swift`, shared by the App, the watch and Live Activities (`docs/apple/ios.md` ("Design language")).
 The Agents list also has "Waiting": the state is Seen, but a `/loop` hasn't fired yet (`Session.isWaiting`), so a new message will come. Sessions whose background commands / sub-Agents are still running are counted as Working directly by the hub (#2228, `backgroundState`) and no longer go into Waiting; the assistant chat's background tasks and Monitor are always running and don't count.
-A long-running process started in the background (such as a dev server) keeps the Agent Working until it exits (node stops listing background tasks older than 24 hours). Turn-end decisions such as the "done" push and hub self-update look at the host state and aren't affected by this.
+A long-running process started in the background (such as a dev server) keeps the Agent Working until it exits (node stops listing background tasks older than 24 hours). Stop on such a session, once its turn is over, interrupts nothing: the node presses the Escape as always and answers `turn_over_background`, so the app says the turn had ended and the background work still runs instead of "Interrupted" (#10828); ending the background work itself is done in the terminal. Turn-end decisions such as the "done" push and hub self-update look at the host state and aren't affected by this.
 
 ### Background workflows and Monitor (#2935)
 

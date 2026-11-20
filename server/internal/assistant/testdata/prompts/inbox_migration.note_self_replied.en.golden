@@ -1,0 +1,5 @@
+Example owner replied in the source (original reply).
+
+Read the current state. If settled, call inbox_suggest with a conclusion (outcome done); if waiting on the other party, give only recap and follow (no kind; follow names who, next step and when to check), without another suggestion.
+
+Do not start Agents, send messages or directly perform actions visible to others in this turn. Use read-only investigation tools; the program executes suggestions only after Example owner confirms.

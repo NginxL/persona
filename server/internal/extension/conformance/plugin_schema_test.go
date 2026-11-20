@@ -312,6 +312,56 @@ func TestPluginSchemasFollowTheGoTypes(t *testing.T) {
 	}
 }
 
+// The mention opt-in is a wire contract, not only a server-side branch: the manifest admits its kind, channel.receive
+// carries its origin/context and owner attestation, and the generated SDK exposes those same fields (#11130).
+func TestMentionChannelContractInSchemasAndGeneratedSDK(t *testing.T) {
+	s := loadSchemas(t)
+	kind := s.def(t, "ChannelItem")["properties"].(map[string]any)["kind"].(map[string]any)
+	if !slices.Contains(asSlice(kind["enum"]), any("mention")) {
+		t.Errorf("ChannelItem.kind enum %v does not admit mention", kind["enum"])
+	}
+	props := s.def(t, "ChannelMessage")["properties"].(map[string]any)
+	typ := reflect.TypeOf(wire.ChannelMessage{})
+	for jsonName, goName := range map[string]string{"chat": "Chat", "topic": "Topic", "context": "Context", "owner": "Owner"} {
+		if _, ok := props[jsonName]; !ok {
+			t.Errorf("ChannelMessage.%s is missing from channel.schema.json", jsonName)
+		}
+		field, ok := typ.FieldByName(goName)
+		if !ok {
+			t.Errorf("generated wire.ChannelMessage.%s is missing", goName)
+			continue
+		}
+		if got := strings.Split(field.Tag.Get("json"), ",")[0]; got != jsonName {
+			t.Errorf("generated wire.ChannelMessage.%s has JSON name %q, want %q", goName, got, jsonName)
+		}
+	}
+}
+
+// The opt-in and its owner/guest boundary are extension-author facing too: both channel guides name the exact target
+// and make clear that a non-owner request does not enter main (#11130).
+func TestMentionChannelOptInIsDocumented(t *testing.T) {
+	read := func(name string) string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join("../../../../docs/extensions", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	channels := read("channels.md")
+	for _, want := range []string{`"kind": "mention"`, `target: {kind: "main"}`, "owner", "guest"} {
+		if !strings.Contains(channels, want) {
+			t.Errorf("channels.md does not document %q", want)
+		}
+	}
+	lark := read("lark-agent.md")
+	for _, want := range []string{`target: {kind: "main"}`, "channel.receive", "guest conversation", "non-owner"} {
+		if !strings.Contains(lark, want) {
+			t.Errorf("lark-agent.md does not document %q", want)
+		}
+	}
+}
+
 // What the program fixtures (connector/testdata/wire/<program>) answer holds to the schemas.
 func TestConnectorFixturesHoldToTheSchemas(t *testing.T) {
 	byFile := map[string]string{

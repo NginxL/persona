@@ -1,9 +1,11 @@
-类型：通过 lark-cli 收到的 Lark 私聊，另一方是人
-每行一条消息：开头是消息时间（月-日 时:分），然后是发送人和内容。「—— 新消息 ——」之前是更早的聊天记录，只作背景，按它之后的新消息判断；没有这一行时都是新消息。
+種類：lark-cli 経由の Lark 個人チャット。相手は人
 
-本次新消息：[Image: img_example_new_screenshot]
+セクション分けされた会話では「Current messages (new activity):」と「Background history (context only, not new requests):」を区別し、後者は背景としてのみ扱う。古い形式で「—— 新消息 ——」の区切りがある場合、区切り以降だけを新着として判断する。
 
-会话上下文（含较早消息）：
+
+最新のメッセージ：[Image: img_example_new_screenshot]
+
+会話の文脈（以前のメッセージを含む）：
 Example peer（@了我）: @Example owner can you check the filter?
 Example owner: Here is the report.
 Example peer: Thanks, I can see it.

@@ -18,4 +18,5 @@
     <string name="chat_share_card_share_text">分享文字</string>
     <string name="chat_share_card_light">浅色</string>
     <string name="chat_share_card_dark">深色</string>
+    <string name="chat_reply_image_original">打开原图</string>
 </resources>

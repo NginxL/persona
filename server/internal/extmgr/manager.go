@@ -33,6 +33,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/remoteimage"
 	"github.com/nwverse/persona/server/internal/secretkey"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 	"github.com/nwverse/persona/server/internal/update"
@@ -143,6 +144,7 @@ type Manager struct {
 	connectorsOff map[string]bool
 	migrated      sync.Map
 	media         mediaCache
+	avatars       *remoteimage.Fetcher // the avatars route's (avatars.go)
 	recalls       recallLocks
 	extensions    *extensions
 	hostCLIMu     sync.Mutex
@@ -155,9 +157,12 @@ type Manager struct {
 	bots          botHub
 	channels      channelsHub
 	chans         struct{ in inbound }
-	inbox         inboxSources
-	larkDefault   larkDefault
-	admin         struct {
+	// clarificationProofs are one-time owner-question attestations issued after
+	// a fresh channel action, never reusable approval capabilities.
+	clarificationProofs clarificationProofBook
+	inbox               inboxSources
+	larkDefault         larkDefault
+	admin               struct {
 		extensions extensionGate
 		now        func() time.Time // the admin UI's clock (tests move it)
 	}
@@ -224,6 +229,7 @@ func New(opts Options) *Manager {
 	h.started = make(chan struct{})
 	h.extTokens.dropped = h.tellHubDropped
 	h.droppedWait = time.Second
+	h.avatars = newAvatars(cfg.dir, h.avatarDoH, opts.Logf)
 	return h
 }
 
@@ -346,13 +352,15 @@ func (h *Manager) waitPrepared(ctx context.Context, ix proto.Interaction, op app
 		return h.opts.AskPrepared(ctx, ix, op)
 	}
 	if h.opts.Ask == nil {
-		return approval.Outcome{}, errAssistantOffline
+		return approval.Outcome{}, fmt.Errorf("%w: %w", approval.ErrNotApplied, errAssistantOffline)
 	}
 	// Embedders that predate AskPrepared keep their original one-shot approval
 	// behavior. The production assistant supplies AskPrepared for clarification.
 	r, err := h.opts.Ask(ctx, ix)
 	if err != nil {
-		return approval.Outcome{}, err
+		// The legacy wait never entered Apply. Keep the original error while making
+		// that definite outcome distinguishable from an uncertain Apply failure.
+		return approval.Outcome{}, fmt.Errorf("%w: %w", approval.ErrNotApplied, err)
 	}
 	switch {
 	case r.UserAllowed():

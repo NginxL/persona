@@ -1,0 +1,15 @@
+{
+  "sections": [
+    {
+      "items": [
+        {"type": "graph", "nodes": [
+          {"id": "a", "title": "a",
+           "links": [
+             {"title": "Plain http", "url": "http://hub.example.com/s/dev-box/run-1"},
+             {"title": "Credentials", "url": "https://user:pass@hub.example.com/s/dev-box/run-1"}
+           ]}
+        ]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# The watch app (with its widgets) and the share extension the iPhone app embeds, merged into project.yml by its
+# `include:` always. They are here and not in project.yml's Persona dependencies because in a merge project.yml's own
+# values win over every include's: only dependencies an include added can be taken out again, which
+# lean-dev-build.yml does for a development build (#10713). CI, release and the UI tests build them as before.
+targets:
+  Persona:
+    dependencies:
+      - target: PersonaWatch
+      - target: PersonaShare

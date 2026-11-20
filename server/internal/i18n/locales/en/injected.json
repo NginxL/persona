@@ -13,5 +13,7 @@
   "limit_continue": "Usage limit reset: Persona told it to go on",
   "ask_answered": "You answered: {title}",
   "ask_expired": "The question timed out unanswered",
-  "ask_closed": "The question was closed without an answer"
+  "ask_closed": "The question was closed without an answer",
+  "answer_again": "Persona is asking for a reply again",
+  "answer_again_failed": "The Assistant did not give an answer. Try sending your message again."
 }

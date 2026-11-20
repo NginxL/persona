@@ -9,10 +9,28 @@ import (
 )
 
 // Read grants at dispatch, not while a plan waits to start, so changes made in between apply.
-func (s *Service) withStandingAuthorizations(ctx context.Context, machine, cwd, text string) (string, error) {
+func (s *Service) withStandingAuthorizations(ctx context.Context, machine, cwd, text string, repositories ...string) (string, error) {
 	grants, err := s.standingForDirectory(ctx, machine, cwd)
 	if err != nil {
 		return "", fmt.Errorf("read standing authorizations: %w", err)
+	}
+	if len(repositories) > 0 {
+		seen := map[string]bool{}
+		for _, g := range grants {
+			seen[g.ID] = true
+		}
+		for _, dir := range repositories {
+			scoped, err := s.standingForDirectory(ctx, machine, dir)
+			if err != nil {
+				return "", fmt.Errorf("read standing authorizations: %w", err)
+			}
+			for _, g := range scoped {
+				if !seen[g.ID] {
+					grants = append(grants, g)
+					seen[g.ID] = true
+				}
+			}
+		}
 	}
 	if len(grants) == 0 {
 		return text, nil

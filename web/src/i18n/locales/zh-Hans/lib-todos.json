@@ -24,5 +24,9 @@
   "orphaned": "没人在做",
   "orphaned_error": "出错后关闭",
   "orphaned_closed": "已关闭",
-  "orphaned_offline": "电脑离线"
+  "orphaned_offline": "电脑离线",
+  "create_unconfirmed": "Hub 还没有确认创建结果，请先查询结果，不要重复创建。",
+  "images_not_saved": "Hub 没有保存图片。你的草稿还在，请重试。",
+  "images_cleanup_failed": "Hub 创建了没有图片的待办，并且无法将其删除。你的草稿还在，请检查待办列表。",
+  "images_unsupported": "此 Hub 不支持待办图片。请更新所有助手后再添加。"
 }

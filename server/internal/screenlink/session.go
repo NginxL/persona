@@ -95,17 +95,20 @@ type channel struct {
 
 	// Node → phone. buf holds bytes [base, base+len(buf)): base is what the phone acknowledged, sent where the
 	// active transport's writer is. Bytes in buf are never changed in place, so a writer may hold a slice of it.
-	buf       []byte
-	base      uint64
-	sent      uint64
-	marks     []mark // where each read (RFB) or message (video) starts in buf, and when it was read
-	eof       bool   // local ended: a close follows the last byte
-	sentClose bool
-	reset     bool // a reset at base goes out before more data
-	resetOut  bool // a reset handed to the active writer is still waiting for the phone's confirmation
-	resetOff  uint64
-	jumpOff   uint64
-	jumpValid bool // a backlog drop made jumpOff; RFB never has one
+	buf        []byte
+	base       uint64
+	sent       uint64
+	marks      []mark // where each read (RFB) or message (video) starts in buf, and when it was read
+	eof        bool   // local ended: a close follows the last byte
+	sentClose  bool   // close was handed to the active route; false when the next route owes it
+	closeAcked bool   // the phone confirmed closeEnd; a final-data ack alone does not confirm close
+	closeEnd   uint64
+	closeRoute *transport // the route close last went on; kept while a copy is owed elsewhere, nil after confirmation
+	reset      bool       // a reset at base goes out before more data
+	resetOut   bool       // a reset handed to the active writer is still waiting for the phone's confirmation
+	resetOff   uint64
+	jumpOff    uint64
+	jumpValid  bool // a backlog drop made jumpOff; RFB never has one
 	// While jumpValid && !jumpConfirmed, only a phone-stated offset at or past jumpOff confirms the jump. A transport
 	// change then owes its reset again. jumpData says whether data at or past jumpOff was handed to a TCP or UDP writer;
 	// if so, the old reset may be behind the phone, so the next transport drops again instead of repeating it.
@@ -117,6 +120,10 @@ type channel struct {
 	lostAt        time.Time  // since when no transport carries it; zero while one does
 	progress      time.Time  // when the phone last acknowledged something, or the channel last moved or started sending
 	finished      bool
+	// unread is the active transport when the node moved the channel there by itself off a UDP flow, or on from such a
+	// route, and no use from the phone has come since (#10007). The phone ignores the channel's TCP data while it takes
+	// a flow to carry it, so its next use counts as a move even on this route. Nil otherwise.
+	unread *transport
 
 	// Phone → node, written to local under umu in order; recv is the next offset expected (written under umu, read
 	// anywhere).
@@ -575,9 +582,10 @@ func (s *Session) nextLocked(t *transport) []byte {
 			s.noteJumpDataLocked(ch, off)
 			return out
 		}
-		if ch.eof && !ch.sentClose && (!ch.jumpValid || ch.jumpConfirmed) {
+		if ch.eof && !ch.sentClose && !ch.closeAcked && (!ch.jumpValid || ch.jumpConfirmed) {
 			// The phone's reset handler does not re-check an earlier close, so close follows confirmation of a final jump.
 			ch.sentClose = true
+			ch.closeEnd, ch.closeRoute = end, t
 			return frame(TypeClose, chanOffset(id, end))
 		}
 	}
@@ -651,15 +659,16 @@ func (s *Session) ageLocked(ch *channel) time.Duration {
 }
 
 // moveLocked has t carry ch from off on (what the phone has). A video backlog older than VideoBacklog is dropped and
-// the stream goes on at a new keyframe; RFB is always sent on exactly from off.
+// the stream goes on at a new keyframe; RFB is always sent on exactly from off. A use on the route the node already
+// moved ch to off a flow is a move too: the phone dropped what came there meanwhile (unread).
 func (s *Session) moveLocked(ch *channel, t *transport, off uint64) bool {
 	if !s.ackedLocked(ch, off) {
 		return false
 	}
-	moved := ch.active != t
-	ch.active, ch.lostAt = t, time.Time{}
+	moved := ch.active != t || ch.unread == t
+	ch.active, ch.lostAt, ch.unread = t, time.Time{}, nil
 	if !moved {
-		return true // the same route: what it has in flight still arrives
+		return true // the same route, which the phone reads: what it has in flight still arrives
 	}
 	ch.sent, ch.progress = ch.base, s.now()
 	ch.resetOut = false // the new route owes an unconfirmed reset itself; the old writer no longer holds one
@@ -676,6 +685,9 @@ func (s *Session) moveLocked(ch *channel, t *transport, off uint64) bool {
 	case ch.jumpValid && !ch.jumpConfirmed:
 		// The backlog is young and no post-jump data was handed out, so the same reset remains safe.
 		ch.reset = true
+	}
+	if ch.sentClose && !ch.closeAcked && ch.closeRoute != t {
+		ch.sentClose = false // the last route may have lost close; this route owes a copy until close_ack
 	}
 	s.cond.Broadcast()
 	return true
@@ -701,6 +713,7 @@ func (s *Session) dropBacklogLocked(ch *channel) {
 	ch.reset, ch.keyWait = true, true
 	ch.resetOut = false  // this is a new jump; its reset has not been handed out yet
 	ch.sentClose = false // a new jump invalidates an earlier close, so sentClose implies no unconfirmed jump
+	ch.closeAcked, ch.closeEnd, ch.closeRoute = false, 0, nil
 	ch.jumpOff, ch.jumpValid, ch.jumpConfirmed, ch.jumpData = ch.base, true, false, false
 	s.logf("screenlink: video moved with a %d-byte backlog: dropped for a keyframe", dropped)
 	go ch.upstream.inject(ch, keyframeRequest)
@@ -746,6 +759,19 @@ func (s *Session) handle(t *transport, typ byte, body []byte) bool {
 		defer s.mu.Unlock()
 		if ch := s.chans[id]; ch != nil && !ch.finished {
 			return s.phoneAckedLocked(ch, off)
+		}
+		return true
+	case TypeCloseAck:
+		id, off, _, err := readChanOffset(body)
+		if err != nil {
+			return false
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if ch := s.chans[id]; ch != nil && !ch.finished && !ch.closeAcked && ch.closeRoute != nil && off == ch.closeEnd {
+			s.dropQueuedCloseLocked(id, off)
+			ch.closeAcked, ch.sentClose, ch.closeRoute = true, true, nil
+			s.cond.Broadcast() // a copy owed on another route is no longer needed, and the channel may finish
 		}
 		return true
 	case TypePing:
@@ -884,6 +910,21 @@ func (s *Session) peerClose(id byte, off uint64) {
 	}
 }
 
+// dropQueuedCloseLocked cancels copies that have not reached a writer yet, notably a close queued on a UDP flow's
+// parent. A frame already handed to a writer cannot be taken back, but no transport may keep an unsent copy after ack.
+func (s *Session) dropQueuedCloseLocked(id byte, off uint64) {
+	for t := range s.ts {
+		kept := t.ctl[:0]
+		for _, m := range t.ctl {
+			if len(m) == 14 && m[4] == TypeClose && m[5] == id && binary.BigEndian.Uint64(m[6:14]) == off {
+				continue
+			}
+			kept = append(kept, m)
+		}
+		t.ctl = kept
+	}
+}
+
 func (s *Session) queue(t *transport, msg []byte) {
 	s.mu.Lock()
 	t.ctl = append(t.ctl, msg)
@@ -917,12 +958,18 @@ func (s *Session) lose(t *transport) {
 		if ch.active != t || ch.finished {
 			continue
 		}
+		// Until the phone itself leaves a flow, it reads none of the channel's TCP data: off a flow, the next route goes
+		// unread until the phone's use, and so does any route the node moves the channel to by itself before that.
+		unread := t.flow != nil || ch.unread == t
 		if p := t.parent; p != nil && !p.dead && !p.pending {
 			s.moveLocked(ch, p, ch.base) // off a UDP flow: onto its own TLS route first
 		} else if alt := s.fallbackLocked(ch); alt != nil {
 			s.moveLocked(ch, alt, ch.base)
 		} else {
 			ch.active, ch.lostAt = nil, now
+		}
+		if unread {
+			ch.unread = ch.active
 		}
 	}
 	if s.noRelaySince.IsZero() && !s.hasRelayLocked() {
@@ -1005,8 +1052,11 @@ func (s *Session) watch() {
 			if ch.active != nil && (ch.sent > ch.base || ch.resetOut) && now.Sub(ch.progress) >= s.limits.StallAfter {
 				stuck = append(stuck, ch.active)
 			}
-			// The local end finished and the phone has everything.
-			if ch.eof && ch.sentClose && len(ch.buf) == 0 {
+			// RFB still ends at the next tick. Video waits for close_ack only while a route could carry a copy;
+			// with no route left, its local end finishes as before instead of waiting for an acknowledgement.
+			// closeRoute also counts: the latest route may have been lost before its repeated close was dequeued.
+			closeSent := ch.sentClose || ch.closeRoute != nil
+			if ch.eof && closeSent && len(ch.buf) == 0 && (ch.id == RFB || ch.closeAcked || ch.active == nil) {
 				expired = append(expired, ch)
 			}
 		}

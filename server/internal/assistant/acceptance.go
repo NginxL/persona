@@ -23,6 +23,9 @@ import (
 const acceptanceKey = "assistant.acceptance"
 
 type acceptAsk struct {
+	// prepared is the complete conclusion behind an in-flight claim. Saves keep it instead of the empty claim,
+	// while this process still excludes the claim from retries and duplicate initial posts.
+	prepared  *acceptAsk
 	MessageID string   `json:"message_id"`         // the first card ("" while none went out, see NoCard)
 	Messages  []string `json:"messages,omitempty"` // every card asking it (the first and the reminders)
 	// Earlier are the cards of the task's rounds before this one (#4853): dead, so a press or a reply on one is answered
@@ -61,7 +64,7 @@ type acceptAsk struct {
 	DueAt      time.Time `json:"due_at,omitzero"`
 	ByDefault  bool      `json:"by_default,omitempty"`
 	// AgentReply pauses the default while the supervisor checks an owner message in the task's Agent chat.
-	// It is not an option selection; only an explicit answer ends the decision.
+	// A handled reply takes the ask out of the owner's queue and leaves verification to the supervisor.
 	AgentReply *decisionAgentReply `json:"agent_reply,omitempty"`
 	// ByAssistant: a deployed task the supervising assistant accepted itself, not a big feature (ownerVerifies, #3205).
 	ByAssistant bool `json:"by_assistant,omitempty"`
@@ -80,6 +83,10 @@ type acceptAsk struct {
 	Response      string           `json:"response,omitempty"`
 	// Chosen: the option the owner chose when it was not the recommended one.
 	Chosen string `json:"chosen,omitempty"`
+	// Check: the recurring schedule whose progress check raised this decision (schedule_todo.go, #11587). The option
+	// the owner takes is about the supervisor's approach, so it goes to the task's supervisor, not its Agent
+	// (checkDecided).
+	Check string `json:"check,omitempty"`
 	// ForBriefing: a decision that can wait (#4930, decision_wait.go), raised without a push and without a card, while
 	// it waits for a briefing to bring it to the owner; cleared once one did, or once it was pushed after all, at
 	// PushedAt: its card is due from then (retryAcceptance).
@@ -112,7 +119,8 @@ func acceptCardKey(id string, asked time.Time) string {
 // settles the work, not the telling: the card is how the owner hears of it, so it still goes out, saying the supervisor
 // checked it (#9253). The owner's own pass, or a decision settled, leaves nothing to tell.
 func acceptCardDue(a *acceptAsk) bool {
-	return a != nil && !a.AskedAt.IsZero() && a.MessageID == "" && !a.NoCard && (a.AcceptedAt.IsZero() || a.BySupervisor)
+	return a != nil && !a.AskedAt.IsZero() && a.MessageID == "" && !a.NoCard && (a.AcceptedAt.IsZero() || a.BySupervisor) &&
+		a.RecheckAt.IsZero()
 }
 
 type acceptBook struct {
@@ -169,7 +177,17 @@ func (s *Service) saveAcceptErrLocked(ctx context.Context) error {
 		return nil
 	}
 	if st := s.store(); st != nil {
-		return st.PutSetting(ctx, acceptanceKey, s.accept.asks)
+		asks := make(map[string]*acceptAsk, len(s.accept.asks))
+		for id, a := range s.accept.asks {
+			if a != nil && a.prepared != nil {
+				prepared := *a.prepared
+				prepared.Earlier = a.Earlier // an earlier round's in-flight retry may have added its card meanwhile
+				asks[id] = &prepared
+			} else {
+				asks[id] = a
+			}
+		}
+		return st.PutSetting(ctx, acceptanceKey, asks)
 	}
 	return nil
 }

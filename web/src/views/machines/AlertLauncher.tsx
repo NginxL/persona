@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { formatDate, t } from "../../i18n";
 import { api, enc, errorText } from "../../lib/api";
 import { blockReason } from "../../lib/launcher-health";
-import { launcherFailing, type LauncherHealthRecord } from "../../lib/machine-alerts";
+import { launcherBlockedReason, launcherErrorText, launcherFailing, type LauncherHealthRecord } from "../../lib/machine-alerts";
 import { providerTitle } from "../../lib/provider-names";
 import { relativeTime } from "../../lib/relative-time";
 import { navigate } from "../../lib/router";
@@ -72,7 +72,7 @@ export function LauncherSection({ machine, records, onRecords }: { machine: Mach
                 <span className="shrink-0 text-submeta text-ink-2">{r.state === "blocked" ? t("machines-alerts.launcher_blocked") : t("machines-alerts.launcher_failing")}</span>
               </div>
               <p className="mt-0.5 text-meta text-ink-2">{failureKind(r.kind)}</p>
-              {r.error && <p className="mt-0.5 line-clamp-3 break-words font-mono text-submeta text-ink-3" title={r.error}>{r.error}</p>}
+              {launcherErrorText(r) && <p className="mt-0.5 line-clamp-3 break-words font-mono text-submeta text-ink-3" title={launcherErrorText(r)}>{launcherErrorText(r)}</p>}
               <p className="mt-1 text-submeta text-ink-3 tabular-nums">
                 {[
                   r.checked_at && t("machines-alerts.launcher_checked", { time: relativeTime(r.checked_at) }),
@@ -80,7 +80,7 @@ export function LauncherSection({ machine, records, onRecords }: { machine: Mach
                   r.resets_at && t("machines-alerts.launcher_resets", { time: formatDate(Date.parse(r.resets_at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) }),
                 ].filter(Boolean).join(" · ")}
               </p>
-              {r.blocked_reason && <p className="mt-0.5 text-submeta text-ink-3">{r.blocked_reason}</p>}
+              {launcherBlockedReason(r) && <p className="mt-0.5 text-submeta text-ink-3">{launcherBlockedReason(r)}</p>}
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <Button size="sm" icon="retry" busy={checking === r.launcher} disabled={!!checking || !machine.online} onClick={() => void testAgain(r.launcher)} testId="test-again">
                   {t("machines-alerts.test_again")}

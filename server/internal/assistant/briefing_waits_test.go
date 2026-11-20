@@ -204,9 +204,21 @@ func TestBriefDirectionsListStoppedWork(t *testing.T) {
 		t.Fatalf("private row = %+v", private)
 	}
 	raw, _ := json.Marshal(dirs)
-	briefCardView, plain, _ := e.s.briefCard(&briefFacts{At: now, loc: time.UTC, l: i18n.ZhHans, Directions: dirs}, "Morning briefing", "")
-	rendered := string(raw) + briefCardView.JSON() + plain
-	for _, secret := range []string{"SECRET PRIVATE TASK TITLE", "SECRET CARD TASK TITLE", "SECRET PRIVATE QUESTION"} {
+	facts := &briefFacts{At: now, loc: time.UTC, l: i18n.ZhHans, Directions: dirs}
+	briefCardView, plain, _ := e.s.briefCard(facts, "Morning briefing", "")
+	modelText := facts.modelText()
+	for _, d := range dirs {
+		for _, w := range d.Waits {
+			if w.TodoID == "" {
+				continue
+			}
+			if want := w.Line + " " + todoLink(testWeb, w.TodoID); !strings.Contains(modelText, want) {
+				t.Errorf("rendered model facts omitted the stopped task's todo URL %q: %s", want, modelText)
+			}
+		}
+	}
+	rendered := string(raw) + briefCardView.JSON() + plain + modelText
+	for _, secret := range []string{"SECRET PRIVATE TASK TITLE", "SECRET CARD TASK TITLE", "SECRET PRIVATE QUESTION", privateTask} {
 		if strings.Contains(rendered, secret) {
 			t.Errorf("private content %q leaked into the fixed facts or their rendering", secret)
 		}

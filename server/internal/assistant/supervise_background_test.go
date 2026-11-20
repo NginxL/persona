@@ -91,7 +91,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	if slices.Contains(cfg.Leaders, bg) || s.isLeader(ctx, bg) || s.supervises(ctx, bg) {
 		t.Fatal("the background supervisor is a leader")
 	}
-	if !slices.Contains(keptSessions(cfg, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
+	if !slices.Contains(keptSessions(cfg, nil, nil, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
 		t.Fatal("the background supervisor is not kept listed")
 	}
 	if !s.supervising(bg) {
@@ -102,7 +102,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	listBackground(t, s, f, bg)
 	waitFor(t, "the background supervisor's message", func() bool { return len(f.noticesTo(bg)) == 1 })
 	n := f.noticesTo(bg)[0]
-	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "signal=review", "hub 判断做完了，等你验收", "pull/7"} {
+	for _, want := range []string{"📋 督办：你派出去的任务有 1 个要你处理", "这是 Persona 的督办消息", "你是后台督办对话", "signal=review", "待逐项复核，不代表完成", "pull/7"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the background supervisor's message lacks %q:\n%s", want, n)
 		}
@@ -290,7 +290,7 @@ func TestMainSupervisesOwnTasksSetting(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
 	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
-	if n := f.noticesTo("conv1")[0]; strings.Contains(n, "后台督办") || !strings.Contains(n, "hub 判断做完了，等你验收") {
+	if n := f.noticesTo("conv1")[0]; strings.Contains(n, "后台督办") || !strings.Contains(n, "待逐项复核，不代表完成") {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	if got := s.settings(ctx).BackgroundSupervisor; got != "" || len(conversationStarts(f)) != 0 {
@@ -338,7 +338,7 @@ func TestBackgroundSupervisorThatCannotStartFallsBackToMain(t *testing.T) {
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
 	waitFor(t, "the main conversation's message", func() bool { return len(f.noticesTo("conv1")) == 1 })
-	if n := f.noticesTo("conv1")[0]; !strings.Contains(n, "hub 判断做完了，等你验收") || strings.Contains(n, "你是后台督办对话") {
+	if n := f.noticesTo("conv1")[0]; !strings.Contains(n, "待逐项复核，不代表完成") || strings.Contains(n, "你是后台督办对话") {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	if got := s.settings(ctx).BackgroundSupervisor; got != "" {
@@ -505,10 +505,10 @@ func TestAsksOfUnledTasksGoToTheBackgroundSupervisor(t *testing.T) {
 	if _, _, err := e.s.updateSupervision(ctx, e.todo.ID, func(v *Supervision) bool { v.Supervisor = "conv1"; return true }); err != nil {
 		t.Fatal(err)
 	}
-	if ladder, _, _, ok := e.s.askLadder(ctx, "mac", "worker-1"); !ok || !slices.Equal(ladder, []string{"bg1"}) {
+	if ladder, _, _, ok := e.s.askLadder(ctx, proto.Interaction{MachineID: "mac", SessionID: "worker-1", Kind: proto.IxQuestion}); !ok || !slices.Equal(ladder, []string{"bg1"}) {
 		t.Fatalf("ladder = %v %v", ladder, ok)
 	}
-	if _, _, _, ok := e.s.askLadder(ctx, "server", "bg1"); ok {
+	if _, _, _, ok := e.s.askLadder(ctx, proto.Interaction{MachineID: "server", SessionID: "bg1", Kind: proto.IxQuestion}); ok {
 		t.Fatal("the background supervisor's own cards are routed")
 	}
 
@@ -556,7 +556,7 @@ func TestAsksOfUnledTasksGoToTheBackgroundSupervisor(t *testing.T) {
 
 	on := true
 	setSettings(t, e.s, func(v *Settings) { v.MainSupervisesOwnTasks = &on })
-	if ladder, _, _, ok := e.s.askLadder(ctx, "mac", "worker-1"); !ok || !slices.Equal(ladder, []string{"conv1"}) {
+	if ladder, _, _, ok := e.s.askLadder(ctx, proto.Interaction{MachineID: "mac", SessionID: "worker-1", Kind: proto.IxQuestion}); !ok || !slices.Equal(ladder, []string{"conv1"}) {
 		t.Fatalf("with the setting off the ladder = %v %v", ladder, ok)
 	}
 }
@@ -566,7 +566,7 @@ func TestBackgroundSupervisorAloneDoesNotRouteAsks(t *testing.T) {
 	e := newRouteEnv(t, nil, false)
 	e.s.noBackground = false
 	setSettings(t, e.s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg1", "server" })
-	if _, _, _, ok := e.s.askLadder(context.Background(), "mac", "worker-1"); ok {
+	if _, _, _, ok := e.s.askLadder(context.Background(), proto.Interaction{MachineID: "mac", SessionID: "worker-1", Kind: proto.IxQuestion}); ok {
 		t.Fatal("a card is routed with no leader conversation")
 	}
 	e.raise(askPermission("ix1", "worker-1"))

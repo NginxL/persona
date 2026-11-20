@@ -412,8 +412,9 @@ func TestConnReportsABadSecret(t *testing.T) {
 // The update errors are known from the APIError and from its text after the bus.
 func TestUpdateErrorKinds(t *testing.T) {
 	limited := &APIError{Op: "update card", Code: 230020, Msg: "This operation triggers the frequency limit."}
+	operationLimited := &APIError{Op: "update card", Code: 230429, Msg: "This operation triggers the frequency limit."}
 	gone := &APIError{Op: "update card", Code: 230011, Msg: "The message is recalled."}
-	if !RateLimited(limited) || RateLimited(gone) || !RateLimited(errors.New(limited.Error())) || !RateLimited(errors.New("feishu update card: HTTP 429: bad json")) {
+	if !RateLimited(limited) || !RateLimited(operationLimited) || !RateLimited(errors.New(operationLimited.Error())) || RateLimited(gone) || !RateLimited(errors.New(limited.Error())) || !RateLimited(errors.New("feishu update card: HTTP 429: bad json")) {
 		t.Fatal("rate limit")
 	}
 	if !MessageGone(gone) || MessageGone(limited) || !MessageGone(errors.New("feishu update card: 230110 deleted")) || MessageGone(errors.New("offline")) {

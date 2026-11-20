@@ -238,6 +238,17 @@ export struct SettingsPage {
   private modeOptionsFor(field: string): string[] {
     return field === 'permission_mode' ? this.modeOptions() : Wire.strings(this.model.selected.data(), 'efforts');
   }
+  private modeName(field: string, value: string): string {
+    if (field === 'permission_mode') {
+      return ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'].includes(value)
+        ? tr('assistant_feed_permission_' + value) : value;
+    }
+    return tr(value);
+  }
+  private currentModeName(field: string): string {
+    const value = Wire.text(this.model.selected.data(), field);
+    return value ? this.modeName(field, value) : tr('automatic');
+  }
   private purposeProviders(): Record<string, Object>[] {
     const purpose = this.management.purpose, kind = Wire.text(purpose, 'kind', 'launcher');
     const ids = Wire.strings(purpose, 'provider_ids');
@@ -337,7 +348,7 @@ export struct SettingsPage {
     const value = field === 'permission_mode' ? this.permissionMode : this.effortMode;
     const row = this.model.selected, scope = this.model.scope(), target = this.model.target(row);
     this.getUIContext().showAlertDialog({ title: tr('confirm'),
-      message: row.title + '\n' + tr(field === 'permission_mode' ? 'permission_mode' : 'reasoning_effort') + ': ' + value,
+      message: row.title + '\n' + tr(field === 'permission_mode' ? 'permission_mode' : 'reasoning_effort') + ': ' + this.modeName(field, value),
       primaryButton: { value: tr('cancel'), action: () => {} },
       secondaryButton: { value: tr('save'), action: () => {
         if (this.model.scope() === scope && this.model.target() === target) this.management.saveMode(this.model, field, value);
@@ -548,10 +559,10 @@ export struct SettingsPage {
       } else {
         List() {
           ListItem() { ComposeListItemV2({ contentItemV2: new ContentItemV2({ primaryText: tr(field === 'permission_mode' ? 'permission_mode' : 'reasoning_effort'),
-            secondaryText: Wire.text(this.model.selected.data(), field, tr('automatic')) }) }) }
+            secondaryText: this.currentModeName(field) }) }) }
           ListItem() {
-            Select(this.selectOptions(this.modeOptionsFor(field).map((item: string) => tr(item)))).attributeModifier(SelectStyles.inline)
-              .value(tr(field === 'permission_mode' ? this.permissionMode : this.effortMode))
+            Select(this.selectOptions(this.modeOptionsFor(field).map((item: string) => this.modeName(field, item)))).attributeModifier(SelectStyles.inline)
+              .value(this.currentModeName(field))
               .onSelect((index: number) => {
                 const values = this.modeOptionsFor(field);
                 if (field === 'permission_mode') this.permissionMode = values[index]; else this.effortMode = values[index];

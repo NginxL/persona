@@ -1,4 +1,4 @@
-Replace associations atomically using revisions from todo_repositories_get and repositories_list. [] removes metadata only. Retained source snapshots stay fixed; remove and reselect to adopt a changed catalog identity. Editable after execution. Omitted links preserve; [] clears. Use {url} or {kind,number}; omitted/empty titles preserve retained titles. On conflict reread and reconcile. No files, task progress or completion changes.
+Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.
 
 ```json
 {
@@ -50,10 +50,30 @@ Replace associations atomically using revisions from todo_repositories_get and r
                 ]
               },
               "value": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               }
             },
-            "additionalProperties": false
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "default"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              }
+            ]
           },
           "links": {
             "type": "array",
@@ -61,7 +81,8 @@ Replace associations atomically using revisions from todo_repositories_get and r
               "type": "object",
               "properties": {
                 "url": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 },
                 "kind": {
                   "type": "string",
@@ -71,16 +92,50 @@ Replace associations atomically using revisions from todo_repositories_get and r
                   ]
                 },
                 "number": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
                 },
                 "title": {
                   "type": "string",
-                  "description": "Full source title as plain text; max 1,024 UTF-8 bytes after trimming.",
+                  "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
                   "maxLength": 1024
                 }
               },
-              "additionalProperties": false
-            }
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": [
+                    "url"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "number"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "kind",
+                    "number"
+                  ],
+                  "not": {
+                    "required": [
+                      "url"
+                    ]
+                  }
+                }
+              ]
+            },
+            "maxItems": 50
           }
         },
         "additionalProperties": false

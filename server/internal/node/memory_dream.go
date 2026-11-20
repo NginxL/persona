@@ -87,7 +87,7 @@ func dreamMemory(dir string, a memoryOp) (any, error) {
 	}
 	linked := false
 	for _, line := range strings.Split(indexText, "\n") {
-		if strings.Contains(line, "("+dreamNoteName+")") {
+		if memoryIndexLinks(line, dreamNoteName) {
 			linked = true
 			break
 		}

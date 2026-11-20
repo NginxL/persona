@@ -86,7 +86,7 @@ func TestStatusCardPending(t *testing.T) {
 	}
 	card, fb := setup(t, "https://hub.example.com").statusCard(ctx, statusAgent)
 	got := card.JSON()
-	for _, want := range []string{"**待答问题**", "要现在发版吗", "打开网页版", "/s/server/agent0001", "📝"} {
+	for _, want := range []string{"**待答问题**", "要现在发版吗", "打开会话", "/s/server/agent0001", "<text_tag color='orange'>授权</text_tag>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q: %s", want, got)
 		}
@@ -100,7 +100,7 @@ func TestStatusCardPending(t *testing.T) {
 		t.Fatalf("fallback missing the question: %q", fb)
 	}
 	noLink, _ := setup(t, "").statusCard(ctx, statusAgent)
-	if strings.Contains(noLink.JSON(), "打开网页版") || strings.Contains(noLink.JSON(), "/s/") {
+	if strings.Contains(noLink.JSON(), "打开会话") || strings.Contains(noLink.JSON(), "/s/") {
 		t.Fatalf("links rendered without a public URL: %s", noLink.JSON())
 	}
 }

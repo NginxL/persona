@@ -81,6 +81,54 @@ func TestHerdrRetire(t *testing.T) {
 	}
 }
 
+// session.retire stops an idle agy in its pane with the same two Ctrl+C presses and keeps the pane (#11087); a working
+// one is refused, and a work agent the node cannot quit that way (cursor) is never stopped.
+func TestHerdrRetireAgy(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	cwd := mkdir(t, filepath.Join(home, "proj"))
+	working := agyTestAgent("w1:p2", cwd, agyOtherTestID)
+	working["agent_status"] = proto.StatusWorking
+	working["tab_id"] = "w1:t2"
+	cursor := agentOf(cursorAgent, "", proto.StatusIdle, "w1:p3", "w1:t3", "w1", cwd, "cursor")
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, cwd, agyTestID), working, cursor)
+	idOf := func(pane string) string {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		for id, a := range n.agents {
+			if a.PaneID == pane {
+				return id
+			}
+		}
+		t.Fatalf("no agent in %s", pane)
+		return ""
+	}
+	idle, busy, other := idOf(agyTestPane), idOf("w1:p2"), idOf("w1:p3")
+
+	// The agy rows are pane-derived (otherSession), never a hex session id: still accepted while agy runs in the pane.
+	if idle != otherSession(host.Agent{Agent: agyAgent, PaneID: agyTestPane}) {
+		t.Fatalf("agy row id = %q", idle)
+	}
+	_, err := request(t, n, "session.retire", map[string]any{"session_id": busy})
+	if code, _ := refusalOf(t, err); code != notRetirable {
+		t.Errorf("working agy: code %q", code)
+	}
+	if _, err := request(t, n, "session.retire", map[string]any{"session_id": other}); err == nil {
+		t.Errorf("cursor: retired")
+	}
+	if got := withoutAgentReports(f.trace("pane.send_keys")); len(got) != 0 {
+		t.Fatalf("keys sent before the idle agy's retire: %v", got)
+	}
+	quitsOn(f, agyTestPane, idle, []any{working, cursor}, shellPane(agyTestPane, "w1:t1", "w1", cwd, idle))
+	res, err := request(t, n, "session.retire", map[string]any{"session_id": idle})
+	if err != nil || res["closed"] != true {
+		t.Fatalf("retire = %v, %v", res, err)
+	}
+	assertTrace(t, withoutAgentReports(f.trace("pane.send_keys", "tab.close", "pane.close")), []string{
+		sendKeys(agyTestPane, "ctrl+c"), sendKeys(agyTestPane, "ctrl+c"),
+	})
+}
+
 // A message to a Codex Persona started that is no longer running is refused (#4754: a stopped agent takes no
 // messages). The user's Resume (session.start) brings it back in a new tab of its directory's workspace, named after
 // its title: its launcher's words with the model it ran with, `resume <id>`, and the start's prompt (nothing typed).

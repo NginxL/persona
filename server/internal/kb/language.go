@@ -35,5 +35,17 @@ func (e *Engine) writingOwner(lang i18n.Lang) prompts.KBOwner {
 	return o
 }
 
+// knowledgeOwner selects the owner's language once for a new non-recording model call.
+// It does not schedule refreshes or change stored source content.
+func (e *Engine) knowledgeOwner() prompts.KBOwner {
+	lang := i18n.ZhHans
+	if e.OwnerLanguage != nil {
+		if l := e.OwnerLanguage(); i18n.Valid(l) {
+			lang = l
+		}
+	}
+	return e.writingOwner(lang)
+}
+
 // storedLang is the language of minutes or a recap that say lang: one written before they said any is Chinese.
 func storedLang(lang string) i18n.Lang { return i18n.Lang(lang).Or(i18n.ZhHans) }

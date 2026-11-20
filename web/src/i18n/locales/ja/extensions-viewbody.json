@@ -15,5 +15,20 @@
   "chosen_count_other": "{count} 件選択",
   "done": "完了",
   "search_choices": "検索",
-  "no_match": "一致する項目はありません"
+  "no_match": "一致する項目はありません",
+  "graph": "グラフ",
+  "graph_zoom_in": "拡大",
+  "graph_zoom_out": "縮小",
+  "graph_fit": "画面に合わせる",
+  "graph_full_screen": "全画面表示",
+  "graph_close": "閉じる",
+  "graph_fold": "折りたたむ",
+  "graph_show_hidden_other": "非表示の {count} 件を表示",
+  "graph_under": "{title}の下",
+  "graph_outline": "アウトライン",
+  "graph_timeline": "タイムライン",
+  "graph_inspector": "詳細",
+  "graph_links": "セッションとリンク",
+  "graph_open_action": "開く",
+  "graph_running": "実行中"
 }

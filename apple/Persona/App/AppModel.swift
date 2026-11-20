@@ -46,12 +46,44 @@ final class AppModel {
     @ObservationIgnored private let idleLive = LiveConnection()
     /// What the titles say about the links (Waiting for Network / Connecting… / Updating…).
     let connection: ConnectionStatus
-    private(set) var machines: [Machine] = [] {
-        didSet {
-            machinesNow = machines
-            let choices = machines.map(MachineChoice.init)
+    /// The machines. A heartbeat, a list that differs only in `lastSeen` (on every push of a busy hub), is stored
+    /// without telling who read `machines`: a body that reads them for anything else ran again on every push (the
+    /// Agents list, #1495; every row through its menu, #10231). What shows `lastSeen` reads `lastSeen(_:)`.
+    private(set) var machines: [Machine] {
+        get {
+            access(keyPath: \.machines)
+            return machineStore
+        }
+        set {
+            if Self.sameApartFromHeartbeat(newValue, machineStore) {
+                if newValue != machineStore { machineHeartbeat &+= 1 }
+                machineStore = newValue
+            } else {
+                withMutation(keyPath: \.machines) { machineStore = newValue }
+            }
+            machinesNow = machineStore
+            let choices = machineStore.map(MachineChoice.init)
             if choices != machineChoices { machineChoices = choices }
             saveSnapshot()
+        }
+    }
+    @ObservationIgnored private var machineStore: [Machine] = []
+    /// Moves on each heartbeat: what `lastSeen(_:)` observes instead of `machines`.
+    private var machineHeartbeat = 0
+
+    /// When the hub last heard from a machine, observed through the heartbeat (`machines` is not told of it).
+    func lastSeen(_ ref: MachineRef) -> Date? {
+        _ = machineHeartbeat
+        return machinesNow.first { $0.id == ref.id && $0.group == ref.group }?.lastSeen
+    }
+
+    /// The same machines but for when the hub last heard from them (`lastSeen`).
+    nonisolated static func sameApartFromHeartbeat(_ a: [Machine], _ b: [Machine]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { x, y in
+            guard x.lastSeen != y.lastSeen else { return x == y }
+            var y = y
+            y.lastSeen = x.lastSeen
+            return x == y
         }
     }
     /// `machines` for a page that can be kept hidden behind another (`allSessions(inFront:)`): watched only in front.
@@ -140,6 +172,7 @@ final class AppModel {
         }
         countBadges()
         saveSnapshot()
+        resolveProvisionalChat()
     }
 
     /// The lists are folded again when a hub's hello says it folds side sessions now, or no longer.
@@ -214,7 +247,175 @@ final class AppModel {
         didSet {
             saveSnapshot(); countBadges(); withdrawSettled(Set(oldValue.keys).subtracting(interactions.keys))
             PermissionDiff.prewarm(interactions.lazy.filter { oldValue[$0.key] == nil }.map(\.value))
+            lookUpCardSessions()
         }
+    }
+    /// Pending cards' sessions no list holds, from an exact lookup each (#8584): a paging hub leaves directory-hidden
+    /// and off-page sessions out of its list but sends every pending card, so whether a card shows (Needs you, the
+    /// scoped attention views, the badges) is read from this row when the list has none (`cardSession`). Kept while the
+    /// card is; asked again when a list hint names the session (hidden or shown again), at most every few seconds.
+    private(set) var cardSessionRows: [SessionKey: Session] = [:]
+    private struct CardLookup { var answered = false; var tries = 0; var nextAt = Date.distantPast }
+    @ObservationIgnored private var cardLookups: [SessionKey: CardLookup] = [:]
+    @ObservationIgnored private var cardLookupsOut: Set<SessionKey> = []
+    @ObservationIgnored private var cardLookupWake: (at: Date, task: Task<Void, Never>)?
+    /// Lookups out when a list hint named their session: their answer may be older than the hint, so they ask again.
+    @ObservationIgnored private var cardLookupsStale: Set<SessionKey> = []
+    /// Card sessions the lists of a hub that leaves hidden sessions out held at the last pass: one that leaves them
+    /// (hidden, or off the page) is asked about again.
+    @ObservationIgnored private var cardSessionsListed: Set<SessionKey> = []
+    /// The list rows of each hub that leaves hidden sessions out, as last landed (`rememberListedRows`): what stands while
+    /// its list reloads.
+    @ObservationIgnored private var lastListedRows: [String: [SessionKey: Session]] = [:]
+    /// Watched sessions an exact lookup found the hub no longer has: a kept row of one is not counted as waiting.
+    @ObservationIgnored private var cardSessionsGone: Set<SessionKey> = []
+
+    /// The rows the lists of a hub that leaves hidden sessions out hold now (`currentListedRows`). A row kept in
+    /// `sessionIndex` from an earlier page or an opened chat is not refreshed when the list leaves it out, so it does not
+    /// say whether that session is hidden now. A list between a new query and its first page (`SessionListModel.reset`)
+    /// has no rows and says neither paged nor complete; the hub has not changed, so the last landed rows stand until the
+    /// new page lands.
+    private func listedSessionRows(_ group: String) -> [SessionKey: Session]? {
+        if let rows = currentListedRows(group) { return rows }
+        if let list = sessionLists.lists[group], !list.loaded { return lastListedRows[group] }
+        return nil
+    }
+
+    /// The lists landed: their rows stand for the hub until the next landing (nil: an older hub, whose lists annotate
+    /// hidden rows).
+    func rememberListedRows(_ group: String) {
+        guard let list = sessionLists.lists[group], list.loaded else { return }
+        lastListedRows[group] = currentListedRows(group)
+    }
+
+    func forgetListedRows() { lastListedRows = [:] }
+
+    /// Kept rows as the counts read them for waiting sessions: through the cards' resolver, without the ones the hub no
+    /// longer has or that are directory-hidden.
+    func waitingRows(_ rows: [Session], reading session: (SessionKey) -> Session?) -> [Session] {
+        rows.compactMap { cardSessionsGone.contains($0.key) ? nil : session($0.key) ?? $0 }.filter { $0.hiddenByDirectory != true }
+    }
+
+    /// The rows a hub that leaves directory-hidden sessions out of its lists holds in them now (the Agents list and its
+    /// sections): a window of pages, or a complete copy read from its pages (`query.legacy`, the repository grouping;
+    /// `SessionListModel.complete`). nil for an older hub, whose complete lists annotate hidden rows instead.
+    private func currentListedRows(_ group: String) -> [SessionKey: Session]? {
+        guard let list = sessionLists.lists[group], list.paged || list.complete else { return nil }
+        var rows: [SessionKey: Session] = [:]
+        for row in list.rows where rows[row.key] == nil { rows[row.key] = row }
+        for (scope, page) in sessionLists.sections where scope.hub == group {
+            for row in page.rows where rows[row.key] == nil { rows[row.key] = row }
+        }
+        return rows
+    }
+
+    /// Which session a pending card is shown by, for the pages, counts and badges alike: on a hub that leaves hidden
+    /// sessions out, the lists' current row, else the card's exact lookup, else a kept row; elsewhere the app's row, else the lookup. Made once
+    /// for a pass over many cards (each paging hub's rows are read once).
+    func cardSessionResolver() -> (SessionKey) -> Session? {
+        var listed: [String: [SessionKey: Session]] = [:]
+        var read: Set<String> = []
+        return { [self] key in
+            if read.insert(key.group).inserted, let rows = listedSessionRows(key.group) { listed[key.group] = rows }
+            guard let rows = listed[key.group] else { return latest(key) ?? cardSessionRows[key] }
+            return rows[key] ?? cardSessionRows[key] ?? latest(key)
+        }
+    }
+
+    /// The session one pending card is shown by (`cardSessionResolver`).
+    func cardSession(_ key: SessionKey) -> Session? { cardSessionResolver()(key) }
+
+    /// The pending cards whose session is not directory-hidden, oldest first: what the pages of cards and every count
+    /// start from.
+    var directoryVisibleInteractions: [Interaction] { directoryVisibleInteractions(reading: cardSessionResolver()) }
+
+    /// `directoryVisibleInteractions` with a resolver the caller reads the same pass with.
+    func directoryVisibleInteractions(reading session: (SessionKey) -> Session?) -> [Interaction] {
+        pendingInteractions.filter { session($0.sessionKey)?.hiddenByDirectory != true }
+    }
+
+    /// The sessions whose visibility the cards and counts read from an exact lookup when no list holds them: pending
+    /// cards' sessions, and kept rows that wait for the user (a prompt only the terminal shows has no card). A kept row
+    /// is not refreshed once a paging list leaves it out, so its lookup says whether it is hidden or only off the page.
+    private var visibilityWatchedSessions: Set<SessionKey> {
+        var keys = Set(interactions.values.lazy.filter { !$0.isSessionless }.map(\.sessionKey))
+        for s in allSessions where !s.assistant && s.countedState == .needsYou { keys.insert(s.key) }
+        return keys
+    }
+
+    /// Asks for the rows of pending cards' sessions that no list holds, four at a time until each is answered (a
+    /// session the hub does not have is an answer too). A failed one is asked again after 1, 2, 4 s, then left as it
+    /// is until a list hint names it. Answers for cards that are gone go with them.
+    func lookUpCardSessions() {
+        let keys = visibilityWatchedSessions
+        if cardSessionRows.keys.contains(where: { !keys.contains($0) }) { cardSessionRows = cardSessionRows.filter { keys.contains($0.key) } }
+        cardLookups = cardLookups.filter { keys.contains($0.key) }
+        var listed: [String: Set<SessionKey>] = [:]
+        for group in Set(keys.map(\.group)) {
+            if let rows = listedSessionRows(group) { listed[group] = Set(rows.keys) }
+        }
+        let nowListed = keys.filter { listed[$0.group]?.contains($0) == true }
+        // Left the lists since the last pass (hidden, or off the page): whatever an earlier lookup said, ask again; one
+        // out now may answer from before, so it asks again when it lands.
+        for key in cardSessionsListed.subtracting(nowListed) where keys.contains(key) {
+            // at most once every 5 s a session (a search typed into the list moves rows in and out)
+            if cardLookupsOut.contains(key) { cardLookupsStale.insert(key) } else { cardLookups[key] = CardLookup(nextAt: cardLookups[key]?.nextAt ?? .distantPast) }
+        }
+        cardSessionsListed = nowListed
+        cardSessionsGone = cardSessionsGone.filter { keys.contains($0) && !nowListed.contains($0) }
+        let now = Date()
+        var wake: Date?
+        for key in keys where cardLookupsOut.count < 4 && !cardLookupsOut.contains(key) && !nowListed.contains(key) {
+            guard listed[key.group] != nil, let api = api(key.group), api.sessionLookup else { continue }
+            let lookup = cardLookups[key] ?? CardLookup()
+            if lookup.answered || lookup.tries >= 4 { continue }
+            if lookup.nextAt > now { wake = min(wake ?? lookup.nextAt, lookup.nextAt); continue }
+            cardLookupsOut.insert(key)
+            Task { [weak self] in
+                let answer: Session??
+                do { answer = .some(try await api.sessionListDetail(key, title: "")) } catch { answer = nil }
+                guard let self else { return }
+                self.cardLookupsOut.remove(key)
+                let stale = self.cardLookupsStale.remove(key) != nil
+                guard self.visibilityWatchedSessions.contains(key) else { return self.lookUpCardSessions() }
+                if let answer {
+                    self.cardLookups[key] = CardLookup(answered: !stale, nextAt: Date().addingTimeInterval(5))
+                    self.cardSessionRows[key] = answer
+                    if answer == nil { self.cardSessionsGone.insert(key) } else { self.cardSessionsGone.remove(key) }
+                    self.countBadges()
+                } else {
+                    var failed = self.cardLookups[key] ?? CardLookup()
+                    failed.tries += 1
+                    failed.nextAt = Date().addingTimeInterval(pow(2, Double(failed.tries - 1)))
+                    self.cardLookups[key] = failed
+                }
+                self.lookUpCardSessions()
+            }
+        }
+        if let wake, wake < cardLookupWake?.at ?? .distantFuture {
+            cardLookupWake?.task.cancel()
+            cardLookupWake = (wake, Task { [weak self] in
+                guard (try? await Task.sleep(for: .seconds(max(0, wake.timeIntervalSinceNow)))) != nil else { return }
+                self?.cardLookupWake = nil
+                self?.lookUpCardSessions()
+            })
+        }
+    }
+
+    /// A `sessions_list` hint: the card sessions it names are asked about again, at most every 5 s, so a session hidden
+    /// or shown again since its lookup shows its card as the list does. A hint that cannot say which rows changed asks
+    /// again only about answers older than 30 s.
+    private func cardSessionsListChanged(_ group: String, _ changes: SessionListChanges?) {
+        let now = Date()
+        for key in cardLookupsOut where key.group == group && changes?.names(key) == true { cardLookupsStale.insert(key) }
+        var stale = false
+        for (key, lookup) in cardLookups where key.group == group && (lookup.answered || lookup.tries > 0) {
+            // an answer's nextAt is 5 s after it came
+            guard changes?.names(key) ?? (lookup.answered && lookup.nextAt < now.addingTimeInterval(-25)) else { continue }
+            cardLookups[key] = CardLookup(nextAt: lookup.answered ? lookup.nextAt : max(lookup.nextAt, now.addingTimeInterval(5)))
+            stale = true
+        }
+        if stale { lookUpCardSessions() }
     }
     /// When each group's whole list of pending interactions was last asked for (NotificationWithdrawal.stale).
     @ObservationIgnored var interactionsListedAt: [String: Date] = [:]
@@ -291,6 +492,8 @@ final class AppModel {
     var sideLanding: SideLanding?
     /// Cancels deferred list resets even after a newer targeted open has already been consumed.
     @ObservationIgnored private(set) var agentsNavigationRevision = 0
+    /// An external link without a group can open the first hub before any hub has listed its sessions.
+    @ObservationIgnored private var provisionalChat: (key: SessionKey, latestAnswer: Bool, revision: Int)?
     /// An explicit Agents-tab selection returns to its list; targeted opens do not change this request.
     var agentsListReveal = 0
     /// Bumped each time the Inbox is entered at its root (the sidebar, a widget, a quick action, its tab on visionOS),
@@ -385,14 +588,15 @@ final class AppModel {
     /// Session whose chat is on screen; its completion pings are suppressed.
     var visibleSession: SessionKey? {
         didSet {
-            if heldInList != visibleSession { heldInList = nil }
+            if heldInList != visibleSession { heldInList = nil; heldJustFinished = false }
             // the recently opened conversations: the home screen menu's (#2191)
             if visibleSession != oldValue { RecentChatsStore.shared.shown(visibleSession) }
         }
     }
-    /// The open agent that was Unread and was marked seen by being open: the Agents list keeps it where it was until
+    /// The open agent that was Unread or Just finished: the Agents list keeps it in that section until
     /// its chat is left (`AgentListOrder.held`, #2213; user, 2026-11-05: it moves to Idle only after you leave).
     private(set) var heldInList: SessionKey?
+    private(set) var heldJustFinished = false
     private(set) var assistantConfig: APIClient.AssistantState? {
         didSet {
             if let g = hub?.group, let a = assistantConfig {
@@ -502,7 +706,23 @@ final class AppModel {
     /// The groups whose outbox is going out now (`flushOutbox`): one group sending does not hold back another.
     @ObservationIgnored var flushingOutbox = Set<String>()
     /// Kept messages (#10194) a Retry or Delete is on its way for: a second tap does nothing.
-    @ObservationIgnored var undeliveredActions = Set<String>()
+    @ObservationIgnored var undeliveredActions: [SessionKey: Set<String>] = [:]
+    var heldActionRequests: Set<HeldActionTarget> = []
+    /// The startup read and the changes to replay over it; nil once the persisted receipts have been published.
+    @ObservationIgnored var heldRetryRestoration: HeldRetryRestoration?
+    var heldRetryReceipts: Set<HeldRetryOffer> = [] {
+        didSet {
+            guard heldRetryReceipts != oldValue else { return }
+            if let restoration = heldRetryRestoration {
+                if restoration.recordsChanges {
+                    let old = oldValue, new = heldRetryReceipts
+                    restoration.changes.append { $0.subtracting(old).union(new) }
+                }
+            } else {
+                HeldRetryOffer.save(heldRetryReceipts, in: stateFolder)
+            }
+        }
+    }
     /// Per group: the one retry of its waiting messages due in a few seconds (`retryOutboxSoon`).
     @ObservationIgnored var outboxRetry: [String: Task<Void, Never>] = [:]
     #if DEBUG
@@ -519,12 +739,27 @@ final class AppModel {
     /// What each machine's New Agent list says is left out there, with why (`unavailable`, #8109: the Persona-managed
     /// providers whose own-service rule skips it), loaded with `launcherCache`; empty from an older hub.
     @ObservationIgnored private(set) var launcherUnavailable: [MachineRef: [UnavailableLauncher]] = [:]
+    /// The active model profile's Agent presets offered on each machine, loaded with `launcherCache`.
+    @ObservationIgnored private(set) var launcherTiers: [MachineRef: [AgentPreset]] = [:]
+    @ObservationIgnored private(set) var launcherTierProfile: [MachineRef: AgentPresetProfile] = [:]
     /// The main chat's own picker (`?purpose=assistant`, #5033): its eligible launchers, the effective Main chat
     /// default, and what can't run there with why. Separate from `launcherCache`, which serves the agent.new purpose.
     nonisolated struct AssistantLauncherScope: Hashable {
         var machine: MachineRef
         var manager: String?
     }
+    /// Only the assistant settings that decide whose launcher catalog and effective default the picker shows. Volatile
+    /// conversation and preference fields are deliberately not part of this signature.
+    nonisolated struct AssistantLauncherSignature: Equatable, Sendable {
+        var group: String
+        var requestedManager: String?
+        var respondingManager: String?
+        var machineID: String
+        var launcher: String
+    }
+    nonisolated static let assistantLauncherRecheckInterval: TimeInterval = 10 * 60
+    @ObservationIgnored private var lastAssistantLauncherSignature: AssistantLauncherSignature?
+    @ObservationIgnored private var lastAssistantLauncherInvalidation: Date?
     @ObservationIgnored private(set) var assistantLauncherCache: [AssistantLauncherScope: APIClient.LaunchersResponse] = [:]
     @ObservationIgnored private var assistantLauncherReads: [AssistantLauncherScope: Int] = [:]
     @ObservationIgnored private var assistantLauncherReadID = 0
@@ -661,6 +896,7 @@ final class AppModel {
         #endif
         DemoHub.shared.onNotSent = { [weak self] in self?.toast = Toast(DemoText.notSent) }
         countBadges()
+        startHeldRetryRestoration()
     }
 
     /// Feishu conversations changed (the old API's `lark` event, or the messaging source's): the chats and lists
@@ -957,6 +1193,9 @@ final class AppModel {
         sessionLists.forget()
         pendingSessions = [:]
         interactions = [:]
+        // Pairing a real hub after Demo Mode must not reuse a same-scoped demo signature.
+        lastAssistantLauncherSignature = nil
+        lastAssistantLauncherInvalidation = nil
     }
 
     /// What the demo's conversations left behind: drafts, and cached chats (a new demo starts over).
@@ -976,6 +1215,8 @@ final class AppModel {
 
     /// Sign Out of everything: every group, every hub (Settings › Disconnect with one group, a revoked credential of this device).
     func unpair() {
+        forgetSeen()
+        updateHeldRetryReceipts { _ in [] }
         LarkChatOutbox.forget()
         // No hub left to answer: the open questions are denied, their results have nowhere to go.
         phoneConfirmations.denyAll()
@@ -1000,6 +1241,9 @@ final class AppModel {
         for g in Set(registry.groups).union(PushCrypto.allKeys().map(\.group)) { PushCrypto.removeKey(group: g) }
         links = []
         registry = HubRegistry()
+        // A later pairing's first snapshot must invalidate even when it has the same assistant scope.
+        lastAssistantLauncherSignature = nil
+        lastAssistantLauncherInvalidation = nil
         saveRegistry(registry)
         // The watch drops the credential it holds only when told (#1870): an empty push, as `removeGroup` sends for one group.
         pushWatchConfigs()
@@ -1250,6 +1494,17 @@ final class AppModel {
         st.timezonePicked != true && !zone.isEmpty && st.timezone != zone
     }
 
+    /// Whether an assistant snapshot must wake the launcher's readers: first sight, a scope change, an empty cache
+    /// (a failed read must retry), or the periodic recheck for changes made on another device (there is no
+    /// launcher-settings live event for apps).
+    nonisolated static func shouldInvalidateAssistantLaunchers(signature: AssistantLauncherSignature,
+                                                               lastSignature: AssistantLauncherSignature?,
+                                                               lastInvalidation: Date?, hasCachedLaunchers: Bool,
+                                                               now: Date) -> Bool {
+        guard hasCachedLaunchers, lastSignature == signature, let lastInvalidation else { return true }
+        return now.timeIntervalSince(lastInvalidation) >= assistantLauncherRecheckInterval
+    }
+
     /// Loads the assistant config; with no remembered conversation, picks up the newest one.
     func refreshAssistant() async {
         guard let api else { return }
@@ -1271,9 +1526,19 @@ final class AppModel {
             // Assistant snapshots are the settings-level refresh signal. Session.rev is deliberately not used here:
             // it ticks during transcript streaming and is not published through SessionCell to the composer.
             // Invalidate only the assistant picker; New Chat and Model Providers use launchersRevision instead.
-            assistantLauncherCache = [:]
-            assistantStarterCache.clear()
-            assistantLauncherRequestRevision += 1
+            let signature = AssistantLauncherSignature(group: api.group, requestedManager: assistantManagerID,
+                                                       respondingManager: st.manager, machineID: st.machineID,
+                                                       launcher: st.launcher)
+            let now = Date()
+            if Self.shouldInvalidateAssistantLaunchers(signature: signature, lastSignature: lastAssistantLauncherSignature,
+                                                       lastInvalidation: lastAssistantLauncherInvalidation,
+                                                       hasCachedLaunchers: !assistantLauncherCache.isEmpty, now: now) {
+                assistantLauncherCache = [:]
+                assistantStarterCache.clear()
+                assistantLauncherRequestRevision += 1
+                lastAssistantLauncherSignature = signature
+                lastAssistantLauncherInvalidation = now
+            }
             if sessionLists.lists[api.group]?.paged == true { landSessionSummaries(api.stamp(st.conversations), group: api.group) }
             // Only on the very first launch: after New Chat the key exists but is empty, and the home page stays.
             let neverChosen = UserDefaults.standard.object(forKey: "assistant.current") == nil
@@ -1586,11 +1851,37 @@ final class AppModel {
         }
     }
 
+    /// Keep an unqualified external open provisional until a hub supplies its row (#9167).
+    func openExternal(machineID: String, sessionID: String, group: String?, latestAnswer: Bool = false) {
+        let key = resolve(machineID: machineID, sessionID: sessionID, group: group)
+        open(key, latestAnswer: latestAnswer)
+        if group.flatMap(link) == nil, latest(key) == nil, openChat == key {
+            provisionalChat = (key, latestAnswer, agentsNavigationRevision)
+        }
+    }
+
+    private func resolveProvisionalChat() {
+        guard let pending = provisionalChat else { return }
+        guard pending.revision == agentsNavigationRevision, selectedTab == .chats else {
+            provisionalChat = nil
+            return
+        }
+        let key = resolve(machineID: pending.key.machineID, sessionID: pending.key.sessionID, group: nil)
+        guard latest(key) != nil else { return }
+        if key == pending.key { provisionalChat = nil; return }
+        // ChatsView consumes openChat when it pushes, before the view reports itself visible.
+        guard openChat == pending.key || visibleSession == pending.key else { return }
+        provisionalChat = nil
+        if latestAnswerFor == pending.key { latestAnswerFor = nil }
+        open(key, latestAnswer: pending.latestAnswer)
+    }
+
     /// Routes a notification / deep link to the right tab; `latestAnswer` lands on the start of the agent's last answer.
     /// A child whose parent row is already in hand opens that parent, with the child's card revealed. Anything else
     /// opens immediately. A child whose row is not loaded yet is looked up in the background (`refreshSessionDetail`),
     /// and moves to the parent only when that parent row exists.
     func open(_ key: SessionKey, latestAnswer: Bool = false, reveal: String? = nil) {
+        provisionalChat = nil
         // A side session lives in its parent's chat (#7944): its parent opens with the side shown over it, not with a
         // child's card revealed (`openChat` turns it into the parent and `sideLanding`).
         if reveal == nil, sideFold.home[key] == nil, let home = localChildHome(key), home.key != key {
@@ -1766,7 +2057,7 @@ final class AppModel {
         return String(localized: "This conversation isn't available")
     }
 
-    func refreshSessionDetail(_ key: SessionKey, listHint: String? = nil) async {
+    func refreshSessionDetail(_ key: SessionKey, listHint: String? = nil, force: Bool = false) async {
         forgetRetainedIfUnheld(key)
         // Paged hubs refresh complete metadata for every open chat. Complete hubs fetch when the opened row is missing
         // from the filtered index, or when it was only kept by `retainHeldSessionRows` (another manager's Agent, #8748):
@@ -1774,7 +2065,7 @@ final class AppModel {
         let paged = sessionLists.lists[key.group]?.paged == true
         let missing = sessionIndex[key] == nil
         let retained = retainedSessionKeys.contains(key)
-        guard paged || missing || retained, let api = api(key.group) else { return }
+        guard force || paged || missing || retained, let api = api(key.group) else { return }
         var hint: String? = listHint
         while true {
             var gate = detailHints[key] ?? FetchHint()
@@ -2152,11 +2443,16 @@ final class AppModel {
         shown.append((owner, key))
         visibleSession = key
         NotificationActions.clearDelivered(key) // what it said is on screen now (#3449)
+        resolveProvisionalChat()
     }
 
     func hide(by owner: UUID) {
+        let previous = visibleSession
         shown.removeAll { $0.owner == owner }
         visibleSession = shown.last?.key
+        if let pending = provisionalChat, previous == pending.key, visibleSession != previous, openChat != pending.key {
+            provisionalChat = nil
+        }
     }
 
     /// Asks for everything after what the chat holds without holes (`covered`), or the last exchanges if nothing. Built
@@ -2221,7 +2517,9 @@ final class AppModel {
             let res = try await api.items(key, beforeSeq: nil)
             settle(key, applyBatch(chat(key), kind: .latest, items: res.items, span: res.span, backlog: true, hasMore: res.hasMore))
         } catch {
-            chat(key).error = error.shown
+            let store = chat(key)
+            store.error = error.shown
+            store.historyNotFound = error.isHistoryNotFound
         }
     }
 
@@ -2289,6 +2587,11 @@ final class AppModel {
             ChatTrace.shared.note(key, "reload n=\(page.items.count) to=\(page.span.to.map(String.init) ?? "?") kept=\(chat(key).items.count - page.items.count)")
         } catch {
             // The defer reports one failed completion for both transport errors and fence cancellation.
+            if error.isHistoryNotFound, shouldApply?() ?? true {
+                let store = chat(key)
+                store.error = error.shown
+                store.historyNotFound = true
+            }
         }
     }
 
@@ -2326,6 +2629,7 @@ final class AppModel {
     func loadOlder(_ key: SessionKey, turns: Int = 2) async -> Bool {
         let store = chat(key)
         guard let api = api(key.group), store.hasMore, !store.isLoadingOlder, let first = store.items.first else { return false }
+        let requestedHistory = store.history
         store.isLoadingOlder = true
         #if DEBUG && os(iOS)
         ProductionContinuityShadow.shared.loadOlder(store)
@@ -2336,9 +2640,11 @@ final class AppModel {
             prependBatch(store, items: res.items, hasMore: res.hasMore)
             return true
         } catch {
+            let missing = error.isHistoryNotFound
             #if DEBUG && os(iOS)
-            ProductionContinuityShadow.shared.failed(.olderFailed, in: store)
+            if !missing { ProductionContinuityShadow.shared.failed(.olderFailed, in: store) }
             #endif
+            if missing, store.history == requestedHistory { prependBatch(store, items: [], hasMore: false) }
             if !error.isOffline { show(error) } // scrolling up while offline: the title says why nothing comes
             return false
         }
@@ -2368,6 +2674,7 @@ final class AppModel {
                 InboxStore.shared.reload()
                 TodoStore.shared.reload()
                 TasksStore.shared.reconnected()
+                SavedPromptStore.shared.reload()
             }
         }
         if plan.refetch { AgentSync.shared.schedule() }
@@ -2557,7 +2864,8 @@ final class AppModel {
     /// update once for the lot, and only when a list really changed; the notifications, the watch and the chats kept
     /// current in the background (`AgentSync`) follow them. The one place the lists land (msg-render's SessionStore
     /// replaces its inside, docs/apple/ios-state.md).
-    func applySessions(_ byMachine: [MachineRef: [Session]]) {
+    func applySessions(_ byMachine: [MachineRef: [Session]], complete: Bool = true) {
+        if complete { reconcileHeldRetries(byMachine) }
         let byMachine = seenOutbox.land(byMachine, at: Date())
         var lists = sessionsByMachine
         var olds: [(old: [Session], new: [Session])] = []
@@ -2568,8 +2876,21 @@ final class AppModel {
             olds.append((old, list))
         }
         if lists != sessionsByMachine { sessionsByMachine = lists }
+        // WatchSync drops unchanged content; repeated calls still drive its freshness resend and the widget writer.
         summariesChanged()
+        var effortSettled = false
         for (old, new) in olds {
+            for session in new {
+                if let effort = session.pendingEffort {
+                    if effortRequests[session.key] == nil { updateOutboxEffort(session.key, to: effort) }
+                    if session.effortChangeFailed == true, visibleSession == session.key,
+                       old.first(where: { $0.key == session.key })?.effortChangeFailed != true {
+                        toast = Toast(String(localized: "Couldn't change thinking effort. Choose it again to send waiting messages."), style: .error)
+                    }
+                } else if existingChat(session.key)?.pending.contains(where: { $0.state == .waiting && $0.requiredEffort != nil }) == true {
+                    effortSettled = true
+                }
+            }
             for session in new where session.status != .working {
                 updateLiveRetry(session.key, nil, working: false, subscribed: isSubscribed(session.key))
             }
@@ -2582,6 +2903,7 @@ final class AppModel {
             notifyTransitions(old: old, new: new)
             AgentSync.shared.sessions(new)
         }
+        if effortSettled { flushOutbox() }
         readSettingsForNewTaskConversations(olds)
         // A link may have opened a child before this list held its parent. Once the parent row is here, that page is
         // the parent's. An ordinary open is not a child, so a list update does not move it.
@@ -2775,6 +3097,7 @@ final class AppModel {
             }
         case .sessionsList(let revision, let changes):
             sessionLists.invalidate(group, revision: revision)
+            cardSessionsListChanged(group, changes)
             if isHub { followNeedsYou() }
             for key in subscribers.keys where key.group == group {
                 if passesOver(key, revision: revision, changes: changes) {
@@ -2813,20 +3136,18 @@ final class AppModel {
             if isHub { InboxStore.shared.reload() }
         case .todos:
             if isHub { TodoStore.shared.reload() }
+        case .savedPrompts(let manager):
+            // another device changed the list: only the shown assistant's is read again (#9436)
+            if isHub, SavedPromptStore.concerns(eventManager: manager, shownManager: api?.shownManager) { SavedPromptStore.shared.reload() }
         case .personas:
-            // The new tier's package is downloaded whole before the face changes (PersonaStore.load). The list changed
+            // The new tier's package is downloaded whole before the face changes. The list changed
             // just now: a refresh already under way may have asked before, so it is read again after that one (#2405).
-            if isHub { Task { await personas.reload(api) } }
+            if isHub, let from = api { personas.packagesChanged(on: from) }
         case .look(let id, let effective):
             // Another device chose an avatar, or the hub went back to the default. Like every hub-level setting, the
             // avatar is the current hub's: another group's choice is its own (docs/protocol/multi-hub.md). The hub it
             // came from goes with it: when another group's became current before it is handled, it changes nothing.
-            if isHub, let from = api {
-                Task {
-                    guard api?.config.url == from.config.url else { return }
-                    await personas.follow(id, effective: effective, api: from)
-                }
-            }
+            if isHub { personas.receive(id, effective: effective, api: api) }
         case .managers:
             // Settings › Managers reads the roster again (ManagersView watches this).
             if isHub { managersRevision += 1 }
@@ -2981,6 +3302,7 @@ final class AppModel {
         case .agents: "agents"
         case .inbox: "inbox"
         case .todos: "todos"
+        case .savedPrompts: "assistant_saved_prompts"
         case .personas: "personas"
         case .look: "look"
         case .managers: "managers"
@@ -3079,7 +3401,8 @@ final class AppModel {
     /// the hub would refuse it (`SecretHandoff`).
     func resolve(_ ix: Interaction, _ r: Resolution, handoffCard: Bool = false) async {
         // To the hub of the interaction's own group (docs/protocol/multi-hub.md「Connections and routing」).
-        guard canAnswer(ix), let api = api(ix.group) else { return }
+        // A stopped Agent's work card still takes the answers that send it nothing: put off, or dismissed (#6839).
+        guard canAnswer(ix) || ix.isLocalResolution(r), let api = api(ix.group) else { return }
         let handoff = ix.isSecretHandoff && r.allow == true
         if handoff && !handoffCard {
             toast = Toast(String(localized: "Approve it on its card in the chat."), style: .error)
@@ -3374,10 +3697,14 @@ final class AppModel {
     var assistantModels: [SessionKey: String] = [:]
 
     /// Check at dispatch time too: capabilities can change while a menu or outbox bubble is on screen.
-    func allowSend(_ key: SessionKey) -> Bool {
+    func allowSend(_ key: SessionKey, forMessage: Bool = false) -> Bool {
         guard let s = session(key) else { return false }
         guard s.canSend else {
             toast = Toast(s.sourceSubtitle ?? String(localized: "This session is view-only"), style: .error)
+            return false
+        }
+        if forMessage, let away = offlineAgent(s), !away.canHold {
+            toast = Toast(away.line, style: .error)
             return false
         }
         return true
@@ -3388,7 +3715,7 @@ final class AppModel {
     @discardableResult
     /// via: how the app wrote it when the user did not type it (`APIClient.MessageVia`).
     func sendNow(_ key: SessionKey, text: String, images: [ImagePayload] = [], via: APIClient.MessageVia? = nil) -> Bool {
-        guard allowSend(key) else { return false }
+        guard allowSend(key, forMessage: true) else { return false }
         // Take-back can retain pathless hub photos past the picker's cap; the person removes some before sending.
         guard images.count <= MessagePhotos.limit else {
             toast = Toast(String(localized: "Up to 4 at a time"), style: .error)
@@ -3398,10 +3725,16 @@ final class AppModel {
         msg.via = via
         // The composer says "queued" while the agent works: such a message is drawn in the queue strip (#1461).
         if session(key)?.status.isActive == true { msg.queuedMode = true }
-        chat(key).pending.append(msg)
+        let store = chat(key)
+        msg.requiredEffort = effortRequests[key] ?? latest(key)?.pendingEffort
+            ?? store.pending.first(where: {
+                $0.requiredEffort != nil && ($0.state == .waiting || $0.state == .sending)
+            })?.requiredEffort
+        if msg.requiredEffort != nil { msg.state = .waiting }
+        store.pending.append(msg)
         saveOutbox()
         Haptics.tap()
-        deliver(key, msg)
+        if msg.state == .waiting { flushOutbox() } else { deliver(key, msg) }
         return true
     }
 
@@ -3421,19 +3754,28 @@ final class AppModel {
     }
 
     func retry(_ key: SessionKey, _ msg: PendingMessage, clearDraft: String? = nil) {
-        guard allowSend(key) else { return }
-        guard let i = chat(key).pending.firstIndex(where: { $0.id == msg.id }) else { return }
-        guard chat(key).pending[i].mayHaveArrived == true else {
-            chat(key).pending[i].state = .sending
-            if chat(key).pending[i].refused == true {
+        guard allowSend(key, forMessage: true) else { return }
+        let store = chat(key)
+        guard let i = store.pending.firstIndex(where: { $0.id == msg.id }) else { return }
+        guard store.pending[i].mayHaveArrived == true else {
+            let retryingEffort = store.pending[i].state == .failed && store.pending[i].requiredEffort != nil
+            if retryingEffort {
+                // An explicit resend follows the current effort. sendPending still waits if a new change is pending.
+                store.pending[i].requiredEffort = nil
+                store.pending[i].failure = nil
+                store.pending[i].stalledSince = nil
+            }
+            store.pending[i].state = .sending
+            let refused = store.pending[i].refused == true
+            if refused {
                 // Refused with nothing typed: under its old id the hub would answer that refusal again without asking
                 // the computer, and Clear and Send's clear_draft would be another op on a used id (op_id_reused).
                 // Saved before it goes: an app killed meanwhile sends it again under the id it went with.
-                chat(key).pending[i].id = UUID()
-                chat(key).pending[i].refused = nil
-                saveOutbox()
+                store.pending[i].id = UUID()
+                store.pending[i].refused = nil
             }
-            deliver(key, chat(key).pending[i], clearDraft: clearDraft)
+            if refused || retryingEffort { saveOutbox() }
+            deliver(key, store.pending[i], clearDraft: clearDraft)
             return
         }
         chat(key).pending[i].state = .sending
@@ -3519,10 +3861,28 @@ final class AppModel {
         sendSeen(key)
         // Optimistic: flip the local copy right away.
         if var list = sessionsByMachine[key.machineRef], let i = list.firstIndex(where: { $0.sessionID == key.sessionID }),
-           list[i].state == .unread {
-            if key == visibleSession { heldInList = key }
-            list[i].state = .idle
+           list[i].needsSeen() {
+            if key == visibleSession && (list[i].state == .unread || list[i].showsJustFinished(muted: isMuted(list[i]))) {
+                heldInList = key
+                heldJustFinished = list[i].state == .idle
+            }
+            list[i].markLocallySeen()
             sessionsByMachine[key.machineRef] = list
+            sessionLists.markSeen([key], model: self)
+        }
+    }
+
+    func keepSeen(in list: SessionListModel<Session>) {
+        guard !seenOutbox.marks.isEmpty else { return }
+        list.keepSeen { seenOutbox.marks[$0] != nil }
+    }
+
+    /// Retire marks and their held row when their pairing is forgotten. Reconnecting keeps both.
+    func forgetSeen(in groups: Set<String>? = nil) {
+        seenOutbox.forget(groups: groups)
+        if let heldInList, groups?.contains(heldInList.group) ?? true {
+            self.heldInList = nil
+            heldJustFinished = false
         }
     }
 
@@ -3539,10 +3899,14 @@ final class AppModel {
             socket.send(["type": "seen", "machine_id": key.machineID, "session_id": key.sessionID])
             scheduleSeenCheck()
         } else if let api = api(key.group) {
-            seenOutbox.sent(key, .http, at: Date())
+            let owner = link(key.group)
+            let markID = seenOutbox.sent(key, .http, at: Date())
             Task {
+                guard link(key.group) === owner else { return }
                 // A failed one waits for the socket to come back (`hello`).
-                if (try? await api.post("/api/v1/sessions/\(key.machineID)/\(key.sessionID)/seen")) != nil { seenOutbox.answered(key) }
+                if (try? await api.post("/api/v1/sessions/\(key.machineID)/\(key.sessionID)/seen")) != nil {
+                    seenOutbox.answered(key, markID: markID)
+                }
             }
         }
     }
@@ -3560,14 +3924,21 @@ final class AppModel {
 
     /// Mark All as Read: every finished-unread one of these, in one update of the list.
     func markSeen(_ keys: [SessionKey]) {
-        let unread = keys.filter { session($0)?.state == .unread }
+        let unread = keys.filter { key in sessionIndex[key].map { $0.needsSeen(muted: isMuted($0)) } == true }
         guard !unread.isEmpty else { return }
         for key in unread { sendSeen(key) }
         var lists = sessionsByMachine
-        for key in unread {
-            if let i = lists[key.machineRef]?.firstIndex(where: { $0.sessionID == key.sessionID }) { lists[key.machineRef]![i].state = .idle }
+        for (machine, keys) in Dictionary(grouping: unread, by: \.machineRef) {
+            guard var list = lists[machine] else { continue }
+            var remaining = Set(keys.map(\.sessionID))
+            for i in list.indices {
+                if remaining.isEmpty { break }
+                if remaining.remove(list[i].sessionID) != nil { list[i].markLocallySeen() }
+            }
+            lists[machine] = list
         }
         sessionsByMachine = lists
+        sessionLists.markSeen(unread, model: self)
         Haptics.success()
     }
 
@@ -3631,24 +4002,79 @@ final class AppModel {
         } catch { show(error) }
     }
 
-    /// Changes a session's permission mode / effort level / model (nil leaves one). Shown right away; the hub's next session
-    /// list confirms it. Returns whether it worked.
+    /// An effort request has not answered yet. Follow-ups typed now wait in the same outbox as those typed once
+    /// the node has accepted the change.
+    @ObservationIgnored var effortRequests: [SessionKey: String] = [:]
+
+    /// Changes a session's permission mode, effort or model (nil leaves it). Returns whether the node took it.
     @discardableResult
     func setModes(_ key: SessionKey, permissionMode: String? = nil, effort: String? = nil, model claudeModel: String? = nil) async -> Bool {
         guard allowSend(key), let api = api(key.group) else { return false }
+        if let effort {
+            guard effortRequests[key] == nil else { return false }
+            effortRequests[key] = effort
+        }
+        defer {
+            if effort != nil {
+                effortRequests[key] = nil
+                flushOutbox()
+            }
+        }
         do {
-            try await api.setModes(key, permissionMode: permissionMode, effort: effort, model: claudeModel)
-            if var list = sessionsByMachine[key.machineRef], let i = list.firstIndex(where: { $0.sessionID == key.sessionID }) {
-                if let permissionMode { list[i].permissionMode = permissionMode }
-                if let effort { list[i].effort = effort }
-                if let claudeModel { list[i].model = claudeModel } // the node lists the pick too until the transcript moves on
-                sessionsByMachine[key.machineRef] = list
+            let pending = try await api.setModes(key, permissionMode: permissionMode, effort: effort, model: claudeModel, queueEffort: effort != nil)
+            landPendingSessions()
+            patchSession(key) { row in
+                if let permissionMode { SessionModes.applyOptimistic(&row, permissionMode: permissionMode) }
+                if let claudeModel { row.model = claudeModel } // the node lists the pick until the transcript moves on
+                if let effort {
+                    if let pending {
+                        if row.pendingEffort != pending, row.pendingEffort != nil || row.effort != pending {
+                            row.pendingEffort = pending
+                            row.effortChangeFailed = nil
+                        }
+                    } else {
+                        row.effort = effort
+                        row.pendingEffort = nil
+                        row.effortChangeFailed = nil
+                    }
+                }
+            }
+            if let effort { updateOutboxEffort(key, to: effort, includeFailed: true) }
+            if pending != nil, latest(key)?.effortChangeFailed != true {
+                toast = Toast(String(localized: "Thinking effort will change after this turn."))
             }
             Haptics.success()
             return true
         } catch {
             show(error)
             Haptics.error()
+            return false
+        }
+    }
+
+    /// Speed requests in flight, shared by every rendering of a chat's native menu. The menu closes on a pick, so this
+    /// cannot live in the view: reopening must show why the choices wait and must not issue the request twice.
+    private(set) var serviceTierChanges: Set<SessionKey> = []
+
+    /// Codex speed is different from an optimistic mode edit: only the hub's acknowledged session value moves the
+    /// selection. A refusal or an unconfirmed request keeps that value and is always said, including a timeout.
+    @discardableResult
+    func setServiceTier(_ key: SessionKey, tier: String) async -> Bool {
+        guard !serviceTierChanges.contains(key), allowSend(key), let api = api(key.group) else { return false }
+        serviceTierChanges.insert(key)
+        defer { serviceTierChanges.remove(key) }
+        do {
+            try await api.setServiceTier(key, tier: tier)
+            Haptics.success()
+            return true
+        } catch {
+            if !error.isCancellation {
+                let reason = error.isTimeout
+                    ? String(localized: "The hub didn't respond. Try again later.")
+                    : error.localizedDescription
+                toast = Toast(String(localized: "Couldn't change Speed: \(reason)"), style: .error)
+                Haptics.error()
+            }
             return false
         }
     }
@@ -3891,6 +4317,8 @@ final class AppModel {
         launcherCache = [:]
         launcherDefaults = [:]
         launcherUnavailable = [:]
+        launcherTiers = [:]
+        launcherTierProfile = [:]
         assistantLauncherCache = [:]
         assistantStarterCache.clear()
         // Model Settings changes are launcher changes too: wake the open main-chat composer to re-read the default.
@@ -3912,6 +4340,8 @@ final class AppModel {
         launcherCache[machine] = r.launchers
         launcherDefaults[machine] = r.default
         launcherUnavailable[machine] = r.unavailable ?? []
+        launcherTiers[machine] = r.tiers ?? []
+        launcherTierProfile[machine] = r.tiersProfile
         return r.launchers
     }
 
@@ -4037,6 +4467,22 @@ final class AppModel {
 
     func openSentRecords() {
         settingsPath = SettingsPage.sentPath
+        #if os(macOS)
+        MacShellState.shared.go(.settings, self)
+        #else
+        selectedTab = .settings
+        if tabRouter != nil { shellSettings = true }
+        #endif
+    }
+
+    /// A provider import link opened from outside (#5428): the Model providers page reads it through the hub's parse
+    /// route and opens the wizard with the draft. Held only until the wizard takes it; never logged or shown, since it
+    /// may carry a key.
+    var providerImport: ProviderImportRequest?
+    func openProviderImport(_ link: String) {
+        let request = ProviderImportRequest(link: link)
+        providerImport = request
+        settingsPath.append(ModelLaunchersRoute(id: request.id))
         #if os(macOS)
         MacShellState.shared.go(.settings, self)
         #else
@@ -4227,6 +4673,8 @@ final class AppModel {
     /// What the app holds about groups that are no longer there.
     func forgetGroups(_ gone: Set<String>, keepingPushKeys: Bool = false) {
         guard !gone.isEmpty else { return }
+        forgetSeen(in: gone)
+        updateHeldRetryReceipts { receipts in receipts.filter { !gone.contains($0.target.session.group) } }
         if !keepingPushKeys { LarkChatOutbox.forget(groups: gone) }
         toolResults.forget(groups: gone)
         PortForwarder.shared.close(groups: gone)
@@ -4237,6 +4685,7 @@ final class AppModel {
         drafts = drafts.filter { !gone.contains($0.key.group) }
         heldAttachments = heldAttachments.filter { !gone.contains($0.key.group) }
         healthReports = healthReports.filter { !gone.contains($0.key) }
+        TodosV1.shared.forget(gone)
         if let k = openChat, gone.contains(k.group) { openChat = nil }
         if let k = assistantCurrent, gone.contains(k.group) { assistantCurrent = nil }
         for g in gone {
@@ -4273,13 +4722,17 @@ final class AppModel {
         InboxStore.shared.reload()
         TodoStore.shared.forget()
         TodoStore.shared.reload()
+        SavedPromptStore.shared.forget()
+        SavedPromptStore.shared.reload()
         followScope()
         // The avatar is the new hub's from now, before its list is read below: a card tapped meanwhile goes to it.
-        personas.switchHub(api)
+        let avatarHub = api
+        personas.switchHub(avatarHub)
+        let avatarRequest = avatarHub.flatMap { personas.mark(for: $0) }
         let newChat = assistantNewChat
         Task {
             await refreshAssistant()
-            await personas.refresh(api)
+            if let avatarRequest { await personas.refresh(avatarHub, since: avatarRequest) }
             selectAssistantMain(after: newChat)
         }
         applyPersonaPalette()
@@ -4308,6 +4761,9 @@ final class AppModel {
         if switched {
             if let a = assistantCurrent, let s = session(a), s.assistant, !s.isHealth, !assistantShows(s.manager) { assistantCurrent = assistantMain }
             assistantSwitches += 1
+            // the "/" list offers the new assistant's saved prompts, never the one before's (#9436)
+            SavedPromptStore.shared.forget()
+            SavedPromptStore.shared.reload()
         }
         let newChat = assistantNewChat
         Task {
@@ -4369,8 +4825,10 @@ final class AppModel {
         func place(_ key: SessionKey) -> TabBadges.Place {
             TabBadges.place(key, session: sessionIndex[key], quiet: isQuiet(key), mutes: pinsStore(key.group)?.mutes)
         }
-        for ix in interactions.values {
-            guard scope.has(ix.manager ?? sessionIndex[ix.sessionKey]?.manager, group: ix.group) else { continue }
+        // A directory-hidden session's cards count nowhere, as the pages leave them out (`directoryVisibleInteractions`).
+        let session = cardSessionResolver()
+        for ix in interactions.values where session(ix.sessionKey)?.hiddenByDirectory != true {
+            guard scope.has(ix.manager ?? session(ix.sessionKey)?.manager, group: ix.group) else { continue }
             // A quiet task's agent asking is the main conversation's to tell (#1731): its count goes there, not on Agents.
             switch place(ix.sessionKey) {
             case .assistant, .quiet: b.assistant += 1
@@ -4378,7 +4836,10 @@ final class AppModel {
             }
         }
         // Agents counts what its Needs You section lists: one per session that waits for the user, not one per card.
-        b.agents = AgentsNeedsYou.badge(AgentsNeedsYou.rows(cards: scopedInteractions, waiting: AgentsNeedsYou.waiting(scoped(allSessions))),
+        // A kept row of a session the paging list has since left out (hidden) is not one waiting: read through the same
+        // projection as its cards.
+        let waitingNow = waitingRows(scoped(allSessions), reading: session)
+        b.agents = AgentsNeedsYou.badge(AgentsNeedsYou.rows(cards: scopedInteractions, waiting: AgentsNeedsYou.waiting(waitingNow)),
                                         place: place)
         if b != badges { badges = b }
         let waiting = waitingAgents()
@@ -4391,8 +4852,12 @@ final class AppModel {
     private func waitingAgents() -> [String: Int] {
         guard let group = hub?.group, let roster = managerRosters[group], roster.isMulti else { return [:] }
         let rows = needsYou.flatMap { $0.group == group ? $0.rows : nil } ?? allSessions
-        return AssistantBadges.waiting(roster: roster, group: group, sessions: rows, interactions: interactions.values,
-                                       known: { sessionIndex[$0] }) { key, session in
+        // The cards and their sessions as the pages and the tab badges read them (`directoryVisibleInteractions`).
+        let resolve = cardSessionResolver()
+        return AssistantBadges.waiting(roster: roster, group: group, sessions: waitingRows(rows, reading: resolve),
+                                       interactions: directoryVisibleInteractions(reading: resolve),
+                                       known: resolve) { key, session in
+            if session?.hiddenByDirectory == true || resolve(key)?.hiddenByDirectory == true { return false }
             switch TabBadges.place(key, session: session, quiet: session?.quiet == true || isQuiet(key), mutes: pinsStore(key.group)?.mutes) {
             case .assistant, .agents: return true
             case .quiet, .muted: return false

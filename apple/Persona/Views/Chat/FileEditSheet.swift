@@ -30,7 +30,7 @@ struct FileEditSheet: View {
             }
         }
         .interactiveDismissDisabled(edit.dirty)
-        .confirmationDialog("Discard your changes?", isPresented: $discarding, titleVisibility: .visible) {
+        .accessibleConfirmationDialog("Discard your changes?", isPresented: $discarding, titleVisibility: .visible, hasCancel: true) {
             Button("Discard Changes", role: .destructive) { dismiss() }
             Button("Keep Editing", role: .cancel) {}
         } message: {

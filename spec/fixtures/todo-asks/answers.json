@@ -1,0 +1,617 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "decision_recommended_option",
+      "description": "OK on the recommended option takes the recommendation: it goes to the to-do's Agent and the decision leaves the row.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7",
+        "server/internal/assistant/decision.go chooseOption"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Ryokan Hanami"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_other_option",
+      "description": "Another option is the owner's own choice: sent to the Agent with what it leads to, kept with the to-do's decisions.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7",
+        "server/internal/assistant/decision.go chooseOption"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_unknown_option",
+      "description": "A label that is none of the decision's options takes nothing.",
+      "source": [
+        "server/internal/assistant/decision.go chooseOption"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Somewhere else"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_you_decide",
+      "description": "You decide hands a decision that can be undone back to the supervisor: nothing is taken and the owner is not asked again.",
+      "source": [
+        "docs/assistant/todos.md \"Decisions the owner can answer\"",
+        "server/internal/assistant/decision.go ownerCannotAnswer"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "response": "decide_yourself"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_explain_first",
+      "description": "Tell me the background first is an answer the supervisor hears, but the decision keeps waiting for the owner.",
+      "source": [
+        "docs/assistant/todos.md \"Decisions the owner can answer\"",
+        "server/internal/assistant/decision.go ownerCannotAnswer"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "response": "explain_first"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_in_words",
+      "description": "The owner's own words go to the Agent as they are and are kept as the decision.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.3 Asks",
+        "server/internal/assistant/decision.go answerDecisionText"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "text": "Hanami, but only with a late check-in"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_in_words_without_origin",
+      "description": "A to-do no conversation opened, supervised by the main conversation, is answered in words the same way: the route names no conversation, so the origin guard of the conversation route does not apply.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 5 decision 5 (the origin guards lifted for answers)",
+        "server/internal/assistant/decision.go answerDecisionText"
+      ],
+      "input": {
+        "state": "decision_no_origin",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "text": "Hanami, but only with a late check-in"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_in_words_no_agent",
+      "description": "Words no Agent can receive are still the owner's answer: recorded, the decision ends, the supervisor passes them on.",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionText",
+        "server/internal/assistant/acceptance_reply.go decisionNotDelivered"
+      ],
+      "input": {
+        "state": "decision_no_agent",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "text": "Hanami, but only with a late check-in"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered",
+          "delivered": "none"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_in_words_no_origin_no_agent",
+      "description": "Words on a to-do no conversation opened, with no Agent to take them, are still the owner's answer: recorded, the decision ends, the supervisor passes them on.",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionText",
+        "server/internal/assistant/acceptance_reply.go decisionNotDelivered"
+      ],
+      "input": {
+        "state": "decision_no_origin_no_agent",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "text": "Hanami, but only with a late check-in"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered",
+          "delivered": "none"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_option_no_agent",
+      "description": "An option no Agent can receive is recorded and handed to the supervisor, as the accept route does.",
+      "source": [
+        "server/internal/assistant/decision.go chooseOption",
+        "server/internal/assistant/acceptance_reply.go decisionNotDelivered"
+      ],
+      "input": {
+        "state": "decision_no_agent",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered",
+          "delivered": "none"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_needs_an_answer",
+      "description": "A decision has no one action: an empty answer takes nothing (its recommendation is an option like the others).",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go answerDecision"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {}
+      },
+      "expected": {
+        "status": 400,
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_two_answers",
+      "description": "One answer at a time: an option and words together are refused.",
+      "source": [
+        "schema/wire/todo-view.schema.json TodoAskAnswer"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede",
+          "text": "Or Hanami"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_later",
+      "description": "Later writes nothing: the ask still waits, and the client keeps Later for its app session.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 (three outcomes on every ask)"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "later"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "later"
+        },
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_decline",
+      "description": "Don't handle is kept with a receipt; the decision leaves the row, and nothing is taken or sent.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 (three outcomes on every ask)",
+        "server/internal/assistant/task_review_dismissals.go changeDecisionDismissal"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "decline"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "declined",
+          "receipt": "dismiss_receipt"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_undo_decline",
+      "description": "Undo with the decline's receipt puts the decision back on the row.",
+      "source": [
+        "server/internal/assistant/task_review_dismissals.go changeDecisionDismissal"
+      ],
+      "input": {
+        "state": "decision_declined",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "undo",
+          "receipt": "dismiss_receipt"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "undone"
+        },
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "decision_undo_another_receipt",
+      "description": "Undo with a receipt that is not this decline's changes nothing.",
+      "source": [
+        "server/internal/assistant/task_review_dismissals.go changeDecisionDismissal"
+      ],
+      "input": {
+        "state": "decision_declined",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "undo",
+          "receipt": "dismiss_another"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "ask_stale",
+        "row": true,
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "decision_earlier_round",
+      "description": "An answer for a round that no longer asks (a screen that is behind) answers nothing: 409 with the row as it is now.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 7.3 Asks (a stale round)",
+        "server/internal/assistant/decision.go askRound"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:decision@2026-11-09T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "ask_stale",
+        "row": true,
+        "sent": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "cannot_acknowledged",
+      "description": "A conclusion that says the work cannot be done is acknowledged by its one action.",
+      "source": [
+        "server/internal/assistant/briefing.go acceptTryFromBrief"
+      ],
+      "input": {
+        "state": "cannot",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {}
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": false,
+        "waits": false
+      }
+    },
+    {
+      "name": "cannot_takes_no_option",
+      "description": "A conclusion that says the work cannot be done has no options to choose from.",
+      "source": [
+        "spec/fixtures/todo-view/README.md asks (a conclusion that says the work cannot be done)"
+      ],
+      "input": {
+        "state": "cannot",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "waits": true
+      }
+    },
+    {
+      "name": "cannot_not_declinable",
+      "description": "A conclusion with no review waiting on the owner has no Don't handle.",
+      "source": [
+        "server/internal/assistant/task_review_dismissals.go currentDecisionReview"
+      ],
+      "input": {
+        "state": "cannot",
+        "ask": "todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "decline"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "not_declinable",
+        "waits": true
+      }
+    },
+    {
+      "name": "failed_start_retry",
+      "description": "A failed start's one action starts it again on the same to-do; the retry leaves the row.",
+      "source": [
+        "server/internal/assistant/tasks_start.go retryTask"
+      ],
+      "input": {
+        "state": "failed_start",
+        "ask": "todo:retry@2026-11-10T09:00:00Z",
+        "answer": {}
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:retry@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "started": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "failed_start_later",
+      "description": "Later on a failed start writes nothing; it still waits.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 (three outcomes on every ask)"
+      ],
+      "input": {
+        "state": "failed_start",
+        "ask": "todo:retry@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "later"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "todo:retry@2026-11-10T09:00:00Z",
+          "outcome": "later"
+        },
+        "started": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "failed_start_earlier_failure",
+      "description": "A retry for a failure that is not the to-do's last starts nothing.",
+      "source": [
+        "spec/fixtures/todo-view/README.md asks (todo:retry@<done_at>)"
+      ],
+      "input": {
+        "state": "failed_start",
+        "ask": "todo:retry@2026-11-09T09:00:00Z",
+        "answer": {}
+      },
+      "expected": {
+        "status": 409,
+        "code": "ask_stale",
+        "row": true,
+        "started": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "failed_start_not_declinable",
+      "description": "A failed start has no Don't handle.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go answerRetry"
+      ],
+      "input": {
+        "state": "failed_start",
+        "ask": "todo:retry@2026-11-10T09:00:00Z",
+        "answer": {
+          "outcome": "decline"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "not_declinable",
+        "started": false,
+        "waits": true
+      }
+    },
+    {
+      "name": "step_decision_option",
+      "description": "A step's decision on its to-do's row is answered on the step, named by the row's ask id.",
+      "source": [
+        "spec/fixtures/todo-view/README.md asks (a step's ask on its parent's row)",
+        "server/internal/assistant/decision.go chooseOption"
+      ],
+      "input": {
+        "state": "step_decision",
+        "ask": "step:todo_step/todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "answered": {
+          "ask": "step:todo_step/todo:decision@2026-11-10T09:00:00Z",
+          "outcome": "answered"
+        },
+        "sent": true,
+        "waits": false
+      }
+    },
+    {
+      "name": "step_of_another_todo",
+      "description": "An id naming a to-do that is no step of this one answers nothing.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go ownAskOf"
+      ],
+      "input": {
+        "state": "step_decision",
+        "ask": "step:todo_other/todo:decision@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 404,
+        "code": "ask_not_found",
+        "sent": false
+      }
+    },
+    {
+      "name": "run_ask_in_session",
+      "description": "A run's ask is answered at its card in its session, not here.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 (a run's ask has its home in its session)"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "run:box/s1@2026-11-10T09:00:00Z",
+        "answer": {
+          "option": "Yes"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "answer_in_session",
+        "sent": false
+      }
+    },
+    {
+      "name": "unknown_ask_form",
+      "description": "An id of no form a to-do's ask has answers nothing.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go ownAskOf"
+      ],
+      "input": {
+        "state": "decision",
+        "ask": "todo:verify@2026-11-10T09:00:00Z",
+        "answer": {}
+      },
+      "expected": {
+        "status": 404,
+        "code": "ask_not_found",
+        "sent": false,
+        "waits": true
+      }
+    }
+  ]
+}

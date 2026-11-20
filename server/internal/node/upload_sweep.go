@@ -16,6 +16,13 @@ const terminalUploadKeep = 7 * 24 * time.Hour
 
 const uploadDayLayout = "2006-01-02"
 
+// fileUploadDir is where a file a task's Agent handed to its conversation goes (dest=file): uploads/files/<date>/,
+// apart from both the terminal pastes and the chat's images (uploads/<date>, saveImages). It is not swept: a
+// conversation may name the file in a message the user opens weeks later.
+func fileUploadDir(nodeDir string, now time.Time) string {
+	return filepath.Join(nodeDir, "uploads", "files", now.Format(uploadDayLayout))
+}
+
 func terminalUploadRoot(nodeDir string) string {
 	return filepath.Join(nodeDir, "uploads", "terminal")
 }

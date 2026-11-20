@@ -2,7 +2,8 @@
 """Verify the actual Assistant trays using only synthetic HTTP/WS data.
 
 Build web first. Run with a loopback production preview URL and --shots <directory>; --text-size large uses the largest Web text-size setting.
-The test covers wide/narrow light/dark, the two entries (#3387: Needs you and In progress, each thing in one only),
+The test covers wide/narrow light/dark, the two entries (#3387: Needs you and In progress, each thing in one only) and
+Finished (#10922: what finished in the last 24 hours, seen or not, the unseen ones as Just finished),
 their capsule size and selected state, stable live task rows, every open task that does not wait on the user in In
 progress (a stopped one too, saying why it is not done, #3180) with inactive ones folded and finished ones excluded from open counts, a task's agents never listed by
 themselves, an Agent opened by hand in the entry its state says, the plan waiting for Start, decisions and draft sends in
@@ -25,6 +26,8 @@ PLAN = {"id": "demo-plan", "conversation": MAIN, "created_at": AT, "state": "sta
 OPEN_PLAN = {"id": "demo-next-plan", "conversation": MAIN, "created_at": AT, "state": "open", "tasks": [{"title": "Prepare the next demo", "prompt": "Prepare a synthetic demo", "machine": "demo", "cwd": "/demo/project"}]}
 SESSIONS = [{"machine_id": "demo", "session_id": MAIN, "title": "Persona", "state": "idle", "status": "idle", "cwd": "/demo", "updated_at": AT, "started_by_persona": True, "capabilities": {"send": True, "interrupt": True}}] + [{"machine_id": "demo", "session_id": f"worker-{i}", "title": title, "state": ["working", "working", "needs_you", "unread", "idle"][i], "status": ["working", "working", "needs_you", "unread", "idle"][i], "cwd": "/demo/project", "updated_at": AT, "agent": "claude", "todo": {"id": f"demo-task-{i}", "title": title}, "plan": {"done": 3, "total": 4, "current": "Run the remaining checks"}} for i, title in enumerate(TITLES)]
 TODOS = [{"id": f"demo-task-{i}", "title": title, "origin": MAIN, "plan_id": PLAN["id"], "created_at": AT, "updated_at": AT, "agents": [{"machine_id": "demo", "session_id": f"worker-{i}", "linked_at": AT}], "pr_url": f"https://github.com/example/demo/pull/{2801 + i}", "supervision": {"supervisor": MAIN, "state": "accepted" if i == 3 else "needs_user" if i == 2 else "", "progress": {"kind": "blocked" if i == 2 else "progress", "step": i + 1, "steps": 5, "text": "Waiting for a decision" if i == 2 else "Run the demo checks", "at": AT}}, **({"done_at": AT} if i == 3 else {})} for i, title in enumerate(TITLES)]
+# #10922: the accepted task was opened already (seen_at after it finished): Finished still lists it, as Accepted, not new.
+TODOS[3]["seen_at"] = "2026-11-10T08:05:00Z"
 # #3331: a task with no move for 48 hours and nothing running is shelved (folded, not counted, as on the To-dos page); the
 # main conversation watches every to-do, one another conversation handed out too.
 STALE = "2026-11-07T08:00:00Z"
@@ -131,23 +134,30 @@ def run(args):
                     # The entries are the dock's old "All" / task capsules (#2999): one rem-based height, fully round,
                     # content-wide in a row, and the open tray is the selected capsule.
                     entries = bar.locator("[data-tray-entry]")
-                    expect(entries).to_have_count(2)
-                    assert entries.evaluate_all("es => es.map(e => e.dataset.trayEntry)") == ["needs", "running"]
+                    expect(entries).to_have_count(3)
+                    assert entries.evaluate_all("es => es.map(e => e.dataset.trayEntry)") == ["needs", "running", "finished"]
                     # Needs you: the release task (its agent's card), the hand-opened Agent's question, the plan waiting
                     # for Start, the draft. In progress: three of the plan's tasks (one asks, one is closed), the other
                     # chat's task and the hand-opened working Agent; the shelved one is folded, not counted.
                     needs_entry = bar.locator('[data-tray-entry="needs"]')
                     running_entry = bar.locator('[data-tray-entry="running"]')
+                    finished_entry = bar.locator('[data-tray-entry="finished"]')
                     expect(needs_entry).to_have_text("Needs you4")
                     expect(running_entry).to_have_text("In progress5")
+                    # #10922: the accepted task, finished ten minutes ago, is Finished's; its number is not open work
+                    expect(finished_entry).to_have_text("Finished1")
                     boxes = entries.evaluate_all("""es => es.map(e => { const box = e.getBoundingClientRect(); const style = getComputedStyle(e);
                         return { h: box.height, w: box.width, top: box.top, radius: parseFloat(style.borderTopLeftRadius), font: style.fontSize,
                                  capsule: 2 * parseFloat(getComputedStyle(document.documentElement).fontSize) }; })""")
                     assert all(b["h"] == b["capsule"] for b in boxes), boxes
                     assert all(b["radius"] >= b["h"] / 2 for b in boxes), boxes
                     assert len({b["top"] for b in boxes}) == 1 and len({b["font"] for b in boxes}) == 1, boxes
-                    assert sum(b["w"] for b in boxes) < bar.evaluate("e => e.getBoundingClientRect().width"), boxes
-                    assert entries.evaluate_all("es => es.map(e => e.getAttribute('aria-expanded'))") == ["false"] * 2
+                    # Side by side they fit the bar, Finished (#10922) too at the standard text size; at the large one on a
+                    # phone it runs past the bar's end, and the entries' scroller brings it into view when it opens (below)
+                    bar_width = bar.evaluate("e => e.getBoundingClientRect().width")
+                    assert sum(b["w"] for b in boxes[:2]) < bar_width, boxes
+                    assert args.text_size == "large" and width < 1280 or sum(b["w"] for b in boxes) < bar_width, boxes
+                    assert entries.evaluate_all("es => es.map(e => e.getAttribute('aria-expanded'))") == ["false"] * 3
                     print(f"  entry heights {[b['h'] for b in boxes]} px, fully round, font {boxes[0]['font']}", flush=True)
                     capture("collapsed")
                     # keyboard: the entry takes focus and Enter toggles its tray, as a click does
@@ -166,15 +176,11 @@ def run(args):
                     expect(running_entry).to_have_attribute("aria-expanded", "true")
                     expect(running_entry).to_have_class(re.compile(r"\bbg-ink\b"))
                     assert running_entry.evaluate("e => e.getBoundingClientRect().height") == boxes[1]["h"]
-                    expect(bar.locator("[data-task-slot]")).to_have_count(5)
-                    # The asking task and the plan waiting for Start are Needs you's; the finished one stays in Just finished.
+                    expect(bar.locator("[data-task-slot]")).to_have_count(4)
+                    # The asking task and the plan waiting for Start are Needs you's; the finished one is Finished's (#10922).
                     expect(bar.locator('[data-task-slot="plan:demo-plan:2"]')).to_have_count(0)
                     expect(bar.locator('[data-task-slot="plan:demo-next-plan:0"]')).to_have_count(0)
-                    finished = bar.locator('[data-task-slot="plan:demo-plan:3"]')
-                    expect(finished).to_have_count(1)
-                    expect(finished).to_have_attribute("data-counts-open", "false")
-                    expect(finished.locator('[data-task-mark="done"]')).to_have_count(1)
-                    expect(finished.locator("[data-task-status]")).to_have_text("Accepted")
+                    expect(bar.locator('[data-task-slot="plan:demo-plan:3"]')).to_have_count(0)
                     expect(bar.locator("[data-progress-closed]")).to_have_count(0)
                     expect(bar.locator('[data-task-slot="task:demo-elsewhere"]')).to_have_count(1)
                     expect(bar.locator('[data-task-slot="task:demo-stale"]')).to_have_count(0)
@@ -206,14 +212,31 @@ def run(args):
                     todos[0]["supervision"]["state"] = "accepted"
                     for ws in sockets:
                         ws.send(json.dumps({"type": "todos"}))
-                    # Acceptance keeps the same row in Just finished without counting it as open work.
-                    expect(row).to_have_count(1)
-                    expect(row).to_have_attribute("data-counts-open", "false")
-                    expect(row.locator('[data-task-mark="done"]')).to_have_count(1)
-                    expect(row.locator("[data-task-status]")).to_have_text("Accepted")
+                    # Acceptance moves the row to Finished without counting it as open work (#10922): new there, as
+                    # Just finished, above the accepted task opened before (the same moment: by id), which reads Accepted.
+                    expect(row).to_have_count(0)
                     expect(running_entry).to_have_text("In progress4")
+                    expect(finished_entry).to_have_text("Finished2")
                     expect(bar.locator("[data-progress-closed]")).to_have_count(0)
                     capture("accepted-live")
+                    finished_entry.click()
+                    expect(finished_entry).to_have_attribute("aria-expanded", "true")
+                    # the open entry is whole in view, however far the entries' row had to scroll for it
+                    assert finished_entry.evaluate("""e => { const b = e.getBoundingClientRect(), r = e.closest("[data-assistant-actionbar]").getBoundingClientRect();
+                        return b.left >= r.left - 1 && b.right <= r.right + 1; }""")
+                    finished_rows = bar.locator("[data-tray-finished] [data-task-slot]")
+                    # its rows come with the tray's first opening, in the Parked rows' chunk (FinishedTaskRows.tsx)
+                    expect(finished_rows).to_have_count(2)
+                    assert finished_rows.evaluate_all("es => es.map(e => e.dataset.taskSlot)") == ["plan:demo-plan:0", "plan:demo-plan:3"]
+                    assert finished_rows.evaluate_all("es => es.map(e => e.dataset.countsOpen)") == ["false", "false"]
+                    fresh = finished_rows.nth(0)
+                    expect(fresh.locator('[data-task-mark="just_finished"] [data-state="just_finished"]')).to_have_count(1)
+                    expect(fresh.locator("[data-task-status]")).to_have_text("Just finished")
+                    seen = finished_rows.nth(1)
+                    expect(seen.locator('[data-task-mark="done"]')).to_have_count(1)
+                    expect(seen.locator("[data-task-status]")).to_have_text("Accepted")
+                    capture("finished")
+                    running_entry.click()
                     bar.locator("[data-progress-shelved]").click()
                     expect(bar.locator('[data-task-slot="task:demo-stale"]')).to_have_count(1)
                     capture("shelved-unfolded")
@@ -318,7 +341,7 @@ def run(args):
                     expect(rework_row.locator("[data-task-todo-state]")).to_have_text("To-do: Rework round 2")
                     expect(bar.locator('[data-task-slot="task:demo-parked"]')).to_have_count(0)
                     capture("agent-state")
-                    print(f"PASS {width} {theme} {args.text_size}: Agent-only status; Just finished excluded from open counts; supervisor review and waiting-PR blockers retained; draft not sent", flush=True)
+                    print(f"PASS {width} {theme} {args.text_size}: Agent-only status; Finished lists seen and new rows outside open counts; supervisor review and waiting-PR blockers retained; draft not sent", flush=True)
                     context.close()
         finally:
             browser.close()

@@ -602,7 +602,12 @@ export const Markdown = memo(function Markdown({ text: raw, small, compact, mid,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, highlight, katex, images],
   );
-  const chunks = useMemo(() => (streaming ? splitChunks(md) : wordFade ? [{ start: 0, content: md }] : null), [md, streaming, wordFade]);
+  // Keep the first parser (and its paragraph/selection) mounted when a stream settles. Parse the
+  // finished text as a whole document so cross-block references and footnotes still resolve.
+  const streamed = useRef(false);
+  useEffect(() => { if (streaming) streamed.current = true; }, [streaming]);
+  const retainParser = streamed.current;
+  const chunks = useMemo(() => streaming ? splitChunks(md) : wordFade || retainParser ? [{ start: 0, content: md }] : null, [md, streaming, wordFade, retainParser]);
   // A finished block: its tree from the cache when this text was drawn with the same plugins and links before.
   const tree = useMemo(
     () =>

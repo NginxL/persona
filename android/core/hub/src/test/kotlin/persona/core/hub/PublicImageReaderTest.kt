@@ -59,6 +59,19 @@ class PublicImageReaderTest {
         }
     }
 
+    @Test fun aConnectorAvatarIsAnAuthenticatedHubGetAtItsExactPath() = runBlocking {
+        MockWebServer().use { hub ->
+            val transport = HttpInboxAssistantTransport("scope", hub.url("/").toString(), "test-token", OkHttpClient(), reader())
+            val ref = "/api/v1/avatars/telegram/YS51MS41MDE?size=144"
+            hub.enqueue(MockResponse().setBody("connector"))
+            assertArrayEquals("connector".toByteArray(), transport.avatar(ref))
+            val request = hub.takeRequest()
+            assertEquals("GET", request.method)
+            assertEquals(ref, request.path)
+            assertEquals("Bearer test-token", request.getHeader("Authorization"))
+        }
+    }
+
     @Test fun aFullUrlOnTheHubStillGoesThroughThePairing() = runBlocking {
         MockWebServer().use { hub ->
             val transport = HttpInboxAssistantTransport("scope", hub.url("/").toString(), "test-token", OkHttpClient(), reader())

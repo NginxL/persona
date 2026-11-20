@@ -40,6 +40,18 @@ export interface CronPreview {
   next_runs: string[] | null;
 }
 
+export interface TaskExecution {
+  machine_id: string;
+  launcher: string;
+  agent?: string;
+  model?: string;
+  effort?: string;
+  runtime?: string;
+  cwd?: string;
+  permission_mode?: string;
+  fingerprint?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -64,6 +76,13 @@ export interface Task {
   /** A conversation runs go into ("Continue the original chat"); empty = the task's own one. */
   session_id?: string;
   launcher?: string;
+  model?: string;
+  model_revision?: number;
+  execution_machine_id?: string;
+  cwd?: string;
+  execution?: TaskExecution;
+  execution_error?: string;
+  run_execution?: TaskExecution;
   permission_mode?: string;
   effort?: string;
   /** "Push when done" (hubs with the task_push feature): "" every run's answer, "asked" only what a run sends with notify_user.
@@ -115,6 +134,9 @@ export function grantKinds(task: Pick<Task, "start_grant">): GrantKind[] {
 }
 
 export interface Run {
+  conversation?: "source" | "resumed" | "new";
+  conversation_reason?: string;
+  execution?: TaskExecution;
   id: string;
   kind: string;
   ref_id: string;
@@ -305,10 +327,22 @@ export function effortLabel(id?: string): string {
   return EFFORTS.find((e) => e.id === id)?.title ?? id;
 }
 
-/** What it runs with when that isn't the default, in a few words: "claude-fast · Auto · Low thinking"; `danger` for "Allow all".
+type TaskLauncherName = Named & { agent?: string; agent_type?: string };
+
+/** The same effective launcher/backend/model/effort line, with metadata from its execution computer. */
+export function taskExecutionSummary(ex: Pick<TaskExecution, "launcher" | "agent" | "model" | "effort">, names: readonly TaskLauncherName[] | undefined, fallback: string): string {
+  const title = launcherTitle(ex.launcher, names);
+  const known = names?.find((l) => l.name === ex.launcher);
+  const agent = ex.agent || known?.agent_type || known?.agent || (["claude", "codex"].includes(ex.launcher) ? ex.launcher : "");
+  return [title || fallback, agent !== title ? agent : "", ex.model || fallback, ex.effort || fallback].filter(Boolean).join(" · ");
+}
+
+/** The effective execution context, or a legacy task's explicit settings; `danger` for "Allow all".
  *  The launcher by its display name from `names` (#5029). */
-export function runsWith(task: Pick<Task, "launcher" | "permission_mode" | "effort">, names?: readonly Named[]): { text: string; danger: boolean } | null {
-  const parts = [task.launcher && launcherTitle(task.launcher, names), modeLabel(task.permission_mode), task.effort ? t("lib-routines.effort", { effort: effortLabel(task.effort) }) : ""].filter(Boolean);
+export function runsWith(task: Pick<Task, "launcher" | "model" | "permission_mode" | "effort" | "execution">, names?: readonly TaskLauncherName[]): { text: string; danger: boolean } | null {
+  const parts = (task.execution
+    ? [taskExecutionSummary(task.execution, names, t(task.launcher ? "assistant-taskeditor.follow_launcher" : "assistant-taskeditor.follow_assistant")), modeLabel(task.permission_mode)]
+    : [task.launcher && launcherTitle(task.launcher, names), modeLabel(task.permission_mode), task.effort ? t("lib-routines.effort", { effort: effortLabel(task.effort) }) : ""]).filter(Boolean);
   return parts.length ? { text: parts.join(" · "), danger: task.permission_mode === BYPASS } : null;
 }
 
@@ -323,10 +357,25 @@ function pastUntil(d: Task, now: Date): string | null {
   return t("lib-routines.error_until");
 }
 
+export function taskStartsFresh(task: Pick<Task, "repeat" | "fresh_each_run">): boolean {
+  return task.repeat !== "once" && !!task.fresh_each_run;
+}
+
+/** Source chats retain their context, including legacy tasks whose launcher/effort fields were inert. */
+export function taskExecutionNeedsOwnChat(d: Task, saved?: Task | null): boolean {
+  if (!d.session_id || taskStartsFresh(d)) return false;
+  const legacy = saved && saved.session_id === d.session_id && !saved.model && !saved.cwd && !saved.execution_machine_id &&
+    !taskStartsFresh(saved) &&
+    (["launcher", "effort"] as const).every((key) => (d[key] ?? "").trim() === (saved[key] ?? "").trim());
+  return !!d.model?.trim() || !!d.execution_machine_id?.trim() || !!d.cwd ||
+    (!legacy && !!(d.launcher?.trim() || d.effort?.trim()));
+}
+
 /** What the editor checks before saving (the hub checks the same and says why in Chinese): null = fine. */
-export function validateTask(d: Task, now: Date): string | null {
+export function validateTask(d: Task, now: Date, saved?: Task | null): string | null {
   if (d.repeat !== "once" && !d.title.trim()) return t("lib-routines.error_title");
   if (!d.prompt.trim()) return t("lib-routines.error_prompt");
+  if (taskExecutionNeedsOwnChat(d, saved)) return t("assistant-taskeditor.execution_own_chat");
   switch (d.repeat) {
     case "daily":
       if (!HHMM.test(d.time ?? "")) return t("lib-routines.error_time");
@@ -356,6 +405,9 @@ export function validateTask(d: Task, now: Date): string | null {
 export function sameTask(a: Task, b: Task): boolean {
   if (a.title.trim() !== b.title.trim() || a.prompt.trim() !== b.prompt.trim() || a.repeat !== b.repeat || a.enabled !== b.enabled) return false;
   if ((a.session_id ?? "") !== (b.session_id ?? "")) return false;
+  for (const key of ["launcher", "model", "effort", "cwd", "execution_machine_id"] as const) {
+    if (key === "cwd" ? (a.cwd ?? "") !== (b.cwd ?? "") : (a[key] ?? "").trim() !== (b[key] ?? "").trim()) return false;
+  }
   if ((a.permission_mode ?? "") !== (b.permission_mode ?? "")) return false;
   if ((a.push ?? "") !== (b.push ?? "")) return false;
   if ((a.inbox ?? "") !== (b.inbox ?? "")) return false;
@@ -392,7 +444,7 @@ function untilBody(d: Task, saved?: Task | null): string | null | undefined {
   return draft ? draft.toISOString() : null;
 }
 
-/** The JSON for POST (no `saved`) or PUT. Models follow Models › Main chat; tasks only configure permissions.
+/** The JSON for POST (no `saved`) or PUT. Execution overrides are sparse; empty explicitly restores inheritance.
  *  `push` goes only when changed from `saved`. `session_id` "" makes runs use the task's own conversation; `at` is left out when there is none (Go can't read "").
  *  `until` follows untilBody: omit to keep, null to clear. Changed state text includes the revision the editor started with. */
 export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> {
@@ -409,6 +461,12 @@ export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> 
     session_id: d.session_id ?? "",
     permission_mode: d.permission_mode ?? "",
   };
+  for (const key of ["launcher", "model", "effort", "cwd", "execution_machine_id"] as const) {
+    const value = key === "cwd" ? d.cwd ?? "" : (d[key] ?? "").trim();
+    const previous = key === "cwd" ? saved?.cwd ?? "" : (saved?.[key] ?? "").trim();
+    if (value !== previous) body[key] = value;
+  }
+  if (["launcher", "model", "effort", "cwd", "execution_machine_id"].some((key) => key in body)) body.model_revision = saved?.model_revision ?? 0;
   const at = d.repeat === "daily" || d.repeat === "cron" ? null : parseTime(d.at);
   if (at) body.at = at.toISOString();
   const until = untilBody(d, saved);
@@ -565,8 +623,8 @@ export function runStatusWord(r: Pick<Run, "status">): string {
 
 /** "Run manually" / the error / "On time" / "21 seconds late" / "3 minutes late" / "2 hours late". */
 export function runDetail(r: Run): string {
-  if (r.manual) return t("lib-routines.run_manual");
   if (r.status !== "ok") return r.error || runStatusWord(r);
+  if (r.manual) return t("lib-routines.run_manual");
   const at = parseTime(r.at), due = parseTime(r.due);
   if (!at || !due) return runStatusWord(r);
   const late = (at.getTime() - due.getTime()) / 1000;

@@ -172,12 +172,30 @@ func msTime(s string) time.Time {
 
 // Content is a message read into what Persona passes on: its text (Markdown-ish) and the media in it to download.
 type Content struct {
-	Text  string
-	Media []Media
+	Text      string
+	Media     []Media
+	postLinks []postLink
 	// Forward: a merged forward; its messages are read with Client.Message.
 	Forward bool
 	// Sticker: a sticker carries no request; accept it silently instead of starting an Agent turn.
 	Sticker bool
+}
+
+// A received post supplies a link's display text separately from its destination.
+type postLink struct{ label, markdown string }
+
+// CutPostLink recognizes a leading link rendered from a real rich-text element, including
+// labels or destinations containing brackets and parentheses.
+func (c Content) CutPostLink(text string) (label, rest string, found bool) {
+	if !strings.HasPrefix(text, "[") {
+		return "", text, false
+	}
+	for _, link := range c.postLinks {
+		if rest, ok := strings.CutPrefix(text, link.markdown); ok {
+			return link.label, rest, true
+		}
+	}
+	return "", text, false
 }
 
 // Media is an image or file in a message.
@@ -302,15 +320,19 @@ type richNode struct {
 }
 
 // writeNodes renders nodes onto b: text as it stands, links as Markdown links, at nodes as @name, code blocks fenced.
-// Pictures and videos are a placeholder; media, when not nil, collects them to download. A card's note renders its
+// Pictures and videos are a placeholder; a post also keeps their download references and its link labels. A card's note renders its
 // elements, a button or a select menu its label. mentions give names for at nodes with only a user_id.
-func writeNodes(b *strings.Builder, nodes []richNode, mentions []Mention, media *[]Media) {
+func writeNodes(b *strings.Builder, nodes []richNode, mentions []Mention, post *Content) {
 	for _, n := range nodes {
 		switch n.Tag {
 		case "text", "md":
 			b.WriteString(n.Text)
 		case "a":
-			fmt.Fprintf(b, "[%s](%s)", n.Text, n.Href)
+			markup := "[" + n.Text + "](" + n.Href + ")"
+			b.WriteString(markup)
+			if post != nil {
+				post.postLinks = append(post.postLinks, postLink{nameMentionKeys(n.Text, mentions), nameMentionKeys(markup, mentions)})
+			}
 		case "at":
 			switch {
 			case n.UserName != "":
@@ -328,15 +350,15 @@ func writeNodes(b *strings.Builder, nodes []richNode, mentions []Mention, media 
 			}
 		case "img":
 			if n.ImageKey != "" {
-				if media != nil {
-					*media = append(*media, Media{Kind: "image", Key: n.ImageKey})
+				if post != nil {
+					post.Media = append(post.Media, Media{Kind: "image", Key: n.ImageKey})
 				}
 				b.WriteString("[图片]")
 			}
 		case "media":
 			if n.FileKey != "" {
-				if media != nil {
-					*media = append(*media, Media{Kind: "file", Key: n.FileKey, Name: "视频.mp4"})
+				if post != nil {
+					post.Media = append(post.Media, Media{Kind: "file", Key: n.FileKey, Name: "视频.mp4"})
 				}
 				b.WriteString("[视频]")
 			}
@@ -347,7 +369,7 @@ func writeNodes(b *strings.Builder, nodes []richNode, mentions []Mention, media 
 		case "hr":
 			b.WriteString("---")
 		case "note":
-			writeNodes(b, n.Elements, mentions, media)
+			writeNodes(b, n.Elements, mentions, post)
 		case "button", "select_static":
 			label := cmp.Or(n.Text, n.Placeholder)
 			if label == "" {
@@ -394,7 +416,7 @@ func parsePost(content string, mentions []Mention) Content {
 	}
 	for _, para := range p.Content {
 		var b strings.Builder
-		writeNodes(&b, para, mentions, &c.Media)
+		writeNodes(&b, para, mentions, &c)
 		lines = append(lines, b.String())
 	}
 	c.Text = strings.Join(lines, "\n")

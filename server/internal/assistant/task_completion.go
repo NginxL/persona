@@ -153,16 +153,21 @@ func taskAgentsSettled(t Todo, agents []proto.Session) bool {
 		return false
 	}
 	for _, c := range agents {
-		if c.Status != proto.StatusDone && c.Status != proto.StatusIdle ||
-			c.State == proto.StateWorking || c.State == proto.StateNeedsYou ||
-			c.PendingInteractions > 0 || backgroundRunning(c) {
-			return false
-		}
-		if w := c.Work; w != nil && w.Phase == proto.WorkBlocked && w.On == proto.WaitTransient && w.WakeAt != nil {
+		if !taskAgentSettled(c) {
 			return false
 		}
 	}
 	return true
+}
+
+func taskAgentSettled(c proto.Session) bool {
+	if c.Status != proto.StatusDone && c.Status != proto.StatusIdle ||
+		c.State == proto.StateWorking || c.State == proto.StateNeedsYou ||
+		c.PendingInteractions > 0 || backgroundRunning(c) {
+		return false
+	}
+	w := c.Work
+	return w == nil || w.Phase != proto.WorkBlocked || w.On != proto.WaitTransient || w.WakeAt == nil
 }
 
 // supersededAgents are the links of t another agent took over from (#6483): an unreleased link whose session is

@@ -1,10 +1,14 @@
-import { isPersonaStateDir, storedValue, storeValue } from "../lib/compatibility";
+import { useBotmuxHidden } from "../lib/agents-display";
+import { SectionAdd } from "./SectionAdd";
+import { AgentsAdd } from "./agents/AgentsAdd";
+import { isSidebarAgent } from "../lib/sidebar-agent";
+import { storedValue, storeValue } from "../lib/compatibility";
 // Beautiful UI's Sidebar Nav: workspace row, quick search, sections, one gliding highlight. Persona's main conversation
 // is the first entry (the app opens on the assistant); a new conversation and a new agent are the "+" of their sections (#1239).
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { NARROW, useMedia } from "../lib/viewport";
-import { AGENT_FILTERS, agentFilter, applyFilter, arrangeSpaces, BOTMUX_HIDDEN_KEY, botmuxAndFilter, filterCounts, isBotmux, isSpaceMuted, matchingKeys, shownFilters, unreadOf, withoutBotmux, type AgentFilter, type FilterCounts } from "../lib/agent-filter";
+import { AGENT_FILTERS, agentFilter, applyFilter, arrangeSpaces, filterCounts, isSpaceMuted, matchesFilter, matchingKeys, shownFilters, unreadOf, withoutBotmux, type AgentFilter, type FilterCounts } from "../lib/agent-filter";
 import { applyDimensionFilters, buildAgentFacets, DEFAULT_DIMENSION_FILTERS, hasActiveDimensionFilters, NO_FACETS, type AgentDimensionFilters } from "../lib/agent-chatlist-filter";
 import { getAgentListFilters, setAgentListFilters, useAgentListFilters } from "../lib/agent-list-filters";
 import { AGENT_SORT_KEY, AGENT_SORTS, agentSort, byUpdated, machineTreeByUpdate, projectsByUpdate, repoMachinesByUpdate, todoTreeByUpdate, type AgentSort } from "../lib/agent-sort";
@@ -28,6 +32,7 @@ import { SidebarDirectionRow } from "./SidebarDirections";
 import { ConversationRowMenu } from "./ConversationMenu";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
+import { useScrollMemory } from "../lib/scroll-memory";
 import { retryFullAgentSessions, useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { getState, refresh, refreshTodos, useHubUnreachable, useStore } from "../lib/store";
 import { SESSIONS_SIDE_FOLD_FEATURE } from "../lib/side-fold";
@@ -38,7 +43,7 @@ import { openTodoFromTag, sortTodos, TODO_STATUS_INFO, type TodoStatus } from ".
 import type { Machine, Session } from "../lib/types";
 import { Collapse, cx, EASE, Kbd, Menu, sidebarFoldMotion, useMenu, useNow, type MenuItem } from "../ui/atoms";
 import { StatusMark } from "../ui/StatusMark";
-import { Icon, type IconName } from "../ui/icons";
+import { Icon } from "../ui/icons";
 import { HerdrNotices as HerdrNoticesContent } from "./agents/HerdrNotices";
 import { HubNoticeLine as HubNoticeLineContent } from "./agents/HubNoticeRow";
 import { DeleteSessionDialog, RenameDialog, RenameSpaceDialog } from "./chat/SessionDialogs";
@@ -63,12 +68,11 @@ import { markAllSeenLabel, stateCount } from "../lib/state-labels";
 import { PagedSessionList, type PagedQuickFilters } from "./agents/PagedSessionList";
 import { ListError } from "../ui/ListError";
 import { SESSION_LIST_STYLE } from "../ui/list-metrics";
-import { normalizePath } from "../lib/files";
 import { RUNTIME_AGENTS_PATH, supportsPagedAgents, runtimeActiveAt, runtimeAgents, runtimeIdentity, runtimeNeedsYou, runtimeOrder, runtimeParentIdentity, runtimePlace, runtimeRemoval } from "../lib/runtime-list";
 import { SESSIONS_CATALOG_FEATURE, SESSIONS_JUST_FINISHED_FEATURE, SESSIONS_QUICK_FILTERS_FEATURE, SESSIONS_TODO_FEATURE, type GroupDimension, type TodoNames } from "../lib/session-groups";
 import { type ListFilters } from "../lib/session-list";
 import { NoComputers, useAddComputer } from "./machines/AddComputerEntry";
-import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
+import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, pageIconStyle, pageLabel, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
 import { NavRow, PersonalAgents, PersonaRow, SessionRow, SubHeading } from "./SidebarRows";
 import { GroupBranch, LooseSection, MachineSection, RepoMachineSection, SessionTally, type SpaceMenuFn, type WorkspaceTreeActions, SpaceSection, TodoTreeView } from "./SidebarTree";
 import { CollapseButton, PagesTally } from "./SidebarRail";
@@ -345,7 +349,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
         <button type="button" onClick={onSearch} className="touch-hit mb-1 flex h-8 w-full items-center gap-2 rounded-control bg-inset px-2.5 text-left shadow-hairline transition-colors hover:bg-hover">
           <Icon name="search" size={12} stroke={2} className="text-ink-3" />
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{t("sidebar.search_sessions")}</span>
-          <span className="hidden sm:inline-flex"><Kbd>{searchHint}</Kbd></span>
+          <span className="hidden sm:inline-flex [@media(hover:none)]:hidden"><Kbd>{searchHint}</Kbd></span>
         </button>
       </div>
 
@@ -369,6 +373,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
 
         {chats && (
           <Section
+            top
             title={t("sidebar.persona_chats")}
             folded={personaFolded}
             onToggle={togglePersona}
@@ -437,6 +442,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
 
         {workBrowserReady ? <PendingAgents route={route} reg={reg} hover={hover} go={go} onNewAgent={onNewAgent} onNavigate={onNavigate} />
           : !(narrow && route.name === "agent-list") && <AgentsBlock reg={reg} hover={hover} activeKey={activeKey} go={go} onNewAgent={onNewAgent} onNavigate={onNavigate} workspaceActions={workspaceActions} foldable />}
+        {!workBrowserReady && <NavRow k="terminal" reg={reg} hover={hover} active={activeKey === "terminal"} to={{ name: "terminal" }} go={go} label={t("work-entry.title")} icon="clock" />}
       </div>
       {convMenu && <ConversationRowMenu s={convMenu.s} main={convMenu.s.session_id === assistant?.main} leader={isLeader(convMenu.s.session_id)} builtIn={isBackgroundSupervisor(assistant, convMenu.s.session_id)} anchor={convMenu.anchor} at={convMenu.at} onClose={() => setConvMenu(null)} />}
       {/* subscription rate-limit windows (#2432): nothing is drawn without data */}
@@ -457,7 +463,7 @@ function PendingAgents({ route, reg, hover, go, onNewAgent, onNavigate }: {
   const rows = useMemo(() => sidebarPending(sessions, interactions, answered), [sessions, interactions, answered]);
   const [folded, toggle] = useFolded("work-pending", false, { all: false });
   return (
-    <Section title={t("work-entry.pending")} folded={folded} onToggle={toggle} right={<SectionAdd label={t("sidebar.new_agent")} onClick={onNewAgent} />}>
+    <Section top title={t("work-entry.pending")} folded={folded} onToggle={toggle} right={<AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} />}>
       {loaded && !rows.length && <p className="px-2 py-1.5 text-[12px] text-ink-3">{t("work-entry.pending_empty")}</p>}
       {rows.map((row) => {
         const card = row.cards[0];
@@ -483,11 +489,15 @@ export function AgentsList({ route, onNewAgent, workspaceActions }: { route: Rou
   const bare = useStore((s) => s.loaded && s.machines.length === 0 && Object.keys(s.launches).length === 0);
   const none = useAgentSessions().length === 0 && bare;
   const adding = useAddComputer();
+  // Back from an Agent it opened lands where the list was; a fresh visit starts at the top
+  const scroller = useRef<HTMLDivElement>(null);
+  useScrollMemory(scroller, "/agents");
   return (
-    <div data-row-scroller className="h-full overflow-y-auto overscroll-contain">
+    <div ref={scroller} data-row-scroller className="h-full overflow-y-auto overscroll-contain">
       <div ref={nav} onMouseLeave={() => hover(null)} className="relative mx-auto max-w-[640px] px-2.5 pb-6">
         {highlight}
         {none ? <NoComputers body={t("agentspage.no_computers_body")} onAdd={adding.open} /> : <AgentsBlock reg={reg} hover={hover} activeKey={activeKey} go={go} onNewAgent={onNewAgent} workspaceActions={workspaceActions} add={false} />}
+        <NavRow k="terminal" reg={reg} hover={hover} active={activeKey === "terminal"} to={{ name: "terminal" }} go={go} label={t("work-entry.title")} icon="clock" />
       </div>
       {adding.dialog}
     </div>
@@ -499,7 +509,7 @@ export function AgentsList({ route, onNewAgent, workspaceActions }: { route: Rou
 function PageGroup({ group, more, first, reg, hover, activeKey, go }: { group: PageSection<NavPage>; more: NavPage[]; first: boolean; reg: RegFn; hover: (k: string | null) => void; activeKey: string; go: GoFn }) {
   const [folded, toggle] = useFolded(group.id ? `pages:${group.id}` : "pages", false, { all: false, holds: more.some((p) => p.k === activeKey) });
   return (
-    <Section title={group.title ?? t("sidebar.pages")} folded={folded} onToggle={toggle} right={folded ? <PagesTally pages={[...group.pages, ...more]} /> : undefined} first={first}>
+    <Section top title={group.title ?? t("sidebar.pages")} folded={folded} onToggle={toggle} right={folded ? <PagesTally pages={[...group.pages, ...more]} /> : undefined} first={first}>
       {group.pages.map((p) => <NavRow key={p.k} {...p} reg={reg} hover={hover} active={activeKey === p.k} go={go} />)}
       {more.length > 0 && <MorePages more={more} reg={reg} hover={hover} activeKey={activeKey} go={go} />}
     </Section>
@@ -526,11 +536,11 @@ export function NavGrid({ pages, more = [], activeKey, go, onNavigate }: { pages
             href={href(p.to)}
             onClick={go(p.to)}
             title={p.title ?? p.label}
-            aria-label={p.badge !== undefined ? `${p.label} ${p.badge}` : p.label}
+            aria-label={pageLabel(p)}
             aria-current={active ? "page" : undefined}
             className={cx("relative z-10 flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-[9px] px-0.5 py-1.5 transition-[background-color,transform] duration-150 active:scale-[0.96]", active ? "bg-hover" : "hover:bg-hover")}
           >
-            <span className={cx("relative", active ? "text-ink" : "text-ink-3")}>
+            <span className={cx("relative", active ? "text-ink" : "text-ink-3")} style={pageIconStyle(p.color, active)}>
               <Icon name={p.icon} size={17} stroke={1.8} />
               {p.badge !== undefined && (
                 <span className={cx("absolute -top-1.5 left-2.5 flex h-4 min-w-4 items-center justify-center whitespace-nowrap rounded-full px-1 text-[10px] font-semibold tabular-nums", BADGE_CLASS[p.badgeTone ?? "accent"])}>{p.badge}</span>
@@ -575,7 +585,7 @@ function MorePages({ more, reg, hover, activeKey, go }: { more: NavPage[]; reg: 
         type="button"
         onClick={toggle}
         aria-expanded={!folded}
-        title={counted.map((p) => `${p.label} ${p.badge}`).join(t("sidebar.list_separator")) || undefined}
+        title={counted.map(pageLabel).join(t("sidebar.list_separator")) || undefined}
         className="touch-hit relative z-10 flex w-full items-center gap-2 rounded-[7px] px-2 sidebar-row text-left transition-[background-color,transform] duration-150 hover:bg-hover active:scale-[0.98] [@media(pointer:coarse)]:min-h-11"
       >
         <span className="text-ink-3"><Icon name="more" size={14} stroke={1.8} /></span>
@@ -646,12 +656,17 @@ function AgentsBlock(props: AgentsBlockProps) {
 
 /** The Agents block's title, the paged list's as the complete list's (#6662): unpinning changes nothing above the list. */
 const AGENTS_TITLE = "min-w-0 flex-1 text-[11px] font-semibold text-ink-3";
+/** The title row's icon buttons (Filter, ⋯, +) sit 4 px apart: a touch screen gives each a real 44 px box, as the fold-all
+ *  button has, since centred touch-hit squares would overlap and the later button would take the earlier one's taps. */
+const TITLE_ICON_TOUCH = "[@media(pointer:coarse)]:size-11";
+/** And the row drops its end padding there, so its last box ends where the rows' ⋯ boxes do, its icon in their column. */
+const TITLE_ROW_TOUCH = "[@media(pointer:coarse)]:pr-0";
 
 /** The Agents title row's ⋯ (Agent list options): the sort and the archived Agents; the clock while sorted by update. */
 function ListMenuButton({ sorted, open, onClick }: { sorted: boolean; open: boolean; onClick: React.MouseEventHandler<HTMLButtonElement> }) {
   const label = sorted ? t("sidebar.list_menu_sorted", { sort: AGENT_SORTS[1].label }) : t("sidebar.list_menu");
   return (
-    <button type="button" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={onClick} className={cx("touch-hit relative z-10 flex size-5 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink-2", sorted ? "text-accent" : "text-ink-3", open && "bg-hover")}>
+    <button type="button" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={onClick} className={cx("touch-hit relative z-10 flex size-5 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink-2", TITLE_ICON_TOUCH, sorted ? "text-accent" : "text-ink-3", open && "bg-hover")}>
       <Icon name={sorted ? "clock" : "more"} size={12} stroke={2} />
     </button>
   );
@@ -721,33 +736,23 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
     const titles = new Map(open.map((td) => [td.id, td.title]));
     return { order: open.map((td) => td.id), title: (id) => titles.get(id) };
   }, [todos]);
-  // The complete list's quick filters and botmux switch, kept where it keeps them, so a pin or an unpin keeps the chip
-  // too; on a hub that cannot select them (no sessions_quick_filters), the paged list's own state chips.
   const quickFilters = useStore((s) => s.features.includes(SESSIONS_QUICK_FILTERS_FEATURE));
-  const [filter, setFilter] = useState(() => agentFilter(storedValue("persona.agentFilter")));
-  const [botmuxHidden, setBotmuxHidden] = useState(() => botmuxAndFilter(filter, localStorage.getItem(BOTMUX_HIDDEN_KEY) === "1", "filter").hidden);
-  const saveBotmuxHidden = useCallback((next: boolean) => {
-    localStorage.setItem(BOTMUX_HIDDEN_KEY, next ? "1" : "0");
-    setBotmuxHidden(next);
-  }, []);
+  const botmuxHidden = useBotmuxHidden();
+  const [savedFilter, setFilter] = useState(() => agentFilter(storedValue("persona.agentFilter")));
+  const [larkCount, setLarkCount] = useState<number>();
+  const reportCounts = useCallback((counts: FilterCounts | undefined) => setLarkCount(counts?.feishu), []);
+  const filter = (botmuxHidden || larkCount === 0) && savedFilter === "feishu" ? "all" : savedFilter;
   const chooseFilter = useCallback((f: AgentFilter) => {
-    if (botmuxAndFilter(f, botmuxHidden, "filter").hidden !== botmuxHidden) saveBotmuxHidden(false);
     storeValue("persona.agentFilter", f);
     setFilter(f);
     hover(null);
-  }, [botmuxHidden, hover, saveBotmuxHidden]);
-  const toggleBotmux = useCallback(() => {
-    const next = botmuxAndFilter(filter, !botmuxHidden, "botmux");
-    saveBotmuxHidden(next.hidden);
-    if (next.filter !== filter) chooseFilter(next.filter);
-    hover(null);
-  }, [filter, botmuxHidden, saveBotmuxHidden, chooseFilter, hover]);
-  const quick = useMemo((): PagedQuickFilters | undefined => quickFilters ? {
-    select: QUICK_SELECT[filter],
+  }, [hover]);
+  const quick = useMemo((): PagedQuickFilters | undefined => quickFilters || botmuxHidden ? {
+    select: quickFilters ? QUICK_SELECT[filter] : SHOW_ALL,
     exclude: botmuxHidden ? HIDE_BOTMUX : SHOW_ALL,
-    // the switch shows while there are Lark sessions to hide, or they are hidden
-    bar: (counts) => <FilterBar selection={filter} counts={counts ?? NO_COUNTS} onChoose={chooseFilter} botmux={(counts?.feishu ?? 0) > 0 || botmuxHidden ? { hidden: botmuxHidden, onToggle: toggleBotmux } : undefined} />,
-  } : undefined, [quickFilters, filter, botmuxHidden, chooseFilter, toggleBotmux]);
+    onCounts: reportCounts,
+    bar: (counts) => quickFilters ? <FilterBar selection={filter} counts={counts ?? NO_COUNTS} onChoose={chooseFilter} /> : null,
+  } : undefined, [quickFilters, filter, botmuxHidden, chooseFilter, reportCounts]);
   const groupsRef = useRef<HTMLDivElement>(null);
   // the words ⌘K's "Filter Agents list" put on the list, its search (#6589): only its words, which the hub matches as
   // text; the Filter menu's choices are the complete list's, so a chip shows here only what this list is narrowed by
@@ -774,11 +779,11 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
   }), [grouping, todoNames, groupings, chooseGrouping, quick, byUpdate, listQuery, queryOnly, setQuery, todosUnread]);
   return <div data-sidebar-agents ref={groupsRef}>
     {/* the complete list's title row (#6662): fold all, the ⋯ with its sorts and the archived Agents, and "+" */}
-    <div className={SESSION_LIST_STYLE.heading}>
+    <div className={cx(SESSION_LIST_STYLE.heading, TITLE_ROW_TOUCH)}>
       <span className={AGENTS_TITLE}>Agents</span>
       <GroupFoldButton groups={groupsRef} onAction={() => hover(null)} />
       {listItems.length > 0 && <ListMenuButton sorted={byUpdate} open={Boolean(listMenu.anchor)} onClick={listMenu.open} />}
-      {add && <SectionAdd label={t("sidebar.new_agent")} onClick={onNewAgent} />}
+      {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} className={TITLE_ICON_TOUCH} />}
     </div>
     {listMenu.anchor && <Menu anchor={listMenu.anchor} onClose={listMenu.close} align="right" items={listItems} />}
     <HubNoticeLine />
@@ -800,15 +805,6 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
   </div>;
 }
 
-function isSidebarAgent(session: Session): boolean {
-  if (session.assistant || session.space === "health") return false;
-  // Older hubs may report the health directory without a space marker. Match the state directory and manager name
-  // used by identity.InHealthSpace, including paths from Windows nodes.
-  const cwd = session.cwd ?? "";
-  const path = normalizePath(/^(?:[a-z]:|\\\\)/i.test(cwd) ? cwd.replaceAll("\\", "/") : cwd);
-  const parts = path.split("/");
-  return !parts.some((part, index) => isPersonaStateDir(part) && /^health(?:-m-[0-9a-f]+)?$/.test(parts[index + 1] ?? ""));
-}
 
 function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, workspaceActions, add = true, foldable = false, grouping, hubUnreachable, chooseGrouping }: AgentsBlockProps & { grouping: AgentGrouping; /** useHubUnreachable */ hubUnreachable: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
   // the current assistant's computers, agents and to-dos (all of them with one assistant)
@@ -865,15 +861,9 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   // the title row's ⋯ (#2812): what the grouping dropdown held besides the groupings, the sort and "Fold all" / "Unfold all"
   const listMenu = useMenu();
   // the quick filter ("All" / "Needs you" / "Unread" / "Working"), stacked on any grouping; what it showed when chosen stays (`kept`)
-  const [filter, setFilter] = useState(() => agentFilter(storedValue("persona.agentFilter")));
+  const [savedFilter, setFilter] = useState(() => agentFilter(storedValue("persona.agentFilter")));
   const [kept, setKept] = useState<ReadonlySet<string>>(() => new Set());
-  // "botmux" beside the filters (#2786): botmux sessions shown or hidden in this browser
-  const [botmuxHidden, setBotmuxHidden] = useState(() => botmuxAndFilter(filter, localStorage.getItem(BOTMUX_HIDDEN_KEY) === "1", "filter").hidden);
-  const botmuxCount = useMemo(() => all.filter(isBotmux).length, [all]);
-  const saveBotmuxHidden = useCallback((next: boolean) => {
-    localStorage.setItem(BOTMUX_HIDDEN_KEY, next ? "1" : "0");
-    setBotmuxHidden(next);
-  }, []);
+  const botmuxHidden = useBotmuxHidden();
   const listed = useMemo(() => withoutBotmux(all, botmuxHidden), [all, botmuxHidden]);
   const facets = useMemo(() => buildAgentFacets(listed, machines, pins), [listed, machines, pins]);
   const dimActive = hasActiveDimensionFilters(dimFilters);
@@ -887,6 +877,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const { live, recent: offline } = useMemo(() => splitAgentSessions(dimFiltered, machines,
     shownGrouping === "repo" && !chatList ? (s) => hasWorkspacePin(s, catalog.workspaces, catalog.manager) : undefined),
   [dimFiltered, machines, shownGrouping, chatList, catalog]);
+  const filter = savedFilter === "feishu" && !live.some((s) => matchesFilter(s, "feishu", mutes)) ? "all" : savedFilter;
   const seeded = useRef(false);
   useEffect(() => {
     // a filter saved in this browser starts from what it matches once the list has loaded
@@ -956,19 +947,11 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const filterInputs = useRef({ live, mutes });
   useLayoutEffect(() => { filterInputs.current = { live, mutes }; }, [live, mutes]);
   const choose = useCallback((f: AgentFilter) => {
-    if (botmuxAndFilter(f, botmuxHidden, "filter").hidden !== botmuxHidden) saveBotmuxHidden(false);
     storeValue("persona.agentFilter", f);
     setFilter(f);
     setKept(matchingKeys(filterInputs.current.live, f, filterInputs.current.mutes));
     hover(null);
-  }, [botmuxHidden, hover, saveBotmuxHidden]);
-  const toggleBotmux = useCallback(() => {
-    const next = botmuxAndFilter(filter, !botmuxHidden, "botmux");
-    saveBotmuxHidden(next.hidden);
-    if (next.filter !== filter) choose(next.filter);
-    hover(null);
-  }, [filter, botmuxHidden, saveBotmuxHidden, choose, hover]);
-  const botmux = useMemo(() => botmuxCount > 0 || botmuxHidden ? { hidden: botmuxHidden, onToggle: toggleBotmux } : undefined, [botmuxCount, botmuxHidden, toggleBotmux]);
+  }, [hover]);
   // Settings › Appearance › Show terminals in sidebar (off): the plain shells of each machine's terminal host, under its agents in "By machine"
   const showTerminals = useSidebarTerminals() && shownGrouping === "machine";
   const { listing: panes, refresh: refreshPanes } = usePanes(machines, showTerminals);
@@ -1034,7 +1017,8 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
     <div data-sidebar-agents ref={groupsRef}>
     <SidebarGroup className="mt-3" heading={
       <div data-sidebar-agents-controls className="pb-1">
-      <div className="group/sec relative flex items-center gap-1 px-2">
+      {/* the sidebar's top-level heading box (#10637): its controls never make it taller than Pages' or Persona chats' */}
+      <div className={cx("group/sec relative flex sidebar-heading items-center gap-1 px-2", TITLE_ROW_TOUCH)}>
         {foldable ? (
           <button type="button" aria-expanded={!folded} onClick={toggleBlock} className="touch-hit relative z-10 flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap text-left text-[11px] font-semibold text-ink-3 hover:text-ink-2">
             <span className="min-w-0 truncate">Agents</span>
@@ -1050,11 +1034,11 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
         {listItems.length > 0 && (
           <ListMenuButton sorted={byUpdate} open={Boolean(listMenu.anchor)} onClick={listMenu.open} />
         )}
-        {add && <SectionAdd label={t("sidebar.new_agent")} onClick={onNewAgent} />}
+        {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} className={TITLE_ICON_TOUCH} />}
       </div>
       <Collapse open={!folded} sidebarFold>
         <GroupingBar groupings={availableGroupings} selection={shownGrouping} onChoose={chooseGroupingOutOfChatList} />
-        <FilterBar selection={filter} counts={filterTotals} onChoose={choose} botmux={botmux} />
+        <FilterBar selection={filter} counts={filterTotals} onChoose={choose} />
       </Collapse>
       </div>
     }>
@@ -1208,12 +1192,10 @@ const GroupingBar = memo(function GroupingBar({ groupings, selection, onChoose }
   );
 });
 
-/** "All" / "Needs you" / "Unread" / "Working" with their counts (iOS QuickFilterBar): "All" and the states that have agents now; the
- * chosen one stays while it empties, so it can be left. Then "botmux" (#2786), when there are botmux sessions: a
- * show / hide switch that stacks on any filter. Hidden when there is nothing to pick. */
-const FilterBar = memo(function FilterBar({ selection, counts, onChoose, botmux }: { selection: AgentFilter; counts: FilterCounts; onChoose: (f: AgentFilter) => void; botmux?: { hidden: boolean; onToggle: () => void } }) {
+/** Quick filters describe the visible inventory; an empty Lark filter is never offered. */
+const FilterBar = memo(function FilterBar({ selection, counts, onChoose }: { selection: AgentFilter; counts: FilterCounts; onChoose: (f: AgentFilter) => void }) {
   const keys = shownFilters(selection, counts);
-  if (keys.length < 2 && !botmux) return null;
+  if (keys.length < 2) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-0.5 px-1">
       <div role="radiogroup" aria-label={t("sidebar.quick_filters")} className="contents">
@@ -1241,21 +1223,6 @@ const FilterBar = memo(function FilterBar({ selection, counts, onChoose, botmux 
         );
       })}
       </div>
-      {botmux && (
-        <button
-          type="button"
-          aria-pressed={!botmux.hidden}
-          title={t(botmux.hidden ? "lib-agent-filter.botmux_show" : "lib-agent-filter.botmux_hide")}
-          onClick={botmux.onToggle}
-          className={cx(
-            "touch-hit relative z-10 flex h-6 items-center gap-1 whitespace-nowrap rounded-full px-[7px] text-[11.5px] transition-[background-color,color,box-shadow] duration-150",
-            botmux.hidden ? "text-ink-3 line-through hover:bg-hover hover:text-ink-2" : "text-ink-2 hover:bg-hover hover:text-ink",
-          )}
-        >
-          <Icon name={botmux.hidden ? "x" : "check"} size={10} stroke={2.4} />
-          {t("lib-agent-filter.botmux")}
-        </button>
-      )}
     </div>
   );
 });
@@ -1310,9 +1277,3 @@ function AgentSection({ group, machines, byTodo, showHost, reg, hover, activeKey
 // A section's "+" (a new conversation, a new agent): quiet, next to the section's title.
 /** A small button at the end of a section's heading: "+" (add), or another page of the section (`icon`). */
 /** A section title's own action as an icon (New chat on Persona chats, New group…); `active`: the page it opens is open. */
-function SectionAdd({ label, to, go, onClick, icon: name = "plus", active }: { label: string; to?: Route; go?: GoFn; onClick?: () => void; icon?: IconName; active?: boolean }) {
-  const cls = cx("touch-hit relative z-10 flex size-5 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink-2", active ? "bg-hover text-ink" : "text-ink-3");
-  const icon = <Icon name={name} size={12} stroke={2} />;
-  if (to && go) return <a href={href(to)} onClick={go(to)} title={label} aria-label={label} aria-current={active ? "page" : undefined} className={cls}>{icon}</a>;
-  return <button type="button" onClick={onClick} title={label} aria-label={label} className={cls}>{icon}</button>;
-}

@@ -300,6 +300,22 @@ func (s *meshStore) PairTokenByHash(context.Context, string) (*db.PairToken, err
 func (s *meshStore) RedeemPairToken(context.Context, string, db.DeviceToken, string) (bool, error) {
 	return false, nil
 }
+
+// MachineLinkInUse is db.DB's without pairing codes (this store keeps none): a live link credential.
+func (s *meshStore) MachineLinkInUse(_ context.Context, machine string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tokens {
+		if t.MachineID == machine && t.Role == roleLink && !s.revoked[t.ID] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *meshStore) RevokeLinkPair(context.Context, string, string) (string, bool, error) {
+	return "", false, nil
+}
 func (s *meshStore) PutInboxItem(context.Context, string, []byte, time.Time, *time.Time) error {
 	return nil
 }
@@ -538,6 +554,9 @@ func (s *meshStore) Feed(context.Context, string, time.Time, int) ([]db.FeedRow,
 }
 func (s *meshStore) FeedItem(context.Context, string) (*db.FeedRow, error) { return nil, nil }
 func (s *meshStore) MarkFeedSent(context.Context, string, string, time.Time, json.RawMessage) ([]db.FeedRow, error) {
+	return nil, nil
+}
+func (s *meshStore) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
 	return nil, nil
 }
 func (s *meshStore) LinkTodoSpace(context.Context, string, string, string, time.Time) (string, error) {

@@ -1,0 +1,4 @@
+Example owner confirmed and it was sent (Example owner edited the text; the sent text follows):
+原文 sent
+
+Wait for the other party. If you know who, the next step and when to check, call inbox_suggest with only recap and follow (who, next, check_in or check_at); empty who means waiting for the other party's reply. Otherwise give recap only; no new suggestion. Their reply will be forwarded here.

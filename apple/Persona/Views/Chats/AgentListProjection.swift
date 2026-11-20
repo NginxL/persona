@@ -224,6 +224,7 @@ nonisolated struct AgentListProjection: Sendable {
         var multiHub = false
         var kept = Set<SessionKey>()
         var held: SessionKey?
+        var heldJustFinished = false
         var preferences: [String: Preferences] = [:]
         var pagedGroups = Set<String>()
         var listQuery = SessionListQuery()
@@ -247,7 +248,7 @@ nonisolated struct AgentListProjection: Sendable {
         }
 
         var order: AgentListOrder {
-            AgentListOrder(isPinned: pinned, isMuted: muted, byRank: filter == .all && sort == "state", held: held)
+            AgentListOrder(isPinned: pinned, isMuted: muted, byRank: filter == .all && sort == "state", held: held, heldJustFinished: heldJustFinished)
         }
 
         func scope(machine: String, hub: String, space: String = "", project: String = "") -> RuntimeSessionLists.Scope {
@@ -317,7 +318,8 @@ nonisolated struct AgentListProjection: Sendable {
     var hasSearchResults: Bool { !base.isEmpty || !tree.isEmpty }
 
     static func preparedSessions(_ input: Input) -> [Session] {
-        ChildSessions.fold(SideFold.fold(input.sessions, groups: input.settings.sideFold).listed, asks: input.asks)
+        let visible = input.sessions.filter { input.settings.listQuery.includeHidden || $0.hiddenByDirectory != true }
+        return ChildSessions.fold(SideFold.fold(visible, groups: input.settings.sideFold).listed, asks: input.asks)
     }
 
     /// The hub's paged totals for the same immutable space, with manager routing and hub scoping preserved.
@@ -462,7 +464,7 @@ nonisolated struct AgentListProjection: Sendable {
                     let quiet = !repo.structured && settings.filter == .all && sessions.allSatisfy { !order.stays($0) }
                     result.repositories[repo.id] = Repository(sessions: sessions,
                         space: spaces.count == 1 && spaces[0].spaceID != "-" ? spaces[0] : nil,
-                        counts: counts, unread: sessions.filter { $0.state == .unread }.map(\.key), quiet: quiet)
+                        counts: counts, unread: sessions.filter { $0.needsSeen(muted: settings.muted($0)) }.map(\.key), quiet: quiet)
                     for worktree in repo.worktrees {
                         func prepare(_ item: RepoTree.Worktree) {
                             result.rows[item.id] = partition(item.sessions, settings: settings)

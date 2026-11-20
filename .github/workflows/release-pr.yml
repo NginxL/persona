@@ -1,0 +1,681 @@
+name: release-pr
+
+# A release is an explicit PR, not a side effect of an ordinary feature merge.
+# This workflow never has signing credentials and never publishes a Release.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: release-pr-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Verify release PR and pin its merge result
+    if: >-
+      github.event_name == 'push' || startsWith(github.event.pull_request.title, 'release:') &&
+      (github.event_name == 'push' || github.event.pull_request.base.ref == 'main') &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'push' || github.event.pull_request.user.login == 'chyroc')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      channel: ${{ steps.source.outputs.channel }}
+      pr: ${{ steps.plan.outputs.pr }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      build: ${{ steps.plan.outputs.build }}
+      commit: ${{ steps.plan.outputs.commit }}
+      source_commit: ${{ steps.plan.outputs.source_commit }}
+      check_run_id: ${{ steps.merge-check.outputs.id }}
+    steps:
+      - name: Resolve and validate the release PR
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+          PR_JSON: ${{ runner.temp }}/release-pr.json
+          PR_LIST_JSON: ${{ runner.temp }}/release-pr-list.json
+          PR_REST_JSON: ${{ runner.temp }}/release-pr-rest.json
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" = push ]]; then
+            commit="${{ github.sha }}"
+            gh api "repos/$REPOSITORY/commits/$commit/pulls" > "$PR_LIST_JSON"
+            COMMIT="$commit" python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          commit=os.environ['COMMIT']
+          candidates=[p for p in json.loads(Path(os.environ['PR_LIST_JSON']).read_text()) if p.get('state')=='closed' and (p.get('merge_commit_sha') or p.get('mergeCommit',{}).get('oid'))==commit and p.get('title','').startswith('release:') and p.get('user',{}).get('login')=='chyroc']
+          if len(candidates)!=1:
+              print('No unique merged release PR for this main commit; not a release run')
+              Path(os.environ['PR_JSON']).write_text('{}')
+              raise SystemExit(0)
+          Path(os.environ['PR_JSON']).write_text(json.dumps(candidates[0]))
+          pr=json.loads(Path(os.environ['PR_JSON']).read_text())
+          pr['state']='MERGED'
+          pr['isDraft']=pr.get('draft',False)
+          pr['baseRefName']=pr.get('base',{}).get('ref','main')
+          pr['headRefOid']=pr.get('head',{}).get('sha','')
+          pr['headRepository']={'nameWithOwner':pr.get('head',{}).get('repo',{}).get('full_name','')}
+          pr['author']=pr.get('user',{})
+          pr['mergeCommit']={'oid':pr.get('merge_commit_sha')}
+          Path(os.environ['PR_JSON']).write_text(json.dumps(pr))
+          PY
+          else
+            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json number,title,state,isDraft,baseRefName,headRefOid,headRepository,author,mergeCommit > "$PR_JSON"
+            gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '{merge_commit_sha}' > "$PR_REST_JSON"
+            python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          pr=json.loads(Path(os.environ['PR_JSON']).read_text())
+          pr['mergeCommit']={'oid':json.loads(Path(os.environ['PR_REST_JSON']).read_text())['merge_commit_sha']}
+          Path(os.environ['PR_JSON']).write_text(json.dumps(pr))
+          PY
+          fi
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" = push ]] && ! python3 -c 'import json,sys; raise SystemExit(0 if json.load(open(sys.argv[1])) else 1)' "$PR_JSON"; then
+            printf 'number=0\n' >> "$GITHUB_OUTPUT"
+            printf 'channel=release\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf 'number=%s\n' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["number"])' "$PR_JSON")" >> "$GITHUB_OUTPUT"
+          channel=release
+          if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["title"])' "$PR_JSON")" == *-beta.* ]]; then channel=beta; fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          # A PR's proposed merge result, not its possibly stale head or an arbitrary branch.
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify PR authorization and create the immutable-source plan
+        id: plan
+        if: steps.source.outputs.number != '0'
+        env:
+          REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ steps.source.outputs.channel }}
+          PR_JSON: ${{ runner.temp }}/release-pr.json
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          GIT_COMMIT: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" = push ]]; then
+            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-pr --pr-json "$PR_JSON" --merged --commit "$GIT_COMMIT")"
+          else
+            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-pr --pr-json "$PR_JSON")"
+          fi
+          python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" next-version --version "$version"
+          current_build="$(python3 - <<'PY'
+          import json,subprocess,os
+          repository=os.environ['REPOSITORY']
+          build=0
+          try:
+              data=json.loads(subprocess.check_output(['gh','release','download','beta-channel','--repo',repository,'--pattern','latest.json','--output','-'],text=True,stderr=subprocess.DEVNULL))
+              build=max(build,int(data.get('build',0)))
+          except Exception:
+              pass
+          try:
+              data=json.loads(subprocess.check_output(['gh','release','view','--repo',repository,'--json','tagName'],text=True))
+              data=json.loads(subprocess.check_output(['gh','release','download',data['tagName'],'--repo',repository,'--pattern','latest.json','--output','-'],text=True))
+              build=max(build,int(data.get('build',0)))
+          except Exception:
+              pass
+          print(build)
+          PY
+          )"
+          build="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" next-build --current "$current_build")"
+          test "$GIT_COMMIT" = "$MERGE_COMMIT"
+          mkdir -p release
+          python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" plan \
+            --version "$version" --commit "$GIT_COMMIT" --pr "$PR_NUMBER" --merge-commit "$MERGE_COMMIT" --build "$build" \
+            --source-commit "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["headRefOid"])' "$PR_JSON")" --out release/plan.json
+          python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" check-plan --plan release/plan.json --commit "$GIT_COMMIT"
+          {
+            printf 'pr=%s\n' "$PR_NUMBER"
+            printf 'channel=%s\n' "$CHANNEL"
+            printf 'version=%s\n' "$version"
+            printf 'tag=v%s\n' "$version"
+            printf 'build=%s\n' "$(python3 -c 'import json; print(json.load(open("release/plan.json"))["build"])')"
+            printf 'commit=%s\n' "$GIT_COMMIT"
+            printf 'source_commit=%s\n' "$(python3 -c 'import json; print(json.load(open("release/plan.json"))["source_commit"])')"
+          } >> "$GITHUB_OUTPUT"
+      - name: Bind the required check to the exact proposed merge result
+        id: merge-check
+        if: steps.plan.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+          PR_NUMBER: ${{ steps.plan.outputs.pr }}
+        run: |
+          set -euo pipefail
+          test "$COMMIT" = "${{ github.event.pull_request.merge_commit_sha || github.sha }}"
+          python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" pending --commit "$COMMIT" --pr "$PR_NUMBER" > "$RUNNER_TEMP/release-check-id.txt"
+          printf 'id=%s\n' "$(cat "$RUNNER_TEMP/release-check-id.txt")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.source.outputs.number != '0'
+        with:
+          name: release-pr-plan-${{ steps.source.outputs.number }}
+          path: release/plan.json
+          if-no-files-found: error
+          retention-days: 2
+
+  cli-web:
+    name: Build and verify CLI and Web without publishing
+    needs: plan
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
+          path: release
+      - name: Prepare the public GitHub update source without a personal config
+        run: |
+          set -euo pipefail
+          printf 'PERSONA_CONFIG=%s\n' "$(python3 scripts/operations/ci_release_config.py public --directory "$RUNNER_TEMP/persona-public")" >> "$GITHUB_ENV"
+      - name: Verify the complete CLI/Web build from the exact merge result
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          NO_DEPLOY: '1'
+          RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
+          RUSTUP_TOOLCHAIN: '1.98.0'
+          PERSONA_RELEASE_BUILD: ${{ needs.plan.outputs.build }}
+          # The hosted TypeScript project needs more than Node's default 2 GB; keep the first-screen budget unchanged.
+          NODE_OPTIONS: '--max-old-space-size=4096'
+        run: scripts/release/publish.sh
+      - name: Bind the verified downloads to the release plan
+        run: |
+          set -euo pipefail
+          mkdir -p release/downloads
+          for path in build-publish/bin/*.gz build-publish/bin/VERSION build-publish/bin/SHA256SUMS build-publish/bin/latest.json build-publish/install.sh; do
+            test -f "$path"
+            cp "$path" "release/downloads/${path##*/}"
+          done
+          result=0
+          python3 scripts/operations/release_pr.py --repository "${{ github.repository }}" --channel "${{ needs.plan.outputs.channel }}" bind-cli-web --plan release/plan.json --downloads release/downloads || result=$?
+          if [[ "$result" -ne 0 ]]; then
+            printf 'bind-cli-web failed with exit %s; its exact error is above. These unverified artifacts are diagnostic only.\n' "$result" >&2
+            exit "$result"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-pr-cli-web-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: |
+            release/plan.json
+            release/downloads/
+          if-no-files-found: error
+          retention-days: 2
+
+  android:
+    name: Build and sign Android for the exact merge result
+    needs: plan
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: persona-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default also installs the legacy `tools` package, which the SDK repository no longer has.
+          packages: platform-tools
+      - name: Install the reviewed Android SDK, NDK and Rust targets
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools' 'ndk;29.0.14206865'
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.0
+          "$HOME/.cargo/bin/rustup" target add --toolchain 1.98.0 aarch64-linux-android x86_64-linux-android
+          printf '%s\n' "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
+          path: ${{ runner.temp }}/release-plan
+      - name: Prepare protected Android signing configuration without logging secrets
+        env:
+          PERSONA_ANDROID_CERTIFICATE_SHA256: ${{ secrets.PERSONA_ANDROID_CERTIFICATE_SHA256 }}
+          PERSONA_ANDROID_KEYSTORE_BASE64: ${{ secrets.PERSONA_ANDROID_KEYSTORE_BASE64 }}
+          PERSONA_ANDROID_KEY_ALIAS: ${{ secrets.PERSONA_ANDROID_KEY_ALIAS }}
+          PERSONA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PERSONA_ANDROID_KEYSTORE_PASSWORD }}
+          PERSONA_ANDROID_KEY_PASSWORD: ${{ secrets.PERSONA_ANDROID_KEY_PASSWORD }}
+          PERSONA_ANDROID_APPLICATION_ID: ${{ secrets.PERSONA_ANDROID_APPLICATION_ID }}
+        run: |
+          set -euo pipefail
+          python3 scripts/operations/ci_release_config.py android --directory "$RUNNER_TEMP/persona-android"
+      - name: Verify tests, R8, versionCode, source and production signature
+        env:
+          PERSONA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PERSONA_ANDROID_KEYSTORE_PASSWORD }}
+          PERSONA_ANDROID_KEY_PASSWORD: ${{ secrets.PERSONA_ANDROID_KEY_PASSWORD }}
+          RUSTUP_TOOLCHAIN: '1.98.0'
+        run: |
+          set -euo pipefail
+          python3 scripts/release/android_tag_release.py \
+            --config "$RUNNER_TEMP/persona-android/android.json" \
+            --worktree "$GITHUB_WORKSPACE" --commit "${{ needs.plan.outputs.commit }}" \
+            --version "${{ needs.plan.outputs.version }}" --receipt "$RUNNER_TEMP/android-receipt.json"
+      - name: Verify the signed APK and Android index against the release plan
+        run: |
+          set -euo pipefail
+          mkdir -p release/downloads "$RUNNER_TEMP/release-downloads"
+          cp "$RUNNER_TEMP/android-receipt.json" "$RUNNER_TEMP/release-downloads/android-receipt.json"
+          python3 - <<'PY'
+          import hashlib,json,os,shutil
+          from pathlib import Path
+          plan=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-plan/plan.json').read_text())
+          receipt=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').read_text())
+          assert receipt['commit']==plan['commit']
+          assert len(receipt['assets'])==2
+          for item in receipt['assets']:
+              path=Path(item['path'])
+              assert path.is_file()
+              assert hashlib.sha256(path.read_bytes()).hexdigest()==item['sha256']
+              shutil.copyfile(path,Path(os.environ['RUNNER_TEMP']+'/release-downloads')/item['name'])
+          index=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android.json').read_text())
+          assert index['version']==plan['version']
+          assert index['source_sha']==plan['commit']
+          assert index['name'].startswith('Persona-')
+          assert index['sha256']==hashlib.sha256(Path(os.environ['RUNNER_TEMP']+'/release-downloads',index['name']).read_bytes()).hexdigest()
+          for name in ('Persona-'+plan['version']+'-android.apk','android.json'):
+              shutil.copyfile(Path(os.environ['RUNNER_TEMP']+'/release-downloads')/name,Path('release/downloads')/name)
+          Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').unlink()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-pr-android-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads/
+          if-no-files-found: error
+          retention-days: 2
+
+  apple:
+    name: Archive and verify iPhone and Watch TestFlight
+    needs: [plan, cli-web, android]
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    runs-on: macos-latest
+    timeout-minutes: 180
+    environment: persona-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-android-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads
+      - name: Install the locked Apple build tools
+        run: |
+          set -euo pipefail
+          brew install xcodegen rustup
+          rustup toolchain install 1.98.0 --profile minimal
+      - name: Prepare protected App Store Connect configuration without logging secrets
+        env:
+          PERSONA_APPLE_API_KEY: ${{ secrets.PERSONA_APPLE_API_KEY }}
+          PERSONA_APPLE_API_KEY_ID: ${{ secrets.PERSONA_APPLE_API_KEY_ID }}
+          PERSONA_APPLE_API_ISSUER: ${{ secrets.PERSONA_APPLE_API_ISSUER }}
+          PERSONA_APPLE_APP_ID: ${{ secrets.PERSONA_APPLE_APP_ID }}
+          PERSONA_APPLE_TEAM_ID: ${{ secrets.PERSONA_APPLE_TEAM_ID }}
+          PERSONA_APP_BUNDLE_ID: ${{ secrets.PERSONA_APP_BUNDLE_ID }}
+          PERSONA_APP_GROUP: ${{ secrets.PERSONA_APP_GROUP }}
+          PERSONA_WATCH_WIDGET_BUNDLE_ID: ${{ secrets.PERSONA_WATCH_WIDGET_BUNDLE_ID }}
+          PERSONA_WATCH_APP_GROUP: ${{ secrets.PERSONA_WATCH_APP_GROUP }}
+          PERSONA_TESTFLIGHT_FEEDBACK_EMAIL: ${{ secrets.PERSONA_TESTFLIGHT_FEEDBACK_EMAIL }}
+          PERSONA_TESTFLIGHT_EXTERNAL_JSON: ${{ secrets.PERSONA_TESTFLIGHT_EXTERNAL_JSON }}
+        run: |
+          set -euo pipefail
+          python3 scripts/operations/ci_release_config.py apple --directory "$RUNNER_TEMP/persona-apple"
+          printf 'PERSONA_CONFIG=%s\n' "$RUNNER_TEMP/persona-apple/config.json" >> "$GITHUB_ENV"
+      - name: Install the Apple Distribution identity and provisioning profiles
+        env:
+          PERSONA_APPLE_DISTRIBUTION_P12_BASE64: ${{ secrets.PERSONA_APPLE_DISTRIBUTION_P12_BASE64 }}
+          PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD }}
+          PERSONA_APPLE_PROFILE_1_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_1_BASE64 }}
+          PERSONA_APPLE_PROFILE_2_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_2_BASE64 }}
+          PERSONA_APPLE_PROFILE_3_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_3_BASE64 }}
+          PERSONA_APPLE_PROFILE_4_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_4_BASE64 }}
+          PERSONA_APPLE_PROFILE_5_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_5_BASE64 }}
+          PERSONA_APPLE_PROFILE_6_BASE64: ${{ secrets.PERSONA_APPLE_PROFILE_6_BASE64 }}
+          PERSONA_SIGNING_KEYCHAIN: ${{ runner.temp }}/persona-release.keychain
+          PERSONA_SIGNING_KEYCHAIN_PASSWORD: ${{ secrets.PERSONA_SIGNING_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$PERSONA_APPLE_DISTRIBUTION_P12_BASE64"
+          test -n "$PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD"
+          test -n "$PERSONA_APPLE_PROFILE_1_BASE64"
+          test -n "$PERSONA_APPLE_PROFILE_2_BASE64"
+          test -n "$PERSONA_APPLE_PROFILE_3_BASE64"
+          test -n "$PERSONA_APPLE_PROFILE_4_BASE64"
+          test -n "$PERSONA_APPLE_PROFILE_5_BASE64"
+          test -n "$PERSONA_APPLE_PROFILE_6_BASE64"
+          test -n "$PERSONA_SIGNING_KEYCHAIN_PASSWORD"
+          umask 077
+          printf '%s' "$PERSONA_APPLE_DISTRIBUTION_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/apple-distribution.p12"
+          security create-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$PERSONA_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          security import "$RUNNER_TEMP/apple-distribution.p12" -k "$PERSONA_SIGNING_KEYCHAIN" -P "$PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          security find-identity -v -p codesigning "$PERSONA_SIGNING_KEYCHAIN" | grep 'Apple Distribution'
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          for i in 1 2 3 4 5 6; do
+            name="PERSONA_APPLE_PROFILE_${i}_BASE64"
+            printf '%s' "${!name}" | base64 --decode > "$RUNNER_TEMP/profile-$i.mobileprovision"
+            cp "$RUNNER_TEMP/profile-$i.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+          done
+      - name: Archive, export and upload the formal iPhone/Watch build
+        env:
+          RUSTUP_TOOLCHAIN: '1.98.0'
+          NO_PUBLISH: '1'
+        run: |
+          set -euo pipefail
+          build="$(python3 -c 'import json; print(json.load(open("release/plan.json"))["build"])')"
+          printf 'PERSONA_TESTFLIGHT_BUILD=%s\n' "$build" >> "$GITHUB_ENV"
+          scripts/release/release.sh "$build"
+      - name: Wait for VALID and attach Internal/Friends with Beta App Review
+        run: python3 scripts/release/asc_testflight.py wait 45 "$PERSONA_TESTFLIGHT_BUILD"
+      - name: Read back TestFlight processing and tester state without resubmitting
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,'scripts/release')
+          import asc_testflight as tf
+          build=tf.build_by_version(os.environ['PERSONA_TESTFLIGHT_BUILD'])
+          assert build and build['attributes']['processingState']=='VALID'
+          assert tf.external_state(build)=='IN_BETA_TESTING'
+          for name,internal in (('Internal',True),('Friends',False)):
+              group=tf.find_group(name,internal)
+              assert group
+              linked={item['id'] for item in tf.get_all('/v1/betaGroups/'+group['id']+'/builds')}
+              assert build['id'] in linked or group['attributes'].get('hasAccessToAllBuilds') is True
+          print('TestFlight VALID; Internal/Friends; external IN_BETA_TESTING')
+          PY
+      - name: Record the store verification without publishing a development IPA
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          plan=json.loads(Path('release/plan.json').read_text())
+          plan['stores']={'iphone_watch':{'build':os.environ['PERSONA_TESTFLIGHT_BUILD'],'processing':'VALID','groups':['Internal','Friends'],'external':'IN_BETA_TESTING'}}
+          Path('release/plan.json').write_text(json.dumps(plan,indent=2)+'\n')
+          Path('release/store-verified.json').write_text(json.dumps(plan['stores'])+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-pr-apple-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: |
+            release/plan.json
+            release/store-verified.json
+          if-no-files-found: error
+          retention-days: 2
+
+  windows:
+    name: Verify Windows programs natively and sign the desktop package
+    # Windows consumes only CLI/Web and Android artifacts. An unrelated Apple failure must not hide a native Windows
+    # execution or signing regression; the final aggregate still requires every platform to succeed.
+    needs: [plan, cli-web, android]
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    runs-on: windows-latest
+    timeout-minutes: 120
+    environment: persona-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-cli-web-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-android-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads
+      - name: Run every Windows CLI on its matching native architecture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $plan = Get-Content release/plan.json -Raw | ConvertFrom-Json
+          python -B scripts/operations/windows_release.py --archive release/downloads/persona-link-windows-amd64.exe.gz --version $plan.version --build $plan.build
+          python -B scripts/operations/windows_release.py --archive release/downloads/personad-windows-amd64.exe.gz --version $plan.version --build $plan.build
+          python -B scripts/operations/windows_release.py --archive release/downloads/persona-node-windows-amd64.exe.gz --version $plan.version --build $plan.build
+      - name: Verify the combined receipt and native Windows reports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $plan = Get-Content release/plan.json -Raw | ConvertFrom-Json
+          $assets = @()
+          foreach ($path in Get-ChildItem release/downloads -File) {
+            $assets += @{path=$path.FullName; name=$path.Name; sha256=(Get-FileHash $path.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          }
+          $assets += @{path=(Resolve-Path release/downloads/persona-link-windows-amd64.verification.json).Path; name='persona-link-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/persona-link-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
+          $assets += @{path=(Resolve-Path release/downloads/personad-windows-amd64.verification.json).Path; name='personad-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/personad-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
+          $assets += @{path=(Resolve-Path release/downloads/persona-node-windows-amd64.verification.json).Path; name='persona-node-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/persona-node-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
+          @{commit=$plan.commit; assets=$assets} | ConvertTo-Json -Depth 5 | Set-Content release/receipt.json -NoNewline
+          python -B -c "import sys; sys.path.insert(0, 'scripts/operations'); from windows_release import check_windows_artifacts; import json; data=json.load(open('release/receipt.json')); check_windows_artifacts(data['assets'], '$($plan.version)')"
+          python scripts/operations/release_pr.py --repository '${{ github.repository }}' --channel '${{ needs.plan.outputs.channel }}' verify-artifacts --plan release/plan.json --commit '${{ needs.plan.outputs.commit }}' --add release/downloads
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build the signed Windows desktop package for the immutable version
+        shell: bash
+        env:
+          PERSONA_DESKTOP_VERSION: ${{ needs.plan.outputs.version }}
+          PERSONA_DESKTOP_REQUIRE_SIGNING: '1'
+          PERSONA_DESKTOP_APP_ID: ${{ secrets.PERSONA_DESKTOP_APP_ID }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: scripts/ci/desktop-package.sh win
+      - name: Verify Authenticode and beta/stable updater metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem desktop/release/*.exe | Select-Object -First 1
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw 'Windows desktop is not Authenticode-signed' }
+          $metadata = if ('${{ needs.plan.outputs.channel }}' -eq 'beta') { 'beta.yml' } else { 'latest.yml' }
+          if (-not (Test-Path "desktop/release/$metadata")) { throw "Missing $metadata" }
+          Copy-Item "desktop/release/$metadata" "release/downloads/$metadata"
+      - name: Collect signed desktop and native verification receipts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item desktop/release/*.exe release/downloads/
+          Copy-Item desktop/release/*.blockmap release/downloads/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-pr-windows-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads/
+          if-no-files-found: error
+          retention-days: 2
+
+  verify:
+    name: All available release-PR checks passed
+    needs: [plan, cli-web, android, apple, windows]
+    # A failed or skipped dependency normally skips this whole job, including its failure-conclusion step. Always run
+    # the aggregate for an actual release plan so the exact merge-result check cannot remain pending indefinitely.
+    if: always() && needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require every platform job to succeed before verification
+        env:
+          CLI_WEB: ${{ needs.cli-web.result }}
+          ANDROID: ${{ needs.android.result }}
+          APPLE: ${{ needs.apple.result }}
+          WINDOWS: ${{ needs.windows.result }}
+        run: |
+          set -euo pipefail
+          for result in "$CLI_WEB" "$ANDROID" "$APPLE" "$WINDOWS"; do
+            test "$result" = success || { echo "A required platform failed or did not complete: $result" >&2; exit 1; }
+          done
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-cli-web-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-android-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-apple-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-pr-windows-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/downloads
+      - name: Check the final verified plan
+        env:
+          REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          set -euo pipefail
+          python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-artifacts --plan release/plan.json --commit "$COMMIT" --add release/downloads
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          plan=json.loads(Path('release/plan.json').read_text())
+          store=plan['stores']['iphone_watch']
+          assert store['build']==str(plan['build'])
+          assert store['processing']=='VALID'
+          assert store['groups']==['Internal','Friends']
+          assert store['external']=='IN_BETA_TESTING'
+          assert json.loads(Path('release/store-verified.json').read_text())==plan['stores']
+          print('All CLI/Web, Android and iPhone/Watch release-PR checks passed')
+          PY
+      - name: Record explicit platform prerequisites without treating them as passed
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          plan=json.loads(Path('release/plan.json').read_text())
+          plan['platforms']={
+              'hub_cli_web':'verified from the exact source',
+              'android':'signed release APK verified',
+              'iphone_watch':'TestFlight VALID, Internal/Friends, IN_BETA_TESTING',
+              'windows_amd64':'verified natively with Authenticode',
+              'windows_arm64':'blocked: matching native ARM64 runner required',
+              'harmonyos':'blocked: DevEco and production signing required (#6734)',
+          }
+          Path('release/plan.json').write_text(json.dumps(plan,indent=2)+'\n')
+          PY
+      - name: Mark the exact merge result verified only after every platform succeeded
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_RUN_ID: ${{ needs.plan.outputs.check_run_id }}
+        run: python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" conclude --check-run-id "$CHECK_RUN_ID" --conclusion success
+      - name: Mark the exact merge result failed when any platform failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_RUN_ID: ${{ needs.plan.outputs.check_run_id }}
+        run: python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" conclude --check-run-id "$CHECK_RUN_ID" --conclusion failure
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: release-pr-verified-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+
+  merge:
+    name: Merge the verified release PR for post-merge verification
+    needs: [plan, verify]
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != '' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: persona-release
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Squash the exact verified PR head, then require the main merge to be verified again
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+          HEAD: ${{ needs.plan.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; refusing an unverifiable merge actor' >&2; exit 1; }
+          gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,baseRefName,headRefOid,headRepository,author,title,mergeCommit > release/merge-pr.json
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '{merge_commit_sha}' > release/merge-pr-rest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          pr=json.loads(Path('release/merge-pr.json').read_text())
+          pr['mergeCommit']={'oid':json.loads(Path('release/merge-pr-rest.json').read_text())['merge_commit_sha']}
+          Path('release/merge-pr.json').write_text(json.dumps(pr))
+          PY
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          pr=json.loads(Path('release/merge-pr.json').read_text())
+          assert pr['state']=='OPEN' and pr['isDraft'] is False
+          assert pr['baseRefName']=='main' and pr['headRefOid']==os.environ['HEAD']
+          assert pr['headRepository']['nameWithOwner']==os.environ['REPOSITORY']
+          assert pr['author']['login']=='chyroc'
+          assert pr['title'].startswith('release:')
+          assert pr['mergeCommit']['oid']
+          PY
+          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --squash --match-head-commit "$HEAD" --subject "$(python3 -c 'import json; print(json.load(open("release/merge-pr.json"))["title"])') (#$PR_NUMBER)"

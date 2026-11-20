@@ -48,6 +48,7 @@ export function detectTransitions(prev: ReadonlyMap<string, AgentState>, session
   const events: AttentionEvent[] = [];
   const looking = lookingOnly(interactions);
   for (const s of sessions) {
+    if (s.hidden_by_directory) continue;
     const key = agentKey(s);
     const state = stateOf(s);
     const now = state === "needs_you" && looking.has(key) ? "working" : state;
@@ -149,6 +150,7 @@ export interface Turn {
 export function trackTurns(prev: ReadonlyMap<string, Turn>, sessions: Session[], now: number): Map<string, Turn> {
   const next = new Map<string, Turn>();
   for (const s of sessions) {
+    if (s.hidden_by_directory) continue;
     const key = agentKey(s);
     const was = prev.get(key);
     if (stateOf(s) === "working") {

@@ -86,11 +86,7 @@ func (s *Service) taskStageSessions(ctx context.Context, d DeviceSessions) {
 		s.tasks.stageReplies[ref] = key
 		s.tasks.mu.Unlock()
 		if t.StageKind == "" {
-			var criteria []string
-			if t.Supervision != nil {
-				criteria = t.Supervision.DoneWhen
-			}
-			s.setTaskStageKind(ctx, t.ID, "", "", taskStageKind(false, criteria, t.PRURL), false)
+			s.restage(ctx, t.ID, nil)
 		}
 		if strings.TrimSpace(c.LastText) == "" {
 			continue

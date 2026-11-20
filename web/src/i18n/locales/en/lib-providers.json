@@ -3,6 +3,7 @@
   "url_scheme": "The URL must start with http(s)://",
   "url_extras": "The URL can't include a user, credentials, a query or a fragment",
   "header_line": "Header line {line} must look like \"Name: value\"",
+  "header_reserved": "Header {name} is managed by Persona or HTTP. Remove it and use the dedicated field, or choose another name.",
   "env_line": "Environment line {line} must look like NAME=value (letters, digits and _ in the name)",
   "env_limit": "At most 50 environment variables",
   "proxy_scheme": "The proxy must start with http(s):// or socks5://",

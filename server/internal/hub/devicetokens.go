@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,12 +15,45 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/screen"
 )
+
+func init() {
+	handleBus(bus.MethodCredentialRevoked, (*Hub).busCredentialRevoked)
+}
+
+// busCredentialRevoked checks durable credential state for a manager about to deliver a queued message.
+func (h *Hub) busCredentialRevoked(ctx context.Context, c *busConn, raw json.RawMessage) (any, error) {
+	if c.ident.Role != bus.RoleManager {
+		return nil, &rpc.Error{Code: "forbidden", Message: "only managers can check device credentials"}
+	}
+	var p bus.DeviceCredential
+	if err := json.Unmarshal(raw, &p); err != nil || p.ID == "" {
+		return nil, &rpc.Error{Code: "bad_request", Message: "credential_id is required"}
+	}
+	if h.isDeviceRevoked(p.ID) {
+		return bus.CredentialStatus{Revoked: true}, nil
+	}
+	if h.store == nil {
+		return nil, errors.New("no database")
+	}
+	tokens, err := h.store.DeviceTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if token.ID == p.ID {
+			return bus.CredentialStatus{Revoked: token.RevokedAt != nil}, nil
+		}
+	}
+	return bus.CredentialStatus{Revoked: true}, nil
+}
 
 // One credential per device (docs/protocol/protocol.md "Authentication"). The pairing token in hub.json still opens everything (the CLI,
 // apps from before this); an app trades it for a token of its own right after pairing and stops keeping it, so a lost
@@ -28,6 +62,7 @@ import (
 
 const (
 	roleFull   = "full"
+	roleScoped = "scoped"
 	roleAnswer = "answer"
 	// roleLink is a persona-link credential (link.go): it opens its machine's link and nothing else.
 	roleLink = "link"
@@ -180,7 +215,7 @@ func (h *Hub) lookupToken(ctx context.Context, tok string) (principal, bool, err
 		}
 		c = cachedToken{at: time.Now(), used: time.Now()}
 		if dt != nil {
-			c.p = &principal{ID: dt.ID, Name: dt.Name, Role: dt.Role, Kind: dt.Kind, Machine: dt.MachineID}
+			c.p = &principal{ID: dt.ID, Name: dt.Name, Role: dt.Role, Kind: dt.Kind, Machine: dt.MachineID, Scopes: dt.Scopes}
 		}
 		t.mu.Lock()
 		if c.p != nil && t.isRevoked(c.p.ID) {
@@ -319,10 +354,12 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 	// browser keeps one device instead of a row of them with the same name (docs/protocol/protocol.md "Authentication").
 	api.HandleFunc("POST /api/v1/auth/tokens", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Name     string `json:"name"`
-			Kind     string `json:"kind"`
-			Machine  string `json:"machine"`
-			Replaces string `json:"replaces"`
+			Name     string          `json:"name"`
+			Kind     string          `json:"kind"`
+			Machine  string          `json:"machine"`
+			Replaces string          `json:"replaces"`
+			Scopes   json.RawMessage `json:"scopes"`
+			Machines json.RawMessage `json:"machines"`
 			// SystemName: what a computer's system calls it (link: persona-link pair), its name when it has none yet.
 			SystemName string `json:"system_name"`
 		}
@@ -338,6 +375,25 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 		if h.store == nil {
 			writeErr(w, http.StatusServiceUnavailable, errors.New("no database"))
 			return
+		}
+		if req.Machines != nil {
+			writeErrCode(w, http.StatusBadRequest, "unsupported_machine_restriction", errors.New("device token machine restrictions are not supported"))
+			return
+		}
+		var scopes []string
+		if req.Scopes != nil {
+			if p.Role != roleFull || p.ID != "" || p.PairHash != "" {
+				scopedPermissionDenied(w, "")
+				return
+			}
+			if req.Kind != "" && req.Kind != "other" || req.Machine != "" || req.Replaces != "" {
+				writeErrCode(w, http.StatusBadRequest, "invalid_scoped_device", errors.New("scoped device tokens require kind other"))
+				return
+			}
+			if json.Unmarshal(req.Scopes, &scopes) != nil || !validDeviceScopes(scopes) {
+				writeErrCode(w, http.StatusBadRequest, "invalid_device_scopes", errors.New("provide a nonempty list of distinct Agent scopes"))
+				return
+			}
 		}
 		kind, role, machine := req.Kind, roleFull, ""
 		if p.Role == roleLinkPair { // made for one machine's persona-link: that credential, and no other
@@ -360,6 +416,9 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 		default:
 			kind = "other"
 		}
+		if len(scopes) > 0 {
+			role = roleScoped
+		}
 		name := strings.TrimSpace(req.Name)
 		if name == "" || len([]rune(name)) > 80 {
 			name = map[string]string{"phone": "iPhone", "watch": "Apple Watch"}[kind]
@@ -371,7 +430,7 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 			}
 		}
 		tok := "jd_" + randomHex(24)
-		dt := db.DeviceToken{ID: "dev_" + randomHex(6), Name: name, Kind: kind, Role: role, MachineID: machine}
+		dt := db.DeviceToken{ID: "dev_" + randomHex(6), Name: name, Kind: kind, Role: role, MachineID: machine, Scopes: scopes}
 		var err error
 		if p.PairHash != "" {
 			var ok bool
@@ -414,6 +473,9 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 			h.notifyPairing(name, dt.ID) // also when it replaced one: a credential was still made
 		}
 		resp := map[string]any{"id": dt.ID, "token": tok, "role": role, "name": name, "machine": machine}
+		if len(scopes) > 0 {
+			resp["scopes"] = scopes
+		}
 		if replaced != "" {
 			resp["replaced"] = replaced
 		}
@@ -465,8 +527,8 @@ func (h *Hub) revokeWebToken(ctx context.Context, id string) (bool, error) {
 	return h.store.RevokeDeviceToken(ctx, id)
 }
 
-// revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too) and stops
-// its pushes.
+// revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too), stops
+// its pushes and tells managers to fail its queued messages.
 func (h *Hub) revoked(id string) {
 	t := &h.devtok
 	t.mu.Lock()
@@ -488,6 +550,9 @@ func (h *Hub) revoked(id string) {
 	}
 	// Registration holds h.mu while checking t.mu; release t.mu before taking h.mu.
 	t.mu.Unlock()
+	go func() {
+		_ = h.notifyManagers(bus.EventCredentialRevoked, bus.DeviceCredential{ID: id})
+	}()
 	h.mu.Lock()
 	for deviceID, r := range h.phoneTools {
 		if deviceID == id || r.CredentialID == id {
