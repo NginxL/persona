@@ -265,3 +265,101 @@ func TestProgressCardLooks(t *testing.T) {
 		t.Fatalf("queued card %s", q)
 	}
 }
+
+// answerMessages answers feishu.messages (reading the progress card's message back) with fn, counting the reads.
+func answerMessages(s *Service, fn func() (any, error)) *int {
+	n := 0
+	s.hub.(*fakeHub).answerApp(AppFeishu, FeishuMessages, func(json.RawMessage) (any, error) {
+		n++
+		return fn()
+	})
+	return &n
+}
+
+// CardKit goes on taking writes into an entity whose message was withdrawn or deleted, so the message is read back
+// every kitCheckEvery: one gone is forgotten, entity and all, and the next tick posts a new card, as a message update
+// that finds it gone does.
+func TestProgressNoticesAWithdrawnEntity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read func() (any, error)
+	}{
+		{"deleted", func() (any, error) {
+			return map[string]any{"items": []map[string]any{{"message_id": "om_card", "deleted": true}}}, nil
+		}},
+		{"withdrawn", func() (any, error) {
+			return nil, errors.New("feishu read message: 230011 The message was withdrawn.")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, posts, k := streamHub(t)
+			now := time.Unix(1_800_000_000, 0)
+			s.chans.now = func() time.Time { return now }
+			reads := answerMessages(s, tc.read)
+			r, _ := cotRun(s)
+			sink, ctx, steps := feishuSink{s}, context.Background(), []string{"运行 `ls`"}
+			sink.progress(ctx, r, time.Second, steps, "我先")
+			now = now.Add(5 * time.Second)
+			sink.progress(ctx, r, time.Second, steps, "我先看")
+			if *reads != 0 || strings.Join(k.ops(), ",") != "create,stream" {
+				t.Fatalf("reads %d, calls %v: the message is not read before kitCheckEvery", *reads, k.ops())
+			}
+			now = now.Add(kitCheckEvery)
+			sink.progress(ctx, r, time.Second, steps, "我先看一下")
+			if *reads != 1 || strings.Join(k.ops(), ",") != "create,stream" {
+				t.Fatalf("reads %d, calls %v: want the message read and nothing written into a gone card", *reads, k.ops())
+			}
+			if r.Ext["card"] != "" || r.Ext["card_id"] != "" {
+				t.Fatalf("ext %v: want the card and its entity forgotten", r.Ext)
+			}
+			sink.progress(ctx, r, time.Second, steps, "我先看一下")
+			if strings.Join(k.ops(), ",") != "create,stream,create" || len(*posts) != 2 || r.Ext["card"] == "" {
+				t.Fatalf("calls %v, posts %d, ext %v: want a new card", k.ops(), len(*posts), r.Ext)
+			}
+		})
+	}
+}
+
+// A read that fails for another reason (a rate limit, the hub away) says nothing of the card: it goes on streaming.
+func TestProgressKeepsTheEntityWhenTheReadFails(t *testing.T) {
+	s, posts, k := streamHub(t)
+	now := time.Unix(1_800_000_000, 0)
+	s.chans.now = func() time.Time { return now }
+	reads := answerMessages(s, func() (any, error) {
+		return nil, errors.New("feishu read message: 99991400 request trigger frequency limit")
+	})
+	r, _ := cotRun(s)
+	sink, ctx, steps := feishuSink{s}, context.Background(), []string{"运行 `ls`"}
+	sink.progress(ctx, r, time.Second, steps, "我先")
+	now = now.Add(kitCheckEvery)
+	sink.progress(ctx, r, time.Second, steps, "我先看")
+	if *reads != 1 || strings.Join(k.ops(), ",") != "create,stream" || len(*posts) != 1 || r.Ext["card_id"] != "ck1" {
+		t.Fatalf("reads %d, calls %v, posts %d, ext %v", *reads, k.ops(), len(*posts), r.Ext)
+	}
+}
+
+// A progress card sent as a message has no entity, even when an earlier card of the run had one: the old card_id is
+// dropped, so its later ticks update the message rather than stream into a card nobody sees (also after a restart).
+func TestProgressAsAMessageForgetsAnOldEntity(t *testing.T) {
+	s, posts, k := streamHub(t)
+	k.fail = func(op string, _ int) error {
+		if op == "create" {
+			return feishuAPIError(99991672)
+		}
+		return nil
+	}
+	r, _ := cotRun(s)
+	s.setRunExt(r, "card_id", "ck_old")
+	sink, ctx := feishuSink{s}, context.Background()
+	sink.progress(ctx, r, time.Second, []string{"运行 `ls`"}, "我先")
+	if len(*posts) != 1 || r.Ext["card"] == "" || r.Ext["card_id"] != "" {
+		t.Fatalf("posts %v, ext %v: want the card as a message and no entity", *posts, r.Ext)
+	}
+	sink.progress(ctx, r, time.Second, []string{"运行 `ls`"}, "我先看")
+	if got := strings.Join(k.ops(), ","); got != "create" {
+		t.Fatalf("calls %s: want nothing streamed into the old entity", got)
+	}
+	if last := (*posts)[len(*posts)-1]; last["update"] != true {
+		t.Fatalf("last %v: want the message updated", last)
+	}
+}

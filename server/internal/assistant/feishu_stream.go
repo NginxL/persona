@@ -17,7 +17,9 @@ import (
 // CardKit turns streaming off ten minutes after it was turned on; it is turned on again for the next write. Anything
 // else that fails sends the run back to updating its card as a message, which a card sent as an entity still takes
 // (the answer always goes that way): nothing waits on CardKit. The entity's id is in the run's Ext ("card_id"), so an
-// assistant started again ends its streaming too.
+// assistant started again ends its streaming too. CardKit goes on taking writes into an entity whose message was
+// withdrawn or deleted, so the message itself is read back every kitCheckEvery (kitGone): one gone is forgotten as a
+// message update that finds it gone forgets it, and the next tick posts a new card.
 
 const (
 	// progressLiveID is the element of the progress card the conversation's words are streamed into.
@@ -28,6 +30,8 @@ const (
 	// kitDownFor is how long progress cards go as messages after CardKit would not make one (the app lacks its
 	// permission, an older hub): it is not asked on every run.
 	kitDownFor = 10 * time.Minute
+	// kitCheckEvery is how often an entity's message is read back to see it is still there (kitGone).
+	kitCheckEvery = 30 * time.Second
 	// codeStreamClosed is CardKit's answer to a write into a card that is not streaming (any more).
 	codeStreamClosed = 300309
 )
@@ -37,11 +41,12 @@ var kitEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // cardKit is a run's progress card as an entity, under its chanLive's mu.
 type cardKit struct {
-	id       string   // the entity
-	seq      int64    // its last write's sequence
-	streamed string   // the words it has
-	shape    [32]byte // the rest of the card as last written (kitShape)
-	off      bool     // CardKit failed for this run: the card is updated as a message from now on
+	id       string    // the entity
+	seq      int64     // its last write's sequence
+	streamed string    // the words it has
+	shape    [32]byte  // the rest of the card as last written (kitShape)
+	off      bool      // CardKit failed for this run: the card is updated as a message from now on
+	checked  time.Time // its message was last read back (kitGone); zero: never, as after a restart
 }
 
 // next is the sequence of the entity's next write: tenths of a second since kitEpoch, so it goes on growing for an
@@ -131,7 +136,7 @@ func (f feishuSink) kitPost(ctx context.Context, r *channel.Run, prog *chanLive,
 	if el := liveElement(c); el != nil {
 		words, _ = el["content"].(string)
 	}
-	prog.kit = &cardKit{id: made.CardID, streamed: words, shape: kitShape(c)}
+	prog.kit = &cardKit{id: made.CardID, streamed: words, shape: kitShape(c), checked: now}
 	s.setRunExt(r, "card_id", made.CardID)
 	return mid, nil, true
 }
@@ -172,6 +177,37 @@ func (f feishuSink) kitProgress(ctx context.Context, r *channel.Run, prog *chanL
 		k.streamed = words
 	}
 	return true
+}
+
+// kitGone reports whether the message of the run's entity was withdrawn or deleted, reading it back at most every
+// kitCheckEvery. A read that fails for another reason (a rate limit, the hub away) says nothing: the card goes on.
+func (f feishuSink) kitGone(ctx context.Context, k *cardKit, messageID string) bool {
+	s := f.s
+	now := s.chansNow()
+	if now.Sub(k.checked) < kitCheckEvery {
+		return false
+	}
+	k.checked = now
+	items, err := s.botMessages(ctx, messageID)
+	if err != nil {
+		return feishubot.MessageGone(err)
+	}
+	for _, it := range items {
+		if it.MessageID == messageID {
+			return it.Deleted
+		}
+	}
+	return false
+}
+
+// forgetProgressCard drops a run's progress card that is gone from the chat (withdrawn or deleted): the next tick
+// posts a new one, and the answer does not go into this one. Its entity goes with it, so no later write streams into
+// a card nobody sees, nor does an assistant started again take the entity up from the run's Ext.
+func (s *Service) forgetProgressCard(r *channel.Run, prog *chanLive) {
+	s.setRunExt(r, "card", "")
+	s.setRunExt(r, "card_id", "")
+	prog.kit = nil
+	prog.sentCard = [32]byte{}
 }
 
 // kitWrite makes one write into the entity; when the card stopped streaming it is turned on again and the write

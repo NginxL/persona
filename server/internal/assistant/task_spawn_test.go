@@ -165,7 +165,7 @@ func TestTaskSpawnExplicitProjectAndDirectionBeatForeignCwd(t *testing.T) {
 			after := onlyTodo(s)
 			child := after.Agents[1]
 			f.outcome = `{"outcome":"child finished","decisions":[{"question":"Where does this belong?","choice":"Still the explicit project","reason":"The child inherited it"}],"pitfalls":["Foreign cwd must not win"]}`
-			s.recordWorkerOutcome(ctx, after, "box", child.SessionID, "/code/app", 9, 1, "child finished", nil)
+			s.recordWorkerOutcome(ctx, after, "box", child.SessionID, "/code/app", 9, 1, "", true, "child finished", nil)
 			records := e.ProjectMemory("explicit", 30)
 			found := false
 			for _, record := range records {
