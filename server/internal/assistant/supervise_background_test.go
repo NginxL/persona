@@ -457,6 +457,9 @@ func TestDigestToWithBackgroundSupervisor(t *testing.T) {
 		{"an ended direction's review", superviseSignal{Todo: ended.ID, Kind: sigReview}, "bg1"},
 		{"a task leader's decision for an ended direction", superviseSignal{Todo: ended.ID, Kind: sigDecide, To: "lead2"}, "bg1"},
 		{"the owner's answer to a check for an ended direction", superviseSignal{Todo: ended.ID, Kind: sigCheck, Report: checkDecidedReport, To: "lead2"}, "bg1"},
+		// A failed start goes to the main conversation for an ended direction's task too, as for the main
+		// conversation's own (#11735).
+		{"an ended direction's failed start", superviseSignal{Todo: ended.ID, Kind: sigFailed}, "conv1"},
 		{"a review", superviseSignal{Todo: todo.ID, Kind: sigReview}, "bg1"},
 		{"a report", superviseSignal{Todo: todo.ID, Kind: sigReport}, "bg1"},
 		{"a stall", superviseSignal{Todo: todo.ID, Kind: sigStalled}, "bg1"},
