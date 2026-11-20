@@ -31,6 +31,17 @@
     <string name="files_copy_path">Copy path</string>
     <string name="files_rename">Rename</string>
     <string name="files_rename_name">Name</string>
+    <string name="files_move">Move…</string>
+    <string name="files_move_title">Move “%1$s”</string>
+    <string name="files_move_here">Move Here</string>
+    <string name="files_move_no_folders">No folders here</string>
+    <string name="files_move_same_folder">This is already the item’s folder.</string>
+    <string name="files_move_inside_itself">A folder can’t be moved into itself.</string>
+    <string name="files_move_conflict_message">Keep Both gives the moved item a numbered name. Replace puts the existing file in the computer’s Trash.</string>
+    <string name="files_move_keep_both">Keep Both</string>
+    <string name="files_move_replace">Replace</string>
+    <string name="files_moving">Moving…</string>
+    <string name="files_moved">Moved “%1$s” to “%2$s”</string>
     <string name="files_trash">Move to Trash</string>
     <string name="files_trash_title">Move “%1$s” to the Trash?</string>
     <string name="files_trash_message">It goes to the computer’s Trash. You can undo right after, or put it back from the Trash there.</string>

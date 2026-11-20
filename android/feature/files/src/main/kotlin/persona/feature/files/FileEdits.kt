@@ -29,9 +29,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import persona.core.contracts.JsonCodec
 import persona.core.hub.HubFailure
 
-// Renaming and moving to the trash in the file browser (docs/protocol/protocol.md "Changing files", iOS FolderEdits): the
-// machine allows these writes only inside the home. A trash goes to the machine's trash and the toast's Undo puts it back;
-// there is no permanent delete. Moving between folders, uploading and selecting several are not here yet.
+// File changes in the browser (docs/protocol/protocol.md "Changing files", iOS FolderEdits). The machine allows them
+// only inside the home. A trash goes to the machine's trash and the toast's Undo puts it back.
 
 /** Why a name can't be a file's, said before asking (iOS `FolderEdits.nameProblem`); the machine checks again. */
 internal enum class NameProblem { Empty, Dots, Slash }
@@ -83,10 +82,11 @@ internal fun editRefusal(error: Throwable, name: String?): EditRefusal {
     }
 }
 
-/** What a rename, a trash or Undo came to; the page turns it into a haptic or a toast. */
+/** The result of a file change, reported with a haptic or a toast. */
 internal sealed interface FileEdit {
     data class Invalid(val problem: NameProblem) : FileEdit
     data object Renamed : FileEdit
+    data class Moved(val name: String, val folder: String) : FileEdit
     /** [trashIds] put them back ([FilesController.restore]); empty when the machine gave none (no Undo then). */
     data class Trashed(val paths: List<String>, val trashIds: List<String>) : FileEdit
     data object Restored : FileEdit
@@ -137,6 +137,7 @@ internal fun rememberFileEditReport(controller: FilesController): (FileEdit) -> 
             when (edit) {
                 is FileEdit.Invalid -> feedback?.notice(nameProblemText(resources, edit.problem), FeedbackStyle.Error)
                 FileEdit.Renamed -> haptics(Haptic.Tap)
+                is FileEdit.Moved -> feedback?.notice(resources.getString(R.string.files_moved, edit.name, edit.folder), FeedbackStyle.Success)
                 FileEdit.Restored -> Unit
                 is FileEdit.Failed -> {
                     val text = editRefusalText(resources, edit.refusal)

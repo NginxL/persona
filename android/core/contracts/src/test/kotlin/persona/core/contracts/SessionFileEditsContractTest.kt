@@ -5,10 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.contracts.api.*
 
-/** Renaming and trashing files (docs/protocol/protocol.md "Changing files"): the answers' shapes and what a transport without them does. */
+/** File changes (docs/protocol/protocol.md "Changing files"): answers and behavior on an unsupported transport. */
 class SessionFileEditsContractTest {
     @Test fun theHubsAnswersDecode() {
         assertEquals("~/a/b.txt", JsonCodec.decodeFromString<SessionFilePath>("""{"path":"~/a/b.txt","future":1}""").path)
+        assertEquals(listOf(SessionMovedFile("~/a.txt", "~/b/a 2.txt")),
+            JsonCodec.decodeFromString<SessionMovedFiles>("""{"moved":[{"from":"~/a.txt","to":"~/b/a 2.txt"}]}""").moved)
         val trashed = JsonCodec.decodeFromString<SessionTrashedFiles>("""{"trashed":[{"path":"~/a","trash_id":"t1"}]}""").trashed
         assertEquals(listOf(SessionTrashedFile("~/a", "t1")), trashed)
         assertTrue(JsonCodec.decodeFromString<SessionTrashedFiles>("""{"trashed":null}""").trashed.isEmpty())
@@ -25,10 +27,9 @@ class SessionFileEditsContractTest {
             override suspend fun log(machineId: String, cwd: String, skip: Int, limit: Int) = error("unused")
             override suspend fun show(machineId: String, cwd: String, hash: String) = error("unused")
         }
-        // The browser offers no Rename or Move to Trash, and a call fails as unsupported rather than doing anything.
         assertFalse(readOnly.editsFiles("m"))
-        for (call in listOf<suspend () -> Unit>({ readOnly.rename("m", "/w", "a", "b") }, { readOnly.trash("m", "/w", listOf("a")) },
-                { readOnly.restore("m", listOf("t1")) })) {
+        for (call in listOf<suspend () -> Unit>({ readOnly.rename("m", "/w", "a", "b") }, { readOnly.move("m", "/w", "a", "/w/b") },
+                { readOnly.trash("m", "/w", listOf("a")) }, { readOnly.restore("m", listOf("t1")) })) {
             try { call(); fail("Expected UnsupportedOperationException") } catch (_: UnsupportedOperationException) {}
         }
     }

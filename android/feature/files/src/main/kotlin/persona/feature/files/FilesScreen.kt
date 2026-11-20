@@ -13,6 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -95,9 +98,10 @@ private fun FilesBrowser(
     val pathCopied = stringResource(R.string.files_path_copied)
     var hidden by rememberShowHidden()
     var menu by remember { mutableStateOf(false) }
-    // The entry a dialog is open for (its full path): Rename's name, or Move to Trash's confirmation.
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
     var trashing by rememberSaveable { mutableStateOf<String?>(null) }
+    var moving by remember { mutableStateOf<MoveSource?>(null) }
+    val moveStatus by controller.moveStatus.collectAsStateWithLifecycle()
     val report = rememberFileEditReport(controller)
     val edits = controller.editsFiles
     val here = state.here
@@ -105,6 +109,9 @@ private fun FilesBrowser(
         title = FilesPaths.name(here), subtitle = here, onBack = onBackToChat, largeTitle = true,
         actions = { JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.files_refresh), { controller.directory(); controller.refreshGit() },
             enabled = !state.directoryLoading && !state.gitLoading) },
+        bottomBar = if (moveStatus == FileMove.Pending) ({
+            Box(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) { Notice(stringResource(R.string.files_moving)) }
+        }) else null,
     ) {
         item("panes") {
             val changes = state.git?.files?.size?.takeIf { it > 0 }
@@ -125,8 +132,10 @@ private fun FilesBrowser(
                     JIconButton(PhIcons.DotsThree, stringResource(R.string.files_options), { menu = true })
                 }
             }
-            filesBrowser(state, controller, hidden, onInsertPath, rename = if (edits) ({ renaming = it }) else null,
-                trash = if (edits) ({ trashing = it }) else null)
+            val canEdit = edits && moveStatus == null
+            filesBrowser(state, controller, hidden, onInsertPath, rename = if (canEdit) ({ renaming = it }) else null,
+                move = if (canEdit) ({ moving = it }) else null,
+                trash = if (canEdit) ({ trashing = it }) else null)
         } else gitBrowser(state, controller)
     }
     if (menu) JActionSheet(buildList {
@@ -137,6 +146,15 @@ private fun FilesBrowser(
     }, { menu = false }, title = stringResource(R.string.files_folder_actions))
     renaming?.let { path -> RenameFileDialog(FilesPaths.name(path), { controller.rename(path, it, report) }, { renaming = null }) }
     trashing?.let { path -> TrashFileDialog(FilesPaths.name(path), { controller.trash(listOf(path), report) }, { trashing = null }) }
+    moving?.let { source ->
+        MoveDestinationSheet(source, controller, hidden, onDismiss = { moving = null }) { destination ->
+            moving = null
+            controller.move(source, destination, report)
+        }
+    }
+    (moveStatus as? FileMove.Conflict)?.let { conflict ->
+        MoveConflictDialog(conflict) { policy -> controller.answerMove(conflict, policy, report) }
+    }
 }
 
 /** The folders from the breadcrumb's top down to the one shown, as chips; it follows you to the end as you go in. */
@@ -155,9 +173,9 @@ private fun Crumbs(levels: List<Pair<String, String>>, onPick: (String) -> Unit,
     }
 }
 
-/** [rename] and [trash] (of an entry's full path): offered in each row's menu when the hub can (`file_edit`). */
+/** File changes are offered through each row's menu when the hub supports `file_edit`. */
 private fun LazyListScope.filesBrowser(state: FilesState, controller: FilesController, hidden: Boolean, insert: (String) -> Unit,
-    rename: ((String) -> Unit)? = null, trash: ((String) -> Unit)? = null) {
+    rename: ((String) -> Unit)? = null, move: ((MoveSource) -> Unit)? = null, trash: ((String) -> Unit)? = null) {
     val listing = state.directory
     when {
         listing == null && state.directoryError != null -> item { RetryState(stringResource(R.string.files_folder_failed), state.directoryError) { controller.directory() } }
@@ -181,7 +199,8 @@ private fun LazyListScope.filesBrowser(state: FilesState, controller: FilesContr
                     FileRow(entry, gitChange(state.git, path, entry.dir), now, thumbnail = thumbnail,
                         open = { if (entry.dir) controller.directory(path) else controller.push(FileSelection.File(path)) },
                         copy = { copyText(path, pathCopied) }, insert = { insert(path) },
-                        rename = rename?.let { { it(path) } }, trash = trash?.let { { it(path) } })
+                        rename = rename?.let { { it(path) } }, move = move?.let { { it(MoveSource(path, entry.dir)) } },
+                        trash = trash?.let { { it(path) } })
                 }
             }
             if (listing.truncated) item { Notice(stringResource(R.string.files_too_many, LocalizedFormats.number(MAX_LISTED, currentLocale)), padded = false) }
@@ -191,11 +210,12 @@ private fun LazyListScope.filesBrowser(state: FilesState, controller: FilesContr
 
 /**
  * One entry: its kind, the name (a hidden one quieter), size and when it changed, the Git change, ⋯. Its menu (⋯ or a long
- * press) inserts or copies the path, and with [rename] and [trash] renames it or moves it to the trash (iOS `FilesPane.entryRow`).
+ * press) inserts or copies the path and offers the available file changes (iOS `FilesPane.entryRow`).
  */
 @Composable
 private fun FileRow(entry: SessionFileEntry, change: SessionGitFile?, now: Instant, open: () -> Unit, copy: () -> Unit, insert: () -> Unit,
-    thumbnail: Pair<String, suspend (Int) -> ByteArray?>? = null, rename: (() -> Unit)? = null, trash: (() -> Unit)? = null) {
+    thumbnail: Pair<String, suspend (Int) -> ByteArray?>? = null, rename: (() -> Unit)? = null, move: (() -> Unit)? = null,
+    trash: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     val palette = PersonaTheme.palette
     val resources = LocalResources.current
@@ -223,7 +243,8 @@ private fun FileRow(entry: SessionFileEntry, change: SessionGitFile?, now: Insta
         add(JAction(stringResource(R.string.files_insert_path), PhIcons.CursorText, onClick = insert))
         add(JAction(stringResource(R.string.files_copy_path), PhIcons.Copy, onClick = copy))
         rename?.let { add(JAction(stringResource(R.string.files_rename), PersonaIcons.edit, separatorBefore = true, onClick = it)) }
-        trash?.let { add(JAction(stringResource(R.string.files_trash), PersonaIcons.delete, destructive = true, separatorBefore = rename == null, onClick = it)) }
+        move?.let { add(JAction(stringResource(R.string.files_move), PersonaIcons.folder, separatorBefore = rename == null, onClick = it)) }
+        trash?.let { add(JAction(stringResource(R.string.files_trash), PersonaIcons.delete, destructive = true, separatorBefore = rename == null && move == null, onClick = it)) }
     }, { menu = false }, entry.name)
 }
 
@@ -251,4 +272,4 @@ internal fun fileIcon(name: String): PhIcon = when (FilesPaths.extension(name)) 
 }
 
 /** The most entries a folder listing brings (the node cuts it there and says it's truncated). */
-private const val MAX_LISTED = 2000
+internal const val MAX_LISTED = 2000

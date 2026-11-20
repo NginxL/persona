@@ -71,6 +71,16 @@ class FilesPathsTest {
         assertEquals("~/a", joinRemotePath("~", "a"))
     }
 
+    @Test fun moveRejectsTheSameFolderAndAnyDestinationInsideTheSourceFolder() {
+        val folder = MoveSource("/work/Sources", directory = true)
+        assertFalse(folder.canMoveInto("/work/./"))
+        assertFalse(folder.canMoveInto("/work/Sources/"))
+        assertFalse(folder.canMoveInto("/work/Other/../Sources/Nested"))
+        assertTrue(folder.canMoveInto("/work/Sources-archive"))
+        assertTrue(folder.canMoveInto("/"))
+        assertFalse(MoveSource("~/work/file.txt", directory = false).canMoveInto("~/work/"))
+    }
+
     @Test fun nodeTimesWithTheMachinesOffsetAreRead() {
         // Shapes as a node sends them: RFC 3339 with the machine's own offset, nanoseconds on file times.
         assertEquals(Instant.parse("2026-10-31T05:58:40.205893083Z"), fileTime("2026-10-31T13:58:40.205893083+08:00"))
