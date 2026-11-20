@@ -27,12 +27,33 @@ func (s *Service) taskStartFailed(ctx context.Context, t Todo, machine string, s
 	if start != nil {
 		attempt = start.Attempt
 	}
-	s.taskNoticeOf(ctx, t, machine, "failed", "", reason, attempt, nil)
+	s.taskNoticeOfStart(ctx, t, machine, "failed", "", reason, attempt, nil, start)
+}
+
+// failedStartLauncher snapshots what actually failed, including a launcher selected by a tier or policy and recorded
+// in the plan's refusal arguments. A task without those facts is not eligible for cross-task grouping.
+func (s *Service) failedStartLauncher(ctx context.Context, t Todo) string {
+	if _, p, i, err := s.remedyOf(ctx, t.ID); err == nil {
+		if launcher := s.ranLauncher(ctx, p.Tasks[i]); launcher != "" {
+			return launcher
+		}
+	}
+	for i := len(t.Agents) - 1; i >= 0; i-- {
+		if t.Agents[i].StartError != "" && t.Agents[i].Agent != "" {
+			return t.Agents[i].Agent
+		}
+	}
+	return ""
 }
 
 // taskNoticeOf is taskNotice; attempt is a failed start's retries so far, and files what a done turn handed over to
 // its conversation's computer (task_files.go, #10511), which a notice lists outside its text's clip.
 func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask, text string, attempt int, files []taskFile) {
+	s.taskNoticeOfStart(ctx, t, machine, state, ask, text, attempt, files, nil)
+}
+
+// taskNoticeOfStart also carries the failed start's remedy state; every other task notice passes nil.
+func (s *Service) taskNoticeOfStart(ctx context.Context, t Todo, machine, state, ask, text string, attempt int, files []taskFile, start *StartRemedy) {
 	if t.Supervision == nil {
 		if !t.Quiet {
 			if state == "failed" && t.Origin != "" {
@@ -54,6 +75,9 @@ func (s *Service) taskNoticeOf(ctx context.Context, t Todo, machine, state, ask,
 	switch state {
 	case "failed":
 		g.Kind, g.Key = sigFailed, text
+		g.Generation = g.At.UTC()
+		g.Launcher = s.failedStartLauncher(ctx, t)
+		g.Remedying = start != nil && start.State == remedying && t.StartError == ""
 		if attempt > 0 {
 			g.Key = fmt.Sprintf("retry %d: %s", attempt, text) // as the started signal names it (start_remedy.go)
 		}

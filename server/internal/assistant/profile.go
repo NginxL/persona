@@ -555,6 +555,7 @@ func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
 func (s *Service) settingsChanged(ctx context.Context) {
 	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
+	s.revalidateFailedStartDeferrals(ctx)
 	s.publish(ctx)
 }
 

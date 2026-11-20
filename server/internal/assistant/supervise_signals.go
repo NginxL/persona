@@ -81,8 +81,18 @@ type superviseSignal struct {
 	Unreachable      bool
 	At               time.Time
 	Machine, Session string
-	Detail, Ask      string
-	Minutes          int
+	// Launcher is the actual launcher a failed start used. Recipient is the final conversation or task-leader
+	// destination, and NotBefore holds a repeated failure until its persistent deduplication window expires.
+	Launcher  string
+	Recipient string
+	NotBefore time.Time
+	Remedying bool
+	// Generation identifies a failed-start event independently of its queue position. failedClaim is the local
+	// manager's delivery claim; Claims in the durable batch document carries it between managers.
+	Generation  time.Time `json:"generation,omitzero"`
+	failedClaim string
+	Detail, Ask string
+	Minutes     int
 	// A report's (sigReport): its kind (progress, question, blocked, done), evidence and the step it is on.
 	SourcePermission proto.SourcePermission
 	Report           string
@@ -170,14 +180,19 @@ type superviseBook struct {
 	writeMu sync.Mutex // one ledger write at a time (updateSupervision)
 	dedupMu sync.Mutex // serializes digest reservations and delivery
 	dedup   map[string]superviseFingerprint
-	pending map[string]superviseSignal   // by todo|kind
-	sent    map[string]string            // todo|kind → the key last told
-	asks    map[string]string            // todo → what its agent last asked (InteractionRaised)
-	last    time.Time                    // when the last supervision message went out
-	queued  map[string][]superviseSignal // conversation → the signals of the message still waiting in its queue
-	batch   map[string]time.Time         // conversation → its routine batch's first-signal deadline
-	timer   *time.Timer
-	timerAt time.Time
+	// failedBatchMu serializes the durable leader-failure cooldown document. failedBatches is its memory-only
+	// fallback when this manager has no store; failedBatchesLoaded says whether deferred members were restored.
+	failedBatchMu       sync.Mutex
+	failedBatches       failedStartBatchDoc
+	failedBatchesLoaded bool
+	pending             map[string]superviseSignal   // by todo|kind
+	sent                map[string]string            // todo|kind → the key last told
+	asks                map[string]string            // todo → what its agent last asked (InteractionRaised)
+	last                time.Time                    // when the last supervision message went out
+	queued              map[string][]superviseSignal // conversation → the signals of the message still waiting in its queue
+	batch               map[string]time.Time         // conversation → its routine batch's first-signal deadline
+	timer               *time.Timer
+	timerAt             time.Time
 
 	resuming map[[2]string]struct{} // fingerprints of offline leader sends in flight, under dedupMu
 
@@ -234,6 +249,9 @@ func digestWait(now, last time.Time, pending []superviseSignal, p superviseTimin
 	var due time.Time
 	for _, g := range pending {
 		at := g.At.Add(p.gather)
+		if g.NotBefore.After(at) {
+			at = g.NotBefore
+		}
 		if !last.IsZero() && !g.immediate() {
 			gap := p.every
 			if g.urgent() {
@@ -290,7 +308,23 @@ func (s *Service) queueSignal(g superviseSignal) {
 		return
 	}
 	if cur, ok := b.pending[g.id()]; ok {
-		g.At = cur.At // still waiting: it keeps its place
+		if g.Kind == sigFailed {
+			if cur.Key != g.Key && newerFailedSignal(cur, g) {
+				b.mu.Unlock()
+				return // a restored or delayed old attempt cannot replace the newer pending one
+			}
+			if cur.Key == g.Key {
+				g.At = cur.At // the same failed attempt keeps its queue position and delivery generation
+				if g.Generation.IsZero() {
+					g.Generation = cur.Generation
+				}
+				if g.NotBefore.IsZero() {
+					g.NotBefore = cur.NotBefore
+				}
+			}
+		} else {
+			g.At = cur.At // still waiting: it keeps its place
+		}
 		if g.Ask == "" {
 			g.Ask = cur.Ask
 		}

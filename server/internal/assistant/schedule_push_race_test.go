@@ -37,6 +37,7 @@ func newPatrolEnv(t *testing.T) *patrolEnv {
 		Status: proto.StatusDone, LastText: "Previous answer", UpdatedAt: time.Now(), Rev: 1}
 	ft.sessions("mac", sess)
 	ft.f.sessions["mac"] = []proto.Session{sess}
+	ft.f.known[sess.SessionID] = true // the listed leader has a transcript that resume_only may continue
 	return &patrolEnv{t: t, ft: ft, task: task, sess: sess}
 }
 

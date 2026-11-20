@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"path"
@@ -680,6 +681,31 @@ func (s *Service) queueRelay(to string, msg relayMsg) int {
 	b.mu.Unlock()
 	go s.releaseHeldAsks(to)
 	return n
+}
+
+// queueRelayDurable is the supervision delivery boundary. Unlike best-effort conversation relays, a supervision
+// signal is accepted only after its queued message is saved. A failed write rolls the in-memory append back so the
+// durable failed-start outbox and the ordinary pending scheduler can retry the same generation.
+func (s *Service) queueRelayDurable(to string, msg relayMsg) (int, error) {
+	b := &s.relays
+	b.mu.Lock()
+	if !s.relayLocked(context.Background()) {
+		b.mu.Unlock()
+		return 0, errors.New("the relay queue cannot be read")
+	}
+	previous := b.st.Queue
+	b.st.Queue = maps.Clone(previous)
+	msg.QueuedAt, msg.Depth = time.Now().UTC(), len(previous[to])+1
+	b.st.Queue[to] = append(slices.Clone(previous[to]), msg)
+	if err := s.saveRelayLocked(); err != nil {
+		b.st.Queue = previous
+		b.mu.Unlock()
+		return 0, err
+	}
+	n := len(b.st.Queue[to])
+	b.mu.Unlock()
+	go s.releaseHeldAsks(to)
+	return n, nil
 }
 
 // queuedRelays are the texts waiting for a conversation (shown above its composer, like typed-ahead input); false

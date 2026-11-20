@@ -65,3 +65,25 @@ func TestBackgroundPlaceholderStopsAtTheNextUserInput(t *testing.T) {
 		t.Fatal("the background source reached past a new direct input")
 	}
 }
+
+func TestBackgroundReplyMissingDoesNotSuppressAnEarlierDirectTurn(t *testing.T) {
+	patrol := proto.Item{Role: "user", Kind: proto.KindText,
+		Text: prompts.MessageSourceText("Check the pending work", &proto.MessageSource{Kind: proto.SourcePatrol})}
+	direct := proto.Item{Role: "user", Kind: proto.KindText, Text: "Show me the details"}
+	answer := proto.Item{Role: "assistant", Kind: proto.KindText, Text: "Here are the details"}
+	for _, tc := range []struct {
+		name  string
+		items []proto.Item
+		want  bool
+	}{
+		{name: "next patrol input has not answered the direct turn", items: []proto.Item{direct, answer, patrol}, want: false},
+		{name: "background input with no answer stays quiet", items: []proto.Item{patrol}, want: true},
+		{name: "another unanswered background turn stays quiet", items: []proto.Item{patrol, answer, patrol}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BackgroundReplyMissing(tc.items); got != tc.want {
+				t.Fatalf("BackgroundReplyMissing = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

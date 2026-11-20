@@ -42,6 +42,11 @@ def blocking_findings(findings):
     return [finding for finding in findings or [] if finding.get("severity") == "P0"]
 
 
+def finding_anchor(finding):
+    """Where a finding points, independent of a reviewer's wording."""
+    return (finding.get("path"), finding.get("line"), finding.get("severity"))
+
+
 def load_config(path):
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -513,15 +518,39 @@ class Watcher:
             head = pr.get("headRefOid") or pr.get("head")
             if not isinstance(head, str) or not pr_watch_common.SHA.fullmatch(head):
                 raise WatchError("review publication requires an exact head")
-            item[head] = {"findings": findings,
-                                      "published_findings": findings if posted else [],
-                                      "updated_at": int(time.time())}
+            entry = item.setdefault(head, {})
+            published = list(entry.get("published_findings") or [])
+            if posted:
+                known = {finding_anchor(f) for f in published}
+                published += [f for f in findings if finding_anchor(f) not in known]
+            entry.update({"findings": findings, "published_findings": published,
+                          "updated_at": int(time.time())})
+            atomic_json(self.state.path, self.state.data)
+
+    def head_publication(self, repo, number, head):
+        """What this watcher already published for one exact head (#11738).
+
+        Evidence records are replaced whenever the base moves, so publication
+        history lives beside them, keyed by head."""
+        with self.state.lock:
+            return dict(self.state.data.get("finding_publications", {}).get(repo + "#" + str(number), {}).get(head) or {})
+
+    def record_success_publication(self, repo, number, head):
+        with self.state.lock:
+            item = self.state.data.setdefault("finding_publications", {}).setdefault(repo + "#" + str(number), {})
+            item.setdefault(head, {}).update({"success_posted": True, "updated_at": int(time.time())})
             atomic_json(self.state.path, self.state.data)
 
     def comment_findings(self, repo, number, pr, findings, inline=True):
         head = pr.get("headRefOid") or pr.get("head")
         if not isinstance(head, str) or not pr_watch_common.SHA.fullmatch(head):
             raise WatchError("findings publication requires an exact head")
+        if inline:
+            # A re-review on a moved base words the same findings differently;
+            # publish again only when it anchors something new on this head.
+            published = {finding_anchor(f) for f in self.head_publication(repo, number, head).get("published_findings") or []}
+            if findings and all(finding_anchor(f) in published for f in findings):
+                return
         blocking = bool(blocking_findings(findings))
         if not self.repositories[repo]["merge"]:
             action = "Review-only mode: no automatic repair or merge will be attempted. P1/P2 findings are notes; only P0 blocks."
@@ -566,6 +595,9 @@ class Watcher:
             raise WatchError("could not post PR comment: " + bounded(result.stderr, 1000))
 
     def success_review(self, repo, number, pr, results, base_failures=None):
+        if self.head_publication(repo, number, pr["headRefOid"]).get("success_posted"):
+            # Already said for this exact head; a moved base reran the gates.
+            return
         visual_missing = any(result.get("name", "").startswith("Visual acceptance not performed:") for result in results)
         checks = "\n".join("- `%s`" % r["name"] for r in results if r.get("ok") and not r.get("skipped")) or "- No additional successful lanes"
         if base_failures:
@@ -586,6 +618,7 @@ class Watcher:
         result = run(["gh", "pr", "review", str(number), "--repo", repo, "--comment", "--body", body], timeout=90)
         if result.returncode:
             raise WatchError("could not post successful review: " + bounded(result.stderr, 1000))
+        self.record_success_publication(repo, number, pr["headRefOid"])
 
     def notify(self, config, number, head, outcome):
         command = config.get("notify_command")
@@ -1098,8 +1131,9 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
         if old.get("evidence_key") != evidence_key:
             previous = old
             history = self.state.data.get("finding_publications", {}).get(repo + "#" + str(number), {}).get(previous.get("head"), {})
+            published_anchors = {finding_anchor(f) for f in history.get("published_findings") or []}
             unpublished = (previous.get("head") and previous.get("findings")
-                           and history.get("published_findings") != previous["findings"]
+                           and not all(finding_anchor(f) in published_anchors for f in previous["findings"])
                            and not (previous.get("review_posted") and
                                    previous.get("published_findings", previous["findings"]) == previous["findings"]))
             if unpublished and not self.dry_run:

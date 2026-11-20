@@ -1649,10 +1649,9 @@ private struct AgentsList: View {
         .onChange(of: query) { _, now in SearchTrace.shared.note("query '\(now)'") }
         #endif
         .onChange(of: machineFilter) { _, _ in kept = [] }
-        // Narrowed to one hub, another one made current (#11657): a computer of the hub before is not on this list.
-        .onChange(of: hubFilter) { _, now in
-            if !machineFilter.isEmpty, !HubFilter.matches(now, MachineRef(path: machineFilter).group) { machineFilter = "" }
-        }
+        // Narrowed to one hub, another one made current (#11657): a computer of the hub before is not on this list, also
+        // when the switch was made while the list was not there.
+        .modifier(MachineFilterFollowsHub(hubFilter: hubFilter, machineFilter: $machineFilter))
         .onAppear {
             #if DEBUG && os(iOS)
             sortShadow.enable()

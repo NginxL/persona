@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import Persona
 import PersonaWire
 
@@ -67,6 +69,34 @@ import PersonaWire
         #expect(agents(model, stored: HubFilter.value("g1")) == ["Home agent"])
     }
 
+    /// A computer the Agents list was narrowed to stays only while it is one of the hub the list shows (`HubFilter.machine`).
+    @Test func aComputerOfAnotherHubIsNotKept() {
+        #expect(HubFilter.machine("mac", shown: HubFilter.value("g1")) == "", "Home's computer on a list of Work's")
+        #expect(HubFilter.machine("g1|mac", shown: HubFilter.value("")) == "", "Work's computer on a list of Home's")
+        #expect(HubFilter.machine("g1|mac", shown: HubFilter.value("g1")) == "g1|mac")
+        #expect(HubFilter.machine("mac", shown: HubFilter.value("")) == "mac")
+        #expect(HubFilter.machine("g1|mac", shown: "") == "g1|mac", "All Hubs keeps any computer")
+        #expect(HubFilter.machine("", shown: HubFilter.value("g1")) == "", "every computer stays every computer")
+    }
+
+    /// A computer of the hub before, stored while the list was not there to see the switch (another page in front, the
+    /// app not running, an update from before the list followed the current hub): the list lets it go as it first
+    /// shows, not only when its hub changes while it is there. Kept, the list read the hub before's agents and showed
+    /// none (the review of #11721).
+    @Test func aComputerOfTheHubBeforeIsLetGoWhenTheListFirstShows() async throws {
+        let stale = FilterFixture.Filters(hub: HubFilter.value("g1"), machine: "mac") // Work current, Home's computer kept
+        let first = try FilterFixture.host(stale)
+        defer { first.isHidden = true }
+        #expect(await FilterFixture.settles(stale, at: ""), "Home's computer still narrows the list of Work: \(stale.machine)")
+
+        let own = FilterFixture.Filters(hub: HubFilter.value("g1"), machine: "g1|mac")
+        let second = try FilterFixture.host(own)
+        defer { second.isHidden = true }
+        #expect(!(await FilterFixture.settles(own, at: "")), "Work's own computer let go")
+        own.hub = HubFilter.value("") // Home made current while the list shows
+        #expect(await FilterFixture.settles(own, at: ""), "Work's computer still narrows the list of Home: \(own.machine)")
+    }
+
     /// The sidebar reads which chats the scheduled tasks started again for another hub, not only for another manager or
     /// another number of chats: a column that stays out (the iPad's) kept the hub before's.
     @Test func theTaskChatsAreReadAgainForAnotherHub() {
@@ -76,5 +106,38 @@ import PersonaWire
         #expect(AssistantTaskChatsStore.readKey(out: true, group: "", manager: "m-2", conversations: 4) != home)
         #expect(AssistantTaskChatsStore.readKey(out: true, group: "", manager: nil, conversations: 5) != home)
         #expect(AssistantTaskChatsStore.readKey(out: false, group: "g1", manager: nil, conversations: 4) == "", "nothing while it is in")
+    }
+}
+
+/// `MachineFilterFollowsHub` alone, in a window of its own: the group shown and the computer stored, as the Agents list
+/// holds them.
+@MainActor private struct FilterFixture: View {
+    @Observable final class Filters {
+        var hub: String
+        var machine: String
+        init(hub: String, machine: String) { (self.hub, self.machine) = (hub, machine) }
+    }
+
+    let filters: Filters
+
+    var body: some View {
+        Color.clear.modifier(MachineFilterFollowsHub(hubFilter: filters.hub,
+                                                     machineFilter: Binding(get: { filters.machine }, set: { filters.machine = $0 })))
+    }
+
+    static func host(_ filters: Filters) throws -> UIWindow {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        window.rootViewController = UIHostingController(rootView: FilterFixture(filters: filters))
+        window.isHidden = false
+        window.layoutIfNeeded()
+        return window
+    }
+
+    /// Whether the stored computer comes to `value` within a second.
+    static func settles(_ filters: Filters, at value: String) async -> Bool {
+        for _ in 0..<20 where filters.machine != value { try? await Task.sleep(for: .milliseconds(50)) }
+        return filters.machine == value
     }
 }

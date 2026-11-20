@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -26,6 +27,10 @@ const superviseTool = "supervise"
 // conversation that dispatched its task (routeTo). A signal that no longer holds (answered, done, reviewed meanwhile) is
 // dropped.
 func (s *Service) sendDigest(ctx context.Context) {
+	if err := s.restoreFailedStartBatches(ctx); err != nil {
+		s.logf("supervise: could not restore deferred failed starts: %v", err)
+	}
+	s.revalidateFailedStartDeferrals(ctx)
 	b := &s.supervise
 	batch := s.supervisionBatchInterval(ctx)
 	b.dedupMu.Lock()
@@ -44,9 +49,9 @@ func (s *Service) sendDigest(ctx context.Context) {
 		b.mu.Unlock()
 		return
 	}
-	if batch > 0 {
-		list = slices.DeleteFunc(list, func(g superviseSignal) bool { return supervisionBatchDeferred(g, now) })
-	}
+	list = slices.DeleteFunc(list, func(g superviseSignal) bool {
+		return g.NotBefore.After(now.Add(time.Second)) || batch > 0 && supervisionBatchDeferred(g, now)
+	})
 	if len(list) == 0 {
 		s.scheduleDigestLocked(now)
 		b.mu.Unlock()
@@ -122,7 +127,7 @@ func (s *Service) sendDigest(ctx context.Context) {
 	list = list[:0]
 	held := map[string]superviseSignal{}
 	for id, g := range b.pending { // as they are now: one may have come or gone meanwhile
-		if waits[id] || batch > 0 && supervisionBatchDeferred(g, now) {
+		if waits[id] || g.NotBefore.After(now.Add(time.Second)) || batch > 0 && supervisionBatchDeferred(g, now) {
 			held[id] = g
 			continue
 		}
@@ -307,6 +312,10 @@ func (s *Service) dispatcherOf(id string, there func(string) bool) string {
 // message before. True when it went in or was queued.
 func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, list []superviseSignal, web string, now, prev time.Time) bool {
 	b := &s.supervise
+	list = s.gateFailedStartBatches(ctx, to, list, now, prev)
+	if len(list) == 0 {
+		return false
+	}
 	var entries []prompts.SuperviseEntry
 	var kept, moot []superviseSignal
 	s.remedyGoesTo(to, list) // a failed start is ended by this conversation's turn, no other's (start_remedy.go)
@@ -319,6 +328,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		}
 	}
 	s.turnsTold(ctx, moot) // what no longer holds is not told after a restart either (task_turns.go)
+	s.discardFailedStartBatches(ctx, moot, now)
 	if len(entries) == 0 {
 		return false
 	}
@@ -326,12 +336,14 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	entries, kept, rollback, err := s.reserveSupervision(ctx, entries, kept, now)
 	if err != nil {
 		s.logf("supervise: deduplication unavailable; retrying: %v", err)
+		s.releaseFailedStartBatches(ctx, kept)
 		s.restoreDigest(kept, now, prev)
 		return false
 	}
 	if len(entries) == 0 {
 		s.agentDecisionRepliesTold(ctx, holds)
 		s.turnsTold(ctx, holds) // said the same within the window: told
+		s.finishFailedStartBatches(ctx, to, nil, holds, now)
 		b.mu.Lock()
 		if b.last.Equal(now) {
 			b.last = prev
@@ -340,15 +352,27 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 		return false
 	}
 	accepted := false
+	acceptedIDs := map[[2]string]bool{}
+	for _, g := range kept {
+		acceptedIDs[[2]string{g.id(), g.Key}] = true
+	}
+	var settled []superviseSignal
+	for _, g := range holds {
+		if !acceptedIDs[[2]string{g.id(), g.Key}] {
+			settled = append(settled, g)
+		}
+	}
 	defer func() {
 		if !accepted {
 			rollback()
+			s.releaseFailedStartBatches(ctx, kept)
 			return
 		}
 		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
 		s.parkDecidedTold(ctx, kept)
 		s.agentDecisionRepliesTold(ctx, kept)
 		s.turnsTold(ctx, holds) // and how a turn ended: kept went, the rest of them was said the same within the window
+		s.finishFailedStartBatches(ctx, to, kept, settled, now)
 	}()
 	background := to != here.Main && to == here.BackgroundSupervisor // the leader's message, told that the tasks are not its own (supervise_background.go)
 	render := func(list []prompts.SuperviseEntry) string { return s.renderQueuedDigest(ctx, to, list) }
@@ -449,7 +473,7 @@ func (s *Service) queueDigest(to string, msg relayMsg, kept []superviseSignal, a
 		return false
 	}
 	b := &s.supervise
-	if s.queueRelay(to, msg) > 0 {
+	if n, err := s.queueRelayDurable(to, msg); err == nil && n > 0 {
 		b.mu.Lock()
 		b.setQueuedLocked(to, kept)
 		b.mu.Unlock()
@@ -508,11 +532,17 @@ func (s *Service) replaceQueuedSupervise(to string, msg relayMsg) bool {
 	if !s.relayLocked(context.Background()) {
 		return false
 	}
-	q := b.st.Queue[to]
+	previous := b.st.Queue
+	q := slices.Clone(previous[to])
 	for i := range q {
 		if q[i].Tool == superviseTool && (i > 0 || !b.draining[to]) {
 			q[i] = msg.replacing(q[i], time.Now()) // it waited since then (relay_presence.go)
-			s.saveRelayLocked()
+			b.st.Queue = maps.Clone(previous)
+			b.st.Queue[to] = q
+			if err := s.saveRelayLocked(); err != nil {
+				b.st.Queue = previous
+				return false
+			}
 			return true
 		}
 	}
@@ -530,6 +560,20 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	var replyAsk acceptAsk
 	var draft *TodoPRStatus
 	switch g.Kind {
+	case sigFailed:
+		if g.Remedying {
+			// Notification batching never holds the remedy itself. If that remedy already succeeded or became a
+			// final failure while this signal waited, its old remediable notification is moot; the final attempt,
+			// when there is one, has its own generation and must not be discarded here.
+			if t.DoneAt != nil || t.StartError != "" {
+				return prompts.SuperviseEntry{}, false
+			}
+			if _, p, i, err := s.remedyOf(ctx, t.ID); err == nil {
+				if r := p.Tasks[i].Start; r == nil || r.State != remedying {
+					return prompts.SuperviseEntry{}, false
+				}
+			}
+		}
 	case sigDraftPR:
 		if t.PRURL != g.PRURL && !slices.Contains(t.PRs, g.PRURL) {
 			return prompts.SuperviseEntry{}, false

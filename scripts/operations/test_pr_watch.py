@@ -814,6 +814,43 @@ class WatcherTests(unittest.TestCase):
                          if call.args[0][:2] == ["gh", "api"]]
         self.assertEqual(len(finding_calls), 1)
 
+    def test_moved_base_does_not_republish_reviews_on_an_unchanged_head(self):
+        # A merge-blocked PR is re-reviewed whenever main moves; the same head
+        # must not collect a new copy of the same reviews each time (#11738).
+        reworded = [{"path": "x.py", "line": 2, "severity": "P2", "summary": "note %d" % n, "suggestion": "consider"}
+                    for n in range(3)]
+        other_base = "d" * 40
+        with patch.object(pr_watch, "semantic_review", side_effect=[[f] for f in reworded]) as review, \
+                patch.object(pr_watch, "verify", return_value=[{"name": "test", "ok": True}]), \
+                patch.object(self.watcher, "merge", side_effect=pr_watch_common.WatchError("ratchet: 1 time.Sleep call")):
+            for base in (SHA_BASE, other_base, SHA_BASE):
+                with patch.object(pr_watch, "pr_snapshot", return_value=pr(baseRefOid=base)):
+                    self.watcher.process("example/one", 7)
+                self.watcher.state.annotate("example/one", 7, retry_after=0)
+        self.assertEqual(review.call_count, 3)  # each new base is still reviewed
+        findings = [c for c in self.github.call_args_list if c.args[0][:2] == ["gh", "api"]]
+        success = [c for c in self.github.call_args_list if c.args[0][:3] == ["gh", "pr", "review"]]
+        self.assertEqual((len(findings), len(success)), (1, 1))
+
+    def test_a_new_finding_on_the_same_head_is_still_published(self):
+        first = {"path": "x.py", "line": 2, "severity": "P2", "summary": "note", "suggestion": "consider"}
+        moved = dict(first, summary="same place, new words")
+        new = {"path": "y.py", "line": 9, "severity": "P1", "summary": "another", "suggestion": "fix"}
+        snapshot = {"head": SHA_A}
+        for findings in ([first], [moved], [moved, new]):
+            self.watcher.comment_findings("example/one", 7, snapshot, findings)
+        posted = [c for c in self.github.call_args_list if c.args[0][:2] == ["gh", "api"]]
+        self.assertEqual(len(posted), 2)
+        self.assertIn("y.py", posted[1].kwargs["input_text"])
+        anchors = {(f["path"], f["line"]) for f in self.watcher.head_publication("example/one", 7, SHA_A)["published_findings"]}
+        self.assertEqual(anchors, {("x.py", 2), ("y.py", 9)})
+
+    def test_success_review_is_posted_once_per_head(self):
+        for head in (SHA_A, SHA_A, SHA_B):
+            self.watcher.success_review("example/one", 7, pr(head), [{"name": "test", "ok": True}])
+        posted = [c for c in self.github.call_args_list if c.args[0][:3] == ["gh", "pr", "review"]]
+        self.assertEqual(len(posted), 2)
+
     def test_mixed_findings_are_fully_published_before_blocking_repair(self):
         findings = [
             {"path": "x.py", "line": 2, "severity": "P0", "summary": "wrong", "suggestion": "fix it"},

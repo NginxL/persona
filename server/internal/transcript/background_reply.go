@@ -48,6 +48,13 @@ func BackgroundReplyMissing(items []proto.Item) bool {
 	if !background {
 		return false
 	}
+	if start == len(items)-1 {
+		if previous, previousBackground := lastBackgroundInput(items[:start]); previous >= 0 && !previousBackground {
+			// A trailing input with no output yet belongs to the next turn. It must not silence the completed
+			// non-background exchange above it; an earlier background turn keeps the missing-reply behavior.
+			return false
+		}
+	}
 	for i := len(items) - 1; i > start; i-- {
 		item := items[i]
 		if item.Role != "assistant" || item.Narration {

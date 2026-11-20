@@ -115,6 +115,8 @@ type Service struct {
 	// trustSrc is Options.Trust.
 	trustSrc MachineTrust
 	logf     func(format string, args ...any)
+	// runWorkerOutcome overrides asynchronous outcome startup in tests; nil uses a goroutine.
+	runWorkerOutcome func(func())
 	// runRetry is how long after a failed run the retry goes (0: runRetryDelay; tests shorten it).
 	runRetry time.Duration
 	// turnPoll is how often a run's watcher reads its turn (0: turnPollInterval; tests shorten it).

@@ -185,7 +185,7 @@ func (s *Service) ownSettings() []ownSetting {
 		{Setting: Setting{Key: "assistant.leaders", Title: "Leader conversations", Actions: getSet,
 			About: "empty (the default): only the main conversation supervises the tasks it hands out. A leader is a side conversation " +
 				"(one repository or long-running project each) that supervises the tasks it hands out with task_plan itself: their " +
-				"supervision messages go to it and it reviews them with task_review; needs_user and failed starts still come to the " +
+				"supervision messages go to it and it reviews them with task_review; its failed starts go to it too, while needs_user still comes to the " +
 				"main conversation. Applies to tasks handed out from now on",
 			Value: "the whole list of leader conversation ids (conversations_list), [] for none"},
 			get: s.getLeaders,
@@ -265,7 +265,7 @@ func (s *Service) ownSettings() []ownSetting {
 		{Setting: Setting{Key: "assistant.main_supervises_own_tasks", Title: "The main chat supervises its own tasks", Actions: getSet,
 			About: "off (the default): the background supervisor, one built-in Persona conversation made on first use, follows up " +
 				"every supervised task no leader supervises: their supervision messages go to it and it reviews them with task_review, " +
-				"so the main conversation stays free to answer the user. The main conversation still hears of failed starts and of " +
+				"so the main conversation stays free to answer the user. The main conversation still hears of failed starts with no current leader and of " +
 				"what the background supervisor hands to the user, and may review any of these tasks itself. on: the main conversation " +
 				"gets these supervision messages itself, as before the background supervisor existed. Applies to signals raised from " +
 				"the change on (a supervision message already with the background supervisor is finished there); tasks keep running",

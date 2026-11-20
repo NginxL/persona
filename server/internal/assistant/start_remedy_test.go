@@ -24,17 +24,22 @@ func keptRefusal(code string) error {
 // remedyingTask is a task of the main conversation conv1, supervised, on box, whose start failed with failure.
 func remedyingTask(t *testing.T, s *Service, f *fakeHub, failure error) (Todo, *TaskPlan) {
 	t.Helper()
+	return remedyingTaskAs(t, s, f, failure, "conv1", "plan_r")
+}
+
+func remedyingTaskAs(t *testing.T, s *Service, f *fakeHub, failure error, supervisor, planID string) (Todo, *TaskPlan) {
+	t.Helper()
 	ctx := context.Background()
 	f.mu.Lock()
 	f.failStart = failure
 	f.mu.Unlock()
-	todo, err := s.createTodo(ctx, "修登录", "修登录", "conv1", "plan_r")
+	todo, err := s.createTodo(ctx, "修登录", "修登录", supervisor, planID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.superviseTodo(ctx, todo.ID, "conv1", []string{"PR 合并"}, 0)
+	s.superviseTodo(ctx, todo.ID, supervisor, []string{"PR 合并"}, 0)
 	task := PlanTask{Title: "修登录", Prompt: "修登录", Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions", TodoID: todo.ID}
-	p := &TaskPlan{ID: "plan_r", Conversation: "conv1", State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	p := &TaskPlan{ID: planID, Conversation: supervisor, State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := s.savePlan(ctx, p); err != nil {
 		t.Fatal(err)
 	}

@@ -47,6 +47,9 @@ func digestWaitWithBatch(now, last time.Time, pending []superviseSignal, p super
 	var due time.Time
 	for _, g := range pending {
 		at := g.At.Add(p.gather)
+		if g.NotBefore.After(at) {
+			at = g.NotBefore
+		}
 		if batch > 0 && !supervisionBatchImmediate(g) && g.batchUntil.After(at) {
 			at = g.batchUntil
 		}
