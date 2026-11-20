@@ -25,6 +25,8 @@ import (
 
 const justMeKey = "assistant.just_me_turns"
 
+const justMeMsgPrefix = "just-me-"
+
 const (
 	// justMeMax: a mark lasts at most this long after its message went.
 	justMeMax = 3 * time.Hour
@@ -208,7 +210,7 @@ func (s *Service) justMeRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	text := prompts.RenderMeetingJustMe(prompts.MeetingJustMe{Title: feedMeetingName(rec, loc), Calendar: cal, RecordingID: rec.ID,
 		At: timeInMeeting(rec, time.Now()), Text: msg.Text})
-	msgID := "just-me-" + msg.ID
+	msgID := justMeMsgPrefix + msg.ID
 	machine, session, err := s.justMeSend(ctx, text, msg.Images, msgID)
 	if err != nil {
 		writeSendError(w, err)

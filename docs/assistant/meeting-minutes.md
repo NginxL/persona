@@ -863,6 +863,7 @@ A meeting Persona is not in still gets its live view. Since #8731 a meeting star
   - no completion push, and nothing mirrored to the Lark bot or channels;
   - `notify_user` sends no push and no Lark or channel copy; its text stays in the conversation, which the meeting page shows;
   - a card the turn raises (`ask_user`, a permission or a confirmation) is pushed only with content-free text, as a health-space card is, and never to Lark or channels; the Fleet Live Activity shows it without its text;
+  - `conversation_send` and `conversation_new` refuse any `quote` during the marked turn, including an answer to a private card. The refusal tells the assistant to keep the words out of its relay text too. The Just me question's client message id keeps that question ineligible for quoting after the mark ends. Sending a message without a quote follows the usual rules;
   - otherwise it is an ordinary turn of the main chat, with every tool.
 - Nothing of it is stored with the recording: it is never meeting material, never in `asks`, the room or the follow-up's seed.
 - The phone shows the main chat's items after that message, and the turn's cards (answered there), until its turn ends, only on the meeting page under **Just me**; never in the Live Activity, never spoken.

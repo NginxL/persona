@@ -58,6 +58,7 @@ const (
 type BriefRequest struct {
 	Text         string    `json:"text"`
 	Truncated    bool      `json:"truncated,omitempty"`
+	Part         bool      `json:"part,omitempty"` // a quoted passage from the source message
 	At           time.Time `json:"at"`
 	Conversation string    `json:"conversation,omitempty"`
 	MessageID    string    `json:"message_id,omitempty"`
@@ -764,7 +765,9 @@ func (s *Service) briefOrigin(ctx context.Context, machine, conversation string)
 		case src.Kind == proto.SourceConversation:
 			rec.Trigger, rec.TriggerTitle = "conversation", src.Title
 			// The owner's words it carried, as the hub verified them when it was sent (relay_quote.go).
-			rec.Request = s.receivedQuote(ctx, it, src)
+			if q := s.receivedQuote(ctx, it, src); q != nil {
+				rec.Request = &q.BriefRequest
+			}
 		case src.Kind == proto.SourceMeeting:
 			rec.Trigger, rec.TriggerTitle = "meeting", src.Title
 		default:

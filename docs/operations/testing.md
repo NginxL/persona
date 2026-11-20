@@ -1298,6 +1298,22 @@ TEST_RUNNER_PERSONA_HUB_A=http://127.0.0.1:18760 TEST_RUNNER_PERSONA_HUB_B=http:
   repeat after, pixel compare. Repeated shots from same build identify noise (system spinner/Liquid Glass highlights vary per launch); exclude noise, inspect remaining differences.
   Only allowed change: hub row added to Settings Server section.
 
+### Switching hubs (`HubSwitchSidebarTests`, #11657)
+
+Two mock hubs, each a group of its own with data of its own, check that the iPhone's sidebar follows the current hub in both layouts: Persona's chats
+(Home's mock titles, Work's `MOCK_TITLES=1` titles) and the Agents list narrowed to one hub (`服务器 · Home`, `Work server · Work`).
+
+```sh
+PORT=18870 MOCK_HUB_ID=hub-home MOCK_HUB_NAME=Home python3 scripts/mock/mock_hub.py &
+PORT=18871 MOCK_HUB_ID=hub-work MOCK_HUB_NAME=Work MOCK_TITLES=1 \
+  MOCK_MACHINE_NAMES='{"server":"Work server","macbook":"Work MacBook"}' python3 scripts/mock/mock_hub.py &
+TEST_RUNNER_PERSONA_HUB_A=http://127.0.0.1:18870 TEST_RUNNER_PERSONA_HUB_B=http://127.0.0.1:18871 TEST_RUNNER_PERSONA_HUB_B_TITLES=1 \
+  TEST_RUNNER_PERSONA_SCHEME=light TEST_RUNNER_PERSONA_SHOTS=<directory> \
+  xcodebuild test … -only-testing:PersonaUITests/HubSwitchSidebarTests
+```
+
+Both hubs also run with `MOCK_SESSIONS_LIST=1` (bounded lists, as current hubs have them); the test is the same.
+
 ### All-day recording (`RecordingDayUITests`)
 
 The phone's side of all-day recording (`docs/apple/recording.md` "All-day recording (Apple)") against the mock hub, with made-up days standing in for the watch: a simulator pair can't record a day or deliver its files.

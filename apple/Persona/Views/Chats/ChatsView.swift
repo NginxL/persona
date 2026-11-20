@@ -965,8 +965,10 @@ private struct AgentsList: View {
     @StoredValue("dev.pinnedOnly") private var pinnedOnly = false
     @StoredValue("dev.searchScope") private var searchScope: AgentSearchScope = .all
     @StoredValue("dev.searchAsCode") private var searchAsCode = false
-    /// Several groups of hubs: the one the list shows ("" = all; `HubFilter`).
-    @StoredValue(HubFilter.key) private var hubFilter = ""
+    /// Several groups of hubs: "" all of them, else the list is narrowed to one (`HubFilter`).
+    @StoredValue(HubFilter.key) private var storedHubFilter = ""
+    /// The group the list shows when narrowed: the current hub's (`HubFilter.shown`, #11657).
+    private var hubFilter: String { HubFilter.shown(storedHubFilter, current: model.hub?.group) }
     @StoredValue("dev.grouping") private var storedGrouping: DevGrouping = .standard // by repository first (#2108)
     /// The grouping in use (`DevGrouping.resolved`).
     private var grouping: DevGrouping { DevGrouping.resolvedNow(storedGrouping) }
@@ -1647,6 +1649,10 @@ private struct AgentsList: View {
         .onChange(of: query) { _, now in SearchTrace.shared.note("query '\(now)'") }
         #endif
         .onChange(of: machineFilter) { _, _ in kept = [] }
+        // Narrowed to one hub, another one made current (#11657): a computer of the hub before is not on this list.
+        .onChange(of: hubFilter) { _, now in
+            if !machineFilter.isEmpty, !HubFilter.matches(now, MachineRef(path: machineFilter).group) { machineFilter = "" }
+        }
         .onAppear {
             #if DEBUG && os(iOS)
             sortShadow.enable()

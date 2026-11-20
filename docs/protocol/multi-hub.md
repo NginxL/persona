@@ -7,9 +7,11 @@
 - **Settings › Server** has a new "hub" row (present even with one group: this is where users add a second hub; **this is the only pixel change when there is one group**). It opens a list of paired hubs organized by group:
   add a hub, rename a group, set the current hub, disconnect one hub (if others remain in the group), or disconnect an entire group.
 - Agents, Machines, interactions that need you, and Agent requests in the Inbox display all groups together. With multiple groups, machine names include the group name ("MacBook · Company").
-  The Machines page has separate sections by group, with a connection-status dot in each header. The menu at the top left of Agents gains a "hub" selector to show just one group.
+  The Machines page has separate sections by group, with a connection-status dot in each header. The menu at the top left of Agents gains a "hub" selector to show just one group. The group it shows is always the current hub (#11657):
+  picking a group there makes it the current hub, and making another hub current anywhere moves a list narrowed to one group along with it, so Agents and the
+  hub-level pages (Persona and its sidebar, the Inbox) never show two different hubs. "All Hubs" leaves the current hub as it is.
 - The Persona assistant, Inbox, the avatar (#2406, [persona.md](../apple/persona.md) "On the phone": each hub keeps its own choice), and hub-related settings (models, connectors, devices, notifications…) belong to each hub and are **not merged**. They display the "current hub":
-  switch it in the Persona top-bar menu, at the top left of the Inbox, or at the top of the Settings home page.
+  switch it in the Persona top-bar menu, at the top left of the Inbox, at the top of the Settings home page, or by showing one group in the Agents menu.
 - With only one group, none of these additions appear, and the UI is exactly as before (screenshots compared pixel by pixel; see "Tests").
 
 ## Terminology
@@ -18,7 +20,7 @@
 | --- | --- |
 | Group | Paired hubs grouped by their linked-hub relationships; one connection per group |
 | Default group | The group whose id is the empty string `""`: migrated from the old single pairing, or the first group paired. When it is the only group, every key and path is byte-for-byte identical to before. |
-| Current hub (`AppModel.hubGroup`) | The group used by hub-level pages. **Controls only hub-level pages**, not session keys, machine ids, drafts, pins, or caches. |
+| Current hub (`AppModel.hubGroup`) | The group used by hub-level pages. **Controls only hub-level pages** (and which group an Agents list narrowed to one group shows), not session keys, machine ids, drafts, pins, or caches. |
 
 ## Storage
 

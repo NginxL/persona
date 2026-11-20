@@ -186,6 +186,9 @@ func TestATaskConversationIsTitledAfterTheTask(t *testing.T) {
 	h := newTestHub(t)
 	putAssistantSettings(t, h, assistant.Settings{Timezone: "Asia/Shanghai"})
 	n := newAssistantNode(t, h)
+	n.m.mu.Lock()
+	n.m.online = true // runTask's execution guard sees this in-process peer as an online machine.
+	n.m.mu.Unlock()
 	model, calls := replies(t, "探索 | 不该用到")
 	useModel(t, h, model)
 	seedTasks(t, h, assistant.Task{ID: "r", Title: "早报", Prompt: "给我今天的早报", Repeat: "daily", Time: "09:00", Enabled: true})

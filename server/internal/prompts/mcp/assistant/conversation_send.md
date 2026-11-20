@@ -14,7 +14,7 @@ Message another conversation. It waits for a running turn or 2 min of user quiet
     },
     "quote": {
       "type": "string",
-      "description": "\"latest\" or a message id: the user's words, carried verbatim"
+      "description": "\"latest\" (this turn), a message id or the user's exact words"
     }
   }
 }

@@ -1052,6 +1052,7 @@ type Relay struct {
 // RelayQuote is the owner's message a relay carries: its id, when and in which conversation they wrote it, the
 // conversations that passed it on after that one (oldest first), and the text verbatim. ParseRelayQuoteID reads the id back.
 type RelayQuote struct {
+	Part                 bool // the text is an excerpt from the source message
 	ID, At, Conversation string
 	Via                  []string
 	Text                 string

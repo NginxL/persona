@@ -68,7 +68,9 @@ struct AgentsListMenu: View {
     }
 
     @StoredValue("dev.machineFilter") private var machineFilter = ""
-    @StoredValue(HubFilter.key) private var hubFilter = ""
+    @StoredValue(HubFilter.key) private var storedHubFilter = ""
+    /// The group the list shows when narrowed: the current hub's (`HubFilter.shown`, #11657).
+    private var hubFilter: String { HubFilter.shown(storedHubFilter, current: model.hub?.group) }
     @StoredValue("dev.grouping") private var grouping: DevGrouping = .standard
     /// The grouping the list shows: a stored By To-do is By Project on a hub without todos (`DevGrouping.resolved`).
     private var shownGrouping: DevGrouping { DevGrouping.resolvedNow(grouping) }
@@ -137,8 +139,14 @@ struct AgentsListMenu: View {
                 }
             }
             if model.isMultiHub {
-                // Several groups of hubs (docs/protocol/multi-hub.md「What the user sees」): one group's agents only.
-                Picker("hub", selection: Binding(get: { hubFilter }, set: { hubFilter = $0; machineFilter = "" })) {
+                // Several groups of hubs (docs/protocol/multi-hub.md「What the user sees」): one group's agents only. That
+                // group is the current hub (#11657): picking it here makes it current, so Persona's sidebar, the Inbox and
+                // the hub's settings show it too; All Hubs leaves the current hub as it is.
+                Picker("hub", selection: Binding(get: { hubFilter }, set: { pick in
+                    storedHubFilter = pick
+                    machineFilter = ""
+                    if let g = HubFilter.group(pick) { model.selectHub(g) }
+                })) {
                     Label("All Hubs", systemImage: Theme.Icon.hubGroup).tag("")
                     ForEach(model.groupIDs, id: \.self) { g in
                         Label(model.groupName(g), systemImage: Theme.Icon.hubGroup).tag(HubFilter.value(g))

@@ -1195,7 +1195,9 @@ Provider responses carry only the description and `has_key`, never secrets. Defa
  // The task's brief (#3822, docs/assistant/unified-entry.md "Briefs"): what was asked when the work was handed out, never rewritten; absent on a to-do with none.
  // Clients that don't know it show the to-do as usual.
  "brief":{"id":"brief_…","created_at":"...",
-          "request":{"text":"the owner's message, verbatim","truncated":false,"at":"...","conversation":"<chat id>","message_id":"<item id>"},   // absent when the owner did not ask for it
+          "request":{"text":"the owner's words, verbatim","part":true,"at":"...","conversation":"<chat id>","message_id":"<source item id>"},   // absent when the owner did not ask for it
+          // request.part is true for a selected passage and omitted for a whole message. message_id and at always identify the original message.
+          // request.truncated is true when text was clipped at 2000 characters. request.via lists the relaying conversations, oldest first.
           "started_by":"owner|assistant|leader|routine|hub|unknown",
           "trigger":"supervision|followup|routine|conversation|notice|meeting|wake","trigger_title":"…","reason":"why it was started",   // when not the owner
           "conversation":"<chat id>","goal":"one sentence","done_when":["…"],"expect_minutes":30,"out_of_bounds":["…"],   // as handed out

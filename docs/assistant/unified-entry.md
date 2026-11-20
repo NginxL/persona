@@ -642,7 +642,7 @@ record per piece of work, made when the work is handed out and never rewritten (
 
 | Field | From | Meaning |
 | --- | --- | --- |
-| `request` | the hub | The owner's message that led to the task, verbatim: `text` (cut at 2000 characters, then `truncated`), `at`, and where the whole of it is (`conversation`, `message_id`); `via`: the conversations that relayed it, oldest first ("Across a relay" below). Absent when the owner did not ask for it |
+| `request` | the hub | The owner's words that led to the task. `text` keeps their original wording and spacing, up to 2000 characters (`truncated` if clipped). `part: true` marks a selected passage. `at`, `conversation` and `message_id` identify the original message. `via` lists the conversations that relayed it, oldest first. Absent when the owner did not ask for it |
 | `started_by`, `trigger`, `trigger_title`, `reason` | the hub, `reason` from the model | Who started it: `owner`, `assistant`, `leader`, `routine`, `hub`, or `unknown`; what the turn followed when it was not the owner (`supervision`, `followup`, `routine`, `conversation`, `notice`, `meeting`, `wake`); and why (`task_plan`'s `started_why`) |
 | `goal` | the model | The work in one sentence (the task's title when a writable task gives none) |
 | `done_when`, `expect_minutes`, `out_of_bounds` | the model | What done means, about how long it should take, what the Agent must not do |
@@ -658,18 +658,25 @@ never writes `request`: a `brief` in the tool call is dropped.
 
 **Across a relay.** When the main conversation hands the owner's request to a leader, the leader's latest message is
 the relay, so its brief would only say a conversation started it. `conversation_send` and `conversation_new` take an
-optional `quote`: `"latest"` or a message id (`server/internal/assistant/relay_quote.go`). The hub reads the sending
-conversation's last ten turns and accepts only a message the owner sent there from an app (it has a client message
-id), or a verified quote that conversation itself received, so a quote passes on through more than one conversation.
-Anything else refuses the send before the hop and rate limits count it. The hub keeps what it verified (setting
-`assistant.quotes`, by sender and message id, 14 days, at most 64) and the receiver gets the text verbatim in a
-`<persona-context kind="owner-request" message_id="…">` block right after the relay context
-(`prompts/assistant/relay.md`). When the receiver hands work out on that message, `request` is the kept quote,
-found by the sender (the item's `source`) and the id in that block; only a block directly after the canonical relay
-context counts (`prompts.ParseRelayQuoteID`), and its text is never read as the request. `started_by` stays
-`leader` / `assistant` with trigger `conversation`, and `request.via` lists who passed it on. A relayed quote is the
-owner's request, never their approval: a scope change that needs the owner's yes takes only a message they wrote in
-the conversation making the change. Hops and rate limits are as before.
+optional `quote`. With `"latest"`, the hub uses the one owner message or verified incoming quote in **this turn**.
+A queued owner message belongs to the turn already running. A background notice or wake continues it. If the turn
+contains several candidates, the tool lists their ids and first words so the sender can choose. If the turn contains
+none, or its start is outside the transcript page, the sender can give the exact words of an earlier request or omit
+`quote`.
+
+A message id or the owner's exact words can select from the last ten turns. An id takes precedence. Text matches
+the newest owner message or verified incoming quote that contains it, with at least four characters and runs of
+whitespace compared as a single space. The receiver gets the original spacing. A selected passage sets
+`request.part` and keeps the source message's time and id. A marked Just me turn cannot quote anything, and a
+Just me question remains ineligible afterwards. A refusal uses no relay allowance.
+
+The hub keeps the verified words for 14 days, up to 64 entries in `assistant.quotes`, keyed by sender and the id
+in the receiver's `<persona-context kind="owner-request" message_id="…">` block. A whole message keeps its id.
+Each passage has its own stable reference so different receivers can pass on their own passage using the id in
+their block. The receiver's brief takes the stored words by that reference and the relay item's source. Only a
+block directly following the canonical relay context counts (`prompts.ParseRelayQuoteID`). The brief keeps
+`started_by` as `leader` or `assistant`, trigger `conversation`, and the conversation ids in `request.via`.
+A scope change requiring the owner's approval still needs a message they wrote in the conversation making it.
 
 **Required.** `task_plan` refuses a writable task (`readonly` false) without `done_when` (at least one criterion) and
 `expect_minutes`, and a read-only task without `goal` and `expect_minutes`; the refusal names what is missing and

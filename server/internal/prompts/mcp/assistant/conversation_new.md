@@ -16,7 +16,7 @@ Open a Persona conversation with a first message; returns its id. For threads th
     },
     "quote": {
       "type": "string",
-      "description": "\"latest\" or a message id: the user's words, carried verbatim"
+      "description": "\"latest\" (this turn), a message id or the user's exact words"
     }
   }
 }

@@ -10,6 +10,16 @@ nonisolated enum HubFilter {
     static func value(_ group: String) -> String { "=" + group }
     static func matches(_ filter: String, _ group: String) -> Bool { filter.isEmpty || filter == "=" + group }
     static func group(_ filter: String) -> String? { filter.hasPrefix("=") ? String(filter.dropFirst()) : nil }
+
+    /// What a list narrowed to one group shows (#11657): the current hub (`AppModel.hubGroup`), whichever group the
+    /// stored filter names. The Agents list and the hub-level pages (Persona and its sidebar, the Inbox) then never show
+    /// two different hubs: making another hub current anywhere moves the narrowed list with it, and picking one group in
+    /// the list's menu makes it the current hub (`AgentsMenus`). Every group ("") stays every group; `current` nil (not
+    /// paired) leaves the filter as it is.
+    static func shown(_ filter: String, current: String?) -> String {
+        guard !filter.isEmpty, let current else { return filter }
+        return value(current)
+    }
 }
 
 /// Which group of hubs a row or a page is about, as a small chip; nothing with one group.

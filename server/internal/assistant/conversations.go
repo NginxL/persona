@@ -259,7 +259,7 @@ type relayMsg struct {
 	// Quote: the owner's message the sender carried (conversation_send / conversation_new quote), as the hub verified
 	// it (relay_quote.go, #3822). A version that does not know it drops it on its next save: the message then goes
 	// without the owner's words, as before.
-	Quote *BriefRequest `json:"quote,omitempty"`
+	Quote *relayRequest `json:"quote,omitempty"`
 	// Chat: what a chat_reply tells (chat_reply.go, #10777), so a later batch of the same chat merges into it. A version
 	// that does not know it drops it on its next save: the message then goes as it is, and the next batch queues its own.
 	Chat *chatReply `json:"chat,omitempty"`
