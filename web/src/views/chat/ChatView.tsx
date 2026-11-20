@@ -61,7 +61,8 @@ import { glide } from "./glide";
 import { AGENT_COMMANDS, Composer, type Outgoing } from "./Composer";
 import { agentCommands } from "../../lib/composer-commands";
 import { CLEAR_MAIN_FEATURE, clearMainContext, isClearCommand, mainCommands } from "../../lib/main-clear";
-import { PendingCards } from "./Interactions";
+import { PendingCards, TurnCards } from "./Interactions";
+import { splitTurnAsks } from "../../lib/turn-asks";
 import { focusedCard, focusedFirst } from "../../lib/card-focus";
 import { COMPOSER_INPUT, lostWith } from "../../lib/dock-focus";
 import { FailureNote, showsFailureNote } from "./FailureNote";
@@ -2083,9 +2084,13 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
     return embedded ? mine.map((ix) => (ix.session_id === sid && ix.folded_under ? asOwnCard(ix) : ix)) : mine;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interactions, teamShown, sideShown, embedded, sid]);
+  // a Persona chat's own requests hold its turn: open above the capsules (TurnCards), out of the stack and of Needs you's
+  // count; the rest (a worker's, a side session's) stay in the stack and the tray as before (lib/turn-asks.ts)
+  const turnSplit = useMemo(() => (assistant ? splitTurnAsks(docked, mid, sid) : { turn: [], rest: docked }), [assistant, docked, mid, sid]);
+  const trayAsks = useMemo(() => (assistant ? splitTurnAsks(interactions, mid, sid).rest : interactions), [assistant, interactions, mid, sid]);
   const pendingCards = (
     <PendingCards
-      interactions={focusedFirst(docked, focusedCard())}
+      interactions={focusedFirst(turnSplit.rest, focusedCard())}
       answered={teamShown || sideShown ? answered.filter((a) => !elsewhere(a.ix)) : answered}
       delegated={teamShown || sideShown ? delegated.filter((d) => !elsewhere(d.ix)) : delegated}
       offerNext={inPage && !assistant ? { mid, sid } : undefined}
@@ -2319,9 +2324,11 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
         {assistant && (
           <>
             {voiceState === "live" && <TaskQuestions conversation={sid} />}
-            {/* The conversation's own cards are in the chat under the bar (#4883, as iOS): Needs you counts them and
+            {/* the cards this chat's own turn waits on, open above the capsules (also while a voice call is live); the cards
+                of the sessions folded under it are in the chat under the bar (#4883, as iOS): Needs you counts them and
                 lists a row for each that closes the tray onto its card. */}
-            {voiceState !== "live" && <AssistantActionBar key={sid} conversation={sid} ownAsks={interactions} />}
+            <TurnCards asks={turnSplit.turn} />
+            {voiceState !== "live" && <AssistantActionBar key={sid} conversation={sid} ownAsks={trayAsks} />}
             {voiceState !== "live" && <RouteChip conversation={sid} />}
             {/* items handed to this conversation that are still open: "Wrap up" asks it for the final write-back (#5932) */}
             {voiceState !== "live" && isMain && <Suspense fallback={null}><LazyWrapUpChips conversation={sid} /></Suspense>}

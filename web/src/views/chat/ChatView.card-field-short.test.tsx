@@ -35,8 +35,10 @@ const { loadPages } = await import("../../lib/lazy-page");
 await loadPages();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// a worker's question (folded under the chat, #5120): such cards fold on a short page. The chat's own question holds its
+// turn and is never folded (lib/turn-asks.ts, #11794; the last test).
 const question = {
-  id: "ix_question", machine_id: "hub", session_id: "c1", session_title: "Persona", kind: "question", tool_name: "ask_user",
+  id: "ix_question", machine_id: "hub", session_id: "w1", session_title: "Worker", folded_under: "c1", folded_as: "worker", kind: "question", tool_name: "AskUserQuestion",
   questions: [{ question: "Move tomorrow's meeting to the afternoon?", header: "Decide", options: [{ label: "Yes" }, { label: "Not now" }] }],
   created_at: "2020-01-01T00:01:00Z",
 } as Interaction;
@@ -72,6 +74,7 @@ beforeEach(() => {
   transcript.items = [];
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0));
   upsertSession({ machine_id: "hub", session_id: "c1", title: "Persona", status: "working", state: "needs_you", assistant: true, agent: "claude" } as Session);
+  upsertSession({ machine_id: "hub", session_id: "w1", title: "Worker", status: "working", state: "needs_you", agent: "claude", folded_under: "c1", folded_as: "worker" } as Session);
   Object.assign(getState(), { interactions: [question], answered: {} });
   fetcher = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetcher);
@@ -162,5 +165,18 @@ describe("a waiting card's own field on a page the keyboard made short", () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
     await flush();
     expect(folded()).toBe(true);
+  });
+
+  it("never folds the chat's own question, which holds its turn, on a short page either", async () => {
+    const own = { ...question, id: "ix_own", session_id: "c1", session_title: "Persona", folded_under: undefined, folded_as: undefined, tool_name: "ask_user" } as Interaction;
+    Object.assign(getState(), { interactions: [own, question], answered: {} });
+    media.short = true;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant onToggleSidebar={() => {}} />));
+    await flush();
+    // the worker's folds into the one line; the chat's own stands open above the capsules with its answers
+    expect(folded()).toBe(true);
+    const open = host.querySelector(`[data-turn-asks] [data-card="${own.id}"]`);
+    expect(open).not.toBeNull();
+    expect(open!.querySelector("[data-pending-card] button")).not.toBeNull();
   });
 });

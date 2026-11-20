@@ -828,6 +828,9 @@ func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, tex
 
 // reportNow sends a report to the supervisor of task t as a signal, and shows it in its conversation.
 func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind, text string, evidence []string, step, steps int, now time.Time) (string, error) {
+	if kind == upReportDone {
+		s.recordBriefCompletion(ctx, t, briefCompletionReport, now)
+	}
 	s.progressReported(machine, session, len(evidence), step, now) // evidence or a later step is progress (supervise_progress.go)
 	s.signal(superviseSignal{Todo: t.ID, Kind: sigReport, Key: now.UTC().Format(time.RFC3339Nano), At: now, Machine: machine,
 		Session: session, Report: kind, Detail: text, Evidence: evidence, Step: step, Steps: steps, SourcePermission: devicewire.SourcePermissionFrom(ctx)})

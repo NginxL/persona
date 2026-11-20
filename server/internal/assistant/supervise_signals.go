@@ -159,7 +159,7 @@ func (g superviseSignal) id() string {
 func (g superviseSignal) urgent() bool {
 	switch g.Kind {
 	case sigNeedsYou, sigIdle, sigUnjudged, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
-		sigRecheck, sigUndecidable, sigOwnerCannot, // the owner waits on a decision they cannot answer as it is
+		sigRecheck, sigUndecidable, sigOwnerCannot, sigEstimateDue, // the owner or an automatic review deadline waits
 		sigParkDecided, sigDecisionReply, sigHandoffResult:
 		return true
 	case sigReport:

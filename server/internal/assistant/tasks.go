@@ -101,10 +101,11 @@ type PlanTask struct {
 	// Reroute is set once a flexible task has been moved to another machine; nil while it runs where it was asked.
 	// Repeated moves keep the original FromMachine and refresh ToMachine and Reason (#2271).
 	Reroute *PlanReroute `json:"reroute,omitempty"`
-	// DoneWhen: what done means, criteria the supervisor checks before it accepts the work; ExpectMinutes: how long it
-	// should take (#3124, supervise.go). Both optional; the agent is told the criteria with its prompt.
-	DoneWhen      []string `json:"done_when,omitempty"`
-	ExpectMinutes int      `json:"expect_minutes,omitempty"`
+	// DoneWhen: what done means, criteria the supervisor checks before it accepts the work. ExpectMinutes is an optional
+	// override of the hub-selected estimate; EstimateSource records which automatic estimate the brief owns (#11685).
+	DoneWhen       []string `json:"done_when,omitempty"`
+	ExpectMinutes  int      `json:"expect_minutes,omitempty"`
+	EstimateSource string   `json:"estimate_source,omitempty"`
 	// The brief (#3822, task_brief.go): Goal is the work in one sentence (the title when left out), OutOfBounds what
 	// the agent must not do. Continues: the to-do this task carries on in (a retry on another computer or a rework
 	// round), for ContinuesWhy: it keeps that to-do and its brief instead of creating another. Brief is

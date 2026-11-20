@@ -62,6 +62,13 @@ func (s *Service) recordBriefResult(ctx context.Context, t Todo, checks []Review
 		s.logf("task %s: brief result: %v", t.ID, err)
 		return nil
 	}
+	if verdict == reviewAccepted {
+		source := briefCompletionReview
+		if by == reviewerJudge {
+			source = briefCompletionJudge
+		}
+		s.recordBriefCompletion(ctx, t, source, time.Now().UTC())
+	}
 	s.clearOverdue(t.ID)
 	return &r
 }

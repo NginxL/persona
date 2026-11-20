@@ -995,6 +995,14 @@ type DraftPR struct {
 
 func RenderDraftPR(p DraftPR) string { return render("assistant/draft_pr", p) }
 
+// EstimateDue is the localized fact attached to an automatic estimate_due supervision entry.
+type EstimateDue struct {
+	Language          string
+	Expected, Elapsed int
+}
+
+func RenderEstimateDue(p EstimateDue) string { return render("assistant/estimate_due", p) }
+
 // SuperviseReviewed is the independent review of a task waiting for review: State clean (nothing blocking), blocking
 // (blocking findings left once the rework rounds ran out) or failed (Error says why), its counts and report.
 type SuperviseReviewed struct {

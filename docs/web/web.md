@@ -177,6 +177,12 @@ The browser check opens Overview, permission/plan cards, green/orange/AI workflo
 
 - **Hosted by the hub itself**: the hub serves `<hub data dir>/web` (default `~/.persona/web`) as a static site on the same port as the API (the hub's `listen`, default `:18660`, i.e. all interfaces).
   Same origin, so no CORS, and WebSocket and images use the same token. Without that directory, non-`/api/` paths still return 404.
+  A published `personad` carries a copy of the web client too (`server/internal/hub/webdist`), which serves when the data
+  dir has none, or when the data dir's copy is older than it (#11794): every build writes when it was made to
+  `.build.json` beside `index.html` (`buildStamp` in `web/vite.config.ts`, `SOURCE_DATE_EPOCH` when set; a dot file, never
+  served), and a data dir copy without one counts from its `index.html`'s modification time. Before, the data dir always
+  won, so a `deploy.sh web` left from before an update kept serving its old build under the new binary for good. A
+  built-in copy without a stamp leaves the data dir in charge, as before.
   Paths that are not files all return `index.html` (front-end routes: `/` (Persona main chat), `/overview` (Overview), `/s/<machine>/<session>`, `/t/<machine>/<space>/<tab>[/<session>]` (one herdr tab, #1963), `/space/<machine>/<space name>` (space page, #2887), `/persona`, `/persona/<session>`, `/persona/new`, `/history`, `/inbox`, `/inbox/<item>`, `/messages`, `/messages/<chat>`, `/routines`,
   `/kb`, `/kb/<type>/<entry>`, `/workspace-board` (workspace board), `/machines`, `/machines/<machine>`, `/terminal`, `/terminal/<machine>/<terminal id>`, `/assistant` (assistant profile page), `/settings`, `/extension/<extension>/<page>` (an extension's full page));
   files under `/assets/` carry a content hash and are cached forever; `index.html` is not cached (`server/internal/hub/web.go`).

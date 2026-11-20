@@ -370,6 +370,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 			return
 		}
 		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
+		s.estimateDueTold(ctx, kept)
 		s.parkDecidedTold(ctx, kept)
 		s.agentDecisionRepliesTold(ctx, kept)
 		s.handoffResultsTold(ctx, kept)
@@ -561,6 +562,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	st := v.state(t)
 	var replyAsk acceptAsk
 	var draft *TodoPRStatus
+	var estimateBrief *TaskBrief
 	switch g.Kind {
 	case sigHandoffResult:
 		h := v.handoffResult()
@@ -644,6 +646,12 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		if b, ok := s.briefOfTodo(t.ID); !ok || b.Overdue == nil || st == reviewNeedsUser || st == reviewParked {
 			return prompts.SuperviseEntry{}, false // re-scoped, with the owner, or parked meanwhile
 		}
+	case sigEstimateDue:
+		b, ok := s.briefOfTodo(t.ID)
+		if !ok || !s.estimateDueCurrent(t, b, g.Key) {
+			return prompts.SuperviseEntry{}, false // completed, reviewed, re-scoped or already told meanwhile
+		}
+		estimateBrief = &b
 	case sigAllStopped:
 		fresh, holds := s.checkedAllStopped(ctx, t, g)
 		if !holds {
@@ -705,6 +713,10 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	if draft != nil {
 		e.Detail = prompts.RenderDraftPR(prompts.DraftPR{Language: answerLanguage(string(s.botLang(ctx))),
 			URL: draft.URL, Head: draft.HeadOID})
+	}
+	if estimateBrief != nil {
+		e.Detail = prompts.RenderEstimateDue(prompts.EstimateDue{Language: answerLanguage(string(s.botLang(ctx))),
+			Expected: estimateBrief.ExpectNow, Elapsed: g.Minutes})
 	}
 	// The last review, shown only in a Fresh message (supervise_round.go): a decision reply's round confirms the decision
 	// that review put to the owner.
@@ -842,7 +854,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 
 // sortEntries puts what waits on a decision first.
 func sortEntries(list []prompts.SuperviseEntry) []prompts.SuperviseEntry {
-	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigParkedDue: 2, sigParkDecided: 2, sigIdle: 2, sigUnjudged: 2, sigAllStopped: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigNoProgress: 6, sigLeaderStuck: 6, sigOverdue: 6, sigInbox: 6, sigReport: 7}
+	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigEstimateDue: 2, sigParkedDue: 2, sigParkDecided: 2, sigIdle: 2, sigUnjudged: 2, sigAllStopped: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigNoProgress: 6, sigLeaderStuck: 6, sigOverdue: 6, sigInbox: 6, sigReport: 7}
 	at := func(e prompts.SuperviseEntry) int {
 		switch {
 		case e.Kind == sigCheck && e.Report == checkDecidedReport: // the owner's answer

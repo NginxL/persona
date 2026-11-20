@@ -105,7 +105,7 @@ fun Closeout.line(): CoreText = when (status) {
 }
 
 // Markdown work reports have a dedicated heading, three required facts and a terminating rule.
-private val WorkReport = Regex("""(?:^|\n)(### Persona (?:work report|工作报告|作業報告)\r?\n(?:\r?\n)?- Status: (?:done|not_done|blocked)\r?\n- Merged: (?:yes|no|n/a)\r?\n- Deployed: (?:yes|no|n/a)\r?\n(?:- (?:Did|Artifact|Delivery|Unblock|Verified|Missing|Waiting|Next): [^\r\n]+\r?\n)*(?:\r?\n)?---)(?=[\t \r\n]*(?:\n<oai-mem-citation>[\s\S]*?</oai-mem-citation>[\t \r\n]*)?$)""")
+private val WorkReport = Regex("""(?:^|\n)(### Persona (?:work report|工作报告|作業報告)\r?\n(?:\r?\n)?- Status: (?:done|not_done|blocked)\r?\n- Merged: (?:yes|no|n/a)\r?\n- Deployed: (?:yes|no|n/a)\r?\n(?:- (?:Did|Artifact|Delivery|Unblock|Verified|Missing|Waiting|Next): [^\r\n]+\r?\n)*(?:\r?\n)?---)(?=[\t \r\n]*(?:\n<oai-mem-citation>[\s\S]*?</oai-mem-citation>[\t \r\n]*)?$)""") // i18n-ignore: the report heading as Persona writes it in each language
 private val WorkReportFence = Regex("""^[\t ]*(`{3,}|~{3,})([^\r\n]*)""", RegexOption.MULTILINE)
 
 private fun insideWorkReportFence(before: String): Boolean {

@@ -1136,7 +1136,11 @@ func TestWorkerAutomaticSignalsGoToLeader(t *testing.T) {
 			s, f := newQuietService(t)
 			ctx := context.Background()
 			startTaskLeader(t, s, f)
-			w := planWorker(t, s, f, nil)
+			var extra map[string]any
+			if kind == sigStalled {
+				extra = map[string]any{"expect_minutes": 10} // an explicit short estimate also exercises estimate_due
+			}
+			w := planWorker(t, s, f, extra)
 			switch kind {
 			case sigIdle, sigInterrupted:
 				s.signal(superviseSignal{Todo: w.ID, Kind: kind, Key: "k1", Machine: "box", Session: w.Agents[0].SessionID, Detail: "停下了"})
@@ -1147,7 +1151,15 @@ func TestWorkerAutomaticSignalsGoToLeader(t *testing.T) {
 				stall := proto.Session{SessionID: w.Agents[0].SessionID, MachineID: "box", Cwd: "/code/app", Agent: "claude",
 					Status: proto.StatusWorking, State: proto.StateWorking, UpdatedAt: time.Now().Add(-superviseStallMin - time.Minute)}
 				f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Agent: "claude", Status: proto.StatusIdle}, stall)
-				s.superviseWatch(ctx, time.Now())
+				f.hello.Locale = "en"
+				s.superviseWatch(ctx, time.Now().Add(11*time.Minute))
+				due := gotMessage(t, f, "Persona · supervision", "改登录页", "automatic estimate reached")
+				if !strings.Contains(due, "not an overdue judgment") {
+					t.Fatalf("leader's estimate_due lacks its fact: %s", due)
+				}
+				if b, ok := s.briefOfTodo(w.ID); !ok || b.EstimateDueToldAt == nil {
+					t.Fatalf("leader delivery did not persist estimate_due: %+v", b)
+				}
 			case sigOrphaned:
 				// A session its computer no longer lists: the orphan pass marks it closed, and the worker's signal goes to the leader.
 				f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Agent: "claude", Status: proto.StatusIdle})
@@ -1156,9 +1168,9 @@ func TestWorkerAutomaticSignalsGoToLeader(t *testing.T) {
 					s.signal(g)
 				}
 			}
-			m := gotMessage(t, f, "Persona · supervision", "改登录页")
 			want := map[string]string{sigIdle: "stopped, but the work is not finished", sigStalled: "no progress for",
 				sigOrphaned: "nobody works on it any more", sigInterrupted: "cut its turn off"}[kind]
+			m := gotMessage(t, f, "Persona · supervision", "改登录页", want)
 			if !strings.Contains(m, want) {
 				t.Errorf("the leader's message for %s lacks %q:\n%s", kind, want, m)
 			}
@@ -1923,8 +1935,8 @@ func TestRehomedWorkerSurvivesARestart(t *testing.T) {
 	}
 }
 
-// A leader's workers are held to the brief rule (goal for a read-only worker, done_when for a writable one, and
-// expect_minutes for both) as any task_plan task is, and the leader's schema can say them.
+// A leader's workers follow the brief rule (goal for read-only, done_when for writable), while the hub supplies an
+// omitted estimate automatically, as for any task_plan task.
 func TestLeaderWorkersNeedABrief(t *testing.T) {
 	s, f := newQuietService(t)
 	startTaskLeader(t, s, f)
@@ -1934,8 +1946,8 @@ func TestLeaderWorkersNeedABrief(t *testing.T) {
 		return s.mcpCall(context.Background(), "box", "s1", "task_plan", raw, false)
 	}
 	res := call(map[string]any{"title": "改登录页", "prompt": "改", "readonly": false, "permission": "bypassPermissions", "done_when": []string{"测试通过"}})
-	if !res.IsError || !strings.Contains(res.Content[0].Text, "expect_minutes") {
-		t.Fatalf("a writable worker without expect_minutes: %+v", res)
+	if res.IsError {
+		t.Fatalf("a writable worker with criteria and an automatic estimate: %+v", res)
 	}
 	res = call(map[string]any{"title": "查一下", "prompt": "查", "readonly": true, "expect_minutes": 10})
 	if !res.IsError || !strings.Contains(res.Content[0].Text, "goal") {

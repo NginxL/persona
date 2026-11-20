@@ -11,6 +11,7 @@ import { BUSY_MOTION, spinStyle } from "../../lib/busy-motion";
 import { appArchiveDeps, archiveAgent, archiveSession } from "../../lib/agent-archives";
 import { isSessionReview } from "../../lib/types";
 import type { Interaction } from "../../lib/types";
+import type { TurnAsk } from "../../lib/turn-asks";
 import { defaults, elicitationDraft, elicitationResolution, elicitationSource, fields, numberInputMode, saveElicitationDraft, urlHost, urlTarget, validate, type ElicitationAction, type Field, type Values } from "../../lib/elicitation";
 import { answerLines } from "../../lib/answered";
 import { answerBlock, interactionCanAnswer, sessionTitle } from "../../lib/format";
@@ -1421,6 +1422,14 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
       </AskedByVoice.Provider>
     </div>
   );
+}
+
+/** The cards a Persona chat's own turn waits on (lib/turn-asks.ts): each open in full, in the order they came, above the
+ *  dock's capsules. Never folded behind a position chip, a "N pending" line or the Needs you tray: the chat cannot go on
+ *  until one is answered. Takes only `TurnAsk`s, so no other card can be drawn here. */
+export function TurnCards({ asks }: { asks: readonly TurnAsk[] }) {
+  // their own box, which gives up its height first and scrolls (as the stack's does): the capsules under them stay in view
+  return asks.length > 0 && <div data-turn-asks data-scroll-box className="-m-1 flex min-h-0 shrink flex-col gap-2 overflow-y-auto overscroll-contain p-1 empty:hidden">{asks.map((ix) => <InteractionCard key={ix.id} ix={ix} />)}</div>;
 }
 
 /**

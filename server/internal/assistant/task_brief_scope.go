@@ -24,6 +24,15 @@ import (
 // sigOverdue: the task's brief passed its clock with no end (briefClock).
 const sigOverdue = "overdue"
 
+// sigEstimateDue: an automatic task_plan estimate reached its review point (briefClock).
+const sigEstimateDue = "estimate_due"
+
+const (
+	briefCompletionReport = "report_to_supervisor"
+	briefCompletionReview = "task_review"
+	briefCompletionJudge  = "judge"
+)
+
 // scopeRisk are the risky words text adds that were not part of the work as known: the hub's risky words (riskyWords;
 // the agent's own reversible pushes aside) that text names to be done (not after a negation) and known does not.
 func scopeRisk(text, known string) []string {
@@ -101,8 +110,12 @@ func (s *Service) applyScope(ctx context.Context, t Todo, c scopeChange) (TaskBr
 	if scopes >= briefLogMax {
 		return TaskBrief{}, fmt.Errorf("task %s's scope changed %d times already: this is other work by now; close it (task_review) and hand out a new task", t.ID, scopes)
 	}
+	estimateSource := ""
+	if expect > 0 && brief.EstimateSourceNow != "" {
+		estimateSource = briefEstimateOverride
+	}
 	ev := BriefEvent{At: time.Now().UTC(), Kind: briefEventScope, Todo: t.ID, By: c.By, Change: clip(oneLine(c.Change), 300),
-		Why: clip(oneLine(c.Why), 300), Added: added, Dropped: dropped, ExpectMinutes: expect}
+		Why: clip(oneLine(c.Why), 300), Added: added, Dropped: dropped, ExpectMinutes: expect, EstimateSource: estimateSource}
 	if len(added)+len(dropped) > 0 {
 		ev.DoneWhen = next
 		if ev.DoneWhen == nil {
@@ -247,20 +260,160 @@ func (s *Service) toolTaskScope(ctx context.Context, self string, args json.RawM
 	return b.String(), nil
 }
 
-// clearOverdue forgets a task's waiting overdue signal: it was answered (re-scoped or closed).
+// briefFromView rebuilds the mutable brief helpers without changing the stored record.
+func briefFromView(v TaskBrief) *taskBrief {
+	return &taskBrief{rec: v.briefRecord, st: briefState{Log: v.Log, Result: v.Result}}
+}
+
+// recordBriefCompletion keeps the first active completion of the current task_plan round. report_to_supervisor is
+// normally earliest; recordBriefResult covers supervisor acceptance and judgeClose when no such report arrived.
+func (s *Service) recordBriefCompletion(ctx context.Context, t Todo, source string, now time.Time) {
+	if t.Supervision == nil || t.StartError != "" {
+		return
+	}
+	brief, ok := s.briefOfTodo(t.ID)
+	if !ok {
+		return
+	}
+	tb := briefFromView(brief)
+	if _, estimateSource, _ := tb.estimateState(); estimateSource == "" {
+		return // manual and pre-feature work has no automatic estimate history
+	}
+	if tip := s.briefTip(brief.ID); tip != "" && tip != t.ID {
+		return // a late report from a superseded leg is not this brief's completion
+	}
+	roundID, start, ok := tb.roundFor(t)
+	if !ok || tb.completionFor(roundID, t.ID) != nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	actual := 1 // sub-minute work and an equal timestamp both remain a real, nonzero sample
+	if elapsed := now.Sub(start); elapsed > 0 {
+		actual = int((elapsed + time.Minute - 1) / time.Minute)
+	}
+	ev := BriefEvent{At: now.UTC(), Kind: briefEventCompletion, Todo: t.ID, Source: source, RoundID: roundID, ActualMinutes: actual}
+	_, changed, err := s.changeBrief(ctx, brief.ID, func(current *taskBrief) bool {
+		if current.completionFor(roundID, t.ID) != nil {
+			return false
+		}
+		current.st.Log = append(current.st.Log, ev)
+		return true
+	})
+	if err != nil {
+		s.logf("task %s: completion duration: %v", t.ID, err)
+		return
+	}
+	if changed {
+		s.clearEstimateDue(t.ID) // a queued deadline must not arrive after the active done report
+		s.todosChanged(ctx)
+	}
+}
+
+// estimateDueKey names one automatic estimate revision: the brief and its dispatch / estimate-change timestamp.
+func estimateDueKey(brief TaskBrief) string {
+	if brief.EstimateClockAt.IsZero() {
+		return ""
+	}
+	return brief.ID + "@" + brief.EstimateClockAt.UTC().Format(time.RFC3339Nano)
+}
+
+// estimateDueCurrent says whether key still names an eligible, unanswered review deadline on t.
+func (s *Service) estimateDueCurrent(t Todo, brief TaskBrief, key string) bool {
+	if t.Supervision == nil || t.DoneAt != nil || brief.EstimateSourceNow == "" || brief.EstimateDueAt.IsZero() ||
+		brief.EstimateDueToldAt != nil || key == "" || key != estimateDueKey(brief) {
+		return false
+	}
+	if tip := s.briefTip(brief.ID); tip != "" && tip != t.ID {
+		return false
+	}
+	switch st := t.Supervision.state(t); st {
+	case reviewPending, reviewNeedsUser, reviewParked:
+		return false
+	case "":
+		tb := briefFromView(brief)
+		if roundID, _, ok := tb.roundFor(t); ok && tb.completionFor(roundID, t.ID) != nil {
+			return false // the done report already asked for review; the judge need not have run yet
+		}
+	}
+	return true
+}
+
+// estimateDueSignal raises the one-shot review cue when the current estimate is due. Unlike overdue, no durable mark
+// is written here: an untold cue is re-derived after a restart, then estimateDueTold marks accepted delivery.
+func (s *Service) estimateDueSignal(ctx context.Context, t Todo, now time.Time) {
+	if t.Supervision == nil || t.DoneAt != nil {
+		return
+	}
+	brief, ok := s.briefOfTodo(t.ID)
+	if !ok || now.Before(brief.EstimateDueAt) {
+		return
+	}
+	key := estimateDueKey(brief)
+	if !s.estimateDueCurrent(t, brief, key) {
+		return
+	}
+	s.signal(superviseSignal{Todo: t.ID, Kind: sigEstimateDue, Key: key, At: now,
+		Minutes: int(now.Sub(brief.EstimateClockAt).Minutes())})
+}
+
+// estimateDueTold persists accepted delivery for every supervisor route (conversation, direct leader, resumed leader).
+func (s *Service) estimateDueTold(ctx context.Context, list []superviseSignal) {
+	for _, g := range list {
+		if g.Kind != sigEstimateDue {
+			continue
+		}
+		brief, ok := s.briefOfTodo(g.Todo)
+		if !ok || brief.EstimateSourceNow == "" || g.Key != estimateDueKey(brief) {
+			continue
+		}
+		if tip := s.briefTip(brief.ID); tip != "" && tip != g.Todo {
+			continue
+		}
+		tb := briefFromView(brief)
+		if tb.estimateDueToldAt() != nil {
+			continue
+		}
+		_, changed, err := s.changeBrief(ctx, brief.ID, func(current *taskBrief) bool {
+			if current.estimateDueToldAt() != nil {
+				return false
+			}
+			current.st.Log = append(current.st.Log, BriefEvent{At: time.Now().UTC(), Kind: briefEventEstimateDue, Todo: g.Todo})
+			return true
+		})
+		if err != nil {
+			s.logf("task %s: estimate due delivery: %v", g.Todo, err)
+		}
+		if changed {
+			s.todosChanged(ctx)
+		}
+	}
+}
+
+// clearEstimateDue forgets a waiting review-due signal after completion, review or re-scope.
+func (s *Service) clearEstimateDue(todoID string) {
+	b := &s.supervise
+	b.mu.Lock()
+	b.init()
+	delete(b.pending, todoID+"|"+sigEstimateDue)
+	b.mu.Unlock()
+}
+
+// clearOverdue forgets waiting overdue and estimate_due signals after re-scope or closure.
 func (s *Service) clearOverdue(todoID string) {
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
 	delete(b.pending, todoID+"|"+sigOverdue)
 	b.mu.Unlock()
+	s.clearEstimateDue(todoID)
 }
 
-// briefClock raises supervised open task t's overdue signal when its brief's clock ran out with no end: once per
-// clock (the mark is on the brief, so a restart does not raise it again), and only for the to-do that carries the
-// work now. A task waiting for the owner's decision or for review has reached its end for now, and a parked one waits
-// on purpose (its own time brings it back, parked.go).
+// briefClock raises estimate_due at the automatic estimate and overdue at the older brief clock. The first is marked
+// only after accepted delivery; the second keeps its existing mark-before-signal behavior. Both run only on the brief tip.
 func (s *Service) briefClock(ctx context.Context, t Todo, now time.Time) {
+	s.estimateDueSignal(ctx, t, now)
 	v := t.Supervision
 	if v == nil || t.DoneAt != nil {
 		return

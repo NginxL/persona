@@ -172,7 +172,7 @@ func TestSupervisionInstructionsFirstStartAndWarm(t *testing.T) {
 
 func TestSupervisionEventsContainFactsNotPolicy(t *testing.T) {
 	policy := prompts.RenderSupervisionInstructions()
-	for _, name := range []string{"overdue", "parked_due", "park_decided", "inbox", "ask", "escalated", "leader_stuck", "recheck", "undecidable", "owner_cannot_answer", "decide", "all_stopped", "pr_conflict"} {
+	for _, name := range []string{"overdue", "estimate_due", "parked_due", "park_decided", "inbox", "ask", "escalated", "leader_stuck", "recheck", "undecidable", "owner_cannot_answer", "decide", "all_stopped", "pr_conflict"} {
 		t.Run(name, func(t *testing.T) {
 			p := prompts.Supervise{Leader: true, Side: true, Background: true, Escalated: true, BackgroundEscalated: true,
 				LeaderStuck: true, Overdue: true, ParkedDue: true, ParkDecided: true, Asked: true, AskMinutes: 5, LowDistraction: true, Decisions: true, Inbox: true,

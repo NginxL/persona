@@ -1238,8 +1238,9 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   };
   return (
     // shrinks with the dock (ChatView's DOCK_MAX): an open tray gives up its height and scrolls inside, instead of
-    // standing taller than the dock and leaving its bottom (a card's answer row) and the entries under the composer
-    <div ref={bar} className={cx("flex min-h-0 flex-col gap-2", ownAsks.length > 0 && !tray ? "shrink-0" : "shrink")} data-assistant-actionbar onKeyDownCapture={onTrayKey}>
+    // standing taller than the dock and leaving its bottom (a card's answer row) and the entries under the composer;
+    // closed it is the capsules alone, which never give way to the cards over them (#10347, #11794)
+    <div ref={bar} className={cx("flex min-h-0 flex-col gap-2", !tray ? "shrink-0" : "shrink")} data-assistant-actionbar onKeyDownCapture={onTrayKey}>
       {tray && (
         // its height follows what is visible (styles.css: an open tray lets the dock take most of it); the header stays
         // and the list scrolls under it, so a plan card's Start (sticky to the list's bottom) is never under the header

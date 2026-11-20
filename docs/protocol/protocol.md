@@ -1208,13 +1208,18 @@ Provider responses carry only the description and `has_key`, never secrets. Defa
           // request.truncated is true when text was clipped at 2000 characters. request.via lists the relaying conversations, oldest first.
           "started_by":"owner|assistant|leader|routine|hub|unknown",
           "trigger":"supervision|followup|routine|conversation|notice|meeting|wake","trigger_title":"…","reason":"why it was started",   // when not the owner
-          "conversation":"<chat id>","goal":"one sentence","done_when":["…"],"expect_minutes":30,"out_of_bounds":["…"],   // as handed out
+          "conversation":"<chat id>","goal":"one sentence","done_when":["…"],"expect_minutes":30,"estimate_source":"override","out_of_bounds":["…"],   // as handed out
           "reconstructed":true,"handover":"the prompt at hand-over, not the owner's words",   // a task from before briefs
-          "log":[{"at":"...","kind":"scope","todo_id":"todo_…","by":"<chat id>","change":"…","why":"…","done_when":["…"],"expect_minutes":90,
+          "log":[{"at":"...","kind":"dispatch","source":"task_plan","plan_id":"plan_…","round_id":"plan_…/todo_…@...","todo_id":"todo_…","expect_minutes":60,"estimate_source":"system_default"},
+                 {"at":"...","kind":"scope","todo_id":"todo_…","by":"<chat id>","change":"…","why":"…","done_when":["…"],"expect_minutes":90,"estimate_source":"override",
                   "added":["…"],"dropped":["…"],"approval":{"text":"…","at":"...","conversation":"…","message_id":"…"}},   // approval: the owner's message that allowed a risky step
+                 {"at":"...","kind":"completion","source":"report_to_supervisor|task_review|judge","todo_id":"todo_…","round_id":"plan_…/todo_…@...","actual_minutes":45},
+                 {"at":"...","kind":"estimate_due","todo_id":"todo_…"},   // accepted delivery of the current estimate_due review cue
                  {"at":"...","kind":"overdue","todo_id":"todo_…"}],
           "criteria":["…"],"expect_minutes_now":90,     // done_when and expect_minutes as the scope changes left them
-          "clock_at":"...","due_at":"...","overdue_at":"...",   // the clock: from the hand-out or the latest scope change to max(expect × 3, 24 h); overdue_at once its supervisor was told
+          "estimate_source_now":"override","estimate_clock_at":"...","estimate_due_at":"...","estimate_due_told_at":"...",
+          "actual_minutes":45,"completion_reported_at":"...",   // latest completion; every round remains in log
+          "clock_at":"...","due_at":"...","overdue_at":"...",   // the overdue clock: from the hand-out or latest scope change to max(expect × 3, 24 h); overdue_at once its supervisor was told
           "result":{"at":"...","todo_id":"todo_…","by":"judge","verdict":"accepted|cancelled",   // by absent: the supervisor's review
                     "criteria":[{"criterion":"…","state":"met|not_met|unchecked|dropped","evidence":"…","change":"the scope change that dropped it","changed_at":"..."}],
                     "also_done":["…"]}},
@@ -4756,7 +4761,7 @@ in plan order (a task without `todo_id` did not start and has no link); no extra
  "tasks":[{"title":"Fix the login crash","prompt":"The first message to the Agent","machine":"<machine id>","cwd":"/abs/path",
            "launcher":"","model":"","permission":"acceptEdits","readonly":false,"why":"one-line reason",
            "ultracode":true,            // optional (#12): the Claude Code Agent starts with ultracode on; on start, true / false sets it and leaving it out keeps the assistant's choice
-           "done_when":["PR merged into master"],"expect_minutes":30,   // acceptance criteria, expected minutes (#3124); required of task_plan since #3822; clients only display them and don't send them back on start
+           "done_when":["PR merged into master"],"expect_minutes":30,"estimate_source":"override",   // criteria, optional estimate override and its hub-recorded source; omitted estimate uses system_default=60 minutes; clients display them and don't send them back on start
            "goal":"one sentence","out_of_bounds":["do not merge"],"started_why":"…",   // optional (#3822): the brief's goal and bounds, and why the assistant starts it on its own
            "continues":"todo_…","continues_why":"…",   // optional (#3822): the to-do this task takes over from; it keeps that to-do's brief
            "brief":{…},                 // the hub's (#3822): the brief as it will be kept (the to-do's `brief` above), for the card to show before Start; never sent back

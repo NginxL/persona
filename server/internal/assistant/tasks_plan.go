@@ -114,7 +114,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		if err := t.normalizeMachinePolicy(); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
-		t.DoneWhen, t.ExpectMinutes = cleanDoneWhen(t.DoneWhen), max(0, min(t.ExpectMinutes, 24*60))
+		if t.ExpectMinutes < 0 {
+			return "", fmt.Errorf("task %d: expect_minutes must be zero or a positive number of minutes", i+1)
+		}
+		t.DoneWhen, t.ExpectMinutes = cleanDoneWhen(t.DoneWhen), min(t.ExpectMinutes, 24*60)
 		if t.Title == "" || t.Prompt == "" || t.Cwd == "" && !t.backendWorkspace() {
 			return "", fmt.Errorf("task %d: title, prompt and cwd are required", i+1)
 		}
@@ -122,6 +125,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Goal, t.OutOfBounds = clip(oneLine(t.Goal), 300), cleanDoneWhen(t.OutOfBounds)
 		t.Continues, t.ContinuesWhy = strings.TrimSpace(t.Continues), clip(oneLine(t.ContinuesWhy), 300)
 		t.StartedWhy = clip(oneLine(t.StartedWhy), 300)
+		t.EstimateSource = ""
+		if t.Continues == "" {
+			t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, "")
+		}
 		if err := briefRequired(t); err != nil && !(s.briefsOptional && t.Continues == "") {
 			return "", fmt.Errorf("task %d (%s): %w", i+1, t.Title, err)
 		}

@@ -85,12 +85,12 @@ Hand part of your own task to workers: each task you give this starts a new codi
           },
           "goal": {
             "type": "string",
-            "description": "a read-only worker's goal: what you get from it, in one sentence (a writable worker needs done_when instead); expect_minutes is needed for both"
+            "description": "a read-only worker's goal: what you get from it, in one sentence (a writable worker needs done_when instead); estimates are automatic for both"
           },
           "expect_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "about how long the worker should take, in minutes; with no progress for 1.5 times that (at least 20 minutes) it counts as stuck and you are told"
+            "description": "optional minutes override; omit/0 for 60 (system_default). Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)"
           },
           "why": {
             "type": "string",

@@ -1906,6 +1906,10 @@ Kinds: questions, plan approvals, tool approvals, secret entry, MCP forms, and w
   composer, under the Needs you / In progress entries and the route chip, on every client (#4883: on the web and Android
   they sat only in the closed Needs you tray, and an owner waited minutes on an approval no screen in the chat showed).
   Needs you still counts them, and its row for one closes the tray onto the card instead of drawing it a second time.
+  On the web, a card the conversation's own turn waits on (its own session's request, not one of a worker or side
+  session folded under it: `lib/turn-asks.ts`, #11794) is never folded: each stands open above the Needs you / In
+  progress capsules, all of them at once, and Needs you neither counts nor lists it again. The cards of sessions folded
+  under the conversation keep the stack and the tray as above. iOS and Android keep the stack for both until they follow.
   The stack holds the conversation's own cards alone, as one slot on the web: its first card with "2 / 6" (where it stands in the run), the next taking its place when it is answered, and what was just answered one line over it that goes 3 seconds after the last answer (details with the interaction cards in `docs/web/web.md`).
   What the conversation's tasks ask is a card of its own above the entries (iOS `TaskQuestions`, #4339 C10): the oldest
   question of their Agents, under its task's name with the ask mark in the needs-you tone and, at the end of that line,

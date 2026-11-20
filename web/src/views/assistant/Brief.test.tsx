@@ -13,8 +13,12 @@ vi.mock("../../lib/api", async (orig) => ({ ...(await orig<typeof import("../../
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast }));
 import { FeedLineView } from "./Tasks";
-import { AcceptRow } from "./Brief";
+import { AcceptRow, meta } from "./Brief";
 import { getState } from "../../lib/store";
+import { loadPages } from "../../lib/lazy-page";
+
+// the week's setup block is its own chunk (BriefSetup.tsx): in before any test draws it
+await loadPages();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -334,6 +338,20 @@ describe("a row's meta line", () => {
     expect(got.accept).toEqual([{ id: "todo_v1", title: "改设置页", waited_s: 60, asked_at: ASKED }]);
     expect(got.waiting).toEqual([{ id: "ix1", title: "问题", waited_s: 0 }]);
     draw(item(wire));
+    expect(host.textContent).not.toContain("[object Object]");
+  });
+
+  // The tray of a web build from before #3403 drew `{ id, title, waited_s, ...todo.ask }`: the live row read
+  // "已等 38 小时 3 分 · [object Object]" (#11794). That row does not compile any more; the tray builds it with askRow.
+  it("cannot be handed a to-do's ask spread into a row: the live row's shape is a type error", () => {
+    const waited_s = 38 * 3600 + 3 * 60;
+    // @ts-expect-error -- ask.from is an object, BriefRow.from is text: spreading the ask into a row does not compile
+    const spread: BriefRow = { id: "todo_ce", title: "搭 persona PR watcher", waited_s, ...ASK };
+    expect(typeof spread.from).toBe("object");
+    const row = askRow({ id: "todo_ce", title: "搭 persona PR watcher" }, ASK, Date.parse(ASKED) + waited_s * 1000);
+    expect(meta(row)).toBe("已等 38 小时 3 分");
+    drawDecision(row);
+    expect(host.querySelector("[data-brief-meta]")!.textContent).toBe("已等 38 小时 3 分");
     expect(host.textContent).not.toContain("[object Object]");
   });
 

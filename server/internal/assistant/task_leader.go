@@ -514,6 +514,7 @@ func (s *Service) deliverToLeaderAgent(ctx context.Context, lead TodoAgent, list
 	}
 	s.logf("supervise: %d signal(s) to task leader %s", len(entries), short(lead.SessionID))
 	s.parkedDueTold(ctx, kept)
+	s.estimateDueTold(ctx, kept)
 	s.turnsTold(ctx, kept) // how a turn ended is told once, to a leader too (task_turns.go)
 	return true
 }
@@ -580,6 +581,7 @@ func (s *Service) leaderDelivered(ctx context.Context, lead TodoAgent, entries [
 		s.logf("supervise: task leader %s took the message; deduplication not recorded: %v", short(lead.SessionID), err)
 	}
 	s.parkedDueTold(ctx, kept)
+	s.estimateDueTold(ctx, kept)
 	s.turnsTold(ctx, kept)
 	s.logf("supervise: %d signal(s) to task leader %s after confirmation", len(kept), short(lead.SessionID))
 }
@@ -738,7 +740,7 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigOrphaned} {
+	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigOrphaned, sigEstimateDue} {
 		delete(b.pending, t.ID+"|"+k) // reviewed: what waited is answered
 	}
 	b.mu.Unlock()
