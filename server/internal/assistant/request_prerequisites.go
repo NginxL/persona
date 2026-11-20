@@ -166,6 +166,18 @@ func (s *Service) requeueRequestStart(ctx context.Context, task PlanTask, blocke
 // replaceRequestQueue compares the exact queue entry, not only the plan state. The launch claim is committed
 // before any remote mutations. An unanswered launch or a crash after the claim is never replayed automatically.
 func (s *Service) replaceRequestQueue(ctx context.Context, task PlanTask, next *TaskQueue) bool {
+	return s.replaceTaskQueue(ctx, task, next, queueOwnerStart)
+}
+
+type queueCASPolicy int
+
+const (
+	queueCAS queueCASPolicy = iota
+	queueOwnerStart
+	queueQuotaStart
+)
+
+func (s *Service) replaceTaskQueue(ctx context.Context, task PlanTask, next *TaskQueue, policy queueCASPolicy) bool {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
 	defer cancel()
 	book := &s.tasks
@@ -179,22 +191,38 @@ func (s *Service) replaceRequestQueue(ctx context.Context, task PlanTask, next *
 	current := &plan.Tasks[index]
 	expected, _ := json.Marshal(task.Queue)
 	actual, _ := json.Marshal(current.Queue)
-	if current.TodoID != task.TodoID || current.RequestGate != task.RequestGate || !current.OwnerStarted || string(expected) != string(actual) {
+	if current.TodoID != task.TodoID || current.RequestGate != task.RequestGate || policy == queueOwnerStart && !current.OwnerStarted || string(expected) != string(actual) {
 		return false
 	}
 	current.Queue = next
 	var changed bool
-	if store, ok := s.store().(interface {
+	st := s.store()
+	if policy == queueQuotaStart && st != nil {
+		store, ok := st.(gatewayQueueStore)
+		if !ok || task.Queue.Gateway == nil {
+			return false
+		}
+		plan.UpdatedAt = time.Now().UTC()
+		replacement, _ := json.Marshal(next)
+		changed, err = store.ClaimUnstartedTaskQueue(ctx, plan.ID, index, task.TodoID,
+			task.Queue.Gateway.Since, expected, replacement, plan.UpdatedAt)
+	} else if store, ok := st.(interface {
 		CompareTaskQueue(context.Context, string, int, string, json.RawMessage, json.RawMessage, time.Time) (bool, error)
 	}); ok {
 		plan.UpdatedAt = time.Now().UTC()
 		replacement, _ := json.Marshal(next)
 		changed, err = store.CompareTaskQueue(ctx, plan.ID, index, task.TodoID, expected, replacement, plan.UpdatedAt)
 	} else {
+		if policy == queueQuotaStart {
+			ready, err := s.gatewayTaskReadyAt(ctx, task, task.Queue.Gateway.Since)
+			if err != nil || !ready {
+				return false
+			}
+		}
 		changed, err = s.movePlan(ctx, plan, planStarted)
 	}
 	if err != nil {
-		s.logf("task %s: save prerequisite queue: %v", task.TodoID, err)
+		s.logf("task %s: compare task queue: %v", task.TodoID, err)
 		return false
 	}
 	if changed {

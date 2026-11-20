@@ -105,7 +105,7 @@ try {
       if ((await el.locator('a[href*="/pull/31"]').count()) !== 1) fail(`${where}: the pull request is not a link`);
       if ((await el.locator("a").count()) !== 1) fail(`${where}: a commit hash became a link`);
       let words = await transcript(page);
-      if (words.includes("<closeout") || words.includes("</closeout>") || words.includes("did:")) fail(`${where}: done: the raw block is still in the reply`);
+      if (words.includes("<closeout") || words.includes("</closeout>") || words.includes("did:") || words.includes("Persona 工作报告") || words.includes("Status: done")) fail(`${where}: done: the raw block is still in the reply`);
       if (!words.includes("94 秒降到 11 秒")) fail(`${where}: done: the reply's own words went with the block`);
       const box = await el.boundingBox();
       const scroll = await page.locator("[data-chat-scroll]").first().boundingBox();
@@ -139,6 +139,7 @@ try {
       if (!blockedText.includes("Blocked on: DBA")) fail(`${where}: the blocked card does not say what it waits for: ${blockedText}`);
       if ((await claim(el, "merged")) !== "unchecked" || (await claim(el, "deployed")) !== null) fail(`${where}: blocked: merged should be unchecked and deployed absent`);
       if ((await el.locator("a").count()) !== 0) fail(`${where}: a branch or a file path became a link`);
+      if ((await transcript(page)).includes("Persona 工作报告")) fail(`${where}: the blocked report is duplicated beneath its card`);
       ok(`${where}: blocked closeout: what it waits for, a branch and a document as text, merged not checked`);
       await shot(page, `blocked-${size}-${theme}`);
 

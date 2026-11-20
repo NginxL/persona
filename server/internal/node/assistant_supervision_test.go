@@ -465,6 +465,13 @@ func TestSupervisionCapableRuntimePolicyLifecycleAndFailClosed(t *testing.T) {
 		t.Fatalf("persisted supervision policy was not cleared: %q", st.SupervisionInstructions)
 	}
 
+	// That turn ends: the runtime reports the conversation idle. A send marks an Antigravity conversation working until
+	// its runtime says otherwise (#11591), and a policy change while working is refused as busy (above).
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": sid, "cwd": dir, "status": "idle"},
+	}})
+	waitFor(t, "session idle after the ordinary turn", func() bool { return listed(t, n)[sid].Status == "idle" })
+
 	// If the runtime fails closed applying policy, the node propagates assistant_supervision_runtime and keeps prior state.
 	failSend = &rpc.Error{Code: "assistant_supervision_runtime", Message: "policy write failed"}
 	if _, err := nodeCall(t, n, "assistant.send", map[string]any{

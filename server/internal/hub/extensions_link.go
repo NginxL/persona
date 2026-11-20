@@ -199,6 +199,7 @@ func (h *Hub) features() []string {
 	out = append(out, h.meetingTranscriptionFeatures()...)
 	out = append(out, h.recordingDayFeatures()...)
 	out = append(out, h.assistantSearchFeatures()...)
+	out = append(out, h.directionSessionsFeatures()...)
 	out = append(out, h.remoteImagesFeatures()...)
 	out = append(out, h.assistantStartServiceTierFeatures()...)
 	out = append(out, h.todoViewFeatures()...)
@@ -213,8 +214,8 @@ func (h *Hub) features() []string {
 		switch f {
 		case featureAgentSessionArchives, featureAgentSessionArchiveClose, featureAgentAutoname, featureMeetingAttendance, featureMeetingConversation,
 			featureMeetingPhotos, featureMeetingLiveView, featureMeetingHighlights, featureMeetingNotes, featureMeetingEcho, featureMeetingTranscription, featureRecordingDay,
-			featureAssistantSearch, featureAssistantStartServiceTier, featureSessionsSideFold, featureRemoteImages, featureTodoView, featureTodoPlaces, featureTodoAsks, featureTodoTimeline:
-			continue // only manager hello can promise fleet archives, requested names, meetings, all-day recordings, chat search, start speed, the side-session fold, remote images, the To-dos view, its answers and its history
+			featureAssistantSearch, featureDirectionSessions, featureAssistantStartServiceTier, featureSessionsSideFold, featureRemoteImages, featureTodoView, featureTodoPlaces, featureTodoAsks, featureTodoTimeline:
+			continue // only manager hello can promise fleet archives, requested names, meetings, all-day recordings, chat search, direction sessions, start speed, the side-session fold, remote images, the To-dos view, its answers and its history
 		}
 		if !slices.Contains(out, f) {
 			out = append(out, f)
@@ -277,7 +278,8 @@ func (h *Hub) emitToExtensions(owner, event string, params any) {
 func (h *Hub) extensionRoutesRelayed(api *http.ServeMux) {
 	for _, pattern := range extwire.Routes {
 		relay := func(w http.ResponseWriter, r *http.Request) { h.relayToManager(w, r, false) }
-		if pattern == "/api/v1/agents/" { // messages to the personal Agents (terminal_controls.go)
+		if strings.HasPrefix(pattern, "/api/v1/agents/") || strings.Contains(pattern, " /api/v1/agents/") {
+			// Messages to the personal Agents (terminal_controls.go), on both broad and concrete relay patterns.
 			relay = h.withoutTerminalControls(relay)
 		}
 		api.HandleFunc(pattern, relay)

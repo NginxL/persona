@@ -69,7 +69,23 @@ checks. Build the binaries and write `latest.json` in one run with one build
 number: never write a manifest over binaries an earlier attempt left behind.
 The coordinator refuses a receipt whose `latest.json` does not describe its
 binaries (sizes, sha256s, build number, and this machine's `personad version
--v`), and uploads `latest.json` after the files it lists.
+-v`), whose installer or any `personad` does not carry the Release's exact
+GitHub update base, or whose immutable tag manifest reports another version or
+build. It uploads `latest.json` after the files it lists. Only after those
+checks and remote digest verification succeed does stable hub publication mark
+the Release Latest; it never moves Latest to an older stable tag, and
+prereleases and other platforms never move that pointer. The uploaded checkpoint
+retains the exact verified receipt and digests, so a feed or promotion retry
+reuses it instead of rebuilding conflicting assets or rerunning the optional
+per-tag Agent. When Darwin signing is enabled in CI, the coordinator waits for
+the current run, even while it is queued before the signing job is registered,
+and uses its staging `ci-latest.json` and `ci-SHA256SUMS` with digest checks and
+the exact requested commit's non-Windows downloads, merged
+with the locally verified Windows archives and reports into one final manifest;
+a failed job stops publication. An existing final `latest.json` or `SHA256SUMS`
+means the Release is already coordinated and is never used as CI staging input.
+Every initial publication and every uploaded-state resume repeats the same
+manifest, beta, Android and native Windows validation before upload.
 
 For a Windows CLI ZIP or a current `persona-link` / `personad` / `persona-node-windows-<arch>.exe.gz`,
 run `scripts/operations/windows_release.py` on Windows of the matching architecture before writing the artifact receipt. Include each `<artifact-stem>.verification.json` report with the exact artifact and release metadata. Node programs also require their exact `latest.json` entry. The coordinator verifies native command results, the selected beta/stable receipt identity, PE architecture and the binding to exact archive and executable hashes. A Link report never verifies personad or persona-node. Without native verification, report the Windows artifact as blocked; do not infer its version from a filename, a build number, or a string found in its bytes. These command-line programs are not Authenticode-signed; native execution and publisher signing are separate requirements.

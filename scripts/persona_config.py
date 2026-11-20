@@ -71,8 +71,9 @@ def env(cfg: dict) -> dict:
         "PERSONA_SIM": cfg.get("simulator", ""),
         # Where scripts/release/publish.sh puts personad and install.sh (the site/ worker's domain), and the wrangler to run.
         "PERSONA_PUBLISH_URL": get(cfg, "publish.site_url", "").rstrip("/"),
-        # Where the personad built here looks for its updates (-X main.updateURL): publish.update_url, else <site_url>/dl.
-        "PERSONA_UPDATE_URL": update_url(cfg),
+        # Where the personad built here looks for its updates (-X main.updateURL): an existing environment override,
+        # then publish.update_url, else <site_url>/dl.
+        "PERSONA_UPDATE_URL": update_url(cfg, os.environ.get("PERSONA_UPDATE_URL")),
         "PERSONA_WRANGLER": os.path.expanduser(get(cfg, "publish.wrangler", "")),
         # Existing opt-in entitlements: each feature's include selects the generated file and contributes its property.
         # Siri's later include then replaces that path with its own generated file when its overlay is on.
@@ -95,11 +96,11 @@ def env(cfg: dict) -> dict:
     return out
 
 
-def update_url(cfg: dict) -> str:
+def update_url(cfg: dict, override=None) -> str:
     """The update source built into personad (-X main.updateURL, docs/operations/hub-update.md "Update source"):
-    publish.update_url as given (the directory latest.json is in, e.g. a GitHub repository's releases/latest/download),
-    else publish.site_url's dl/, else none. A hub's hub.json update.url still replaces it at run time."""
-    value = get(cfg, "publish.update_url", "")
+    a non-empty environment override, then publish.update_url as given (the directory latest.json is in, e.g. a GitHub
+    repository's releases/latest/download), else publish.site_url's dl/, else none. hub.json update.url still replaces it."""
+    value = override or get(cfg, "publish.update_url", "")
     if value in ("", None):
         site = get(cfg, "publish.site_url", "")
         return site.rstrip("/") + "/dl" if isinstance(site, str) and site.strip() else ""

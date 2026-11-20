@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestNextRun(t *testing.T) {
@@ -560,7 +561,9 @@ func TestEditTask(t *testing.T) {
 }
 
 func TestTaskRoutes(t *testing.T) {
-	h := newStorelessService(t, newFakeHub())
+	f := newFakeHub().withMachine()
+	f.zshrc = map[string][]proto.Launcher{"server": {{Name: "claude-fast"}}}
+	h := newTestService(t, f)
 	setTasks(h, Task{ID: "morning", Title: "早报", Prompt: "x", Repeat: repeatDaily, Time: "09:00", Enabled: true},
 		Task{ID: "fu_1", Title: "巡检", Prompt: "y", Repeat: repeatInterval, EveryMinutes: 30, At: time.Now().Add(time.Minute), Enabled: true,
 			MachineID: "server"})

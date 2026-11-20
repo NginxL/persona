@@ -393,6 +393,7 @@ internal fun ChatLineContent(
     streamingItemIds: Set<String> = emptySet(),
     userImages: List<Item> = emptyList(),
     imagesInUserBubble: Boolean = false,
+    openingSource: (@Composable () -> Unit)? = null,
     workRunning: Boolean = false,
     lastWorkStep: Boolean = false,
     plan: LinePlan? = null,
@@ -427,7 +428,7 @@ internal fun ChatLineContent(
                         images = userPictures(userImages, session, loader), hidePrompt = hideTaskPrompts)
                     line.row.item?.injected != null -> InjectedLine(line.row.id, line.row.item!!.injected!!, showDetail = !hideTaskPrompts)
                     else -> MergedUserBubble(listOf(item), textUpdates, onLastLine.takeIf { line.row.id == lastUserId },
-                        images = userPictures(userImages, session, loader))
+                        images = userPictures(userImages, session, loader), openingSource = openingSource)
                 }
             }
             "reply" -> line.row.item?.item?.let { item ->
@@ -474,7 +475,7 @@ internal fun ChatLineContent(
                     info = persona.core.domain.lines.ApiErrorInfo.parse(text) ?: line.info))
             }
         }
-        is ChatLine.UserImages -> if (!imagesInUserBubble) UserBubbleFrame {
+        is ChatLine.UserImages -> if (!imagesInUserBubble) UserBubbleFrame(footer = openingSource) {
             line.images.forEach { ChatPicture(session, it.item, loader, alignEnd = true) }
         }
         is ChatLine.Work -> Column(Modifier.fillMaxWidth()) {

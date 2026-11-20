@@ -20,6 +20,10 @@ const (
 	methodGitPRMerge  = "git.pr_merge"
 )
 
+// methodGitBackendPrefix starts a git.* method addressed to a repository of a backend task workspace (#11687):
+// git.backend.<verb> runs git.<verb> in the repository its workspace and repo ids name (task_workspace_git_route.go).
+const methodGitBackendPrefix = "git.backend."
+
 // gitStatusParams is git.status's request; IdentityOnly asks for the repository's author identity alone.
 type gitStatusParams struct {
 	Cwd          string `json:"cwd"`

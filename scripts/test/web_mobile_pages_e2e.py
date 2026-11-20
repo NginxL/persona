@@ -6,7 +6,7 @@ hit without opening the row, and the row opens from the keyboard; a long-pressed
 
 Needs a running web page against the fake hub and Playwright for Python (it drives the installed Chrome):
 
-    PORT=18964 python3 scripts/mock/mock_hub.py &
+    MOCK_GITHUB_INBOX=1 PORT=18964 python3 scripts/mock/mock_hub.py &
     (cd web && PERSONA_HUB_URL=http://127.0.0.1:18964 npx vite --port 5964 --strictPort &)
     uv run --no-project --with playwright==1.58.0 python3 scripts/test/web_mobile_pages_e2e.py http://127.0.0.1:5964 [--shots <dir>]
 
@@ -16,6 +16,7 @@ Prints one line per check and a verdict; exits 1 on the first failure. --shots s
 import argparse
 import json
 import os
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
@@ -113,7 +114,10 @@ def sheet_checks(page, w, h, tag, shots):
         open_new_agent(page)
         close()
         page.wait_for_selector(PANEL, state="detached")
-        page.wait_for_timeout(300)
+        try:  # its entry goes a tick after it closes (lib/back-close.ts)
+            page.wait_for_function("!history.state?.personaOverlay", timeout=3000)
+        except Exception:
+            pass
         check(not page.evaluate("history.state && history.state.personaOverlay"), f"{tag}: closing it from the page leaves no overlay entry")
 
 
@@ -130,6 +134,7 @@ def touch_hit(page, tag):
     goto(page, "/settings?tab=general")
     sw = page.locator("[role=switch]").first
     sw.wait_for()
+    sw.scroll_into_view_if_needed()  # below a phone's first screen since #10656 (the font pickers above it)
     res = page.evaluate("""() => { const b = document.querySelector('[role=switch]'); const r = b.getBoundingClientRect();
       return { h: r.height, hit: document.elementFromPoint(r.left + r.width / 2, r.top - 8)?.closest('[role=switch]') === b }; }""")
     check(res["h"] < 44 and res["hit"], f"{tag}: a {res['h']:.0f}px switch is hit 8px above it", res)
@@ -138,14 +143,20 @@ def touch_hit(page, tag):
 def settings_list(page, tag, shots):
     goto(page, "/settings")
     page.locator('nav[aria-label="设置分类"]').wait_for()
-    rows = page.evaluate("() => [...document.querySelectorAll('nav[aria-label=\"设置分类\"] button')].map(b => [b.textContent.trim(), Math.round(b.getBoundingClientRect().height)])")
+    # the categories' rows; the first group's 切换 (#3667, its assistants) is a text button in its title line
+    rows = page.evaluate("() => [...document.querySelectorAll('nav[aria-label=\"设置分类\"] button:not([data-settings-switch])')].map(b => [b.textContent.trim(), Math.round(b.getBoundingClientRect().height)])")
     check(len(rows) >= 10 and all(h >= 44 for _, h in rows), f"{tag}: 设置 opens on the list of categories, rows of 44pt+", rows)
+    sw = page.evaluate("""() => { const b = document.querySelector('[data-settings-switch]'); if (!b) return null; const r = b.getBoundingClientRect();
+      const at = (y) => document.elementFromPoint(r.left + r.width / 2, y)?.closest('[data-settings-switch]') === b;
+      return { h: r.height, up: at(r.top - 10), down: at(r.bottom + 10) }; }""")
+    check(sw is None or (sw["up"] and sw["down"]), f"{tag}: 切换 is hit 10px above and below it", sw)
     shot(page, shots, f"settings_list_{tag}")
-    page.get_by_role("button", name="Codex").tap()
-    page.wait_for_function("location.search === '?tab=codex'")
-    expect(page.locator("header h1")).to_have_text("Codex")
-    check(page.locator('nav[aria-label="设置分类"]').count() == 0, f"{tag}: Codex opens as its own page with a back button")
-    shot(page, shots, f"settings_codex_{tag}")
+    # Codex is a section of Agent since #2317 (Claude Code, Codex, Antigravity, omp, one category)
+    page.locator('nav[aria-label="设置分类"]').get_by_role("button", name=re.compile(r"^Agent")).tap()
+    page.wait_for_function("location.search === '?tab=agents'")
+    expect(page.locator("header h1")).to_have_text("Agent")
+    check(page.locator('nav[aria-label="设置分类"]').count() == 0, f"{tag}: Agent opens as its own page with a back button")
+    shot(page, shots, f"settings_agents_{tag}")
     page.go_back()
     page.wait_for_function("location.pathname === '/settings' && location.search === ''")
     page.locator('nav[aria-label="设置分类"]').wait_for()
@@ -187,12 +198,27 @@ def inbox_filters(page, tag, shots):
     shot(page, shots, f"inbox_menu_{tag}")
     page.keyboard.press("Escape")
     page.get_by_role("menu").wait_for(state="detached")
+    # the menu's history entry goes a tick after it closes (lib/back-close.ts): until then the next page's address is
+    # the one its Back pops, which left the to-dos step on /inbox about one run in two
+    page.wait_for_function("!history.state?.personaOverlay")
 
 
 def todos(page, tag, shots):
+    # a to-do's page asks for its repositories and decisions: none is open, so none is asked for (#11442)
+    detail_reads = []
+    on_request = lambda r: detail_reads.append(r.url) if "/api/v1/todos/" in r.url and ("/repositories" in r.url or "/decisions" in r.url) else None
+    page.on("request", on_request)
     goto(page, "/todos")
-    circle = page.get_by_role("button", name="完成待办").first
+    circle = page.get_by_role("button", name="完成待办", exact=True).first
     circle.wait_for()
+    check(page.locator("[data-todo][aria-current]").count() == 0, f"{tag}: no to-do row is current before one is opened")
+    search = page.get_by_placeholder("搜索待办")
+    search.press_sequentially("PR", delay=60)
+    page.wait_for_timeout(300)
+    search.fill("")
+    page.wait_for_timeout(500)
+    page.remove_listener("request", on_request)
+    check(not detail_reads, f"{tag}: no unopened to-do's page loads, also while searching", detail_reads)
     calls = []
     page.route("**/api/v1/todos/*", lambda r: (calls.append((r.request.method, r.request.post_data)), r.fulfill(status=500, body="{}")) if r.request.method == "PATCH" else r.continue_())
     b = circle.bounding_box()
@@ -204,12 +230,69 @@ def todos(page, tag, shots):
     check(page.evaluate("location.pathname + location.search") == path, f"{tag}: and does not open the row", path)
     page.unroute("**/api/v1/todos/*")
     # the row opens from the keyboard
-    row = page.locator('[role=button][tabindex="0"]').filter(has=page.get_by_role("button", name="完成待办")).first
+    row = page.locator('[role=button][tabindex="0"]').filter(has=page.get_by_role("button", name="完成待办", exact=True)).first
     row.focus()
     page.keyboard.press("Enter")
     page.wait_for_function("location.search.startsWith('?id=')")
     ok(f"{tag}: Enter on a focused todo row opens it")
     shot(page, shots, f"todos_{tag}")
+
+
+# Overview on a phone (#11442): a task card opens from a tap anywhere on it, its PR link keeps its own; See all and
+# Monitor take a 44pt touch; a Needs you card's kicker never takes more room than its title.
+def overview_cards(page, ctx, w, tag, shots):
+    def back_to_overview():
+        goto(page, "/overview")
+        page.wait_for_selector("[data-task]")
+        page.wait_for_timeout(300)
+
+    # in the middle of the screen, clear of a toast left at its bottom by an earlier step
+    def center(loc):
+        loc.evaluate("e => e.scrollIntoView({ block: 'center' })")
+        page.wait_for_timeout(200)
+
+    def tap(box, dy=0.0):
+        page.touchscreen.tap(box["x"] + min(12, box["width"] / 2), box["y"] + box["height"] / 2 + dy)
+        page.wait_for_timeout(500)
+        return page.evaluate("location.pathname + location.search")
+
+    back_to_overview()
+    card = page.locator("[data-task]:has([data-task-agents])").first
+    center(card)
+    tid = card.get_attribute("data-task")
+    check(tap(card.locator("[data-task-agents]").bounding_box()) == f"/todos?id={tid}", f"{tag}: a tap on a task card's agent line opens the task")
+    back_to_overview()
+    card = page.locator("[data-task]:has([data-stage]):has(a[target=_blank])").first
+    center(card)
+    shot(page, shots, f"overview_cards_{tag}")
+    tid = card.get_attribute("data-task")
+    pr = card.locator("a[target=_blank]")
+    with ctx.expect_page() as popup:
+        tap(pr.bounding_box())
+    check(popup.value.url == pr.get_attribute("href") and page.evaluate("location.pathname") == "/overview", f"{tag}: its PR link opens the PR, not the task", popup.value.url)
+    popup.value.close()
+    check(tap(card.locator("[data-stage] .rounded-full").first.bounding_box()) == f"/todos?id={tid}", f"{tag}: a tap on its stage bar opens the task")
+    for name, path in [("查看全部", "/todos"), ("监控", "/machines")]:
+        for dy in (-15, 15):
+            back_to_overview()
+            link = page.locator("section h2 ~ a", has_text=name)
+            center(link)
+            box = link.bounding_box()
+            check(box["height"] < 30 and tap(box, dy) == path, f"{tag}: {name} answers a touch {abs(dy)}px {'above' if dy < 0 else 'below'} its words")
+    if w == 360 and not tag.endswith("d"):
+        back_to_overview()
+        page.evaluate("localStorage.setItem('persona.language', 'en')")
+        page.reload()
+        page.wait_for_selector("[data-task]")
+        page.wait_for_timeout(800)
+        rows = page.evaluate("""() => [...document.querySelectorAll('a')].filter(a => a.querySelector('span[title] > span.truncate')).map(a => {
+          const words = a.querySelector('span[title] > span.truncate'), title = a.querySelector('.block.truncate');
+          return { kicker: words.textContent, words: words.getBoundingClientRect().width, title: title.getBoundingClientRect().width, cut: words.scrollWidth > words.clientWidth + 1 }; })""")
+        page.evaluate("localStorage.removeItem('persona.language')")
+        page.reload()
+        page.wait_for_selector("aside", state="attached")
+        check(rows and all(r["title"] >= r["words"] - 1 for r in rows), "360 en: every Needs you title is at least as wide as its kicker's words", rows)
+        check(any(r["cut"] for r in rows) and all(abs(r["title"] - r["words"]) <= 1 for r in rows if r["cut"]), "360 en: a long kicker is cut only to the title's width", rows)
 
 
 def long_press(page, ctx, tag):
@@ -230,6 +313,48 @@ def long_press(page, ctx, tag):
     ok(f"{tag}: a tap outside closes it")
 
 
+SHOW_UNDO = """async () => { const m = await import('/src/ui/atoms.tsx'); const { t } = await import('/src/i18n/index.ts');
+  window.__undone = 0; m.toast('已归档', 'ok', { label: t('lib-agent-archives.undo'), run() { window.__undone++; } });
+  await new Promise((r) => setTimeout(r, 400));
+  const row = [...document.querySelectorAll('[aria-live=polite] > div:not([data-closing])')].pop(); const [undo, close] = row.querySelectorAll('button');
+  // the word itself (the button may reach past it on a touch screen)
+  const range = document.createRange(); range.selectNodeContents(undo); const u = range.getBoundingClientRect(), c = close.getBoundingClientRect();
+  return { label: undo.textContent, right: u.right, cy: u.top + u.height / 2, close: [c.left + c.width / 2, c.top + c.height / 2], height: row.offsetHeight }; }"""
+
+
+def toast_undo_edges(browser, base, token):
+    # A toast's Undo on a phone (#11442): real taps 1, 3 and 5 px past its word run it, not Close, for a short word and
+    # a wide one (ja); Close still closes from its own face; a toast with Undo is no taller than one without.
+    for lang, label in ((None, "撤销"), ("ja", "元に戻す")):
+        ctx, page = open_page(browser, base, token, 390, 844)
+        if lang:
+            page.evaluate(f"localStorage.setItem('persona.language', '{lang}')")
+            page.reload()
+            page.wait_for_selector("aside", state="attached", timeout=20000)
+        for d in (1, 3, 5):
+            u = page.evaluate(SHOW_UNDO)
+            if u["label"] != label:
+                fail(f"the toast's button reads {u['label']!r}, not {label!r}")
+            at = page.evaluate("([x, y]) => document.elementFromPoint(x, y)?.closest('button')?.textContent", [u["right"] + d, u["cy"]])
+            if at != label:
+                fail(f"{label}: {d} px right of it is {at!r}, not the button")
+            page.touchscreen.tap(u["right"] + d, u["cy"])
+            try:
+                page.wait_for_function("window.__undone === 1 && !document.querySelector('[aria-live=polite] > div:not([data-closing])')", timeout=3000)
+            except Exception:
+                fail(f"{label}: a tap {d} px right of it did not run it (runs: {page.evaluate('window.__undone')})")
+        ok(f"{label}: taps 1, 3 and 5 px right of it run it")
+        u = page.evaluate(SHOW_UNDO)
+        page.touchscreen.tap(*u["close"])
+        page.wait_for_function("!document.querySelector('[aria-live=polite] > div:not([data-closing])')", timeout=3000)
+        check(page.evaluate("window.__undone") == 0, f"{label}: a tap on Close closes it without running it")
+        page.wait_for_timeout(400)
+        plain = page.evaluate("""async () => { const m = await import('/src/ui/atoms.tsx'); m.toast('已复制', 'ok');
+          await new Promise((r) => setTimeout(r, 400)); return [...document.querySelectorAll('[aria-live=polite] > div:not([data-closing])')].pop().offsetHeight; }""")
+        check(u["height"] == plain, f"{label}: a toast with it is as tall as one without", (u["height"], plain))
+        ctx.close()
+
+
 def wide_dialog(browser, base, token, shots):
     ctx, page = open_page(browser, base, token, 1280, 820, mobile=False)
     open_new_agent(page, tap=False)
@@ -244,10 +369,51 @@ def wide_dialog(browser, base, token, shots):
     if shots:
         open_new_agent(page, tap=False)
         shot(page, shots, "dialog_1280")
-    # Settings keeps its tab bar
+    # Settings keeps its categories beside the page (a column since #2342, not the phone's list): /settings is 通用
     page.goto(f"{base}/settings")
     page.locator('nav[aria-label="设置分类"] button[aria-current="page"]', has_text="通用").wait_for()
-    check(page.locator("header nav[aria-label='设置分类']").count() == 1, "1280: 设置 keeps the tab bar, /settings is 通用")
+    check(page.locator("aside nav[aria-label='设置分类']").count() == 1 and page.get_by_role("button", name="返回设置").count() == 0,
+          "1280: 设置 keeps its category column, /settings is 通用")
+    ctx.close()
+
+
+INBOX_TITLE = """() => { const h = document.querySelector('[data-item-title]'); const s = h.querySelector('span');
+  const done = [...h.closest('.items-start').querySelectorAll(':scope > button')].pop();
+  const text = [...done.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); const range = document.createRange(); range.selectNodeContents(text);
+  const lh = parseFloat(getComputedStyle(s).lineHeight);
+  return { text: s.textContent, cw: s.clientWidth, sw: s.scrollWidth, ch: s.clientHeight, sh: s.scrollHeight, lines: Math.round(s.getBoundingClientRect().height / lh),
+    wrap: getComputedStyle(s).whiteSpace, done: done.textContent.trim(), doneLines: new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size,
+    doneH: done.getBoundingClientRect().height }; }"""
+
+
+def inbox_title_phone(browser, base, token, shots):
+    """An Inbox item's title wraps on a phone for every source (#11511), not only a Feishu one's: a GitHub review's
+    "Add …" was cut to a few letters beside Done. It wraps in full, all of it shown; Done stays one line; wide, the
+    title is still one line, cut at its end."""
+    item = "/inbox/github%3Areview12"  # the fake hub's GitHub review (MOCK_GITHUB_INBOX=1), "Add retries to the example uploader"
+    for lang, locale in (("en", "en-US"), ("ja", "ja-JP")):
+        ctx = browser.new_context(viewport={"width": 360, "height": 740}, device_scale_factor=3, is_mobile=True, has_touch=True,
+                                  user_agent=UA, locale=locale)
+        ctx.add_init_script(f"localStorage.setItem('persona.language', '{lang}')")
+        page = ctx.new_page()
+        page.set_default_timeout(10000)
+        page.goto(f"{base}/overview?token={token}")
+        page.wait_for_selector("aside", state="attached", timeout=20000)
+        goto(page, item)
+        page.wait_for_selector("[data-item-title]")
+        page.wait_for_timeout(500)
+        res = page.evaluate(INBOX_TITLE)
+        check(res["sw"] <= res["cw"] + 1 and res["sh"] <= res["ch"] + 1 and res["lines"] >= 2,
+              f"360 {lang}: a GitHub item's title wraps to {res['lines']} lines, all of it shown", res)
+        check(res["doneLines"] == 1 and res["doneH"] <= 33, f"360 {lang}: {res['done']} stays on one line", res)
+        shot(page, shots, f"inbox_title_360_{lang}")
+        ctx.close()
+    ctx, page = open_page(browser, base, token, 1280, 820, mobile=False)
+    goto(page, item)
+    page.wait_for_selector("[data-item-title]")
+    page.wait_for_timeout(500)
+    res = page.evaluate(INBOX_TITLE)
+    check(res["wrap"] == "nowrap" and res["lines"] == 1, "1280: the title stays one line, cut at its end", res)
     ctx.close()
 
 
@@ -271,6 +437,7 @@ def main():
                 settings_list(page, tag, a.shots)
                 inbox_filters(page, tag, a.shots)
                 todos(page, tag, a.shots)
+                overview_cards(page, ctx, w, tag, a.shots)
                 if not dark:
                     long_press(page, ctx, tag)
                 ctx.close()
@@ -280,7 +447,9 @@ def main():
             box = page.evaluate("() => { const r = document.querySelector('[role=dialog]').getBoundingClientRect(); return [r.left, r.right, r.width]; }")
             check(box[0] > 0 and abs(box[2] - 520) < 1, "844×390: the dialog is the card, not a sheet", box)
             ctx.close()
+            toast_undo_edges(browser, base, a.token)
             wide_dialog(browser, base, a.token, a.shots)
+            inbox_title_phone(browser, base, a.token, a.shots)
         finally:
             browser.close()
     print("PASS web mobile pages e2e")

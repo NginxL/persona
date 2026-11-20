@@ -188,6 +188,12 @@ data class Todo(
      *  that review (web #4874, docs/protocol/protocol.md `GET /api/v1/todos`); null otherwise and from an older hub. */
     @SerialName("decision_review") val decisionReview: DecisionReview? = null,
     @SerialName("pr_url") val prUrl: String? = null,
+    /** "code" or "general" (#3380): general work draws no stage bar, its status already says how it goes; null from an
+     *  older hub, which keeps the bar for any stage. */
+    @SerialName("stage_kind") val stageKind: String? = null,
+    /** Closed with nothing left to deploy (#11590): the stage bar ends with Done after [stage]. False while open, for work
+     *  that went out or waits to, and from an older hub. */
+    @SerialName("stage_done") val stageDone: Boolean = false,
     @WireTime @SerialName("cancelled_at") val cancelledAt: String? = null,
     /** The manager it belongs to, as the merged list stamps it (docs/assistant/managers.md "Ownership"); null: the default manager's. */
     val manager: String? = null,

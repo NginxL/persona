@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -41,6 +42,175 @@ func TestAssistantOf(t *testing.T) {
 		if got, ok := n.assistantOf(c.pid, parent); got != c.want || ok != (c.want != "") {
 			t.Errorf("pid %d: %q %v, want %q", c.pid, got, ok, c.want)
 		}
+	}
+}
+
+func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no local peer process lookup")
+	}
+	n, hub := runtimeNode(t)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "s"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if err := ln.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"runtime", "unrelated"} {
+		cmd := assistantPeerCommand(ln.Addr().String(), role)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := cmd.Wait(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	peers := map[string]net.Conn{}
+	pids := map[string]int{}
+	for range 5 {
+		conn, err := ln.AcceptUnix()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid, err := peerPID(conn)
+		if err != nil || pid <= 1 {
+			t.Fatalf("peer PID for %q: %d, %v", line, pid, err)
+		}
+		role := strings.TrimSpace(line)
+		peers[role], pids[role] = conn, pid
+	}
+	const assistantID, agentID = "agy-assistant", "agy-agent"
+	n.state.put(assistantID, sessionState{Cwd: identity.AssistantDir(n.home)})
+	host := n.runtimes.add(nil)
+	host.ready, host.hello.Runtime, host.hello.Caps.Assistant, host.pid = true, "agy", true, pids["runtime"]
+	n.runtimes.claim(host, assistantID)
+	n.runtimes.claim(host, agentID)
+	report := func(pids map[string]int) {
+		n.runtimes.setAssistantPIDs(host, pids, func(id string) bool { return n.runtimeAssistantChat(host, id) })
+	}
+	check := func(role, want string) {
+		t.Helper()
+		if got, ok := n.assistantCaller(peers[role]); got != want || ok != (want != "") {
+			t.Errorf("%s: assistantCaller = (%q, %v), want %q", role, got, ok, want)
+		}
+	}
+	for _, pid := range []int{pids["runtime"], os.Getpid(), pids["unrelated"], 1, 0, -1} {
+		report(map[string]int{assistantID: pid})
+		if roots := n.assistantRoots(); len(roots) != 0 {
+			t.Fatalf("accepted non-worker PID %d: %v", pid, roots)
+		}
+	}
+	report(map[string]int{assistantID: pids["worker"], agentID: pids["agent"]})
+	check("assistant", assistantID)
+	check("agent", "")
+	check("runtime", "")
+	check("unrelated", "")
+	t.Run("cliCall", func(t *testing.T) {
+		t.Setenv("PERSONA_SKILLS_DIR", t.TempDir())
+		t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+		n.bin = "/opt/example/personad"
+		stateCwd := prepareAssistantForTest(t, n, ".persona/assistant", []string{"example"}, nil)
+		rowCwd := prepareAssistantForTest(t, n, ".persona/health", []string{"other"}, nil)
+		n.runtimes.setSessions(host, []proto.Session{{SessionID: assistantID, Cwd: rowCwd}, {SessionID: agentID}})
+		n.state.put(assistantID, sessionState{Cwd: stateCwd})
+		calls := assistantHub(hub)
+		call := func(role, name string) proto.ToolResult {
+			return n.cliCall(t.Context(), peers[role], sockRequest{Name: name, SessionID: "forged", Assistant: true})
+		}
+		if res := call("assistant", "example_list"); res.IsError {
+			t.Fatalf("prepared runtime assistant denied: %+v", res)
+		}
+		if res := call("assistant", "other_list"); !res.IsError {
+			t.Fatalf("runtime row overrode prepared state: %+v", res)
+		}
+		n.state.put(assistantID, sessionState{})
+		if res := call("assistant", "other_list"); res.IsError {
+			t.Fatalf("prepared runtime row denied: %+v", res)
+		}
+		for _, role := range []string{"agent", "runtime", "unrelated"} {
+			if res := call(role, "other_list"); !res.IsError || !strings.Contains(res.Content[0].Text, "只能在助手的对话里用") {
+				t.Errorf("%s was not denied as an unauthorized caller: %+v", role, res)
+			}
+		}
+		n.runtimes.setSessions(host, []proto.Session{{SessionID: assistantID}, {SessionID: agentID}})
+		calls.mu.Lock()
+		defer calls.mu.Unlock()
+		if len(calls.calls) != 2 {
+			t.Fatalf("hub received %d calls, want 2", len(calls.calls))
+		}
+		for index, name := range []string{"example_list", "other_list"} {
+			var params map[string]any
+			if err := json.Unmarshal(calls.calls[index], &params); err != nil {
+				t.Fatal(err)
+			}
+			if params["session_id"] != assistantID || params["assistant"] != true || params["name"] != name {
+				t.Errorf("unexpected hub request: %s", calls.calls[index])
+			}
+		}
+	})
+	n.state.put(assistantID, sessionState{Cwd: t.TempDir()})
+	check("assistant", "")
+	n.state.put(assistantID, sessionState{Cwd: identity.AssistantDir(n.home)})
+	report(map[string]int{assistantID: 0})
+	check("assistant", "")
+	report(map[string]int{assistantID: pids["worker"]})
+	check("assistant", assistantID)
+	n.runtimes.remove(host)
+	report(map[string]int{assistantID: pids["worker"]})
+	check("assistant", "")
+}
+
+func assistantPeerCommand(path, role string) *exec.Cmd {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAssistantWorkerPeerProcess$", "--", path, role)
+	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+func TestAssistantWorkerPeerProcess(t *testing.T) {
+	if len(os.Args) < 4 || os.Args[len(os.Args)-3] != "--" {
+		return
+	}
+	path, role := os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]
+	var children []string
+	switch role {
+	case "runtime":
+		children = []string{"worker", "agent"}
+	case "worker":
+		children = []string{"assistant"}
+	}
+	for _, child := range children {
+		cmd := assistantPeerCommand(path, child)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := cmd.Wait(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, role+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, conn); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -49,7 +49,16 @@ beforeEach(() => {
     calls.push({ url, header: new Headers(init?.headers).get("X-Persona-Manager"), method: init?.method ?? "GET" });
     let body: unknown = { error: "not found" };
     let status = 404;
-    if (/\/conversations\/f3\/messages\?/.test(url)) {
+    if (url.includes("/conversations/faces/messages")) {
+      const account = new URL(url, "http://hub").searchParams.get("ol_account");
+      body = { messages: [{ ...msg("m1"), sender_id: "person", sender_avatar: "/agent/v1/media/old-person", sender_avatar_url: `/api/v1/avatars/lark/c2VuZGVy?lark_account=${account}`,
+        parts: [{ kind: "image", url: "/api/v1/lark/media/attachment" }] }] };
+      status = 200;
+    } else if (url.includes("/lark/users/person")) {
+      const account = new URL(url, "http://hub").searchParams.get("ol_account");
+      body = { displayName: "Example person", avatarUrl: "/agent/v1/media/old-profile", avatar_url: `/api/v1/avatars/lark/cHJvZmlsZQ?lark_account=${account}` };
+      status = 200;
+    } else if (/\/conversations\/f3\/messages\?/.test(url)) {
       // two pictures: the viewer pages through both
       const pic = (id: string, key: string): LarkMessage => ({ ...msg(id), text: "", parts: [{ kind: "image", url: `/api/v1/lark/media/${key}` }] });
       body = { messages: [pic("p1", "k1"), pic("p2", "k2")], read_cursor: "0" };
@@ -84,6 +93,26 @@ const lark = (feed: string) => calls.filter((c) => c.url.includes(`/lark/convers
 const named = (url: string) => new URL(url, "http://hub").searchParams.get("manager");
 
 describe("an inbox item's chat of another manager", () => {
+  it("uses the item's own manager and account for the sender and profile, including same-named people on another manager", async () => {
+    const expectFace = (value: string, size: number, manager: string, account: number) => {
+      const img = document.querySelector<HTMLImageElement>(`img[src*="/avatars/lark/${value}"]`);
+      expect(img).not.toBeNull();
+      const url = new URL(img!.src);
+      expect([url.searchParams.get("lark_account"), url.searchParams.get("size"), url.searchParams.get("manager")]).toEqual([String(account), String(size), manager]);
+      return img!;
+    };
+    for (const [manager, account] of [["first-copy", 7], ["second-copy", 7], ["second-copy", 8]] as const) {
+      act(() => root.render(<LarkThread chat={{ feed: "faces", title: "Chat", account, manager }} />));
+      await flush();
+      expect(document.querySelector("[role=dialog]")).toBeNull();
+      const sender = expectFace("c2VuZGVy", 32, manager, account);
+      expect(host.querySelector("img[src*='/lark/media/attachment']")).not.toBeNull();
+      act(() => sender.closest("button")!.click());
+      await flush();
+      expectFace("cHJvZmlsZQ", 56, manager, account);
+    }
+  });
+
   it("names the item's manager on its reads, and on the read report it flushes as the next item opens", async () => {
     // item B (m-2's chat f1, opened at its first unread) open and read, then item C (the default's chat f2) in its
     // place, as InboxDetail does

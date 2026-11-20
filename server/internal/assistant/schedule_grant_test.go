@@ -190,6 +190,52 @@ func TestScheduledRoundStartsTheKindItsOwnerGranted(t *testing.T) {
 	}
 }
 
+// With the opt-in guide, a granted round gets its planning steps inline. File reads
+// or a native skill call still require the owner's Start, even for a covered kind.
+func TestWorkGuideScheduledGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		tool      string
+		automatic bool
+	}{
+		{"default", false, "ToolSearch", true},
+		{"enabled", true, "ToolSearch", true},
+		{"native skill read", true, "Skill", false},
+		{"reference file read", true, "Read", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGrantFixture(t, granted(depsTask()))
+			setSettings(t, g.s, func(v *Settings) { v.WorkGuide = ptr(tc.enabled) })
+			machine, session := g.round("deps", nil, toolUse(tc.tool), toolResult())
+			if !g.s.cleanRoundSession(session) {
+				t.Fatal("expected the scheduler to start a separate granted round")
+			}
+			const inline = "Leave user_requested false"
+			round := g.s.Context(t.Context(), ContextParams{SessionID: session})
+			if strings.Contains(round.Text, inline) != tc.enabled {
+				t.Fatalf("unexpected scheduled instructions: %q", round.Text)
+			}
+			if other := g.s.Context(t.Context(), ContextParams{SessionID: "ordinary-chat"}); strings.Contains(other.Text, inline) {
+				t.Fatal("scheduled guidance leaked into another chat")
+			}
+			// The node prepends the rendered context to the native transcript's user message.
+			block := prompts.RenderTurnContext(prompts.TurnContext{Full: true, Sections: []prompts.TurnSection{{Text: round.Text}}})
+			g.mu.Lock()
+			g.items[0].Text = block + "\n" + g.items[0].Text
+			g.mu.Unlock()
+			if _, out := g.plan(machine, session, "/wt/app/deps"); tc.automatic {
+				if !strings.Contains(out, "without asking") {
+					t.Fatal(out)
+				}
+				waitFor(t, "covered dispatch", func() bool { return fakeStarts(g.f) == 1 })
+			} else if !waitsForStart(out) || fakeStarts(g.f) != 0 {
+				t.Fatalf("expected approval with zero starts: %s", out)
+			}
+		})
+	}
+}
+
 // What the grant does not cover keeps the card.
 func TestScheduledRoundWithoutTheOwnersGrantWaits(t *testing.T) {
 	other := granted(depsTask())
@@ -351,15 +397,21 @@ func TestScheduleGrantDropsWhenTheScheduleChanges(t *testing.T) {
 			t.Fatalf("PUT: %d %s", w.Code, w.Body)
 		}
 	}
-	g := newGrantFixture(t, two())
+	legacy := two()
+	// The persisted basis before task-local execution options existed.
+	legacy.StartGrant.Basis = "3b456559ae474d2a197c2945636b3c1545a69e8165db3e811969db697fa3ca44"
+	g := newGrantFixture(t, legacy)
 	put(g, keep)
 	if task, _ := taskByID(g.s, "deps"); task.liveGrant() == nil || len(task.StartGrant.Kinds) != 2 {
 		t.Fatalf("a time change (or the body's start_grant) changed the grant: %+v", task.StartGrant)
 	}
 	for name, body := range map[string]string{
-		"prompt": strings.Replace(keep, "open a PR", "merge it", 1),
-		"facts":  strings.Replace(keep, `"enabled":true`, `"enabled":true,"facts":true`, 1),
-		"report": strings.Replace(keep, `"enabled":true`, `"enabled":true,"report":true`, 1),
+		"prompt":              strings.Replace(keep, "open a PR", "merge it", 1),
+		"facts":               strings.Replace(keep, `"enabled":true`, `"enabled":true,"facts":true`, 1),
+		"report":              strings.Replace(keep, `"enabled":true`, `"enabled":true,"report":true`, 1),
+		"execution computer":  strings.Replace(keep, `"enabled":true`, `"enabled":true,"execution_machine_id":"box"`, 1),
+		"execution directory": strings.Replace(keep, `"enabled":true`, `"enabled":true,"cwd":"/code/other"`, 1),
+		"prompt with model":   strings.Replace(strings.Replace(keep, "open a PR", "merge it", 1), `"enabled":true`, `"enabled":true,"model":"test-model"`, 1),
 	} {
 		g := newGrantFixture(t, two())
 		put(g, body)

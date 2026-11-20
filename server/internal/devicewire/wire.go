@@ -13,6 +13,10 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// LegacyTaskExecution is an internal assistant.send hint for unconfigured scheduled turns.
+// The devices manager consumes it against the connected node's handshake before dispatch.
+const LegacyTaskExecution = "task_execution_legacy"
+
 // Manager → hub.
 const (
 	// EventState {machines: [State], absorbed: {entry id: machine id}, entries: [Entry]}: every machine as the manager
@@ -449,6 +453,7 @@ var Routes = []string{
 	"POST /api/v1/sessions/{mid}/{sid}/start/continue",
 	// Retry and Delete on a message held for an Agent while its computer was away (#10661, internal/devices held.go),
 	// from a full device.
+	HeldOutboxRoute,
 	"POST /api/v1/sessions/{mid}/{sid}/held/{msg}/retry",
 	"DELETE /api/v1/sessions/{mid}/{sid}/held/{msg}",
 	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
@@ -471,6 +476,9 @@ var Routes = []string{
 	"POST /api/v1/machines/{mid}/cleanup",
 	"GET /api/v1/machines/{mid}/claude-dirs",
 	"PUT /api/v1/machines/{mid}/claude-dirs/blocked",
+	// Hidden Agent folders, beside the blocked Claude config folders (internal/devices agentdirs.go).
+	"GET /api/v1/machines/{mid}/agent-dirs/hidden",
+	"PUT /api/v1/machines/{mid}/agent-dirs/hidden",
 	"GET /api/v1/machines/{mid}/claude-live-replies",
 	"PUT /api/v1/machines/{mid}/claude-live-replies",
 	// Sharing the machine's clipboard with the phone (#3064, internal/devices clipboard.go).

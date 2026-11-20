@@ -21,6 +21,7 @@ spec/
     injected/         hub 注入给模型的消息怎么认
     comments/         comment blocks a message leads with (web and iOS)
     sync/             chat sync scenarios: hub state, frames with faults, what each device shows
+    sync-driver/      one hub group's reconnect, event cursor and lifecycle decisions
     fold-changes/     the files a run of work changed, counted by the hub and the web alike
     fold-sources/     the web pages a run of work used, read by the hub and the web alike
     graph-layout/     an extension graph's layout, reading order and folds, checked by the web, iOS, Android and the hub
@@ -33,6 +34,7 @@ spec/
     todo-counts/      the To-dos list's counts and places, schema/wire/todo-view
     todo-rounds/      a to-do's conversation in rounds, its results and what changed since the owner looked, schema/wire/todo-view
     todo-asks/        an answer to a to-do's own ask: what it takes, refuses and changes, schema/wire/todo-view
+    todo-writes/      a to-do's message or answer that failed: what it typed, and what the hub's receipt makes of it
     todo-detail/      a to-do's page: which elements it draws, in order, and its one primary action
     todo-layout/      the To-dos window rule: a window and what is wanted → its regions and their widths
     todo-push/        a decision's push: what the manager sends → its category, mutable-content and todo, schema/wire/todo-view
@@ -79,10 +81,12 @@ spec/
 | todo-view | [README](fixtures/todo-view/README.md): the view the manager works out for each to-do (phase, section, reason, line 2, times, marks, asks, steps) by the redesign's decision table, held to `schema/wire/todo-view.schema.json`, answered by the manager's projection (`server/internal/assistant/todo/projection`, `fixtures_test.go`) and read back by the generated Go, Kotlin and Swift types (#10226) |
 | todo-counts | [README](fixtures/todo-counts/README.md): a To-dos list's counts (N, open, in progress, rows per section), its places (All, Today, Upcoming, projects) and the order within each section, with the same schema and readers (#10226); its counting rules are replayed by the iOS app's `TodoCountsFallback` (#10465) |
 | todo-asks | [README](fixtures/todo-asks/README.md): an answer to one of a to-do's own asks through `POST /api/v1/todos/{id}/asks/{ask}/answer` (what waits, the ask's id and the answer → the status, code, reply and what it changed), held to `schema/wire/todo-view.schema.json`, replayed by the manager against its route (`server/internal/assistant/todo_asks_routes_test.go`) and read back by the generated Go types (#10465) |
+| todo-writes | [README](fixtures/todo-writes/README.md): how a to-do's message or answer that carries the owner's words ends (what happens to the words → the manager's status, code and `delivered` → the hub's final `todo_send_state` and receipt), replayed by the manager against its routes (`server/internal/assistant/todo_write_outcome_test.go`) and by the hub's relay (`server/internal/hub/todo_send_state_test.go`), the seam between two packages that never import each other (#10465) |
 | todo-detail | [README](fixtures/todo-detail/README.md): a to-do's page (the paper) from what the item route answers and where it is shown: its elements in order, its one primary action and whom its composer addresses, with a guard that everyday pages name no engine, runtime, model, path, repository or session id; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: iOS will replay it from its paper (#10465), the web and Android from their stages |
 | todo-layout | [README](fixtures/todo-layout/README.md): the To-dos window rule, a window, its text size and what the owner asked for → the sidebar, list, paper and conversation regions with their forms and widths, every window of the redesign's table included; checked by `scripts/test/test_todo_fixtures.py`, read by no client yet: each will replay it with its own pure function, iOS first (#10465) |
 | todo-push | [README](fixtures/todo-push/README.md): a decision's push, the `todo` a manager sends → the push's category, whether it sets `mutable-content`, and its `todo` (an older manager's unchanged, the lock-screen rule, the options forwarded), answered by the hub (`TestDecisionPushFixtures`), held to the schema by `scripts/test/test_wire_schema.py` and read back by the generated Go, Swift and Kotlin types (#10465) |
 | sync | [README](fixtures/sync/README.md): stories of one chat on one or more devices (sends, cards, reconnects, hub restarts, wakes, long chats) with faults, checked at every step by Go, the clients and the end-to-end runs (#1073) |
+| sync-driver | [README](fixtures/sync-driver/README.md): single-group socket, retry, cursor and lifecycle decisions derived from iOS and replayed against the pure Rust driver (#9783) |
 | stream-chunks | [README](fixtures/stream-chunks/README.md): the pure Rust projection of iOS `StreamChunks.split`, with source-cited Apple cases (#8607) |
 | tool-names | [README](fixtures/tool-names/README.md): a tool no table names in words ("GitHub · Create issue"), what its call is about, a shell's command line and its arguments as a key/value list, checked by Android; iOS's own tests hold the same cases until it reads them (#4339) |
 | fold-changes | [README](fixtures/fold-changes/README.md): the files a run of work's successful edits changed and their lines, counted by the hub for a fold and by the web for the same calls unfolded (#5157) |

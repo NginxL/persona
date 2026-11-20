@@ -1,6 +1,8 @@
 package persona.core.domain.sort
 
 import java.time.Instant
+import kotlinx.serialization.json.jsonPrimitive
+import persona.core.domain.FixtureReader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,6 +15,17 @@ import persona.core.contracts.WorkState
 import persona.core.domain.zhAny
 
 class CloseoutTest {
+    @Test fun reportsAboveTheSameCard() {
+        for ((_, sample) in FixtureReader.read("work-reports")) {
+            if (sample.getValue("name").jsonPrimitive.content == "done") {
+                val text = sample.getValue("text").jsonPrimitive.content
+                assertEquals(text, stripCloseout(text, complete = false))
+            }
+            assertEquals(sample.getValue("name").jsonPrimitive.content, sample.getValue("display").jsonPrimitive.content,
+                stripCloseout(sample.getValue("text").jsonPrimitive.content))
+        }
+    }
+
     private val now = Instant.parse("2026-11-10T10:00:00Z")
     private fun session(work: WorkState?, state: String = "unread", status: String = "done") =
         Session(machineId = "m", sessionId = "s", status = status, state = state, work = work)

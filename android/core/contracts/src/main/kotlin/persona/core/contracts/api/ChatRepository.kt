@@ -23,6 +23,8 @@ data class ChatSnapshot(
     val liveText: Map<String, StateFlow<String>> = emptyMap(),
     val history: String? = null,
     val recordedTurnDurations: Map<String, Long> = emptyMap(),
+    /** The oldest page boundary can survive in the cache before a fresh subscription verifies the latest items. */
+    val olderBoundaryKnown: Boolean = verified,
 )
 
 interface ChatRepository {

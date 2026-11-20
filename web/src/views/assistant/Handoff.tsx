@@ -6,7 +6,7 @@
 import { openAgent, openTask } from "../../lib/handoff";
 import { startFailure, type TaskPlan } from "../../lib/feed";
 import { startFailureCardLine } from "../../lib/start-failure";
-import { interruption, TODO_STATUS_INFO, type Todo } from "../../lib/todos";
+import { interruption, TODO_STATUS_INFO, type Todo, type TodoAgent } from "../../lib/todos";
 import { ago, stateOf } from "../../lib/format";
 import { stateName } from "../../lib/state-labels";
 import { useStore, type State } from "../../lib/store";
@@ -31,9 +31,44 @@ export function whyNotStarted(todo: Todo, plans: Record<string, TaskPlan>): stri
   return startFailure(todo, plans) ?? todo.agents?.find((a) => a.start_error)?.start_error;
 }
 
-/** How long after a task's first Agent another counts as handed off with it (the plan's several Agents, a retry): one
- *  linked later (a new Agent after every one stopped, #4754) has its own card where that happened. */
+/** How long after a hand-off's first Agent another counts as handed off with it (the plan's several Agents, a retry): one
+ *  linked later (a new Agent after every one stopped, #4754; a plan that continues the to-do, #11854) has its own card
+ *  where that happened. */
 const SAME_HANDOFF_MS = 120_000;
+/** How long before a standalone task line an Agent may be linked and still be that line's: the line is written just
+ *  after the link (agent_start, a takeover). A plan line takes none: it is written before its Agents start, so an Agent
+ *  linked before it is an earlier hand-off's (a previous continuation's, however recent). */
+export const TASK_LINE_SLACK_MS = 30_000;
+
+/** The Agents a card stands for (#11854). `since`: the time of the card's feed line, which anchors it to the first
+ *  Agents linked from then on, so a card under an older message keeps the Agents that started then and one under the
+ *  newest plan has the plan's own, never an older one while its Agent is starting (none, and the card says so).
+ *  Without an anchor (or with nothing linked since, for a task that took over a running Agent or a plan a later one
+ *  continued): the newest batch still linked, else the Agent released last. `slack`: how long before `since` an Agent
+ *  may be linked and still count (TASK_LINE_SLACK_MS for a task line; none for a plan line, so a previous
+ *  continuation's Agent linked just before the plan never stands in for the plan's own). */
+export function handoffAgents(agents: TodoAgent[], since?: string, fallback = true, slack = 0): TodoAgent[] {
+  const started = agents.filter((a) => !a.start_error);
+  const at = (a: TodoAgent) => Date.parse(a.linked_at);
+  const anchor = since ? Date.parse(since) : NaN;
+  if (Number.isFinite(anchor) && started.every((a) => Number.isFinite(at(a)))) {
+    const after = started.filter((a) => at(a) >= anchor - slack);
+    if (after.length > 0) {
+      const first = Math.min(...after.map(at));
+      return after.filter((a) => at(a) - first <= SAME_HANDOFF_MS);
+    }
+    if (!fallback) return [];
+  }
+  const time = (a: TodoAgent) => Date.parse(a.linked_at) || 0;
+  const current = started.filter((a) => !a.released_at);
+  if (current.length > 0) {
+    const last = Math.max(...current.map(time));
+    return current.filter((a) => last - time(a) <= SAME_HANDOFF_MS);
+  }
+  const released = (a: TodoAgent) => Date.parse(a.released_at ?? "") || time(a);
+  const latest = started.reduce<TodoAgent | undefined>((best, a) => (!best || released(a) > released(best) ? a : best), undefined);
+  return latest ? [latest] : [];
+}
 
 /** What one card stands for; flat, so a list of them built by a store selector compares field by field. */
 export interface Handoff {
@@ -55,15 +90,15 @@ export interface Handoff {
   ended?: boolean;
 }
 
-/** A task's cards: one per Agent the hand-off went to (its first Agents, released since or not), or one for the task
- *  while it has none: starting, why it did not start, or gone (removed since). `planned`: the plan's task, for its
- *  title and error before the to-do arrives (or after it was removed); `loaded`: the to-do list is in, so a to-do it
- *  lacks is gone rather than on its way. */
-export function taskHandoffs(todo: Todo | undefined, planned: { key: string; title: string; error?: string; todoId?: string } | undefined, wake: HandoffWake, plans: Record<string, TaskPlan>, loaded = true): Handoff[] {
-  const started = (todo?.agents ?? []).filter((a) => !a.start_error);
-  const at = (a: { linked_at: string }) => Date.parse(a.linked_at) || 0;
-  const first = Math.min(...started.map(at));
-  const shown = started.filter((a) => at(a) - first <= SAME_HANDOFF_MS);
+/** A task's cards: one per Agent the hand-off went to (handoffAgents), or one for the task while it has none: starting,
+ *  why it did not start, or gone (removed since). `planned`: the plan's task, for its title and error before the to-do
+ *  arrives (or after it was removed); `superseded`: a later plan continues its to-do, so with no Agent of its own the
+ *  card shows the to-do's latest rather than starting for ever. `loaded`: the to-do list is in, so a to-do it lacks is
+ *  gone rather than on its way. `since`: the card's feed line's time; `slack`: how long before it its Agents may be linked
+ *  (TASK_LINE_SLACK_MS for a standalone task line, none for a plan's). */
+export function taskHandoffs(todo: Todo | undefined, planned: { key: string; title: string; error?: string; todoId?: string; superseded?: boolean } | undefined, wake: HandoffWake, plans: Record<string, TaskPlan>, loaded = true, since?: string, slack = 0): Handoff[] {
+  // a task made of a running Agent, or resumed: its Agent may be linked before the line; one a plan started never is
+  const shown = handoffAgents(todo?.agents ?? [], since, wake !== "created" || Boolean(planned?.superseded), slack);
   if (todo && shown.length > 0) {
     return shown.map((a) => ({ key: `${a.machine_id}/${a.session_id}`, title: todo.title, wake, mid: a.machine_id, sid: a.session_id, agentTitle: a.title, todo: todo.id }));
   }

@@ -532,7 +532,7 @@ func (svc *Service) listArchivedSessions(w http.ResponseWriter, r *http.Request)
 			svc.publishList(m.ID)
 		}
 		for _, row := range list {
-			if row.Archived && !row.Assistant && !(ext && (row.Space == SpaceHealth || identity.InHealthSpace(row.Cwd))) {
+			if row.Archived && !row.Assistant && (!row.HiddenByDirectory() || r.URL.Query().Get("include_hidden") == "1") && !(ext && (row.Space == SpaceHealth || identity.InHealthSpace(row.Cwd))) {
 				row.Manager = svc.id
 				row.NativeArchive = svc.nativeArchiveView(m.ID, row.SessionID)
 				out = append(out, row)

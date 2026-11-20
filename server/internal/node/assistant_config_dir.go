@@ -52,6 +52,7 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, aske
 		return "", nil
 	}
 	selected := ""
+	held := false // a live process has the conversation: runs it on this launcher, or works in it (signedInResume)
 	if resume {
 		st, _ := n.state.get(id)
 		selected = st.ConfigDir
@@ -65,6 +66,7 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, aske
 				selected = p.model.ConfigDir
 			}
 			running = p.alive() && p.launcher == launcher && sameAssistantProfile(p.model.ConfigDir, selected)
+			held = running || p.alive() && p.workingLocked()
 			p.mu.Unlock()
 		}
 		// When one id has several copies, the newest is the conversation (transcriptPath).
@@ -130,6 +132,15 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, aske
 	selected, err := normalize(selected)
 	if err != nil {
 		return "", err
+	}
+	// Another launcher's private profile this one is signed out of: resume where it is signed in (#11694). Not for a
+	// start that names this very profile (a spawn after the send resolved it), nor for a launcher with a profile of its own.
+	if resume && !itself && !held {
+		if pinned, err := normalize(asked); asked == "" || err == nil && !sameAssistantProfile(pinned, selected) {
+			if own, err := ownProfile(); err == nil && own == "" {
+				selected = n.signedInResume(ctx, id, launcher, selected)
+			}
+		}
 	}
 	if resume {
 		profile := n.assistantConfigPath(selected)

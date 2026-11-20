@@ -19,9 +19,8 @@ import (
 // ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl (parsed by transcript/codex.go). Compatible Codex
 // variants use the same layout in their own data directories. herdr's Codex integration reports the session id when
 // Codex starts; a Codex started before that integration has none. Codex puts
-// the thread's name in the terminal title ("<name> | <directory>"), which says which thread the pane shows now; the
-// newest unclaimed rollout in the pane's directory is only the last resort (2026-10-31: five Codex panes in one
-// repository, four of them showed another pane's thread, and the one at work looked idle).
+// the thread's name in the terminal title ("<name> | <directory>"). Until a herdr pane identifies its thread, it
+// has its own waiting row (codex_waiting.go). Its working directory can contain rollouts from many earlier panes.
 //
 // Subagents write rollouts of their own next to the conversation, in the same directory: Codex's thread_spawn helpers
 // and the compatible CLI's guardian, which reviews each tool call before it runs. A pane never shows one: they are skipped when
@@ -645,8 +644,7 @@ func dirStamp(dir string) int64 {
 	return st.ModTime().UnixNano()
 }
 
-// codexSession picks the rollout of a Codex pane herdr could not identify: the newest conversation in its directory
-// not taken (a subagent's rollout there is newer than its conversation's, but never what the pane runs).
+// codexSession is the last fallback for other hosts: the newest unclaimed conversation in the pane's directory.
 func (n *Node) codexSession(a host.Agent, taken map[string]host.Agent) string {
 	if strings.LastIndex(a.Title, " | ") > 0 {
 		return "" // a named thread could not be identified: never substitute another conversation from its directory
@@ -681,8 +679,8 @@ func codexTitleName(title string) (name string, match func(string) bool, ok bool
 }
 
 // codexByTitle finds the thread a Codex pane shows by the name in its title (codexTitleName). Of several threads with
-// that name it keeps prefer (what herdr or a start said), else takes the most recently written one not taken. claimed
-// says at least one matching thread already belongs to another pane, so the caller must not keep a stale fallback.
+// that name it keeps prefer (what the host or a start said). A herdr pane with an ambiguous title waits for stronger
+// evidence. claimed prevents keeping a stale id when a uniquely matching thread is already taken.
 func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.Agent) (bestID string, claimed bool) {
 	_, match, ok := codexTitleName(a.Title)
 	if !ok {
@@ -691,16 +689,19 @@ func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.A
 	home := n.codexPaneHome(a.PaneID)
 	var best string
 	var bestAt time.Time
+	matches := 0
 	for _, id := range threadsNamed(home, match) {
-		if _, used := taken[n.codexPublicID(home, id)]; used {
-			claimed = true
-			continue
-		}
 		p := rolloutPath(home, id)
 		if p != "" && metaOf(home, p).sub {
 			continue // a pane shows its conversation, never a subagent's thread
 		}
-		if id == prefer {
+		matches++
+		public := n.codexPublicID(home, id)
+		if _, used := taken[public]; used {
+			claimed = true
+			continue
+		}
+		if id == prefer || public == prefer {
 			return id, claimed
 		}
 		if p == "" {
@@ -709,6 +710,10 @@ func (n *Node) codexByTitle(a host.Agent, prefer string, taken map[string]host.A
 		if st, err := os.Stat(p); err == nil && (best == "" || st.ModTime().After(bestAt)) {
 			best, bestAt = id, st.ModTime()
 		}
+	}
+	kind := host.ParsePane(a.PaneID).Kind
+	if matches > 1 && (kind == host.Herdr || kind == host.HerdrCore) {
+		return "", false // an ambiguous name neither identifies a thread nor contradicts a reported id
 	}
 	return best, claimed
 }

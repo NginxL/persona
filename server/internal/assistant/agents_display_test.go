@@ -38,13 +38,17 @@ func TestAgentsDisplayDefaultsRolesAndMigration(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &got)
 		return w.Code, got
 	}
-	if code, got := call("GET", "", roleAnswer); code != 200 || !got.ShowBotmux || got.Configured {
+	if code, got := call("GET", "", roleAnswer); code != 200 || !got.ShowBotmux || got.Configured || got.UseHerdrTabName {
 		t.Fatalf("default: %d %+v", code, got)
 	}
 	if code, _ := call("PUT", `{"show_botmux":false}`, roleAnswer); code != http.StatusForbidden {
 		t.Fatal(code)
 	}
-	for _, body := range []string{`{}`, `{"show_botmux":null}`, `{"show_botmux":"false"}`, `nope`} {
+	if code, _ := call("PUT", `{"use_herdr_tab_name":true}`, roleAnswer); code != http.StatusForbidden {
+		t.Fatal(code)
+	}
+	for _, body := range []string{`{}`, `{"show_botmux":null}`, `{"show_botmux":"false"}`, `{"use_herdr_tab_name":"true"}`,
+		`{"use_herdr_tab_name":null}`, `{"use_herdr_tab_name":true,"show_botmux":false}`, `{"use_herdr_tab_name":true,"only_if_unset":true}`, `nope`} {
 		if code, _ := call("PUT", body, roleFull); code != 400 {
 			t.Fatalf("%s: %d", body, code)
 		}
@@ -71,6 +75,32 @@ func TestAgentsDisplayDefaultsRolesAndMigration(t *testing.T) {
 	got, err := other.readAgentsDisplay(context.Background())
 	if err != nil || !got.ShowBotmux || !got.Configured {
 		t.Fatalf("second service: %+v %v", got, err)
+	}
+}
+
+func TestAgentsDisplayHerdrNamePersistsAcrossServices(t *testing.T) {
+	database := todoTestDB(t)
+	a, _ := navigationService(t, database)
+	b, _ := navigationService(t, database)
+	ctx := context.Background()
+	path := "/api/v1/agents/display-settings"
+	if a.useHerdrTabName(ctx) || b.useHerdrTabName(ctx) {
+		t.Fatal("herdr names should be opt-in")
+	}
+	if w := boardCall(a, "PUT", path, `{"use_herdr_tab_name":true}`, roleFull); w.Code != 200 {
+		t.Fatalf("enable: %d %s", w.Code, w.Body)
+	}
+	if got, err := b.readAgentsDisplay(ctx); err != nil || !got.UseHerdrTabName || !got.ShowBotmux || got.Configured {
+		t.Fatalf("saved name preference affected the botmux default: %+v %v", got, err)
+	}
+	if w := boardCall(b, "PUT", path, `{"show_botmux":false,"only_if_unset":true}`, roleFull); w.Code != 200 || !a.useHerdrTabName(ctx) {
+		t.Fatalf("botmux migration lost the name preference: %d %s", w.Code, w.Body)
+	}
+	if w := boardCall(b, "PUT", path, `{"use_herdr_tab_name":false}`, roleFull); w.Code != 200 {
+		t.Fatalf("disable: %d %s", w.Code, w.Body)
+	}
+	if got, err := a.readAgentsDisplay(ctx); err != nil || got.UseHerdrTabName || got.ShowBotmux || !got.Configured {
+		t.Fatalf("saved opt-out: %+v %v", got, err)
 	}
 }
 func TestAgentsDisplayConcurrentMigration(t *testing.T) {

@@ -190,6 +190,23 @@ describe("侧边面板的键盘操作", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it("returns to an overview row when its background detail replaces an open panel", async () => {
+    const row = document.createElement("button");
+    row.textContent = "Overview run";
+    document.body.append(row);
+    try {
+      row.focus();
+      act(() => openPanel({ kind: "background", mid: "m1", sid: "s1", run: "w1", from: "overview" }));
+      await until(() => Boolean(host.querySelector('[data-testid="background"]')));
+      separator().focus();
+      press(separator(), "Escape");
+      expect(host.querySelector("aside")).toBeNull();
+      expect(document.activeElement).toBe(row);
+    } finally {
+      row.remove();
+    }
+  });
+
   it("keeps its Esc from the window, where the conversation's Esc stops a running agent", () => {
     const onWindow = vi.fn();
     addEventListener("keydown", onWindow);

@@ -68,12 +68,30 @@ describe("QueuePanel row actions", () => {
     await settle();
   });
 
+  it.each([[true, true], [false, true], [true, false], [false, false]])("respects runtime queue capabilities (edit %s, steer %s)", (queue_edit, queue_send_now) => {
+    const runtime: Session = { ...session, agent: "agy", source_kind: "runtime", capabilities: { queue_edit, queue_send_now } };
+    render(<QueuePanel session={runtime} draftKey="qp-runtime-capabilities" canEdit />);
+    expect(Boolean(rows()[0].querySelector("[data-queue-edit]"))).toBe(queue_edit);
+    expect(Boolean(rows()[0].querySelector("[data-send-now]"))).toBe(queue_send_now);
+  });
+
   it("says in the Persona chat's words what sending now does", () => {
     const persona = { ...session, agent: undefined, assistant: true, queued: ["我的"] } as unknown as Session;
     render(<QueuePanel session={persona} draftKey="qp-persona-send" canEdit persona="Nova" />);
     const send = within(0, "[data-send-now]");
     expect(send.getAttribute("aria-label")).toBe("现在就把排队的消息全部发给 Nova，不用等到下一步");
     expect(document.getElementById(send.getAttribute("aria-describedby")!)!.textContent).toContain("Nova 会马上收到");
+  });
+
+  it("explains that a runtime assistant stops its turn and starts only the next queued message", () => {
+    const runtime: Session = { ...session, agent: "agy", assistant: true, source_kind: "runtime", capabilities: { queue_send_now: true } };
+    render(<QueuePanel session={runtime} draftKey="qp-runtime-assistant-send" canEdit persona="Nova" />);
+    const send = within(0, "[data-send-now]");
+    const tip = "停止 Nova 当前这一轮，开始处理下一条排队消息";
+    const body = "Nova 会停止当前这一轮，开始处理下一条排队消息。其余消息仍按原顺序排队。";
+    expect(send.getAttribute("aria-label")).toBe(tip);
+    expect(document.getElementById(send.getAttribute("aria-describedby")!)!.textContent).toBe(body);
+    expect(send.title).toBe(`${tip}\n${body}`);
   });
 
   it("shows a spinner where the busy row's actions were and takes no other action meanwhile", async () => {
@@ -343,5 +361,74 @@ describe("QueuePanel relayed group", () => {
     expect(host.querySelector("[data-queue-relayed-toggle]")).toBeNull();
     click(body(0));
     expect(body(0).className).toContain("truncate");
+  });
+});
+
+describe("QueuePanel status, always-visible Send now and photo thumbnails (#10871)", () => {
+  const photo = (name: string) => `/Users/me/.persona/uploads/2026-11-20/${name}.png`;
+  const withPhotos = (...names: string[]) => `[Image #1]\n<attached_images>\n${names.map((n) => `path: ${photo(n)}`).join("\n")}\n</attached_images>`;
+  const errorImg = (img: HTMLImageElement) => act(() => void img.dispatchEvent(new Event("error")));
+
+  it("shows the queued status header in full layout and keeps Send now visible without hover on the first row", () => {
+    render(<QueuePanel session={session} draftKey="qp-10871-status" canEdit />);
+    const header = host.querySelector<HTMLElement>("[data-queue-header]");
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toContain("已排队，尚未发送");
+
+    const firstRow = rows()[0];
+    const firstActions = firstRow.querySelector<HTMLElement>("[data-queue-actions]")!;
+    const firstSendNow = firstRow.querySelector<HTMLButtonElement>("[data-send-now]")!;
+    expect(firstActions.className).not.toContain("opacity-0");
+    expect(firstSendNow.className).not.toContain("opacity-0");
+    expect(firstSendNow.textContent).toContain("立即发送");
+    expect(firstSendNow.title).toContain("现在就把排队的消息全部发给 Claude");
+
+    const secondActions = rows()[1].querySelector<HTMLElement>("[data-queue-actions]")!;
+    expect(secondActions.className).toContain("opacity-0");
+  });
+
+  it("omits the full-layout status header in compact mode", () => {
+    render(<QueuePanel session={session} draftKey="qp-10871-compact" canEdit compact />);
+    expect(host.querySelector("[data-queue-header]")).toBeNull();
+  });
+
+  it("renders thumbnails for server-saved photo paths and falls back from thumb to inline download to icon", () => {
+    const raw = withPhotos("shot1");
+    render(<QueuePanel session={{ ...session, queued: [raw] }} draftKey="qp-10871-thumb" canEdit />);
+    const img = rows()[0].querySelector<HTMLImageElement>("[data-queue-photo-thumb]")!;
+    expect(img).not.toBeNull();
+    expect(img.src).toContain("/file/thumb?");
+    expect(img.src).toContain(encodeURIComponent(photo("shot1")));
+
+    // first error: fall back to inline file download
+    errorImg(img);
+    const inlineImg = rows()[0].querySelector<HTMLImageElement>("[data-queue-photo-thumb]")!;
+    expect(inlineImg.src).toContain("/file/download?");
+    expect(inlineImg.src).toContain("inline=1");
+
+    // second error: fall back gracefully to photo icon
+    errorImg(inlineImg);
+    expect(rows()[0].querySelector("[data-queue-photo-thumb]")).toBeNull();
+    expect(rows()[0].querySelector("[data-queue-photo-fallback] svg")).not.toBeNull();
+  });
+
+  it("uses local preview data URLs when freshly queued and collapses more than three photos into a +N badge", () => {
+    const dataUrl = "data:image/png;base64,iVBORw0KGgo=";
+    const fivePhotos = withPhotos("p1", "p2", "p3", "p4", "p5");
+    render(
+      <QueuePanel
+        session={{ ...session, queued: [fivePhotos] }}
+        draftKey="qp-10871-multi"
+        canEdit
+        photoPreviewsOf={() => [dataUrl]}
+      />,
+    );
+    const thumbs = [...rows()[0].querySelectorAll<HTMLImageElement>("[data-queue-photo-thumb]")];
+    expect(thumbs).toHaveLength(3);
+    expect(thumbs[0].getAttribute("src")).toBe(dataUrl);
+    expect(thumbs[1].getAttribute("src")).toContain(encodeURIComponent(photo("p2")));
+    expect(thumbs[2].getAttribute("src")).toContain(encodeURIComponent(photo("p3")));
+    const overflow = rows()[0].querySelector<HTMLElement>("[data-queue-photo-overflow]");
+    expect(overflow?.textContent).toBe("+2");
   });
 });

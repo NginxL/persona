@@ -1,0 +1,7 @@
+# Repository bindings and issue or PR links
+
+Distinguish saving a repository for this Assistant from editing the associations on one to-do. An explicit URL or full path from the owner establishes which repository they mean. For an ambiguous name, search `repositories_list` and use `repository_get` if details are needed. Adding a repository to the manager's catalog uses `repository_add` and requires the owner's approval card. A saved reference provides neither checkout location nor access to files.
+
+For “Replace the repository on the release to-do,” find the item and read its current bindings with `todo_repositories_get`. Resolve selected IDs and the current catalog revision with `repositories_list`. Preserve every existing binding and link outside the requested change. Replace or remove the named binding and send the full intended set to `todo_repositories_set` with both expected revisions. On conflict, reread and reconcile the owner's edit with the current state. An empty repository list removes every binding, so use it only for that request.
+
+For “Attach this PR,” add the exact URL with `todo_repository_links_add`; the tool groups and deduplicates links. For “Remove this issue link,” read the current associations, then use `todo_repository_links_set` with the selected repository, expected to-do revision and remaining links. Use titles from evidence when available. Report the saved associations. None of these metadata changes completes a task or edits a repository.

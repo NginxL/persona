@@ -256,11 +256,25 @@ func (s *Service) ownService(ctx context.Context, machine, agent string) proto.O
 
 // usableOn: provider l may be listed on machine's pickers (its scope, and its own-service rule as the node says).
 func (s *Service) usableOn(ctx context.Context, l storedLauncher, machine string) bool {
+	return s.usableOnAsking(ctx, l, machine, true)
+}
+
+// usableOnAsking is usableOn; with ask false its own-service rule goes by what machine's node said before only
+// (ownServiceCached) and the node is not asked: an answer missing or out of date counts as no service of its own, as
+// one the node does not give does. A status that asks no node reads it so (mainChatOffers).
+func (s *Service) usableOnAsking(ctx context.Context, l storedLauncher, machine string, ask bool) bool {
 	if s.scopeReason(l, machine) != "" {
 		return false
 	}
 	if l.SkipsOwnService() {
-		if st := s.ownService(ctx, machine, l.AgentType()); st.Known && st.Own {
+		st, fresh := s.ownServiceCached(machine, l.AgentType())
+		if !fresh {
+			st = proto.OwnServiceState{}
+			if ask {
+				st = s.ownService(ctx, machine, l.AgentType())
+			}
+		}
+		if st.Known && st.Own {
 			return false
 		}
 	}

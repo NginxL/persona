@@ -911,8 +911,9 @@ struct AssistantSidebar: View {
         .ignoresSafeArea(.keyboard, edges: drawer == nil && !searching ? Edge.Set.bottom : [])
         #endif
         // Which conversations the tasks started: read again as the sidebar comes out, when a conversation came or went, and
-        // for another manager's page.
-        .task(id: out ? "\(all.count)|\(model.assistantManagerID ?? "")" : "") { if out { await taskChats.refresh(model.api) } }
+        // for another hub's or manager's page.
+        .task(id: AssistantTaskChatsStore.readKey(out: out, group: model.hub?.group, manager: model.assistantManagerID,
+                                                   conversations: all.count)) { if out { await taskChats.refresh(model.api) } }
         .modifier(AssistantSidebarPresenters(ui: ui, open: open))
         .background {
             if let drawer {
@@ -950,7 +951,8 @@ struct AssistantSidebar: View {
         // Where the list's rows start (`rowsLeading`): its mark on the places' symbol line, its shade as wide as theirs.
         .padding(.horizontal, ui.rowsLeading ?? Theme.Space.s)
         // Which conversations the tasks started, as the whole sidebar reads them (the rows' source marks).
-        .task(id: out ? "\(all.count)|\(model.assistantManagerID ?? "")" : "") { if out { await taskChats.refresh(model.api) } }
+        .task(id: AssistantTaskChatsStore.readKey(out: out, group: model.hub?.group, manager: model.assistantManagerID,
+                                                   conversations: all.count)) { if out { await taskChats.refresh(model.api) } }
     }
 
     /// The rows the Agents list holds above its own: the places to go and Persona's chats, each under a heading that
@@ -984,10 +986,19 @@ struct AssistantSidebar: View {
     @ViewBuilder private var placesTally: some View {
         if placesFolded {
             let inbox = InboxStore.shared.unreadCount
-            let todos = TodoStore.shared.isSupported ? TodoStore.shared.badgeCount : 0
+            let todos = TodoStore.shared.isSupported ? TodoStore.shared.sidebarCount : 0
             HStack(spacing: Theme.Space.xs) {
                 if inbox > 0 { CountBadge(count: inbox, look: .needs, label: String(localized: "Inbox")) }
-                if todos > 0 { CountBadge(count: todos, look: .needs, label: String(localized: "To-dos")) }
+                if todos > 0 {
+                    if TodosV1.shared.isOn {
+                        // The V1 list's N, readable by its tests (#10465); today's tally stays as it was.
+                        CountBadge(count: todos, look: .needs, label: String(localized: "To-dos"))
+                            .accessibilityValue(String(todos))
+                            .accessibilityIdentifier("sidebar-fold-places.todos")
+                    } else {
+                        CountBadge(count: todos, look: .needs, label: String(localized: "To-dos"))
+                    }
+                }
             }
         }
     }
@@ -1311,7 +1322,7 @@ extension AssistantSidebar {
                 meetingRow
                 action(String(localized: "Inbox"), Theme.Icon.inbox, id: "sidebar-inbox", count: InboxStore.shared.unreadCount, place: .inbox, run: openInbox)
                 if TodoStore.shared.isSupported {
-                    action(String(localized: "To-dos"), Theme.Icon.todo, id: "sidebar-todos", count: TodoStore.shared.badgeCount, place: .todos, run: { (openTodos ?? openInbox)() })
+                    action(String(localized: "To-dos"), Theme.Icon.todo, id: "sidebar-todos", count: TodoStore.shared.sidebarCount, place: .todos, run: { (openTodos ?? openInbox)() })
                 }
                 action(String(localized: "Scheduled Tasks"), Theme.Icon.schedule, place: .routines, run: openRoutines)
                 action(String(localized: "Knowledge"), Theme.Icon.knowledge, place: .knowledge, run: openKnowledge)

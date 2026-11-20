@@ -10,8 +10,10 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
-// marketRoutes are the markets' routes for the apps (a device with full rights).
+// marketRoutes are the markets' routes for the apps (a device with full rights), plus the one narrow self-refresh
+// route an extension token can call. The latter stays outside marketRoutesAt so it has no admin or legacy alias.
 func (h *Manager) marketRoutes(api *http.ServeMux) {
+	api.HandleFunc("POST /api/v1/extensions/-/self/market/refresh", h.selfMarketRefresh)
 	h.marketRoutesAt(api, "/api/v1/extensions/-", func(w http.ResponseWriter, r *http.Request) bool {
 		if principalOf(r.Context()).Role != roleFull {
 			writeErr(w, http.StatusForbidden, errors.New("this device can only read and answer"))
@@ -19,6 +21,45 @@ func (h *Manager) marketRoutes(api *http.ServeMux) {
 		}
 		return true
 	})
+}
+
+// selfMarketRefresh starts a background read of the market in the calling extension's own install record. The route
+// deliberately has no market parameter: query and body input cannot select a different market.
+func (h *Manager) selfMarketRefresh(w http.ResponseWriter, r *http.Request) {
+	who := principalOf(r.Context())
+	if who.Role != roleExtension || who.Extension == "" {
+		writeExtensionResponseError(w, r, http.StatusForbidden, "permission_denied", i18n.Err("http-status.forbidden"))
+		return
+	}
+	if h.extensions == nil || h.extensions.reg == nil {
+		writeExtensionResponseError(w, r, http.StatusNotFound, "not_found", i18n.Err("extension-status.not_found"))
+		return
+	}
+	p := h.extensions.reg.SnapshotExact(who.Extension)
+	if p == nil {
+		writeExtensionResponseError(w, r, http.StatusNotFound, "not_found", i18n.Err("extension-status.not_found"))
+		return
+	}
+	mid := upgradesFrom(p)
+	if mid == "" {
+		writeExtensionResponseError(w, r, http.StatusConflict, "not_from_market", i18n.Err("hub-extension_market.not_from_market"))
+		return
+	}
+	if err := h.marketsLoad(r.Context()); err != nil {
+		writeExtensionResponseError(w, r, http.StatusServiceUnavailable, "no_markets", err)
+		return
+	}
+	retry, ok := h.selfRefreshLater(mid)
+	if !ok {
+		writeExtensionResponseError(w, r, http.StatusNotFound, "not_found", i18n.Err("hub-extension_market.no_market"))
+		return
+	}
+	if retry > 0 {
+		retryAfter(w, retry)
+		writeExtensionResponseError(w, r, http.StatusTooManyRequests, "rate_limited", i18n.Err("hub-extension_market.refresh_rate_limited"))
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // marketRoutesAt registers the markets' routes under base (the apps' API, or the admin UI's behind its session).

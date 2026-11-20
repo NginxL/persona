@@ -754,6 +754,11 @@ export interface UIItem {
   hosts?: string[];
   /** nav_page only. */
   icon?: NavIcon;
+  /**
+   * nav_page only: the icon's named color in the sidebar, the same colors as a row's icon_color, drawn only while the
+   * owner chose Colored sidebar icons (#10822); without it the icon stays the sidebar's neutral ink.
+   */
+  icon_color?: Color;
   /** overview_card, capsule_card and widget only: a nav_page or extension_page of the same extension. */
   opens?: string;
   /** inbox_item only: one of the extension's own connectors. */
@@ -1144,6 +1149,8 @@ export interface UIPlace {
   connector?: string;
   /** A nav_page's sidebar group, its title in the request's language (#9071). */
   group?: UIGroup;
+  /** A nav_page's icon color as its manifest names it, drawn only with Colored sidebar icons (#10822). */
+  icon_color?: Color;
 }
 
 export interface UIPlaces {
@@ -2811,6 +2818,8 @@ export interface MessagingAccount {
   id: string;
   name?: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   tenant?: string;
   signed_in: boolean;
   unread?: number;
@@ -2828,6 +2837,8 @@ export interface MessagingConversation {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind: MessagingConversationKind;
   unread: number;
   marked_unread?: boolean;
@@ -2852,6 +2863,8 @@ export interface MessagingPerson {
   id?: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind?: string;
 }
 
@@ -3265,6 +3278,8 @@ export interface MessagingProfile {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   cover?: string;
   kind?: string;
   subtitle?: string;
@@ -3689,6 +3704,12 @@ export interface ConnectorTool {
    * list whatever a connector sent.
    */
   defer_loading?: boolean;
+  /**
+   * Set by Persona itself on the tool list of an assistant conversation with the work guide on: the tool is found on
+   * demand through the guide (#11078). A connector does not need to send it; the manager sets it on every list
+   * whatever a connector sent.
+   */
+  work_guide_tool?: boolean;
 }
 
 /**
@@ -4256,6 +4277,8 @@ export interface ConnectorArchiveChat {
   state?: string;
   /** When the conversation got to state; omitted when unknown. */
   state_at?: string;
+  /** Stable HTTP(S) link to the conversation at its source, when available. */
+  source_url?: string;
 }
 
 /**
@@ -5018,6 +5041,10 @@ export interface KBEntry {
    * absent on other kinds, before a match and from an older hub.
    */
   meeting_id?: string;
+  /** Reference-only for a project that stores pointers. Omitted means full. */
+  project_mode?: string;
+  freshness?: KBProjectFreshness;
+  sources?: KBProjectSource[];
 }
 
 /**
@@ -5088,6 +5115,57 @@ export interface KBDetail {
    * (docs/assistant/knowledge.md "Person profiles").
    */
   profiles?: Record<string, KBProfileRecord>;
+  /** Reference-only for a project that stores pointers. Omitted means full. */
+  project_mode?: string;
+  freshness?: KBProjectFreshness;
+  sources?: KBProjectSource[];
+}
+
+export interface KBProjectSource {
+  /** Canonical source identity shared across project views. */
+  id: string;
+  url?: string;
+  refs?: string[];
+  /** State observed at the source, such as merged. */
+  delivery_state?: string;
+  delivery_at?: string;
+  /** Unverified when only source delivery facts are available. */
+  environment_verification?: string;
+}
+
+export interface KBProjectFreshness {
+  needs_review: boolean;
+  timeline_end: number;
+  evidence?: KBProjectEvidenceRef[];
+  fields: Record<string, KBProjectFieldFreshness>;
+}
+
+export interface KBProjectFieldFreshness {
+  /** Omitted when historical authorship is unknown. */
+  writer?: string;
+  source?: string;
+  cutoff?: KBProjectCutoff;
+  lock_reason?: string;
+  review_by: string;
+  needs_review: boolean;
+  review_reason?: string;
+  /** Omitted when the gap cannot be counted. */
+  uncovered_evidence_count?: number;
+}
+
+export interface KBProjectCutoff {
+  timeline_from: number;
+  timeline_through: number;
+  /** True if earlier timeline entries were outside this refresh window. */
+  timeline_truncated?: boolean;
+  sources?: KBProjectEvidenceRef[];
+}
+
+export interface KBProjectEvidenceRef {
+  ref: string;
+  /** Opaque revision of this input. */
+  position: string;
+  source_id?: string;
 }
 
 export interface KBProfileRecord {

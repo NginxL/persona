@@ -15,7 +15,7 @@ import (
 // hub still sends them), and a machine it names that the hub doesn't have is not used.
 func TestOwnConfigOverTheHello(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "manager.json")
-	mine := `{"id":"x","token":"bus","assistant":{"owner":" Example ","machine":"laptop","launcher":"codex","memory_dreaming":true},
+	mine := `{"id":"x","token":"bus","assistant":{"owner":" Example ","machine":"laptop","launcher":"codex","memory_dreaming":true,"complete_agentless_todos":true,"supervision_batch_minutes":45},
 		"agents":{"triage":{"max_retries":2}},"kb":{"enabled":false,"read_only":true,"text_days":30,"ai":{"model":"k"},"attachment_days_by_source":{"chat":3650,"off":0,"neg":-1}},
 		"ai":{"base_url":"https://gateway.example.com","model":"m"},
 		"inbox":{"triage_ai":{"model":"t"},"agent":{"machine":"gone"}},"hook_timeout_minutes":0}`
@@ -30,7 +30,9 @@ func TestOwnConfigOverTheHello(t *testing.T) {
 		Models: assistantwire.HubModels{JudgeAI: &aiwire.Config{Model: "old"}, InboxAgentMachine: "server"},
 		Notify: assistantwire.NotifyTimings{LongTurnMS: 5}}
 	h := c.over(hub)
-	if h.Owner != "Example" || h.OwnerNotes != "the hub's notes" || h.Assistant.MachineID != "laptop" || h.Assistant.Launcher != "codex" || !h.Assistant.MemoryDreaming {
+	if h.Owner != "Example" || h.OwnerNotes != "the hub's notes" || h.Assistant.MachineID != "laptop" || h.Assistant.Launcher != "codex" ||
+		!h.Assistant.MemoryDreaming || !h.Assistant.CompleteAgentlessTodos || h.Assistant.SupervisionBatchMinutes == nil ||
+		*h.Assistant.SupervisionBatchMinutes != 45 {
 		t.Fatalf("assistant %+v %q %q", h.Assistant, h.Owner, h.OwnerNotes)
 	}
 	if h.Agents.Triage.MaxRetries != 2 || h.KB == nil || !h.KB.Off || !h.KB.ReadOnly || h.KB.TextDays != 30 || h.Models.KBAI == nil || h.Models.KBAI.Model != "k" {
@@ -49,7 +51,7 @@ func TestOwnConfigOverTheHello(t *testing.T) {
 	}
 	// Nothing in manager.json: the hello as it came, with the knowledge base's defaults.
 	none, _ := readOwnConfig(filepath.Join(t.TempDir(), "manager.json"))
-	if h := none.over(hub); h.OwnerNotes != "the hub's notes" || h.Models.JudgeAI.Model != "old" || h.KB == nil || h.KB.Off || h.KB.AttachmentDaysBySource != nil {
+	if h := none.over(hub); h.OwnerNotes != "the hub's notes" || h.Models.JudgeAI.Model != "old" || h.KB == nil || h.KB.Off || h.KB.AttachmentDaysBySource != nil || h.Assistant.CompleteAgentlessTodos {
 		t.Fatalf("empty %+v", h)
 	}
 	// A machine the hub doesn't have keeps the hub's default.
@@ -59,6 +61,33 @@ func TestOwnConfigOverTheHello(t *testing.T) {
 	c, _ = readOwnConfig(file)
 	if h := c.over(hub); h.Assistant.MachineID != "server" {
 		t.Fatalf("machine %q", h.Assistant.MachineID)
+	}
+}
+
+func TestOwnConfigSupervisionBatchRange(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "manager.json")
+	write := func(value string) {
+		t.Helper()
+		if err := os.WriteFile(file, []byte(`{"assistant":{"supervision_batch_minutes":`+value+`}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []string{"-1", "1441"} {
+		write(value)
+		if _, err := readOwnConfig(file); err == nil {
+			t.Fatalf("accepted out-of-range supervision batch %s", value)
+		}
+	}
+	for _, test := range []struct {
+		value string
+		want  int
+	}{{"0", 0}, {"45", 45}, {"1440", 1440}} {
+		write(test.value)
+		c, err := readOwnConfig(file)
+		if err != nil || c.Assistant == nil || c.Assistant.SupervisionBatchMinutes == nil ||
+			*c.Assistant.SupervisionBatchMinutes != test.want {
+			t.Fatalf("valid supervision batch %s: %+v, %v", test.value, c.Assistant, err)
+		}
 	}
 }
 

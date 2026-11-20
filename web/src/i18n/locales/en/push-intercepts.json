@@ -1,7 +1,7 @@
 {
   "held_entry": "Held pushes",
   "held_entry_label": "Held pushes, {count} today",
-  "held_entry_hint": "P1 and P2 pushes held while low-distraction mode is on",
+  "held_entry_hint": "P1 and P2 pushes held while push grading is on",
   "held_title": "Held pushes today",
   "held_explanation": "P1 is waiting for your review. P2 is quiet and starts folded.",
   "held_p1": "P1 · Needs your review",

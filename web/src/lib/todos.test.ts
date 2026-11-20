@@ -6,6 +6,7 @@ import {
   shownDecisions,
   heldDelivery,
   isAutoDone,
+  isCancelled,
   isRemovable,
   TODO_STATUS_INFO,
   todoStatusLabel,
@@ -22,6 +23,7 @@ import {
   resolveLinkCurrentTodoId,
   runningSubagents,
   sortTodos,
+  strikesThrough,
   stoppedReason,
   taskNow,
   todoDueBy,
@@ -906,6 +908,35 @@ describe("a to-do's decisions shown (#6447)", () => {
   });
 });
 
+describe("strikesThrough (#11677)", () => {
+  const at = "2026-11-19T10:00:00Z";
+  const td = (extra: Partial<Todo> = {}): Todo => ({ id: "t", title: "t", created_at: at, updated_at: at, done_at: at, ...extra });
+
+  it("strikes only a cancelled task whose supervisor closed it", () => {
+    const cancelled = td({ done_by: "review", supervision: { supervisor: "c", state: "cancelled" } });
+    expect(isCancelled(cancelled)).toBe(true);
+    expect(strikesThrough(cancelled, false)).toBe(true);
+    // still open (reopened): the row is not struck
+    expect(strikesThrough({ ...cancelled, done_at: null }, true)).toBe(false);
+  });
+
+  it("leaves an accepted, deployed, auto-completed or owner-ticked task plain", () => {
+    const accepted = td({ done_by: "review", supervision: { supervisor: "c", state: "accepted" } });
+    const deployed = td({ delivery: { state: "live", at } });
+    const auto = td({ done_by: "auto" });
+    const ticked = td();
+    for (const t of [accepted, deployed, auto, ticked]) {
+      expect(isCancelled(t)).toBe(false);
+      expect(strikesThrough(t, false)).toBe(false);
+    }
+  });
+
+  it("never strikes an open row, including a failed start waiting on the owner", () => {
+    const failed = td({ start_error: "machine offline", done_by: "review", supervision: { supervisor: "c", state: "cancelled" } });
+    expect(strikesThrough(failed, true)).toBe(false);
+  });
+});
+
 describe("hasRequestPieces", () => {
   const td = (id: string, extra: Partial<Todo> = {}): Todo => ({ id, title: id, created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-10T00:00:00Z", ...extra });
   it("is a to-do part_of another listed one, or two to-dos of one plan", () => {
@@ -915,5 +946,43 @@ describe("hasRequestPieces", () => {
     expect(hasRequestPieces([td("b", { part_of: "gone" }), td("c", { part_of: "c" })])).toBe(false);
     expect(hasRequestPieces([td("a", { plan_id: "p" }), td("b", { plan_id: "q" })])).toBe(false);
     expect(hasRequestPieces([td("a", { plan_id: "p" }), td("b", { plan_id: "p" })])).toBe(true);
+  });
+});
+
+describe("striking a finished to-do's title through (#11677)", () => {
+  const td = (extra: Partial<Todo> = {}): Todo => ({
+    id: "t", title: "Ship the report", created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-10T00:00:00Z", ...extra,
+  });
+  const cancelled = td({
+    done_at: "2026-11-10T01:00:00Z",
+    done_by: "review",
+    supervision: { supervisor: "conv", state: "cancelled" },
+  });
+  const accepted = td({
+    done_at: "2026-11-10T01:00:00Z",
+    done_by: "review",
+    supervision: { supervisor: "conv", state: "accepted", reviews: [{ at: "2026-11-10T01:00:00Z", verdict: "accepted" }] },
+  });
+  const deployed = td({ done_at: "2026-11-10T01:00:00Z", delivery: { state: "live", at: "2026-11-10T01:00:00Z" } });
+  const ticked = td({ done_at: "2026-11-10T01:00:00Z" });
+  const auto = td({ done_at: "2026-11-10T01:00:00Z", done_by: "auto" });
+  const failed = td({ done_at: "2026-11-10T01:00:00Z", start_error: "machine offline" });
+
+  it("strikes only a cancelled task, and only once it is closed", () => {
+    expect(isCancelled(cancelled)).toBe(true);
+    expect(strikesThrough(cancelled, false)).toBe(true);
+    // reopened, it is no longer closed and reads like any open row
+    expect(strikesThrough(td({ supervision: { supervisor: "conv", state: "cancelled" } }), true)).toBe(false);
+  });
+
+  it("leaves every successful outcome plain", () => {
+    for (const t of [accepted, deployed, ticked, auto, failed]) {
+      expect(isCancelled(t)).toBe(false);
+      expect(strikesThrough(t, false)).toBe(false);
+    }
+  });
+
+  it("never strikes an open row, including a failed start waiting on the owner", () => {
+    expect(strikesThrough(failed, true)).toBe(false);
   });
 });

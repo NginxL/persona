@@ -37,6 +37,12 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 		sum := sha256.Sum256(key)
 		return string(key), hex.EncodeToString(sum[:])
 	}
+	if g.externalPRReview() {
+		// Keep the latest source wake per task, independent of its Agent's answer or a manager restart.
+		key, _ := json.Marshal([]string{g.Todo, g.Kind, "external_pr"})
+		sum := sha256.Sum256([]byte(g.Key))
+		return string(key), hex.EncodeToString(sum[:])
+	}
 	// State timestamps and elapsed minutes deliberately do not participate: a new
 	// turn or a periodic sweep is not new information when the last summary is unchanged.
 	parts := []string{g.Todo, g.Machine, e.Machine, g.Session, e.AgentID, g.Kind, g.Report}
@@ -76,7 +82,8 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 // words stay the same.
 func keyIsNews(kind string) bool {
 	switch kind {
-	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted, sigAllStopped, sigDecisionReply:
+	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted, sigAllStopped, sigDecisionReply, sigHandoffResult,
+		sigCheck: // a check's run, or the owner's answer to its decision: an Agent that only runs tools says the same all along
 		return true
 	}
 	return false
@@ -140,7 +147,7 @@ func (s *Service) reserveSupervisionDelivery(ctx context.Context, entries []prom
 		if signals[i].Kind == sigAllStopped {
 			fingerprint.Todo = signals[i].Todo
 		}
-		if g := signals[i]; g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" {
+		if g := signals[i]; g.externalPRReview() || g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" {
 			fingerprint.Todo = g.Todo
 		}
 		next[key] = fingerprint

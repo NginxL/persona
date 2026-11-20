@@ -30,4 +30,13 @@
     <string name="chat_forward_failed">転送できませんでした：%1$s</string>
     <string name="chat_forward_photos_lost_one">1 枚の写真を一緒に転送できませんでした</string>
     <string name="chat_forward_photos_lost_other">%1$d 枚の写真を一緒に転送できませんでした</string>
+    <string name="chat_forward_select_messages">メッセージを選択…</string>
+    <string name="chat_forward_selected">%1$d 件選択中</string>
+    <string name="chat_forward_send_count">%1$d 件を転送</string>
+    <string name="chat_forward_select_limit">一度に転送できるメッセージは %1$d 件までです。</string>
+    <string name="chat_forward_group">転送されたメッセージ %1$d 件</string>
+    <string name="chat_forward_group_chat">転送されたメッセージ %1$d 件 · %2$s</string>
+    <string name="chat_forward_group_line">%1$s：%2$s</string>
+    <string name="chat_forward_group_more">ほか %1$d 件</string>
+    <string name="chat_forward_several_no_note">上に転送したメッセージを確認してください。</string>
 </resources>

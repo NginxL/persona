@@ -328,7 +328,7 @@ func TestSessionReviewSeedContainsOnlyUserAsksAndRealDiff(t *testing.T) {
 		"Fix the login crash without changing the session API.",
 		"Also add a regression test for landscape.",
 		"login/view.swift", "+if landscape { layout() }", "0a1b2c3",
-		"P0", "path:line", "修复建议", `<review-findings count="N" blocking="M"/>`,
+		"P0", "path:line", "fix suggestion", `<review-findings count="N" blocking="M"/>`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("reviewer seed lacks %q:\n%s", want, prompt)

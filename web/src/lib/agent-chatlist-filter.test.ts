@@ -69,9 +69,10 @@ describe("session metadata extractors & facet building", () => {
     expect(sessionHasError(s2)).toBe(true);
   });
 
-  it("names a gateway's routed model without its prefix", () => {
-    expect(sessionModelId(mkSession("s", { model: "passthrough/route-gemini-4-carbon/gemini-4-carbon" }))).toBe("gemini-4-carbon");
-    expect(sessionModelId(mkSession("s", { model: "passthrough/claude-opus-5-5[1m]" }))).toBe("opus 5.5 1M");
+  it("keeps a gateway's routed model with its prefix", () => {
+    expect(sessionModelId(mkSession("s", { model: "passthrough/route-gemini-4-carbon/gemini-4-carbon" }))).toBe("passthrough/route-gemini-4-carbon/gemini-4-carbon");
+    expect(sessionModelId(mkSession("s", { model: "route-a/gemini-4-carbon" }))).toBe("route-a/gemini-4-carbon");
+    expect(sessionModelId(mkSession("s", { model: "passthrough/claude-opus-5-5[1m]" }))).toBe("passthrough/claude-opus-5-5[1m]");
   });
 
   it("builds facet counts across harnesses, projects, models, machines, and pins", () => {
@@ -177,6 +178,24 @@ describe("structured inline query operators & search scopes", () => {
     const errEv = buildEvidenceSnippet(s, "peer", "errors", baseCtx);
     expect(errEv?.role).toBe("error");
     expect(errEv?.match.toLowerCase()).toBe("peer");
+  });
+
+  it("keeps an emoji whole where the text before the match is cut", () => {
+    // the 28 units before the match start on the second unit of an emoji
+    const ev = buildEvidenceSnippet(mkSession("s1", { asks: "xxxxx😀" + "y".repeat(27) + "needle" + "z".repeat(10) }), "needle", "user", baseCtx);
+    expect(ev?.before).toBe("…😀" + "y".repeat(27));
+  });
+
+  it("keeps an emoji whole where the text after the match is cut", () => {
+    // the 52 units after the match end on the first unit of an emoji
+    const ev = buildEvidenceSnippet(mkSession("s1", { asks: "needle" + "z".repeat(51) + "😀" + "tail" }), "needle", "user", baseCtx);
+    expect(ev?.after).toBe("z".repeat(51) + "😀…");
+  });
+
+  it("keeps an emoji whole where the errors scope's fallback line is cut", () => {
+    // the fallback line is the error text cut at 90 units
+    const ev = buildEvidenceSnippet(mkSession("s1", { turn_error: "e".repeat(89) + "😀" + "tail" }), "nothing-like-it", "errors", baseCtx);
+    expect(ev?.match).toBe("e".repeat(89) + "😀");
   });
 });
 

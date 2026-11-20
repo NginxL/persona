@@ -16,7 +16,7 @@ import (
 // and inbox.agent.machine when the hub has that machine, laid over the hello (an older hub sends its hub.json's; the
 // API categories' baselines when nothing is chosen for them; key files are paths, read where the manager runs), and
 // the hub's: each machine's configured launchers (machines[].launchers: wrappers the node does not list, a type the
-// user gave).
+// user gave) and their Assistant-launcher recovery policy.
 type HubModels struct {
 	AI                aiwire.Config                   `json:"ai"`
 	TriageAI          *aiwire.Config                  `json:"triage_ai,omitempty"`
@@ -24,6 +24,14 @@ type HubModels struct {
 	KBAI              *aiwire.Config                  `json:"kb_ai,omitempty"`
 	InboxAgentMachine string                          `json:"inbox_agent_machine,omitempty"`
 	Launchers         map[string][]ConfiguredLauncher `json:"launchers,omitempty"`
+	LauncherRecovery  map[string]LauncherRecovery     `json:"launcher_recovery,omitempty"`
+}
+
+// LauncherRecovery is one machine's advanced Assistant-launcher recovery policy. Fallbacks maps a resolved launcher
+// to the only launchers that may replace it, in order. An omitted or non-positive WaitSeconds uses the manager default.
+type LauncherRecovery struct {
+	WaitSeconds int                 `json:"wait_seconds,omitempty"`
+	Fallbacks   map[string][]string `json:"fallbacks,omitempty"`
 }
 
 // ConfiguredLauncher is one of hub.json's machines[].launchers: a launcher as GET /api/v1/machines/{mid}/launchers

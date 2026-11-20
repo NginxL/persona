@@ -1,0 +1,19 @@
+<persona-context kind="context" title="プロジェクト · Weather &quot;direction&quot; · 方向メモリー" url="">
+このタスクの明示されたプロジェクトと方向の記録です。要約、結果、決定と理由、失敗からの教訓の順に読んでください。agent_reported はスーパーバイザーがまだ承認していない報告であることを意味します。
+
+プロジェクト要約：
+Keep the dispatch context bounded.
+
+最近の結果（新しい順）：
+- Merged the fix https://example.com/pr/1 · 2026-11-20T01:00:00Z · agent_reported · スーパーバイザー未承認
+
+有効な決定と理由（新しい順。異なる ID の矛盾する決定も保持）：
+- [decision-b] Which context? → Explicit direction；理由：It owns the task · 2026-11-20T02:00:00Z · agent_reported · スーパーバイザー未承認
+- [decision-a] Which context? → Working directory；理由：Older conflicting call · 2026-11-20T01:00:00Z · agent_reported · スーパーバイザー未承認
+
+失敗からの教訓（新しい順）：
+- Never close the context from memory · agent_reported · スーパーバイザー未承認
+
+拡張機能「Notes」がまとめたプロジェクトの背景：
+Extension context stays last.
+</persona-context>

@@ -370,9 +370,10 @@ func TestInboxNodeRecoveryKeepsPersistedOrigin(t *testing.T) {
 			if in := f.file("stdin.jsonl"); !strings.Contains(in, `"mode":"default"`) {
 				t.Fatalf("node-owned recovery did not force default: %s", in)
 			}
-			cliWait(t, "recovered task cleanup", func() bool {
-				st, _ := f.n.state.get(id)
-				return len(st.Tasks) == 0 && st.Origin == originInbox && st.OriginKnown
+			// The CLI can publish its result before the recovery caller clears the delivered lost-task record.
+			cliWait(t, "cleared lost tasks and retained Inbox origin", func() bool {
+				st, ok := f.n.state.get(id)
+				return ok && len(st.Tasks) == 0 && st.Origin == originInbox && st.OriginKnown
 			})
 			if st, _ := f.n.state.get(id); len(st.Tasks) != 0 || st.Origin != originInbox || !st.OriginKnown {
 				t.Fatalf("recovered session state=%+v, want cleared tasks and retained origin decision", st)

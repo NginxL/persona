@@ -894,7 +894,15 @@ func TestReadinessUnknownStatusNotWaitedFor(t *testing.T) {
 		t.Fatalf("first: model = %+v", m)
 	}
 	hold := make(chan struct{})
+	// With no retry delay, the first readiness's prefetch and its waited read can each finish an ask. Let both finish
+	// before holding the next one, so the assertion counts this readiness's new ask rather than assuming a global total.
+	waitFor(t, "the first status asks to finish", func() bool {
+		s.ready.mu.Lock()
+		defer s.ready.mu.Unlock()
+		return len(s.ready.authIn) == 0
+	})
 	f.mu.Lock()
+	asksBefore := len(f.authAsked)
 	f.authHold = hold
 	f.auth["server/claude"] = proto.ClaudeAuthStatus{State: proto.ClaudeLoggedIn, AuthMethod: "claude.ai"}
 	f.mu.Unlock()
@@ -917,7 +925,7 @@ func TestReadinessUnknownStatusNotWaitedFor(t *testing.T) {
 	waitFor(t, "the second ask on its way", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return len(f.authAsked) == 2
+		return len(f.authAsked) == asksBefore+1
 	})
 	release()
 	readinessClaudeRetry = time.Hour // the new answer is the one kept

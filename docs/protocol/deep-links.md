@@ -54,7 +54,7 @@ Query keys not listed for a row are dropped (not passed on, not acted on). Fragm
 - `at` names one message to land on (`?at=<item id>`; Claude's ids hold `#`, written `%23`).
 - Settings tabs are the web's (`web/src/views/settings/nav.ts`): `general`, `persona`, `prompts`, `notifications`,
   `models`, `agents`, `channels`, `connectors`, `sources`, `extensions`, `shortcuts`, `devices`, `hub`, `managers`,
-  `knowledge`, `avatar`. Four have an item key: `models` → `purpose`, `channels` → `channel`, `extensions` →
+  `knowledge`, `avatar`, `labs`. Four have an item key: `models` → `purpose`, `channels` → `channel`, `extensions` →
   `extension`, `connectors` → `connector`. An extension's settings are `/settings?tab=extensions&extension=<id>`. An
   unknown tab opens Settings. The iPhone opens the page it has for a tab, else Settings.
 - A page the iPhone has no screen for opens in the in-app web card, as any other link to the hub does.

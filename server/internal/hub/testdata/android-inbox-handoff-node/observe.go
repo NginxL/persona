@@ -15,18 +15,29 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 type fixtureRequestDigest struct{}
 
 // Forward the real connection (including the WebSocket) and record only the two
 // fixture writes. The audit excludes credentials, message bodies and other calls.
-func observe(origin, directory string) error {
+func observe(origin, directory string, refuseFirst bool) error {
 	target, err := url.Parse(origin)
 	if err != nil || target.Scheme != "http" || target.Hostname() != "127.0.0.1" {
 		return errors.New("expected the isolated loopback hub")
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	// Inject a single, observable refusal before forwarding any message to the real hub.
+	base := http.DefaultTransport
+	var refused atomic.Bool
+	proxy.Transport = fixtureTransport(func(r *http.Request) (*http.Response, error) {
+		if refuseFirst && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages") && refused.CompareAndSwap(false, true) {
+			return &http.Response{StatusCode: http.StatusConflict, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+				Body: io.NopCloser(strings.NewReader(`{"error":"fixture draft","code":"input_draft","delivered":"none","draft":"draft","clearable":"draft"}`))}, nil
+		}
+		return base.RoundTrip(r)
+	})
 	proxy.ModifyResponse = func(res *http.Response) error {
 		r := res.Request
 		digest, monitored := r.Context().Value(fixtureRequestDigest{}).(string)
@@ -72,3 +83,7 @@ func observe(origin, directory string) error {
 		proxy.ServeHTTP(w, r)
 	}))
 }
+
+type fixtureTransport func(*http.Request) (*http.Response, error)
+
+func (f fixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

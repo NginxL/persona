@@ -81,12 +81,15 @@ func (rh *RuntimeHost) current() *Node {
 // attach makes n the Node serving the hub: it lists and drives the runtimes' sessions from now on. What the last hub
 // connection watched is forgotten (the new one watches afresh); runtimes hear that a hub is there.
 func (rh *RuntimeHost) attach(n *Node) {
-	rh.mu.Lock()
-	rh.node = n
-	rh.mu.Unlock()
 	n.runtimes = rh.reg
 	rh.reg.setHostOff(n.engineHostOff)
 	n.runtimeHost = rh
+	rh.mu.Lock()
+	if rh.node != n {
+		rh.reg.clearAssistantPIDs()
+	}
+	rh.node = n
+	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(true)
 }
@@ -99,6 +102,7 @@ func (rh *RuntimeHost) detach(n *Node) {
 		return
 	}
 	rh.node = nil
+	rh.reg.clearAssistantPIDs()
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(false)
@@ -193,8 +197,12 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 	peer.OnEvent = func(event string, params json.RawMessage) { rh.event(h, event, params) }
 	err := peer.Serve(ctx, c)
 	peer.Close(err)
+	cancel()
 	rh.reg.remove(h)
 	if id := h.id(); id != "" {
+		if id == agyRuntimeID {
+			rh.wakeAgyBridge()
+		}
 		rh.logger.Printf("runtime %s #%d left: %v", id, h.serial, err)
 	}
 	if n := rh.current(); n != nil {
@@ -203,6 +211,55 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 			_ = n.peer.Notify("launchers.changed", map[string]any{})
 		}
 	}
+}
+
+func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hello runtimeHello) error {
+	var preempt func(*runtimeConn, runtimeHello) bool
+	if hello.Runtime == agyRuntimeID && !h.isDaemon() {
+		instance := rh.builtinAgyInstance()
+		if instance != "" && hello.Instance != instance {
+			if !rh.agy.takeover.TryLock() {
+				return &rpc.Error{Code: "runtime_conflict", Message: "another agy runtime is taking over"}
+			}
+			defer rh.agy.takeover.Unlock()
+			if builtin, external := rh.agyPeers(instance); builtin != nil && !external {
+				builtin.peer.SuspendCalls()
+				defer builtin.peer.ResumeCalls()
+				grace := rh.agy.yieldGrace
+				if grace == 0 {
+					grace = agyYieldGrace
+				}
+				drain, cancel := context.WithTimeout(ctx, grace)
+				builtin.waitAgyIdle(drain)
+				cancel()
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
+			preempt = func(old *runtimeConn, _ runtimeHello) bool {
+				old.mu.Lock()
+				defer old.mu.Unlock()
+				return old.hello.Instance == instance
+			}
+		}
+	}
+	stale, err := rh.reg.hello(h, hello, rh.reservedID, preempt)
+	if err != nil {
+		return err
+	}
+	for _, old := range stale {
+		old.mu.Lock()
+		drop := old.drop
+		old.mu.Unlock()
+		old.peer.Close(errors.New("the runtime reconnected"))
+		if drop != nil {
+			drop()
+		}
+	}
+	if hello.Runtime == agyRuntimeID {
+		rh.wakeAgyBridge()
+	}
+	return nil
 }
 
 // request answers a runtime's call.
@@ -223,30 +280,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		hello.Instance = strings.TrimSpace(hello.Instance)
 		hello.Launchers = cleanLaunchers(hello.Launchers)
-		stale, err := rh.reg.hello(h, hello, rh.reservedID, func(o *runtimeConn, incoming runtimeHello) bool {
-			if incoming.Runtime != agyRuntimeID || h.isDaemon() {
-				return false
-			}
-			o.mu.Lock()
-			oldInstance := o.hello.Instance
-			o.mu.Unlock()
-			return rh.isBuiltinAgyInstance(oldInstance) && incoming.Instance != oldInstance
-		})
-		if err != nil {
+		if err := rh.registerRuntime(ctx, h, hello); err != nil {
 			rh.logger.Printf("runtime %s #%d refused: %v", hello.Runtime, h.serial, err)
 			return nil, err
-		}
-		for _, o := range stale { // this process again, on a new connection: the old one is dead
-			o.mu.Lock()
-			drop := o.drop
-			o.mu.Unlock()
-			o.peer.Close(errors.New("the runtime reconnected"))
-			if drop != nil {
-				drop()
-			}
-		}
-		if hello.Runtime == agyRuntimeID && !h.isDaemon() && !rh.isBuiltinAgyInstance(hello.Instance) {
-			rh.yieldAgyBridge()
 		}
 		rh.logger.Printf("runtime %s %s #%d connected", hello.Runtime, hello.Version, h.serial)
 		if rh.autoCompanions && (hello.Launcher != "" || len(hello.Launchers) > 0) {
@@ -272,6 +308,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
 			features = append(features, "leader_tools", "supervision_policy")
+			if hello.Caps.Assistant {
+				features = append(features, "assistant_pids")
+			}
 		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
 			"features": features}
@@ -375,6 +414,21 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 	h.mu.Unlock()
 	if !ready {
 		return // hello first
+	}
+	if event == "runtime.assistant_pids" {
+		var p struct {
+			PIDs map[string]int `json:"pids"`
+		}
+		if json.Unmarshal(params, &p) == nil {
+			rh.mu.Lock()
+			defer rh.mu.Unlock()
+			n := rh.node
+			if n == nil {
+				p.PIDs = nil
+			}
+			rh.reg.setAssistantPIDs(h, p.PIDs, func(id string) bool { return n != nil && n.runtimeAssistantChat(h, id) })
+		}
+		return
 	}
 	n := rh.current()
 	if event == "runtime.launchers" { // its launchers changed (runtimecontrol.go)

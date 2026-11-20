@@ -59,8 +59,9 @@ export type Panel =
    *  panel stays while the page shows the parent. */
   | { kind: "sides"; mid: string; sid: string; side?: string; at?: string }
   /** An Agent's background work (#5421, cindy's Background tasks tab; lib/background-panel.ts): its /loop, background tasks
-   *  and workflow runs. `run`: a workflow run's task_id; `task`: a background command's id. */
-  | { kind: "background"; mid: string; sid: string; run?: string; task?: string }
+   *  and workflow runs. `run`: a workflow run's task_id; `task`: a background command's id; `from`: Session overview when
+   *  that view opened the detail. */
+  | { kind: "background"; mid: string; sid: string; run?: string; task?: string; from?: "overview" }
   /** The session's dev server in a headless browser on its computer (docs/web/preview.md); `port` / `path`: the one to
    *  show (a localhost link of a reply), else the one shown last or the first running one. */
   | { kind: "preview"; mid: string; sid: string; cwd: string; port?: number; path?: string };
@@ -79,8 +80,9 @@ export function openPanel(p: Panel | null) {
   if (p?.kind === "agent") p = { ...p, sid: followSubagentLink(p.mid, p.sid) };
   // what had the focus when the panel opened (its header button): closing gives the focus back to it (#5155). Called
   // from the click, before the panel renders, so it is never something inside the panel; a panel replacing another keeps
-  // the first one's.
-  if (!current && p) opener = typeof document === "undefined" ? null : document.activeElement;
+  // the first one's, except an overview detail, which returns to the overview row that opened it.
+  if (p && (!current || (p.kind === "background" && p.from === "overview")))
+    opener = typeof document === "undefined" ? null : document.activeElement;
   current = p;
   listeners.forEach((l) => l());
 }

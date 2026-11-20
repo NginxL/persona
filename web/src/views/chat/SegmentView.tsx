@@ -1,6 +1,7 @@
 import { type CSSProperties, Fragment, lazy, memo, type ReactNode, Suspense, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clock } from "../../lib/format";
-import { stripCloseout } from "../../lib/closeout";
+import type { stripCloseout as stripCloseoutText } from "../../lib/closeout-text";
+import { useCloseoutReader } from "./closeout-chunks";
 import { getSession, getState, useStore } from "../../lib/store";
 import { withChildSessions } from "../../lib/child-cards";
 import { agentStatus, isNestedSubagentStep, nestedSubagentStatus, nestingKey, subagentFor, withNestedSubagents } from "../../lib/tasks";
@@ -241,14 +242,14 @@ const ANSWER = "[&_.prose-j]:text-[length:var(--chat-body)]! [&_.prose-j]:leadin
  *  it); only a finished turn's last reply has the bar under it (`bar`, #5314).
  *  Memo'd: the chat context changes with every streamed item, so each SegmentView re-renders; a finished answer's
  *  props stay the same and it is skipped (#3024). */
-export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, noCloseout, bar, cut, usage, usageMs }: {
+export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, stripCloseout, bar, cut, usage, usageMs }: {
   item?: Item;
   streaming?: string;
   mid?: string;
   sid?: string;
   fade?: boolean;
   /** The card above the transcript shows its closeout (#3612): drawn without the raw block. */
-  noCloseout?: boolean;
+  stripCloseout?: typeof stripCloseoutText;
   /** The bar under it (ReplyBar): a finished turn's last reply, never narration in a work summary. */
   bar?: boolean;
   /** Its turn ended in a model error or an interruption right after these words (Segment.cut): cindy's line above them. */
@@ -260,16 +261,16 @@ export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, no
   // a long answer the hub cut for the page: its start, and "View full text" under it
   const live = streaming !== undefined;
   const full = useFullText(live ? undefined : item, mid, sid);
-  const text = streaming ?? (noCloseout ? stripCloseout(full.text) : full.text);
+  const text = streaming ?? (stripCloseout ? stripCloseout(full.text, !item?.full_size || (Boolean(mid && sid) && !full.more)) : full.text);
   if (!text) return null;
   const cwd = mid && sid ? getSession(mid, sid)?.cwd : undefined;
   return (
     <MessageActions text={text} ts={item?.ts} itemId={item?.id} bar={bar} usage={bar ? usage : undefined} usageMs={bar ? usageMs : undefined}
       translationSource={item?.full_size ? {
-        key: JSON.stringify([mid, sid, item.id, item.text, item.full_size, noCloseout]),
+        key: JSON.stringify([mid, sid, item.id, item.text, item.full_size, Boolean(stripCloseout)]),
         load: async () => {
           const complete = await full.getText();
-          return noCloseout ? stripCloseout(complete) : complete;
+          return stripCloseout ? stripCloseout(complete) : complete;
         },
       } : undefined}>
       {cut && <p className="mb-1 text-[13px] leading-[1.384615] text-ink-2" data-cut-short>{t("chat-messageactions.cut_short")}</p>}
@@ -293,7 +294,9 @@ const LatestAnswer = memo(function LatestAnswer({ item, streaming, mid, sid, noC
   const persisted = streaming === undefined ? item?.id : undefined;
   const fresh = useFreshWords(mid, sid, persisted);
   const bar = Boolean(done && persisted);
-  return <Answer item={item} streaming={streaming} mid={mid} sid={sid} fade={persisted ? fresh : undefined} noCloseout={noCloseout} bar={bar || undefined} cut={cut} usage={bar ? usage : undefined} usageMs={bar ? usageMs : undefined} />;
+  const stripCloseout = useCloseoutReader(Boolean(noCloseout));
+  if (stripCloseout && item?.text?.trim() && !item.full_size && !stripCloseout(item.text)) return null;
+  return <div data-latest-text><Answer item={item} streaming={streaming} mid={mid} sid={sid} fade={persisted ? fresh : undefined} stripCloseout={stripCloseout} bar={bar || undefined} cut={cut} usage={bar ? usage : undefined} usageMs={bar ? usageMs : undefined} /></div>;
 });
 
 export const SegmentView = memo(function SegmentView({
@@ -370,7 +373,6 @@ export const SegmentView = memo(function SegmentView({
   // The card above the transcript shows this exchange's closeout (#3612): its last words are drawn without the raw
   // block, and not at all when the block was all they said.
   const noCloseout = closeoutSegment === seg.id && streaming === undefined;
-  const onlyCloseout = noCloseout && Boolean(latestItem?.text?.trim()) && !latestItem?.full_size && stripCloseout(latestItem?.text ?? "") === "";
   const working = live && (streaming === undefined || batchedWords) && !nodes.some((n) => n.kind === "group" && n.live);
   const liveRow = working && <WorkGroup g={{ kind: "group", id: `work-live-${seg.id}`, children: [], live: true, startedAt: Date.parse(turnStart ?? "") || undefined }} p={p} />;
   const imageStrip = images.length > 0 && <TurnImages images={images} mid={mid} sid={sid} cwd={getSession(mid, sid)?.cwd} />;
@@ -408,7 +410,7 @@ export const SegmentView = memo(function SegmentView({
       {liveRow}
       {imageStrip}
       {!live && <Fragment key="before-words">{beforeWords}</Fragment>}
-      {(latestItem || streaming !== undefined) && !onlyCloseout && <div key="latest-text" data-latest-text><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} /></div>}
+      {(latestItem || streaming !== undefined) && <Suspense key="latest-text" fallback={null}><LatestAnswer item={streaming === undefined ? latestItem : undefined} streaming={streaming} mid={mid} sid={sid} noCloseout={noCloseout || undefined} done={(!live && !busy) || undefined} cut={(!live && seg.cut) || undefined} usage={usage} usageMs={usageMs} /></Suspense>}
       {sourced && <Suspense key="turn-sources" fallback={null}><TurnSources steps={own} /></Suspense>}
       {changes && <TurnChanges key="turn-changes" changes={changes} mid={mid} sid={sid} cwd={cwd} />}
     </section>

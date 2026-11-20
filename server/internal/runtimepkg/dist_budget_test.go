@@ -6,11 +6,11 @@ import (
 )
 
 // TestDistBudget bounds what personad, persona-node and persona-manager embed of the runtime packages: every file
-// Generate writes from integrations/. Measured 173,369 B with the macOS Antigravity Desktop companion (#11172)
-// included in the Antigravity runtime package. Keep the existing 5,244 B of headroom.
-// Raise it only for code a runtime needs, never to embed the packages raw again.
+// Generate writes from integrations/. The complete Antigravity package, including the image guard (#11790),
+// measured 192,060 B. Preserving delivered replies through a background wake (#11756) adds 1,822 B.
+// Raise the budget only for code a runtime needs, never to embed the packages raw again.
 func TestDistBudget(t *testing.T) {
-	const budget = 178_613
+	const budget = 194_559
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

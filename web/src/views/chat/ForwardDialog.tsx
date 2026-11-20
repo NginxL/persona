@@ -42,7 +42,7 @@ import { conversationTitle } from "../assistant/conversations";
 import { ForwardBar } from "./ForwardBar";
 import { ForwardGroupBar } from "./ForwardGroup";
 import { startPick } from "./Picking";
-import { readPhoto } from "./QueueStrip";
+import { readPhoto } from "./queue-restore";
 
 type Target = { kind: "persona" } | { kind: "new" } | { kind: "session"; s: Session };
 

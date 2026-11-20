@@ -1139,6 +1139,7 @@ struct ChatView: View {
         ChatLines(openWork: openWork, openAll: Self.debugOpenAll, openRuns: openRuns,
                   openAllRuns: Self.debugOpenRuns, chipRuns: AppStyle.current.usesBeautifulUI,
                   foldsIntoRun: foldsIntoRun, foldSupervision: style == .assistant, foldBackground: foldsBackground,
+                  main: shownKey.sessionID == model.assistantMain?.sessionID,
                   openSupervision: openSupervision, openAllSupervision: Self.debugOpenSupervision, active: shownRoundActive)
     }
     private func unfoldWork(_ lines: [ChatLine]) -> [ChatLine] { lineBuilder.unfold(lines) }
@@ -2347,7 +2348,7 @@ struct ChatView: View {
                         await loadUserInputIndex()
                     }
                     // not `tabActiveTask`: the app coming back to the front asks nothing (#10297)
-                    .task(id: "\(shownKey)|\(session?.permissionMode ?? "")") {
+                    .task(id: "\(shownKey)|\(session?.permissionMode ?? "")|\(session?.bypassPending == true)") {
                         await loadModeChanges()
                     }
                     .tabActiveTask(id: navigationJump) {
@@ -2505,13 +2506,15 @@ struct ChatView: View {
     }
 
     /// An Agent's chat reads its permission mode changes when it opens and when its mode changes, nothing else: not on a
-    /// timer, a refresh, the page shown again or the app back in front (one request; the energy lane counts them). After a
-    /// change of mode it looks once more 2 s later: the manager records the change as the node answers, which can be a
-    /// moment after the row says the new mode. Off the main actor; a failure (an older hub, offline) keeps what there was
-    /// and asks again next time. Persona's own conversations have none.
+    /// timer, a refresh, the page shown again or the app back in front (one request; the energy lane counts them). A
+    /// restart into Full access queued or called off (`bypassPending`) counts as a change of mode: the mode stays the
+    /// same, and its line would only show on reopening (#11410). After a change of mode it looks once more 2 s later: the
+    /// manager records the change as the node answers, which can be a moment after the row says the new mode. Off the
+    /// main actor; a failure (an older hub, offline) keeps what there was and asks again next time. Persona's own
+    /// conversations have none.
     private func loadModeChanges() async {
         guard style == .dev, let api = model.api(shownKey.group) else { return }
-        let key = shownKey, read = "\(key)|\(session?.permissionMode ?? "")"
+        let key = shownKey, read = "\(key)|\(session?.permissionMode ?? "")|\(session?.bypassPending == true)"
         guard modeChangesRead != read else { return }
         let modeChanged = modeChangesRead?.hasPrefix("\(key)|") == true
         for wait in modeChanged ? [0, 2] : [0] {
@@ -2555,6 +2558,8 @@ struct ChatView: View {
                 store.prepend(page.items, hasMore: page.hasMore)
             } catch {
                 store.isLoadingOlder = false
+                if error.isHistoryNotFound, !Task.isCancelled, shownKey == key, store.history == history,
+                   model.api(key.group)?.config == api.config { store.prepend([], hasMore: false) }
                 if !Task.isCancelled { model.show(error) }
                 return
             }
@@ -3214,7 +3219,7 @@ struct ChatView: View {
             switch ChatLines.placeholder(lines: lines, hasTranscript: !rows.isEmpty,
                                          hasPending: !kept.isEmpty || !pending.isEmpty || !store.pending.isEmpty || !store.arriving.isEmpty,
                                          hasLiveText: drawsLive && !(frozen?.text ?? store.liveText).isEmpty,
-                                         loadedOnce: store.loadedOnce) {
+                                         loadedOnce: store.loadedOnce, historyNotFound: store.historyNotFound) {
             case .loading:
                 ChatSkeleton().flippedBack().accessibilityIdentifier("chat-loading-placeholder")
             case .empty:
@@ -5897,11 +5902,11 @@ struct Composer: View, Equatable {
         // The main conversation adds `/clear` (#5100). The quick messages, /loop, /permissions, saved prompts (#9436) and extension prompts stay.
         var commands = PromptItems.commands(clear: canClear && !offersMainClear && !status.isActive && !clearing, loop: canLoop,
                                             permissions: canPickPermissions)
-            + savedPrompts.prompts.map { PromptCommand("/" + $0.name, detail: SlashMenuRow.savedDetail, insert: $0.text, id: "saved:\($0.id)") }
+            + PromptItems.saved(savedPrompts.prompts)
             + declarations.prompts.map {
             PromptCommand(String(localized: "/extension/\($0.title)", comment: "Menu name of a prompt an extension adds"), detail: $0.ownerName, insert: $0.text)
         }
-        if offersMainClear, !commands.contains(where: { $0.name == MainClearCommand.word }) {
+        if offersMainClear, !commands.contains(where: { $0.id == MainClearCommand.word }) { // a saved "clear" leaves it (#11410)
             commands.append(PromptCommand(MainClearCommand.word, detail: String(localized: "Clear the chat and start over")))
         }
         return commands
@@ -6138,6 +6143,7 @@ struct Composer: View, Equatable {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if isMain {
+                PushHealthNotice(group: key.group)
                 // The main conversation: what it still needs, or a refused send (docs/assistant/onboarding.md 4.4, 5.2).
                 ReadinessHomeCard(key: key, route: $failureRoute)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -6285,19 +6291,17 @@ struct Composer: View, Equatable {
                                    return true
                                },
                                onCommand: { command in
-                                   if command.name == SlashCommand.loop.word {
+                                   // by id: a saved prompt of the same name types its text (#11410)
+                                   switch PromptItems.ownCommand(command, permissions: canPickPermissions) {
+                                   case .loop:
                                        // The bar puts its text in without moving the caret off the "/": what is typed
                                        // next went in the middle ("/10m check CIloop "). Ours, after the bar has
                                        // cleared the "/" it took.
                                        Task { @MainActor in startDraft(SlashCommand.loop.text) }
-                                       return true
+                                   case .permissions: showPermissions = true
+                                   case .clear: if offersMainClear { Task { await runMainClear() } } else { confirmClear = true }
+                                   case nil: return false
                                    }
-                                   if command.name == SessionModes.permissionsCommand {
-                                       showPermissions = true
-                                       return true
-                                   }
-                                   guard command.name == MainClearCommand.word else { return false }
-                                   if offersMainClear { Task { await runMainClear() } } else { confirmClear = true }
                                    return true
                                },
                                quotes: contexts,

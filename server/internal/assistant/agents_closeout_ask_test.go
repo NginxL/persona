@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -383,6 +384,6 @@ func TestSummarizeCloseoutAsks(t *testing.T) {
 }
 
 func TestGoldenAgentCloseoutAsk(t *testing.T) {
-	golden(t, "agent_closeout_ask", renderCloseoutAsk("简体中文"))
-	golden(t, "agent_closeout_ask.no_language", renderCloseoutAsk(""))
+	golden(t, "agent_closeout_ask", renderCloseoutAsk("简体中文", closeout.Example))
+	golden(t, "agent_closeout_ask.no_language", renderCloseoutAsk("", closeout.Example))
 }

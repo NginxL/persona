@@ -32,7 +32,7 @@ var assistantOnlyEnv = []string{
 // typed start line unsets it again, so the Agent, and the shell the tab keeps once it exits, have the environment
 // the user's own terminals have; the Agent mark the tab also starts with (agentMarkEnv) stays. Nothing an Agent's own
 // shells read: they are not interactive and load none of those frameworks.
-var startupOnlyEnv = []string{"DISABLE_AUTO_UPDATE", "DISABLE_UPDATE_PROMPT", "POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD"}
+var startupOnlyEnv = []string{"DISABLE_AUTO_UPDATE", "DISABLE_UPDATE_PROMPT", "ZSH_DISABLE_COMPFIX", "POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD"}
 
 // assistantOnlyEnvNames is assistantOnlyEnv with each Persona variable's older spelling after it.
 func assistantOnlyEnvNames() []string {

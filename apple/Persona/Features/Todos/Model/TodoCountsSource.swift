@@ -27,7 +27,12 @@ final class TodoCountsSource {
     var needsYou: Int { counts.needsYou }
     /// Whether a counted row is filed by the app's own rules, which read the clock: the store counts again each minute
     /// while there is one (its sessions are watched here).
-    @ObservationIgnored private(set) var byRules = false
+    @ObservationIgnored private(set) var byRules = false {
+        didSet { if byRules != oldValue { byRulesChanged?() } }
+    }
+    /// Told when `byRules` changes, whatever counted again (a read, the clock, a session, another assistant made
+    /// current): the store starts or stops its minute clock.
+    @ObservationIgnored var byRulesChanged: (@MainActor () -> Void)?
 
     /// What the store holds: every row (each manager's), their views, and the hub's counts and places.
     struct Input {

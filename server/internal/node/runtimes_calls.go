@@ -17,8 +17,8 @@ import (
 // claimMethods are the calls that ask the connected runtimes about a session nobody claimed yet: what the apps do
 // with a session they show (open it, page it, send to it, stop it).
 var claimMethods = map[string]bool{"session.send": true, "session.items": true, "session.item": true, "session.image": true,
-	"session.visualization": true,
-	"session.watch":         true, "session.info": true, "session.interrupt": true}
+	"session.visualization": true, "session.fork": true,
+	"session.watch": true, "session.info": true, "session.interrupt": true}
 
 // awayReads are the calls the node answers itself for a session of a runtime that is away whose conversation is a
 // Claude transcript here (runtimeaway.go): its content, its info and the watch of its transcript.
@@ -56,7 +56,8 @@ func (n *Node) runtimeFor(ctx context.Context, method, id string) (*runtimeConn,
 		if awayReads[method] && n.runtimeTranscript(id) != "" {
 			return nil, nil // the node reads the transcript (n.file), as it does while the runtime lists the session
 		}
-		if claimMethods[method] || method == "session.rename" || method == "session.close" || method == "session.rewind" || method == "session.archive" || method == "session.unarchive" {
+		if claimMethods[method] || method == "session.rename" || method == "session.close" || method == "session.rewind" || method == "session.archive" || method == "session.unarchive" ||
+			method == "session.queue.edit" || method == "session.queue.send_now" {
 			return nil, errRuntimeAway(label)
 		}
 		return nil, nil // unwatching and the like: nothing to refuse
@@ -352,8 +353,26 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 		}
 		_, err := call("session.modes", map[string]any{"session_id": p.SessionID, "permission_mode": p.PermissionMode, "effort": p.Effort, "model": p.Model})
 		return okResult(err), err, true
-	case "session.queue.edit", "session.queue.send_now":
-		return nil, errRuntimeUnsupported(label, "这个操作"), true
+	case "session.queue.edit":
+		if !caps.QueueEdit || strings.Contains(p.SessionID, subagentSep) {
+			return nil, errRuntimeUnsupported(label, "这个操作"), true
+		}
+		var edit struct {
+			Keep json.RawMessage `json:"keep"`
+		}
+		if err := json.Unmarshal(params, &edit); err != nil {
+			return nil, err, true
+		}
+		out, err := call(method, map[string]any{"session_id": p.SessionID, "keep": edit.Keep})
+		return out, err, true
+	case "session.queue.send_now":
+		if !caps.QueueSendNow || strings.Contains(p.SessionID, subagentSep) {
+			return nil, errRuntimeUnsupported(label, "这个操作"), true
+		}
+		if _, err := call(method, map[string]any{"session_id": p.SessionID}); err != nil {
+			return nil, err, true
+		}
+		return map[string]any{"sent": true}, nil, true
 	}
 	return nil, nil, false
 }
@@ -440,15 +459,15 @@ func okResult(err error) any {
 // into the node's ok result, when it is set.
 func withFlag(res any, answer json.RawMessage, flag string) any {
 	m, ok := res.(map[string]any)
-	if !ok || len(answer) == 0 {
-		return res
+	if ok && runtimeAnswerFlag(answer, flag) {
+		m[flag] = true
 	}
+	return res
+}
+
+func runtimeAnswerFlag(answer json.RawMessage, flag string) bool {
 	var a map[string]json.RawMessage
-	if json.Unmarshal(answer, &a) != nil || string(a[flag]) != "true" {
-		return res
-	}
-	m[flag] = true
-	return m
+	return len(answer) != 0 && json.Unmarshal(answer, &a) == nil && string(a[flag]) == "true"
 }
 
 func isRPCError(err error) bool {

@@ -1,0 +1,12 @@
+<persona-context kind="context" title="Example Chat ボット" url="">
+Example Ownerが Example Chat の個別チャットで Persona ボットにこのメッセージを送りました。このターンの最終回答はボットとして Example Chat に返信されます（Markdown）。結論から簡潔に書いてください。notify_user を重ねて呼ぶ必要はありません。確認が必要なときは通常どおり ask_user を使ってください。ユーザーはアプリで回答します。
+</persona-context>
+<persona-context kind="context" title="引用されたメッセージ" url="">
+会議 原文
+</persona-context>
+<persona-context kind="context" title="転送されたチャット履歴" url="">
+Cliente: la entrega será mañana.
+</persona-context>
+返事はスペイン語で #42
+
+（Example Chat から次の項目も届きましたが、ボットは転送できません：証拠 #42、ファイル「資料.pdf」）

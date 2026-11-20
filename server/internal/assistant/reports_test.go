@@ -149,8 +149,18 @@ func TestStageOf(t *testing.T) {
 			t.Errorf("stageOf(%q) = %q, want %q", text, got, want)
 		}
 	}
-	if got := stageBar("zh-Hans", ""); strings.Contains(got, "✅") || strings.Contains(got, "🔵") {
+	if got := stageBar("zh-Hans", "", false); strings.Contains(got, "✅") || strings.Contains(got, "🔵") {
 		t.Errorf("no stage: %s", got)
+	}
+	if got := stageBar("zh-Hans", "", true); strings.Contains(got, "✅") || strings.Contains(got, "完成") {
+		t.Errorf("no stage, done: %s", got) // nothing reached: the plain strip, never a Done of nothing
+	}
+	// Done after the steps taken (#11590): no current step, nothing claimed past Develop.
+	if got, want := stageBar("en", "develop", true), "✅Plan → ✅Build → ✅**Done**"; got != want {
+		t.Errorf("done at develop = %s, want %s", got, want)
+	}
+	if got := stageBar("en", "develop", false); !strings.Contains(got, "🔵**Build**") || !strings.Contains(got, "⚪Verified") {
+		t.Errorf("open at develop = %s", got)
 	}
 	_ = context.Background
 }
@@ -208,7 +218,7 @@ func failingPosts(f *fakeHub, alwaysFail bool) (posts func() []string, reportAtt
 		_ = json.Unmarshal(p, &m)
 		mu.Lock()
 		got = append(got, m.Card)
-		isReport := strings.Contains(m.Card, `"content":"📋 `)
+		isReport := strings.Contains(m.Card, `"content":"汇报"}`)
 		if isReport {
 			attempts++
 		}
@@ -387,7 +397,7 @@ func TestTaskReportMergesChangeArrivedDuringPost(t *testing.T) {
 		_ = json.Unmarshal(p, &m)
 		mu.Lock()
 		got = append(got, m.Card)
-		firstReport := strings.Contains(m.Card, `"content":"📋 `)
+		firstReport := strings.Contains(m.Card, `"content":"汇报"}`)
 		if firstReport {
 			attempts++
 		}

@@ -11,6 +11,28 @@ final class InboxConnectorAvatarUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// The conversation pages use the same shared loader for their participants (#10994).
+    @MainActor func testConversationAvatars() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let hub = env["PERSONA_MOCK_THREAD_AVATARS"] else {
+            throw XCTSkip("needs the synthetic Telegram and GitHub Inbox threads from scripts/mock/mock_hub.py")
+        }
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        for (source, item, marker) in [("telegram", "telegram:dm1", "thread.box"), ("github", "github:review12", "github.description")] {
+            for (scheme, largest) in [("light", false), ("dark", false), ("light", true), ("dark", true)] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-pairURL", pair, "-tab", "mail", "-openInboxItem", item, "-ui.scheme", scheme]
+                if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-ui.textSize", "large"] }
+                app.launchPinned()
+                let content = app.descendants(matching: .any).matching(identifier: marker).firstMatch
+                XCTAssertTrue(content.waitForExistence(timeout: 25), "\(source) thread missing\n\(app.debugDescription)")
+                dismissStartupAlerts()
+                shot(app, "thread-\(source)-\(scheme)" + (largest ? "-largest" : ""), env)
+                app.terminate()
+            }
+        }
+    }
+
     @MainActor func testTelegramRowsWearTheirPictures() throws {
         let env = ProcessInfo.processInfo.environment
         guard let hub = env["PERSONA_MOCK_HUB"] else {
@@ -25,7 +47,7 @@ final class InboxConnectorAvatarUITests: XCTestCase {
                 // Telegram's rows alone (its source chip), so both are on the first screen under every other source's.
                 app.launchArguments = ["-pairURL", pair, "-tab", "mail", "-inbox.kind", "", "-inbox.source", "telegram", "-ui.scheme", scheme]
                 app.launchPinned()
-                dismissIconAlert()
+                dismissStartupAlerts()
                 func text(_ s: String) -> XCUIElement {
                     app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", s)).firstMatch
                 }
@@ -39,11 +61,19 @@ final class InboxConnectorAvatarUITests: XCTestCase {
         }
     }
 
-    @MainActor private func dismissIconAlert() {
+    @MainActor private func dismissStartupAlerts() {
         let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
-        guard alert.waitForExistence(timeout: 2) else { return }
-        for label in ["好", "OK"] where alert.buttons[label].exists { alert.buttons[label].tap(); break }
-        _ = alert.waitForNonExistence(timeout: 3)
+        // SpringBoard may show both notification permission and the icon-change notice on a fresh install.
+        let labels = ["不允许", "Don’t Allow", "Don't Allow", "好", "OK"] // i18n-ignore: SpringBoard's own buttons
+        for _ in 0..<2 {
+            guard alert.waitForExistence(timeout: 2) else { return }
+            guard let button = labels.map({ alert.buttons[$0] }).first(where: \.exists) else {
+                XCTFail("Unexpected SpringBoard alert: \(alert.label)")
+                return
+            }
+            button.tap()
+        }
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
     }
 
     @MainActor private func shot(_ app: XCUIApplication, _ file: String, _ env: [String: String]) {

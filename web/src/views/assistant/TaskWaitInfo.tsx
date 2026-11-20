@@ -3,6 +3,7 @@ import { formatDate, t } from "../../i18n";
 import { taskWait } from "../../lib/task-wait-info";
 import { waitSource } from "../../lib/task-wait";
 import { normalizedPR, prBlockers } from "../../lib/todo-triage";
+import { href, onLinkClick } from "../../lib/router";
 import type { PRFacts, Todo } from "../../lib/todos";
 import { Button, copyText, cx, Dialog, useNow } from "../../ui/atoms";
 
@@ -42,6 +43,22 @@ export function TaskWaitInfo({ todo, merges = [], expanded = false }: { todo: To
   const contact = info.contact;
   const contactTime = contact && formatDate(contact.sent_at, { dateStyle: "medium", timeStyle: "short" });
   const age = elapsed(info.since, now, info.sinceRequest);
+  if (info.handoff) {
+    const handoff = info.handoff;
+    const target = { name: "todos", id: handoff.todo_id } as const;
+    return <div data-task-wait-info={todo.id} data-wait-kind={info.kind} data-wait-overdue={info.overdue ? "true" : "false"}
+      className="min-w-0 space-y-1 break-words text-xs text-ink-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span>{t("task-wait.kind_todo_handoff")}</span>
+        <a data-wait-target href={href(target)} className="inline-flex items-center text-accent-ink hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+          onClick={(event) => { event.stopPropagation(); onLinkClick(event, target); }}>{handoff.title}</a>
+        <span data-wait-age className="tabular-nums">{age}</span>
+        {info.overdue && <span data-wait-due className="font-medium text-red">{t("task-wait.follow_up_due")}</span>}
+      </div>
+      <p data-wait-wake>{handoff.check}</p>
+      {info.until && <p>{t("task-wait.handoff_deadline", { time: formatDate(new Date(info.until).toISOString(), { dateStyle: "medium", timeStyle: "short" }) })}</p>}
+    </div>;
+  }
   const target = info.target ?? t("task-wait.target_unknown");
   const contactURL = waitSource(contact?.url);
   const sourceLinks = info.sources.filter((url) => url !== contactURL || merges.some((pr) => normalizedPR(waitSource(pr.url)) === normalizedPR(url)));

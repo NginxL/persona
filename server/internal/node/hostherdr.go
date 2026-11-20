@@ -317,6 +317,15 @@ func (h *herdrHost) serverID(ctx context.Context, pane host.PaneRef) string {
 	return t.c.ServerID()
 }
 
+// serverVersion is herdr.Client.ServerVersion of the server the pane is in; "" when it cannot tell.
+func (h *herdrHost) serverVersion(ctx context.Context, pane host.PaneRef) string {
+	t, err := h.target(ctx, pane.ID)
+	if err != nil || t.c == nil {
+		return ""
+	}
+	return t.c.ServerVersion(ctx)
+}
+
 // has runs `herdr <args> --help` once: whether this herdr knows the command.
 func (h *herdrHost) has(cache *struct {
 	once sync.Once

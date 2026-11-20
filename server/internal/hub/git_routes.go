@@ -1,7 +1,10 @@
 package hub
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -44,4 +47,43 @@ func (h *Hub) gitRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/machines/{mid}/git/stash", h.proxyBody("git.stash"))
 	api.HandleFunc("POST /api/v1/machines/{mid}/git/pr", h.proxyBodyFor("git.pr_create", 2*time.Minute))
 	api.HandleFunc("POST /api/v1/machines/{mid}/git/pr/merge", h.proxyBodyFor("git.pr_merge", 3*time.Minute))
+}
+
+// backendGitTarget routes an explicit repository selection through a distinct RPC.
+// Older nodes reject it even when the client has also supplied a legacy cwd.
+func backendGitTarget(r *http.Request, method string, params any) (string, any, error) {
+	fields, isMap := params.(map[string]any)
+	var workspace, repo any
+	if r.Method == http.MethodGet {
+		q := r.URL.Query()
+		if !q.Has("backend_workspace_id") {
+			return method, params, nil
+		}
+		workspace, repo = q.Get("backend_workspace_id"), q.Get("repo_id")
+	} else if isMap {
+		var w bool
+		workspace, w = fields["backend_workspace_id"]
+		repo = fields["repo_id"]
+		if !w {
+			return method, params, nil
+		}
+	} else {
+		return method, params, nil
+	}
+	ws, wok := workspace.(string)
+	id, rok := repo.(string)
+	if !wok || !rok || ws == "" || id == "" {
+		return "", nil, errors.New("backend_workspace_id and repo_id are required together")
+	}
+	if !isMap {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return "", nil, err
+		}
+		if err = json.Unmarshal(raw, &fields); err != nil {
+			return "", nil, err
+		}
+	}
+	fields["backend_workspace_id"], fields["repo_id"] = ws, id
+	return "git.backend." + strings.TrimPrefix(method, "git."), fields, nil
 }

@@ -90,5 +90,10 @@
   "idle_auto_compact_unchanged": "Idle compaction setting is unchanged.",
   "idle_auto_compact_saved": "Idle compaction setting saved.",
   "change_idle_auto_compact_minutes": "Idle time before compaction: {before} → {after} minutes",
-  "change_idle_auto_compact_tokens": "Context size before compaction: {before} → {after} tokens"
+  "change_idle_auto_compact_tokens": "Context size before compaction: {before} → {after} tokens",
+  "title_supervision_batch_minutes": "Batch routine supervision per recipient",
+  "change_supervision_batch_minutes": "Routine supervision batching per recipient: {before} → {after} minutes (0 keeps the existing cadence)",
+  "bad_supervision_batch_minutes": "Choose a whole number from 0 to 1440 minutes.",
+  "supervision_batch_minutes_unchanged": "The routine supervision batch interval is unchanged.",
+  "supervision_batch_minutes_saved": "Routine supervision batch interval saved as {value} minutes."
 }

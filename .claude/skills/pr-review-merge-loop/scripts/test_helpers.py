@@ -18,6 +18,46 @@ import pr_watch_repair
 
 
 class HelperTests(unittest.TestCase):
+    def test_interactive_stalled_prompt_keeps_accepted_work_on_same_pane(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        calls = []
+        def fake_command(*args, **kwargs):
+            calls.append(args)
+            if args[:2] == ("agent", "prompt"):
+                raise RuntimeError("agent prompt produced no observed state change within 5000 ms")
+            if args[:2] == ("agent", "list"):
+                return {"agents": [{"pane_id": "w3:p1", "agent_status": "working"}]}
+            return {}
+        with patch.dict(module["submit_prompt"].__globals__,
+                        {"_config": {"lifetime_seconds": 7200}, "command": fake_command}):
+            module["submit_prompt"]("w3:p1", "large prompt")
+        self.assertEqual(sum(args[:2] == ("agent", "prompt") for args in calls), 1)
+
+    def test_interactive_stalled_prompt_rejects_unstarted_work(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        def fake_command(*args, **kwargs):
+            if args[:2] == ("agent", "prompt"):
+                raise RuntimeError("agent prompt produced no observed state change within 5000 ms")
+            if args[:2] == ("agent", "list"):
+                return {"agents": [{"pane_id": "w3:p1", "agent_status": "idle"}]}
+            return {}
+        with patch.dict(module["submit_prompt"].__globals__,
+                        {"_config": {"lifetime_seconds": 7200}, "command": fake_command}):
+            with self.assertRaisesRegex(RuntimeError, "did not start"):
+                module["submit_prompt"]("w3:p1", "large prompt")
+
+    def test_interactive_stalled_prompt_accepts_completed_work(self):
+        module = runpy.run_path(str(HERE / "herdr_review.py"))
+        def fake_command(*args, **kwargs):
+            if args[:2] == ("agent", "prompt"):
+                raise RuntimeError("agent prompt produced no observed state change within 5000 ms")
+            if args[:2] == ("agent", "list"):
+                return {"agents": [{"pane_id": "w3:p1", "agent_status": "done"}]}
+            return {}
+        with patch.dict(module["submit_prompt"].__globals__,
+                        {"_config": {"lifetime_seconds": 7200}, "command": fake_command}):
+            module["submit_prompt"]("w3:p1", "large prompt")
+
     def test_reviewer_forwards_prompt_json_and_read_boundary(self):
         module = runpy.run_path(str(HERE / "herdr_review.py"))
         flags = module["forwarded_flags"](

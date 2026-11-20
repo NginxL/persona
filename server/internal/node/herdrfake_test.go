@@ -141,7 +141,9 @@ func (f *fakeHerdr) serveConn(c net.Conn) {
 		}
 		result = map[string]any{"read": map[string]any{"text": text}}
 	}
-	f.log = append(f.log, call)
+	if req.Method != "ping" { // the server's version (herdr.Client.ServerVersion): a read, not something the node did
+		f.log = append(f.log, call)
+	}
 	hooks := slices.Clone(f.hooks)
 	limit := f.replyLimit
 	f.mu.Unlock()

@@ -25,11 +25,46 @@ afterEach(() => {
 const larkItem = (avatar: string) => ({ id: "lark:chat:1", source: "lark", title: "Review group", avatar, lark: { feed_id: "chat", is_group: true } }) as unknown as InboxItem;
 
 describe("inbox avatars", () => {
+  it("draws a Feishu item's advertised picture at its size, on its own account and manager", () => {
+    const item = { ...larkItem("/agent/v1/media/legacy"), manager: "second", avatar_url: "/api/v1/avatars/lark/cm93?lark_account=7" };
+    act(() => root.render(<ItemAvatar it={item} />));
+    const picture = host.querySelector<HTMLImageElement>("img[src*='/avatars/lark/']");
+    expect(picture).not.toBeNull();
+    const url = new URL(picture!.src);
+    expect(url.pathname).toBe("/api/v1/avatars/lark/cm93");
+    expect([url.searchParams.get("lark_account"), url.searchParams.get("size"), url.searchParams.get("manager")]).toEqual(["7", "40", "second"]);
+    expect(host.querySelector("img[src*='legacy']")).toBeNull();
+  });
+
+  it("keeps unavailable Feishu portraits on their letter without making an external request", () => {
+    const item = { ...larkItem("https://outside.example/photo"), avatar_url: "/api/v1/avatars/lark/bWlzc2luZw?lark_account=7" };
+    act(() => root.render(<ItemAvatar it={item} />));
+    const img = host.querySelector("img[src*='/avatars/lark/']")!;
+    act(() => img.dispatchEvent(new Event("error")));
+    expect(host.querySelector("img[src*='outside.example']")).toBeNull();
+    expect(host.textContent).toContain("R");
+    act(() => root.render(<ItemAvatar it={{ ...item, avatar_url: undefined }} />));
+    expect(host.querySelector("img[src*='outside.example']")).toBeNull();
+    expect(host.textContent).toContain("R");
+  });
+
   it("loads a gateway avatar path through the hub", () => {
     act(() => root.render(<ItemAvatar it={larkItem("/agent/v1/media/default-avatar_1")} />));
     const src = host.querySelector("img:not([class*='size-'])")?.getAttribute("src") ?? "";
     expect(src).toContain("/api/v1/lark/media/default-avatar_1");
     expect(src).not.toContain("/agent/v1/");
+  });
+
+  it("reads an old Feishu key from the item's own account and manager", () => {
+    for (const slot of [2, 3]) {
+      const item = { ...larkItem("photo/one"), lark: { ...larkItem("").lark!, ol_account: slot }, manager: "work" };
+      act(() => root.render(<ItemAvatar it={item} />));
+      const picture = host.querySelector<HTMLImageElement>("img[src*='/lark/media/']");
+      expect(picture).not.toBeNull();
+      const url = new URL(picture!.src);
+      expect(url.pathname).toBe("/api/v1/lark/media/photo%2Fone");
+      expect([url.searchParams.get("ol_account"), url.searchParams.get("manager")]).toEqual([String(slot), "work"]);
+    }
   });
 
   // A connector's thread picture (#10923): the avatars route's path the hub listed, asked at a size it draws; the letter

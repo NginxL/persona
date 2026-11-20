@@ -404,6 +404,13 @@ running Agent to another provider".
   its turn ended) is not started: `session.switch` with `launcher` points its record at the new launcher and model, so
   its next Resume, or the message that resumes it, comes up there ("switched (takes effect when resumed)"). A switch
   that fails on the node (it did not come up and rolled back) is reported as refused with its reason and not retried.
+- **An agent off its launcher** (`off_launcher`, #11792): a Persona Agent whose claude runs without Persona's start
+  command (herdr's bare `claude --resume <id>` after a restart on herdr older than 0.9.2) does not run on the launcher
+  its row names. `agents_list` says so after `launcher=`, and a switch to that launcher (`agent_switch`, `agents_switch`,
+  the chat's pick) moves it back there rather than being refused as one it runs on already; `agent_switch` does not take
+  such a pick back when its message fails, since picking the agent's own launcher is the switch back (a switch to
+  another launcher it does take back: with that switch waiting, the own launcher's pick cancels it). Busy, it is
+  queued and switched back when its turn ends.
 - **A busy agent is not switched**: one that works, waits for the user, is starting, or has background work a quit
   would end gets the message on its launcher as always, and the switch waits for a later message. Background work is the
   row's (running subagents and workflows, a `/loop`) and every background command or monitor of its claude process,
@@ -882,6 +889,7 @@ Some computers run automation scripts launching Claude with a separate `CLAUDE_C
 - Hides only; **does not delete files**. Unblocking returns sessions under the original rules (last 7 days, at most 80 offline sessions).
 - Limits: running Claude in herdr remains listed even with its config directory blocked—that is a terminal in use. Old nodes do not understand `claude_dirs_blocked`; hub can only avoid storing / sending directories, while scans still list sessions. Full effect needs updated node. Existing knowledge archives are unchanged.
 - APIs: `GET /api/v1/machines/{mid}/claude-dirs` (node `claude.dirs.list`: each directory, source, session count, running count, blocking rule; offline / old node falls back to hub records, `live: false`); `PUT /api/v1/machines/{mid}/claude-dirs/blocked {"blocked": [...]}` replaces all rules and returns new state.
+- Not the same as hidden Agent folders, the parallel per-computer list that matches a session's working directory for every runtime and only hides it, collection untouched (`docs/protocol/protocol.md`, "Agent directory visibility"). Both share the pattern syntax and matcher (`proto.DirPatternMatchedBy`).
 - UI: Settings › Claude Code (iOS `ClaudeDirsSection`, web `settings/ClaudeDirs.tsx`), Blocked Configuration Directories. One row per directory with Block / Unblock. Glob-blocked rows say “Blocked by Rule …”; unblocking deletes the rule and restores all directories it covers. Manual rule entry below. Assistant uses `persona_settings` `agents.blocked_claude_dirs` get / add / remove, with phone confirmation before changes.
 - Why no Block This Directory on individual Agents list sessions: Session lacks config-directory data (would need `proto.Session` and every client changed); users usually block the source of a whole batch, clearer in directory settings with counts / running status. A later session-menu entry can reuse the API.
 

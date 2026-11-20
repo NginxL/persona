@@ -583,10 +583,10 @@ func Refused(err error) bool {
 }
 
 // RateLimited: Feishu refused the call for coming too often (230020: too many messages into one chat, or a message
-// updated too often; 99991400: the app's rate limit; HTTP 429).
+// updated too often; 230429: the operation's frequency limit; 99991400: the app's rate limit; HTTP 429).
 func RateLimited(err error) bool {
 	switch errorCode(err) {
-	case 230020, 99991400, http.StatusTooManyRequests:
+	case 230020, 230429, 99991400, http.StatusTooManyRequests:
 		return true
 	}
 	return err != nil && strings.Contains(err.Error(), "HTTP 429")

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -186,6 +186,31 @@ describe('antigravity transcript and tool mapping', () => {
     }
   })
 
+  it('keeps a delivered reply and attachment outside a later native wake on pages and catch-up', () => {
+    const steps = readFileSync(new URL('./fixtures/autonomous-wake.jsonl', import.meta.url), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    const prior = stepsToItems(steps.slice(0, 3), { full: true })
+    const pending = stepsToItems(steps.slice(0, 5), { full: true })
+    const all = stepsToItems(steps, { full: true })
+    assert.deepEqual(pending.items, prior.items, 'a notification alone is not a visible wake')
+    assert.equal(pending.toSeq, 5)
+    assert.deepEqual(all.items.slice(0, 2), prior.items)
+    assert.match(prior.items[1].text, /file: \/synthetic\/chart\.png/)
+    const catchUp = page(all.items, { after_seq: pending.toSeq }, { toSeq: all.toSeq })
+    assert.deepEqual(catchUp.items.map((item) => [item.seq, item.kind, item.wake]), [
+      [6, 'notice', true], [6, 'text', undefined], [8, 'text', undefined], [9, 'text', undefined],
+    ])
+    assert.equal(catchUp.items[0].id, prior.items[1].id.replace(/#\d+$/, '#-1'))
+    assert.deepEqual(stepsToItems(steps).items.map((item) => item.id), all.items.map((item) => item.id))
+    assert.doesNotMatch(JSON.stringify(all.items), /Synthetic|housekeeping|second notification/)
+    const checkpoint = { step_index: 4, type: 'CHECKPOINT', created_at: steps[4].created_at }
+    const compacted = [...steps.slice(0, 4), checkpoint]
+    assert.deepEqual(stepsToItems(compacted).items.slice(-1).map(item => [item.kind, item.text, item.wake]), [['notice', '上下文已压缩', undefined]])
+    const afterCheckpoint = stepsToItems([...compacted, steps[5]])
+    assert.deepEqual(afterCheckpoint.items.slice(-2).map(item => item.id), catchUp.items.slice(0, 2).map(item => item.id))
+    const emptyPlanner = { step_index: 5, type: 'PLANNER_RESPONSE', status: 'RUNNING' }
+    assert.deepEqual(stepsToItems([...compacted, emptyPlanner, ...steps.slice(7)]).items.filter(item => item.wake), [])
+  })
+
   it('does not let a call that never got a result shift the results of later calls', () => {
     const at = '2026-11-05T10:00:00Z'
     const step = (step_index, type, extra = {}) => ({ step_index, type, source: type === 'USER_INPUT' ? 'USER_EXPLICIT' : 'MODEL', status: 'DONE', created_at: at, ...extra })
@@ -207,7 +232,8 @@ describe('antigravity transcript and tool mapping', () => {
     assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)), ['first', undefined, 'second', 'third', 'fourth'])
   })
 
-  it('omits unresolvable step.media image items while preserving Read ViewedImages metadata and user attached_images', () => {
+  it('opts into lazy tool media without changing Read metadata, user attachments, or turn pagination', () => {
+    const inline = { mime_type: 'image/gif', data: 'R0lGODlh' }
     const steps = [
       {
         step_index: 0,
@@ -240,6 +266,8 @@ describe('antigravity transcript and tool mapping', () => {
         media: [
           { mime_type: 'image/png', uri: '/work/shots/ui.png' },
           { mime_type: 'application/pdf', uri: '/work/spec.pdf' },
+          inline,
+          { mime_type: 'image/png' },
         ],
       },
       {
@@ -304,6 +332,20 @@ describe('antigravity transcript and tool mapping', () => {
       const paged = page(items, { turns: 1 }, { history: 'h', toSeq })
       assert.equal(paged.has_more, false, `full=${full}: single turn must not be split by tool media`)
       assert.equal(paged.items[0].id, userItems[0].id)
+
+      const mapped = stepsToItems(steps, { full, includeMedia: true })
+      const images = mapped.items.filter((item) => item.kind === 'image')
+      const expected = [[0, 0, 'png'], [0, 2, 'gif'], [1, 0, 'jpeg'], [2, 0, 'webp']]
+      assert.deepEqual(images, expected.map(([resultIndex, mediaIndex, format]) => {
+        const { id, seq, tool_use_id, ts } = results[resultIndex]
+        return { id: id.replace(/#0$/, `#media${mediaIndex}`), seq, role: 'assistant', kind: 'image', tool_use_id, ts,
+          image: { mime: `image/${format}`, data: '', lazy: true } }
+      }))
+      assert.equal(mapped.media, undefined)
+      assert.equal(stepsToItems(steps, { includeMedia: true, mediaItemId: images[1].id }).media, inline)
+      assert.equal(stepsToItems(steps, { mediaItemId: images[1].id }).media, undefined)
+      const withMedia = page(mapped.items, { turns: 1 }, { history: 'h', toSeq: mapped.toSeq })
+      assert.deepEqual({ ...withMedia, items: withMedia.items.filter((item) => item.kind !== 'image') }, paged)
     }
 
     // Photo-only user uploads carried via <attached_images> still produce the user text item without lazy image items.
@@ -317,7 +359,7 @@ describe('antigravity transcript and tool mapping', () => {
         content: '<USER_REQUEST>\n<attached_images>\n/tmp/only-photo.png\n</attached_images>\n</USER_REQUEST>',
         media: [{ mime_type: 'image/png', uri: '/tmp/only-photo.png' }],
       },
-    ])
+    ], { includeMedia: true })
     assert.equal(photoOnly.items.length, 1)
     assert.equal(photoOnly.items[0].kind, 'text')
     assert.equal(photoOnly.items[0].text, '<attached_images>\n/tmp/only-photo.png\n</attached_images>')

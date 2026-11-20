@@ -272,6 +272,12 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             (configuration / "all-types.json").write_text('{"configuration":true}\n')
             configuration_capture = root / "configuration-sync.json"
             remote_configuration = remote / ".cache/persona-test-checkout/schema/configuration"
+            # The Antigravity pane tests replay the integration's recorded wake fixtures (#11841).
+            agy_fixtures = checkout / "integrations/antigravity/test/fixtures"
+            agy_fixtures.mkdir(parents=True)
+            (agy_fixtures / "autonomous-wake.jsonl").write_text('{"fixture":true}\n')
+            agy_capture = root / "agy-fixtures-sync.json"
+            remote_agy = remote / ".cache/persona-test-checkout/integrations/antigravity/test/fixtures"
             shutil.copy2(ROOT / "scripts/test/test-server.sh", checkout / "scripts/test/test-server.sh")
             shutil.copy2(ROOT / "scripts/test/server_test_env.py", checkout / "scripts/test/server_test_env.py")
             # test-server.sh stages the internal/node partition runner beside server_test_env.py (#5594).
@@ -328,7 +334,9 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  "if str(source)=='schema/wire':\n"
                  f" pathlib.Path({str(wire_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n"
                  "if str(source)=='schema/configuration':\n"
-                 f" pathlib.Path({str(configuration_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+                 f" pathlib.Path({str(configuration_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+                 "if str(source)=='integrations/antigravity/test/fixtures':\n"
+                 f" pathlib.Path({str(agy_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n")
             packages = ["github.com/example/fixture/server/internal/example",
                         "github.com/example/fixture/server/internal/node"]
             node_tests = ["TestNodeA", "TestNodeB", "TestNodeC", "ExampleNode"]
@@ -362,6 +370,9 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  "configuration=base/'schema/configuration'\n"
                  "assert (configuration/'all-types.json').read_text()=='{\"configuration\":true}\\n'\n"
                  "assert not (configuration/'stale.json').exists()\n"
+                 "agy=base/'integrations/antigravity/test/fixtures'\n"
+                 "assert (agy/'autonomous-wake.jsonl').read_text()=='{\"fixture\":true}\\n'\n"
+                 "assert not (agy/'stale.jsonl').exists()\n"
                  "assert (base/'docs/guide.md').read_text()=='# Fixture guide\\n'\n"
                  "assert (base/'web/src/i18n/locales/en/fixture.json').read_text()=='{\"locale\":true}\\n'\n"
                  "assert (base/'sdk/templates/go/persona-extension.json').read_text()=='{\"template\":true}\\n'\n"
@@ -413,6 +424,8 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                     (remote_wire / "stale.json").write_text("{}\n")
                 if index and remote_configuration.is_dir():
                     (remote_configuration / "stale.json").write_text("{}\n")
+                if index and remote_agy.is_dir():
+                    (remote_agy / "stale.jsonl").write_text("{}\n")
                 with self.subTest(args=args, extra=extra):
                     result = subprocess.run(["bash", str(checkout / "scripts/test/test-server.sh"), *args],
                                             env={**environment, **extra}, capture_output=True, text=True, timeout=30)
@@ -444,6 +457,10 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                                      ["-a", "--delete", "schema/configuration/",
                                       "fake-hub:.cache/persona-test-checkout/schema/configuration/"])
                     self.assertFalse((remote_configuration / "stale.json").exists())
+                    self.assertEqual(json.loads(agy_capture.read_text()),
+                                     ["-a", "--delete", "integrations/antigravity/test/fixtures/",
+                                      "fake-hub:.cache/persona-test-checkout/integrations/antigravity/test/fixtures/"])
+                    self.assertFalse((remote_agy / "stale.jsonl").exists())
                     for record in records:
                         child = record["env"]
                         # the pinned Bun lives in the hub user's ~/.local/bin, which a non-interactive shell may lack (#1947)

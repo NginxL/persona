@@ -235,7 +235,11 @@ func (s *Service) acceptCard(ctx context.Context, t Todo, a acceptAsk, again boo
 		head = "assistant-reports.accept_again"
 	}
 	title := s.feishuDirection(ctx, t, s.feishuDirections(ctx)) + i18n.T(l, head, i18n.Args{"task": clip(oneLine(t.Title), 30)})
-	c := feishubot.NewCard("🧪 "+title, feishubot.Purple, title)
+	color := feishubot.Orange // the owner is to check it
+	if !a.AcceptedAt.IsZero() {
+		color = feishubot.Grey
+	}
+	c := feishubot.NewCard(title, color, title).Tag(i18n.T(l, "assistant-reports.tag_accept"), feishubot.Neutral)
 	link := i18n.T(l, "assistant-reports.accept_no_link")
 	if a.Link != "" {
 		link = "[" + feishubot.EscapeMarkdown(clip(a.Link, 80)) + "](" + a.Link + ")"

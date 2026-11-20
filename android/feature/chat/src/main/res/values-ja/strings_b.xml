@@ -490,4 +490,5 @@
     <string name="chat_turn_fix_model_route_launcher">%1$sでモデルを使えません</string>
     <string name="chat_turn_fix_model_route_detail">モデル名が正しくないか、このモデルは今使えません。別のモデルを試してください。</string>
     <string name="chat_turn_fix_action">直す</string>
+    <string name="chat_slash_saved_prompts">保存済みプロンプト</string>
 </resources>

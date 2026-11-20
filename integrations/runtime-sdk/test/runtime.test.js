@@ -15,13 +15,125 @@ test('hello names the runtime and declares only the caps whose driver methods ex
   assert.equal(n.hello.runtime, 'toy')
   assert.equal(n.hello.name, 'Toy')
   assert.equal(n.hello.agent, 'claude')
-  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false })
+  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false,
+    queue_edit: false, queue_send_now: false })
   assert.equal(n.hello.launcher, undefined, 'no launcher without start')
   await until('list', () => n.last('runtime.sessions'))
   await n.peer.call('session.send', { session_id: 's1', text: 'x' })
   await assert.rejects(n.peer.call('session.interrupt', { session_id: 's1' }), /unsupported/)
+  for (const method of ['session.queue.edit', 'session.queue.send_now']) {
+    await assert.rejects(n.peer.call(method, { session_id: 's1' }), { code: 'unsupported' })
+  }
+  await assert.rejects(n.peer.call('session.fork', { session_id: 's1' }), (error) => error.code === 'unsupported')
   assert.throws(() => createRuntime(minimal(), {}), /runtime id/)
 })
+
+test('queue capabilities forward edits and steering, and publish both changes', async (t) => {
+  const node = await startFakeNode(t)
+  const session_id = 's1'
+  let queued = ['first', 'second']
+  const rt = createRuntime(minimal({
+    listSessions: async () => [{ session_id, status: 'working', queued }],
+    editQueue: async (params) => {
+      assert.deepEqual(params, { session_id, keep: [1] })
+      const queue = queued
+      queued = params.keep.map((index) => queue[index])
+      return { queue }
+    },
+    sendNow: async (params) => {
+      assert.deepEqual(params, { session_id })
+      queued = []
+    },
+  }), { runtime: 'toy', socketPath: node.path, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  await rt.start()
+  await until('initial queue published', () => node.last('runtime.sessions')?.sessions[0]?.queued?.length === 2)
+  assert.equal(node.hello.caps.queue_edit, true)
+  assert.equal(node.hello.caps.queue_send_now, true)
+  assert.deepEqual(await node.peer.call('session.queue.edit', { session_id, keep: [1] }), { queue: ['first', 'second'] })
+  await until('edit published', () => node.last('runtime.sessions').sessions[0].queued?.length === 1)
+  assert.deepEqual(await node.peer.call('session.queue.send_now', { session_id }), { sent: true })
+  await until('send-now published', () => node.last('runtime.sessions').sessions[0].queued?.length === 0)
+})
+
+test('fork advertises native support and returns the driver response', async (t) => {
+  const node = await startFakeNode(t)
+  const params = { session_id: 's1', at_item_id: '12#0' }
+  const rt = createRuntime(minimal({ fork: async (input) => {
+    assert.deepEqual(input, params)
+    return { session_id: 's2' }
+  } }), { runtime: 'toy', socketPath: node.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.fork, true)
+  assert.deepEqual(await node.peer.call('session.fork', params), { session_id: 's2' })
+})
+
+test('assistant worker PID snapshots report updates and replay only live workers after reconnect', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  assert.equal(rt.assistantPid('s1', 110), false)
+  assert.throws(() => rt.assistantPid('s1', -1), TypeError)
+  await rt.start()
+  await until('first PID report', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  rt.assistantPid('s2', 220)
+  rt.assistantPid('s1', 0)
+  await until('s1 removed', () => node.last('runtime.assistant_pids')?.pids.s2 === 220 && !node.last('runtime.assistant_pids').pids.s1)
+  const peer = node.peer
+  const reports = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('replayed on new connection', () => node.peer !== peer && node.all('runtime.assistant_pids').length > reports)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: { s2: 220 } })
+  rt.assistantPid('s2', 0)
+  await until('empty snapshot', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+})
+
+test('the last assistant worker exiting while the hub is down replays an empty snapshot when it returns', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  await rt.start()
+  await until('connected and listed', () => rt.hubConnected && node.last('runtime.sessions'))
+  rt.assistantPid('s1', 110)
+  await until('worker reported', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  node.setHub(false)
+  await until('hub gone', () => !rt.hubConnected)
+  rt.assistantPid('s1', 0)
+  await until('worker removed', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+  const reports = node.all('runtime.assistant_pids').length
+  const peer = node.peer
+  node.setHub(true)
+  await until('snapshot replayed', () => node.all('runtime.assistant_pids').length > reports)
+  assert.equal(node.peer, peer)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+  node.setHub(false)
+  await until('hub gone again', () => !rt.hubConnected)
+  const beforeReconnect = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('next socket sends its empty snapshot', () => node.peer !== peer && node.all('runtime.assistant_pids').length > beforeReconnect)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+})
+
+for (const [assistant, features] of [[true, []], [false, ['assistant_pids']]]) {
+  test(`assistant PID reports require both sides to opt in (assistant=${assistant})`, async (t) => {
+    const node = await startFakeNode(t, { features })
+    const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+      runtime: 'toy', assistant, socketPath: node.path, refreshMs: 0,
+    })
+    t.after(() => rt.stop())
+    await rt.start()
+    await until('runtime listed', () => node.last('runtime.sessions'))
+    assert.equal(rt.assistantPid('s1', 110), false)
+    await rt.pushNow()
+    assert.equal(node.last('runtime.assistant_pids'), undefined)
+  })
+}
 
 test('a list carries the transcripts the runtime names as its own though it does not list them', async (t) => {
   const n = await startFakeNode(t)
@@ -143,6 +255,22 @@ test('content rewritten under another history goes out even where its seq did no
   rt.append('s1', { items: [], fromSeq: 4, toSeq: 5, history: 'h3' }) // the same again: already pushed
   await new Promise((r) => setTimeout(r, 100))
   assert.equal(n.all('session.items').length, 3)
+})
+
+test('a wake batch reaches a watcher before the first live text of the new exchange', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal({ items: async () => ({ items: [], history: 'h', to_seq: 0 }) }), { runtime: 'toy', socketPath: n.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  rt.append('s1', { items: [{ id: 'reply#0', seq: 1, kind: 'text' }], fromSeq: 0, toSeq: 1, history: 'h' })
+  rt.append('s1', { items: [{ id: 'reply#-1', seq: 2, kind: 'notice', wake: true }], fromSeq: 1, toSeq: 2, history: 'h' })
+  rt.stream('s1', 'Checking again.')
+  await until('new exchange starts streaming', () => n.last('session.delta')?.text === 'Checking again.')
+  const events = n.events.filter(entry => entry.event === 'session.items' || entry.event === 'session.delta')
+  assert.deepEqual(events.map(entry => entry.event), ['session.items', 'session.delta'])
+  assert.deepEqual(events[0].params.items.map(item => item.id), ['reply#0', 'reply#-1'])
 })
 
 test('in-place item updates under the same history go out without advancing seq and coalesce by id', async (t) => {

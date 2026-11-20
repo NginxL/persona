@@ -369,6 +369,8 @@ export interface UIPlace {
   connector?: string;
   /** The sidebar group a nav_page goes in unless the user put it elsewhere (#9071), its title in the app's language. */
   group?: { id: string; title: string };
+  /** A nav_page's icon color (a named Color), drawn only with Colored sidebar icons (#10822); colorOf reads it. */
+  icon_color?: string;
 }
 
 export interface UIBadge {
@@ -1139,5 +1141,7 @@ export function stackedShare(item: Pick<UIItem, "kind" | "stacked" | "series">):
   if (values.some((v) => !Number.isFinite(v) || v < 0)) return null;
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return null;
-  return values.map((value, i) => ({ series: i, value, ratio: value / total }));
+  const scale = Number.isFinite(total) ? 1 : Math.max(...values);
+  const scaledTotal = values.reduce((a, b) => a + b / scale, 0);
+  return values.map((value, i) => ({ series: i, value, ratio: value / scale / scaledTotal }));
 }

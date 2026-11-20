@@ -2,11 +2,13 @@
 // chunk of their own (SessionDialogs.tsx loads them with lazyDialog), so the first screen does not carry them (#10382).
 // The menu that offers one starts the chunk when it opens (preloadSessionDialogs), so the click draws the dialog at once.
 import { useEffect, useState } from "react";
+import { isUntouchedStart } from "../../lib/agent-archives";
 import { api, enc, errorText, sessionPath } from "../../lib/api";
-import { sessionCan, sessionTitle } from "../../lib/format";
+import { herdrTabName, sessionCan, sessionTitle } from "../../lib/format";
+import { useHerdrTabName } from "../../lib/agents-display";
 import { renameBody } from "../../lib/session-actions";
 import { href, navigate } from "../../lib/router";
-import { dropSession, refresh, refreshAssistant, upsertSession } from "../../lib/store";
+import { dropSession, getSession, refresh, refreshAssistant, upsertSession } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Button, Dialog, toast } from "../../ui/atoms";
 import { t } from "../../i18n";
@@ -17,6 +19,7 @@ export function RenameDialog({ session, open, onClose }: { session: Session; ope
   const [tab, setTab] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const preferTab = useHerdrTabName();
   useEffect(() => {
     if (!open) return;
     setTab(session.slot_name ?? "");
@@ -25,7 +28,8 @@ export function RenameDialog({ session, open, onClose }: { session: Session; ope
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const hasTab = !session.assistant && Boolean(session.slot_id);
-  const body = renameBody(session, tab, title);
+  const unified = preferTab && Boolean(herdrTabName(session));
+  const body = renameBody(session, tab, title, unified);
   const save = async () => {
     // the form submits on Enter while the field stays editable: a second Enter would rename (type /rename) twice
     if (busy) return;
@@ -34,7 +38,8 @@ export function RenameDialog({ session, open, onClose }: { session: Session; ope
     try {
       await api(`${sessionPath(session.machine_id, session.session_id)}/rename`, { method: "POST", json: body });
       // the list shows the new name at once; the hub's push confirms it
-      upsertSession({ ...session, ...(body.title ? { title: body.title } : {}), ...(body.tab_name ? { slot_name: body.tab_name } : {}) });
+      const latest = getSession(session.machine_id, session.session_id) ?? session;
+      upsertSession({ ...latest, ...(body.title ? { title: body.title } : {}), ...(body.tab_name ? { slot_name: body.tab_name } : {}) });
       if (session.assistant) void refreshAssistant().catch(() => {});
       toast(t("chat-sessiondialogs.renamed"), "ok");
       onClose();
@@ -67,10 +72,12 @@ export function RenameDialog({ session, open, onClose }: { session: Session; ope
           void save();
         }}
       >
-        {hasTab && <Field label={t("chat-sessiondialogs.tab_name")} value={tab} onChange={setTab} autoFocus />}
-        <Field label={t("chat-sessiondialogs.session_name")} value={title} onChange={setTitle} autoFocus={!hasTab} />
+        {unified ? <Field label={t("chat-sessiondialogs.name")} value={tab} onChange={setTab} autoFocus /> : <>
+          {hasTab && <Field label={t("chat-sessiondialogs.tab_name")} value={tab} onChange={setTab} autoFocus />}
+          <Field label={t("chat-sessiondialogs.session_name")} value={title} onChange={setTitle} autoFocus={!hasTab} />
+        </>}
         {/* the agent's hint is about herdr's tab and Claude's /rename: a session without a terminal (a runtime's) has neither */}
-        {(session.assistant || sessionCan(session, "terminal")) && <p className="text-label leading-relaxed text-ink-3">{session.assistant ? t("chat-sessiondialogs.rename_hint_assistant") : t("chat-sessiondialogs.rename_hint_agent")}</p>}
+        {(session.assistant || sessionCan(session, "terminal")) && <p className="text-label leading-relaxed text-ink-3">{unified ? t("chat-sessiondialogs.rename_hint_unified") : session.assistant ? t("chat-sessiondialogs.rename_hint_assistant") : t("chat-sessiondialogs.rename_hint_agent")}</p>}
         <button type="submit" hidden />
       </form>
     </Dialog>
@@ -150,7 +157,7 @@ function Field({ label, value, onChange, autoFocus }: { label: string; value: st
 // conversation comes back once it is used again (claude --resume).
 export function DeleteSessionDialog({ session, machineName, open, onClose }: { session: Session; machineName: string; open: boolean; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
-  const wt = useAgentWorktree(session, open);
+  const wt = useAgentWorktree(session, open && !isUntouchedStart(session));
   const [cleanup, setCleanup] = useState<Cleanup>(KEEP);
   useEffect(() => {
     if (open) setCleanup(KEEP); // each time: keeping is the default

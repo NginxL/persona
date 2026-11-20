@@ -142,6 +142,9 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 			}
 		}
 		tools := s.mcpTools(ctx, assistant)
+		if assistant {
+			tools = s.guardTools(ctx, machine, session, tools)
+		}
 		if !assistant {
 			tools = append(tools, s.leaderTools(ctx, machine, session)...)
 			tools = append(tools, s.spawnTools(ctx, machine, session)...)

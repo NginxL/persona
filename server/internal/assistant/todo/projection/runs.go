@@ -70,12 +70,44 @@ func (r run) since() time.Time {
 	return r.s.UpdatedAt
 }
 
+func parkEvidenceInteractionID(f *Facts) string {
+	sv := f.Supervision
+	if sv == nil || sv.State != reviewParked || sv.Parked == nil || sv.Parked.Evidence == nil || sv.Parked.Evidence.Kind != parkExternalEvent {
+		return ""
+	}
+	return sv.Parked.Evidence.InteractionID
+}
+
+func parkInteractionID(f *Facts, a Agent) string {
+	if a.DismissedAt != nil || a.StartError != "" {
+		return ""
+	}
+	return parkEvidenceInteractionID(f)
+}
+
+// linkedParkCard is the exact pending card a current external-event park names for this worker, if it still exists.
+func linkedParkCard(f *Facts, a Agent) *proto.Interaction {
+	id := parkInteractionID(f, a)
+	if id == "" {
+		return nil
+	}
+	for i := range f.Interactions {
+		c := &f.Interactions[i]
+		if c.ID == id && c.MachineID == a.MachineID && c.SessionID == a.SessionID {
+			return c
+		}
+	}
+	return nil
+}
+
 // activeRuns are the to-do's runs that still work for it (not released, not dismissed, started), in the list's order
-// (the newest link first), each read off its session.
+// (the newest link first), each read off its session. A released worker with the park's exact pending card remains,
+// because releasing the worker did not answer its owner request.
 func activeRuns(f *Facts, now time.Time) []run {
 	var out []run
 	for _, a := range f.Agents {
-		if a.ReleasedAt != nil || a.DismissedAt != nil || a.StartError != "" {
+		linked := linkedParkCard(f, a)
+		if (a.ReleasedAt != nil || a.DismissedAt != nil || a.StartError != "") && linked == nil {
 			continue // a run whose start failed counts as stopped
 		}
 		r := run{link: a, s: &noSession}
@@ -94,7 +126,16 @@ func activeRuns(f *Facts, now time.Time) []run {
 				r.card = c
 			}
 		}
+		if linked != nil {
+			r.card = linked
+		}
 		r.kind = runReading(r, now)
+		if linked != nil {
+			r.kind = runAsks
+		} else if r.card == nil && r.kind == runAsks && r.s.Work != nil && r.s.Work.InteractionID == parkInteractionID(f, a) {
+			// The exact linked card is gone; this is its stale session state, not a new owner question.
+			r.kind = runIdle
+		}
 		out = append(out, r)
 	}
 	return out

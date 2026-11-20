@@ -156,12 +156,51 @@ func (d *DB) EditStartedPlanTask(ctx context.Context, id string, index int, edit
 	return &row, nil
 }
 
+const compareTaskQueueSQL = `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text, 'queue'], $5::jsonb), updated_at = $6
+	WHERE id = $1 AND state = 'started' AND tasks->$2::integer->>'todo_id' = $3 AND tasks->$2::integer->'queue' = $4::jsonb`
+
 // CompareTaskQueue changes one authorized start's queue only if it is still the entry the dispatcher read.
 func (d *DB) CompareTaskQueue(ctx context.Context, id string, index int, todoID string, before, after json.RawMessage, at time.Time) (bool, error) {
-	tag, err := d.pool.Exec(ctx, `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text, 'queue'], $5::jsonb), updated_at = $6
-		WHERE id = $1 AND state = 'started' AND tasks->$2::integer->>'todo_id' = $3 AND tasks->$2::integer->'queue' = $4::jsonb`,
-		id, index, todoID, []byte(before), []byte(after), at)
+	tag, err := d.pool.Exec(ctx, compareTaskQueueSQL, id, index, todoID, []byte(before), []byte(after), at)
 	return tag.RowsAffected() == 1, err
+}
+
+const unstartedQueueTodo = `SELECT 1 FROM todos WHERE id = $1 AND plan_id = $2 AND origin <> ''
+	AND done_at IS NULL AND done_by <> 'cancelled' AND start_error = ''
+	AND (reopened_at IS NULL OR reopened_at <= $3)`
+
+// UnstartedQueuedTodo reads durable eligibility immediately before dispatch.
+// A manager's already-loaded to-do book cannot attest to another writer's changes.
+func (d *DB) UnstartedQueuedTodo(ctx context.Context, todoID, planID string, since time.Time) (bool, error) {
+	var eligible bool
+	err := d.pool.QueryRow(ctx, `SELECT EXISTS (`+unstartedQueueTodo+`)
+		AND NOT EXISTS (SELECT 1 FROM todo_agents WHERE todo_id = $1)`, todoID, planID, since).Scan(&eligible)
+	return eligible, err
+}
+
+// ClaimUnstartedTaskQueue combines to-do eligibility and the exact queue CAS.
+// Agent link writers lock the same to-do row. Check membership in a separate
+// statement after acquiring it so links committed while the lock was busy are visible.
+func (d *DB) ClaimUnstartedTaskQueue(ctx context.Context, planID string, index int, todoID string, since time.Time, before, after json.RawMessage, at time.Time) (bool, error) {
+	var claimed bool
+	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		var one int
+		err := tx.QueryRow(ctx, unstartedQueueTodo+` FOR UPDATE`, todoID, planID, since).Scan(&one)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var linked bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM todo_agents WHERE todo_id = $1)`, todoID).Scan(&linked); err != nil || linked {
+			return err
+		}
+		tag, err := tx.Exec(ctx, compareTaskQueueSQL, planID, index, todoID, []byte(before), []byte(after), at)
+		claimed = tag.RowsAffected() == 1
+		return err
+	})
+	return claimed && err == nil, err
 }
 
 func (d *DB) AppendFeed(ctx context.Context, f FeedRow) error {

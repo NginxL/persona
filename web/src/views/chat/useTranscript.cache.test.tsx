@@ -422,12 +422,12 @@ describe("other chats' memory cache", () => {
 
   it("drops an older page still on its way when the refresh leaves a hole", async () => {
     await readOnce();
-    reopen();
     await act(async () => { void shown.loadEarlier(); await Promise.resolve(); });
     expect(shown.loadingEarlier).toBe(true);
-    await answer({ items: [item("q2", 40, "Later question", "user"), item("a2", 41)], has_more: true, history: "v1", to_seq: 41 });
+    reopen();
     expect(shown.loadingEarlier).toBe(false);
-    await answer({ items: [item("older", 5, "Older", "user")], has_more: false });
+    await answer({ items: [item("q2", 40, "Later question", "user"), item("a2", 41)], has_more: true, history: "v1", to_seq: 41 }, 1);
+    await answer({ items: [item("older", 5, "Older", "user")], has_more: false }, 0);
     expect(ids()).toEqual(["q2", "a2"]);
     expect(shown.hasMore).toBe(true);
   });

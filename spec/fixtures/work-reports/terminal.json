@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "done",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "",
+      "markdown": true
+    },
+    {
+      "name": "reserved-next",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n- Next: Check the next sample.\n\n---",
+      "display": "",
+      "markdown": true
+    },
+    {
+      "name": "blocked",
+      "text": "### Persona 工作报告\n\n- Status: blocked\n- Merged: no\n- Deployed: n/a\n- Did: 已核对三份样例。\n- Missing: 第四份样例。\n- Waiting: 等待样例负责人提供。\n\n---",
+      "display": "",
+      "markdown": true
+    },
+    {
+      "name": "japanese-crlf",
+      "text": "サンプル📋\r\n\r\n### Persona 作業報告\r\n- Status: not_done\r\n- Merged: no\r\n- Deployed: no\r\n- Missing: 残りのサンプルを確認する。\r\n---",
+      "display": "サンプル📋",
+      "markdown": true
+    },
+    {
+      "name": "combining-text",
+      "text": "The café sample matched. 📋\n\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Checked café and 📋.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "The café sample matched. 📋",
+      "markdown": true
+    },
+    {
+      "name": "combining-mark-in-heading",
+      "text": "### Persóna work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Persóna work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "fullwidth-heading",
+      "text": "＃＃＃ Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "＃＃＃ Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "nonbreaking-heading-gap",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "after-example",
+      "text": "````md\nA sample.\n```\n````\n\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "````md\nA sample.\n```\n````",
+      "markdown": true
+    },
+    {
+      "name": "runtime-footer",
+      "text": "Read the notes.\n\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---\n\n<oai-mem-citation>notes.md</oai-mem-citation>",
+      "display": "Read the notes.\n\n<oai-mem-citation>notes.md</oai-mem-citation>",
+      "markdown": true
+    },
+    {
+      "name": "ordinary-heading",
+      "text": "### Work notes\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Work notes\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "quoted",
+      "text": "> ### Persona work report\n> \n> - Status: done\n> - Merged: n/a\n> - Deployed: n/a\n> - Did: Reviewed the four sample entries.\n> - Artifact: doc notes/review.md\n> - Verified: Four entries matched the checklist.\n> \n> ---",
+      "display": "> ### Persona work report\n> \n> - Status: done\n> - Merged: n/a\n> - Deployed: n/a\n> - Did: Reviewed the four sample entries.\n> - Artifact: doc notes/review.md\n> - Verified: Four entries matched the checklist.\n> \n> ---",
+      "markdown": false
+    },
+    {
+      "name": "closed-example",
+      "text": "```md\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---\n```",
+      "display": "```md\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---\n```",
+      "markdown": false
+    },
+    {
+      "name": "unclosed-example",
+      "text": "~~~md\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "~~~md\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "short-fence-inside",
+      "text": "````md\n```\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "````md\n```\n### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "indented-heading",
+      "text": "    ### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "    ### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "no-end",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n",
+      "display": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n",
+      "markdown": false
+    },
+    {
+      "name": "unknown-status",
+      "text": "### Persona work report\n\n- Status: later\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Persona work report\n\n- Status: later\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "unknown-field",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Title: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Title: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "duplicate-status",
+      "text": "### Persona work report\n\n- Status: done\n- Status: blocked\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "display": "### Persona work report\n\n- Status: done\n- Status: blocked\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---",
+      "markdown": false
+    },
+    {
+      "name": "earlier-report",
+      "text": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---\n\nAn example from an earlier turn.",
+      "display": "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Did: Reviewed the four sample entries.\n- Artifact: doc notes/review.md\n- Verified: Four entries matched the checklist.\n\n---\n\nAn example from an earlier turn.",
+      "markdown": false
+    },
+    {
+      "name": "legacy-archive",
+      "text": "In the archive.\n\n<closeout status=\"done\" merged=\"no\" deployed=\"no\">\ndid: Read the notes.\n</closeout>",
+      "display": "In the archive.",
+      "markdown": false
+    }
+  ]
+}

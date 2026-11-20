@@ -4,21 +4,42 @@ import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgent
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { setToken } from "./api";
+import { t } from "../i18n";
+import { AgentsDisplayRow } from "../views/settings/AgentsDisplayRow";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let saved: boolean | undefined;
+let preferTab: boolean;
 let fail = "";
 let requests: { method: string; body?: Record<string,unknown> }[];
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers:{"Content-Type":"application/json"} });
 beforeEach(() => {
- localStorage.clear(); resetAgentsDisplay(); saved = undefined; fail = ""; requests = [];
+ localStorage.clear(); resetAgentsDisplay(); saved = undefined; preferTab = false; fail = ""; requests = [];
  vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
   const method = init?.method ?? "GET";
   const body = init?.body ? JSON.parse(init.body) : undefined;
   requests.push({method,body});
   if (fail === method) return json({error:"offline"},503);
-  if (body && (!body.only_if_unset || saved === undefined)) saved = body.show_botmux;
-  return json({ show_botmux:saved ?? true,configured:saved !== undefined });
+  if (typeof body?.show_botmux === "boolean" && (!body.only_if_unset || saved === undefined)) saved = body.show_botmux;
+  if (typeof body?.use_herdr_tab_name === "boolean") preferTab = body.use_herdr_tab_name;
+  return json({ show_botmux:saved ?? true,configured:saved !== undefined,use_herdr_tab_name:preferTab });
  }));
+});
+
+it("saves the Settings › Agents name switch and follows later hub reads", async () => {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const nameSwitch = () => [...host.querySelectorAll<HTMLButtonElement>('[role="switch"]')]
+    .find((button) => button.getAttribute("aria-label") === t("settings.use_herdr_tab_name"))!;
+  await act(async () => { root.render(<AgentsDisplayRow />); });
+  expect(nameSwitch().getAttribute("aria-checked")).toBe("false");
+  await act(async () => { nameSwitch().click(); });
+  expect(requests.at(-1)).toEqual({ method: "PUT", body: { use_herdr_tab_name: true } });
+  expect(nameSwitch().getAttribute("aria-checked")).toBe("true");
+  expect(saved).toBeUndefined();
+  preferTab = false;
+  await act(refreshAgentsDisplay);
+  expect(nameSwitch().getAttribute("aria-checked")).toBe("false");
+  await act(async () => { root.unmount(); });
 });
 it("fresh default, conditional legacy migration, explicit choice wins and clearing storage preserves it", async () => {
  await refreshAgentsDisplay(); expect(saved).toBeUndefined(); expect(requests).toHaveLength(1);

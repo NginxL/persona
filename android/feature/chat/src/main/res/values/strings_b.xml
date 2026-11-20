@@ -505,4 +505,5 @@
     <string name="chat_turn_fix_model_route_launcher">Model not connected: this model isn\'t available on %1$s</string>
     <string name="chat_turn_fix_model_route_detail">The model name is wrong, or the model isn\'t available right now; try another one.</string>
     <string name="chat_turn_fix_action">Fix it</string>
+    <string name="chat_slash_saved_prompts">Saved Prompts</string>
 </resources>

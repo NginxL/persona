@@ -162,7 +162,7 @@ struct HeaderModeTests {
 
     /// Picking the checked mode while a restart into Allow Everything waits sends it without a confirmation so the node
     /// calls off the restart directly instead of forcing a switch to a third mode (#7996 review).
-    @Test func pickingTheCheckedModeCallsOffAWaitingRestart() throws {
+    @MainActor @Test func pickingTheCheckedModeCallsOffAWaitingRestart() throws {
         let idle = try session(#","agent":"claude","permission_mode":"acceptEdits""#)
         #expect(!SessionModes.appliesPick(idle, to: "acceptEdits"))
         #expect(SessionModes.appliesPick(idle, to: "plan"))
@@ -253,7 +253,7 @@ struct HeaderModeTests {
         #expect(SessionModes.bypassUnavailable(agy) == nil)
         let rows = SessionModes.commandRows(agy)
         #expect(Set(rows.map(\.option.id)) == ["default", "acceptEdits", "plan", "auto", "bypassPermissions"])
-        #expect(rows.allSatisfy(\.enabled))
+        #expect(rows.allSatisfy { $0.enabled })
         #expect(rows.first { $0.option.id == "bypassPermissions" }?.option.detail == SessionModes.assistantModes.last?.detail)
         #expect(SessionModes.confirmation(agy, to: "bypassPermissions") == nil)
         let inBypass = try session(#","agent":"agy","source_kind":"runtime","permission_mode":"bypassPermissions","capabilities":{"read":true,"send":true,"modes":true}"#)

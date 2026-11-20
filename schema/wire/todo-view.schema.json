@@ -60,6 +60,16 @@
         "rest"
       ]
     },
+    "TodoLineKey": {
+      "description": "The line keys produced by this version of the projection; see the Line keys table in spec/fixtures/todo-view/README.md. Clients can receive a newer key.",
+      "type": "string",
+      "enum": ["failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"]
+    },
+    "TodoLineArg": {
+      "description": "The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on the wire.",
+      "type": "string",
+      "enum": ["at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until"]
+    },
     "TodoLine": {
       "description": "The row's second line as a key and its arguments, never words: each client says it in its own language (spec/fixtures/todo-view/README.md lists every key and its arguments).",
       "type": "object",
@@ -301,7 +311,7 @@
         "needs_you": {
           "type": "integer",
           "minimum": 0,
-          "description": "N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are not counted. The To-dos row's badge, the bar's Needs you and the Needs you header show it."
+          "description": "N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are not counted. For the To-dos V1 design's To-dos row badge, the bar's Needs you and the Needs you header. Of the clients only iOS reads it, behind the V1 gate that is off in release builds; the release clients count their To-dos row by rules of their own."
         },
         "in_progress": {
           "type": "integer",

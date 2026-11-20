@@ -41,6 +41,7 @@ var Moved = []string{
 	"extensions", "plugins", "trusted_extension_markets", "extension_market", "extension_runtime", "ui_page_sessions", "usage", "sent_ledger_days", "sent_recall_hours",
 	"agents", "kb", "ai", "inbox", "hook_timeout_minutes",
 	"assistant.owner", "assistant.notes", "assistant.machine", "assistant.launcher", "assistant.memory_dreaming",
+	"assistant.complete_agentless_todos", "assistant.supervision_batch_minutes",
 }
 
 // MarkerKey is manager.json's record of the move: the sections it took over from hub.json (copied, or kept as

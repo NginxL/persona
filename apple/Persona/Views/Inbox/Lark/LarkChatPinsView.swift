@@ -117,7 +117,7 @@ struct LarkChatPinsView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack(spacing: Theme.Space.s) {
                         if let m = pin.message {
-                            LarkAvatarImage(name: m.senderName, url: m.senderAvatar, size: Theme.Size.iconL)
+                            LarkAvatarImage(name: m.senderName, url: m.senderPicture, size: Theme.Size.iconL)
                                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge).accessibilityHidden(true)
                             Text(m.senderName).font(Theme.Font.labelMedium).lineLimit(1)
                         }

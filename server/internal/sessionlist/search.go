@@ -180,6 +180,9 @@ func normalizedDocument(d SearchDocument) SearchDocument {
 // counted, never as a projection of already paginated hits. It runs under the index's lock.
 func (i *Index) searchCandidates(o Options, f filters, allowed map[string]bool, visit func(item, row *record, rowID, side string) error) error {
 	for id, item := range i.items {
+		if item.item.HiddenByDirectory && !f.IncludeHidden {
+			continue
+		}
 		row, rowID, side := item, id, ""
 		if fold := item.item.Fold; o.Roots && fold != nil && fold.SearchAs != "" && fold.Root != "" {
 			if f.NoPrivate && item.item.Private {

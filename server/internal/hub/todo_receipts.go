@@ -162,14 +162,16 @@ func todoOfWrite(kind string, r *http.Request) string {
 	return in.TodoID
 }
 
-// todoSendOutcome is how a to-do write's relay ended, for its final todo_send_state and its receipt alike. Delivered
-// on a 2xx: its Agent took the message, or the manager took the answer (one it recorded for the supervisor too, a 200
-// that says delivered "none"). Failed only when the answer shows nothing was taken: it says delivered "none", it never
+// todoSendOutcome is how a to-do write's relay ended, for its final todo_send_state and its receipt alike. Delivered on
+// a 2xx: its Agent took the message, or the manager took the answer (one it recorded for the supervisor too, a 200 that
+// says delivered "none"). Failed only when the answer shows nothing was taken: it says delivered "none", it never
 // reached a manager (assistant_offline, whose receipt is let go, so the op id may go again), or the request was refused
-// before anything ran (400, 401, 403, 404). Anything else is unknown, since it may have been taken: 502
-// assistant_in_doubt, and a manager's 409 or 502 that says nothing of delivery (the conversation route answers 409 for
-// a send whose result it does not know too). The same op id gets the recorded answer back; only a new one could type
-// it twice.
+// before anything ran (400, 401, 403, 404 that say nothing of delivery). Anything else is unknown, since it may have
+// been taken: 502 assistant_in_doubt, a manager's send_in_doubt (delivered "unknown", or "yes" for words typed before
+// what followed failed), and a 409 or 502 that says nothing of delivery, which is all an older manager says (its
+// conversation route answers 409 for a send whose result it does not know too); a newer one says delivered on every
+// refusal of a to-do's write (spec/fixtures/todo-writes). The same op id gets the recorded answer back; only a new one
+// could type it twice.
 func todoSendOutcome(status int, body []byte) string {
 	var out struct {
 		Delivered string `json:"delivered"`

@@ -1,0 +1,12 @@
+<persona-context kind="context" title="Example Chat机器人" url="">
+Example Owner在Example Chat里私聊 Persona 机器人发来这条消息。这一轮的最终回答会以机器人的身份发回Example Chat（Markdown）：结论先行、短一些，也不用再 notify_user。需要确认的照常 ask_user，用户要到 App 里答。
+</persona-context>
+<persona-context kind="context" title="引用的消息" url="">
+会議 原文
+</persona-context>
+<persona-context kind="context" title="转发的聊天记录" url="">
+Cliente: la entrega será mañana.
+</persona-context>
+返事はスペイン語で #42
+
+（Example Chat里还发来了这些，机器人还不能转交：証拠 #42、文件「資料.pdf」）

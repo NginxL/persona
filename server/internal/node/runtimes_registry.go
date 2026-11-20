@@ -48,7 +48,8 @@ type runtimeRegistry struct {
 	// started: sessions the hub started through a runtime (session.start), by session id: the runtime that started
 	// it and when. Another runtime that comes to run one (pi's companion starts sessions in pi-web) is told the hub
 	// drove it (runtime.driven), so its cards go to the phone first as the starter's would.
-	started map[string]startedSession
+	started     map[string]startedSession
+	compactions map[string]*runtimeCompaction
 }
 
 // startedSession is who started a session for the hub, and when (runtimeRegistry.started).
@@ -211,6 +212,7 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 	}
 	h.mu.Lock()
 	h.hello, h.ready = hello, true
+	h.assistantPIDs = nil
 	h.mu.Unlock()
 	return stale, nil
 }
@@ -239,6 +241,9 @@ func (b *runtimeRegistry) remember(h *runtimeConn, id string, now time.Time) {
 		sort.Slice(oldest, func(i, j int) bool { return b.known[oldest[i]].at.Before(b.known[oldest[j]].at) })
 		for _, k := range oldest[:len(oldest)-maxKnown*3/4] {
 			delete(b.known, k)
+			if compact := b.compactions[k]; compact != nil && compact.state.State != proto.CompactionRunning {
+				delete(b.compactions, k)
+			}
 		}
 	}
 }
@@ -400,6 +405,80 @@ func (b *runtimeRegistry) assistantIn(pids []int) *runtimeConn {
 	return nil
 }
 
+func (b *runtimeRegistry) clearAssistantPIDs() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, h := range b.conns {
+		h.mu.Lock()
+		h.assistantPIDs = nil
+		h.mu.Unlock()
+	}
+}
+
+func (b *runtimeRegistry) setAssistantPIDs(h *runtimeConn, reports map[string]int, isAssistant func(string) bool) {
+	h.mu.Lock()
+	pid := h.pid
+	ready := h.ready && h.hello.Caps.Assistant
+	h.mu.Unlock()
+	if !ready || pid <= 0 {
+		return
+	}
+	verified := make(map[string]int)
+	seen := make(map[int]string)
+	for id, worker := range reports {
+		if runtimeSessionID(id) && strictDescendant(worker, pid, parentPID) && isAssistant(id) {
+			if previous, duplicate := seen[worker]; duplicate {
+				delete(verified, previous)
+			} else {
+				seen[worker] = id
+				verified[id] = worker
+			}
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns[h.serial] != h {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ready && h.hello.Caps.Assistant && h.pid == pid {
+		h.assistantPIDs = verified
+	}
+}
+
+type runtimeAssistantWorker struct {
+	host            *runtimeConn
+	runtimePID, pid int
+	session         string
+}
+
+func (b *runtimeRegistry) assistantWorkers() []runtimeAssistantWorker {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var workers []runtimeAssistantWorker
+	for _, h := range b.conns {
+		if h.peer != nil {
+			select {
+			case <-h.peer.Done():
+				continue
+			default:
+			}
+		}
+		h.mu.Lock()
+		if h.ready && h.hello.Caps.Assistant && h.pid > 0 {
+			for id, worker := range h.assistantPIDs {
+				workers = append(workers, runtimeAssistantWorker{host: h, runtimePID: h.pid, pid: worker, session: id})
+			}
+		}
+		h.mu.Unlock()
+	}
+	return workers
+}
+
 func (b *runtimeRegistry) add(peer *rpc.Peer) *runtimeConn {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -414,6 +493,9 @@ func (b *runtimeRegistry) remove(h *runtimeConn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, h.serial)
+	h.mu.Lock()
+	h.assistantPIDs = nil
+	h.mu.Unlock()
 	b.leftUnlisted(id)
 	b.leftRows(h, id)
 	b.recomputeOwners()
@@ -491,6 +573,9 @@ func (b *runtimeRegistry) setSessions(h *runtimeConn, list []proto.Session) (map
 		if startedHere(s) {
 			b.remember(h, s.SessionID, now)
 		}
+		if compact := b.compactions[s.SessionID]; compact != nil && compact.runtime == h {
+			compact.observe(s)
+		}
 		if st, ok := b.started[s.SessionID]; ok && st.runtime != h.hello.Runtime && now.Sub(st.at) < drivenFor &&
 			s.Status != proto.StatusOffline && !h.drivenTold[s.SessionID] {
 			if h.drivenTold == nil {
@@ -535,7 +620,11 @@ func (b *runtimeRegistry) appendSessions(dst []proto.Session) []proto.Session {
 		h.mu.Lock()
 		for i := range h.sessions {
 			if b.owner[h.sessions[i].SessionID] == h {
-				dst = append(dst, h.sessions[i])
+				row := h.sessions[i]
+				if compact := b.compactions[row.SessionID]; compact != nil {
+					row.Compaction = compact.state
+				}
+				dst = append(dst, row)
 			}
 		}
 		h.mu.Unlock()

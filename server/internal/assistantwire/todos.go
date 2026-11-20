@@ -86,4 +86,8 @@ const (
 	MethodTodoLink = "assistant.todo_link"
 	// EventTodoSpaceRenamed: TodoSpaceRenamed, one way.
 	EventTodoSpaceRenamed = "todos.space_renamed"
+	// CodeSendInDoubt: a to-do's message or answer that failed while its words may be with its Agent already
+	// (delivered "unknown") or are, with what followed failed ("yes"), #10465. Never retryable: a client checks its op
+	// id, or looks at the to-do, instead of sending the words again.
+	CodeSendInDoubt = "send_in_doubt"
 )

@@ -82,9 +82,10 @@ type AdmissionSettings struct {
 // across every computer. Names are matched exactly, because a launcher's agent kind cannot tell a launcher that draws on
 // the pool from a compatible one that does not. A launcher belongs to at most one group.
 type LauncherGroup struct {
-	Name      string   `json:"name"`
-	Launchers []string `json:"launchers"`
-	Cap       int      `json:"cap"`
+	Name      string            `json:"name"`
+	Launchers []string          `json:"launchers"`
+	Cap       int               `json:"cap"`
+	QuotaPool *GatewayQuotaPool `json:"quota_pool,omitempty"`
 }
 
 // launcherGroup is the group launcher belongs to; false when no group names it.
@@ -865,6 +866,9 @@ func (cfg AdmissionSettings) validate() error {
 			return fmt.Errorf("launcher_groups: the name %q is used twice", name)
 		}
 		names[name] = true
+		if g.QuotaPool != nil && !g.QuotaPool.valid() {
+			return fmt.Errorf("launcher_groups: quota_pool needs a usage source ID and provider claude or codex")
+		}
 		for _, l := range g.Launchers {
 			l = strings.TrimSpace(l)
 			if l == "" {

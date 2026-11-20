@@ -16,7 +16,7 @@ import (
 func (h *Hub) gitReview(w http.ResponseWriter, r *http.Request, m *Machine) {
 	q := r.URL.Query()
 	p := proto.GitReviewRequest{Cwd: q.Get("cwd"), Scope: q.Get("scope"), Base: q.Get("base"), Paths: q["path"]}
-	if strings.TrimSpace(p.Cwd) == "" {
+	if strings.TrimSpace(p.Cwd) == "" && !q.Has("backend_workspace_id") {
 		writeErr(w, http.StatusBadRequest, errors.New("cwd is required"))
 		return
 	}

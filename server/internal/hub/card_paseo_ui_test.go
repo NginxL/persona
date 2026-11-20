@@ -233,13 +233,13 @@ func TestCardCompatItemsConvertsPaseoUIForEveryClient(t *testing.T) {
 		{ID: "a", Kind: proto.KindText, Role: "assistant", Text: md},
 	}
 	for _, ring := range []bool{true, false} {
-		got := cardCompatItems(i18n.En, ring, items)
+		got := cardCompatItems(i18n.En, ring, true, items)
 		if got[0].Text != md || !strings.HasPrefix(got[1].Text, "```persona-view\n") || items[1].Text != md {
 			t.Fatalf("ring %v: %+v", ring, got)
 		}
 	}
 	plain := []proto.Item{{ID: "a", Kind: proto.KindText, Role: "assistant", Text: "no cards"}}
-	if got := cardCompatItems(i18n.En, true, plain); &got[0] != &plain[0] {
+	if got := cardCompatItems(i18n.En, true, true, plain); &got[0] != &plain[0] {
 		t.Fatal("a reply without blocks was copied")
 	}
 }

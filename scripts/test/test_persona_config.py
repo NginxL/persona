@@ -555,6 +555,37 @@ class UpdateURLConfigTests(unittest.TestCase):
                 self.assertEqual(generated['PERSONA_UPDATE_URL'], expected)
                 self.assertEqual(generated[PersonaConfigTests.former_prefix + 'UPDATE_URL'], expected)
 
+    def test_env_preserves_a_nonempty_update_url_override_and_keeps_the_fallbacks(self):
+        configured = 'https://configured.example.test/releases/latest/download'
+        override = 'https://override.example.test/releases/latest/download'
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / 'config.json'
+            base_env = {'HOME': directory, 'PATH': os.environ['PATH'], 'PERSONA_CONFIG': str(file)}
+            cases = (
+                ('environment wins', configured, override, override),
+                ('an empty override is absent', configured, '', configured),
+                ('configured update URL', configured, None, configured),
+                ('site dl fallback', None, None, 'https://site.example.test/dl'),
+            )
+            for name, configured_value, inherited, expected in cases:
+                with self.subTest(case=name):
+                    publish = {'site_url': 'https://site.example.test/'}
+                    if configured_value is not None:
+                        publish['update_url'] = configured_value
+                    file.write_text(json.dumps({'publish': publish}))
+                    env = dict(base_env)
+                    if inherited is not None:
+                        env['PERSONA_UPDATE_URL'] = inherited
+                    result = subprocess.run([sys.executable, str(ROOT / 'scripts/persona_config.py'), 'env'],
+                                            env=env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    shell = subprocess.run(['bash', '-c', result.stdout +
+                                            '\nprintf "%s|%s" "$PERSONA_UPDATE_URL" "$' +
+                                            PersonaConfigTests.former_prefix + 'UPDATE_URL"'],
+                                           env=env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(shell.returncode, 0, shell.stderr)
+                    self.assertEqual(shell.stdout, expected + '|' + expected)
+
     def test_update_url_refuses_what_a_hub_could_not_use(self):
         for value in ('http://site.example.test/dl', 'https://user:pw@site.example.test/dl', 'https://site.example.test/dl?x=1',
                       'https://site.example.test/dl#x', 'https://site.example.test/dl/latest.json', 'site.example.test/dl', 7, []):

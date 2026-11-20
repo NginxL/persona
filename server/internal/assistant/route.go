@@ -13,46 +13,23 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/kb"
-	"github.com/nwverse/persona/server/internal/prompts"
 )
 
-// New chat opens a direction (docs/design/proposals/owner-at-a-glance.md "New chat opens a direction; New agent goes
-// under one", #3607). Right after the owner sends a New chat's first message, the hub asks a small model under its own
-// purpose, assistant.route, off the conversation's path, whether the sentence opens a direction (a leader, a peer of the
-// existing ones) or is a quick chat. One call within routeTimeout: a slow, failed or unreadable answer is a quick chat,
-// and nothing shows (no strip, no error). A direction is offered, not made: the offer is kept (assistant.route_offers)
-// and told to the apps (direction_offer), and the owner's tap makes it (Start direction), or drops it (Just a quick
-// chat). A quick chat can be made a direction later (Make it a direction), and any direction ended (End direction).
-// Those taps are the owner's own choice: they need no phone approval, unlike the assistant's persona_settings change of
-// assistant.leaders, and the record says by "user", so the hub never redoes them (directions.go).
-
+// Older managers offered to turn new chats into directions. Their stored offers can still be
+// read, accepted or dismissed. New chats become directions when their owner chooses Pin.
 const routeOffersKey = "assistant.route_offers"
 
 // routeTimeout is all one routing may take (the proposal's "about 2 s"); tests change it.
 var routeTimeout = 2 * time.Second
 
 const (
-	// routeCrowded: with this many leaders or more, the offer names the closest existing leader to use instead.
-	routeCrowded = 6
-	// routeTitleMax is a direction's suggested name, in characters.
-	routeTitleMax = 20
 	// routeMaxTokens: the answer is one small JSON object.
 	routeMaxTokens = 400
-	// routeProjectsMax: how many knowledge-base projects the model is shown.
-	routeProjectsMax = 40
 	// routeOfferKeep: an offer nobody answered in this long is dropped.
 	routeOfferKeep = 7 * 24 * time.Hour
 	// leadersMost is the hard limit on leaders, the same for every way one is made (setLeaders, the owner's taps).
 	leadersMost = 20
 )
-
-// routeAnswer is the model's answer (prompts assistant/route).
-type routeAnswer struct {
-	Kind    string `json:"kind"` // direction | quick
-	Title   string `json:"title"`
-	Project string `json:"project"`
-	Closest string `json:"closest"`
-}
 
 // routeLeader is a current leader as the model and the rules see it.
 type routeLeader struct{ ID, Title, Project string }
@@ -66,10 +43,13 @@ type routeOffer struct {
 	// project Start direction makes ("" both: none).
 	Project    string `json:"project,omitempty"`
 	NewProject string `json:"new_project,omitempty"`
-	// Closest: with routeCrowded leaders or more, the existing leader to use instead (the strip suggests renaming it or
-	// going on there).
+	// Closest is the existing leader suggested by the manager that made the offer.
 	Closest string    `json:"closest,omitempty"`
 	At      time.Time `json:"at"`
+}
+
+func (o *routeOffer) current() bool {
+	return o != nil && time.Since(o.At) <= routeOfferKeep
 }
 
 type routeBook struct {
@@ -78,103 +58,6 @@ type routeBook struct {
 	m      map[string]*routeOffer // by conversation id
 	// ask is the model call (nil: assistant.route's model); tests set it.
 	ask func(ctx context.Context, system, input string, out any) error
-}
-
-// decideRoute is the rule table: what the model's answer (or its error) makes of the sentence, given the current
-// leaders and how a project name is found in the knowledge base (ok false: no such live project). No offer (false) is a
-// quick chat.
-func decideRoute(sentence string, a routeAnswer, err error, leaders []routeLeader, findProject func(string) (string, bool)) (routeOffer, bool) {
-	if err != nil || !strings.EqualFold(strings.TrimSpace(a.Kind), "direction") {
-		return routeOffer{}, false
-	}
-	o := routeOffer{Title: clip(oneLine(a.Title), routeTitleMax)}
-	if o.Title == "" {
-		o.Title = clip(oneLine(sentence), routeTitleMax)
-	}
-	if o.Title == "" {
-		return routeOffer{}, false
-	}
-	if p := strings.TrimSpace(a.Project); p != "" {
-		if slug, ok := findProject(p); ok {
-			o.Project = slug
-		} else {
-			o.NewProject = clip(oneLine(p), 40)
-		}
-	}
-	if len(leaders) >= routeCrowded {
-		closest := strings.TrimSpace(a.Closest)
-		if !slices.ContainsFunc(leaders, func(l routeLeader) bool { return l.ID == closest }) {
-			closest = ""
-		}
-		if closest == "" && o.Project != "" { // the model named none: the leader filed under the same project, if one is
-			if i := slices.IndexFunc(leaders, func(l routeLeader) bool { return l.Project == o.Project }); i >= 0 {
-				closest = leaders[i].ID
-			}
-		}
-		o.Closest = closest
-	}
-	return o, true
-}
-
-// routeNewChat routes New chat id on machine, whose first message is sentence: in the background, at most
-// routeTimeout; an offer is kept and told, anything else leaves no trace but a log line.
-func (s *Service) routeNewChat(machine, id, sentence string) {
-	sentence = strings.TrimSpace(contextBlock.ReplaceAllString(sentence, ""))
-	if sentence == "" || id == "" {
-		return
-	}
-	ctx := context.Background()
-	cfg := s.settings(ctx)
-	if machine != cfg.MachineID || id == cfg.Main || slices.Contains(cfg.Leaders, id) {
-		return
-	}
-	leaders := s.routeLeaders(ctx)
-	e, kbErr := s.kbGet(ctx)
-	find := func(name string) (string, bool) {
-		if kbErr != nil || e == nil {
-			return "", false
-		}
-		p := e.FindProject(name)
-		if p == nil || !p.Live() || p.Status == "ignored" {
-			return "", false
-		}
-		return p.Slug, true
-	}
-	var projects []string
-	if kbErr == nil && e != nil {
-		projects = routeProjects(e)
-	}
-	system := prompts.RenderRoute(prompts.Route{Language: answerLanguage(s.hello(ctx).Locale), TitleMax: routeTitleMax,
-		Crowded: len(leaders) >= routeCrowded, Leaders: len(leaders)})
-	in := prompts.RouteInput{Sentence: cutRunes(sentence, 1500), Projects: projects}
-	for _, ld := range leaders {
-		in.Leaders = append(in.Leaders, prompts.RouteLeader{ID: ld.ID, Title: ld.Title, Project: ld.Project})
-	}
-	var a routeAnswer
-	mctx, cancel := context.WithTimeout(ctx, routeTimeout) // the model's budget: the lookups above are local
-	err := s.askRouteModel(mctx, system, prompts.RenderRouteInput(in), &a)
-	cancel()
-	o, ok := decideRoute(sentence, a, err, leaders, find)
-	if err != nil {
-		s.logf("route %s: %v (a quick chat)", short(id), err)
-	}
-	if !ok {
-		return
-	}
-	o.MachineID, o.At = machine, time.Now().UTC()
-	b := &s.offers
-	b.mu.Lock()
-	// The owner may have made it a direction (or the main conversation) while the model answered: nothing to offer.
-	// makeDirection takes the offer after it changed the leaders, under this lock, so one of the two always sees the other.
-	if now := s.settings(ctx); id == now.Main || slices.Contains(now.Leaders, id) || !s.routeOffersLocked(ctx) {
-		b.mu.Unlock()
-		return
-	}
-	b.m[id] = &o
-	s.saveRouteOffersLocked(ctx)
-	b.mu.Unlock()
-	s.logf("route %s: direction %q offered", short(id), o.Title)
-	s.event(ctx, map[string]any{"type": "direction_offer", "conversation": id, "offer": o})
 }
 
 // askRouteModel asks the model (or the test's stand-in).
@@ -204,31 +87,6 @@ func (s *Service) routeLeaders(ctx context.Context) []routeLeader {
 	return out
 }
 
-// routeProjects are the names of the live projects the model may file a direction under, long ones first, then by
-// the most recently updated.
-func routeProjects(e *kb.Engine) []string {
-	var list []*kb.Project
-	for _, p := range e.Store.Projects() {
-		if p.Live() && p.Status != "ignored" && p.Status != "done" && p.MergedInto == "" {
-			list = append(list, p)
-		}
-	}
-	slices.SortFunc(list, func(a, b *kb.Project) int {
-		if (a.Kind == "long") != (b.Kind == "long") {
-			return cond(a.Kind == "long", -1, 1)
-		}
-		return b.Updated.Compare(a.Updated)
-	})
-	var out []string
-	for _, p := range list {
-		if len(out) == routeProjectsMax {
-			break
-		}
-		out = append(out, p.Name)
-	}
-	return out
-}
-
 // ---- the offers ----
 
 func (s *Service) routeOffersLocked(ctx context.Context) bool {
@@ -252,7 +110,7 @@ func (s *Service) routeOffersLocked(ctx context.Context) bool {
 
 func (s *Service) saveRouteOffersLocked(ctx context.Context) {
 	for id, o := range s.offers.m {
-		if time.Since(o.At) > routeOfferKeep {
+		if !o.current() {
 			delete(s.offers.m, id)
 		}
 	}
@@ -276,14 +134,14 @@ func (s *Service) takeRouteOffer(ctx context.Context, id string) (*routeOffer, e
 		return nil, errors.New("the direction offers could not be read")
 	}
 	o := b.m[id]
-	if o != nil {
-		delete(b.m, id)
-		s.saveRouteOffersLocked(ctx)
+	if !o.current() {
+		b.mu.Unlock()
+		return nil, nil
 	}
+	delete(b.m, id)
+	s.saveRouteOffersLocked(ctx)
 	b.mu.Unlock()
-	if o != nil {
-		s.event(context.WithoutCancel(ctx), map[string]any{"type": "direction_offer", "conversation": id, "offer": nil})
-	}
+	s.event(context.WithoutCancel(ctx), map[string]any{"type": "direction_offer", "conversation": id, "offer": nil})
 	return o, nil
 }
 
@@ -435,7 +293,7 @@ func (s *Service) routeRoutes() {
 		}
 		list := make([]offerView, 0, len(b.m))
 		for id, o := range b.m {
-			if time.Since(o.At) <= routeOfferKeep {
+			if o.current() {
 				list = append(list, offerView{id, *o})
 			}
 		}
@@ -479,7 +337,7 @@ func (s *Service) routeRoutes() {
 				b.mu.Lock()
 				ok := s.routeOffersLocked(ctx)
 				var o *routeOffer
-				if ok && b.m[id] != nil {
+				if ok && b.m[id].current() {
 					cp := *b.m[id]
 					o = &cp
 				}

@@ -14,6 +14,7 @@ pub mod sort;
 pub mod state;
 pub mod stream_chunks;
 pub mod stream_repair;
+pub mod sync;
 pub mod task_index;
 pub mod transport;
 pub mod turns;

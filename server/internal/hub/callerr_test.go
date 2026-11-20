@@ -36,6 +36,16 @@ func TestCallErrRefusedSend(t *testing.T) {
 	}
 }
 
+func TestCallErrEffortChangePending(t *testing.T) {
+	w := httptest.NewRecorder()
+	callErr(w, &rpc.Error{Code: "effort_change_pending", Message: "Thinking effort will change after this turn.",
+		Data: json.RawMessage(`{"delivered":"none","effort":"high"}`)})
+	body := errorResponse(t, w)
+	if w.Code != http.StatusConflict || body["code"] != "effort_change_pending" || body["delivered"] != "none" || body["effort"] != "high" {
+		t.Fatalf("%d %v", w.Code, body)
+	}
+}
+
 func TestRequestID(t *testing.T) {
 	if requestID("1a2b3c4d") != "1a2b3c4d" {
 		t.Fatal("a client id is kept")

@@ -138,7 +138,8 @@ test('a listening runtime serves its endpoint: the node dials in with the token 
   t.after(() => n.ws.close())
   await until('hello', () => n.hello, 3000)
   assert.equal(n.hello.runtime, 'toy')
-  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false })
+  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false,
+    queue_edit: false, queue_send_now: false })
   await until('the list', () => n.last('runtime.sessions'), 3000)
   await n.peer.call('session.send', { session_id: 's1', text: 'over the websocket', client_msg_id: 'm-1' })
   assert.equal(sent[0].text, 'over the websocket')

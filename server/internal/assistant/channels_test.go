@@ -928,8 +928,9 @@ func TestFeishuOpenButtonNeedsAWebAddress(t *testing.T) {
 		if !strings.Contains(card, `"甲"`) || !strings.Contains(card, `"乙"`) {
 			t.Fatalf("%q: answer buttons gone: %s", web, card)
 		}
-		hasLink := strings.Contains(card, "open_url")
-		if strings.Contains(card, `"default_url":""`) || hasLink != strings.HasPrefix(web, "https://") {
+		// The conversation's page is in the card's "more" menu (a multi_url entry), or a button.
+		hasLink := strings.Contains(card, "open_url") || strings.Contains(card, `"multi_url"`)
+		if strings.Contains(card, `"default_url":""`) || strings.Contains(card, `"url":""`) || hasLink != strings.HasPrefix(web, "https://") {
 			t.Fatalf("%q: link %v in %s", web, hasLink, card)
 		}
 		if hasLink && !strings.Contains(card, "https://hub.example.com/persona/a1") {
@@ -967,7 +968,8 @@ func TestFeishuPushIsLaidOutAndWhole(t *testing.T) {
 	}
 	first, _ := (*posts)[0]["card"].(string)
 	last, _ := (*posts)[len(*posts)-1]["card"].(string)
-	if !strings.Contains(first, "🔔 巡检结果") || strings.Contains(first, `"button"`) {
+	if !strings.Contains(first, `"content":"巡检结果"`) || strings.Contains(first, "🔔") || !strings.Contains(first, `"content":"通知"`) ||
+		strings.Contains(first, `"button"`) {
 		t.Fatalf("first %s", first)
 	}
 	if !strings.Contains(last, `"button"`) || !strings.Contains(last, `"tag":"table"`) || !strings.Contains(last, "最后一句") {

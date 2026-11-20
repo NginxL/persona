@@ -1,6 +1,6 @@
 {
   "name": "task_review",
-  "description": "Verify handed-out work. accepted closes the task; its terminal stays unless the owner opted in at Start, when accepted done closes its idle tab once saved. Report the cleanup result (closed, skipped or pending); never close the tab yourself or ask to. rework sends gaps to that Agent: at most 2 rounds; a third requires a complete owner decision. A stopped Agent is read-only: replace with agent_start. External waits use parked with source evidence, not needs_user. Only answerable owner-only decisions use needs_user: why_owner, reason, recommend, 2–4 options (recommended first, each with leads_to), cost_of_waiting. Otherwise act within your authority, rework or close.\n\naccepted with outcome done (default) and current done_when requires every criterion exactly once in checks, met=true with nonblank evidence. Refuse missing/duplicate/unknown/unmet checks before writing; user_check cannot bypass this. outcome cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without erasing progress. Report each criterion as met, not met or dropped (logged scope change), then also_done. Judge the scoped brief, not a later handover or the Agent's word; review every task supervision asks you to.\n\nSupervised accepted/needs_user send one Lark conclusion card (verdict, reason, link; needs_user adds recommend, selected by “OK”); do not duplicate it. Give accepted's outcome/reason/link or needs_user's reason/recommend. Acceptance passes an existing “Please verify” card; user_check means the owner must still inspect. needs_user defaults to recommend after 24h/deadline except irreversible or visible_to_others: never default those, remind daily. Recheck once at 24h. can_wait requires nobody blocked today, low waiting cost and no deadline within 12h (see schema). “You decide”, “This isn't what I asked for”, “Tell me the background first” return to supervision: don't repeat the question or take irreversible/external action.\n\nA non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.",
+  "description": "Verify handed-out work. accepted closes it. If the owner opted in at Start, accepted done cleans up the saved idle tab. Report closed, skipped or pending; never close it yourself or ask to. rework sends gaps to the Agent twice; a third needs a complete owner decision. Replace a stopped Agent via agent_start. External waits use parked with source evidence. needs_user requires an owner-only decision with why_owner, reason, recommend, 2–4 options and cost_of_waiting. Otherwise act, rework or close.\n\naccepted with outcome done (default) and current done_when requires every criterion exactly once in checks, met=true with nonblank evidence. Refuse missing/duplicate/unknown/unmet checks before writing; user_check cannot bypass this. outcome cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without erasing progress. Report each criterion as met, not met or dropped (logged scope change), then also_done. Judge the scoped brief, not a later handover or the Agent's word; review every task supervision asks you to.\n\nGive accepted's outcome/reason/link. The hub handles conclusion cards and passes “Please verify” on acceptance unless user_check. needs_user can default to recommend at 24h/deadline; irreversible or visible_to_others only reminds. Recheck at 24h. can_wait needs low cost, nobody blocked today and no deadline within 12h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or taking irreversible/external action.\n\nA non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.",
   "input_schema": {
     "type": "object",
     "required": [
@@ -121,6 +121,10 @@
         "type": "string",
         "description": "needs_user (required): one sentence saying what it costs if the user does not answer soon"
       },
+      "question_quote": {
+        "type": "string",
+        "description": "needs_user: quote the Agent's original question verbatim if reason paraphrases it, so the hub can check for an existing reply"
+      },
       "can_wait": {
         "type": "boolean",
         "description": "needs_user, optional: true when the decision can wait for the next daily briefing (no deadline within 12 hours, a low cost_of_waiting): it is not pushed and has no card, and is in the user's Needs you at once. Ignored (the answer says why) for why_owner irreversible and visible_to_others, a deadline within 12 hours or with reversible false, and when no daily briefing with facts is due within 24 hours and at least 12 hours before the deadline (24 hours by default: give a longer deadline for what can wait longer); default false (pushed as usual)"
@@ -161,22 +165,35 @@
               "external_event",
               "date"
             ],
-            "description": "parked: person_reply (a sent request to a person), merge_review (a sent request for review of a ready PR/MR), external_event (an observable outside event), or date"
+            "description": "External wait kind"
           },
           "target": {
             "type": "string",
             "maxLength": 200,
-            "description": "the named person/reviewer or external object"
+            "description": "The person or external object"
           },
           "wake": {
             "type": "string",
             "maxLength": 600,
-            "description": "the observable change that ends this wait"
+            "description": "Observable change that ends the wait"
           },
           "url": {
             "type": "string",
             "maxLength": 2000,
-            "description": "required for merge_review (ready PR/MR link) and external_event (observable object URL); omit for person_reply and date"
+            "description": "Required for merge_review (ready PR/MR) and external_event"
+          },
+          "interaction_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "external_event only. This worker's exact pending owner request ID from agents_list. Shows the existing request"
+          },
+          "pr_event": {
+            "type": "string",
+            "enum": [
+              "terminal",
+              "terminal_or_review"
+            ],
+            "description": "GitHub PR waits only. terminal for merge or close. terminal_or_review adds new submitted reviews"
           },
           "contact": {
             "type": "object",
@@ -218,14 +235,14 @@
                 ]
               }
             },
-            "description": "required for person_reply and merge_review: the request has already been sent"
+            "description": "Sent request, required for person_reply and merge_review"
           },
           "ready": {
             "type": "boolean",
             "enum": [
               true
             ],
-            "description": "merge_review only: the named reviewer can review the PR/MR"
+            "description": "merge_review only. The PR/MR is ready for the reviewer"
           },
           "reply": {
             "type": "object",
@@ -277,7 +294,7 @@
             "description": "person_reply: exact IDs from a configured lark-cli reader, never names. contact.url must be the sent request's matching topic AppLink. A verified reply asks the current supervisor to review, not direct Agent delivery"
           }
         },
-        "description": "required for parked. Inspect the source receipt: this records your attestation, not a provider check. Do not supply recorded_by (current conversation, server-authored/output only). Legacy missing evidence is unrecorded, not verified"
+        "description": "Required for parked. Inspect the source. recorded_by is output only. Missing legacy evidence is unverified"
       }
     }
   }

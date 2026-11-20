@@ -56,7 +56,7 @@ fun starterMentionSource(sessions: List<Session>, folders: MentionFolders?): Com
 /** The sessions picked in New chat's @ list, over its composer as a chat's quote cards; Remove takes one out. */
 @Composable
 fun StarterQuoteCards(mentions: StarterMentions) {
-    if (mentions.quotes.isNotEmpty()) ComposerContextCards(mentions.quotes, onRemove = mentions::remove)
+    if (mentions.quotes.isNotEmpty()) ComposerContextCards(mentions.quotes) { removed -> removed.forEach(mentions::remove) }
 }
 
 /** A message as its bubble shows the words: the `<persona-context>` tags in front of them left out. */

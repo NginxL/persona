@@ -152,3 +152,34 @@ func TestDeliveryDispositionIsIndependentOfDeploymentFacts(t *testing.T) {
 		t.Fatalf("unknown enum=%+v %v", c, ok)
 	}
 }
+
+func TestOptionalNextStep(t *testing.T) {
+	const chinese = "按刚才的条件整理候选清单。"
+	const japanese = "候補を三つに絞ってください。"
+	for _, tc := range []struct{ name, status, fields, want string }{
+		{"owner's words", "done", "next: " + chinese, chinese},
+		{"localized colon", "done", "- next：" + japanese + "\nverified: unit tests passed", japanese},
+		{"explicit none", "done", "missing: none\nnext: Draft the list", "Draft the list"},
+		{"blocks", "blocked", "next: Continue", ""},
+		{"unfinished", "not_done", "next: Continue", ""},
+		{"needs an answer", "done", "missing: Choose a format\nnext: Continue", ""},
+		{"waits", "done", "next: Continue\nwaiting: a reviewer", ""},
+		{"duplicate", "done", "next: Draft one\nnext: Draft two", ""},
+		{"empty duplicate", "done", "next: \nnext: Draft two", ""},
+		{"omitted", "done", "did: Summarized the notes", ""},
+		{"placeholder", "done", "next: <short reply>", ""},
+		{"nothing", "done", "next: なし", ""},
+		{"continuation", "done", "next: Prepare a summary\n  with names removed", ""},
+		{"continuation with colon", "done", "next: Prepare a summary\n  Important: omit the names", ""},
+		{"line separator", "done", "next: Prepare a summary\u2028with names removed", ""},
+		{"limit", "done", "next: " + strings.Repeat("字", 180), strings.Repeat("字", 180)},
+		{"over limit", "done", "next: " + strings.Repeat("字", 181), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, ok := Parse("<closeout status=\"" + tc.status + "\">\n" + tc.fields + "\n</closeout>")
+			if !ok || c.Next != tc.want {
+				t.Fatalf("next = %q, valid = %t", c.Next, ok)
+			}
+		})
+	}
+}

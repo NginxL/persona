@@ -8,6 +8,7 @@ unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>
+next: <optional on done: one short reply naming the proposed action in the owner's language>
 </closeout>
 
 填写规则：

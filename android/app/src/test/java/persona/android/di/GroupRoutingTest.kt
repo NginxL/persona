@@ -122,7 +122,7 @@ class GroupRoutingTest {
         assertEquals(listOf("download macbook a.mp3", "stat macbook", "thumbnail macbook a.pdf 256", "convert macbook a.docx", "preview macbook a.mp4"), calls)
     }
 
-    /** Renaming and trashing (docs/protocol/protocol.md "Changing files"): both wrappers pass them on, or the app only ever sees the interface's "not supported". */
+    /** Both wrappers forward the file changes supported by the hub. */
     private class EditingFiles(val calls: MutableList<String>) : SessionFiles {
         override suspend fun directory(machineId: String, cwd: String, path: String) = error("unused")
         override suspend fun file(machineId: String, cwd: String, path: String) = error("unused")
@@ -132,6 +132,8 @@ class GroupRoutingTest {
         override suspend fun show(machineId: String, cwd: String, hash: String) = error("unused")
         override fun editsFiles(machineId: String) = true.also { calls += "edits $machineId" }
         override suspend fun rename(machineId: String, cwd: String, path: String, name: String) = "~/b".also { calls += "rename $machineId $path $name" }
+        override suspend fun move(machineId: String, cwd: String, path: String, directory: String, conflict: SessionMoveConflictPolicy?) =
+            SessionMovedFile(path, "$directory/a").also { calls += "move $machineId $cwd $path $directory $conflict" }
         override suspend fun trash(machineId: String, cwd: String, paths: List<String>) =
             listOf(SessionTrashedFile(paths.single(), "t1")).also { calls += "trash $machineId ${paths.single()}" }
         override suspend fun restore(machineId: String, trashIds: List<String>) = listOf("~/a").also { calls += "restore $machineId ${trashIds.single()}" }
@@ -140,6 +142,7 @@ class GroupRoutingTest {
     private suspend fun SessionFiles.editAll(machineId: String) {
         assertTrue(editsFiles(machineId))
         assertEquals("~/b", rename(machineId, "/w", "~/a", "b"))
+        assertEquals(SessionMovedFile("~/a", "~/folder/a"), move(machineId, "/w", "~/a", "~/folder", SessionMoveConflictPolicy.KeepBoth))
         assertEquals(listOf("t1"), trash(machineId, "/w", listOf("~/a")).map { it.trashId })
         assertEquals(listOf("~/a"), restore(machineId, listOf("t1")))
     }
@@ -147,7 +150,7 @@ class GroupRoutingTest {
     @Test fun anotherGroupsFileEditsReachItsMachineByThePlainId() = runBlocking<Unit> {
         val calls = mutableListOf<String>()
         EditingFiles(calls).inGroup(other).editAll("macbook~g0a1b2c3d")
-        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "trash macbook ~/a", "restore macbook t1"), calls)
+        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "move macbook /w ~/a ~/folder KeepBoth", "trash macbook ~/a", "restore macbook t1"), calls)
     }
 
     @Test fun theMergedFilesSendEditsToTheMachinesGroup() = runBlocking<Unit> {
@@ -161,11 +164,11 @@ class GroupRoutingTest {
         }
         merged.editAll("macbook")
         merged.editAll("studio~g0a1b2c3d")
-        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "trash macbook ~/a", "restore macbook t1"), home)
-        assertEquals(listOf("edits studio", "rename studio ~/a b", "trash studio ~/a", "restore studio t1"), work)
+        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "move macbook /w ~/a ~/folder KeepBoth", "trash macbook ~/a", "restore macbook t1"), home)
+        assertEquals(listOf("edits studio", "rename studio ~/a b", "move studio /w ~/a ~/folder KeepBoth", "trash studio ~/a", "restore studio t1"), work)
         // No open group: not offered, and a change fails as offline.
         assertFalse(merged.editsFiles("mini~gffffffff"))
-        try { merged.trash("mini~gffffffff", "/w", listOf("a")); fail("Expected offline") }
+        try { merged.move("mini~gffffffff", "/w", "~/a", "~/folder"); fail("Expected offline") }
         catch (failure: HubFailure) { assertEquals(HubError.NoNetwork, failure.kind) }
     }
     @Test fun keptMessageActionsReachTheirGroupWithPlainSessionIds() = runBlocking<Unit> {

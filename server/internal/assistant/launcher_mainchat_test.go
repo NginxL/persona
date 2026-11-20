@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -124,6 +125,9 @@ func TestMainChatPickerReplaysSharedLauncherFixture(t *testing.T) {
 func TestSendRefusesOrReplacesALauncherThatCannotRunTheAssistant(t *testing.T) {
 	ctx := context.Background()
 	s, f := mainChatFixture(t)
+	f.hello.Models.LauncherRecovery = map[string]LauncherRecovery{"server": {Fallbacks: map[string][]string{
+		"cc-relay": {"gw"}, "codex-gw": {"cx"},
+	}}}
 	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.gw"})
 	f.setSessions("server", proto.Session{SessionID: "side", Launcher: "cc-relay", Model: "kimi", Assistant: true},
 		proto.Session{SessionID: "side-codex", Launcher: "codex-gw", Assistant: true},
@@ -136,7 +140,13 @@ func TestSendRefusesOrReplacesALauncherThatCannotRunTheAssistant(t *testing.T) {
 	}
 	for _, sid := range []string{"side", "side-codex"} {
 		p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: sid, Params: map[string]any{"text": "hi"}})
-		if err != nil || p["launcher"] != "gw" || p["model"] != nil {
+		wantLauncher, wantModel := "gw", any(nil)
+		if sid == "side" {
+			wantModel = "kimi" // an approved substitute keeps a model its unreadable list cannot rule out
+		} else {
+			wantLauncher = "cx"
+		}
+		if err != nil || p["launcher"] != wantLauncher || p["model"] != wantModel {
 			t.Fatalf("%s left on a launcher that can't run it: %v %v", sid, p, err)
 		}
 	}
@@ -157,6 +167,7 @@ func TestSendValidatesTheResolvedAssistantLauncher(t *testing.T) {
 	ctx := context.Background()
 	t.Run("old managed Codex default on the main conversation", func(t *testing.T) { // gives way to a Codex launcher, never to Claude (#4659)
 		s, f := mainChatFixture(t)
+		f.hello.Models.LauncherRecovery = map[string]LauncherRecovery{"server": {Fallbacks: map[string][]string{"codex-gw": {"cx"}}}}
 		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.codex-gw", Model: "old-model"})
 		setSettings(t, s, func(v *Settings) { v.Main = "main" })
 		f.setSessions("server", proto.Session{SessionID: "main", Assistant: true})
@@ -167,6 +178,7 @@ func TestSendValidatesTheResolvedAssistantLauncher(t *testing.T) {
 	})
 	t.Run("legacy side falls back to the same incompatible default", func(t *testing.T) {
 		s, f := mainChatFixture(t)
+		f.hello.Models.LauncherRecovery = map[string]LauncherRecovery{"server": {Fallbacks: map[string][]string{"cc-relay": {"claude"}}}}
 		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.cc-relay"})
 		f.setSessions("server", proto.Session{SessionID: "side", Launcher: "cc-relay", Assistant: true})
 		p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "side", Params: map[string]any{"text": "hi"}})
@@ -312,5 +324,139 @@ func TestPlainAgyAndOmpRequireConnectedAssistantRuntime(t *testing.T) {
 	}
 	if got := strings.Join(pickerNames(t, s, "assistant"), ","); got != "claude,agy,agy-gw" {
 		t.Fatalf("assistant with agy runtime: %s", got)
+	}
+}
+
+// A main chat on a launcher that Model settings' provider list leaves out, but the main chat's picker offers on its
+// computer, is not "Provider missing or incompatible" (#11772): a runtime that runs it (DSH declaring caps.assistant), or
+// a hub.json wrapper only that computer names. Its status is the one any launcher there gets, and the uses that follow
+// the main chat say the same. The room keeps its own word for a runtime (TestMeetingRoomExplainsAMainChatOnARuntime).
+func TestMainChatOnARuntimeIsNotIncompatible(t *testing.T) {
+	s, f, _ := modelService(t)
+	ctx := context.Background()
+	f.mu.Lock()
+	f.zshrc = map[string][]proto.Launcher{"server": {{Name: "dsh-rt", Source: "dsh", Agent: "dsh", Assistant: true}, {Name: "cc", Source: "zshrc"}}}
+	f.hello.Models.Launchers = map[string][]ConfiguredLauncher{"server": {{Launcher: proto.Launcher{Name: "cc-wrapper"}, AgentType: "claude"}}}
+	f.mu.Unlock()
+	names, providers := pickerNames(t, s, "assistant"), s.modelProviders(ctx)
+	for _, name := range []string{"dsh-rt", "cc-wrapper"} {
+		if !slices.Contains(names, name) {
+			t.Fatalf("the main chat can't run on %s, so this proves nothing: %v", name, names)
+		}
+		if slices.ContainsFunc(providers, func(v ModelProvider) bool { return v.ID == "launcher."+name }) {
+			t.Fatalf("the provider list names %s, so this proves nothing", name)
+		}
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher." + name})
+		for _, id := range []string{"assistant", "schedule", purposeSupervise} {
+			if p := purposeOf(t, s, id); p.Effective.Provider != "launcher."+name || p.Status != modelUnverified {
+				t.Fatalf("%s on %s: %+v; want status %q", id, name, p, modelUnverified)
+			}
+		}
+	}
+}
+
+// A runtime's launcher the main chat can't run on is still "Provider missing or incompatible": one that does not declare
+// the assistant, and one gone from its computer's list after the main chat was set to it.
+func TestMainChatOnAMissingRuntimeIsIncompatible(t *testing.T) {
+	ctx := context.Background()
+	t.Run("without the assistant capability", func(t *testing.T) {
+		s, f, _ := modelService(t)
+		f.mu.Lock()
+		f.zshrc = map[string][]proto.Launcher{"server": {{Name: "dsh-rt", Source: "dsh", Agent: "dsh"}, {Name: "cc", Source: "zshrc"}}}
+		f.mu.Unlock()
+		if names := pickerNames(t, s, "assistant"); slices.Contains(names, "dsh-rt") {
+			t.Fatalf("the picker offers a runtime without the capability, so this proves nothing: %v", names)
+		}
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.dsh-rt"})
+		if p, want := purposeOf(t, s, "assistant"), mc(s.requestCtxLang(ctx), "status_provider_incompatible"); p.Status != want {
+			t.Fatalf("a runtime that can't run the main chat: %+v; want status %q", p, want)
+		}
+	})
+	t.Run("gone from the computer", func(t *testing.T) {
+		s, f, _ := modelService(t)
+		f.mu.Lock()
+		f.zshrc = map[string][]proto.Launcher{"server": {{Name: "dsh-rt", Source: "dsh", Agent: "dsh", Assistant: true}, {Name: "cc", Source: "zshrc"}}}
+		f.mu.Unlock()
+		setModel(t, s, "assistant", ModelBinding{Provider: "launcher.dsh-rt"})
+		if p := purposeOf(t, s, "assistant"); p.Status != modelUnverified {
+			t.Fatalf("on the runtime while it is there: %+v; want status %q", p, modelUnverified)
+		}
+		f.mu.Lock()
+		f.zshrc = map[string][]proto.Launcher{"server": {{Name: "cc", Source: "zshrc"}}}
+		f.mu.Unlock()
+		s.zshrcLaunchers(ctx, true) // the computer's list as it is now: the runtime has gone
+		if p, want := purposeOf(t, s, "assistant"), mc(s.requestCtxLang(ctx), "status_provider_incompatible"); p.Effective.Provider != "launcher.dsh-rt" || p.Status != want {
+			t.Fatalf("on a runtime gone from the computer: %+v; want status %q", p, want)
+		}
+	})
+}
+
+// A Persona-managed provider in the computer's scope takes the place of the computer's own launcher by its name, in the
+// picker and in mainChatFit, so the status goes by the provider too: a managed Codex provider cx, which can't run the
+// main chat, stays "Provider missing or incompatible" while the computer's ~/.zshrc has a Claude alias cx that could.
+func TestMainChatOnAManagedProviderOverItsOwnLauncherIsIncompatible(t *testing.T) {
+	s, f, _ := modelService(t)
+	ctx := context.Background()
+	f.mu.Lock()
+	f.zshrc = map[string][]proto.Launcher{"server": {{Name: "cx", Source: "zshrc"}, {Name: "cc", Source: "zshrc"}}}
+	f.mu.Unlock()
+	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.cx"})
+	if p := purposeOf(t, s, "assistant"); p.Status != modelUnverified {
+		t.Fatalf("on the computer's own Claude alias: %+v; want status %q, or this proves nothing", p, modelUnverified)
+	}
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "cx", Agent: "codex", BaseURL: "https://gw.example/v1", Model: "gpt"}})
+	if names := pickerNames(t, s, "assistant"); slices.Contains(names, "cx") {
+		t.Fatalf("the main chat's picker offers cx over the managed Codex provider: %v", names)
+	}
+	if fit, _ := s.mainChatFit(ctx, "server", "cx"); fit != mainChatRefused {
+		t.Fatalf("mainChatFit on the managed Codex provider: %v; want refused", fit)
+	}
+	want := mc(s.requestCtxLang(ctx), "status_provider_incompatible")
+	for _, id := range []string{"assistant", "schedule", purposeSupervise} {
+		if p := purposeOf(t, s, id); p.Effective.Provider != "launcher.cx" || p.Status != want {
+			t.Fatalf("%s on the managed Codex provider cx: %+v; want status %q", id, p, want)
+		}
+	}
+}
+
+// Model settings' status asks no node (mainChatOffers): with the main chat on a runtime's launcher and a Persona-managed
+// provider that skips a computer with its own service, but no answer on that yet or one out of date, reading the model
+// configuration does not ask the node (launchers.own_service, up to ownServiceWait each time). The pickers still ask.
+func TestMainChatStatusAsksNoNodeAboutItsOwnService(t *testing.T) {
+	for name, stale := range map[string]bool{"no answer yet": false, "an answer out of date": true} {
+		t.Run(name, func(t *testing.T) {
+			s, f, _ := modelService(t)
+			f.mu.Lock()
+			f.zshrc = map[string][]proto.Launcher{"server": {{Name: "dsh-rt", Source: "dsh", Agent: "dsh", Assistant: true}, {Name: "cc", Source: "zshrc"}}}
+			f.ownServices = map[string]proto.OwnServiceState{"server/claude": {Agent: "claude", Known: true, Own: true}}
+			f.mu.Unlock()
+			putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", BaseURL: "https://gw.example", Model: "m1", OwnService: proto.OwnServiceSkip}})
+			setModel(t, s, "assistant", ModelBinding{Provider: "launcher.dsh-rt"})
+			if stale {
+				s.models.ownMu.Lock()
+				s.models.own = map[string]ownSeen{"server/claude": {st: proto.OwnServiceState{Agent: "claude", Known: true, Own: true}, at: time.Now().Add(-2 * ownServiceFresh)}}
+				s.models.ownMu.Unlock()
+			}
+			asked := func() int {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				return len(slices.DeleteFunc(slices.Clone(f.calls), func(c DeviceCall) bool { return c.Method != DeviceLaunchersOwnService }))
+			}
+			for _, id := range []string{"assistant", "schedule", purposeSupervise} {
+				if p := purposeOf(t, s, id); p.Effective.Provider != "launcher.dsh-rt" || p.Status != modelUnverified {
+					t.Fatalf("%s on the runtime: %+v; want status %q", id, p, modelUnverified)
+				}
+			}
+			if r := modelRequest(s, "GET", "", ""); r.Code != 200 {
+				t.Fatalf("%d %s", r.Code, r.Body.String())
+			}
+			if n := asked(); n != 0 {
+				t.Fatalf("reading the model configuration asked the node about its own service %d times", n)
+			}
+			pickerNames(t, s, "agent.new")
+			if asked() == 0 {
+				t.Fatal("New Agent's picker did not ask either, so this proves nothing")
+			}
+		})
 	}
 }

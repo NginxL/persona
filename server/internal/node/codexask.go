@@ -106,6 +106,9 @@ func (n *Node) syncCodexCards(ctx context.Context) {
 	var list []proto.Interaction
 	var ids []string
 	for _, ix := range cards {
+		if n.sessionBlocked(ix.SessionID, ix.Cwd) {
+			continue // a blocked Agent folder (agentdirs.go): the card stays on the computer's own screen
+		}
 		if d, gone := n.cx.dismissed[ix.ID]; gone {
 			d.seen = now // still asked: still the computer's
 			n.cx.dismissed[ix.ID] = d

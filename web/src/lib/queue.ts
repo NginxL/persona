@@ -39,21 +39,19 @@ export function sameMessage(a: string, b: string): boolean {
   return x === y || (Math.min([...x].length, [...y].length) >= 8 && (x.includes(y) || y.includes(x)));
 }
 
-/** Photo-only messages sent from here (no words, files or contexts), paired one to one, in order, with the queued
- *  entries that hold as many photos and nothing else (#10871): Claude queues such a message as `[Image #n]` and the
- *  paths the node saved, which no text matches, so its sending bubble stayed in the transcript beside its queue row.
- *  Each entry pairs with at most one message and only by its real photo paths: a message or an entry left over on
- *  either side stays unpaired (its bubble shows). Returns the entry → the index of its message in `pending`. */
-export function pairPhotoOnly(queued: string[], pending: { text: string; images: number; carries?: boolean }[]): Map<string, number> {
-  const pairs = new Map<string, number>();
+/** Pair each photo-only queue row with at most one local pending message, in order. Claude includes saved paths;
+ *  runtimes that keep photos separately can publish an empty string instead. Indexes distinguish identical rows. */
+export function pairPhotoOnly(queued: string[], pending: { text: string; images: number; carries?: boolean }[]): Map<number, number> {
+  const pairs = new Map<number, number>();
   const taken = new Set<number>();
-  for (const raw of queued) {
+  for (const [index, raw] of queued.entries()) {
     const q = parseQueued(raw);
-    if (q.text || q.photos.length === 0 || q.files.length || q.contexts.length) continue;
-    const i = pending.findIndex((p, k) => !taken.has(k) && !p.carries && !normalize(p.text) && p.images === q.photos.length);
+    if (q.text || q.files.length || q.contexts.length || (raw !== "" && q.photos.length === 0)) continue;
+    const i = pending.findIndex((p, k) => !taken.has(k) && !p.carries && !normalize(p.text) &&
+      (raw === "" ? p.images > 0 : p.images === q.photos.length));
     if (i < 0) continue;
     taken.add(i);
-    pairs.set(raw, i);
+    pairs.set(index, i);
   }
   return pairs;
 }

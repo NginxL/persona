@@ -8,7 +8,8 @@ import (
 
 // Blocked Claude Code config directories (docs/integrations/claude-integration.md "Blocking configuration directories"): per machine, patterns the user
 // keeps out of Persona — the node neither looks in nor reports a matching directory, the hub does not remember it, and
-// its sessions are not listed. Both the hub and the node match with ClaudeDirBlocked.
+// its sessions are not listed. Both the hub and the node match with ClaudeDirBlocked. Hidden Agent folders
+// (agentdirs.go) are the parallel list with the same pattern syntax and matcher.
 
 // CleanClaudeDirPatterns trims spaces and trailing slashes, drops empty ones, ones that would block everything and
 // duplicates, and keeps the order.
@@ -38,14 +39,8 @@ func blocksEverything(p string) bool {
 	}
 }
 
-// ValidClaudeDirPattern: a pattern filepath.Match understands, rooted at /, ~/, or starting with *.
-func ValidClaudeDirPattern(p string) bool {
-	if !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, "*") {
-		return false
-	}
-	_, err := filepath.Match(p, "")
-	return err == nil
-}
+// ValidClaudeDirPattern: a pattern filepath.Match understands, rooted at /, ~/, or starting with * (ValidDirPattern).
+func ValidClaudeDirPattern(p string) bool { return ValidDirPattern(p) }
 
 // ClaudeDirBlocked: dir (a CLAUDE_CONFIG_DIR value, a session's cwd, "~/…" or absolute) matches a pattern, or sits
 // under a directory that does. A pattern is a path ("~/has_workspaces"), a filepath.Match glob ("~/.automation/*"),
@@ -56,27 +51,7 @@ func ClaudeDirBlocked(dir, home string, patterns []string) bool {
 
 // ClaudeDirBlockedBy is the first pattern that blocks dir ("" when none does), as the user wrote it.
 func ClaudeDirBlockedBy(dir, home string, patterns []string) string {
-	if dir == "" || len(patterns) == 0 {
-		return ""
-	}
-	d := filepath.Clean(ExpandHome(dir, home))
-	for _, raw := range patterns {
-		p := filepath.Clean(ExpandHome(raw, home))
-		for c := d; ; {
-			if ok, _ := filepath.Match(p, c); ok {
-				return raw
-			}
-			if ok, _ := filepath.Match(p, filepath.Base(c)); ok {
-				return raw
-			}
-			parent := filepath.Dir(c)
-			if parent == c || parent == "." || parent == "/" || parent == "~" {
-				break
-			}
-			c = parent
-		}
-	}
-	return ""
+	return DirPatternMatchedBy(dir, home, patterns)
 }
 
 // ClaudeDir is one config directory of a machine as the settings page lists it (GET /api/v1/machines/{mid}/claude-dirs).

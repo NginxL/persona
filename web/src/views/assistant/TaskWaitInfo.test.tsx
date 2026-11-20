@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDate, initI18n, t } from "../../i18n";
 import { reset } from "../../lib/store";
 import { assistantEntries } from "../../lib/assistant-entries";
-import type { Todo } from "../../lib/todos";
+import { todoStatusLabel, TODO_STATUS_INFO, type Todo } from "../../lib/todos";
 import { ParkedTaskRows } from "./ParkedTaskRow";
 import { TaskWaitInfo } from "./TaskWaitInfo";
 
@@ -44,6 +44,38 @@ afterEach(async () => {
 });
 
 describe("task wait information", () => {
+  it("shows both confirmed handoffs in the tray and the same receiving to-do in the detail", async () => {
+    const at = new Date(NOW - 61 * 60_000).toISOString();
+    const until = new Date(NOW + 60 * 60_000).toISOString();
+    const toDo = (id: string, check: string): Todo => makeTodo(undefined, {
+      id, title: id, origin: "conversation-1", updated_at: at,
+      supervision: { supervisor: "conversation-1", state: "parked",
+        reviews: [{ at, verdict: "parked", waiting_on: "todo_handoff", parks: 1, reason: check }],
+        parked: { reason: check, until, waiting_on: "todo_handoff", count: 1,
+          handoff: { todo_id: "shared-verification", title: "Release verification", check } },
+      },
+    });
+    const first = toDo("candidate-a", "Check the sign-in screen");
+    const second = toDo("candidate-b", "Check saved settings");
+    expect(todoStatusLabel(first, "follow_up")).toBe(TODO_STATUS_INFO.waiting.label);
+    expect(todoStatusLabel(first, "needs_you")).toBe(TODO_STATUS_INFO.needs_you.label);
+    const entries = assistantEntries({ conversation: "conversation-1", main: "conversation-1", todos: [first, second],
+      sessions: [], interactions: [], plans: {}, feed: [], now: NOW });
+    expect(entries.parked).toHaveLength(2);
+    await act(async () => root.render(<ParkedTaskRows items={entries.parked} />));
+    const rows = [...host.querySelectorAll('[data-wait-kind="todo_handoff"]')];
+    expect(rows.map((row) => row.querySelector("[data-wait-target]")?.getAttribute("href")))
+      .toEqual(["/todos?id=shared-verification", "/todos?id=shared-verification"]);
+    expect(rows.map((row) => row.querySelector("[data-wait-wake]")?.textContent))
+      .toEqual(["Check the sign-in screen", "Check saved settings"]);
+    expect(rows.every((row) => row.querySelector("[data-wait-age]")?.textContent === "Waiting 1 hr")).toBe(true);
+    await render(first);
+    expect(text("[data-wait-target]")).toBe("Release verification");
+    expect(text("[data-wait-wake]")).toBe("Check the sign-in screen");
+    expect(host.textContent).toContain(t("task-wait.handoff_deadline", { time: formatDate(until, { dateStyle: "medium", timeStyle: "short" }) }));
+    expect(host.querySelector("[data-wait-contact-missing]")).toBeNull();
+  });
+
   it("orders an explicitly unsorted lazy waiting list by first request", async () => {
     const older = { ...makeTodo({ kind: "person_reply", target: "Design team", wake: "They reply", contact }), id: "older", origin: "conversation-1" };
     const newer = { ...makeTodo({ kind: "person_reply", target: "Design team", wake: "They reply",

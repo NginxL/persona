@@ -137,6 +137,7 @@ export const Composer = memo(function Composer({
   commands = AGENT_COMMANDS,
   onSend,
   onStop,
+  onSendNow,
   onEditLastMessage,
   editingLast,
   loadingDraft,
@@ -169,6 +170,9 @@ export const Composer = memo(function Composer({
    *  back into the box. */
   onSend: (m: Outgoing) => Promise<boolean>;
   onStop?: () => void;
+  /** Ctrl/⌘+Enter while the agent works or waits: after the message is queued, hands the queue over now (the queue panel's
+   *  Send now). Absent where the agent cannot take messages now; Ctrl/⌘+Enter then queues as Enter does. */
+  onSendNow?: () => void | Promise<void>;
   /** Starts editing the last Claude prompt in this box (↑ in it while empty, Esc twice; #4503, #2945). */
   onEditLastMessage?: () => void;
   /** Set while the box edits the last message: a bar says so, Esc or × cancels, and a send rewinds first. */
@@ -768,8 +772,17 @@ export const Composer = memo(function Composer({
   // an empty box and an idle agent: voice takes the send button's place (it would be off anyway), as on iOS
   const roundVoice = voice?.mode === "start" && !canSend && !showStop && !blocked && !disabled;
 
-  const submit = async (text = draft) => {
+  // `/model` alone opens the model panel (where the agent switches models), `/permissions` alone the permission menu
+  // (#6476), from Enter and the send buttons alike. Where the chat has no such picker, the words are sent as typed.
+  const pickerCommand = (text: string) => {
+    const opened = (isModelCommand(text) && requestModelPicker(draftKey)) || (isPermissionsCommand(text) && requestPermissionPicker(draftKey));
+    if (opened) setDraft("");
+    return opened;
+  };
+
+  const submit = async (text = draft, now = false) => {
     if (!canWriteDraft()) return;
+    if (pickerCommand(text)) return;
     const refs = getContexts(draftKey);
     const q = getQuotes(draftKey).list;
     // a file still on its way holds the message, as a video does on the phone (#8361); the words stay in the box
@@ -817,6 +830,7 @@ export const Composer = memo(function Composer({
     const ok = await onSend({ text: withContexts(refs, body, sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })),
       ...(quoteReply ? { quoteReply: true } : {}), ...(committed ? { edit: committed } : {}) });
     if (!canWriteDraft()) { releaseAttachments(sent); return; }
+    if (ok && now && queues) await onSendNow?.();
     if (ok) {
       history.record(skillDraft(refs, text));
       releaseAttachments(sent);
@@ -1026,16 +1040,9 @@ export const Composer = memo(function Composer({
             const modEnter = e.ctrlKey || e.metaKey;
             // a plain Enter picks the highlighted row; Shift+Enter or Alt+Enter is always a new line
             const pickEnter = e.key === "Enter" && !modEnter && !e.shiftKey && !e.altKey;
-            // `/model` alone opens the model panel instead of sending (where the agent switches models)
-            if (send && isModelCommand(draft) && requestModelPicker(draftKey)) {
+            // `/model` or `/permissions` alone opens its picker, ahead of the slash palette's Enter, which would pick its row
+            if (send && pickerCommand(draft)) {
               e.preventDefault();
-              setDraft("");
-              return;
-            }
-            // so does `/permissions` alone: the permission menu (#6476)
-            if (send && isPermissionsCommand(draft) && requestPermissionPicker(draftKey)) {
-              e.preventDefault();
-              setDraft("");
               return;
             }
             // ↑ in an empty box edits the last message where Edit last message is on offer (#4503); else the history's
@@ -1108,7 +1115,7 @@ export const Composer = memo(function Composer({
               e.preventDefault();
               // any Enter while blocked says why (also an empty box or attachments only): submit() would do nothing
               if (blocked) nudgeBlocked(e.repeat);
-              else void submit();
+              else void submit(draft, modEnter && Boolean(onSendNow));
             }
           }}
           placeholder={pill && hasFinePointer() ? t("chat-composer.suggestion", { suggestion: pill }) : placeholder}

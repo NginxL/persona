@@ -129,9 +129,16 @@ type Supervision struct {
 
 // Parked is what a parked task waits for: why, until when, on what kind of thing.
 type Parked struct {
-	Reason    string    `json:"reason"`
-	Until     time.Time `json:"until"`
-	WaitingOn string    `json:"waiting_on"`
+	Reason    string        `json:"reason"`
+	Until     time.Time     `json:"until"`
+	WaitingOn string        `json:"waiting_on"`
+	Evidence  *ParkEvidence `json:"evidence,omitempty"`
+}
+
+// ParkEvidence carries only the owner-request link the projection reads; the other evidence stays on the listed to-do.
+type ParkEvidence struct {
+	Kind          string `json:"kind,omitempty"`
+	InteractionID string `json:"interaction_id,omitempty"`
 }
 
 // Review is one review of the ledger: when, its verdict, its note (a cancellation's why), and a needs_user review's
@@ -153,6 +160,8 @@ type Progress struct {
 type Delivery struct {
 	State string    `json:"state"`
 	At    time.Time `json:"at"`
+	Owner bool      `json:"owner,omitempty"` // an open delivery hold asks the owner to release it
+	Gate  string    `json:"gate,omitempty"`
 }
 
 // PRStatus is an observation of one of the task's PRs.
@@ -177,7 +186,8 @@ const (
 	reviewCancelled = "cancelled"
 	reviewParked    = "parked"
 
-	parkSomeoneElse = "someone_else"
+	parkSomeoneElse   = "someone_else"
+	parkExternalEvent = "external_event"
 
 	outcomeDone   = "done"
 	outcomeCannot = "cannot"

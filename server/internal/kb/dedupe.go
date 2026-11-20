@@ -169,6 +169,9 @@ func (e *Engine) DedupeProjects(ctx context.Context, max int) int {
 		if isShownFormOf(c.a.Name, c.b.Name) || isShownFormOf(c.b.Name, c.a.Name) {
 			continue
 		}
+		if e.shareProjectSource(c.a, c.b) {
+			continue
+		}
 		key := pairKey(c.a.Slug, c.b.Slug)
 		if v, ok := verdicts[key]; ok && v.settled() {
 			continue
@@ -263,7 +266,9 @@ func (e *Engine) MergeProjects(keepSlug, dropSlug, why string) error {
 	return e.mergeProjects(keepSlug, dropSlug, why, false)
 }
 
-func protectedProject(p *Project) bool { return p.Pinned != "" || p.Locked || len(p.LockedFields) > 0 }
+func protectedProject(p *Project) bool {
+	return p.referenceOnly() || len(p.SourceURLs) > 0 || p.Pinned != "" || p.Locked || len(p.LockedFields) > 0
+}
 
 func (e *Engine) mergeProjects(keepSlug, dropSlug, why string, manual bool) error {
 	if keepSlug == dropSlug {
@@ -277,9 +282,15 @@ func (e *Engine) mergeProjects(keepSlug, dropSlug, why string, manual bool) erro
 	if !ok || !drop.Live() {
 		return fmt.Errorf("%s: %w", dropSlug, ErrNotFound)
 	}
+	if keep.referenceOnly() || drop.referenceOnly() {
+		return fmt.Errorf("%w: cannot merge projects", ErrReferenceOnly)
+	}
 	if !manual {
 		if protectedProject(keep) || protectedProject(drop) {
 			return errors.New("automatic merge would change a protected project")
+		}
+		if e.shareProjectSource(keep, drop) {
+			return errors.New("automatic merge would fold separate views of a shared source")
 		}
 		for _, id := range drop.Chats {
 			if c, ok := e.Store.Chat(id); ok && c.fieldLocked("projects") {

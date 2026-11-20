@@ -135,6 +135,42 @@ type TodoProjectOutcome struct {
 	When, Title, Text string
 }
 
+// TodoProjectMemory is the memory-aware project background for a dispatch. Its sections always render in this order:
+// bounded summary, outcomes, effective decisions with reasons, pitfalls, then extension-provided context.
+type TodoProjectMemory struct {
+	Language, Name, Summary string
+	Outcomes                []TodoProjectMemoryOutcome
+	Decisions               []TodoProjectMemoryDecision
+	Pitfalls                []TodoProjectMemoryPitfall
+	Extensions              []ExtensionContext
+}
+
+type TodoProjectMemoryOutcome struct {
+	When, Text, Verification string
+	Links                    []string
+	Unaccepted               bool
+}
+
+type TodoProjectMemoryDecision struct {
+	ID, Question, Choice, Reason string
+	When, Verification           string
+	Unaccepted                   bool
+}
+
+type TodoProjectMemoryPitfall struct {
+	Text, When, Verification string
+	Unaccepted               bool
+}
+
+// RenderTodoProjectMemory renders only projects with usable memory.jsonl records. RenderTodoProject remains the
+// byte-compatible path for projects without them.
+func RenderTodoProjectMemory(p TodoProjectMemory) string {
+	if p.Summary == "" && len(p.Outcomes) == 0 && len(p.Decisions) == 0 && len(p.Pitfalls) == 0 && len(p.Extensions) == 0 {
+		return ""
+	}
+	return render("todo/project_memory", p)
+}
+
 // RenderTodoProject is the block; empty when there is nothing to say (no one line, no outcomes, nothing from an
 // extension).
 func RenderTodoProject(p TodoProject) string {

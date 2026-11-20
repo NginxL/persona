@@ -1,8 +1,8 @@
 {
-  "title": "Low-distraction mode",
+  "title": "Push grading",
   "on": "on",
   "off": "off",
-  "change": "Low-distraction mode: {before} → {after}. {what}",
+  "change": "Push grading: {before} → {after}. {what}",
   "when_on": "Only what needs you will notify you: questions, approvals, decisions only you can make, and the main conversation's notices. Task results, “Please verify” requests and other conversations' notices wait for the briefing. Applies to all your devices.",
   "when_off": "Every notification comes as before, on all your devices."
 }

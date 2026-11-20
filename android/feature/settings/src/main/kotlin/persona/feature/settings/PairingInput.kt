@@ -10,7 +10,8 @@ import persona.core.hub.HubFailure
 import persona.core.hub.SpkiTrustManager
 import persona.core.hub.LocalAddressPolicy
 import java.net.*
-import javax.net.ssl.SSLException
+import java.security.cert.CertificateException
+import javax.net.ssl.SSLPeerUnverifiedException
 
 object PairingInput {
     fun parse(link: String): PairingRequest {
@@ -82,13 +83,32 @@ object PairingInput {
     private fun invalid(): Nothing = throw PairingException(PairingFailure.InvalidCode)
 }
 
+private fun isCertificateRejection(error: Throwable): Boolean =
+    error is SSLPeerUnverifiedException || error is CertificateException
+
 fun pairingFailure(error: Throwable): PairingFailure = when (error) {
     is PairingException -> error.reason
     is UnknownHostException -> PairingFailure.Dns
     is ConnectException -> PairingFailure.Refused
     is NoRouteToHostException -> PairingFailure.Unreachable
     is SocketTimeoutException -> PairingFailure.Timeout
-    is SSLException -> PairingFailure.Certificate
+    is SSLPeerUnverifiedException, is CertificateException -> PairingFailure.Certificate
+    is HubFailure -> when (error.kind) {
+        HubError.CertificateMismatch ->
+            if (error.code == persona.core.hub.PROXY_CERTIFICATE) PairingFailure.ProxyCertificate else PairingFailure.Certificate
+        HubError.HubMismatch -> PairingFailure.Certificate
+        HubError.AddressNotFound -> PairingFailure.Dns
+        HubError.ConnectionRefused -> PairingFailure.Refused
+        HubError.Unreachable, HubError.NoNetwork -> PairingFailure.Unreachable
+        HubError.Timeout -> PairingFailure.Timeout
+        HubError.PairingExpired -> PairingFailure.Expired
+        HubError.Incompatible -> PairingFailure.Incompatible
+        HubError.TlsRequired -> PairingFailure.TlsRequired
+        HubError.LocalNetworkPermission -> PairingFailure.LocalPermission
+        HubError.AccessRequired -> PairingFailure.AccessRequired
+        HubError.AccessRejected -> PairingFailure.AccessRejected
+        else -> error.cause?.takeIf { it !== error }?.let(::pairingFailure) ?: PairingFailure.Unknown
+    }
     is SecurityException -> PairingFailure.LocalPermission
     else -> error.cause?.takeIf { it !== error }?.let(::pairingFailure) ?: PairingFailure.Unknown
 }
@@ -164,7 +184,7 @@ fun pairingStep(error: Throwable, stage: PairingStage? = null): PairingAttemptSt
     val reason = causes.filterIsInstance<PairingException>().firstOrNull()?.reason
     val beforeNetwork = stage == null || stage == PairingStage.Parse
     return when {
-        causes.any { it is SSLException || it is java.security.cert.CertificateException } -> PairingAttemptStep.Tls
+        causes.any(::isCertificateRejection) -> PairingAttemptStep.Tls
         hub != null -> when (hub.kind) {
             HubError.CertificateMismatch -> PairingAttemptStep.Tls
             HubError.PairingExpired -> PairingAttemptStep.Auth

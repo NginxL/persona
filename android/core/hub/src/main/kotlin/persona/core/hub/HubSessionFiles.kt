@@ -35,7 +35,7 @@ class HubSessionFiles internal constructor(
     private val post: suspend (String, String) -> Response = { _, _ -> throw UnsupportedOperationException("post") },
     /** The hub's features from its last hello. */
     private val features: () -> Set<String> = { emptySet() },
-    /** A POST for files/rename, trash and restore: the hub gives the machine 2 minutes (a big folder on a slow disk). */
+    /** A POST for files/rename, move, trash and restore: the hub gives the machine 2 minutes. */
     private val editPost: suspend (String, String) -> Response = post,
 ) : SessionFiles {
     constructor(connection: OkHttpHubConnection, decoding: CoroutineDispatcher = Dispatchers.Default) :
@@ -93,6 +93,18 @@ class HubSessionFiles internal constructor(
     override suspend fun rename(machineId: String, cwd: String, path: String, name: String) =
         edit<SessionFilePath>(machineId, "rename", buildJsonObject { put("path", path); put("cwd", cwd); put("name", name) }).path
 
+    override suspend fun move(machineId: String, cwd: String, path: String, directory: String, conflict: SessionMoveConflictPolicy?) =
+        edit<SessionMovedFiles>(machineId, "move", buildJsonObject {
+            putJsonArray("paths") { add(path) }
+            put("cwd", cwd)
+            put("dir", directory)
+            when (conflict) {
+                SessionMoveConflictPolicy.KeepBoth -> put("conflict", "keep")
+                SessionMoveConflictPolicy.Replace -> put("conflict", "replace")
+                null -> Unit
+            }
+        }).moved.singleOrNull() ?: throw HubFailure(HubError.Protocol, retryable = false)
+
     override suspend fun trash(machineId: String, cwd: String, paths: List<String>) =
         edit<SessionTrashedFiles>(machineId, "trash", buildJsonObject { putJsonArray("paths") { paths.forEach { add(it) } }; put("cwd", cwd) }).trashed
 
@@ -100,7 +112,7 @@ class HubSessionFiles internal constructor(
         edit<SessionRestoredFiles>(machineId, "restore", buildJsonObject { putJsonArray("trash_ids") { trashIds.forEach { add(it) } } })
             .restored.map { it.path }
 
-    /** `POST …/files/{rename,trash,restore}` with [body]; the hub passes on the node's answer, or its refusal, as it is. */
+    /** `POST …/files/{rename,move,trash,restore}` with [body]; the hub passes on the node's answer or refusal. */
     private suspend inline fun <reified T> edit(machineId: String, operation: String, body: JsonObject): T {
         require(machineId.isNotBlank())
         val path = HttpUrl.Builder().scheme("https").host("example.com")

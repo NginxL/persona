@@ -66,6 +66,7 @@ func (f *fakeDevices) Sessions(string) ([]proto.Session, bool) { return nil, fal
 func (f *fakeDevices) AppendSessions(dst []proto.Session, _ string) ([]proto.Session, bool) {
 	return dst, false
 }
+func (f *fakeDevices) Shown(string) (devices.Shown, bool) { return devices.Shown{}, false }
 func (f *fakeDevices) SessionsWhere(string, func(*proto.Session) bool) ([]proto.Session, bool) {
 	return nil, false
 }
@@ -76,6 +77,8 @@ func (f *fakeDevices) Usage() assistantwire.UsageSummary            { return ass
 func (f *fakeDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot {
 	return proto.CapacitySnapshot{}
 }
+
+func (f *fakeDevices) GatewayRetryAt(string, string, time.Time) time.Time { return time.Time{} }
 
 func (f *fakeDevices) Follow(context.Context, string, string, bool) error   { return nil }
 func (f *fakeDevices) SetAttention(link.Attention)                          {}

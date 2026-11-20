@@ -46,5 +46,5 @@
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "次に {agent} に何をしてもらいますか？",
   "continue_failed_plain": "送信できませんでした。チャットを開いて理由を確認してください。",
-  "arrange_cards": "カードを並べ替え"
+  "arrange": "概要を整理"
 }

@@ -2,6 +2,8 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -139,16 +141,40 @@ func notCompactable(c proto.Session) string {
 }
 
 // compactFailed is a send whose compaction of a nearly full context failed (the node's compact_failed): nothing was
-// sent; what to do instead. resumed: the agent was resumed for it and now rests with its context.
+// sent; where the agent stands and what to do instead. resumed: the agent was resumed for it. The node says when the
+// agent quit meanwhile (agent_quit): then it is stopped again, recorded as compact_failed, which the assistant may
+// resume (#11441); the receipt never says it rests when it does not run.
 func compactFailed(c proto.Session, am Device, err error, resumed bool) error {
-	state := "It keeps its context as it was"
-	if resumed {
-		state = "It was resumed and now rests with its context as it was"
+	quit := agentQuit(err)
+	var state string
+	switch {
+	case resumed && quit:
+		state = "It was resumed, but its process quit again (see what its terminal shows above); it is stopped as " +
+			"compact_failed, so you may resume it again once that is dealt with"
+	case resumed:
+		state = "It was resumed and runs with its context as it was"
+	case quit:
+		state = "Its process quit (see what its terminal shows above); it is stopped as compact_failed, so you may " +
+			"resume it once that is dealt with"
+	default:
+		state = "It keeps running with its context as it was"
 	}
 	return fmt.Errorf("could not compact %s on %s before your text: %w. %s; nothing was sent. Send again to try once "+
 		"more, or, if it cannot be compacted, start a replacement (read this one with agent_read and give it what it "+
 		"needs): for its task, task_plan with continues (the task's todo id) and continues_why; for work on no task, "+
 		"agent_start in its directory", agentLabel(c), am.Name, err, state)
+}
+
+// agentQuit: a node's compact_failed says the agent quit while it was compacted (refusal data agent_quit).
+func agentQuit(err error) bool {
+	var re *rpc.Error
+	if !errors.As(err, &re) || len(re.Data) == 0 {
+		return false
+	}
+	var d struct {
+		AgentQuit bool `json:"agent_quit"`
+	}
+	return json.Unmarshal(re.Data, &d) == nil && d.AgentQuit
 }
 
 // compactSendWait bounds a send that may compact first: a compaction takes minutes (node compactBeforeSendDeadline).

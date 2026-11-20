@@ -162,6 +162,8 @@ type legacyUIPlace struct {
 	Connector     string           `json:"connector,omitempty"`
 	// Group as on the new path: an app old enough for these keys reads no group and ignores it
 	Group *extension.UIGroup `json:"group,omitempty"`
+	// IconColor as on the new path; such an app ignores it too
+	IconColor string `json:"icon_color,omitempty"`
 }
 
 func legacyUIPlaces(us []UIPlace) []legacyUIPlace {

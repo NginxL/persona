@@ -302,6 +302,9 @@ func (n *Node) runtimeWorktreeDelete(ctx context.Context, kind, id string, in wo
 	if err != nil {
 		return nil, err
 	}
+	if err := n.guardBackendDeletion(n.catalogDir(current.runtime.workspace.Cwd)); err != nil {
+		return nil, err
+	}
 	if in.Preview {
 		token, err := rememberWorkspaceDeletion(current)
 		if err != nil {

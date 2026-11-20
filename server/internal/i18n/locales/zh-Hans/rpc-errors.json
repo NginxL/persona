@@ -45,6 +45,7 @@
   "open_elsewhere_agents_list": "这个标签停在 Claude Code 的 agents 列表上：打开终端，用方向键选中一个会话、回车进去后再发。这次没有发送。",
   "modes_on_computer": "这个 Claude 会话运行在电脑上的 Claude 里（桌面 App 或其他终端），它的模式、思考强度和模型请在那里改。",
   "modes_not_running": "这个 Agent 没在运行。先在它的终端页点「恢复」，再改这一项。",
+  "effort_change_pending": "思考强度变更尚未确认，消息未发送。如果变更失败，请重新选择思考强度。",
   "agent_stopped": "这个 Agent 已经停了。对话和终端还在，它不再收消息，这次没有发送。要它接着做，在它的终端页点「恢复」。",
   "resume_not_allowed": "这个 Agent 不能自动恢复。请在它的终端页点「恢复」。",
   "stop_not_saved": "未能保存停止记录。这次没有启动或停止 Agent，也没有关闭终端，请重试。",

@@ -555,8 +555,8 @@ func TestWarmTakesTheMainConversationsPick(t *testing.T) {
 
 // A new main conversation takes a model with its first message, as a message does, and keeps what it was started with
 // as its pick: its later messages run on it. Only a main start keeps one (#6911); another conversation's start runs on
-// what it named and keeps nothing, as the conversation then runs on what it started with. Nothing named, nothing kept; a launcher that is gone falls back as before, with its
-// model dropped and no pick kept.
+// what it named and keeps nothing, as the conversation then runs on what it started with. Nothing named, nothing kept;
+// a launcher that is gone is refused without a send or an implicit substitute, and no pick is kept.
 func TestStartTakesAModelAndKeepsThePick(t *testing.T) {
 	start := func(t *testing.T, s *Service, body string) (int, map[string]any) {
 		t.Helper()
@@ -648,13 +648,15 @@ func TestStartTakesAModelAndKeepsThePick(t *testing.T) {
 		}
 	})
 	t.Run("a launcher that is gone", func(t *testing.T) {
+		fastLauncherRecovery(t)
 		s, f := pickFixture(t)
+		setLauncherRecovery(f, 1, nil)
 		code, got := start(t, s, `{"prompt":"hi","main":true,"launcher":"gone","model":"m9"}`)
-		if code != 200 || got["pick"] != nil {
+		if code != http.StatusBadGateway || got["pick"] != nil || !strings.Contains(got["body"].(string), "no configured substitute") {
 			t.Fatalf("%d %v", code, got)
 		}
-		if p := f.lastSend(t); p["launcher"] != "gw" || p["model"] != nil {
-			t.Fatalf("first message: %v", p)
+		if len(f.sends) != 0 {
+			t.Fatalf("a refused launcher started a conversation: %v", f.sends)
 		}
 	})
 	t.Run("refused before anything starts", func(t *testing.T) {

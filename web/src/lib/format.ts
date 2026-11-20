@@ -210,8 +210,30 @@ export function externalLink(s?: Pick<Session, "external_url">): string | undefi
   }
 }
 
-export function sessionTitle(s: Pick<Session, "title" | "cwd">): string {
-  return s.title?.trim() || baseName(s.cwd) || t("lib-format.untitled_session");
+type SessionNameFields = Pick<Session, "title" | "cwd" | "assistant" | "slot_name" | "slot_id" | "tab_id" | "space_kind" | "host">;
+
+export function herdrTabName(s: SessionNameFields): string {
+  const kind = s.space_kind || s.host;
+  if (s.assistant || !(s.slot_id || s.tab_id) || (kind && kind !== "herdr" && kind !== "herdr-core")) return "";
+  return s.slot_name?.trim() || "";
+}
+
+// Keep the terminal prompt recognizer in sync with server/internal/proto/session_name.go.
+const SHELL_PROMPT_TITLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:[ \t]+[^\r\n]+|[~/][^\r\n]*)$/;
+
+export function sessionDisplayTab(s: SessionNameFields, preferTab = false): string {
+  const title = s.title?.trim() || "";
+  return preferTab || !title || SHELL_PROMPT_TITLE.test(title) ? herdrTabName(s) : "";
+}
+
+export function sessionTitle(s: SessionNameFields, preferTab = false): string {
+  return sessionDisplayTab(s, preferTab) || s.title?.trim() || baseName(s.cwd) || t("lib-format.untitled_session");
+}
+
+export function sessionTitleDetail(s: SessionNameFields, preferTab: boolean): string {
+  const tab = preferTab ? herdrTabName(s) : "";
+  const title = s.title?.trim() || "";
+  return tab && tab !== title ? title : "";
 }
 
 // A path from a Windows computer: a drive letter or a UNC share. Only there is a backslash a separator; in any other
@@ -292,6 +314,20 @@ export function clock(iso?: string): string {
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   if (d.toDateString() === today.toDateString()) return hm;
   return t("lib-format.date_time", { date: formatDate(d, { month: "short", day: "numeric" }), time: hm });
+}
+
+/** 18:20 today, "Yesterday", "Wed" within the week, "Oct 28" this year, else 2025-10-28 (LarkTime.short). */
+export function shortTime(iso?: string, now = new Date()): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000) return "";
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(now) - day(d)) / 86400_000);
+  if (days <= 0) return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (days === 1) return t("lib-inbox.yesterday");
+  if (now.getTime() - d.getTime() < 6 * 86400_000) return formatDate(d, { weekday: "short" });
+  if (d.getFullYear() === now.getFullYear()) return formatDate(d, { month: "short", day: "numeric" });
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** "512 B", "1.5 KB", "250 MB". The unit and the decimal follow the figure as it is shown, after rounding, as the

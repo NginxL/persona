@@ -124,10 +124,10 @@
     <string name="settings_notify_quiet_end">结束</string>
     <string name="settings_notify_quiet_footer">这段时间里，Agent 做完不再通知（早上的「今天要知道的」卡片会汇总），需要你的事照常送达但不响铃。你让助手设的提醒照常提醒。只要你有一台设备在免打扰时段内，聊天机器人对未回答卡片的提醒也会顺延。按这台手机的时区计算。</string>
     <string name="settings_notify_quiet_footer_zone">这段时间里，Agent 做完不再通知（早上的「今天要知道的」卡片会汇总），需要你的事照常送达但不响铃。你让助手设的提醒照常提醒。只要你有一台设备在免打扰时段内，聊天机器人对未回答卡片的提醒也会顺延。目前按设置时所在的%1$s计算，在这里改动后改按这台手机的时区计算。</string>
-    <string name="settings_notify_low_distraction">低打扰模式</string>
+    <string name="settings_notify_low_distraction">推送分级</string>
     <string name="settings_notify_low_distraction_subtitle">只提醒要你处理的事，其余留给简报</string>
     <string name="settings_notify_low_distraction_footer">对你所有的设备生效。开启后，要你回答、批准或拍板的事、你设的提醒和主对话的通知照常提醒；任务结论、「请验收」和其他对话的通知留给简报和「被拦推送」，Agent 做完不再提醒。</string>
-    <string name="settings_notify_low_distraction_save_failed">保存失败，低打扰模式已恢复原样。</string>
+    <string name="settings_notify_low_distraction_save_failed">保存失败，推送分级已恢复原样。</string>
     <string name="settings_reading">正在读取</string>
     <string name="settings_retry_read">重试读取</string>
     <string name="settings_saving">正在保存…</string>

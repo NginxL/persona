@@ -7,11 +7,11 @@ package prompts
 type ChannelMessage struct {
 	Persona  bool   // a Persona conversation (not a coding agent): add the note about answering in the chat app
 	Name     string // the channel's name: WeChat
-	Owner    string // "" is "the user" (in Chinese)
+	Owner    string // optional owner name
 	Plain    bool   // the chat app shows plain text
 	Asks     bool   // what is asked can be answered there
 	Public   bool   // a mention in someone else's chat: use the localized public-audience prompt
-	Language string // English / 日本語 for the public prompt; empty is zh-Hans
+	Language string // English / 日本語; empty is zh-Hans
 	Chat     string // where the owner invoked the mention
 	Topic    string // its topic or thread
 	Context  string // extension-gathered context, always data rather than instructions
@@ -33,7 +33,8 @@ func RenderChannelMessage(m ChannelMessage) string {
 // ChannelAnswerAgain asks a conversation for the answer a turn from a chat app did not give (it ended with nothing,
 // or a placeholder like "No response requested."): channel/answer_again.
 type ChannelAnswerAgain struct {
-	Name string // the chat app: Lark, WeChat
+	Name     string // the chat app: Lark, WeChat
+	Language string // owner language; empty preserves the original Chinese instructions
 }
 
 func RenderChannelAnswerAgain(m ChannelAnswerAgain) string { return render("channel/answer_again", m) }

@@ -11,12 +11,16 @@ struct InboxConnectorDetailView: View {
     var item: InboxItem
     @State private var thread: ConnectorThreadModel
 
-    init(item: InboxItem) {
+    init(item: InboxItem, manager: String?) {
         self.item = item
-        _thread = State(initialValue: ConnectorThreadModel(connector: item.source, thread: item.connector?.thread ?? ""))
+        _thread = State(initialValue: ConnectorThreadModel(connector: item.source, thread: item.connector?.thread ?? "", manager: manager))
     }
 
     var body: some View {
+        content.environment(\.larkManager, thread.manager)
+    }
+
+    @ViewBuilder private var content: some View {
         if thread.loaded && (thread.unavailable || thread.chat.map { !Self.isConversation($0, source: item.source) } == true) {
             InboxConnectorTextView(item: item, problem: thread.failure, reread: reread)
         } else if thread.chat?.isGitHub == true {

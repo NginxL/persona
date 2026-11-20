@@ -15,12 +15,17 @@ import (
 
 func TestParsePSEnv(t *testing.T) {
 	out := parsePSEnv("" +
-		"  101 /home/me/.local/bin/claude --settings /p/a/settings.json TERM=xterm CLAUDE_CONFIG_DIR=/p/a SHELL=/bin/zsh\n" +
-		"  102 claude --resume x HOME=/home/me\n" + // the default directory: left out
+		"  101 /home/me/.local/bin/claude --settings /p/a/settings.json --mcp-config /h/.persona/mcp.json --allowedTools x TERM=xterm CLAUDE_CONFIG_DIR=/p/a SHELL=/bin/zsh\n" +
+		"  102 claude --resume x HOME=/home/me\n" + // the default directory: kept for its command line (offlauncher.go)
 		"  103 node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js CLAUDE_CONFIG_DIR=/p/b\n" +
 		"  104 /bin/zsh -c run CLAUDE_CONFIG_DIR=/p/c\n" + // a shell a claude started: not claude
 		"garbage\n")
-	if len(out) != 2 || out[101].ConfigDir != "/p/a" || out[103].ConfigDir != "/p/b" {
+	want := map[int]procEnv{
+		101: {ConfigDir: "/p/a", Cmd: true, MCPConfig: "/h/.persona/mcp.json"},
+		102: {Cmd: true},
+		103: {ConfigDir: "/p/b", Cmd: true},
+	}
+	if len(out) != len(want) || out[101] != want[101] || out[102] != want[102] || out[103] != want[103] {
 		t.Fatalf("got %v", out)
 	}
 }
@@ -32,10 +37,11 @@ func TestParsePSEnvLauncherVars(t *testing.T) {
 		"  203 claude MY_ANTHROPIC_MODEL=nope HOME=/home/me\n" + // another variable's suffix: not ours
 		"  204 /bin/zsh ANTHROPIC_MODEL=model-a\n") // not claude
 	want := map[int]procEnv{
-		201: {BaseURL: "https://gw.example.com/api", Model: "model-a"},
-		202: {ConfigDir: "/p/a", BaseURL: "https://gw.example.com/api"},
+		201: {BaseURL: "https://gw.example.com/api", Model: "model-a", Cmd: true},
+		202: {ConfigDir: "/p/a", BaseURL: "https://gw.example.com/api", Cmd: true},
+		203: {Cmd: true},
 	}
-	if len(out) != len(want) || out[201] != want[201] || out[202] != want[202] {
+	if len(out) != len(want) || out[201] != want[201] || out[202] != want[202] || out[203] != want[203] {
 		t.Fatalf("got %v", out)
 	}
 	// /proc/<pid>/environ is NUL-separated.

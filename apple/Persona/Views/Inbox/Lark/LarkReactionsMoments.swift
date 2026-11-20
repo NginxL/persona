@@ -253,7 +253,8 @@ struct LarkMomentsPostView: View {
     private func author(name: String, avatar: String?, id: String?, time: Double?, small: Bool = false) -> some View {
         Button { if let id { person = LarkPersonRef(id: id, name: name, avatar: avatar) } } label: {
             HStack(spacing: Theme.Space.m) {
-                LarkAvatarImage(name: name, url: avatar.map(media), size: small ? 30 : 40)
+                LarkAvatarImage(name: name, url: avatar, size: small ? 30 : 40)
+                    .environment(\.larkManager, manager)
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(name).font(small ? Theme.Font.captionStrong : Theme.Font.secondaryStrong).lineLimit(1)
                     if let time { Text(Date(timeIntervalSince1970: time / 1000).formatted(date: .abbreviated, time: .shortened)).font(Theme.Font.label).foregroundStyle(.secondary) }

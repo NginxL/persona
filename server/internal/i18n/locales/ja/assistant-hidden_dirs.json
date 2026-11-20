@@ -1,0 +1,11 @@
+{
+  "title": "Agent フォルダ",
+  "block": "{machine} の {path} にある Agent セッションをブロックします。そのコンピュータはセッションを収集しなくなり、Persona のどこにも表示・集計されません。許可の確認はエージェント自身の画面に任されます",
+  "hide": "{machine} の {path} にある Agent セッションを Agents と Persona のビューから隠します（セッションは動作を続け、記録も続きます。監督中のタスクは表示されたままです）",
+  "add_off": "{machine} に Agent フォルダのルール {path} をオフのまま追加します（オンにするまで何もしません）",
+  "switch_on": "{machine} の Agent フォルダのルール {path} をオンにします",
+  "switch_off": "{machine} の Agent フォルダのルール {path} をオフにします（そのセッションは再び表示され、ルールは残ります）",
+  "to_block": "{machine} の Agent フォルダのルール {path} をブロックに変えます（そのコンピュータはセッションを収集しなくなります）",
+  "to_hide": "{machine} の Agent フォルダのルール {path} を非表示に変えます（セッションは再び収集されますが、Agents と Persona のビューには出ません）",
+  "remove": "{machine} の Agent フォルダのルール {path} を削除します（そのセッションは再び表示されます）"
+}

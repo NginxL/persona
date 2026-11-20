@@ -253,15 +253,19 @@ func (n *Node) quitAgentRound(ctx context.Context, id, pane string, only host.Ho
 // resumed is what a Claude session that is not running is resumed with: the directory, launcher and model it was
 // started with, the modes it ran in and its title as the tab's name.
 type resumed struct {
-	cwd, launcher, mode, effort, tab string
-	execution                        modelExecution
+	cwd, launcher, mode, effort, tab    string
+	taskID, workspaceID, workspaceLabel string
+	execution                           modelExecution
 }
 
 // resumeWith is how a Claude session that is not running comes back, by a message (send) or by a start that resumes
 // it and leaves these out (session.start, fillResume).
 func (n *Node) resumeWith(id string, opts sendOpts) resumed {
 	st, _ := n.state.get(id)
-	r := resumed{cwd: st.Cwd, tab: n.resumeTabName(id)}
+	r := resumed{cwd: st.Cwd, tab: n.resumeTabName(id), taskID: st.TaskID, workspaceID: st.WorkspaceID, workspaceLabel: st.WorkspaceLabel}
+	if r.taskID == "" {
+		r.taskID, r.workspaceID, r.workspaceLabel = opts.TaskID, opts.WorkspaceID, opts.WorkspaceLabel
+	}
 	r.launcher, r.execution = n.resumeLauncher(st, id, opts)
 	if r.cwd == "" {
 		if p := n.transcriptPath(id); p != "" {
@@ -296,6 +300,15 @@ func (n *Node) fillResume(id string, asked resumed) resumed {
 	out.mode = cmp.Or(asked.mode, r.mode)
 	out.effort = cmp.Or(asked.effort, r.effort)
 	out.tab = cmp.Or(asked.tab, r.tab)
+	out.taskID = cmp.Or(asked.taskID, r.taskID)
+	if r.taskID != "" && out.taskID == r.taskID {
+		// The node's own task record is authoritative; a conflicting user workspace is never adopted.
+		out.workspaceID = cmp.Or(r.workspaceID, asked.workspaceID)
+		out.workspaceLabel = cmp.Or(r.workspaceLabel, asked.workspaceLabel)
+	} else {
+		out.workspaceID = cmp.Or(asked.workspaceID, r.workspaceID)
+		out.workspaceLabel = cmp.Or(asked.workspaceLabel, r.workspaceLabel)
+	}
 	return out
 }
 
@@ -318,6 +331,9 @@ func (n *Node) resumeTabName(id string) string {
 // what a Codex thread started outside Persona is resumed with (codex_resume.go).
 func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, text string, images []proto.Image) error {
 	ctx = n.withResumeHost(ctx, id)
+	if st.TaskID != "" {
+		ctx, _ = withTaskSpace(ctx, st.TaskID, st.WorkspaceID, st.WorkspaceLabel)
+	}
 	if r := n.notRunningRefusal(ctx, id); r != nil {
 		return r
 	}
@@ -358,7 +374,7 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 	if len(paths) > 0 {
 		text = strings.TrimSpace(text) + "\n\n<attached_images>\n" + strings.Join(paths, "\n") + "\n</attached_images>"
 	}
-	ws, err := n.workspaceFor(ctx, launch, st.Cwd)
+	ws, err := n.tabSpace(ctx, launch, st.Cwd, "")
 	if err != nil {
 		return err
 	}
@@ -416,6 +432,9 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	for {
 		if err := n.refreshHosts(wait); err == nil {
 			if a, ok := n.agent(id); ok && a.PaneID == pane {
+				// Codex may come up behind its own update offer, whose default is Update now: the next Enter (a
+				// message, a /compact) would install it and quit Codex (#11316). Skipped as a new start skips it.
+				n.settleCodexStartup(wait, pane)
 				return nil
 			}
 		}
@@ -437,16 +456,27 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 // The pane is marked as Persona's (personaTabToken, the session id when it is already known): once its agent exits,
 // the tab stays with the shell, linked to the session (personatab.go).
 func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabName, id string) (*host.Created, error) {
+	ts := taskSpaceIn(ctx, launch)
 	if c := adoptedPane(ctx); c != nil { // "Run Agent Here": the pane the user picked, not a new tab (panes_actions.go)
+		if ts != nil {
+			ts.adopted = true
+		}
 		return c, nil
 	}
 	if c, err := keptClaimOf(ctx).tab(ctx); err != nil || c != nil { // a failed start's kept tab (startremedy.go)
+		if ts != nil {
+			ts.adopted = true
+		}
 		return c, err
 	}
 	var created *host.Created
 	var err error
 	if ws == "" {
-		if created, err = createStartSpace(ctx, launch, cwd, filepath.Base(cwd)); err == nil && created.SlotID != "" {
+		label := filepath.Base(cwd)
+		if ts != nil {
+			label = ts.label
+		}
+		if created, err = createStartSpace(ctx, launch, cwd, label); err == nil && created.SlotID != "" {
 			var taken map[string]bool
 			if _, ok := launch.(*herdrCoreHost); ok {
 				taken = n.tabLabels(ctx, launch, created.SpaceID) // CreateSpace can reuse an app space by its folder.
@@ -455,10 +485,17 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 		}
 	} else {
 		created, err = createStartSlot(ctx, launch, ws, cwd, tabLabel(tabName, n.tabLabels(ctx, launch, ws)))
+		if err == nil {
+			if ts != nil && created != nil && created.SpaceID == "" {
+				created.SpaceID = ws
+			}
+			n.closeWorktreeShells(ctx, launch, ws, created.Pane.String()) // the Agent's tab is the worktree's tab now
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("创建终端标签页失败：%w", err)
 	}
+	ts.opened(created.SpaceID)
 	markPersonaTab(ctx, launch, created.Pane, id)
 	markTaskTerminal(ctx, launch, created.Pane)
 	n.agentTerminalOpened(launch, created.Pane) // finished_close.go

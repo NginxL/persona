@@ -93,6 +93,8 @@ type Closeout struct {
 	Deployed string `json:"deployed,omitempty"`
 	// Verified: what was run or measured, with its reading; "untested" is an answer.
 	Verified string `json:"verified,omitempty"`
+	// Next is one optional follow-up the owner may choose after a completed turn.
+	Next string `json:"next,omitempty"`
 	// Missing: what it still needs from the user or someone else.
 	Missing string `json:"missing,omitempty"`
 	// Checked is what the hub found when it looked at the closeout's pull request itself; nil when it had nothing to

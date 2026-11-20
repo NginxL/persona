@@ -18,7 +18,7 @@ import { ExtensionThemePicker } from "../ui/ExtensionThemePicker";
 import { setTheme, useTheme, type Theme } from "./theme";
 import { Group, Row, Pill, RowConfirm, Switch } from "./settings/SettingsParts";
 import { LanguageRow } from "./settings/LanguageRow";
-import { FontRows, RecentChatsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
+import { FontRows, RecentChatsRow, SidebarIconsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
 import { setReplyMotionEnabled, useReplyMotionSetting } from "../ui/stream/motion";
 import { setAgentDetails, useAgentDetails } from "../lib/context-usage";
 import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
@@ -29,6 +29,7 @@ import { SavedPrompts } from "./settings/SavedPrompts";
 import { SourcesUI } from "./subscriptions/SourcesUI";
 import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
+import { HiddenAgentDirs } from "./settings/HiddenAgentDirs";
 import { AgentSettings } from "./settings/AgentSettings";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
 import { StartPageGroup } from "./settings/StartPage";
@@ -454,6 +455,7 @@ function AgentSections({ section }: { section: SettingsSection | null }) {
   };
   return (
     <>
+      <HiddenAgentDirs />
       {AGENT_KINDS.map((id) => {
         const shown = !closed.has(id);
         return (
@@ -653,6 +655,7 @@ function General({ onModel }: { onModel: () => void }) {
           <Switch on={replyMotion} onChange={setReplyMotionEnabled} label={t("settings.reply_motion")} />
         </Row>
         <RecentChatsRow />
+        <SidebarIconsRow />
       </Group>
 
       <DesktopSettings />

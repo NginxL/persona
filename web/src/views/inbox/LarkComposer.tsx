@@ -235,7 +235,7 @@ export const LarkComposer = forwardRef<LarkComposerHandle, LarkComposerProps>(fu
           </div>
         )}
         <div className="relative flex items-end gap-2">
-          {group && <LarkPeopleMenu picker={people} label={t("inbox-larkthread.mention_label")} />}
+          {group && <LarkPeopleMenu picker={people} account={account} label={t("inbox-larkthread.mention_label")} />}
           {canAttach && (
             <>
               <input

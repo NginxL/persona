@@ -43,15 +43,16 @@ func TestAnsweredCardOpenButton(t *testing.T) {
 			ix := proto.Interaction{ID: "ix_q", MachineID: "server", SessionID: tc.session, Kind: proto.IxQuestion,
 				Questions: []proto.Question{{Question: "用哪个？"}}}
 			card := s.answeredCard(context.Background(), ix, "已处理").JSON()
-			hasLink := strings.Count(card, "open_url") > 0
-			if hasLink != (tc.wantURL != "") {
-				t.Fatalf("open_url button=%v, want %v: %s", hasLink, tc.wantURL != "", card)
+			// Over, it keeps no buttons: the conversation's page is a link in its small print.
+			if strings.Contains(card, `"tag":"button"`) {
+				t.Fatalf("an answered card with a button: %s", card)
 			}
-			if strings.Contains(card, `"default_url":""`) {
-				t.Fatalf("a dead empty link: %s", card)
+			hasLink := strings.Contains(card, "](http")
+			if hasLink != (tc.wantURL != "") {
+				t.Fatalf("link=%v, want %v: %s", hasLink, tc.wantURL != "", card)
 			}
 			if tc.wantURL != "" {
-				if !strings.Contains(card, tc.wantURL) || !strings.Contains(card, "打开网页版") {
+				if !strings.Contains(card, "[打开会话]("+tc.wantURL+")") {
 					t.Fatalf("card missing %q: %s", tc.wantURL, card)
 				}
 			}

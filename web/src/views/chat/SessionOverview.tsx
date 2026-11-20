@@ -5,7 +5,6 @@ import { t } from "../../i18n";
 import { formatTokens } from "../../lib/tokens";
 import { contextLabel, contextTier, contextTooltip, contextUsage } from "../../lib/context-usage";
 import { sessionTitle, shortPath, stateOf } from "../../lib/format";
-import { openBackgroundPanel } from "../../lib/background-panel";
 import { credentialOwner } from "../../lib/api";
 import { openPanel } from "../../lib/panel";
 import { followChildSession, followSubagentLink } from "../../lib/subagent-link";
@@ -27,9 +26,10 @@ interface OverviewProps {
   id: string;
   children: readonly Session[];
   onJumpToCall?: (call: string) => void;
+  hidden?: boolean;
 }
 
-export function SessionOverview({ id, session, machineName, items, tasks, children, onJumpToCall }: OverviewProps) {
+export function SessionOverview({ id, session, machineName, items, tasks, children, onJumpToCall, hidden }: OverviewProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const finished = useMemo(() => finishedBackgroundTasks(items, tasks), [items, tasks]);
   // Codex child threads are standalone sessions. Use the known rows from this machine and manager.
@@ -66,7 +66,7 @@ export function SessionOverview({ id, session, machineName, items, tasks, childr
   };
 
   return (
-    <aside id={id} data-session-overview aria-labelledby={`${id}-title`}
+    <aside id={id} data-session-overview aria-labelledby={`${id}-title`} hidden={hidden}
       className="session-overview flex min-h-0 shrink-0 flex-col bg-surface">
       <h2 id={`${id}-title`} className="shrink-0 border-b border-line px-3 py-2.5 text-sm font-semibold text-ink">{t("chat-chatview.session_overview")}</h2>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3">
@@ -82,8 +82,8 @@ export function SessionOverview({ id, session, machineName, items, tasks, childr
         }} />}
         <div className="border-t border-line">
           <BackgroundList session={session} mid={mid} sid={sid} inOverview
-            onOpenRun={(task) => { if (current()) openBackgroundPanel(mid, sid, task); }}
-            onOpenTask={(task) => { if (current()) openPanel({ kind: "background", mid, sid, task: task.id }); }}
+            onOpenRun={(task) => { if (current()) openPanel({ kind: "background", mid, sid, run: task, from: "overview" }); }}
+            onOpenTask={(task) => { if (current()) openPanel({ kind: "background", mid, sid, task: task.id, from: "overview" }); }}
           />
           <FinishedTasks finished={finished} session={session}
             onOpenOutput={(path) => { if (current()) openPanel({ kind: "file", mid, path, cwd: session.cwd }); }}

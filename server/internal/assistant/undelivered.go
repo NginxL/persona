@@ -95,9 +95,13 @@ type keptMessage struct {
 	Looks     int       `json:"looks,omitempty"`
 	// OwnerRetry: the owner pressed Retry; tries are made even after one in doubt, each looking for it first, until one
 	// goes in or ends in doubt itself (tries that typed nothing keep it).
-	OwnerRetry bool   `json:"owner_retry,omitempty"`
-	Error      string `json:"error,omitempty"`
-	SignedOut  bool   `json:"signed_out,omitempty"`
+	OwnerRetry bool `json:"owner_retry,omitempty"`
+	// WaitIdle: the latest try was refused because the conversation was at work while its task-follow-up role changed
+	// (assistantwire.CodeConversationBusy). A session list that shows it still working does not wake it; one that shows
+	// it settled does, so it goes in right after the work ends, on the new role.
+	WaitIdle  bool   `json:"wait_idle,omitempty"`
+	Error     string `json:"error,omitempty"`
+	SignedOut bool   `json:"signed_out,omitempty"`
 }
 
 // inDoubt: the latest try may have gone in and nobody said to send it again, so it is only looked for (undeliveredLook).
@@ -201,7 +205,7 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 	}
 	k := keptMessage{ID: id, Machine: p.MachineID, Session: p.SessionID, Params: params, Human: p.Human, Lang: string(lang), CredentialID: p.CredentialID,
 		At: now, State: proto.UndeliveredWaiting, Attempts: 1, NextAt: now.Add(undeliveredBackoff[0]),
-		Error: undeliveredReason(lang, p.Code)}
+		Error: undeliveredReason(lang, p.Code), WaitIdle: p.Code == assistantwire.CodeConversationBusy}
 	if p.Code == assistantwire.CodeUndeliveredAhead {
 		// never tried: it goes right after the ones ahead of it, and says so
 		k.Attempts, k.NextAt, k.Error = 0, now, i18n.T(lang, "assistant-undelivered.behind")
@@ -234,6 +238,9 @@ func (s *Service) KeepUndelivered(ctx context.Context, p assistantwire.KeepUndel
 func undeliveredReason(lang i18n.Lang, code string) string {
 	if code == "machine_offline" || code == "node_closed" {
 		return i18n.T(lang, "assistant-undelivered.computer_away")
+	}
+	if code == assistantwire.CodeConversationBusy {
+		return i18n.T(lang, "assistant-undelivered.busy")
 	}
 	return i18n.T(lang, "assistant-undelivered.not_started")
 }
@@ -412,6 +419,10 @@ func (s *Service) undeliveredSeen(d DeviceSessions) {
 		}
 		for i := range q {
 			// A try in doubt is only looked for, on its own steps (undeliveredLook).
+			// One refused while the conversation was at work waits until the list shows it settled.
+			if q[i].WaitIdle && row.Status == proto.StatusWorking {
+				continue
+			}
 			if q[i].State == proto.UndeliveredWaiting && !q[i].inDoubt() && q[i].Machine == d.MachineID && q[i].NextAt.After(now) {
 				q[i].NextAt, woke = now, true
 			}
@@ -568,6 +579,7 @@ func (s *Service) undeliveredSend(ctx context.Context, id string) {
 				m.Attempts++
 				m.NextAt = time.Now().UTC().Add(undeliveredWait(m.Attempts))
 				m.Error = undeliveredReason(i18n.Lang(m.Lang), keptErrCode(err))
+				m.WaitIdle = keptErrCode(err) == assistantwire.CodeConversationBusy
 				// Nothing typed: the mark is as before the try. A first try's is cleared (the next need not look
 				// first); an owner's Retry after a try in doubt still has that try to look for, and stays a Retry.
 				m.TriedAt, m.OwnerRetry = k.TriedAt, k.OwnerRetry

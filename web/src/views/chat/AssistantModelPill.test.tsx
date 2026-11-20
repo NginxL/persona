@@ -98,6 +98,8 @@ beforeEach(() => {
       unavailable: [{ name: "gpt-direct", kind: "api", code: "api_protocol", reason: "Responses API" }],
     });
     if (url.includes("/assistant/conversations/c1/model")) return pickAnswer();
+    // Newly listed chats re-read Assistant; return its complete snapshot instead of an operation receipt.
+    if (url.endsWith("/assistant")) return json(getState().assistant);
     return json({ ok: true });
   }));
   host = document.createElement("div");

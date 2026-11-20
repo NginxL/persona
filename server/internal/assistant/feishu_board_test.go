@@ -404,6 +404,30 @@ func TestBoardStaysWhenAnEditFailsForAPassingReason(t *testing.T) {
 	}
 }
 
+func TestBoardFrequencyLimitedEditKeepsOriginalForNextUpdate(t *testing.T) {
+	e := newBoardEnv(t)
+	e.tasks("/tasks")
+	e.failUpdates(errors.New("feishu update card: 230429 This operation triggers the frequency limit."))
+	e.tasks("/tasks")
+	if got := e.boardID(); got != "om_board_1" {
+		t.Fatalf("the frequency-limited board became %q", got)
+	}
+	if p, u := e.counts(); p != 2 || u != 1 { // the original board and the command's snapshot, no replacement board
+		t.Fatalf("after the frequency limit: %d posts, %d edits; want 2 and 1", p, u)
+	}
+
+	e.failUpdates(nil)
+	e.tasks("/tasks")
+	if p, u := e.counts(); p != 2 || u != 2 {
+		t.Fatalf("after the next update: %d posts, %d edits; want no new board and 2 edits", p, u)
+	}
+	for i, update := range e.updates {
+		if got := update["message_id"]; got != "om_board_1" {
+			t.Fatalf("update %d targeted %v, not the original board", i, got)
+		}
+	}
+}
+
 // A board that was sent as rich text (Feishu refused the card) has the id of a text message, and every edit of it fails
 // the same way for good: it is replaced, not kept for ever. So is a board Feishu refuses for any other answer.
 func TestBoardIsReplacedWhenFeishuWillNeverTakeTheEdit(t *testing.T) {

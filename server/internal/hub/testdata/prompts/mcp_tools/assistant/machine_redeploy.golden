@@ -1,0 +1,15 @@
+{
+  "name": "machine_redeploy",
+  "description": "Redeploy by ID or exact name; return the confirmed outcome.",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "machine"
+    ],
+    "properties": {
+      "machine": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -31,6 +31,9 @@ type UIItem struct {
 	Hosts     []string `json:"hosts,omitempty"`
 	// Icon is a nav_page's icon, from UIIcons (each app draws its own); the default when empty.
 	Icon string `json:"icon,omitempty"`
+	// IconColor is a nav_page's icon color, one of wire.Colors as a row's icon_color: drawn only while the owner chose
+	// Colored sidebar icons (#10822, docs/extensions/extensions.md "UI slots"); the sidebar's neutral ink when empty.
+	IconColor string `json:"icon_color,omitempty"`
 	// Opens is the ui (a nav_page or extension_page of the same extension) a compact card or widget opens when
 	// tapped.
 	Opens string `json:"opens,omitempty"`

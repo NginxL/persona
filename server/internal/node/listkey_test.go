@@ -42,6 +42,12 @@ func listKeyFmt(list []proto.Session) string {
 		if s.Model != "" || s.PermissionMode != "" || s.Effort != "" {
 			fmt.Fprintf(&b, "modes:%q/%q/%q\n", s.Model, s.PermissionMode, s.Effort)
 		}
+		if s.PendingEffort != nil {
+			fmt.Fprintf(&b, "pending-effort:%q/%v\n", *s.PendingEffort, s.EffortChangeFailed)
+		}
+		if s.OffLauncher {
+			b.WriteString("off-launcher\n")
+		}
 		fmt.Fprintf(&b, "source:%s/%s/%s/%s/%v/%v/%s/%s\n", s.SourceKind, s.SourceThreadID, s.SourceInstanceID, s.ReadOnlyReason, capsFmt(s.Capabilities), s.Attached, s.CodexRoute, s.CodexRouteNote)
 		for _, t := range s.Background {
 			b.WriteString(t.ID + ",")
@@ -235,6 +241,7 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 		"effort":                  func(s *proto.Session) { s.Effort = "low" },
 		"model":                   func(s *proto.Session) { s.Model = "claude-opus-5" },        // #6334
 		"permission_mode":         func(s *proto.Session) { s.PermissionMode = "plan" },        // #6334
+		"off_launcher":            func(s *proto.Session) { s.OffLauncher = true },             // #11792
 		"effort_alone":            func(s *proto.Session) { s.Efforts, s.Effort = nil, "max" }, // #6334
 		"efforts":                 func(s *proto.Session) { s.Efforts = []string{"low", "medium", "high"} },
 		"efforts_none":            func(s *proto.Session) { s.Efforts = nil },
@@ -402,5 +409,17 @@ func TestListKeyModelCapability(t *testing.T) {
 	}
 	if key(nil) == key(proto.CanModes(false)) || key(proto.CanModes(false)) == key(proto.CanModes(true)) {
 		t.Fatal("model capability change was lost")
+	}
+}
+
+func TestListKeyQueuedEffort(t *testing.T) {
+	rows := []proto.Session{{SessionID: "s1", Status: proto.StatusIdle, Effort: "low"}}
+	base := listKey(rows)
+	rows[0].PendingEffort = new("high")
+	pending := listKey(rows)
+	rows[0].EffortChangeFailed = true
+	failed := listKey(rows)
+	if base == pending || pending == failed || failed != listKeyFmt(rows) {
+		t.Fatal("the effort choice and its failure must each change the session list key")
 	}
 }

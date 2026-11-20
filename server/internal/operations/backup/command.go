@@ -17,6 +17,8 @@ import (
 
 const Usage = `personad backup create --output <file> --writes-quiesced [database options]
                            create and temporarily restore both databases before atomically publishing a mode-0600 whole-install bundle
+  personad backup inspect --bundle <file> [--json]
+                           check bundle integrity offline and print a summary
   personad backup verify --bundle <file> [database options]
                            verify every SHA-256 and restore both dumps into temporary databases (no service writes)
   personad backup restore --bundle <file> --writes-quiesced [--allow-external-kb] [database options]
@@ -37,6 +39,9 @@ type operatorRunner interface {
 
 // Run is the top-level personad backup command.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "inspect" {
+		return runInspect(ctx, args[1:], stdout)
+	}
 	return runWithOperator(ctx, NewOperator(), args, stdout, stderr)
 }
 

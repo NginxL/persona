@@ -410,6 +410,9 @@ func (s *Service) relayToAsker(ctx context.Context, a askTodo, from, text string
 		return nil
 	}
 	if err := s.tryDirectRelay(ctx, machine, to, &msg); err != nil {
+		if s.refusedDirect(ctx, machine, to, msg, err) {
+			return nil // refused for good: it went to the main conversation (relayRefused)
+		}
 		if s.queueRelay(to, msg) == 0 {
 			return fmt.Errorf("%v, and the relay queue can't be read", err)
 		}

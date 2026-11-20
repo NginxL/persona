@@ -2,7 +2,7 @@
 // The sidebar's To-dos badge (#11085): its number is the to-dos that need the owner (lib/todo-triage ownerBadge), and
 // what it counts is said with it, in the row's tooltip and in what a screen reader hears for the row, the rail's icon,
 // the phone's grid and a folded Pages title, in en, zh-Hans and ja. A goal whose pieces Agents are doing shows no
-// badge at all. The data is made up.
+// badge at all, nor a task whose Agent the To-dos page knows from the list's task rows (#11838). The data is made up.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -96,6 +96,15 @@ describe("the sidebar's To-dos badge (#11085)", () => {
     act(() => root.render(<FoldedTally />));
     await flush();
     expect(host.querySelector(".sr-only")?.textContent).toBe(`${page} ${said}`);
+  });
+
+  it("reads a task's Agent as the To-dos page does, from the list's task rows too (#11838)", async () => {
+    // its Agent works outside the Agents list's window: the page files it under Working, so the badge leaves it out
+    seed([{ id: "far", title: "Check the backups", origin: "conv", created_at: at, updated_at: at, agents: [link("far")] }]);
+    Object.assign(getState() as unknown as Record<string, unknown>, { sessions: {}, taskRows: { [JSON.stringify(["mac", "far"])]: agent("far", "working") } });
+    act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
+    await flush();
+    expect(todosLink().textContent).toBe("待办");
   });
 
   it("shows no badge for a goal whose pieces Agents are doing", async () => {

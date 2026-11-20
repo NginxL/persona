@@ -994,4 +994,71 @@ class AssistantTraysShotsTest {
         assertNull(trayApproval(question, blocked))
         assertEquals(Resolution(approve = true, mode = "acceptEdits"), trayApproval(planRequest, blocked))
     }
+
+    @Test fun trayScheduleTimeFormatsWireIsoInPageLocale() {
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val now = Instant.parse("2026-11-20T04:00:00Z")
+        val sameDay = "2026-11-20T17:30:00+08:00"
+        val otherDay = "2026-11-23T09:00:00+08:00"
+        for (locale in listOf(java.util.Locale.ENGLISH, java.util.Locale.SIMPLIFIED_CHINESE, java.util.Locale.JAPANESE)) {
+            assertEquals(
+                LocalizedFormats.format(Instant.parse("2026-11-20T09:30:00Z"), LocalizedFormats.TIME, locale, zone),
+                formatTrayScheduleTime(sameDay, locale, zone, now),
+            )
+            assertEquals(
+                LocalizedFormats.format(Instant.parse("2026-11-23T01:00:00Z"), LocalizedFormats.MONTH_DAY_TIME, locale, zone),
+                formatTrayScheduleTime(otherDay, locale, zone, now),
+            )
+        }
+        assertEquals("not-a-timestamp", formatTrayScheduleTime("not-a-timestamp", java.util.Locale.ENGLISH, zone, now))
+    }
+
+    @Test fun runningTrayAndScheduleSheetFormatNextRunInLightDarkAndLargestText() {
+        val nextRunIso = "2026-11-23T09:00:00+08:00"
+        val fixture = Fixture().apply {
+            requests.value = emptyList(); drafts.value = emptyList()
+            returnedTodos = emptyList(); tasks.reloadTodos()
+            sessionRows.value = listOf(Session(main.machineId, main.sessionId, title = "Persona", assistant = true, state = "idle", status = "idle"))
+        }
+        val customManagement = object : AssistantManagement by fixture.management {
+            override suspend fun tasks() = listOf(ScheduledTask("morning", "Morning briefing", prompt = "Summarize overnight updates.",
+                repeats = ScheduledTask.DAILY, enabled = true, nextRun = nextRunIso, lastStatus = "ok"))
+        }
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            val scale = if (large) 2f else 1f
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                fontScale = scale
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            val density = androidx.compose.ui.unit.Density(androidx.compose.ui.platform.LocalDensity.current.density, scale)
+            CompositionLocalProvider(LocalConfiguration provides configuration, androidx.compose.ui.platform.LocalDensity provides density) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
+                    Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
+                        ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
+                            chrome = ChatChromeBindings(tasks = fixture.tasks, assistantManagement = customManagement, inboxTrays = fixture.inbox,
+                                inboxScope = "fixture", onOpenSession = { fixture.opened += it }),
+                            renderStyle = ChatRenderStyle.Assistant, embedded = true, showTopBar = false)
+                    }
+                }
+            }
+        }
+        settle()
+        rule.waitUntil(10_000) { rule.onAllNodesWithTag("assistant-tray-bar").fetchSemanticsNodes().isNotEmpty() }
+        val expected = "Next run: " + formatTrayScheduleTime(nextRunIso, java.util.Locale.ENGLISH)
+        rule.onNodeWithTag("assistant-entry-running").performClick(); settle()
+        for (big in listOf(false, true)) for (d in listOf(false, true)) {
+            dark = d; large = big; settle()
+            rule.onNodeWithText(expected).assertIsDisplayed()
+            rule.onNode(hasText(nextRunIso, substring = true)).assertDoesNotExist()
+            shot("schedule-tray-${if (d) "dark" else "light"}-${if (big) "large" else "default"}")
+        }
+        large = false; dark = false; settle()
+        rule.onNodeWithText("Morning briefing").performClick(); settle()
+        rule.onAllNodesWithText(expected).onFirst().assertIsDisplayed()
+        rule.onNode(hasText(nextRunIso, substring = true)).assertDoesNotExist()
+    }
 }

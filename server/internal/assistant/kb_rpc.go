@@ -54,7 +54,7 @@ func kbRPCError(err error) error {
 	if errors.Is(err, kb.ErrNotFound) {
 		return &rpc.Error{Code: "not_found", Message: err.Error()}
 	}
-	if errors.Is(err, kb.ErrInvalidProfile) {
+	if errors.Is(err, kb.ErrInvalidProfile) || errors.Is(err, kb.ErrInvalidProjectSource) || errors.Is(err, kb.ErrReferenceOnly) {
 		return &rpc.Error{Code: bus.CodeInvalidParams, Message: "kb.update: " + err.Error()}
 	}
 	return kbError(err)

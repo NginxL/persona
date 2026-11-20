@@ -219,6 +219,30 @@ class OpenerMarkShotsTest {
         assertEquals("the Lark extension's own /agent keeps Lark's", 1, marks("来自 飞书 /agent"))
     }
 
+    @Test fun openingMessageLineNamesTheDrawnIconAndRestoresItsFallback() {
+        val installed = Hub(withIcons)
+        var openers by mutableStateOf<OpenerIcons?>(null)
+        rule.setContent {
+            CompositionLocalProvider(LocalOpenerIcons provides openers) {
+                PersonaTheme(darkTheme = false, reduceMotion = true) {
+                    androidx.compose.foundation.layout.Column {
+                        for (session in rows) conversationOpeningSource(session)?.invoke()
+                    }
+                }
+            }
+        }
+        fun count(label: String) = rule.onAllNodesWithContentDescription(label).fetchSemanticsNodes().size
+        assertEquals(2, count("来自 飞书 /agent"))
+        assertEquals(1, count("来自扩展"))
+        openers = OpenerIcons(scope, installed, io = Dispatchers.Unconfined)
+        rule.waitUntil(5_000) { count("来自 Chat Bridge") == 1 && count("来自 Example Docs") == 1 }
+        assertEquals(1, count("来自 飞书 /agent"))
+        assertEquals(0, count("来自扩展"))
+        openers = OpenerIcons(scope, Hub(withIcons) { error("offline") }, io = Dispatchers.Unconfined)
+        rule.waitUntil(5_000) { count("来自 飞书 /agent") == 2 && count("来自扩展") == 1 }
+        assertEquals(0, count("来自 Example Docs"))
+    }
+
     private companion object {
         private const val Side = 96
 

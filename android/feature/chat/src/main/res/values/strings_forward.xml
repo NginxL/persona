@@ -31,4 +31,13 @@
     <string name="chat_forward_failed">Couldn\'t forward it: %1$s</string>
     <string name="chat_forward_photos_lost_one">1 photo couldn\'t go with the forward</string>
     <string name="chat_forward_photos_lost_other">%1$d photos couldn\'t go with the forward</string>
+    <string name="chat_forward_select_messages">Select messages…</string>
+    <string name="chat_forward_selected">%1$d selected</string>
+    <string name="chat_forward_send_count">Forward %1$d</string>
+    <string name="chat_forward_select_limit">You can forward up to %1$d messages at once.</string>
+    <string name="chat_forward_group">%1$d forwarded messages</string>
+    <string name="chat_forward_group_chat">%1$d forwarded messages · %2$s</string>
+    <string name="chat_forward_group_line">%1$s: %2$s</string>
+    <string name="chat_forward_group_more">%1$d more</string>
+    <string name="chat_forward_several_no_note">Please look at the forwarded messages above.</string>
 </resources>

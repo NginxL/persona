@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { stripTypeScriptTypes } from 'node:module';
 import { projectToolTurn } from '../entry/src/main/ets/core/Domain.ts';
+import { stepsToItems } from '../../integrations/antigravity/lib/map.js';
 
 const source = readFileSync(new URL('../entry/src/main/ets/models/ClientModel.ets', import.meta.url), 'utf8');
 
@@ -62,6 +63,7 @@ function project(items) {
   const model = Object.assign(new ProjectionHarness(), {
     target: () => 'fixture-reading-target',
     itemTime: () => 0,
+    workText: step => step.item?.text ?? '',
   });
   return model.projectMessages(items, false);
 }
@@ -80,4 +82,18 @@ test('native transcript projection keeps a middle stable ID across prepend and a
   assert.equal(appended.length, 45);
   assert.equal(appended[31].id, middleId);
   assert.equal(appended[31].itemId, 'fixture-reading-51#0');
+});
+
+test('an Antigravity wake keeps the finished reply and its attachment in the conversation', () => {
+  const raw = readFileSync(new URL('../../integrations/antigravity/test/fixtures/autonomous-wake.jsonl', import.meta.url), 'utf8');
+  const steps = raw.trim().split('\n').map(line => JSON.parse(line));
+  const prior = project(stepsToItems(steps.slice(0, 3)).items);
+  const history = stepsToItems(steps).items;
+  const after = project(history);
+  const replies = after.filter(row => row.role === 'assistant');
+  assert.deepEqual(replies.map(row => row.text), [steps[2].content, steps[5].content, steps[8].content]);
+  assert.deepEqual(replies[0], prior.find(row => row.role === 'assistant'));
+  assert.match(replies[0].text, /file: \/synthetic\/chart\.png/);
+  assert.equal(after.filter(row => row.role === 'user').length, 2);
+  assert.ok(after.every(row => !row.work?.includes(steps[2].content)));
 });

@@ -219,6 +219,7 @@ func TestRoutineNotReadySkipsNeverPush(t *testing.T) {
 func TestRoutineWaitsOnlyForWhatItNeeds(t *testing.T) {
 	f := newFakeHub().withMachine()
 	f.sessions["laptop"] = []proto.Session{{SessionID: "c1"}}
+	f.known["c1"] = true // the listed source conversation has a resumable transcript
 	f.devices = []Device{{ID: "server", Name: "server"}, {ID: "laptop", Name: "laptop", Online: true, Reachable: true}}
 	f.settings = &Settings{Timezone: "UTC"}
 	s := newStorelessService(t, f)
@@ -239,8 +240,8 @@ func TestRoutineWaitsOnlyForWhatItNeeds(t *testing.T) {
 		t.Fatal("a computer that is only asleep marks no wait: its waking is not news")
 	}
 	own, _ := taskByID(s, "own")
-	if _, err := s.runTask(own, at, at, true, false); err != nil || lastRunOf(t, s, "own").Status == runSkipped || len(f.sends) != 2 {
-		t.Fatalf("立即运行 is sent as before: %v %+v", err, lastRunOf(t, s, "own"))
+	if _, err := s.runTask(own, at, at, true, false); err == nil || lastRunOf(t, s, "own").Status != runFailed || len(f.sends) != 1 {
+		t.Fatalf("Run now reports the offline computer without sending: %v %+v", err, lastRunOf(t, s, "own"))
 	}
 }
 

@@ -4,7 +4,7 @@ import PersonaWire
 
 /// Whether this device gets background pushes, and if not why (#5998). A relay that refused this app, moved or could
 /// not be reached used to leave one log line; on a hub without its own APNs key nothing came, and nothing said so.
-/// Kept from the last registration so Settings › Notifications can say it.
+/// Kept from the last registration so Settings › Notifications and the main screen can say it.
 nonisolated struct PushHealth: Codable, Equatable, Sendable {
     /// How the last registration with the push relay went.
     enum Relay: Codable, Equatable, Sendable {
@@ -27,6 +27,9 @@ nonisolated struct PushHealth: Codable, Equatable, Sendable {
     var relay: Relay?
     /// Per hub group, the way the hub said it pushes here; missing for an older hub, which does not say.
     var routes: [String: APIClient.PushRoute] = [:]
+    /// Groups whose current hub answered that this credential has no push route. Optional for caches from before #9612.
+    /// Separate from `routes`: assigning nil there would otherwise look like an older hub that supplied no route data.
+    var missingRoutes: Set<String>?
     /// Per hub group, why its route could not be read just now (the registration or Settings › Notifications' check
     /// failed), in the error's words: the page then says it couldn't check, not an older route as if current (#1859).
     /// The next read clears it.
@@ -52,6 +55,56 @@ nonisolated struct PushStatus: Equatable, Sendable {
     var action: String?
 }
 
+/// The everyday-language version of an unavailable push status shown outside Settings (#9612 item 4).
+/// Diagnostics stay in Settings; the main screen says what is affected and the next useful step.
+nonisolated struct PushNoticeContent: Equatable, Sendable {
+    enum Repair: Sendable { case notificationSettings, systemSettings }
+    var text: String
+    var actionTitle: String
+    var repair: Repair
+}
+
+extension PushHealth {
+    /// A confirmed outage only: unknown or unchecked hubs and a route whose latest push merely failed stay quiet.
+    func mainNotice(group: String, allowed: Bool?) -> PushNoticeContent? {
+        guard status(group: group, allowed: allowed).level == .unavailable else { return nil }
+        if (allowed ?? notificationsAllowed) == false {
+            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Allow them in Settings."),
+                                     actionTitle: String(localized: "Open Settings"), repair: .systemSettings)
+        }
+        let settings = String(localized: "Persona Notification Settings")
+        if missingRoutes?.contains(group) == true {
+            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
+                                     actionTitle: settings, repair: .notificationSettings)
+        }
+        if let route = routes[group], route.reason == "relay_failed" || route.reason == "no_relay" {
+            switch relay {
+            case .moved:
+                return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Update Persona to turn them back on."),
+                                         actionTitle: settings, repair: .notificationSettings)
+            case .refused, .notConfigured, nil:
+                return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Ask the person who set up Persona to finish notification setup."),
+                                         actionTitle: settings, repair: .notificationSettings)
+            case .registered, .unreachable:
+                break
+            }
+        }
+        if routes[group]?.reason == "no_token" || relay?.isUnreachable == true {
+            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Check your network. Persona will try again."),
+                                     actionTitle: settings, repair: .notificationSettings)
+        }
+        return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
+                                 actionTitle: settings, repair: .notificationSettings)
+    }
+}
+
+private extension PushHealth.Relay {
+    var isUnreachable: Bool {
+        if case .unreachable = self { return true }
+        return false
+    }
+}
+
 extension PushHealth {
     /// The status at the hub of `group`, with notifications `allowed` in Settings now (nil: unknown).
     func status(group: String, allowed: Bool?) -> PushStatus {
@@ -64,6 +117,11 @@ extension PushHealth {
             return PushStatus(level: .unknown, title: String(localized: "push.unknown", defaultValue: "Unknown"),
                               reason: String(localized: "Couldn't check with the hub (\(why)).", comment: "%@: the network's or the hub's error"),
                               action: String(localized: "Persona checks again when you open this page."))
+        }
+        if missingRoutes?.contains(group) == true {
+            return PushStatus(level: .unavailable, title: String(localized: "push.unavailable", defaultValue: "Unavailable"),
+                              reason: String(localized: "The hub has no push registration for this device."),
+                              action: String(localized: "Open Persona again to register once more."))
         }
         guard let route = routes[group] else { return unknownStatus }
         if route.reaches {
@@ -141,9 +199,25 @@ extension PushHealth {
 }
 
 extension PushHealth {
-    /// The hub answered for group: the way it pushes to this device (nil: none it knows of), nothing left unchecked.
+    /// The current hub's token list answered for group: the way it pushes to this device (nil: none it knows of),
+    /// nothing left unchecked. Unlike a registration response, a missing route here is a confirmed outage.
     mutating func read(_ route: APIClient.PushRoute?, group: String) {
+        apply(route, group: group, confirmedMissing: route == nil)
+    }
+
+    /// A registration response carries no route on an older hub; that says nothing about a confirmed outage (#9612).
+    mutating func readRegistration(_ route: APIClient.PushRoute?, group: String) {
+        apply(route, group: group, confirmedMissing: false)
+    }
+
+    private mutating func apply(_ route: APIClient.PushRoute?, group: String, confirmedMissing: Bool) {
         routes[group] = route
+        if confirmedMissing {
+            missingRoutes = (missingRoutes ?? []).union([group])
+        } else if route != nil {
+            missingRoutes?.remove(group)
+            if missingRoutes?.isEmpty == true { missingRoutes = nil }
+        }
         unchecked?[group] = nil
         if unchecked?.isEmpty == true { unchecked = nil }
     }
@@ -193,8 +267,8 @@ extension PushHealth {
 }
 #endif
 
-/// The device's PushHealth, kept on disk (StateCache: it changes at most a few times a launch, and no view but
-/// Settings › Notifications reads it).
+/// The device's PushHealth, kept on disk (StateCache: it changes at most a few times a launch; only the small push-health
+/// readers on Settings › Notifications and Persona's main screen observe it).
 @MainActor @Observable
 final class PushHealthStore {
     static let shared = PushHealthStore()

@@ -22,6 +22,7 @@ func TestScheduledTodoMultiAgentSnapshotPostgres(t *testing.T) {
 	}
 	s, f := newQuietServiceOn(t, database)
 	s.superviseTimes.gather = time.Hour
+	s.todoAskAfter = time.Nanosecond
 	logs := &logBuffer{}
 	s.logf = logs.logf
 	if err := s.ensureTodosLoaded(ctx); err != nil {
@@ -52,9 +53,9 @@ func TestScheduledTodoMultiAgentSnapshotPostgres(t *testing.T) {
 	for i, want := range []struct {
 		state string
 		count int
-	}{{"no_progress", 1}, {"progress", 0}, {"no_progress", 1}, {"no_progress", 2}} {
+	}{{"baseline", 0}, {"no_progress", 1}, {"progress", 0}, {"no_progress", 1}, {"no_progress", 2}} {
 		var change func()
-		if i == 1 {
+		if i == 2 {
 			change = func() {
 				f.mu.Lock()
 				answer = "Second worker produced a new batch"
@@ -65,7 +66,8 @@ func TestScheduledTodoMultiAgentSnapshotPostgres(t *testing.T) {
 		if result.State != want.state || result.NoProgress != want.count {
 			t.Fatalf("round %d: assessment=%+v; PostgreSQL logs:\n%s", i+1, result, logs.String())
 		}
-		if strings.ContainsRune(result.Reason, 0) || !strings.Contains(result.Reason, `\u0000`) {
+		// Only a progress assessment quotes the run's own reply; the others say what the hub saw.
+		if strings.ContainsRune(result.Reason, 0) || want.state == "progress" && !strings.Contains(result.Reason, `\u0000`) {
 			t.Fatalf("NUL was not removed, or literal backslash-u0000 text was lost: %q", result.Reason)
 		}
 		var storedTasks []Task
@@ -102,7 +104,7 @@ func TestScheduledTodoMultiAgentSnapshotPostgres(t *testing.T) {
 	if strings.Contains(logs.String(), "22P05") || strings.Contains(logs.String(), "save to-do progress:") {
 		t.Fatalf("progress persistence failed:\n%s", logs.String())
 	}
-	t.Log("PostgreSQL committed 4 assessments with 2 distinct Agent snapshots; one needs_user decision has 2 options")
+	t.Log("PostgreSQL committed 5 assessments with 2 distinct Agent snapshots; one needs_user decision has 2 options")
 }
 
 func TestScheduledTodoSnapshotNULGuard(t *testing.T) {
@@ -126,7 +128,7 @@ func TestScheduledTodoSnapshotNULGuard(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, result := assessTodoRun(t, s, task.ID, nil)
-			want := "no_progress"
+			want := "baseline"
 			if tc.reject {
 				want = "error"
 			}
@@ -144,7 +146,7 @@ func TestScheduledTodoSnapshotNULGuard(t *testing.T) {
 				s.supervise.mu.Lock()
 				blocked := false
 				for _, signal := range s.supervise.pending {
-					blocked = blocked || signal.Todo == todo.ID && signal.Report == upReportBlocked &&
+					blocked = blocked || signal.Todo == todo.ID && signal.Kind == sigCheck && signal.Report == checkErrorReport &&
 						strings.Contains(signal.Detail, "progress snapshot contains NUL")
 				}
 				s.supervise.mu.Unlock()

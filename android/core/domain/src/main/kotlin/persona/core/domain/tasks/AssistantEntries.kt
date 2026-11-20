@@ -192,14 +192,15 @@ fun assistantEntries(
         val waits = if (status == TriageStatus.Failed) bucket == TodoBucket.Open
             else !todo.isDone && (status == TriageStatus.NeedsYou || status == TriageStatus.Interrupted)
         val decision = todo.awaitsDecision(now)
+        val deliveryApproval = todo.hold?.unblock == HoldUnblock.User
         // its supervisor's review is under way (not the owner's yet): in progress, whatever the To-dos page files it under
-        val reviewing = !decision && todo.supervisorReviewing(now)
+        val reviewing = !decision && !deliveryApproval && todo.supervisorReviewing(now)
         when {
             asks.isNotEmpty() -> asking += NeedsYouEntry.Task(todo, status, asks)
-            waits || decision -> {
+            waits || decision || deliveryApproval -> {
                 // Only the review decision is hidden once dismissed (web `assistantEntries`, #8262): an Agent that asks still shows.
                 val dismissed = status != TriageStatus.NeedsYou && decision && todo.decisionDismissed()
-                if (!dismissed) deciding += NeedsYouEntry.Task(todo, status, asks) to todo.entryRank(status)
+                if (deliveryApproval || !dismissed) deciding += NeedsYouEntry.Task(todo, status, asks) to todo.entryRank(status)
             }
             bucket == TodoBucket.Open || reviewing -> {
                 val activity = todo.backgroundWork(lookup)

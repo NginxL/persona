@@ -868,6 +868,41 @@ func TestRecoveryConfirmedReturnReleasesFallbackThroughAssistantSend(t *testing.
 	}
 }
 
+func TestTaskExecutionSkipsConversationRecoveryAtRPCBoundary(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary recovery", true: "strict task"}[strict], func(t *testing.T) {
+			n, _ := recoveryTestNode(t, id, false, true)
+			// A persisted marker can survive a restart without an in-memory fallback hold.
+			n.putModelRecovery(id, &proto.ModelRecovery{From: "primary-model", To: "fallback-model", Reason: proto.ModelRecoveryReasonQuota})
+			primary, fallback := errors.New("primary model reached"), errors.New("fallback model reached")
+			modelProbeCache.Lock()
+			for model, err := range map[string]error{"primary-model": primary, "fallback-model": fallback} {
+				modelProbeCache.results[n.home+"\x00claude\x00"+model] = modelProbeResult{at: time.Now(), agent: "claude", err: err}
+			}
+			modelProbeCache.Unlock()
+			t.Cleanup(func() {
+				modelProbeCache.Lock()
+				delete(modelProbeCache.results, n.home+"\x00claude\x00primary-model")
+				delete(modelProbeCache.results, n.home+"\x00claude\x00fallback-model")
+				modelProbeCache.Unlock()
+			})
+			st, _ := n.state.get(id)
+			_, err := nodeCall(t, n, "assistant.send", map[string]any{
+				"session_id": id, "cwd": st.Cwd, "launcher": "claude", "model": "primary-model",
+				"text": "next request", "task_execution": strict, "follows_setting": true,
+			})
+			want := fallback
+			if strict {
+				want = primary
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("wrong model reached: %v, want %v", err, want)
+			}
+		})
+	}
+}
+
 // While the 30-minute hold is still active and the configured model has not answered a probe, the conversation stays
 // on its fallback: the natural-expiry release must not fire early (#7824).
 func TestActiveHoldIsNotReleasedEarly(t *testing.T) {

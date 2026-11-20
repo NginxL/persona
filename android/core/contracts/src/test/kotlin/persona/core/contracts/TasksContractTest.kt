@@ -20,6 +20,20 @@ class TasksContractTest {
         assertEquals("app", ((plan as TaskPlanEvent).plan.tasks.single().project).zhAny())
     }
 
+    /** A to-do's stage kind and the end of its stage bar (#3380, #11590), and their absence on an older hub. */
+    @Test fun todoStageKindAndDoneDecode() {
+        val done = JsonCodec.decodeFromString(Todo.serializer(),
+            """{"id":"t1","title":"t","done_at":"2026-11-20T03:00:00Z","stage":"develop","stage_kind":"code","stage_done":true}""")
+        assertEquals("code", done.stageKind)
+        assertTrue(done.stageDone)
+        val general = JsonCodec.decodeFromString(Todo.serializer(), """{"id":"t2","title":"t","stage":"develop","stage_kind":"general"}""")
+        assertEquals("general", general.stageKind)
+        assertFalse(general.stageDone)
+        val older = JsonCodec.decodeFromString(Todo.serializer(), """{"id":"t3","title":"t","stage":"develop"}""")
+        assertEquals(null, older.stageKind)
+        assertFalse(older.stageDone)
+    }
+
     /** Agent presets on planned tasks (#2225), including their absence on an older hub. */
     @Test fun planTaskTiersDecodeAndAnOlderHubHasNone() {
         val event = ServerEvent.decode("""{"type":"task_plan","plan":{"id":"p1","conversation":"c1","state":"open",

@@ -42,6 +42,8 @@ var (
 	compactPoll = 500 * time.Millisecond
 	// codexComposerWait bounds how long a resumed Codex may take to show its input box before /compact goes in.
 	codexComposerWait = 3 * time.Minute
+	// codexStartupLook bounds how long a Codex just resumed is watched for its update offer.
+	codexStartupLook = 8 * time.Second
 	// compactTurnWait bounds how long a message held for a compaction waits for the Agent's turn to end.
 	compactTurnWait = 6 * time.Hour
 )
@@ -147,7 +149,7 @@ func (n *Node) contextUse(id string) (tokens, window int) {
 	if m.contextTokens <= 0 {
 		return 0, 0
 	}
-	return m.contextTokens, contextWindowOf(m.model, m.contextWindow, m.contextTokens)
+	return m.contextTokens, n.sessionContextWindow(id, "", nil, m)
 }
 
 // sendCompacting is session.send with CompactIfFull: compacted first when nearly full (planCompaction), else n.send.
@@ -185,8 +187,14 @@ func (n *Node) compactThenSendLocked(ctx context.Context, id, text string, image
 			n.logf("session %s: context %d of %d tokens: compacting before the message goes in", short(id), tokens, window)
 			if err := n.compactLocked(ctx, id); err != nil {
 				n.logf("session %s: compaction before the message failed after %s: %v", short(id), time.Since(began).Round(time.Second), err)
+				data := map[string]any{}
+				if _, live := n.agent(id); !live {
+					// It quit on a step of Persona's, not the user's: the assistant may resume it again (#11441).
+					n.state.stopped(id, proto.StopCompactFailed)
+					data["agent_quit"] = true
+				}
 				return refusal(proto.CodeCompactFailed, fmt.Sprintf("its context is nearly full (%d of %d tokens) and compacting it "+
-					"failed: %v. The message was not sent", tokens, window, err), nil)
+					"failed: %v. The message was not sent", tokens, window, err), data)
 			}
 			n.logf("session %s: compacted in %s; the message goes in now", short(id), time.Since(began).Round(time.Second))
 			noteCompact(ctx, false, true)
@@ -257,10 +265,19 @@ func (n *Node) compactLocked(ctx context.Context, id string) error {
 	if err := n.codexComposerReady(ctx, id); err != nil {
 		return err
 	}
-	if err := n.sendLocked(ctx, id, "/compact", nil, sendOpts{}); err != nil {
-		return fmt.Errorf("/compact was not taken: %w", err)
+	pane := ""
+	if a, ok := n.agent(id); ok {
+		pane = a.PaneID
 	}
-	return waitCompaction(ctx, func() compactProgress {
+	if err := n.sendLocked(ctx, id, "/compact", nil, sendOpts{}); err != nil {
+		if !maybeDelivered(err) {
+			return fmt.Errorf("/compact was not taken: %w", err)
+		}
+		// Typed, but its screen did not confirm it in time (a Codex busy compacting a large context shows no empty box):
+		// what the transcript and the agent's status say decides, as for any compaction.
+		n.logf("session %s: /compact typed, not confirmed on screen (%v): waiting for its record", short(id), err)
+	}
+	err := waitCompaction(ctx, func() compactProgress {
 		busy, live := n.compactBusy(id)
 		p := compactProgress{busy: busy, live: live}
 		if path == "" {
@@ -275,7 +292,14 @@ func (n *Node) compactLocked(ctx context.Context, id string) error {
 		}
 		return p
 	}, compactPoll, compactStartGrace, compactBeforeSendDeadline)
+	if errors.Is(err, errCompactAgentGone) && pane != "" {
+		return n.agentExited(ctx, pane, "after /compact was typed, before any compaction was recorded")
+	}
+	return err
 }
+
+// errCompactAgentGone: the agent left its terminal while it was to compact.
+var errCompactAgentGone = errors.New("the agent stopped while compacting")
 
 // contextShrank: now is at most compactShrinkShare of before, as only a compaction makes a context.
 func contextShrank(before, now int) bool {
@@ -287,9 +311,10 @@ func contextShrank(before, now int) bool {
 const compactShrinkShare = 0.6
 
 // codexComposerReady waits, for a Codex in one of Persona's terminals that does not go through its app-server, until
-// its TUI shows its input box: a Codex just resumed (codex resume <id>) reads its whole rollout first, and a /compact
-// typed before the box is there is lost. Its screen says when (screen.CodexComposer); a dialog or a draft refuses at
-// once, as any send to it would.
+// its TUI shows an empty input box: a Codex just resumed (codex resume <id>) reads its whole rollout first, and a
+// /compact typed before the box is there is lost. Codex's own update offer (default: Update now, which installs and
+// quits) is skipped with Esc as a start skips it (codexSkipUpdateKeys, #11316); any other dialog with numbered options
+// is never taken for the box, and refuses with its first line, as does a draft.
 func (n *Node) codexComposerReady(ctx context.Context, id string) error {
 	if n.externalCodex(id) || n.codexJoined(id) {
 		return nil
@@ -303,17 +328,29 @@ func (n *Node) codexComposerReady(ctx context.Context, id string) error {
 	tick := time.NewTicker(compactPoll)
 	defer tick.Stop()
 	for {
-		sc, err := n.codexScreen(wait, a.PaneID)
-		if err == nil {
-			switch sc.View {
-			case screen.CodexComposer:
-				if sc.Draft != "" {
-					return fmt.Errorf("/compact was not typed: %w", refusal(screen.InputDraft, codexDraftMessage(sc.Draft), nil))
+		if _, live := n.agent(id); !live {
+			return n.agentExited(ctx, a.PaneID, "after it was resumed, before it showed its input box")
+		}
+		if text, err := n.readPane(wait, a.PaneID, "visible", screen.DialogLines); err == nil {
+			switch skip, dialog := codexStartupScreen(text); {
+			case skip != nil:
+				if err := n.sendKeys(wait, a.PaneID, skip...); err != nil {
+					return fmt.Errorf("could not skip Codex's update offer: %w", err)
 				}
-				return nil
-			case screen.CodexApproval, screen.CodexQuestion, screen.CodexDialog:
-				return fmt.Errorf("/compact was not typed: a dialog is open in its terminal")
+				n.logf("session %s: skipped Codex's update offer before /compact", short(id))
+				sleepCtx(wait, codexDialogPause)
+				continue
+			case dialog != "":
+				return fmt.Errorf("/compact was not typed: a dialog is open in its terminal (%s)", dialog)
 			}
+		}
+		if sc, err := n.codexScreen(wait, a.PaneID); err == nil && sc.View == screen.CodexComposer {
+			if sc.Draft != "" {
+				return fmt.Errorf("/compact was not typed: %w", refusal(screen.InputDraft, codexDraftMessage(sc.Draft), nil))
+			}
+			return nil
+		} else if err == nil && (sc.View == screen.CodexApproval || sc.View == screen.CodexQuestion || sc.View == screen.CodexDialog) {
+			return fmt.Errorf("/compact was not typed: a dialog is open in its terminal")
 		}
 		select {
 		case <-wait.Done():
@@ -321,6 +358,85 @@ func (n *Node) codexComposerReady(ctx context.Context, id string) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// codexStartupScreen reads a Codex pane's visible text for what stands before its input box: the keys that skip its
+// update offer (codexSkipUpdateKeys), else the first line of any other dialog with numbered options, else neither.
+func codexStartupScreen(text string) (skip []string, dialog string) {
+	if keys := codexUpdateOfferKeys(text); keys != nil {
+		return keys, ""
+	}
+	if d := screen.ParseDialog(text); d != nil && len(d.Options) > 0 {
+		head := d.Options[0].Label
+		if q := strings.TrimSpace(d.Question); q != "" {
+			head = q
+		}
+		return nil, clipLine(head, 120)
+	}
+	return nil, ""
+}
+
+// codexUpdateOfferKeys are the keys that skip Codex's update offer on screen text: codexSkipUpdateKeys, and the same
+// three choices however the screen reads otherwise. Its "› 1. Update now" row can pass for the input box's prompt, and
+// that is how a /compact once picked Update now and quit Codex (#11316).
+func codexUpdateOfferKeys(text string) []string {
+	if keys := codexSkipUpdateKeys(text); keys != nil {
+		return keys
+	}
+	if !strings.Contains(screen.Plain(text), "Update available") {
+		return nil
+	}
+	d := screen.ParseDialog(text)
+	if d == nil || len(d.Options) != 3 {
+		return nil
+	}
+	if first := d.Options[0].Label; (first == "Update now" || strings.HasPrefix(first, "Update now (")) &&
+		d.Options[1].Label == "Skip" && d.Options[2].Label == "Skip until next version" {
+		return []string{"escape"}
+	}
+	return nil
+}
+
+// clipLine is s on one line, at most n runes.
+func clipLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// settleCodexStartup is what a Codex just started or resumed in pane may show before its input box: its update offer
+// is skipped (Esc) when it shows within codexStartupLook; anything else is left for the next send's checks.
+func (n *Node) settleCodexStartup(ctx context.Context, pane string) {
+	look, cancel := context.WithTimeout(ctx, codexStartupLook)
+	defer cancel()
+	for {
+		if text, err := n.readPane(look, pane, "visible", screen.DialogLines); err == nil {
+			if keys := codexUpdateOfferKeys(text); keys != nil {
+				if err := n.sendKeys(look, pane, keys...); err == nil {
+					n.logf("pane %s: skipped Codex's update offer after its start", pane)
+				}
+				return
+			}
+			if screen.ReadCodex(text).View == screen.CodexComposer {
+				return
+			}
+		}
+		if !sleepCtx(look, codexStep) {
+			return
+		}
+	}
+}
+
+// agentExited is the error for an agent that left its pane at step, with the pane's last lines (an update that
+// ran, a crash) so the refusal says where and why it quit.
+func (n *Node) agentExited(ctx context.Context, pane, step string) error {
+	shown, _ := n.readPane(context.WithoutCancel(ctx), pane, "recent-unwrapped", 30)
+	if last := strings.TrimSpace(lastLines(shown, 6)); last != "" {
+		return fmt.Errorf("the agent quit %s; its terminal shows:\n%s", step, last)
+	}
+	return fmt.Errorf("the agent quit %s", step)
 }
 
 // compactProgress is one read of a compaction under way.
@@ -344,7 +460,7 @@ func waitCompaction(ctx context.Context, probe func() compactProgress, poll, gra
 		p := probe()
 		switch {
 		case !p.live:
-			return fmt.Errorf("the agent stopped while compacting")
+			return errCompactAgentGone
 		case p.compacted && !p.busy:
 			return nil
 		case p.busy || p.compacted:

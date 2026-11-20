@@ -155,6 +155,16 @@ func UserUnsupported(kind string, u UserUpdate) []IgnoredField {
 	if _, known := kindFields[kind]; !known {
 		return out
 	}
+	if kind != KindProject {
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{{"project_mode", u.ProjectMode != nil}, {"source_urls", u.SourceURLs != nil}} {
+			if f.set {
+				out = append(out, IgnoredField{Field: f.name, Reason: kind + " entries do not use " + f.name})
+			}
+		}
+	}
 	own := allowFields[kind]
 	for name, ids := range map[string][]string{"allow_people": u.AllowPeople, "allow_chats": u.AllowChats, "allow_projects": u.AllowProjects} {
 		if len(ids) > 0 && !slices.Contains(own, name) {

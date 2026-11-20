@@ -55,6 +55,8 @@ struct OutboxWaitTests {
              linkUp: true, expectedOutcome: .failed, expectedSince: nil, expectedGaveUp: true),
         Case(label: "a wait while the link is down never fails and ends the run", outcome: .waiting, since: t0, after: 3600,
              linkUp: false, expectedOutcome: .waiting, expectedSince: nil),
+        Case(label: "effort can wait through a long turn on a connected link", outcome: .effortWaiting, since: t0, after: 3600,
+             linkUp: true, expectedOutcome: .effortWaiting, expectedSince: nil),
         Case(label: "a send ends the run", outcome: .sent, since: t0, after: 5, linkUp: true,
              expectedOutcome: .sent, expectedSince: nil),
     ]

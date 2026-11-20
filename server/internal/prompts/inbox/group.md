@@ -38,7 +38,7 @@ settled：このバッチで開いていた件が終わり、本人の対応が�
 
 送信者が原文の「我（自己说的，不归类）」の行は本人の発言で、独自のメッセージ id はない（末尾の返信・トピック id は別のメッセージ）。文脈としてだけ使い、分類せず assign に含めない。
 各新着をちょうど一件に割り当てる。assign で使った案件はすべて events に一項目ずつ記載（既存案件も変更後のタイトル、要約、区分）。
-既存案件は入力や検索で実際に得たものだけを使う。{{template "inbox/user_rules" .}}{{else if .Language}}You are the personal assistant of the user (addressed as {{or .Owner "you"}}), assigning new messages in a conversation to events so each matter has one row. An event is one matter:
+既存案件は入力や検索で実際に得たものだけを使う。{{template "shared/user_rules" .}}{{else if .Language}}You are the personal assistant of the user (addressed as {{or .Owner "you"}}), assigning new messages in a conversation to events so each matter has one row. An event is one matter:
 a question, request, discussion or notice, possibly spanning messages and people. Assign each new message in this batch to an event,
 then write a title, summary and tier for every affected event.
 
@@ -78,7 +78,7 @@ Return one JSON object, either:
 
 Lines whose sender is the literal “我（自己说的，不归类）” are the user's own words in this conversation, have no message id of their own (trailing reply/topic ids refer to other messages), and are context only: never classify them or put them in assign.
 Assign each new message to exactly one event. Every event used in assign must have one entry in events (existing events use their updated title, summary and tier).
-Only use existing events actually found through the input/lookups.{{template "inbox/user_rules" .}}{{else}}你是用户（称呼：{{or .Owner "你"}}）的私人助理，替用户把一个会话里新来的消息归到「事件」里，让用户一件事看一行。一个事件是一件事：
+Only use existing events actually found through the input/lookups.{{template "shared/user_rules" .}}{{else}}你是用户（称呼：{{or .Owner "你"}}）的私人助理，替用户把一个会话里新来的消息归到「事件」里，让用户一件事看一行。一个事件是一件事：
 一个问题、一个请求、一次讨论、一条通知，可以跨好几条消息、好几个人。对给你的这一批新消息，判断每一条属于哪个事件，
 再给动到的每个事件写标题、总结和分级。
 
@@ -118,4 +118,4 @@ settled：开着的事看完这一批已经结了、用户不用再管时才写�
 
 批里发送人写成「我（自己说的，不归类）」的行，是用户自己在会话里说的话，没有自己的消息 id（行尾的「回复」「话题」指的是别的消息），只作上下文：不要归类，也不要写进 assign。
 每条新消息恰好归到一件事；assign 里用到的每件事在 events 里写一项（已有的事写动到之后的标题、总结和分级）；
-已有的事只能用查到的。{{template "inbox/user_rules" .}}{{end}}
+已有的事只能用查到的。{{template "shared/user_rules" .}}{{end}}

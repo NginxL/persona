@@ -32,10 +32,10 @@ import PersonaWire
         return value
     }
 
-    private func build(_ items: [Item], background: Bool = true, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
+    private func build(_ items: [Item], background: Bool = true, main: Bool = true, open: Set<String> = [], active: Bool = false) -> [ChatLine] {
         let blocks = ChatStore.rebuild(items, settled: nil).blocks
         let live = active ? blocks.last.flatMap { if case .turn(let t) = $0 { t.id } else { nil } } : nil
-        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, openSupervision: open, active: active)
+        return ChatLines(openWork: [], foldSupervision: true, foldBackground: background, main: main, openSupervision: open, active: active)
             .build(blocks, live: live)
     }
 
@@ -70,6 +70,16 @@ import PersonaWire
         let input = try #require(opened.first { if case .row(.user(let i)) = $0.content { i.id == items[0].id } else { false } })
         #expect(!input.hidesPrompt)
         #expect(opened.contains { if case .row(.assistant(let i)) = $0.content { i.id == items[1].id } else { false } })
+    }
+
+    @Test func mainRelayReplyStaysFoldedAndInspectable() throws {
+        let items = [relayed(), item(2, text: "The delegated check finished")]
+        let lines = build(items)
+        let fold = try #require(folded(lines))
+        guard case .supervision(_, let trace, _, _) = fold.line.content else { return }
+        #expect(trace.contains { $0.holds(items[1].id) })
+        // A leader conversation keeps the previous visible-reply fallback.
+        #expect(folded(build(items, main: false)) == nil)
     }
 
     @Test(arguments: ["daily", "once"])
@@ -191,7 +201,7 @@ import PersonaWire
         // owner's own exchange stays a normal line.
         var owner = item(5, role: "user", text: "A real request"); owner.clientMsgID = "owner-1"
         let items = [relayed(1), narration(2), scheduled(3, state: "daily"), narration(4), owner, item(6)]
-        let lines = build(items, background: true)
+        let lines = build(items, background: true, main: false)
         let folds = lines.compactMap { line -> MessageSource? in if case .supervision(_, _, _, let source) = line.content { return source } else { return nil } }
         #expect(folds.map(\.kind) == ["conversation", "patrol"])
         // the owner's exchange stays outside the folded rounds

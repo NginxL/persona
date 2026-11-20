@@ -6,6 +6,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -15,19 +16,28 @@ import (
 // included), and as the starting context of a session that has Persona's hooks (node/closeout_start.go). Both only
 // under the triage's main switch and its closeout switch.
 
+// closeoutForm returns the format the destination can read. A missing capability keeps the XML contract.
+func (s *Service) closeoutForm(machine, language string) string {
+	if nodes, ok := s.devs.(nodeAnnouncer); ok && nodes.NodeAnnounced(machine, nodeproto.MarkdownCloseout) {
+		return closeout.MarkdownExample(language)
+	}
+	return closeout.Example
+}
+
 // closeoutBrief is what follows a task's prompt: the closeout's form and when to write it; "" while the switches are
 // off. afterDelivery: the same block also carries delivery disposition and responsibility.
-func (s *Service) closeoutBrief(ctx context.Context, afterDelivery bool) string {
+func (s *Service) closeoutBrief(ctx context.Context, machine string, afterDelivery bool) string {
 	if sw := s.triageSwitches(ctx); !sw.Enabled || !sw.Closeout {
 		return ""
 	}
-	return prompts.RenderAgentCloseoutBrief(prompts.AgentCloseoutBrief{Form: closeout.Example,
-		Language: answerLanguage(s.hello(ctx).Locale), AfterDelivery: afterDelivery})
+	language := answerLanguage(s.hello(ctx).Locale)
+	return prompts.RenderAgentCloseoutBrief(prompts.AgentCloseoutBrief{Form: s.closeoutForm(machine, language),
+		Language: language, AfterDelivery: afterDelivery})
 }
 
 // withCloseoutBrief is prompt followed by the closeout's form, or prompt as it is while the switches are off.
-func (s *Service) withCloseoutBrief(ctx context.Context, prompt string, afterDelivery bool) string {
-	if brief := s.closeoutBrief(ctx, afterDelivery); brief != "" {
+func (s *Service) withCloseoutBrief(ctx context.Context, machine, prompt string, afterDelivery bool) string {
+	if brief := s.closeoutBrief(ctx, machine, afterDelivery); brief != "" {
 		return prompt + "\n\n" + brief
 	}
 	return prompt
@@ -45,8 +55,9 @@ func (s *Service) closeoutStart(ctx context.Context, machine string, p assistant
 	if p.SessionID == "" || s.isReviewer(machine, p.SessionID) || s.reviewWorktree(machine, p.Cwd) {
 		return out
 	}
-	out.Context = prompts.RenderAgentCloseoutBrief(prompts.AgentCloseoutBrief{Form: closeout.Example,
-		Language: answerLanguage(s.hello(ctx).Locale), Session: true})
+	language := answerLanguage(s.hello(ctx).Locale)
+	out.Context = prompts.RenderAgentCloseoutBrief(prompts.AgentCloseoutBrief{Form: s.closeoutForm(machine, language),
+		Language: language, Session: true})
 	return out
 }
 

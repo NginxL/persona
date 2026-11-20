@@ -94,6 +94,13 @@ export class ApiError extends Error {
   }
 }
 
+/** A computer's 404 not_found about a session's history (#11450): it carries the computer's `reason`, or its words in
+ * `detail`. The hub's own 404 (an unknown computer, a missing route) carries neither, and may answer otherwise later. */
+export function sessionHistoryNotFound(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 404 && e.code === "not_found" &&
+    (typeof e.body.reason === "string" || typeof e.body.detail === "string");
+}
+
 let onUnauthorized: () => void = () => {};
 /** What a 401 does from now on; returns what it did before, for a caller that sets it only for a while. */
 export function handleUnauthorized(fn: () => void): () => void {
@@ -121,7 +128,7 @@ export const CLIENT_VERSION = "1";
  * limit, so a dead link is still dropped. Only the timeout is asked for: the 20 s interval stays the hub's.
  */
 export const CLIENT_PONG_TIMEOUT = 45;
-export const CLIENT_FEATURES = ["elicitation", "extension_operations", "extension_auth", "managers", "extension_ui_stream_v1", "persona_contracts_v1", "persona_card_ring", "agent_message_hold"];
+export const CLIENT_FEATURES = ["elicitation", "extension_operations", "extension_auth", "managers", "extension_ui_stream_v1", "persona_contracts_v1", "persona_card_ring", "closeout.markdown.v1", "agent_message_hold"];
 
 // A read the hub has not answered by then fails instead of loading forever (#4492): a restarting hub, a stuck node or a
 // half-dead network. Longer than the hub's own cut-offs for asking a computer (30–40 s), so when the hub has an error

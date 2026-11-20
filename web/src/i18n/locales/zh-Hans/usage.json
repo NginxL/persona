@@ -21,7 +21,7 @@
   "problem_failed": "读网关出错，显示的是上次的数字",
   "problem_error": "网关读这个账号失败，显示的是它存着的数字",
   "window_model_label": "{name} {window}（{model}）：{percent}已用",
-  "not_connected": "未接入",
+  "not_connected": "未接额度数据",
   "connect_action": "让助手接入",
   "connect_hint_claude": "尚未接入额度数据，可让助手配置本地 statusLine 或网关用量源",
   "connect_hint_agy": "CLI 暂不直接输出百分比额度，若走账号池网关可让助手接入",

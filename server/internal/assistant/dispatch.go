@@ -215,7 +215,7 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 	}
 	title := s.tabName(sctx, a.Prompt)
 	params := map[string]any{"cwd": a.Cwd, "launcher": strings.TrimSpace(a.Launcher), "model": "", "effort": "",
-		"tab_name": title, "prompt": s.withCloseoutBrief(sctx, prompts.RenderDispatchTask(from), false)}
+		"tab_name": title, "title": title, "prompt": s.withCloseoutBrief(sctx, am.ID, prompts.RenderDispatchTask(from), false)}
 	if err := s.applyModel(sctx, "agent.new", params); err != nil {
 		return "", fmt.Errorf("%w; nothing was started", err)
 	}
@@ -243,6 +243,7 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		}
 		return "", fmt.Errorf("the start on %s failed: %w", am.Name, err)
 	}
+	title = s.nameStartedAgent(sctx, am.ID, res.Session, title)
 	s.addDispatched(ctx, dispatchTask{FromMachine: machine, FromSession: session, Machine: s.canonical(am.ID),
 		Session: res.Session.SessionID, Cwd: a.Cwd, Title: title, At: now})
 	s.logf("dispatch %s/%s -> %s/%s in %s", machine, short(session), am.ID, short(res.Session.SessionID), a.Cwd)
@@ -254,23 +255,40 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		am.Name, a.Cwd, res.Session.SessionID, note, res.Session.SessionID), nil
 }
 
-// dispatchState is where task t stands: working, stopped (its last reply is its result), or gone (its computer
-// is offline or the session is no longer listed).
+// dispatchState checks the computer before its session. Only a listed done or idle session is known to have stopped.
 func (s *Service) dispatchState(ctx context.Context, t dispatchTask, now time.Time) string {
-	c, ok := s.session(ctx, t.Machine, t.Session)
-	switch {
-	case !ok && now.Sub(t.At) < dispatchStartGrace:
-		return "working"
-	case !ok:
-		return "gone"
-	case c.Status == proto.StatusWorking:
-		return "working"
-	case c.Status == proto.StatusBlocked:
-		return "waiting for the user"
-	case c.Status == proto.StatusInterrupted || c.Status == proto.StatusOffline:
-		return "interrupted"
+	computer := s.computerState(t.Machine)
+	switch computer.state {
+	case standingComputerRemoved:
+		return "computer removed"
+	case standingComputerOffline:
+		return "computer offline"
 	}
-	return "stopped"
+	c, found, err := s.sessionNow(ctx, t.Machine, t.Session)
+	switch {
+	case errors.Is(err, ErrNoDevice):
+		return "computer removed"
+	case err != nil:
+		return "not read"
+	case !found && now.Sub(t.At) < dispatchStartGrace:
+		return "working"
+	case !found && !computer.listed:
+		return "not read"
+	case !found:
+		return "not listed"
+	}
+	switch c.Status {
+	case proto.StatusWorking:
+		return "working"
+	case proto.StatusBlocked:
+		return "waiting for the user"
+	case proto.StatusInterrupted, proto.StatusOffline:
+		return "interrupted"
+	case proto.StatusIdle, proto.StatusDone:
+		return "stopped"
+	default:
+		return "state unknown"
+	}
 }
 
 func (s *Service) dispatchWorking(ctx context.Context, t dispatchTask, now time.Time) bool {
@@ -329,8 +347,16 @@ func (s *Service) dispatchRead(ctx context.Context, machine, session string, arg
 		head += " Its last reply below is its result."
 	case "waiting for the user":
 		head += " It asked the user something and goes on once they answer in the apps."
-	case "gone":
-		return head + " Its computer is offline or the session is no longer listed; nothing can be read now.", nil
+	case "computer offline":
+		return head + " " + name + " is offline now: its state and last reply cannot be read until it is connected again.", nil
+	case "computer removed":
+		return head + " " + name + " is no longer one of the computers this Persona manages: nothing can be read there.", nil
+	case "not listed":
+		return head + " The session is no longer in " + name + "'s list; its last reply was not read this time; state unknown.", nil
+	case "not read":
+		return head + " Its state could not be read this time, so it is unknown; read it again later.", nil
+	case "state unknown":
+		head += " Persona cannot tell whether its turn is over: the last reply below may not be its result."
 	}
 	var res struct {
 		Items []proto.Item `json:"items"`

@@ -127,7 +127,7 @@ fun PendingForwardBubble(text: String, id: String) {
     // Everything the message carries besides the forward, as the sent bubble shows it (MergedUserBubble): the other
     // contexts above it, then the files, photos and note inside it.
     val model = remember(text) { messageModel(text, user = true) }
-    val forwards = model.contexts.filter { it.kind == ForwardMessage.KIND }
+    val forwards = remember(model) { bubbleForwardGroups(model.contexts) }
     val contexts = model.contexts.filter { it.kind != ForwardMessage.KIND }
     val rest = model.plain
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
@@ -136,7 +136,7 @@ fun PendingForwardBubble(text: String, id: String) {
         AttachedFileCards(model.attached)
         persona.core.designsystem.UserBubbleFrame {
             forwards.forEachIndexed { index, forward ->
-                ForwardBubbleCard(forward, "outbox/$id/$index")
+                ForwardBubbleGroup(forward, "outbox/$id/$index")
                 if (index < forwards.lastIndex || rest.isNotEmpty() || model.images.isNotEmpty())
                     Spacer(Modifier.padding(top = Tokens.Space.s))
             }

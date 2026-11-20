@@ -4,8 +4,24 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/modelretry"
 	"github.com/nwverse/persona/server/internal/proto"
 )
+
+// The scheduler owns a strict task result after the node's bounded recovery. A generic Continue would run
+// without the task's execution constraints. Keep the original failure text for the schedule and the user.
+func classifyTaskTurnFailure(s *proto.Session) {
+	if s.Status != proto.StatusIdle && s.Status != proto.StatusDone {
+		return
+	}
+	text := s.TurnError
+	if text == "" && assistantwire.CutOff(s.LastText) {
+		text = s.LastText
+	}
+	if text != "" && (s.TurnErrorKind == proto.TurnErrorTransient || s.TurnErrorKind == "" && modelretry.Temporary(text)) {
+		s.TurnError, s.TurnErrorKind = text, proto.TurnErrorUser
+	}
+}
 
 // claudeTurnFailure is how a Claude assistant turn failed, read off its stream-json result (#4669): its text (secrets,
 // URLs and addresses taken out) and kind, "" when it did not fail. It failed when the result is flagged is_error with

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/identity"
 )
 
@@ -54,7 +55,7 @@ func (n *Node) closeoutStart(parent context.Context, req sockRequest, in hookInp
 	if identity.IsAssistantDir(in.Cwd) || n.isAssistantSession(in.SessionID) {
 		return nil
 	}
-	if st, ok := n.state.get(in.SessionID); ok && strings.Contains(st.TaskInstructions, "<closeout") {
+	if st, ok := n.state.get(in.SessionID); ok && (strings.Contains(st.TaskInstructions, "<closeout") || closeout.HasMarkdownInstructions(st.TaskInstructions)) {
 		return nil
 	}
 	text, ok := n.closeoutBriefs.get(in.SessionID)

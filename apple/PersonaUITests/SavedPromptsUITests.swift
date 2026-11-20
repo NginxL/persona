@@ -1,7 +1,8 @@
 import XCTest
 
 /// Assistant Profile › Saved Prompts (#9436) against scripts/mock/mock_hub.py with MOCK_SAVED_PROMPTS=1
-/// (PERSONA_MOCK_HUB): a row's swipe offers Delete, Delete asks first, and Cancel keeps the row and sends nothing. A mock
+/// (PERSONA_MOCK_HUB): a row's swipe offers Delete, Delete asks first, and Cancel keeps the row and sends nothing; the
+/// editor has the sheet's ✕ and ✓, and its ✕ leaves without saving (#11183). A mock
 /// without saved prompts skips. With PERSONA_SHOTS set it writes what it saw there (PERSONA_SHOTS_APPEARANCE names the
 /// simulator's appearance in the file names).
 final class SavedPromptsUITests: XCTestCase {
@@ -35,9 +36,10 @@ final class SavedPromptsUITests: XCTestCase {
         try image.pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/saved-prompts-\(appearance)-\(name).png"))
     }
 
-    @MainActor func testASwipeAsksBeforeDeletingAndCancelKeepsIt() async throws {
-        let before = try await names()
-        guard before.contains("review") else {
+    /// The page with the mock's prompts, and its /review row (the copy on screen: `-openAssistantPage` opens the page
+    /// under the Persona tab as well).
+    @MainActor private func open() async throws -> (XCUIApplication, XCUIElement) {
+        guard try await names().contains("review") else {
             throw XCTSkip("this mock hub has no saved prompts: start it with MOCK_SAVED_PROMPTS=1")
         }
         let app = XCUIApplication()
@@ -45,11 +47,20 @@ final class SavedPromptsUITests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", "", "-openAssistantPage", "prompts",
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launchPinned()
-
-        // `-openAssistantPage` opens the page under the Persona tab as well: work on the copy on screen.
+        // A fresh simulator asks for notifications over everything at the first launch.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for label in ["Allow", "允许"] where springboard.buttons[label].waitForExistence(timeout: 3) {
+            springboard.buttons[label].tap()
+        }
         let row = app.buttons.matching(identifier: "saved-prompt-review").allElementsBoundByIndex.first { $0.isHittable }
             ?? app.buttons["saved-prompt-review"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 20), "no saved prompts:\n\(app.debugDescription)")
+        return (app, row)
+    }
+
+    @MainActor func testASwipeAsksBeforeDeletingAndCancelKeepsIt() async throws {
+        let before = try await names()
+        let (app, row) = try await open()
         row.swipeLeft()
         let delete = app.buttons["Delete"].firstMatch
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "no Delete on the swipe:\n\(app.debugDescription)")
@@ -65,5 +76,23 @@ final class SavedPromptsUITests: XCTestCase {
         XCTAssertTrue(row.exists, "Cancel kept the row")
         let after = try await names()
         XCTAssertEqual(after, before, "nothing was sent")
+    }
+
+    @MainActor func testTheEditorClosesFromItsCornerWithoutSaving() async throws {
+        let before = try await names()
+        let (app, row) = try await open()
+        row.tap()
+        let close = app.buttons["sheet-close"].firstMatch, save = app.buttons["saved-prompt-save"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "no ✕ on the editor:\n\(app.debugDescription)")
+        XCTAssertTrue(save.exists, "no ✓ on the editor")
+        XCTAssertLessThan(close.frame.midX, save.frame.midX, "✕ at the leading corner, ✓ at the trailing one")
+        let name = app.textFields["saved-prompt-name"].firstMatch
+        name.tap()
+        name.typeText("x")
+        try shot(app, "editor")
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5), "the ✕ left the editor open")
+        let after = try await names()
+        XCTAssertEqual(after, before, "the ✕ saved nothing")
     }
 }

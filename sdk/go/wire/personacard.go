@@ -20,11 +20,12 @@ import (
 //   - stacked_bar: metric {label: the "total" label, value: total (else the parts' sum), detail: note}; a stacked bar chart with a
 //     series per part (more than four: the first three and "other", the rest's sum; the rest part's tone neutral), each one
 //     point labelled title or "total"; then a row per part {title: label, subtitle: note, value}. The unit is total's,
-//     else the card's.
+//     else the card's. With exactly one point per series, every app draws a horizontal segmented share bar; two or more
+//     categories stay vertical columns.
 //   - ring (one day's total and its parts): a donut chart, one series of a point per part (more than eight: the first
 //     seven and "other", the rest's sum), center: the total written with its unit (left out past 20 characters), detail:
 //     note; then a row per part. When total is more than the parts' sum, a "remaining" part (total less the sum) comes
-//     last. The unit is total's, else the card's. A stacked_bar is for comparing (days, people), a ring for one whole.
+//     last. The unit is total's, else the card's. A ring presents one whole as a donut; a stacked_bar presents parts as bars.
 //   - line, bar: metric {label: the "current" label, value} when the card has a value; a chart of that kind with one series of the
 //     points (the last 120), detail: note.
 

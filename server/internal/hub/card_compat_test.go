@@ -218,10 +218,10 @@ func TestCardCompatItemsTouchesOnlyAssistantTextAndKeepsTheNodesSlice(t *testing
 		{ID: "a", Role: "assistant", Kind: proto.KindText, Text: ringReply},
 		{ID: "t", Role: "assistant", Kind: proto.KindToolResult, Text: ringReply},
 	}
-	if got := cardCompatItems(i18n.ZhHans, true, items); &got[0] != &items[0] {
+	if got := cardCompatItems(i18n.ZhHans, true, true, items); &got[0] != &items[0] {
 		t.Fatal("a client that draws rings got a copy")
 	}
-	got := cardCompatItems(i18n.ZhHans, false, items)
+	got := cardCompatItems(i18n.ZhHans, false, true, items)
 	if got[0].Text != ringReply || got[2].Text != ringReply {
 		t.Fatal("a user message or tool result was rewritten")
 	}
@@ -276,6 +276,46 @@ func TestEachClientGetsTheRingOrAViewPushed(t *testing.T) {
 			continue
 		}
 		downgradedView(t, e.Items[0].Text)
+	}
+}
+
+func TestWorkReportProjectionFollowsEachClientWithoutChangingHistory(t *testing.T) {
+	const report = "### Persona work report\n\n- Status: blocked\n- Merged: no\n- Deployed: n/a\n- Waiting: the sample owner\n\n---"
+	const archived = "<closeout status=\"done\">\ndid: reviewed the archive\n</closeout>"
+	items := []proto.Item{
+		{ID: "a1", Role: "assistant", Kind: proto.KindText, Text: "Three examples checked.\n\n" + report},
+		{ID: "u2", Role: "user", Kind: proto.KindText, Text: report},
+		{ID: "t3", Role: "assistant", Kind: proto.KindText, Text: report, FullSize: 6000},
+		{ID: "a4", Role: "assistant", Kind: proto.KindText, Text: archived},
+	}
+	h := &Hub{clients: map[*client]struct{}{}}
+	for _, known := range []bool{true, false} {
+		c := &client{out: make(chan []byte, 1), subs: map[[2]string]bool{{"m1", "s1"}: true}}
+		c.meta.features = map[string]bool{featureMarkdownCloseout: known}
+		addTestClient(h, c)
+	}
+	h.itemsToSubscribers("m1", "s1", items, itemSpan{}, false)
+	for c := range h.clients {
+		var event struct{ Items []proto.Item }
+		if err := json.Unmarshal(<-c.out, &event); err != nil || len(event.Items) != len(items) {
+			t.Fatalf("event = %+v, err = %v", event, err)
+		}
+		got := event.Items[0].Text
+		if c.has(featureMarkdownCloseout) {
+			if got != items[0].Text {
+				t.Errorf("new client got %q", got)
+			}
+		} else if !strings.HasPrefix(got, "Three examples checked.\n\n<closeout status=\"blocked\"") || !strings.HasSuffix(got, "</closeout>") || strings.Contains(got, "### Persona ") {
+			t.Errorf("old client cannot strip the report: %q", got)
+		}
+		for i := 1; i < len(items); i++ {
+			if event.Items[i].Text != items[i].Text {
+				t.Errorf("item %d changed: %+v", i, event.Items[i])
+			}
+		}
+	}
+	if !strings.HasSuffix(items[0].Text, report) {
+		t.Fatal("projection mutated the stored reply")
 	}
 }
 

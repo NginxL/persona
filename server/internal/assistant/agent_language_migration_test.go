@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -223,10 +224,10 @@ func TestGoldenAgentLanguageAnswersAndCloseout(t *testing.T) {
 			if after {
 				name = "brief_delivery"
 			}
-			golden(t, "agent_language.closeout."+name+"."+locale, s.closeoutBrief(context.Background(), after))
+			golden(t, "agent_language.closeout."+name+"."+locale, s.closeoutBrief(context.Background(), "box", after))
 		}
-		golden(t, "agent_language.closeout.ask."+locale, renderCloseoutAsk(answerLanguage(locale)))
-		golden(t, "agent_language.closeout.required."+locale, renderCloseoutRequired(answerLanguage(locale)))
+		golden(t, "agent_language.closeout.ask."+locale, renderCloseoutAsk(answerLanguage(locale), closeout.Example))
+		golden(t, "agent_language.closeout.required."+locale, renderCloseoutRequired(answerLanguage(locale), closeout.Example))
 		// Review data and the machine-readable final-line contract remain verbatim.
 		golden(t, "agent_language.review."+locale, prompts.RenderAgentReview(prompts.AgentReview{Language: answerLanguage(locale), Title: "Task 原文", Ask: "Original requirement 原文", DoneWhen: []string{"Original criterion 原文"}, Scope: "base..head", Diff: "+ source 原文", Omitted: 2}))
 		golden(t, "agent_language.triage_records."+locale, prompts.RenderAgentTriageInput(prompts.AgentTriageInput{Language: answerLanguage(locale), Now: "TIME", Agent: "Example agent", Machine: "Example computer", Reply: "Source reply 原文", Answered: []prompts.AgentAnswerItem{{Question: "Original question 原文", Answer: "Original answer 原文"}}, ApprovedWait: "CI #7", ApprovedThen: "push branch/source", ApprovedByTask: true}))
@@ -275,7 +276,7 @@ func TestGoldenAgentLanguageLegacyAll(t *testing.T) {
 			"review": prompts.RenderAgentReview(review), "readonly": prompts.RenderReadonlyTaskConstraint(""),
 			"limit": prompts.RenderAgentLimitContinue(""), "peer": prompts.RenderPeerMessage(prompts.PeerMessage{Text: "Source 原文"}),
 			"reanswer": prompts.RenderAgentReanswer(reanswer), "closeout_brief": prompts.RenderAgentCloseoutBrief(brief),
-			"closeout_ask": renderCloseoutAsk(""), "closeout_required": renderCloseoutRequired(""),
+			"closeout_ask": renderCloseoutAsk("", closeout.Example), "closeout_required": renderCloseoutRequired("", closeout.Example),
 		}
 		for name, text := range values {
 			// Framing preserves exact final newlines without trailing blank lines in fixture files.

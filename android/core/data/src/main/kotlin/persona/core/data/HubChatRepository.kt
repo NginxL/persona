@@ -411,14 +411,15 @@ class HubChatRepository(
         entry.ready.await()
         if (entry.continuity.asynchronous) { loadOlderAsync(entry); return }
         entry.requests.withLock {
-            val action = entry.lock.withLock {
-                entry.continuity.accept(Input.LoadOlder)!!.requests.firstOrNull()?.also {
+            val (action, history) = entry.lock.withLock {
+                val action = entry.continuity.accept(Input.LoadOlder)!!.requests.firstOrNull()?.also {
                     entry.state.update { it.copy(loadingOlder = true, error = null) }
                 }
-            } as? Action.FetchOlder ?: return
+                action to entry.reducer.history
+            }
+            val fetch = action as? Action.FetchOlder ?: return
             try {
-                val history = entry.lock.withLock { entry.reducer.history }
-                val page = transport.items(session, ItemsQuery(beforeSeq = action.beforeSeq))
+                val page = transport.items(session, ItemsQuery(beforeSeq = fetch.beforeSeq))
                 entry.lock.withLock {
                     if (history != entry.reducer.history || page.history != null && history != null && page.history != history) {
                         entry.continuity.accept(Input.OlderFailed)
@@ -427,7 +428,17 @@ class HubChatRepository(
                 }
                 persist(entry)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { entry.lock.withLock { entry.state.update { it.copy(error = DataText.of(Key.ChatHistoryFailed)) } } }
+            catch (error: Exception) {
+                val missing = missingHistory(error) != null
+                entry.lock.withLock {
+                    if (missing && history == entry.reducer.history) {
+                        entry.continuity.accept(Input.Older(emptyList(), hasMore = false))
+                        publish(entry)
+                    }
+                    entry.state.update { it.copy(error = DataText.of(Key.ChatHistoryFailed)) }
+                }
+                if (missing) persist(entry)
+            }
             finally { withContext(NonCancellable) { entry.lock.withLock {
                 entry.continuity.accept(Input.OlderFailed)
                 entry.state.update { it.copy(loadingOlder = false) }
@@ -437,8 +448,11 @@ class HubChatRepository(
 
     private suspend fun loadOlderAsync(entry: Entry) {
         entry.older.withLock {
+            var generation: Long? = null
             try {
-                val (generation, history) = entry.inputs.withLock { entry.historyGeneration to entry.submittedHistory }
+                val initial = entry.inputs.withLock { entry.historyGeneration to entry.submittedHistory }
+                generation = initial.first
+                val history = initial.second
                 val action = awaitActionsAsync(entry, Input.LoadOlder, generation)?.singleOrNull() as? Action.FetchOlder ?: return@withLock
                 entry.lock.withLock { entry.state.update { it.copy(loadingOlder = true, error = null) } }
                 val page = transport.items(entry.key, ItemsQuery(beforeSeq = action.beforeSeq))
@@ -448,10 +462,17 @@ class HubChatRepository(
                 entry.lock.withLock { publish(entry) }
                 persist(entry)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { entry.lock.withLock {
-                recordAsyncError(entry, DataText.of(Key.ChatHistoryFailed))
-                entry.state.update { it.copy(error = entry.eventError) }
-            } }
+            catch (error: Exception) {
+                if (missingHistory(error) != null && generation != null) {
+                    awaitActionsAsync(entry, Input.Older(emptyList(), hasMore = false), generation)
+                    entry.lock.withLock { publish(entry) }
+                    persist(entry)
+                }
+                entry.lock.withLock {
+                    recordAsyncError(entry, DataText.of(Key.ChatHistoryFailed))
+                    entry.state.update { it.copy(error = entry.eventError) }
+                }
+            }
             finally { withContext(NonCancellable) {
                 acceptAsync(entry, Input.OlderFailed)
                 entry.lock.withLock { entry.state.update { it.copy(loadingOlder = false) } }
@@ -842,7 +863,9 @@ class HubChatRepository(
                 if (initial && notLoaded(error)) awaitWatch(entry)
                 else {
                     firstPageIn(entry)
-                    entry.state.update { it.copy(loading = false, error = DataText.of(Key.ChatSyncFailed), verified = false) }
+                    val missing = missingHistory(error)
+                    entry.eventError = missing
+                    entry.state.update { it.copy(loading = false, error = missing ?: DataText.of(Key.ChatSyncFailed), verified = false) }
                 }
             } }
             finally { withContext(NonCancellable) { entry.lock.withLock { entry.continuity.accept(Input.FillFailed) } } }
@@ -870,7 +893,7 @@ class HubChatRepository(
             if (initial && notLoaded(error)) awaitWatch(entry)
             else {
                 firstPageIn(entry)
-                recordAsyncError(entry, DataText.of(Key.ChatSyncFailed))
+                recordAsyncError(entry, missingHistory(error) ?: DataText.of(Key.ChatSyncFailed))
                 entry.state.update { it.copy(loading = false, error = entry.eventError, verified = false) }
             }
         } } finally { withContext(NonCancellable) {
@@ -910,6 +933,13 @@ class HubChatRepository(
     }
 
     private fun notLoaded(error: Throwable) = hubCodedFailure(error)?.code == NOT_LOADED
+
+    /** A history read the node answered as gone: terminal for paging, with the hub's own sentence for the chat. */
+    private fun missingHistory(error: Throwable): String? {
+        val coded = hubCodedFailure(error) ?: return null
+        if (coded.status != 404 || coded.code != NOT_FOUND) return null
+        return (coded as? Throwable)?.message?.takeIf { it.isNotBlank() } ?: DataText.of(Key.ChatSyncFailed)
+    }
 
     /** [first]: a read the continuity already issued; without it, [ContinuityAdapter.Input.ContinueFill] opens one. */
     private suspend fun catchUp(entry: Entry, first: List<Action>? = null) {
@@ -957,8 +987,11 @@ class HubChatRepository(
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { entry.lock.withLock {
                 // While the open waits for the watch (awaitWatch), a catch-up its runtime refuses alike says nothing new.
-                if (entry.notLoadedWait?.isActive != true || !notLoaded(error))
-                    entry.state.update { it.copy(error = DataText.of(Key.ChatSyncFailed), verified = false) }
+                if (entry.notLoadedWait?.isActive != true || !notLoaded(error)) {
+                    val missing = missingHistory(error)
+                    entry.eventError = missing
+                    entry.state.update { it.copy(error = missing ?: DataText.of(Key.ChatSyncFailed), verified = false) }
+                }
             } }
             finally { withContext(NonCancellable) { entry.lock.withLock { entry.continuity.accept(Input.FillFailed) } } }
         }
@@ -990,7 +1023,7 @@ class HubChatRepository(
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { entry.lock.withLock {
             if (entry.notLoadedWait?.isActive != true || !notLoaded(error)) {
-                recordAsyncError(entry, DataText.of(Key.ChatSyncFailed))
+                recordAsyncError(entry, missingHistory(error) ?: DataText.of(Key.ChatSyncFailed))
                 entry.state.update { it.copy(error = entry.eventError, verified = false) }
             }
         } } finally { withContext(NonCancellable) {
@@ -1078,7 +1111,8 @@ class HubChatRepository(
             history = entry.reducer.history,
             streamingItemIds = entry.realtime.streamingItemIds(),
             liveText = entry.realtime.liveText(),
-            hasOlder = entry.reducer.hasMore == true, error = entry.eventError, verified = verified,
+            hasOlder = entry.reducer.hasMore == true, olderBoundaryKnown = entry.reducer.hasMore != null,
+            error = entry.eventError, verified = verified,
             lastSeenMessageId = lastSeen?.let(entry.realtime::displayId),
             ended = runtime.ended || (it.ended && !relisted), replaced = runtime.replaced || (it.replaced && !relisted),
             stopping = runtime.stopping, turnDurationSeconds = runtime.turnDurationSeconds,
@@ -1103,6 +1137,7 @@ class HubChatRepository(
     companion object {
         /** The code of a read that would start the agent: one its engine let go, read only while watched (#8132). */
         private const val NOT_LOADED = "not_loaded"
+        private const val NOT_FOUND = "not_found"
         /**
          * How long an open whose first read was refused as not_loaded waits for the watch ([awaitWatch]): the web's read
          * time (`READ_TIMEOUT_MS`), past the hub's own limits for a backlog (10 s for the watch, then 30 s for the read),

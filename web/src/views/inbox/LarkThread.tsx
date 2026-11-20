@@ -5,7 +5,7 @@
 // Like the phone's chat (lib/lark-chat.ts, LarkExtras.tsx): pictures open in the viewer, files download, voice and video
 // play here, a card's buttons press, my messages show who read them, reactions can be put on, an avatar opens the
 // person's card, a group's box can @ people, and what is typed stays as the chat's draft.
-import { ItemManager, ownerHeaders, useItemManager, withManager } from "../../lib/manager-choice";
+import { defaultManager, ItemManager, ownerHeaders, useItemManager, withManager } from "../../lib/manager-choice";
 import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, ApiError, enc, errorText, getToken } from "../../lib/api";
 import { startConversation } from "../../lib/assistant-start";
@@ -17,13 +17,13 @@ import { larkPath, olAccount } from "../../lib/lark-accounts";
 import { larkAccount } from "../../lib/lark-chats";
 import {
   cardButtons, chatImages, draftKey, isVoice, loadDraft, mergeAround, reactionsOf, readMark, ReadReceipts, readStates, react,
-  statusOf, toggledReactions, type ReadState,
+  statusOf, toggledReactions, type LarkProfileRef, type ReadState,
 } from "../../lib/lark-chat";
 import { quoteSummary, showsBody, showsHistory, useLarkDisplay, useLarkDisplayState, type LarkMessageDisplay } from "../../lib/lark-display";
 import { keepSameMessages, keepSameStates } from "../../lib/lark-reuse";
 import type { LarkPerson } from "../../lib/lark-people";
 import { canAddPin, changeChatPin, needsRecheck, pinProblemText, type ChatPinTarget } from "../../lib/lark-pins";
-import { firstAtOrAfter, historyProblem, type HistoryProblem, latestOf, nearTop, newMessagesLineAt, OlderPaging, screensFromEnd, showsJumpToLatest, showsJumpUp } from "../../lib/lark-history";
+import { atNewest, firstAtOrAfter, historyProblem, type HistoryProblem, latestOf, nearTop, newMessagesLineAt, OlderPaging, showsJumpToLatest, showsJumpUp } from "../../lib/lark-history";
 import { initialCursor, LarkReadTracker } from "../../lib/lark-read";
 import { clickLink, linkHref, prefetchLink } from "../../lib/links";
 import { isResumed } from "../../lib/reconnect";
@@ -37,7 +37,7 @@ import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { ImageViewer } from "../chat/ImageViewer";
-import { MessageBar, Monogram } from "./InboxParts";
+import { MessageBar, LarkAvatar, useFollowEnd } from "./InboxParts";
 import { LarkEditHistoryDialog } from "./LarkEditHistory";
 import { LarkComposer, type LarkComposerHandle, type LarkReplyTarget } from "./LarkComposer";
 import { CardButtons, FilePart, ProfileDialog, ReactionPicker, Reactions, ReadMarkView, VideoPart, VoicePart } from "./LarkExtras";
@@ -114,7 +114,7 @@ interface ChatTools {
   feed: string;
   group: boolean;
   openImage: (src: string) => void;
-  openProfile: (who: { id: string; name: string; avatar?: string; bot?: boolean }) => void;
+  openProfile: (who: LarkProfileRef) => void;
   /** Reads the window around a message again (a card button was pressed on it). */
   refresh: (messageID: string) => Promise<void>;
 }
@@ -160,10 +160,13 @@ export function LarkThread(props: LarkThreadProps) {
   // whose Lark the chat is (an inbox item's manager; a chat opened from it is the same one's): every request below names it
   const outer = useItemManager();
   const manager = props.chat.manager ?? outer;
+  // A different manager or account can return the same feed and person IDs. Drop the old profile and member list
+  // before the new owner starts drawing images or fetching that person's details.
+  const owner = JSON.stringify([manager ?? defaultManager(), props.chat.account]);
   return (
     <ItemManager.Provider value={manager}>
       <ChatAccount.Provider value={props.chat.account}>
-        <ChatFeed.Provider value={props.chat.feed}><LarkThreadBody {...props} /></ChatFeed.Provider>
+        <ChatFeed.Provider value={props.chat.feed}><LarkThreadBody key={owner} {...props} /></ChatFeed.Provider>
       </ChatAccount.Provider>
     </ItemManager.Provider>
   );
@@ -194,7 +197,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   }
   const [viewing, setViewing] = useState<string | null>(null);
   const [reacting, setReacting] = useState<LarkMessage | null>(null);
-  const [person, setPerson] = useState<{ id: string; name: string; avatar?: string; bot?: boolean } | null>(null);
+  const [person, setPerson] = useState<LarkProfileRef | null>(null);
   const [direct, setDirect] = useState<{ feed: string; name: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<LarkComposerHandle>(null);
@@ -215,6 +218,9 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   const [, setPagingTick] = useState(0);
   const latest = useRef<LarkPage | null>(null);
   const toEnd = useRef(false);
+  // Where the last scroll or placement left the list, and until when a jump's glide of its own is on its way.
+  const atEnd = useRef(false);
+  const gliding = useRef(0);
   const windowGen = useRef(0);
   const [jumpShown, setJumpShown] = useState(false);
   const [jumping, setJumping] = useState(false);
@@ -301,7 +307,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
           if (gen !== windowGen.current) return;
           // A list showing its newest message keeps showing it as more come in (iOS larkFollowsEnd).
           const el = scroller.current;
-          const follow = Boolean(el && screensFromEnd(el) < 0.05);
+          const follow = Boolean(el && atNewest(el));
           setPage((cur) => {
             if (!cur) return cur;
             const messages = keepSameMessages(cur.messages, mergeMessages(cur.messages, r.messages ?? []));
@@ -334,30 +340,36 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
     if (toEnd.current) {
       toEnd.current = false;
       el.scrollTop = el.scrollHeight;
-      return;
-    }
-    if (jumpTo.current) {
+    } else if (jumpTo.current) {
       const target = el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(jumpTo.current)}"]`);
       jumpTo.current = null;
       if (target) el.scrollTop = Math.max(0, target.offsetTop - el.clientHeight / 3);
-      return;
-    }
-    if (anchor.current) {
+    } else if (anchor.current) {
       const a = anchor.current;
       anchor.current = null;
       const held = a.id ? el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(a.id)}"]`) : null;
       if (held && a.offset !== undefined) el.scrollTop += held.getBoundingClientRect().top - el.getBoundingClientRect().top - a.offset;
       else el.scrollTop = a.top + (el.scrollHeight - a.height);
-      return;
-    }
-    if (placed.current) return;
-    placed.current = true;
-    const at = firstAtOrAfter(page.messages, land);
-    const target = at ? el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(at.id)}"]`) : null;
-    if (target) el.scrollTop = Math.max(0, target.offsetTop - 64);
-    else el.scrollTop = el.scrollHeight;
-    if (at && focus && comparePosition(at.position, focus) === 0) setFlash((f) => ({ id: at.id, n: (f?.n ?? 0) + 1 }));
+    } else if (!placed.current) {
+      placed.current = true;
+      const at = firstAtOrAfter(page.messages, land);
+      const target = at ? el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(at.id)}"]`) : null;
+      if (target) el.scrollTop = Math.max(0, target.offsetTop - 64);
+      else el.scrollTop = el.scrollHeight;
+      if (at && focus && comparePosition(at.position, focus) === 0) setFlash((f) => ({ id: at.id, n: (f?.n ?? 0) + 1 }));
+    } else return;
+    // a placement counts as where the reader is, before its scroll event says so
+    atEnd.current = atNewest(el);
   }, [page, land, focus]);
+
+  // At its newest message the list keeps it in view when the box gets shorter (the keyboard, a longer draft, a quote over
+  // the box) or the messages grow by themselves (a picture loading), as ChatView does. A placement still to land (an
+  // older page's anchor, a jump, the first one) and a jump's glide are left alone.
+  useFollowEnd(
+    scroller,
+    () => atEnd.current && placed.current && !anchor.current && !jumpTo.current && !toEnd.current && performance.now() >= gliding.current,
+    page !== null,
+  );
 
   const loadNewer = useCallback(async () => {
     const p = pageRef.current;
@@ -422,6 +434,12 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   useEffect(() => {
     checkScroll();
   }, [page, checkScroll]);
+  // Only a scroll says where the reader is: a page that just grew under a reader at the end still counts as at it.
+  const onScroll = useCallback(() => {
+    const el = scroller.current;
+    if (el) atEnd.current = atNewest(el);
+    checkScroll();
+  }, [checkScroll]);
 
   // The newest messages, kept while the window reaches them, so "Back to latest" goes back without waiting for the hub.
   useEffect(() => {
@@ -462,9 +480,9 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
         if (!kept) return { ...cur, ...r, messages: keepSameMessages(cur.messages, fresh) };
         const have = new Set(cur.messages.map((m) => m.id));
         if (fresh.some((m) => have.has(m.id))) return { ...cur, messages: keepSameMessages(cur.messages, mergeMessages(cur.messages, fresh)) };
-        return box && screensFromEnd(box) < 0.05 ? { ...cur, ...r, messages: keepSameMessages(cur.messages, fresh) } : cur;
+        return box && atNewest(box) ? { ...cur, ...r, messages: keepSameMessages(cur.messages, fresh) } : cur;
       });
-      if (!kept || (box && screensFromEnd(box) < 0.05)) toEnd.current = true;
+      if (!kept || (box && atNewest(box))) toEnd.current = true;
     } catch (e) {
       if (!kept) toast(errorText(e), "error");
     } finally {
@@ -484,6 +502,8 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
     const have = first && !(comparePosition(position, first.position) < 0 && p.has_older) ? firstAtOrAfter(p.messages, position) : undefined;
     const row = have ? el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(have.id)}"]`) : null;
     if (have && row) {
+      // a resize under the glide (the keyboard going away with the tap) does not pull it back to the end
+      gliding.current = performance.now() + 1000;
       el.scrollTo({ top: Math.max(0, row.offsetTop - 64), behavior: scrollBehavior() });
       light(have.id);
       return;
@@ -664,7 +684,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
       }}
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} onScroll={checkScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[760px] px-2 py-3 sm:px-4">
           {page.has_older && (
             <OlderHeader auto={autoOlder} loading={paging.current.loading} problem={paging.current.problem} onLoad={() => void loadOlder(true)} />
@@ -682,6 +702,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
               {topicGroup && !isSystem(m) ? (
                 <LarkTopicCard
                   topic={m}
+                  account={ol}
                   replies={topicReplies}
                   onOpen={setOpenTopic}
                   onReply={handleReply}
@@ -1256,14 +1277,14 @@ const Message = memo(function Message({
         {!compact && (tools && m.sender_id && !m.is_mine ? (
           <button
             type="button"
-            onClick={() => tools.openProfile({ id: m.sender_id!, name, avatar: m.sender_avatar, bot: m.sender_type === "bot" })}
+            onClick={() => tools.openProfile({ id: m.sender_id!, name, avatar: m.sender_avatar, avatar_url: m.sender_avatar_url, bot: m.sender_type === "bot" })}
             aria-label={t("inbox-larkthread.open_profile", { name })}
             title={t("inbox-larkthread.open_profile", { name })}
             className="block rounded-full transition-opacity hover:opacity-85"
           >
-            <Monogram name={name} size={nested ? 24 : 32} src={m.sender_avatar} />
+            <LarkAvatar name={name} size={nested ? 24 : 32} avatarURL={m.sender_avatar_url} avatar={m.sender_avatar} account={ol} />
           </button>
-        ) : <Monogram name={name} size={nested ? 24 : 32} src={m.sender_avatar} />)}
+        ) : <LarkAvatar name={name} size={nested ? 24 : 32} avatarURL={m.sender_avatar_url} avatar={m.sender_avatar} account={ol} />)}
       </span>
       <div className="min-w-0 flex-1">
         {!compact && (

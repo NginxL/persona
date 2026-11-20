@@ -81,6 +81,10 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityDirectionSessions: the manager files sessions under a direction and reads one direction
+	// (PUT /api/v1/assistant/sessions/{mid}/{sid}/direction, GET /api/v1/assistant/directions/{id}, and the tree's
+	// additive sessions; #11391). The hub lists direction_sessions only while the default manager names it.
+	CapabilityDirectionSessions = "direction_sessions"
 	// CapabilityAssistantStartServiceTier: the manager forwards a new conversation's native service_tier to the node,
 	// which acknowledges it before the first turn (#6240). The hub lists the feature only for the default manager and
 	// refuses an explicit tier sent to a manager that does not name this capability.
@@ -167,6 +171,10 @@ const (
 	EventConversationSent = "session.assistant_sent"
 )
 
+// DispatchGuardTools are the assistant tools an opt-in dispatch guard may hide and refuse for an explicitly named
+// conversation. List filtering and call admission use the same names, so a hidden tool is not left callable.
+var DispatchGuardTools = []string{"task_plan", "agent_start", "conversation_new", "conversation_send"}
+
 // Error codes that cross the bus where a Go error would lose its kind (rpc.Error.Code).
 const (
 	CodeNoDevice         = "no_device"         // ErrNoDevice
@@ -187,6 +195,11 @@ const (
 	// conversation (Data: conversation_agent, launcher, launcher_agent, delivered "none"): the hub answers 409, nothing
 	// was sent, and the conversation keeps its agent (docs/assistant/assistant.md, #4662).
 	CodeLauncherOtherKind = "launcher_other_kind"
+	// CodeConversationBusy: an assistant conversation is at work (a turn, background tasks) and its task-follow-up role
+	// changed, so the message would need a new process with the new role while the old one still works. Nothing was
+	// sent. The hub keeps an owner's message with an id (MethodKeepUndelivered); the manager sends it again once the
+	// conversation is idle, resolving the role again, so it starts on the new role and the old one never gets it.
+	CodeConversationBusy = "busy"
 	// CodeSupervisionRuntime means the runtime cannot receive separate supervision instructions. Nothing was sent.
 	CodeSupervisionRuntime = "assistant_supervision_runtime"
 	// CodeBodyIncomplete: MethodHTTPStreamed's body did not arrive whole (the relay was not there, broke or carried
@@ -261,12 +274,15 @@ var Routes = []string{
 	"GET /api/v1/assistant/leaders",
 	"GET /api/v1/assistant/dispatch-policy",
 	"PUT /api/v1/assistant/dispatch-policy",
+	"GET /api/v1/assistant/dispatch-guard",
+	"PUT /api/v1/assistant/dispatch-guard",
 	"GET /api/v1/assistant/worker-presets",
 	"GET /api/v1/assistant/start-defaults",
 	"PUT /api/v1/assistant/start-defaults",
 	"GET /api/v1/assistant/availability",
 	"GET /api/v1/assistant/directions/tree",
 	"GET /api/v1/assistant/directions/offers",
+	"GET /api/v1/assistant/directions/{id}",
 	"DELETE /api/v1/assistant/directions/offers/{id}",
 	"POST /api/v1/assistant/directions/{id}/start",
 	"POST /api/v1/assistant/directions/{id}/make",
@@ -275,6 +291,7 @@ var Routes = []string{
 	"POST /api/v1/assistant/agents/{mid}/{sid}/supervisor",
 	"PUT /api/v1/assistant/directions/{id}/name",
 	"PUT /api/v1/assistant/directions/{id}/notes",
+	"PUT /api/v1/assistant/sessions/{mid}/{sid}/direction",
 	"GET /api/v1/assistant/conversations/{id}/feed",
 	"POST /api/v1/assistant/feed/{id}/dismiss",
 	"POST /api/v1/assistant/feed/{id}/undo-dismiss",
@@ -325,6 +342,12 @@ var Routes = []string{
 	"GET /api/v1/todos/{id}",                // one to-do as the list has it, with its view
 	"GET /api/v1/todos/{id}/images/{image}", // one attached picture's exact bytes (todo_images.go, #11084)
 	"GET /api/v1/todos/{id}/repositories",
+	"GET /api/v1/todos/{id}/backend-workspace",
+	"GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}",
+	"POST /api/v1/todos/{id}/backend-workspace/prepare",
+	"POST /api/v1/todos/{id}/backend-workspace/start",
+	"POST /api/v1/todos/{id}/backend-workspace/cancel",
+	"POST /api/v1/todos/{id}/backend-workspace/cleanup",
 	"GET /api/v1/todos/{id}/workspace-rules",
 	"PUT /api/v1/todos/{id}/workspace-rules",
 	"POST /api/v1/todos/{id}/workspace-naming/preview",

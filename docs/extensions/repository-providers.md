@@ -136,6 +136,25 @@ When the extension is switched off, fails, is not running or is uninstalled:
   `provider_off` or `no_provider`. Agent reports that mention such a link skip it, and the import of a to-do's older PR
   links never calls an extension.
 
+## Delivery checks
+
+With `assistant.done_needs_delivery` on, a supervisor's `accepted` waits until the task's review request is merged
+(#6428). Which code host reads it is chosen by the link's host (#11584, `server/internal/assistant/code_host.go`):
+GitHub pull requests are read by built-in GitHub, exactly as before; a request on a host a provider claims is read
+through that provider: `repo.parse`, `repo.link` (it must answer `pull_request`), then `repo.describe`'s `state`.
+
+| The provider… | `accepted` |
+| --- | --- |
+| says `open` or `closed` | refused: not merged, as for GitHub |
+| says `merged` | passes |
+| gives no `state`, or no provider claims the host | passes; the reply says Persona cannot read requests on that host yet |
+| is off, not signed in, fails or times out | passes; the reply says the delivery could not be checked, and why |
+
+A provider's request counts as a task's delivery when an Agent reports it as one; today that is an address ending in
+`/merge_requests/<n>`. Its state is read only through the manager, with the provider's own credentials; nothing of it
+reaches a model beyond the reply's one line. Code hosts have three layers kept apart: reading (above), events (none
+pushed yet) and writes (comments, reviews and merging stay connector tools behind the write gate).
+
 ## Writing a provider
 
 With the Go SDK, the namespace is `ext.RepositoryNamespace`:

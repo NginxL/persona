@@ -253,6 +253,7 @@ func (d *DB) migrate(ctx context.Context) error {
 // number now, and run the renumbered one again; so it is moved to the new number first, or dropped when the new number
 // is recorded too. The renumbered migrations are idempotent; the ones that took over the old numbers never ran there.
 var renumbered = []struct{ from, to string }{
+	{"0520_task_workspaces.sql", "20261119163935_task_workspaces.sql"},   // earlier backend preparation builds
 	{"0515_workspace_naming.sql", "20261118234802_workspace_naming.sql"}, // naming branch before timestamped migrations
 	{"0513_todo_repositories.sql", "0516_todo_repositories.sql"},         // 0513 is assistant_search_plain
 	{"0514_todo_repositories.sql", "0516_todo_repositories.sql"},         // 0514 is assistant_search_strong

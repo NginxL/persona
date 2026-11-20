@@ -7,13 +7,14 @@ import { agentOpenMode } from "./agent-open";
 import { onOverlayEntry } from "./back-close";
 import { stripBase } from "./base";
 import { REPIN_AT_BOTTOM } from "./disclosure";
-import { openPanel } from "./panel";
+import { openPanel, type Panel } from "./panel";
 import { navigate, routeAt, type Route } from "./router";
 import { getState, taskSessionLookup, type State } from "./store";
 import { mostUrgentAgent } from "./todos";
 
 const FROM = "handoff";
 const PLACE = "chatPlace";
+const PANEL = "sidePanel";
 
 /** Where an Agent's page was opened from: the conversation's address in the app (the page names it, ChatView). */
 export interface HandoffFrom {
@@ -37,12 +38,26 @@ const address = () => stripBase(location.pathname) + location.search;
 
 // The place a hand-off kept when the conversation's entry could not carry it: left from an overlay's entry (a sheet, the
 // task board), which the new page takes over, so Back lands on the entry under it. Used when Back reaches that address.
-let left: { path: string; place: ChatPlace; back: boolean } | null = null;
+let left: { path: string; place: ChatPlace; back: boolean; panel?: Panel } | null = null;
 if (typeof addEventListener !== "undefined") {
   // capture: before the router's listener draws the page that reads it
   addEventListener("popstate", () => {
     if (left) left.back = left.path === address();
   }, true);
+  // after it: Back to a conversation left from its side panel (a task's or an Agent's "Open Agent page") opens that panel
+  // again, as the chat's place is put back; the strip's "click to return" is this same Back
+  addEventListener("popstate", () => {
+    const p = panelIn();
+    if (p) openPanel(p);
+  });
+}
+
+/** The side panel a hand-off left this history entry's conversation with (only a task's or an Agent's), if any. */
+export function panelIn(state: unknown = current()): Panel | undefined {
+  const v = entry(entry(state)[PANEL]);
+  if (v.kind === "task" && typeof v.todo === "string") return { kind: "task", todo: v.todo };
+  if (v.kind === "agent" && typeof v.mid === "string" && typeof v.sid === "string") return { kind: "agent", mid: v.mid, sid: v.sid };
+  return left?.back && left.path === address() ? left.panel : undefined;
 }
 
 /** The conversation the page now shown was opened from by a hand-off, if any. */
@@ -111,17 +126,22 @@ export function openAgent(mid: string, sid: string) {
 /**
  * Opens `to` as a page of its own. Left from an assistant conversation, the conversation's history entry keeps where
  * its chat is (Back puts it there again), and with `from` the new page's entry says which conversation it came from.
+ * `panel`: the side panel it was left from (a task's or an Agent's), opened again when Back returns to it.
  */
-export function leaveChat(to: Route, from = true) {
+export function leaveChat(to: Route, from = true, panel?: Panel) {
   const here = typeof location !== "undefined" ? routeAt(location.href) : null;
   if (here?.name !== "persona") return navigate(to);
-  const sc = document.querySelector<HTMLElement>("[data-chat-scroll]");
+  // the main chat's own scroller, not the side panel's chat (which also has one, after it)
+  const sc = [...document.querySelectorAll<HTMLElement>("[data-chat-scroll]")].find((el) => !el.closest("aside")) ?? null;
   const path = address();
-  if (sc) {
-    const place = chatPlaceOf(sc);
-    // an overlay's entry is taken over by the new page (router.ts navigate): Back lands on the conversation's own
-    left = onOverlayEntry() ? { path, place, back: false } : null;
-    if (!left) history.replaceState({ ...entry(history.state), [PLACE]: place }, "");
+  const kept = panel && (panel.kind === "task" || panel.kind === "agent") ? panel : undefined;
+  const place = sc ? chatPlaceOf(sc) : undefined;
+  // an overlay's entry is taken over by the new page (router.ts navigate): Back lands on the conversation's own
+  left = onOverlayEntry() && (place || kept) ? { path, place: place ?? { end: true, offset: 0 }, back: false, panel: kept } : null;
+  if (!left) {
+    // a panel an earlier hand-off kept here goes either way: Back opens only the one this one left from
+    const { [PANEL]: old, ...rest } = entry(history.state);
+    if (place || kept || old !== undefined) history.replaceState({ ...rest, ...(place ? { [PLACE]: place } : {}), ...(kept ? { [PANEL]: kept } : {}) }, "");
   }
   navigate(to, false, from ? { [FROM]: { path } satisfies HandoffFrom } : null);
 }

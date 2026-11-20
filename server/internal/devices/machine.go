@@ -168,6 +168,8 @@ type Machine struct {
 	opened hubOpened
 	// claudeDirsMu serializes the read-modify-writes of the remembered and blocked Claude config dirs (claudedirs.go).
 	claudeDirsMu sync.Mutex
+	// hiddenDirs is the machine's hidden Agent folders, cached (agentdirs.go).
+	hiddenDirs hiddenDirsCache
 	// nodeCmd replaces the node command (tests).
 	nodeCmd func(context.Context) *exec.Cmd
 	// localNote is why the last start of a local node passed a program beside it over (localNode), said once until it
@@ -579,6 +581,16 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-ultracode.node_outdated")}
 		}
 	}
+	if method == "assistant.directory" && !nodeHas(info, nodeproto.TaskExecution) {
+		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_task_execution")}
+	}
+	if method == "assistant.send" {
+		next, allowed := taskExecutionParams(params, nodeHas(info, nodeproto.TaskExecution))
+		if !allowed {
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_task_execution")}
+		}
+		params = next
+	}
 	if devicewire.IsSessionStart(method) && !nodeHas(info, nodeproto.SessionStartSpeed) {
 		raw, _ := json.Marshal(params)
 		var fields struct {
@@ -711,6 +723,37 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 		return m.callPortDial(ctx, p, dial, out)
 	}
 	return p.Call(ctx, method, params, out)
+}
+
+// taskExecutionParams selects the protocol before the first send to the connected node.
+// The scheduler alone can attest that a task uses inherited, ordinary execution.
+func taskExecutionParams(params any, supported bool) (any, bool) {
+	raw, _ := json.Marshal(params)
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return params, true
+	}
+	legacy, hinted := fields[devicewire.LegacyTaskExecution]
+	if !supported && string(fields["task_execution"]) == "true" {
+		var id, origin string
+		_ = json.Unmarshal(fields["session_id"], &id)
+		_ = json.Unmarshal(fields["origin"], &origin)
+		resume := id != "" && string(fields["resume_only"]) == "true"
+		if string(legacy) != "true" || (origin != "task" && !(origin == "" && resume)) || string(fields["origin_known"]) != "true" ||
+			string(fields["is_main"]) == "true" || string(fields["public"]) == "true" ||
+			fields["guest"] != nil || fields["external"] != nil || fields["new_session_id"] != nil {
+			return nil, false
+		}
+		delete(fields, "task_execution")
+		if resume {
+			delete(fields, "cwd") // the traditional resume leaves the existing process's directory alone
+		}
+	}
+	if hinted {
+		delete(fields, devicewire.LegacyTaskExecution)
+		return fields, true
+	}
+	return params, true
 }
 
 // firstWait bounds how long a call waits for a machine's first try to connect (the manager just started: an answer

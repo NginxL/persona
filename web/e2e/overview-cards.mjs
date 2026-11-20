@@ -95,7 +95,7 @@ const cards = async (p) => {
   );
 };
 const rowWidth = (p) => p.evaluate(() => Math.round(document.querySelector("[data-extension-card]").parentElement.getBoundingClientRect().width));
-const arrangeButton = (p) => p.getByRole("button", { name: "整理卡片" });
+const arrangeButton = (p) => p.getByRole("button", { name: "整理总览" });
 const head = (p) => p.locator("[data-overview-arrange]");
 async function startArranging(p) {
   await arrangeButton(p).click();

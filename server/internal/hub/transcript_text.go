@@ -65,6 +65,8 @@ func localizedItem(l i18n.Lang, it proto.Item) (proto.Item, bool) {
 		set(&it.Text, modelRefusalText(l, it.ModelRefusal))
 	case it.Kind == proto.KindNotice && it.Task != nil:
 		set(&it.Text, taskNoteText(l, it.Task, it.Text))
+	case it.Kind == proto.KindNotice && it.Wake && it.Text == transcript.BackgroundTaskUpdate:
+		set(&it.Text, tt(l, "task_updated"))
 	case it.Kind == proto.KindNotice:
 		set(&it.Text, noticeText(l, it.Text))
 	case it.Kind == proto.KindText && it.Role == "user" && it.From == transcript.PersonaPeer && it.Text == transcript.StoppedFromPhone:
@@ -225,7 +227,7 @@ func taskNoteText(l i18n.Lang, n *proto.TaskNote, text string) string {
 	}
 	key, args := taskNoteHead(n)
 	if key == "" {
-		if text == "后台任务有更新" {
+		if text == transcript.BackgroundTaskUpdate {
 			return tt(l, "task_updated")
 		}
 		return text

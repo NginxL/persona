@@ -345,9 +345,10 @@ func TestHerdrTraexPanesAreMergedIntoTheList(t *testing.T) {
 	if !ok {
 		t.Fatalf("no TRAEX session: %v", ids(list))
 	}
-	// No rollout: the title falls back to the directory's name (decorate).
+	// No rollout, and its herdr tab has a name: the title stays empty rather than the directory's name, so the apps
+	// name it by its tab (slot_name; decorate, #11631, docs/protocol/protocol.md).
 	if tr.Agent != traexAgent || tr.Status != proto.StatusWorking || tr.PaneID != "w3:p2" || tr.SpaceName != "tools" ||
-		tr.SlotName != "traex" || tr.SlotIndex != 2 || tr.Title != "sub" || tr.Cwd != "/tmp/tools/sub" {
+		tr.SlotName != "traex" || tr.SlotIndex != 2 || tr.Title != "" || tr.Cwd != "/tmp/tools/sub" {
 		t.Errorf("TRAEX session %+v", tr)
 	}
 	if _, ok := m[thread2]; ok {

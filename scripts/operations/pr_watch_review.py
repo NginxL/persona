@@ -113,7 +113,17 @@ def parse_result(text, anchors):
     return findings
 
 
-def split_diff(text, limit=180_000, worktree=None, base=None, head=None):
+def split_hunk_header(line, old_offset, new_offset, old_count, new_count):
+    """Give each partial hunk its actual ranges, not the original ranges."""
+    match = re.fullmatch(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*\n?)", line)
+    if match is None:
+        raise WatchError("malformed text diff hunk header; review this file manually")
+    old_start = int(match.group(1)) + old_offset - int(old_count == 0)
+    new_start = int(match.group(3)) + new_offset - int(new_count == 0)
+    return "@@ -%d,%d +%d,%d @@%s" % (old_start, old_count, new_start, new_count, match.group(5))
+
+
+def split_diff(text, limit=60_000, worktree=None, base=None, head=None):
     """Partition using Git's file names, never diff-looking added content."""
     if not text:
         return [""]
@@ -157,13 +167,64 @@ def split_diff(text, limit=180_000, worktree=None, base=None, head=None):
                 else:
                     raise WatchError("one diff header exceeds the semantic-review chunk bound; review this file manually")
             for hunk in hunks:
+                # A partial hunk is review input, not a whole-file patch. The
+                # full-blob index line cannot match a partial hunk's content.
+                part_file_header = "".join(line for line in header.splitlines(keepends=True)
+                                           if not line.startswith("index "))
+                hunk_parts = []
                 if len(hunk) + len(header) > limit:
-                    raise WatchError("one diff hunk exceeds the semantic-review chunk bound; review this file manually")
-                if piece != header and len(piece) + len(hunk) > limit:
-                    file_chunks.append((piece, None))
-                    piece = header
-                piece += hunk
-            file_chunks.append((piece, None))
+                    # Split only between complete content lines. Generate each
+                    # part's ranges so a finding keeps its exact new-file line.
+                    hunk_lines = hunk.splitlines(keepends=True)
+                    if len(hunk_lines) < 2:
+                        raise WatchError("one diff hunk has no complete content line; review this file manually")
+                    content = []
+                    for line in hunk_lines[1:]:
+                        if line.startswith("\\") and content:
+                            content[-1] += line
+                        else:
+                            content.append(line)
+                    if any(len(line) + len(header) + len(hunk_lines[0]) > limit
+                           for line in content):
+                        raise WatchError("one diff line exceeds the semantic-review chunk bound; review this file manually")
+                    hunk_parts, part, part_size = [], [], 0
+                    old_offset = new_offset = 0
+
+                    def part_header(old_count, new_count):
+                        return split_hunk_header(hunk_lines[0], old_offset, new_offset,
+                                                 old_count, new_count)
+
+                    def flush_part():
+                        old_count = sum(line.startswith(("-", " ")) for line in part)
+                        new_count = sum(line.startswith(("+", " ")) for line in part)
+                        hunk_parts.append(part_header(old_count, new_count) + "".join(part))
+                        return old_count, new_count
+
+                    for line in content:
+                        old_count = sum(item.startswith(("-", " ")) for item in part)
+                        new_count = sum(item.startswith(("+", " ")) for item in part)
+                        next_header = part_header(old_count + int(line.startswith(("-", " "))),
+                                                  new_count + int(line.startswith(("+", " "))))
+                        if part and len(part_file_header) + len(next_header) + part_size + len(line) > limit:
+                            old_count, new_count = flush_part()
+                            old_offset += old_count
+                            new_offset += new_count
+                            part, part_size = [], 0
+                        part.append(line)
+                        part_size += len(line)
+                    if part:
+                        flush_part()
+                else:
+                    hunk_parts = [hunk]
+                for part in hunk_parts:
+                    if piece != header and len(piece) + len(part_file_header) + len(part) > limit:
+                        file_chunks.append((piece, None))
+                        piece = header
+                    if piece == header:
+                        piece = part_file_header
+                    piece += part
+            if piece != header:
+                file_chunks.append((piece, None))
             reconstructed.append(header + "".join(hunks))
         for file_chunk, original in file_chunks:
             if current and len(current) + len(file_chunk) > limit:

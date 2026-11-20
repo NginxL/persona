@@ -14,6 +14,12 @@ import (
 func TestScheduledExecutionUsesMainConversationCategoryAndNoOldOverrides(t *testing.T) {
 	h, _ := modelTestHub(t)
 	n := newAssistantNode(t, h)
+	n.m.mu.Lock()
+	n.m.online = true
+	n.m.mu.Unlock()
+	n.mu.Lock()
+	n.modelChecks = map[string]string{"claude\x00category-model": "claude"}
+	n.mu.Unlock()
 	putModel(t, h, "assistant", assistantwire.ModelBinding{Provider: "launcher.claude", Model: "category-model", Effort: "high"})
 	putModel(t, h, "agent.new", assistantwire.ModelBinding{Provider: "launcher.agents", Model: "agents-model"})
 	putModel(t, h, "schedule", assistantwire.ModelBinding{Provider: "launcher.old-schedule"})
@@ -31,6 +37,9 @@ func TestScheduledExecutionUsesMainConversationCategoryAndNoOldOverrides(t *test
 			t.Fatalf("task creation/resume kept an old override or changed permission: %+v", p)
 		}
 	}
+	n.mu.Lock()
+	n.known["source"] = true
+	n.mu.Unlock()
 	editSessions(n.m, func([]proto.Session) []proto.Session {
 		return []proto.Session{{SessionID: "source", Launcher: "old-source"}}
 	})

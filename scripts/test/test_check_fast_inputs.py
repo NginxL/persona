@@ -27,8 +27,9 @@ try:
 except ImportError:  # Windows
     fcntl = None
 
-# The stubbed suites and the passing test the throwaway repositories share with test_check_fast.py.
-from test_check_fast import GUARD_SUITES, PASSING
+# The stubbed suites, the passing test and the copy of check-fast the throwaway repositories share with
+# test_check_fast.py.
+from test_check_fast import GUARD_SUITES, PASSING, copy_check_fast
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,7 +49,7 @@ class CheckFastServerInputsTests(unittest.TestCase):
         self.repo = Path(tempfile.mkdtemp(prefix="check-fast-test-"))
         self.addCleanup(shutil.rmtree, self.repo)
         (self.repo / "scripts/test").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        copy_check_fast(self.repo)
         self.write("scripts/privacy_check.py", "print('clean')\n")
         self.write("scripts/test/test_extension_schema.py", "")
         self.write("scripts/test/pr_needs_issue_test.mjs", "")
@@ -554,7 +555,7 @@ class CheckFastWebInputsTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.repo)
         (self.repo / "scripts/test").mkdir(parents=True)
         (self.repo / "scripts/ci").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        copy_check_fast(self.repo)
         shutil.copy(ROOT / "scripts/ci/paths.py", self.repo / "scripts/ci/paths.py")
         self.write("scripts/privacy_check.py", "print('clean')\n")
         self.write("scripts/test/test_extension_schema.py", "")
@@ -758,7 +759,7 @@ class CheckFastPlanTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.repo)
         (self.repo / "scripts/test").mkdir(parents=True)
         (self.repo / "scripts/ci").mkdir(parents=True)
-        shutil.copy(ROOT / "scripts/test/check-fast.sh", self.repo / "scripts/test/check-fast.sh")
+        copy_check_fast(self.repo)
         shutil.copy(ROOT / "scripts/ci/paths.py", self.repo / "scripts/ci/paths.py")
         self.write("scripts/privacy_check.py", "print('clean')\n")
         self.write("server/go.mod", "module example.com/server\n")

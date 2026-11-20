@@ -171,18 +171,32 @@ describe("what the pill says", () => {
     expect(pillView(session({ model: undefined }), { list: claudeList }).model).toBe("Default (recommended)");
   });
 
-  it("names ids briefly where no list does", () => {
+  it("names ids briefly where no list does, keeping gateway routing prefixes intact", () => {
     expect(modelLabel("claude-opus-5-5")).toBe("opus 5.5");
-    expect(modelLabel("anthropic/claude-opus-5-5")).toBe("opus 5.5");
+    expect(modelLabel("anthropic/claude-opus-5-5")).toBe("anthropic/claude-opus-5-5");
     expect(modelLabel("claude-opus-5-5[1m]")).toBe("opus 5.5 1M");
     expect(modelLabel("claude-fable-5-2[1m]")).toBe("fable 5.2 1M");
     expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("sonnet 5.5 1M");
     expect(modelLabel("claude-opus-5-5-20260101")).toBe("opus 5.5");
     expect(modelLabel("claude-haiku-5-5")).toBe("haiku 5.5");
     expect(modelLabel("gpt-5.5-codex")).toBe("5.5 Codex");
-    expect(modelLabel("vendor/model-x")).toBe("model-x");
+    expect(modelLabel("vendor/model-x")).toBe("vendor/model-x");
+    expect(modelLabel("route-a/gemini-4-carbon")).toBe("route-a/gemini-4-carbon");
     expect(currentModelRow(claudeList.models, "CLAUDE-HAIKU-5-5")?.id).toBe("haiku");
     expect(currentModelRow(claudeList.models, "nothing")).toBeUndefined();
+  });
+
+  it("keeps a gateway's echoed route on the pill while still matching the declared row in the panel", () => {
+    const carbonList: LauncherModels = { agent: "claude", models: [{ id: "gemini-4-carbon", name: "Gemini 4 Carbon" }] };
+    const routed = session({ model: "route-a/gemini-4-carbon" });
+    expect(pillView(routed, { loading: true }).model).toBe("route-a/gemini-4-carbon");
+    expect(pillView(routed, { list: carbonList }).model).toBe("route-a/gemini-4-carbon");
+    const { state } = sessionPanel(routed, launchers, lists({ gateway: { list: carbonList } }));
+    expect(state.current).toEqual({ provider: "gateway", model: "gemini-4-carbon", effort: "high" });
+    expect(pickPlan(routed, { provider: "gateway", model: "gemini-4-carbon", effort: "high" }, () => carbonList)).toEqual([]);
+    // A row that explicitly declares the full slash path still uses its own alias.
+    const explicitSlash: LauncherModels = { agent: "claude", models: [{ id: "vendor/model-x", name: "Vendor Model X", custom: true }] };
+    expect(pillView(session({ model: "vendor/model-x" }), { list: explicitSlash }).model).toBe("Vendor Model X");
   });
 
   it("prefers an exact row, then folds a gateway's routed echo or 1M spelling", () => {

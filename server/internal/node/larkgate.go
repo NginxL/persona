@@ -23,8 +23,9 @@ import (
 //
 //   - only gated calls (and a few output filters): each call goes by its gate's rules (the first match: allow, confirm
 //     on the phone first with method, path and body on the card, or deny; none matching is confirmed); lark-cli's
-//     by its own risk level (larkcligate.go). Assistant bypass skips cards only for classified reads and ordinary
-//     writes; Lark sends as the user, deletion and calls it cannot classify still ask. Non-Lark commands such as
+//     by its own risk level (larkcligate.go). Assistant bypass skips cards only for classified reads, ordinary
+//     writes, and calls allowed by configured or per-chat rules; unconfigured Lark sends as the user, deletion and
+//     calls it cannot classify still ask. Non-Lark commands such as
 //     rm, git and tee remain outside this gate. Local redirect targets do not change a call's classification.
 //     Opaque execution requires confirmation when the
 //     command text names the CLI (including paths or interpreter code), or an expansion supplies
@@ -85,6 +86,10 @@ func (n *Node) larkGate(ctx context.Context, in hookInput, ix proto.Interaction)
 // "deny" may carry the user's own words. Claude reaches it through the Bash PreToolUse hook (larkGate), Codex through
 // the app-server's command approvals (assistant_codex_approve.go).
 func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix proto.Interaction) (string, string, error) {
+	// Cwd on the eventual card may be normalized to the conversation's display
+	// directory. Keep the actual execution directory separately for the
+	// manager's exact-call continuation fingerprint.
+	ix.ExecutionCwd = cwd
 	cfg := n.assistantLark(ctx)
 	if slices.ContainsFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Auth != nil }) {
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
@@ -124,6 +129,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 		classified = classified && larkBypassSafe(c)
 	}
 	safe := len(v.calls) > 0 && classified
+	boundary := slices.ContainsFunc(v.calls, func(c larkCall) bool { return !larkBypassSafe(c) })
 	if v.other {
 		// A write through a gate whose credentials are at the proxy goes there only as a call read off the command and
 		// let through here: in a command the gate cannot follow it would be refused after the phone said yes.
@@ -148,7 +154,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 		g, write := gateWrite(cfg.Gates, analysisCommand)
 		// Text naming lark-cli in a command with no call is not one: classifyLark marks unknown what could run it
 		// (larkgate_text.go), so a grep pattern or a note written to a file is no card (#8119).
-		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(analysisCommand) && !classified {
+		if write || boundary || v.cliWrite || v.unknown || larkCLIRe.MatchString(analysisCommand) && !classified {
 			ix.Kind = proto.IxPermission
 			title := wholeCommandTitle(cfg.Gates, v, analysisCommand, g, write)
 			if title != "" {
@@ -176,12 +182,12 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	var ask, covered, bypassed []larkCall
 	for _, c := range v.calls {
 		decision := larkDecision(cfg, c)
-		if bypass {
+		if bypass && decision != "allow" {
 			if larkBypassSafe(c) {
 				bypassed = append(bypassed, c)
 				continue
 			}
-			decision = "confirm" // a configured allow does not waive a hard boundary
+			decision = "confirm" // unconfigured outbound/deletion still requires confirmation
 		}
 		if decision == "allow" && health && !larkRead(c) {
 			decision = "confirm"
@@ -354,6 +360,7 @@ func (n *Node) confirmLark(ctx context.Context, session string, ix proto.Interac
 	if ix.ID == "" { // a gated tool's card has none yet: the ledger names the card by it
 		ix.ID = "ix_" + randHex(6)
 	}
+	ix.Detachable = n.state != nil && n.isAssistantSession(session)
 	res, ok, err := n.ask(ctx, ix)
 	if err != nil {
 		return "", "", card, err
@@ -373,7 +380,11 @@ func (n *Node) confirmLark(ctx context.Context, session string, ix proto.Interac
 			n.rememberLarkAlways(session, larkPattern(c))
 		}
 	}
-	card = proto.LarkLetThrough{Kind: proto.LarkThroughCard, InteractionID: ix.ID, AnsweredBy: res.AnsweredBy}
+	approvalID := ix.ID
+	if res.ApprovalID != "" {
+		approvalID = res.ApprovalID
+	}
+	card = proto.LarkLetThrough{Kind: proto.LarkThroughCard, InteractionID: approvalID, AnsweredBy: res.AnsweredBy}
 	if res.Remembered { // the manager answered from an "Always allow" it kept: no card was answered for this one
 		card = proto.LarkLetThrough{Kind: proto.LarkThroughAlways}
 	}

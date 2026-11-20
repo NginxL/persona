@@ -258,6 +258,7 @@ func TestInlineTurnRegistersWhenStoppedAssistantRevAdvances(t *testing.T) {
 		f.settings = &Settings{Timezone: "Asia/Shanghai"}
 		d := newFleetDevs()
 		d.add("mac", "Mac")
+		f.setSessions("mac") // transcript reads use the same machine the fleet lists
 		st := newMemInlineViewStore()
 		s := New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t), Devices: d})
 		ft := &fleetTest{t: t, s: s, d: d, f: f}

@@ -359,6 +359,10 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   read the input box once; if it's still the just-sent text (strip `[Image #n]` / `[Pasted text #n]`, compare the first few words), press Enter once more. If empty or different, press nothing.
   Use only that post-wait read: the first version read immediately and gave up on a mismatch, which missed the 11-01 case (right after pasting the box may not yet contain this text).
 - Codex app-server integration (2026-11-02): Unix sockets carry WebSocket, not JSON-lines; external stdio has no second attach port. Directory discovery doesn't resume; control goes only to the original loaded owner. Unknown / cancelled requests must not send error / decline, which could consume the desktop approval callback. `serverRequest/resolved` withdraws cards as dismissed without fabricating approval; deduplicate using generation and typed request ID together. Generic server errors after send admission aren't "definitely not sent" and must not auto-retry; old outbox operation ids don't expire after one day (`docs/integrations/codex-app-server.md`).
+- An npm-installed Codex can be found by absolute path while its `/usr/bin/env node` launcher still fails under a node
+  service (#11686). For stdio app-server calls, resolve the npm launcher symlink and add its installation's bin directory
+  to the child PATH when Node.js is missing. Test subscription polling with a service PATH that omits the NVM directory;
+  a successful interactive launch does not exercise that path.
 - Session effort readback is not an edit capability (#6887): keep Codex rollout effort visible for terminal/history rows,
   and do not replace a running effort missing from a stale model list with its default. Long tool output can move the
   latest `turn_context` beyond the quick tail; include those small setting rows in the existing incremental scan.
@@ -758,6 +762,7 @@ Quota can recover before the reported reset. Skipping every on-demand probe unti
   - herdr types argv into the pane shell: quote only necessary elements (an alias as the first element still expands); elements must not contain single quotes.
   - If official integration later reports the same or another session id, herdr retains the original `resume_argv`: after a session id change, explicitly report again or it restores the old session.
   - herdr before 0.9.2 answers `ok` to `resume_argv` and drops it (2026-11-13: a dev machine ran 0.9.0 for days; the upgrade to 0.9.5 by live handoff carried nothing over, the node believed it had reported, and the next restart resumed Persona's Agents bare). A report holds only for the server that took it: the node records the server instance (`herdr.Client.ServerID`, the socket's mtime, new on every restart, handoff and upgrade) and `backfillResume` reports again when a Persona pane's server changed.
+  - The node did not check the version, so a computer that stayed below 0.9.2 resumed bare on every restart without a word (2026-11-20: a power cut restarted a 0.9.1 server, four Persona Agents on a gateway launcher came back on the account's default model, and the assistant's switch back was refused as "runs on <launcher> already", #11792). `reportResume` now asks the server (`ServerVersion`, ping only) and skips a server older than 0.9.2, saying so once; rows whose claude lacks Persona's `--mcp-config` carry `off_launcher` (`offlauncher.go`). Upgrading herdr's binary is not enough: the running server keeps dropping until a live handoff or restart starts the new one.
   - The argv is `eval "<the start command with --resume <id>>"`: herdr only checks that the first word is a plain name (`eval` passes) and types it into the pane's shell, so `CLAUDE_CONFIG_DIR=…` prefixes and launchers that are shell functions work without a wrapper script on PATH. herdr also refuses control characters and more than 8 KiB (`resumeSayable`). Real-Claude check in a throwaway named session: `herdrresume_live_test.go`.
 
 
@@ -1514,6 +1519,8 @@ pin while the final catalog bytes equal the earlier unpinned snapshot.
 ## A transcript directory is not the selected launcher's sign-in
 
 When restoring an assistant conversation, finding its newest transcript does not establish that a newly selected launcher can authenticate in that profile. Check private-profile ownership before stopping the old process or writing input; a later CLI sign-in error has already accepted the wrong launch and may forward a provider-only model. A refusal should preserve the original process and session state and explain how to continue. Regression coverage needs cold resumes and live idle processes, with both an omitted model and the old provider's explicit model (#10453).
+
+The same holds for a shell launcher's private profile, which a managed catalog can't name: its gateway token lives in the launcher's environment, so the profile never gets a sign-in, and plain claude started there answers "Not logged in" while `claude auth status` in the user's own setup says signed in. Ask Claude Code about the profile the start will actually use (`claudeAuthStatusProfile`), not the machine's default, and move the conversation to where the launcher is signed in rather than telling the user to sign in again (#11694).
 
 ## Cross-session permission evidence (#9671)
 

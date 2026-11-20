@@ -118,4 +118,11 @@ nonisolated struct AssistantTaskChats: Equatable, Sendable {
     }
 
     private static func page(_ api: APIClient) -> String { api.group + "\u{0}" + (api.shownManager ?? "") }
+
+    /// When a sidebar reads them again (its `.task` id): as it comes out (nothing while it is in), when a conversation
+    /// came or went, and for another page, another hub's as well as another manager's (#11657: two hubs with as many
+    /// chats shared a key, and a sidebar that stays out, the iPad's column, kept knowing only the hub before's tasks).
+    nonisolated static func readKey(out: Bool, group: String?, manager: String?, conversations: Int) -> String {
+        out ? (group ?? "") + "\u{0}" + (manager ?? "") + "|\(conversations)" : ""
+    }
 }

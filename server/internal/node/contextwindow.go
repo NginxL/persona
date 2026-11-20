@@ -18,8 +18,8 @@ const (
 // contextWindowOf is the model's context window in tokens, 0 when it cannot be told. recorded is the window the
 // transcript itself says (Codex); otherwise Claude models are known by id: a "[1m]" suffix means the 1M variant, so
 // does a model whose window is 1M without it (claudeNative1M), and so does a reply that already saw more than 200k
-// (the transcript records the id without the suffix). A model that is not a Claude one (a gateway's own) has no window
-// we know: the apps then show the tokens only.
+// (the transcript records the id without the suffix). Without a managed launcher's declaration (contextWindowWithLauncher),
+// a model that is not a Claude one (a gateway's own) has no window we know: the apps then show the tokens only.
 func contextWindowOf(model string, recorded, used int) int {
 	if recorded > 0 {
 		return recorded
@@ -36,6 +36,90 @@ func contextWindowOf(model string, recorded, used int) int {
 		return claudeWindow1M
 	}
 	return claudeWindow
+}
+
+// lookupProviderModel finds model in l.Models, matching exact base IDs first, then "/" route suffixes from longest to
+// shortest, and finally proto.SameLauncherModel (where the declared ID carries a vendor prefix and the transcript
+// echoes the bare ID). Bracketed placeholders ("<synthetic>") match nothing.
+func lookupProviderModel(l proto.ManagedLauncher, model string) (proto.ProviderModel, bool) {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" || isBracketedModel(trimmed) {
+		return proto.ProviderModel{}, false
+	}
+	base := proto.TrimModelWindow(trimmed)
+	if base == "" || isBracketedModel(base) {
+		return proto.ProviderModel{}, false
+	}
+	for _, pm := range l.Models {
+		if strings.EqualFold(base, proto.TrimModelWindow(pm.ID)) {
+			return pm, true
+		}
+	}
+	for i := 0; i < len(base); i++ {
+		if base[i] != '/' {
+			continue
+		}
+		suf := base[i+1:]
+		if suf == "" {
+			continue
+		}
+		for _, pm := range l.Models {
+			if strings.EqualFold(suf, proto.TrimModelWindow(pm.ID)) {
+				return pm, true
+			}
+		}
+	}
+	for _, pm := range l.Models {
+		if proto.SameLauncherModel(trimmed, pm.ID) {
+			return pm, true
+		}
+	}
+	return proto.ProviderModel{}, false
+}
+
+// launcherContextWindow resolves the context window a managed launcher declares for a session's model, with the same
+// precedence providerEnv uses for CLAUDE_CODE_MAX_CONTEXT_TOKENS: l.MaxContext when > 0, else the first matching
+// Models[].ContextWindow > 0 across primary and fallbackModels, else 0.
+func launcherContextWindow(l proto.ManagedLauncher, primary string, fallbackModels ...string) int {
+	if l.MaxContext > 0 {
+		return l.MaxContext
+	}
+	if pm, ok := lookupProviderModel(l, primary); ok && pm.ContextWindow > 0 {
+		return pm.ContextWindow
+	}
+	for _, m := range fallbackModels {
+		if pm, ok := lookupProviderModel(l, m); ok && pm.ContextWindow > 0 {
+			return pm.ContextWindow
+		}
+	}
+	return 0
+}
+
+// contextWindowWithLauncher resolves a session's context window: a window recorded in the transcript itself (Codex)
+// comes first; otherwise a managed launcher's MaxContext or matching model ContextWindow supplies the window, keeping
+// 1M promotion when l.MaxContext is unset and an explicit "[1m]" suffix or >200k observed usage exceeds a 200k catalog
+// entry; when neither is declared, contextWindowOf decides.
+func contextWindowWithLauncher(l *proto.ManagedLauncher, model string, recorded, used int, fallbackModels ...string) int {
+	if recorded > 0 {
+		return recorded
+	}
+	if l != nil {
+		if w := launcherContextWindow(*l, model, fallbackModels...); w > 0 {
+			if l.MaxContext <= 0 && w == claudeWindow && (used > claudeWindow || strings.Contains(strings.ToLower(strings.TrimSpace(model)), oneMillionSuffix)) {
+				return claudeWindow1M
+			}
+			return w
+		}
+	}
+	return contextWindowOf(model, recorded, used)
+}
+
+// differentClaudeModels reports whether run and said name two distinct Claude models (neither is a dated spelling of
+// the other), such as an overload fallback answering in place of the session's configured Claude model.
+func differentClaudeModels(run, said string) bool {
+	r := claudeModelAfterRoute(strings.ToLower(proto.TrimModelWindow(run)))
+	s := claudeModelAfterRoute(strings.ToLower(proto.TrimModelWindow(said)))
+	return r != "" && s != "" && !strings.HasPrefix(s, r) && !strings.HasPrefix(r, s)
 }
 
 // claudeModelAfterRoute is id or, for a gateway's routed name ("passthrough/claude-opus-5-5"), the Claude model after
@@ -138,4 +222,146 @@ func setRuntimeContext(s *proto.Session, m quickMeta) {
 		return
 	}
 	s.ContextWindow = claudeWindow1M
+}
+
+// sessionManagedLauncher returns the managed launcher associated with session id (explicit row Launcher first, else
+// ownLauncher: state record, runtime row, or inferred shell/managed launcher).
+func (n *Node) sessionManagedLauncher(id, explicit string) (proto.ManagedLauncher, bool) {
+	if n == nil {
+		return proto.ManagedLauncher{}, false
+	}
+	name := explicit
+	if name == "" && id != "" {
+		if n.state != nil {
+			if st, ok := n.state.get(id); ok && st.Launcher != "" {
+				name = st.Launcher
+			}
+		}
+		if name == "" {
+			if s, _, listed := n.runtimes.rowOf(id); listed && s.Launcher != "" {
+				name = s.Launcher
+			}
+		}
+		if name == "" {
+			name = n.inferLauncher(id)
+		}
+	}
+	if name == "" {
+		return proto.ManagedLauncher{}, false
+	}
+	return n.managedLauncher(name)
+}
+
+// sessionFallbackModels returns the session's configured/displayed model IDs to try after m.model when no refusal or
+// cross-Claude overload fallback occurred on the latest reply.
+func (n *Node) sessionFallbackModels(s *proto.Session, m quickMeta) []string {
+	if s == nil || m.modelFallback != nil || differentClaudeModels(s.Model, m.model) {
+		return nil
+	}
+	var requested string
+	if s.RequestedModel != nil && *s.RequestedModel != "" {
+		requested = *s.RequestedModel
+	} else if n != nil && n.state != nil && s.SessionID != "" {
+		if st, ok := n.state.get(s.SessionID); ok && st.Model != "" {
+			requested = st.Model
+		}
+	}
+	hasShown := s.Model != "" && s.Model != m.model
+	hasReq := requested != "" && requested != m.model && requested != s.Model
+	switch {
+	case hasShown && hasReq:
+		return []string{s.Model, requested}
+	case hasShown:
+		return []string{s.Model}
+	case hasReq:
+		return []string{requested}
+	default:
+		return nil
+	}
+}
+
+// sessionContextWindow computes the context window for session id from quickMeta m, falling back to its managed
+// launcher's MaxContext / Models when the transcript itself records no window.
+func (n *Node) sessionContextWindow(id, explicitLauncher string, s *proto.Session, m quickMeta) int {
+	if m.contextWindow > 0 {
+		return m.contextWindow
+	}
+	l, ok := n.sessionManagedLauncher(id, explicitLauncher)
+	if !ok {
+		return contextWindowOf(m.model, m.contextWindow, m.contextTokens)
+	}
+	// When the reply came from a refusal or overload fallback onto a known Claude model, keep that fallback model's own
+	// window rather than attributing the configured launcher's capacity to it.
+	if s != nil && (m.modelFallback != nil || differentClaudeModels(s.Model, m.model)) {
+		if w := contextWindowOf(m.model, m.contextWindow, m.contextTokens); w > 0 {
+			return w
+		}
+		return contextWindowWithLauncher(&l, m.model, m.contextWindow, m.contextTokens)
+	}
+	return contextWindowWithLauncher(&l, m.model, m.contextWindow, m.contextTokens, n.sessionFallbackModels(s, m)...)
+}
+
+// setSessionContext is setContext with a managed-launcher fallback when the transcript records no context window.
+func (n *Node) setSessionContext(s *proto.Session, m quickMeta) {
+	setContext(s, m)
+	if s == nil || s.ContextTokens == 0 || m.contextWindow > 0 {
+		return
+	}
+	s.ContextWindow = proto.Tokens32(n.sessionContextWindow(s.SessionID, s.Launcher, s, m))
+}
+
+// setRuntimeSessionContext is setRuntimeContext with a managed-launcher fallback when the transcript records no window.
+func (n *Node) setRuntimeSessionContext(s *proto.Session, m quickMeta) {
+	setRuntimeContext(s, m)
+	if s == nil || s.ContextTokens == 0 || m.contextWindow > 0 {
+		return
+	}
+	l, ok := n.sessionManagedLauncher(s.SessionID, s.Launcher)
+	if !ok {
+		return
+	}
+	if m.modelFallback != nil || differentClaudeModels(s.Model, m.model) {
+		if s.ContextWindow == 0 {
+			s.ContextWindow = proto.Tokens32(contextWindowWithLauncher(&l, m.model, m.contextWindow, m.contextTokens))
+		}
+		return
+	}
+	if w := contextWindowWithLauncher(&l, m.model, m.contextWindow, m.contextTokens, n.sessionFallbackModels(s, m)...); w > 0 {
+		// Keep a runtime's explicit [1m] variant at 1M when MaxContext is unset and the catalog entry says 200k.
+		if l.MaxContext <= 0 && w == claudeWindow && s.ContextWindow == claudeWindow1M {
+			return
+		}
+		s.ContextWindow = proto.Tokens32(w)
+	}
+}
+
+// applyLauncherContextWindow fills ContextWindow on a decorated non-Codex row (such as a cached offline Claude row)
+// whose transcript reported tokens without a recorded window before Launcher or the launcher catalog was available.
+func (n *Node) applyLauncherContextWindow(s *proto.Session) {
+	if n == nil || s == nil || s.ContextTokens == 0 || s.Launcher == "" || s.Agent == "codex" || s.ModelFallback != nil {
+		return
+	}
+	if s.ContextWindow != 0 && s.ContextWindow != claudeWindow {
+		return
+	}
+	l, ok := n.managedLauncher(s.Launcher)
+	if !ok {
+		return
+	}
+	var req string
+	if s.RequestedModel != nil {
+		req = *s.RequestedModel
+	}
+	var w int
+	if req != "" && req != s.Model {
+		w = launcherContextWindow(l, s.Model, req)
+	} else {
+		w = launcherContextWindow(l, s.Model)
+	}
+	if w > 0 {
+		if l.MaxContext <= 0 && w == claudeWindow && (int(s.ContextTokens) > claudeWindow || strings.Contains(strings.ToLower(s.Model), oneMillionSuffix)) {
+			w = claudeWindow1M
+		}
+		s.ContextWindow = proto.Tokens32(w)
+	}
 }

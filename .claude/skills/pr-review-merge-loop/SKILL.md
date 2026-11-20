@@ -88,7 +88,10 @@ files into a private runtime directory and replace every placeholder; restrict t
   message containing exactly the two invocation markers and the JSON object is accepted; intermediate tool calls,
   prompt echoes, other sessions, additional prose and duplicate marked results are rejected. The response must still
   match the watcher's JSON schema and changed-line validation; transcript text is transport, never approval by itself.
-  Each review gets a fresh session ID and is never resumed into another PR. The visible launch ends in
+  Each review gets a fresh session ID and is never resumed into another PR. If Herdr's five-second startup observation
+  stalls, the helper checks the same pane before failing: a working, blocked or completed agent keeps its accepted
+  prompt and the helper waits for that session's marked result instead of resubmitting it. Only a prompt that has not
+  started is failed; startup waiting does not weaken the total review deadline or the slot bound. The visible launch ends in
   `zsh -lic cc_k3`; the trusted launcher and `launcher_environment` keep
   safe-mode, Read-only tools, the maintainer's interactive permission policy, per-session identity and any
   cgroup-v1 affinity/rlimit fallback out of the displayed command. Each `pr-review-rNN-PID-TOKEN.scope` has a unique

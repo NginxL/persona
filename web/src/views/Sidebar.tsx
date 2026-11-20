@@ -32,6 +32,7 @@ import { SidebarDirectionRow } from "./SidebarDirections";
 import { ConversationRowMenu } from "./ConversationMenu";
 import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
+import { useScrollMemory } from "../lib/scroll-memory";
 import { retryFullAgentSessions, useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { getState, refresh, refreshTodos, useHubUnreachable, useStore } from "../lib/store";
 import { SESSIONS_SIDE_FOLD_FEATURE } from "../lib/side-fold";
@@ -71,7 +72,7 @@ import { RUNTIME_AGENTS_PATH, supportsPagedAgents, runtimeActiveAt, runtimeAgent
 import { SESSIONS_CATALOG_FEATURE, SESSIONS_JUST_FINISHED_FEATURE, SESSIONS_QUICK_FILTERS_FEATURE, SESSIONS_TODO_FEATURE, type GroupDimension, type TodoNames } from "../lib/session-groups";
 import { type ListFilters } from "../lib/session-list";
 import { NoComputers, useAddComputer } from "./machines/AddComputerEntry";
-import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, pageLabel, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
+import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu, type NavPage, type NodeMenuFn, pageIconStyle, pageLabel, type RegFn, rowKey, type RowMenuFn, Section, SidebarGroup, GroupFoldButton, useActiveKey, useGo, useNavPages } from "./SidebarParts";
 import { NavRow, PersonalAgents, PersonaRow, SessionRow, SubHeading } from "./SidebarRows";
 import { GroupBranch, LooseSection, MachineSection, RepoMachineSection, SessionTally, type SpaceMenuFn, type WorkspaceTreeActions, SpaceSection, TodoTreeView } from "./SidebarTree";
 import { CollapseButton, PagesTally } from "./SidebarRail";
@@ -348,7 +349,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
         <button type="button" onClick={onSearch} className="touch-hit mb-1 flex h-8 w-full items-center gap-2 rounded-control bg-inset px-2.5 text-left shadow-hairline transition-colors hover:bg-hover">
           <Icon name="search" size={12} stroke={2} className="text-ink-3" />
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{t("sidebar.search_sessions")}</span>
-          <span className="hidden sm:inline-flex"><Kbd>{searchHint}</Kbd></span>
+          <span className="hidden sm:inline-flex [@media(hover:none)]:hidden"><Kbd>{searchHint}</Kbd></span>
         </button>
       </div>
 
@@ -488,8 +489,11 @@ export function AgentsList({ route, onNewAgent, workspaceActions }: { route: Rou
   const bare = useStore((s) => s.loaded && s.machines.length === 0 && Object.keys(s.launches).length === 0);
   const none = useAgentSessions().length === 0 && bare;
   const adding = useAddComputer();
+  // Back from an Agent it opened lands where the list was; a fresh visit starts at the top
+  const scroller = useRef<HTMLDivElement>(null);
+  useScrollMemory(scroller, "/agents");
   return (
-    <div data-row-scroller className="h-full overflow-y-auto overscroll-contain">
+    <div ref={scroller} data-row-scroller className="h-full overflow-y-auto overscroll-contain">
       <div ref={nav} onMouseLeave={() => hover(null)} className="relative mx-auto max-w-[640px] px-2.5 pb-6">
         {highlight}
         {none ? <NoComputers body={t("agentspage.no_computers_body")} onAdd={adding.open} /> : <AgentsBlock reg={reg} hover={hover} activeKey={activeKey} go={go} onNewAgent={onNewAgent} workspaceActions={workspaceActions} add={false} />}
@@ -536,7 +540,7 @@ export function NavGrid({ pages, more = [], activeKey, go, onNavigate }: { pages
             aria-current={active ? "page" : undefined}
             className={cx("relative z-10 flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-[9px] px-0.5 py-1.5 transition-[background-color,transform] duration-150 active:scale-[0.96]", active ? "bg-hover" : "hover:bg-hover")}
           >
-            <span className={cx("relative", active ? "text-ink" : "text-ink-3")}>
+            <span className={cx("relative", active ? "text-ink" : "text-ink-3")} style={pageIconStyle(p.color, active)}>
               <Icon name={p.icon} size={17} stroke={1.8} />
               {p.badge !== undefined && (
                 <span className={cx("absolute -top-1.5 left-2.5 flex h-4 min-w-4 items-center justify-center whitespace-nowrap rounded-full px-1 text-[10px] font-semibold tabular-nums", BADGE_CLASS[p.badgeTone ?? "accent"])}>{p.badge}</span>
@@ -652,12 +656,17 @@ function AgentsBlock(props: AgentsBlockProps) {
 
 /** The Agents block's title, the paged list's as the complete list's (#6662): unpinning changes nothing above the list. */
 const AGENTS_TITLE = "min-w-0 flex-1 text-[11px] font-semibold text-ink-3";
+/** The title row's icon buttons (Filter, ⋯, +) sit 4 px apart: a touch screen gives each a real 44 px box, as the fold-all
+ *  button has, since centred touch-hit squares would overlap and the later button would take the earlier one's taps. */
+const TITLE_ICON_TOUCH = "[@media(pointer:coarse)]:size-11";
+/** And the row drops its end padding there, so its last box ends where the rows' ⋯ boxes do, its icon in their column. */
+const TITLE_ROW_TOUCH = "[@media(pointer:coarse)]:pr-0";
 
 /** The Agents title row's ⋯ (Agent list options): the sort and the archived Agents; the clock while sorted by update. */
 function ListMenuButton({ sorted, open, onClick }: { sorted: boolean; open: boolean; onClick: React.MouseEventHandler<HTMLButtonElement> }) {
   const label = sorted ? t("sidebar.list_menu_sorted", { sort: AGENT_SORTS[1].label }) : t("sidebar.list_menu");
   return (
-    <button type="button" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={onClick} className={cx("touch-hit relative z-10 flex size-5 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink-2", sorted ? "text-accent" : "text-ink-3", open && "bg-hover")}>
+    <button type="button" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={onClick} className={cx("touch-hit relative z-10 flex size-5 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink-2", TITLE_ICON_TOUCH, sorted ? "text-accent" : "text-ink-3", open && "bg-hover")}>
       <Icon name={sorted ? "clock" : "more"} size={12} stroke={2} />
     </button>
   );
@@ -770,11 +779,11 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
   }), [grouping, todoNames, groupings, chooseGrouping, quick, byUpdate, listQuery, queryOnly, setQuery, todosUnread]);
   return <div data-sidebar-agents ref={groupsRef}>
     {/* the complete list's title row (#6662): fold all, the ⋯ with its sorts and the archived Agents, and "+" */}
-    <div className={SESSION_LIST_STYLE.heading}>
+    <div className={cx(SESSION_LIST_STYLE.heading, TITLE_ROW_TOUCH)}>
       <span className={AGENTS_TITLE}>Agents</span>
       <GroupFoldButton groups={groupsRef} onAction={() => hover(null)} />
       {listItems.length > 0 && <ListMenuButton sorted={byUpdate} open={Boolean(listMenu.anchor)} onClick={listMenu.open} />}
-      {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} />}
+      {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} className={TITLE_ICON_TOUCH} />}
     </div>
     {listMenu.anchor && <Menu anchor={listMenu.anchor} onClose={listMenu.close} align="right" items={listItems} />}
     <HubNoticeLine />
@@ -1009,7 +1018,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
     <SidebarGroup className="mt-3" heading={
       <div data-sidebar-agents-controls className="pb-1">
       {/* the sidebar's top-level heading box (#10637): its controls never make it taller than Pages' or Persona chats' */}
-      <div className="group/sec relative flex sidebar-heading items-center gap-1 px-2">
+      <div className={cx("group/sec relative flex sidebar-heading items-center gap-1 px-2", TITLE_ROW_TOUCH)}>
         {foldable ? (
           <button type="button" aria-expanded={!folded} onClick={toggleBlock} className="touch-hit relative z-10 flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap text-left text-[11px] font-semibold text-ink-3 hover:text-ink-2">
             <span className="min-w-0 truncate">Agents</span>
@@ -1025,7 +1034,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
         {listItems.length > 0 && (
           <ListMenuButton sorted={byUpdate} open={Boolean(listMenu.anchor)} onClick={listMenu.open} />
         )}
-        {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} />}
+        {add && <AgentsAdd onNewAgent={onNewAgent} onNavigate={onNavigate} className={TITLE_ICON_TOUCH} />}
       </div>
       <Collapse open={!folded} sidebarFold>
         <GroupingBar groupings={availableGroupings} selection={shownGrouping} onChoose={chooseGroupingOutOfChatList} />

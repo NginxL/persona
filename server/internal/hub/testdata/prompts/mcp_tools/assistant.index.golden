@@ -15,6 +15,7 @@ cancel_followup
 list_places
 save_place
 machines_list
+machine_redeploy
 agents_list
 agent_read
 agent_send
@@ -72,6 +73,7 @@ task_decided
 task_start_screen
 task_start_keys
 task_retry
+todo_workspace
 todo_repositories_get
 todo_repositories_set
 todo_repository_links_set

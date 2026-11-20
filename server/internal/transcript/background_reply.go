@@ -48,6 +48,13 @@ func BackgroundReplyMissing(items []proto.Item) bool {
 	if !background {
 		return false
 	}
+	if start == len(items)-1 {
+		if previous, previousBackground := lastBackgroundInput(items[:start]); previous >= 0 && !previousBackground {
+			// A trailing input with no output yet belongs to the next turn. It must not silence the completed
+			// non-background exchange above it; an earlier background turn keeps the missing-reply behavior.
+			return false
+		}
+	}
 	for i := len(items) - 1; i > start; i-- {
 		item := items[i]
 		if item.Role != "assistant" || item.Narration {
@@ -61,6 +68,26 @@ func BackgroundReplyMissing(items []proto.Item) bool {
 		}
 	}
 	return true // a known background run with no written answer
+}
+
+// RoutineConversationReply reports a cross-conversation background round with no successful explicit owner-visibility
+// action. The main conversation keeps its ordinary finished push and visible reply folded; all other sources and every
+// explicit promotion keep their existing behavior. Delivery and execution are not inspected or changed here.
+func RoutineConversationReply(items []proto.Item) bool {
+	start, background := lastBackgroundInput(items)
+	if !background || start < 0 {
+		return false
+	}
+	source := prompts.ItemSource(items[start])
+	if source == nil || source.Kind != proto.SourceConversation {
+		return false
+	}
+	for _, item := range items[start:] {
+		if item.SupervisionUser || item.Fold != nil && item.Fold.SupervisionUser {
+			return false
+		}
+	}
+	return !HasUserVisibleAction(items[start+1:])
 }
 
 // lastBackgroundInput stops at the last input or wake. Tool results are part of the input's turn.

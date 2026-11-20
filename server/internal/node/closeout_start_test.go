@@ -10,11 +10,24 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // closeoutStartNode is a node whose hub answers agents.closeout.brief with answer(); asked counts the asks.
 func closeoutStartNode(t *testing.T, answer func() (string, error)) (n *Node, asked *atomic.Int64) {
+	t.Helper()
+	return closeoutHookNode(t, func(method string, raw json.RawMessage) (any, error) {
+		var p assistantwire.CloseoutBriefRequest
+		if method != assistantwire.MethodCloseoutBrief || json.Unmarshal(raw, &p) != nil || p.SessionID == "" || p.Cwd != "/code/app" {
+			t.Errorf("unexpected request %s %s", method, raw)
+		}
+		text, err := answer()
+		return assistantwire.CloseoutBriefResponse{Context: text}, err
+	})
+}
+
+func closeoutHookNode(t *testing.T, answer func(string, json.RawMessage) (any, error)) (n *Node, asked *atomic.Int64) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	n2hR, n2hW := io.Pipe()
@@ -25,17 +38,22 @@ func closeoutStartNode(t *testing.T, answer func() (string, error)) (n *Node, as
 	hub := rpc.New("h", h2nW)
 	asked = &atomic.Int64{}
 	hub.OnRequest = func(_ context.Context, method string, raw json.RawMessage) (any, error) {
-		var p assistantwire.CloseoutBriefRequest
-		if method != assistantwire.MethodCloseoutBrief || json.Unmarshal(raw, &p) != nil || p.SessionID == "" || p.Cwd != "/code/app" {
-			t.Errorf("unexpected request %s %s", method, raw)
-		}
 		asked.Add(1)
-		text, err := answer()
-		return assistantwire.CloseoutBriefResponse{Context: text}, err
+		return answer(method, raw)
 	}
 	go hub.Serve(ctx, n2hR)
 	go n.peer.Serve(ctx, h2nR)
 	return n, asked
+}
+
+func TestDispatchedReportFormSkipsSecondSessionStart(t *testing.T) {
+	n, asked := closeoutStartNode(t, func() (string, error) { return "duplicate", nil })
+	for _, form := range []string{closeout.Example, closeout.MarkdownExample("English")} {
+		n.state.put("s1", sessionState{TaskInstructions: "Review the samples.\n" + form})
+		if got := n.closeoutStart(t.Context(), sockRequest{Pane: "w1:p1"}, startHook("s1")); got != nil || asked.Load() != 0 {
+			t.Fatalf("supplied form shown twice: %v (%d calls)", got, asked.Load())
+		}
+	}
 }
 
 func startHook(sid string) hookInput {

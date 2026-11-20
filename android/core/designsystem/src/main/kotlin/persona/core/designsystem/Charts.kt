@@ -212,7 +212,12 @@ object ChartMath {
         if (values.any { !it.isFinite() || it < 0 }) return null
         val total = values.sum()
         if (total <= 0.0) return null
-        return values.map { it / total }
+        if (total.isFinite()) return values.map { it / total }
+        // Each value is finite, but their sum can overflow. Scale first so large positive parts stay visible.
+        val largest = values.maxOrNull() ?: return null
+        val scaled = values.map { it / largest }
+        val scaledTotal = scaled.sum()
+        return scaled.map { it / scaledTotal }
     }
 
     /** A donut's or a pie's slices: each value's share of the sum (negatives count as none); all none when the sum is not more than 0. */

@@ -62,6 +62,7 @@ func TestAgyPaneTranscriptMapping(t *testing.T) {
 			{seq: 1, role: "assistant", kind: "tool_use", tool: "LS", input: `[1,2]`, pair: 3},
 			{seq: 1, role: "assistant", kind: "tool_use", tool: "Agent", input: `{"description":"subagent","prompt":""}`, pair: 4},
 			{seq: 2, role: "user", kind: "tool_result", text: "edited", pair: 1},
+			{seq: 2, role: "assistant", kind: "image", pair: 1},
 			{seq: 3, role: "user", kind: "tool_result", text: "multi-edited", pair: 2},
 			{seq: 4, role: "user", kind: "tool_result", text: "listed", pair: 3},
 			{seq: 5, role: "user", kind: "tool_result", text: "delegated", pair: 4},
@@ -166,7 +167,7 @@ func TestAgyParallelResultsOutOfOrderPairWithTheirOwnCalls(t *testing.T) {
 	if after.native == before.native {
 		t.Errorf("watchers must learn that earlier items changed: native stayed %q", after.native)
 	}
-	history := mapAgySteps(steps, time.Time{})
+	history := mapAgySteps(steps, time.Time{}, nil)
 	results := map[string]string{}
 	failed := map[string]bool{}
 	for _, it := range history.items {
@@ -212,7 +213,7 @@ func TestAgyCallWithoutResultDoesNotShiftLaterResults(t *testing.T) {
 		step(8, "GENERIC", `,"content":"third"`) +
 		step(9, "GENERIC", `,"content":"fourth"`)
 	steps, _ := parseAgySteps([]byte(fixture), agyTestID)
-	history := mapAgySteps(steps, time.Time{})
+	history := mapAgySteps(steps, time.Time{}, nil)
 	results := map[string]string{}
 	for _, it := range history.items {
 		if it.Kind == "tool_result" {

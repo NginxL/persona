@@ -3,6 +3,7 @@ import { AgentsAdd } from "./agents/AgentsAdd";
 // switch. Its top bar has ChatView's side slots (sidebar on the left, "New agent" on the right), so switching pages leaves
 // the buttons in place. A wide screen opens it too, as a page titled Agents (no switch there). Search chats (⌘K) sits
 // beside New agent: the list has no search field of its own, and the sidebar's search box is in the drawer here (#6589).
+import { HiddenAgentSessions } from "./HiddenAgentSessions";
 import type { Route } from "../lib/router";
 import { openPalette } from "../lib/palette";
 import { IconButton } from "../ui/atoms";
@@ -18,8 +19,9 @@ export function AgentsPage({ route, onToggleSidebar, onNewAgent, workspaceAction
         <h1 className="hidden min-w-0 flex-1 truncate text-[14px] font-semibold text-ink lg:block">{t("agentspage.title")}</h1>
         <ShellHeaderSlots page="agents" onToggleSidebar={onToggleSidebar} endWide end={<><IconButton icon="search" label={t("sidebar.search_sessions")} onClick={() => openPalette("jump")} /><AgentsAdd header onNewAgent={onNewAgent} /></>} />
       </header>
-      <div className="min-h-0 flex-1">
-        <AgentsList route={route} onNewAgent={onNewAgent} workspaceActions={workspaceActions} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <HiddenAgentSessions />
+        <div className="min-h-0 flex-1"><AgentsList route={route} onNewAgent={onNewAgent} workspaceActions={workspaceActions} /></div>
       </div>
     </div>
   );

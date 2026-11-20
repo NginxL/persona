@@ -233,6 +233,8 @@ final class TodoStore {
         }
         #endif
         boundHold()
+        // Switching assistants counts again inside the source: the clock follows whatever moved `byRules`.
+        countsSource.byRulesChanged = { [weak self] in self?.armRulesClock() }
         // Counted once the app is made: the current assistant is the app model's, which may be making this store now.
         Task { @MainActor [weak self] in self?.recount() }
     }
@@ -461,6 +463,9 @@ final class TodoStore {
             viewsRead = true
         }
     }
+
+    /// Whether the minute clock for rows filed by the app's own rules runs (tests read it).
+    var rulesClockRuns: Bool { rulesClock != nil }
 
     /// Counts again while V1 is on (nothing reads the numbers before).
     private func recount() {

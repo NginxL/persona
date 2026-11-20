@@ -3,9 +3,12 @@ You changed files or ran commands this turn, but your last reply had no closeout
 <closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
 artifact: <pr|commit|branch|doc|build|url|file> <reference>
+delivery: <live|pr|merged|off|none; omit when no delivery standard applies>
+unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>
+next: <optional on done: one short reply naming the proposed action in the owner's language>
 </closeout>
 
 How to fill it in:

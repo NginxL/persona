@@ -899,6 +899,34 @@ func TestRuntimeStartFromTheLauncher(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartForwardsAntigravityImageOnlyPrompt(t *testing.T) {
+	node, _ := runtimeNode(t)
+	hello := map[string]any{"runtime": "agy", "launcher": "agy", "version": "test", "caps": map[string]any{"start": true}}
+	host := dialRuntime(t, node, hello)
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": proto.Session{SessionID: "agy-new", Cwd: "/work"}}, nil
+		}
+		return nil, nil
+	}
+	images := []proto.Image{{Mime: "image/png", Data: "aW1hZ2U="}}
+	_, err := nodeCall(t, node, "session.start", map[string]any{"cwd": "/work", "host": proto.EngineOrca,
+		"launcher": "agy", "client_msg_id": "start-photo", "images": images})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := host.got("session.start")
+	var start struct {
+		Prompt      string        `json:"prompt"`
+		ClientMsgID string        `json:"client_msg_id"`
+		Images      []proto.Image `json:"images"`
+	}
+	if len(starts) != 1 || json.Unmarshal(starts[0], &start) != nil || start.Prompt != "" ||
+		start.ClientMsgID != "start-photo" || !slices.Equal(start.Images, images) {
+		t.Fatalf("runtime starts: %s", starts)
+	}
+}
+
 func TestPollAgentsPublishesWithoutHerdr(t *testing.T) {
 	n, hub := runtimeNode(t)
 	n.events = newHerdrEvents()

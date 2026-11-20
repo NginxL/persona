@@ -27,6 +27,20 @@ export type TodoReason = "failed_start" | "agent_asks" | "interrupted" | "stoppe
 export const TODO_REASONS = ["failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest"] as const;
 
 /**
+ * The line keys produced by this version of the projection; see the Line keys table in
+ * spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+ */
+export type TodoLineKey = "failed_start" | "agent_asks" | "interrupted" | "decision" | "decision_default" | "cannot" | "awaits_reply" | "working" | "persona_working" | "starting" | "background" | "parked" | "finished" | "accepted" | "deployed" | "pr_open" | "usage_limit" | "run_waits" | "finished_seen" | "completed" | "canceled" | "reported" | "superseded" | "someday" | (string & {});
+export const TODO_LINE_KEYS = ["failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"] as const;
+
+/**
+ * The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on
+ * the wire.
+ */
+export type TodoLineArg = "at" | "by" | "default_at" | "error" | "on" | "reason" | "recommend" | "resets_at" | "run" | "step" | "text" | "until" | (string & {});
+export const TODO_LINE_ARGS = ["at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until"] as const;
+
+/**
  * The row's second line as a key and its arguments, never words: each client says it in its own language
  * (spec/fixtures/todo-view/README.md lists every key and its arguments).
  */
@@ -239,7 +253,9 @@ export interface TodoCounts {
   open: number;
   /**
    * N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are not
-   * counted. The To-dos row's badge, the bar's Needs you and the Needs you header show it.
+   * counted. For the To-dos V1 design's To-dos row badge, the bar's Needs you and the Needs you header. Of the
+   * clients only iOS reads it, behind the V1 gate that is off in release builds; the release clients count their
+   * To-dos row by rules of their own.
    */
   needs_you: number;
   /** The rows of Working and Waiting; Just finished is listed at the foot of In progress but not counted. */

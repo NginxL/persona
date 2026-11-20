@@ -965,8 +965,10 @@ private struct AgentsList: View {
     @StoredValue("dev.pinnedOnly") private var pinnedOnly = false
     @StoredValue("dev.searchScope") private var searchScope: AgentSearchScope = .all
     @StoredValue("dev.searchAsCode") private var searchAsCode = false
-    /// Several groups of hubs: the one the list shows ("" = all; `HubFilter`).
-    @StoredValue(HubFilter.key) private var hubFilter = ""
+    /// Several groups of hubs: "" all of them, else the list is narrowed to one (`HubFilter`).
+    @StoredValue(HubFilter.key) private var storedHubFilter = ""
+    /// The group the list shows when narrowed: the current hub's (`HubFilter.shown`, #11657).
+    private var hubFilter: String { HubFilter.shown(storedHubFilter, current: model.hub?.group) }
     @StoredValue("dev.grouping") private var storedGrouping: DevGrouping = .standard // by repository first (#2108)
     /// The grouping in use (`DevGrouping.resolved`).
     private var grouping: DevGrouping { DevGrouping.resolvedNow(storedGrouping) }
@@ -978,6 +980,7 @@ private struct AgentsList: View {
     /// Folded sections (spaces, machines, states), one id per line.
     @StoredValue("dev.folded") private var foldedList = ""
     @State private var quick: AgentFilter = .all
+    @State private var showHiddenDirectories = false
     @State private var paginationArmed = false
 
     private var selectedHub: String? {
@@ -987,6 +990,7 @@ private struct AgentsList: View {
 
     private var listQuery: SessionListQuery {
         var q = SessionListQuery(state: quick.state?.rawValue ?? "", text: query)
+        q.includeHidden = showHiddenDirectories
         if !machineFilter.isEmpty { q.machine = MachineRef(path: machineFilter).id }
         let links = model.links.filter { selectedHub == nil || $0.group == selectedHub }
         let pins = links.contains { !$0.pins.pins.sessions.isEmpty || !$0.pins.pins.spaces.isEmpty }
@@ -1230,8 +1234,9 @@ private struct AgentsList: View {
         let pinnedAgents = projection.pinnedAgents
         // One row per session that waits for the user, its cards under it (`AgentsNeedsYou`): the section, the Needs
         // You filter and the tab's badge count these rows.
+        let cardSession = model.cardSessionResolver() // the same row for a card here as in the counts
         let waiting = AgentsNeedsYou.rows(
-            cards: AgentsNeedsYou.cards(feed.following ? feed.interactions : model.scopedInteractions, session: session,
+            cards: AgentsNeedsYou.cards(feed.following ? feed.interactions : model.scopedInteractions, session: { cardSession($0) ?? session($0) },
                                         machine: machineFilter, hub: model.isMultiHub ? hubFilter : nil),
             waiting: AgentsNeedsYou.waiting(base)) // a folded child's card sits under its parent; a subtask the hub did not fold stays its own row
         let _ = (lookup.needsYou = waiting.count)
@@ -1254,7 +1259,9 @@ private struct AgentsList: View {
                                    foldAll: { setFolded(folding($0, true, in: folded)); expandedQuiet = [] },
                                    unfoldAll: { setFolded(Set(Self.foldedByDefault.union(Self.foldedByChoice).map { "!" + $0 })) },
                                    onMachines: { openFromList(MachineListRoute()) },
-                                   onTerminals: { openFromList(TerminalsRoute()) })
+                                   onTerminals: { openFromList(TerminalsRoute()) },
+                                   showingHidden: showHiddenDirectories,
+                                   toggleHidden: { showHiddenDirectories.toggle() })
         #if os(macOS)
         let _ = macRows.update(rowsInOrder(unpinned: unpinned, pinned: pinnedAgents, active: active, quiet: quiet, tree: tree, byHost: byHost))
         #endif
@@ -1642,6 +1649,9 @@ private struct AgentsList: View {
         .onChange(of: query) { _, now in SearchTrace.shared.note("query '\(now)'") }
         #endif
         .onChange(of: machineFilter) { _, _ in kept = [] }
+        // Narrowed to one hub, another one made current (#11657): a computer of the hub before is not on this list, also
+        // when the switch was made while the list was not there.
+        .modifier(MachineFilterFollowsHub(hubFilter: hubFilter, machineFilter: $machineFilter))
         .onAppear {
             #if DEBUG && os(iOS)
             sortShadow.enable()
@@ -5763,7 +5773,7 @@ struct AgentsTopBar: View, Equatable {
 enum AgentsNeedsYou {
     static func cards(_ all: [Interaction], session: (SessionKey) -> Session?, machine: String = "", hub: String? = nil) -> [Interaction] {
         all.filter { ix in
-            session(ix.sessionKey)?.assistant != true && (machine.isEmpty || ix.machineRef.path == machine)
+            session(ix.sessionKey)?.assistant != true && session(ix.sessionKey)?.hiddenByDirectory != true && (machine.isEmpty || ix.machineRef.path == machine)
                 && (hub.map { HubFilter.matches($0, ix.group) } ?? true)
         }
     }

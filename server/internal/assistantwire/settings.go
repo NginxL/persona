@@ -66,7 +66,8 @@ const CodeDeliveryUnknown = "delivery_unknown"
 // The node's methods the assistant calls for its directory, its conversations and its settings
 // (docs/protocol/protocol.md "hub ↔ node"), passed through by the hub's device.call like the others.
 const (
-	// DeviceAssistantPrepare: {dir, claude_md, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
+	DeviceAssistantDirectory = "assistant.directory" // {path} -> {cwd}; validates an existing directory without writes
+	// DeviceAssistantPrepare: {dir, claude_md, work_guide_md?, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
 	DeviceAssistantPrepare   = "assistant.prepare"
 	DeviceAssistantExecution = "assistant.execution" // {session_id} → proto.AssistantExecution
 	// DeviceAssistantGuestPrepare: {dir, claude_md} → {cwd}: a guest conversation's directory (assistant/guest.go), only
@@ -101,13 +102,17 @@ const ConfigDirClaudeOnly = "config_dir is only supported for Claude assistant c
 
 // StartParams is assistant.start's params.
 type StartParams struct {
-	Text           string        `json:"text"`
-	Images         []proto.Image `json:"images,omitempty"`
-	Launcher       string        `json:"launcher,omitempty"`
-	Model          string        `json:"model,omitempty"`      // the first message's model, picked as a message's is (#5033)
-	ConfigDir      string        `json:"config_dir,omitempty"` // Claude profile on the target machine; "" private, "legacy" old resolution, "default" unset
-	PermissionMode string        `json:"permission_mode,omitempty"`
-	Effort         string        `json:"effort,omitempty"`
+	TaskModel           *ModelBinding `json:"-"`
+	Cwd                 string        `json:"-"` // internal scheduled task directory; validated on the target computer
+	TaskExecution       bool          `json:"-"` // refuse execution substitutions
+	LegacyTaskExecution bool          `json:"-"` // an unconfigured scheduled turn may use an older node
+	Text                string        `json:"text"`
+	Images              []proto.Image `json:"images,omitempty"`
+	Launcher            string        `json:"launcher,omitempty"`
+	Model               string        `json:"model,omitempty"`      // the first message's model, picked as a message's is (#5033)
+	ConfigDir           string        `json:"config_dir,omitempty"` // Claude profile on the target machine; "" private, "legacy" old resolution, "default" unset
+	PermissionMode      string        `json:"permission_mode,omitempty"`
+	Effort              string        `json:"effort,omitempty"`
 	// ServiceTier: the native speed for a new Codex conversation, acknowledged before its first turn. Independent of Effort.
 	ServiceTier string `json:"service_tier,omitempty"`
 	Purpose     string `json:"purpose,omitempty"`    // the model configuration's purpose; "" is the main chat's

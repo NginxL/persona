@@ -263,7 +263,7 @@ func TestFeishuCardFromTheStartAndAlwaysMoving(t *testing.T) {
 	s.chans.mu.Unlock()
 	now = now.Add(time.Second)
 	s.channelProgressTick(r.ID)
-	if len(*posts) != 2 || (*posts)[1]["update"] != true || !strings.Contains((*posts)[1]["card"].(string), "排队中… · 4 秒") {
+	if len(*posts) != 2 || (*posts)[1]["update"] != true || !strings.Contains((*posts)[1]["card"].(string), "排队中</text_tag> <font color='grey'>Persona · 4 秒") {
 		t.Fatalf("queued: %v", *posts)
 	}
 	// Its own message shows in the conversation: from there on it works, with only its own steps.
@@ -277,7 +277,7 @@ func TestFeishuCardFromTheStartAndAlwaysMoving(t *testing.T) {
 	s.chans.mu.Unlock()
 	now = now.Add(feishuProgressIdle)
 	s.channelProgressTick(r.ID)
-	if card := (*posts)[len(*posts)-1]["card"].(string); !strings.Contains(card, "处理中 · 7 秒") || !strings.Contains(card, "mine") || strings.Contains(card, "earlier turn") {
+	if card := (*posts)[len(*posts)-1]["card"].(string); !strings.Contains(card, "处理中</text_tag> <font color='grey'>Persona · 7 秒") || !strings.Contains(card, "mine") || strings.Contains(card, "earlier turn") {
 		t.Fatalf("working: %v", *posts)
 	}
 	// A held run waiting on its background work (not working): no new card.

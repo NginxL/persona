@@ -25,20 +25,27 @@ import (
 // marketStale is how old an index may be before the catalog reads it again (in the background).
 const marketStale = 6 * time.Hour
 
+// marketSelfRefreshWindow is shared by every extension installed from one market: they share the market's upstream
+// token and API quota, so their accepted self-refresh requests share one window too.
+const marketSelfRefreshWindow = 10 * time.Minute
+
 type markets struct {
 	mu     sync.Mutex
 	loaded bool
 	byID   map[string]*marketState
 	// reading: the markets being read in the background, each with a channel closed when its read ends.
 	reading map[string]chan struct{}
-	// Client and GitHubAPI: tests point them at a fake.
+	// Client and GitHubAPI: tests point them at a fake. now is nil in production, and a clock in deterministic tests.
 	client    *http.Client
 	githubAPI string
+	now       func() time.Time
 }
 
 type marketState struct {
 	rec   extension.MarketRecord
 	index *extension.MarketIndex
+	// selfRefreshAt is when the last extension-initiated refresh was accepted, not when its network read finished.
+	selfRefreshAt time.Time
 }
 
 // errMarketSignature: a market's index was read but its signature refuses it (the last good one is kept but not
@@ -434,6 +441,33 @@ func (h *Manager) refreshStale() {
 			ms.readLater(h, id)
 		}
 	}
+}
+
+// selfRefreshLater admits one extension-initiated read of id per marketSelfRefreshWindow. It returns the remaining
+// window for a call to refuse, or zero after starting (or joining) the existing deduplicated background read. ok is
+// false when id is not registered. Admission and scheduling share the market lock, so concurrent callers cannot pass
+// together and a 429 never moves the window.
+func (h *Manager) selfRefreshLater(id string) (retry time.Duration, ok bool) {
+	ms := h.marketsState()
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	s := ms.byID[id]
+	if s == nil {
+		return 0, false
+	}
+	now := time.Now()
+	if ms.now != nil {
+		now = ms.now()
+	}
+	if !s.selfRefreshAt.IsZero() {
+		elapsed := max(now.Sub(s.selfRefreshAt), time.Duration(0))
+		if elapsed < marketSelfRefreshWindow {
+			return marketSelfRefreshWindow - elapsed, true
+		}
+	}
+	s.selfRefreshAt = now
+	ms.readLater(h, id)
+	return 0, true
 }
 
 // readLater reads market id again in the background, unless it is being read already (ms.mu held).

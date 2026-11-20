@@ -6,10 +6,12 @@ package closeout
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/textfmt"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -17,6 +19,9 @@ var (
 	blockRe = lazyre.New(`(?s)<closeout\b([^>]*)>(.*?)</closeout>`)
 	attrRe  = lazyre.New(`([a-z_]+)\s*=\s*"([^"]*)"`)
 )
+
+// nextMaxRunes is the longest reply that every version of the session list carries whole.
+const nextMaxRunes = 180
 
 // Example is the form an agent is asked to write, as the prompts show it.
 const Example = `<closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
@@ -27,11 +32,16 @@ unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>
+next: <optional on done: one short reply naming the proposed action in the owner's language>
 </closeout>`
 
 // Parse reads the last closeout block in an agent's reply. ok is false when there is none or its status is not one
 // of done, not_done and blocked: a block that does not say where the work stands is no closeout.
 func Parse(reply string) (c proto.Closeout, artifacts []proto.WorkArtifact, ok bool) {
+	if report, ok := textfmt.FinalWorkReport(reply); ok {
+		c.Status, c.Merged, c.Deployed = report.Status, yesNo(report.Merged), yesNo(report.Deployed)
+		return readFields(c, report.Body)
+	}
 	all := blockRe.FindAllStringSubmatch(reply, -1)
 	if len(all) == 0 {
 		return c, nil, false
@@ -53,8 +63,32 @@ func Parse(reply string) (c proto.Closeout, artifacts []proto.WorkArtifact, ok b
 	default:
 		return proto.Closeout{}, nil, false
 	}
-	for _, line := range strings.Split(m[2], "\n") {
+	return readFields(c, m[2])
+}
+
+func readFields(c proto.Closeout, body string) (proto.Closeout, []proto.WorkArtifact, bool) {
+	var artifacts []proto.WorkArtifact
+	var seenNext, afterNext bool
+	for line := range strings.Lines(body) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		key, val, found := cutKey(line)
+		followsNext := afterNext
+		if afterNext && !found { // a continuation cannot be sent as only its first line
+			c.Next = ""
+		}
+		afterNext = key == "next"
+		if afterNext {
+			if seenNext || nothing(val) || utf8.RuneCountInString(val) > nextMaxRunes ||
+				strings.IndexFunc(val, unicode.IsControl) >= 0 || strings.ContainsAny(val, "\u2028\u2029") || strings.HasPrefix(val, "<") {
+				c.Next = ""
+			} else {
+				c.Next = val
+			}
+			seenNext = true
+			continue
+		}
 		if !found || val == "" {
 			continue
 		}
@@ -89,13 +123,23 @@ func Parse(reply string) (c proto.Closeout, artifacts []proto.WorkArtifact, ok b
 			if !nothing(val) {
 				c.Waiting = clip(val, 120)
 			}
+		default:
+			if followsNext { // a colon in free-form continuation text does not start a report field
+				c.Next = ""
+			}
 		}
+	}
+	if c.Status != proto.CloseoutDone || c.Missing != "" || c.Waiting != "" {
+		c.Next = ""
 	}
 	return c, artifacts, true
 }
 
 // Strip returns reply without its closeout blocks, for a reader that is given the closeout separately.
 func Strip(reply string) string {
+	if report, ok := textfmt.FinalWorkReport(reply); ok {
+		reply = reply[:report.Start] + reply[report.End:]
+	}
 	return strings.TrimSpace(blockRe.ReplaceAllString(reply, ""))
 }
 
@@ -110,7 +154,7 @@ func Has(reply string) bool {
 // question in such a reply is conversation or an offer, not a wait (docs/protocol/agent-states.md "Awaiting your
 // reply", #4110). False when the reply has no closeout.
 func WaitsOnNobody(reply string) bool {
-	if !strings.Contains(reply, "<closeout") { // most replies have none: no regexp run, nothing allocated
+	if !strings.Contains(reply, "<closeout") && !strings.Contains(reply, "### Persona ") { // most replies have none: no regexp run, nothing allocated
 		return false
 	}
 	c, _, ok := Parse(reply)

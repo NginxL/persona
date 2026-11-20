@@ -253,6 +253,14 @@ export function turnErrorFix(code: string | undefined, launcher?: string): TurnF
   const title = (key: string) => name ? `${name} · ${t(key)}` : t(key);
   switch (code) {
     case "not_logged_in":
+      // The built-in Claude launcher has its own sign-in path. Another launcher gets guidance naming it, and without
+      // launcher metadata the card must not assume Claude Code (#10918; keeps #9366's words for `claude`).
+      if (name && name.toLowerCase() !== "claude") {
+        return { title: title("lib-readiness.turn_not_logged_in_other"), detail: t("lib-readiness.turn_not_logged_in_other_detail", { launcher: name }), action: "connect_model", launcher: name };
+      }
+      if (!name) {
+        return { title: t("lib-readiness.turn_not_logged_in_other"), detail: t("lib-readiness.turn_not_logged_in_generic_detail"), action: "connect_model" };
+      }
       return { title: title("lib-readiness.turn_not_logged_in"), detail: t("lib-readiness.turn_not_logged_in_detail"), action: "connect_model", launcher: name };
     case "auth_failed":
       return { title: title("lib-readiness.turn_auth_failed"), detail: t("lib-readiness.turn_auth_failed_detail"), action: "edit_provider", launcher: name };

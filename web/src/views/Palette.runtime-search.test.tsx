@@ -7,6 +7,7 @@ vi.hoisted(() => {
   Element.prototype.scrollIntoView ??= () => {};
 });
 import { setToken } from "../lib/api";
+import { refreshAgentsDisplay } from "../lib/agents-display";
 import { closePalette, openPalette, setPaletteQuery } from "../lib/palette";
 import { getState, reset } from "../lib/store";
 import { t } from "../i18n";
@@ -57,6 +58,26 @@ afterEach(() => {
 });
 
 describe("server-backed runtime search in the palette", () => {
+  it("shows the primary name and keeps the CLI title as secondary when herdr names are enabled", async () => {
+    const tab = { space_kind: "herdr", slot_id: "w1:t1", slot_name: "Export work" };
+    const hit = agent("herdr", "CLI session name", tab);
+    getState().sessionSummaries = [hit];
+    reply = async () => json(page([{ session: hit, score: 60 }]));
+    await search("Export");
+    expect(options()[0]?.querySelector(".font-medium")?.textContent).toBe(hit.title);
+    vi.mocked(fetch).mockResolvedValueOnce(json({ show_botmux: true, configured: false, use_herdr_tab_name: true }));
+    await act(refreshAgentsDisplay);
+    expect(options()[0]?.querySelector(".font-medium")?.textContent).toBe(tab.slot_name);
+    expect(options()[0]?.querySelector(".font-medium")?.getAttribute("title")).toBe(hit.title);
+  });
+
+  it("falls back to the tab in a search result for a shell prompt title", async () => {
+    const hit = agent("herdr", "user@host:~/work", { space_kind: "herdr", slot_id: "w1:t1", slot_name: "Export work" });
+    reply = async () => json(page([{ session: hit, score: 60 }]));
+    await search("Export");
+    expect(options()[0]?.querySelector(".font-medium")?.textContent).toBe("Export work");
+  });
+
   it("finds an unloaded Agent from evidence beyond its truncated summary and opens that exact session", async () => {
     reply = async () => json(page([{ session: agent("unloaded", "Other work", { last_text: "Truncated preview" }), score: 45, evidence: { role: "agent", before: "The older preview contains ", match: "needle", after: " after its cutoff" } }]));
     await search();

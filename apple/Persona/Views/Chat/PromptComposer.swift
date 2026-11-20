@@ -226,6 +226,26 @@ enum PromptItems {
         return out
     }
 
+    /// The user's saved prompts (#9436) as commands: picking one types its text. Each has its own id (`saved:…`), as a
+    /// saved prompt may share its name with a command.
+    static func saved(_ prompts: [SavedPrompt]) -> [PromptCommand] {
+        prompts.map { PromptCommand("/" + $0.name, detail: SlashMenuRow.savedDetail, insert: $0.text, id: "saved:\($0.id)") }
+    }
+
+    /// Persona's own commands the chat runs when picked in the bar, instead of typing them.
+    enum OwnCommand: Equatable { case loop, permissions, clear }
+
+    /// Which of Persona's own commands a row picked in the bar is, by its id (#11410): a saved prompt's is `saved:…`, so
+    /// one named `permissions`, `loop` or `clear` types its text. `/permissions` only where the mode list is offered.
+    static func ownCommand(_ command: PromptCommand, permissions offered: Bool) -> OwnCommand? {
+        switch command.id {
+        case SlashCommand.loop.word: .loop
+        case SessionModes.permissionsCommand: offered ? .permissions : nil
+        case MainClearCommand.word: .clear
+        default: nil
+        }
+    }
+
     /// Claude Code's `/model` aliases: picking one sends `/model <alias>` to the session.
     static let claudeModels: [PromptModel] = [
         PromptModel(id: "default", name: String(localized: "Default [Prompt Composer 844b8c]"), tag: String(localized: "Account default")),

@@ -37,9 +37,10 @@ import (
 // terminal or put on a command line.
 
 type managedLaunchers struct {
-	mu   sync.Mutex
-	byID map[string]proto.ManagedLauncher // the catalog: a withheld entry has no secrets
-	full map[string]proto.ManagedLauncher // what was pulled of the withheld ones, at their Rev
+	mu    sync.Mutex
+	byID  map[string]proto.ManagedLauncher // the catalog: a withheld entry has no secrets
+	full  map[string]proto.ManagedLauncher // what was pulled of the withheld ones, at their Rev
+	infer []proto.Launcher                 // sorted Claude launcher projection for inferLauncher, rebuilt on catalog change
 	// pull lets one pull of a name go out at a time (the others wait and use it).
 	pull sync.Map // name → *sync.Mutex
 }
@@ -55,8 +56,9 @@ func (n *Node) setManaged(list []proto.ManagedLauncher) {
 		l.Withheld = false
 		m[l.Name] = l
 	}
+	infer := buildManagedInferLaunchers(m)
 	n.managed.mu.Lock()
-	n.managed.byID, n.managed.full = m, nil
+	n.managed.byID, n.managed.full, n.managed.infer = m, nil, infer
 	n.managed.mu.Unlock()
 }
 
@@ -81,7 +83,8 @@ func (n *Node) setCatalog(list []proto.ManagedLauncher) {
 			full[name] = f
 		}
 	}
-	n.managed.byID, n.managed.full = m, full
+	infer := buildManagedInferLaunchers(m)
+	n.managed.byID, n.managed.full, n.managed.infer = m, full, infer
 	n.managed.mu.Unlock()
 	if len(prefetch) > 0 {
 		go func() {
@@ -511,7 +514,20 @@ func Launch(ctx context.Context, name string, args []string, ticket string) erro
 		argv = codexBypassArgs(argv)
 	}
 	env = withoutEnv(env, []string{codexBypassEnv})
+	if agent == "codex" {
+		// The provider wrapper is another native process boundary. Resolve npm's
+		// shim too; never let cmd.exe parse the first message on this final hop.
+		exe, env, err = codexStartProgram(exe, true, env)
+		if err != nil {
+			return fmt.Errorf("%s %w", codexStartError, err)
+		}
+	}
 	exe, argv, env, _ = launchExec(agent, exe, argv, env)
+	if agent == "codex" {
+		if err := codexStartCommandLine(argv); err != nil {
+			return fmt.Errorf("%s %w", codexStartError, err)
+		}
+	}
 	return osproc.Exec(exe, argv, env)
 }
 

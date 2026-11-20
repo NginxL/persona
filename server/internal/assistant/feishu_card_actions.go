@@ -37,6 +37,8 @@ func (s *Service) FeishuAction(ctx context.Context, p FeishuAction) (*feishubot.
 func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, action string) *feishubot.CardResponse {
 	l := s.botLang(ctx)
 	switch a.Str("a") {
+	case "nop": // a link of a "more" menu was opened: nothing to do
+		return nil
 	case "ix":
 		return s.answerFromCard(ctx, a, action)
 	case "accept":
@@ -64,6 +66,9 @@ func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, ac
 		}
 		if errors.Is(err, errAcceptStore) { // the asks could not be read or saved: not accepted, the button works again
 			return toast("error", i18n.T(l, "http-status.unavailable"))
+		}
+		if note := inDoubtNote(l, err); note != "" { // it may be with the agent already: look before pressing again
+			return toast("error", note)
 		}
 		if err != nil { // another delivery failure: not taken, nothing recorded, the button works again
 			return toast("error", i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
@@ -515,17 +520,19 @@ func (s *Service) botStartAgent(machine, cwd, prompt, mode string) error {
 		return err
 	}
 	t := botTarget{Kind: targetAgent, MachineID: d.ID, SessionID: res.Session.SessionID}
-	label := agentLabel(res.Session)
+	preferTab := s.useHerdrTabName(ctx)
+	label, secondary := feishuSessionNames(res.Session, preferTab)
 	if label == "" || label == "." {
 		label = cwd
 	}
 	label += " · " + d.Name
 	s.setBotCurrent(t)
-	c := feishubot.NewCard("", "", i18n.T(l, "assistant-feishu_cards.started")).Markdown(i18n.T(l, "assistant-feishu_cards.started_body", i18n.Args{"machine": feishubot.EscapeMarkdown(d.Name), "dir": feishubot.Code(cwd)}))
+	c := feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.started"), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.started")).Subtitle(dotJoin(label, secondary)).
+		Markdown(i18n.T(l, "assistant-feishu_cards.started_body", i18n.Args{"machine": feishubot.EscapeMarkdown(d.Name), "dir": feishubot.Code(cwd)}))
 	if prompt != "" {
 		c.Note(i18n.T(l, "assistant-feishu_cards.started_working"))
 	}
-	mid, err := s.botPost(ctx, "", c.Buttons(s.openButton(ctx, d.ID, res.Session.SessionID)), "")
+	mid, err := s.botPost(ctx, "", c.AppendToLinks(s.openButton(ctx, d.ID, res.Session.SessionID)), "")
 	if err != nil {
 		s.logf("bots: started note: %v", err)
 	}

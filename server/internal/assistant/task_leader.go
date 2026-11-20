@@ -61,7 +61,7 @@ func (t PlanTask) linkSource() (source, via string) {
 // linkPlanAgent links the agent just started for plan task t to its todo.
 func (s *Service) linkPlanAgent(ctx context.Context, t PlanTask, mid, sid string, allowDone bool) error {
 	source, via := t.linkSource()
-	return s.linkTodoAgentWithSourceAllowingDone(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, "", "", source, via, allowDone)
+	return s.linkTodoAgentWithSourceAllowingDone(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, t.startedAgent, "", source, via, allowDone)
 }
 
 // leaderTask is the open task agent machine/session leads, with the agent's own row; false for any other agent.

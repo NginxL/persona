@@ -8,6 +8,7 @@ import (
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // featureCardRing: the client draws a ```persona-card of type ring (#3068). A client declares it in client_hello's
@@ -19,6 +20,9 @@ import (
 // becomes Markdown (the title in bold, the parts against the goal, a "label: value unit" line per part, the note).
 // Nothing is stored: the transcript keeps the ring, and a client that declares the feature later gets it whole.
 const featureCardRing = "persona_card_ring"
+
+// Clients that draw Markdown work reports keep the original text. Older cards strip the XML projection.
+const featureMarkdownCloseout = "closeout.markdown.v1"
 
 // featuresHeader is how a REST request declares what it can draw (the same names as client_hello's features).
 const featuresHeader = "X-Persona-Features"
@@ -59,9 +63,9 @@ func requestDeclares(r *http.Request, feature string) bool {
 }
 
 // cardCompatItems is items as a client gets them: a copy with each assistant text's paseo-ui blocks written as cards
-// (paseoUIConverted) and, when the client does not draw rings, its ring cards rewritten (ringCardsDowngraded); items
-// itself when nothing changes. The node's slice is shared, so it is never written to.
-func cardCompatItems(l i18n.Lang, ring bool, items []proto.Item) []proto.Item {
+// (paseoUIConverted), unsupported rings rewritten (ringCardsDowngraded), and complete Markdown reports
+// projected for older closeout cards. The node's slice is shared and never modified.
+func cardCompatItems(l i18n.Lang, ring, markdownCloseout bool, items []proto.Item) []proto.Item {
 	var out []proto.Item
 	for i := range items {
 		it := items[i]
@@ -69,6 +73,11 @@ func cardCompatItems(l i18n.Lang, ring bool, items []proto.Item) []proto.Item {
 			continue
 		}
 		text := it.Text
+		if !markdownCloseout && it.FullSize == 0 {
+			if report, ok := textfmt.FinalWorkReport(text); ok {
+				text = report.LegacyText(text)
+			}
+		}
 		if !ring {
 			text = ringCardsDowngraded(l, text)
 		}

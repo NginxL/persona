@@ -1,6 +1,8 @@
 package assistant
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -189,6 +191,11 @@ func TestSuggestNextOnlyWhereTheRulesSay(t *testing.T) {
 			st.f.replies = []string{"Fix both"}
 			st.d.watch("mac", c.sess.SessionID, c.watched)
 			st.turn(c.sess, c.status)
+			if c.name == "switch off" || c.name == "nobody has it open" || claudeInTerminal(&c.sess) {
+				if got := st.waitDone(t); got != "" {
+					t.Fatalf("ordinary reply offered %q", got)
+				}
+			}
 			st.noCall(t)
 		})
 	}
@@ -342,12 +349,12 @@ func TestDecorateSuggestionMarksRisky(t *testing.T) {
 	}
 	cx := codexSession()
 	cx.Status = proto.StatusWorking
-	decorateSuggestion(&cx, map[string]string{"cx1": "Fix both"})
+	decorateSuggestion(&cx, map[string]suggestedReply{"cx1": {text: "Fix both"}})
 	if cx.Suggestion != "" {
 		t.Fatal("suggested while working")
 	}
 	cx.Status = proto.StatusDone
-	decorateSuggestion(&cx, map[string]string{"cx1": "Fix both"})
+	decorateSuggestion(&cx, map[string]suggestedReply{"cx1": {text: "Fix both"}})
 	if cx.Suggestion != "Fix both" || cx.SuggestionRisky {
 		t.Fatalf("%q %v", cx.Suggestion, cx.SuggestionRisky)
 	}
@@ -362,4 +369,174 @@ func TestGoldenNextMessage(t *testing.T) {
 	c := st.suggestAsked()[0]
 	golden(t, "next_message.system", c.System)
 	golden(t, "next_message.user", c.User)
+}
+
+func TestFinishedReportOffersItsNextStep(t *testing.T) {
+	const next = "Shortlist the proposals using the agreed criteria."
+	const question = "The first pass is ready. Shall I shortlist them?\n"
+	const legacy = "<closeout status=\"done\">\ndid: Reviewed the proposals.\nnext: " + next + "\n</closeout>"
+	const markdown = "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n- Next: " + next + "\n\n---"
+	for _, tc := range []struct {
+		name    string
+		session proto.Session
+		model   bool
+		form    string
+	}{
+		{"XML without a background model", codexSession(), false, legacy},
+		{"Markdown without a background model", codexSession(), false, markdown},
+		{"Codex with suggestions enabled", codexSession(), true, markdown},
+		{"Claude with a terminal hint", proto.Session{SessionID: "cl1", Agent: "claude", PaneID: "pane1", Suggestion: "Another possibility"}, true, legacy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newSuggestTest(t, tc.model)
+			st.d.watch("mac", tc.session.SessionID, true)
+			st.f.setItems(
+				proto.Item{Seq: 1, Kind: proto.KindText, Role: "user", Text: "Review the proposals"},
+				proto.Item{Seq: 2, ID: "answer", Kind: proto.KindText, Role: "assistant", Text: question + tc.form},
+			)
+			st.turn(tc.session, proto.StatusDone)
+			if got := st.waitDone(t); got != next {
+				t.Fatalf("completed report offered %q, want %q", got, next)
+			}
+			row := shownSuggestion(t, st.lastList("mac"), tc.session.SessionID)
+			if sent := st.f.sentToAgents(); len(sent) != 0 {
+				t.Fatalf("offering a reply sent %v", sent)
+			}
+			if row.Status != proto.StatusDone || row.Suggestion != next || row.SuggestionRisky || len(st.suggestAsked()) != 0 {
+				t.Fatalf("done=%v, suggestion=%q, risky=%v, model calls=%d", row.Status, row.Suggestion, row.SuggestionRisky, len(st.suggestAsked()))
+			}
+		})
+	}
+}
+
+func TestReportedNextStepBelongsToLatestAnswer(t *testing.T) {
+	const step = "Draft a summary."
+	const report = "<closeout status=\"done\">\nnext: " + step + "\n</closeout>"
+	assistantText := func(text string) proto.Item { return proto.Item{Kind: proto.KindText, Role: "assistant", Text: text} }
+	reply := assistantText("The list is ready.\n" + report)
+	owner := proto.Item{Kind: proto.KindText, Role: "user", Text: "Another question"}
+	s := &Service{}
+	for _, tc := range []struct {
+		name  string
+		items []proto.Item
+		want  string
+	}{
+		{"terminal report", []proto.Item{owner, reply, {Kind: turnDurationKind}}, step},
+		{"plain question", []proto.Item{owner, assistantText("Shall I draft a summary?")}, ""},
+		{"later answer", []proto.Item{reply, assistantText("That suggestion is withdrawn.")}, ""},
+		{"later user", []proto.Item{reply, owner}, ""},
+		{"later tool", []proto.Item{reply, {Kind: proto.KindToolUse, Role: "assistant"}}, ""},
+		{"stopped", []proto.Item{reply, {Kind: proto.KindNotice, Text: userStoppedNotice}}, ""},
+		{"quoted", []proto.Item{assistantText("> " + strings.ReplaceAll(report, "\n", "\n> "))}, ""},
+		{"fenced", []proto.Item{assistantText("Example:\n~~~\n" + report + "\n~~~")}, ""},
+		{"indented code", []proto.Item{assistantText("    " + strings.ReplaceAll(report, "\n", "\n    "))}, ""},
+		{"nonterminal", []proto.Item{assistantText(report + "\nThe example above is obsolete.")}, ""},
+		{"model thinking", []proto.Item{{Kind: proto.KindThinking, Role: "assistant", Text: report}}, ""},
+		{"synthetic line", []proto.Item{{Kind: proto.KindText, Role: "assistant", Text: report, Injected: &proto.Injected{Kind: proto.InjectedFollowup}}}, ""},
+		{"tool result", []proto.Item{{Kind: proto.KindToolResult, Role: "user", Text: report}}, ""},
+		{"unidentified preview", []proto.Item{{Kind: proto.KindText, Role: "assistant", Text: report, FullSize: 9000}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.reportedNextStep(t.Context(), "fixture", "session", tc.items); got != tc.want {
+				t.Fatalf("suggestion = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReportedNextStepRemainsOptionalWhenChatOpensLater(t *testing.T) {
+	st := newSuggestTest(t, false)
+	const step = "Deploy the draft."
+	sess := codexSession()
+	st.f.mu.Lock()
+	st.f.items = []proto.Item{{ID: "answer", Seq: 1, Kind: proto.KindText, Role: "assistant", Text: "<closeout status=\"done\">\nnext: " + step + "\n</closeout>"}}
+	st.f.mu.Unlock()
+	st.turn(sess, proto.StatusDone)
+	if got := st.waitDone(t); got != step {
+		t.Fatalf("read %q", got)
+	}
+	st.d.watch("mac", sess.SessionID, true)
+	got := shownSuggestion(t, st.lastList("mac"), sess.SessionID)
+	if got.Suggestion != step || !got.SuggestionRisky || len(st.suggestAsked()) != 0 || len(st.f.sentToAgents()) != 0 {
+		t.Fatalf("late opener got %q, risky=%v", got.Suggestion, got.SuggestionRisky)
+	}
+	if got := st.s.hubSuggestions("another-machine"); len(got) != 0 {
+		t.Fatalf("another machine got %v", got)
+	}
+	st.s.UserSpoke(t.Context(), SessionRef{MachineID: "mac", SessionID: sess.SessionID})
+	if got := shownSuggestion(t, st.lastList("mac"), sess.SessionID); got.Suggestion != "" {
+		t.Fatalf("spent reply returned: %q", got.Suggestion)
+	}
+}
+
+func TestReportedNextStepReadsTheFullAnswer(t *testing.T) {
+	const next = "Prepare the comparison."
+	const record = "<closeout status=\"done\">\nnext: " + next + "\n</closeout>"
+	preview := proto.Item{ID: "answer", Kind: proto.KindText, Role: "assistant", Text: record, FullSize: 12000}
+	full := proto.Item{ID: preview.ID, Kind: proto.KindText, Role: "assistant", Text: strings.Repeat("A long reply. ", 1000) + "\n" + record}
+	for _, tc := range []struct {
+		name string
+		item proto.Item
+		err  error
+		want string
+	}{
+		{"full answer", full, nil, next},
+		{"superseded proposal", proto.Item{ID: preview.ID, Role: "assistant", Kind: proto.KindText, Text: record + "\nI withdraw it."}, nil, ""},
+		{"different item", proto.Item{ID: "earlier", Role: "assistant", Kind: proto.KindText, Text: record}, nil, ""},
+		{"different speaker", proto.Item{ID: preview.ID, Role: "user", Kind: proto.KindText, Text: record}, nil, ""},
+		{"still truncated", preview, nil, ""},
+		{"missing item", proto.Item{}, errors.New("item no longer available"), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newSuggestTest(t, false)
+			reads := 0
+			st.f.answerNode("session.item", func(machine string, args json.RawMessage) (any, error) {
+				var in struct {
+					Session string `json:"session_id"`
+					Item    string `json:"item_id"`
+				}
+				if err := json.Unmarshal(args, &in); err != nil || machine != "mac" || in.Session != "cx1" || in.Item != preview.ID {
+					t.Fatalf("unexpected full-item request: %s %s", machine, args)
+				}
+				reads++
+				return tc.item, tc.err
+			})
+			got := st.s.reportedNextStep(t.Context(), "mac", "cx1", []proto.Item{preview})
+			if got != tc.want || reads != 1 {
+				t.Fatalf("got %q after %d reads, want %q after one read", got, reads, tc.want)
+			}
+		})
+	}
+}
+
+func TestOwnerReplyCancelsPendingReportSuggestion(t *testing.T) {
+	st := newSuggestTest(t, false)
+	const record = "<closeout status=\"done\">\nnext: Draft a comparison.\n</closeout>"
+	st.f.setItems(proto.Item{ID: "answer", Kind: proto.KindText, Role: "assistant", Text: record})
+	reading, release := make(chan struct{}, 1), make(chan struct{})
+	// The read may still return a valid report after the owner has already answered.
+	st.f.hookReads(receiptHooks{before: func(int) {
+		select {
+		case reading <- struct{}{}:
+		default:
+		}
+		<-release
+	}})
+	sess := codexSession()
+	sess.Status = proto.StatusDone
+	st.s.suggestTurnEnded("mac", sess)
+	select {
+	case <-reading:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("report read did not start")
+	}
+	st.s.suggestDrop("mac", sess.SessionID)
+	close(release)
+	if got := st.waitDone(t); got != "" {
+		t.Fatalf("late report published %q", got)
+	}
+	if len(st.s.hubSuggestions("mac")) != 0 || len(st.f.sentToAgents()) != 0 {
+		t.Fatal("an expired suggestion was offered or sent")
+	}
 }

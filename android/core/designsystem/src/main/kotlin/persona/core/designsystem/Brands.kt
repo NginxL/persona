@@ -119,8 +119,14 @@ fun JChannelMark(channel: HubChannel, modifier: Modifier = Modifier, size: MarkS
 @Composable
 fun JChannelSource(channel: HubChannel, modifier: Modifier = Modifier) {
     val text = stringResource(R.string.designsystem_channel_source, channel.label)
+    JSourceLine(text, modifier) { JChannelMark(channel, size = MarkSize.Inline) }
+}
+
+/** A message's source mark and words, read together once under its bubble. */
+@Composable
+fun JSourceLine(text: String, modifier: Modifier = Modifier, mark: @Composable () -> Unit) {
     Row(modifier.readAs(text), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically) {
-        JChannelMark(channel, size = MarkSize.Inline)
+        mark()
         Text(text, style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

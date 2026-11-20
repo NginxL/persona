@@ -309,7 +309,7 @@ func TestSupervisorNotifyUserStillCopiedToLark(t *testing.T) {
 	waitFor(t, "the notice's Lark card", func() bool {
 		push = nil
 		for _, p := range e.f.appParams(AppFeishu, FeishuPost) {
-			if card, _ := p["card"].(string); strings.Contains(card, "🔔 ") && strings.Contains(card, "登录修好了") {
+			if card, _ := p["card"].(string); strings.Contains(card, `"content":"通知"`) && strings.Contains(card, "登录修好了") {
 				push = append(push, p)
 			}
 		}

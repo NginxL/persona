@@ -512,6 +512,31 @@ fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+# GitHub's Latest pointer can move between requests. Read its manifest once, then keep checksums and every archive on
+# that immutable tag. Other download sources retain their existing layout.
+# Normalize the supported moving-GitHub form before matching it or constructing the immutable tag URL.
+case "$DL" in
+https://github.com/*/releases/latest/download/) DL="${DL%/}" ;;
+esac
+case "$DL" in
+https://github.com/*/releases/latest/download)
+	fetch "$DL/latest.json" "$tmp/latest.json" || fail download_failed "$DL/latest.json"
+	release_version="$(awk '
+	  match($0, /"version"[[:space:]]*:[[:space:]]*"v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]{12})?"/) {
+	    value = substr($0, RSTART, RLENGTH)
+	    sub(/^.*:[[:space:]]*/, "", value)
+	    gsub(/"/, "", value)
+	    sub(/^v/, "", value)
+	    sub(/-[0-9]{12}$/, "", value)
+	    print value
+	    found = 1
+	    exit
+	  }
+	  END { if (!found) exit 1 }
+	' "$tmp/latest.json")" || fail download_failed "$DL/latest.json"
+	DL="${DL%/releases/latest/download}/releases/download/v$release_version"
+	;;
+esac
 fetch "$DL/SHA256SUMS" "$tmp/SHA256SUMS" || fail download_failed "$DL/SHA256SUMS"
 
 # get <name> <installed as>: downloads <name>.gz, checks it against SHA256SUMS and puts it in $DEST.

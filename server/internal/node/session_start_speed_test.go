@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -193,6 +194,11 @@ func TestClaudeFastSpeedIsEffectiveStartOnlySettings(t *testing.T) {
 
 func startSpeedFunction(t *testing.T, name, invocation string) {
 	t.Helper()
+	// The launcher is a function in .zshrc, which the probe reads through zsh: without zsh it sees no launcher at all
+	// and every check would pass or fail for that reason instead (fakeClaudeHome skips the same way).
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("no zsh")
+	}
 	shellLaunchers(t, name)
 	launcherCache.Lock()
 	oldSettings, oldScripts := launcherCache.settings, launcherCache.scripts

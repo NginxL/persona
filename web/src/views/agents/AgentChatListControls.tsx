@@ -145,7 +145,8 @@ export function AgentFilterButton({
   };
 
   const filterLabel = count > 0 ? `${t("lib-agent-filter.filter")} (${count})` : t("lib-agent-filter.filter");
-  // the title row's other icon buttons' size and colors (⋯, fold all); lit like ⋯ under a sort while something is on
+  // the title row's other icon buttons' size and colors (⋯, fold all), and their 44 px box on a touch screen (they sit
+  // 4 px apart: centred touch-hit squares would overlap); lit like ⋯ under a sort while something is on
   const lit = count > 0 || filters.searchAsCode || chatList;
   return (
     <>
@@ -161,7 +162,7 @@ export function AgentFilterButton({
         title={filterLabel}
         data-testid="agent-filter-button"
         className={cx(
-          "touch-hit relative z-10 flex h-5 min-w-5 shrink-0 items-center justify-center gap-0.5 rounded-[5px] px-0.5 text-[11px] hover:bg-hover hover:text-ink-2",
+          "touch-hit relative z-10 flex h-5 min-w-5 shrink-0 items-center justify-center gap-0.5 rounded-[5px] px-0.5 text-[11px] hover:bg-hover hover:text-ink-2 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11",
           lit ? "font-semibold text-accent" : "text-ink-3",
           filterMenu.anchor && "bg-hover",
         )}

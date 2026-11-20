@@ -86,6 +86,9 @@ type Options struct {
 	Event func(machine, event string, params json.RawMessage) (forward bool)
 	// Detached: a machine's node connection ended (not for another one taking over): what waited on it ends.
 	Detached func(machine string)
+	// HiddenAgentDirsChanged is told after a machine's hidden Agent folders changed (agentdirs.go), outside every
+	// lock of the devices: the assistant shows the sessions again by the new rules.
+	HiddenAgentDirsChanged func(machine string)
 	// Location is the user's time zone ("today" of the token usage); nil: the machine's.
 	Location func() *time.Location
 	// PromptLanguage is the owner language for newly generated node-side prompt wrappers.
@@ -849,7 +852,7 @@ func (d *Devices) List() []Summary {
 func (d *Devices) summaryOf(m *Machine) Summary {
 	m.mu.Lock()
 	s := Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-		DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}
+		HomeReal: m.info.HomeReal, DataDir: m.info.DataDir, Online: m.online || m.warmLocked(time.Now())}
 	m.mu.Unlock()
 	s.Trust = d.machineTrust(m)
 	s.Reachable = m.reachable()
@@ -950,7 +953,37 @@ func (d *Devices) Relist(ctx context.Context, id string) error {
 // Summary is one machine for the assistant (assistantwire.Device).
 type Summary struct {
 	ID, Name, Kind, SSHHost, Home, DataDir, Trust string
-	Online, Reachable                             bool
+	// HomeReal is Home with its links followed, when the node says it is another path (proto.NodeInfo.HomeReal).
+	HomeReal          string
+	Online, Reachable bool
+}
+
+// Shown is how a machine's sessions are shown now, for a reader that takes them as the computer's word (the assistant's
+// direction sessions). Listed: the list is one its node gave, on this connection or kept from before it (nil and none
+// given on this connection is not known, as report has it). Until: until when the machine is shown as before while
+// its node is away (the reconnect grace, a warm start after a restart, a resident's reload); zero when it is not.
+type Shown struct {
+	Listed bool
+	Until  time.Time
+}
+
+// Shown is machine id's Shown; false when there is no such machine.
+func (d *Devices) Shown(id string) (Shown, bool) {
+	m := d.machineByID(id)
+	if m == nil {
+		return Shown{}, false
+	}
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := Shown{Listed: m.sessions != nil || m.sessionsListed}
+	if m.warmLocked(now) {
+		s.Until = m.warmUntil
+	}
+	if now.Before(m.reloadUntil) && m.reloadUntil.After(s.Until) {
+		s.Until = m.reloadUntil
+	}
+	return s, true
 }
 
 // Has reports whether id is one of the machines (an entry another one absorbed included).

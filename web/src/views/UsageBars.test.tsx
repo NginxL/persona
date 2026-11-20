@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { initI18n } from "../i18n";
 import { onDraftEvent, type DraftEvent } from "../lib/drafts";
 import { type UsageAccount } from "../lib/usage-windows";
 import { UsageBars } from "./UsageBars";
@@ -141,6 +142,20 @@ describe("where the numbers came from (#2595)", () => {
     const html = renderToStaticMarkup(<UsageBars accounts={mixed().slice(0, 1)} now={NOW} />);
     expect(html).toContain("来源：MacBook · Relay");
   });
+  it.each([
+    ["en", "No quota data connected"],
+    ["zh-Hans", "未接额度数据"],
+    ["ja", "利用量データ未連携"],
+  ])("keeps the launcher row and names its missing quota data in %s", async (lang, label) => {
+    await initI18n(lang);
+    try {
+      const html = renderToStaticMarkup(<UsageBars accounts={[]} unconnected={[{ id: "claude", title: "Claude Code", agent: "claude" }]} now={NOW} />);
+      expect(html).toContain("Claude Code");
+      expect(html).toContain(label);
+    } finally {
+      await initI18n("zh-Hans");
+    }
+  });
   it("lists active providers without usage data and hands setup off to the assistant on click", () => {
     const live = [account("c", 40, 75, { provider: "codex", name: "Codex Pro", local: true })];
     const unconnected = unconnectedUsageProviders(
@@ -160,7 +175,7 @@ describe("where the numbers came from (#2595)", () => {
     expect(strip).toContain("Codex Pro");
     expect(strip).toContain("Claude Code");
     expect(strip).toContain("Antigravity");
-    expect(strip).toContain("未接入");
+    expect(strip).toContain("未接额度数据");
 
     const host = document.createElement("div");
     document.body.appendChild(host);

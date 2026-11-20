@@ -54,6 +54,22 @@ class PagedSessionsMockTests(unittest.TestCase):
         self.assertEqual(exact["sessions"][0]["session_id"], row["session_id"])
         self.assertEqual(self.read(summary=0, session_id="missing")["sessions"], [])
 
+    def test_directory_hidden_rows_leave_lists_but_not_the_exact_lookup(self):
+        # As the hub does (server/internal/sessionlist hidden_test.go): a directory-hidden session leaves the default
+        # pages and counts, include_hidden=1 shows it, and the exact machine/session lookup always answers its row.
+        row = next(s for s in self.read()["sessions"] if s.get("cwd") and not s.get("assistant"))
+        with patch.dict(hub.AGENT_DIRS_HIDDEN, {row["machine_id"]: [{"pattern": row["cwd"], "enabled": True}]}):
+            ids = lambda page: [(s["machine_id"], s["session_id"]) for s in page["sessions"]]
+            key = (row["machine_id"], row["session_id"])
+            self.assertNotIn(key, ids(self.read(summary=1, limit=50)))
+            self.assertIn(key, ids(self.read(summary=1, limit=50, include_hidden=1)))
+            exact = self.read(summary=0, machine_id=row["machine_id"], session_id=row["session_id"])
+            self.assertEqual(ids(exact), [key])
+            self.assertTrue(exact["sessions"][0]["hidden_by_directory"])
+            self.assertEqual(exact["total"], 1)
+            # one session id without its machine is no exact lookup: still a filtered list
+            self.assertNotIn(key, ids(self.read(summary=1, session_id=row["session_id"])))
+
     def test_filter_counts_match_filtered_pages(self):
         row = self.read()["sessions"][0]
         filters = {"machine_id": row["machine_id"], "state": row["state"], "q": row["title"]}

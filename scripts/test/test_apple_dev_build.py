@@ -100,9 +100,10 @@ class LeanDevBuildCallersTests(unittest.TestCase):
 
     def test_every_other_caller_of_xcodegen_generates_the_whole_project(self):
         # Each clears the switch before it generates the project, so a value the shell exported cannot drop the watch
-        # app from a TestFlight build or the share extension from the tests that share into it. Found by searching,
-        # so a new caller is held to it too.
-        listed = subprocess.run(['git', '-C', str(ROOT), 'grep', '-lE', r'xcodegen +generate', '--', '.',
+        # app from a TestFlight build or the share extension from the tests that share into it. Search for new callers
+        # too, ignoring full-line comments that only describe the command.
+        generate = '^[ \t]*([^# \t].*)?xcodegen +generate'
+        listed = subprocess.run(['git', '-C', str(ROOT), 'grep', '-lE', generate, '--', '.',
                                  ':!docs', ':!*.md', ':!scripts/test'],
                                 capture_output=True, text=True, timeout=60, check=True).stdout.split()
         for path in OTHER_PROJECTS:
@@ -116,7 +117,7 @@ class LeanDevBuildCallersTests(unittest.TestCase):
                 self.assertNotIn(SWITCH + '=', text)
                 cleared = text.find('unset ' + SWITCH + '\n')
                 self.assertNotEqual(cleared, -1, 'generates the project without clearing ' + SWITCH)
-                self.assertLess(cleared, re.search(r'xcodegen +generate', text).start(), 'clears it too late')
+                self.assertLess(cleared, re.search(generate, text, re.MULTILINE).start(), 'clears it too late')
 
     def test_only_a_lean_build_names_the_check_it_skipped(self):
         sim = (ROOT / 'scripts/app/sim.sh').read_text()

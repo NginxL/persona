@@ -71,6 +71,54 @@ public nonisolated enum TodoReason {
     public static let all = ["failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest"]
 }
 
+/// The line keys produced by this version of the projection; see the Line keys table in
+/// spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+public nonisolated enum TodoLineKey {
+    public static let failedStart = "failed_start"
+    public static let agentAsks = "agent_asks"
+    public static let interrupted = "interrupted"
+    public static let decision = "decision"
+    public static let decisionDefault = "decision_default"
+    public static let cannot = "cannot"
+    public static let awaitsReply = "awaits_reply"
+    public static let working = "working"
+    public static let personaWorking = "persona_working"
+    public static let starting = "starting"
+    public static let background = "background"
+    public static let parked = "parked"
+    public static let finished = "finished"
+    public static let accepted = "accepted"
+    public static let deployed = "deployed"
+    public static let prOpen = "pr_open"
+    public static let usageLimit = "usage_limit"
+    public static let runWaits = "run_waits"
+    public static let finishedSeen = "finished_seen"
+    public static let completed = "completed"
+    public static let canceled = "canceled"
+    public static let reported = "reported"
+    public static let superseded = "superseded"
+    public static let someday = "someday"
+    public static let all = ["failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"]
+}
+
+/// The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on
+/// the wire.
+public nonisolated enum TodoLineArg {
+    public static let at = "at"
+    public static let by = "by"
+    public static let defaultAt = "default_at"
+    public static let error = "error"
+    public static let on = "on"
+    public static let reason = "reason"
+    public static let recommend = "recommend"
+    public static let resetsAt = "resets_at"
+    public static let run = "run"
+    public static let step = "step"
+    public static let text = "text"
+    public static let until = "until"
+    public static let all = ["at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until"]
+}
+
 /// The row's second line as a key and its arguments, never words: each client says it in its own language
 /// (spec/fixtures/todo-view/README.md lists every key and its arguments).
 public nonisolated struct TodoLine: Codable, Hashable, Sendable {
@@ -449,7 +497,9 @@ public nonisolated struct TodoCounts: Codable, Hashable, Sendable {
     /// Someday.
     public var open: Int
     /// N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are
-    /// not counted. The To-dos row's badge, the bar's Needs you and the Needs you header show it.
+    /// not counted. For the To-dos V1 design's To-dos row badge, the bar's Needs you and the Needs you header. Of the
+    /// clients only iOS reads it, behind the V1 gate that is off in release builds; the release clients count their
+    /// To-dos row by rules of their own.
     public var needsYou: Int
     /// The rows of Working and Waiting; Just finished is listed at the foot of In progress but not counted.
     public var inProgress: Int

@@ -132,6 +132,44 @@ describe("the sidebar's top-level headings (#10637)", () => {
   });
 });
 
+// #11511: in the Agents title rows the icons sit 4 px apart, so each takes a real 44 px box on a touch screen (centred
+// touch-hit squares overlapped, the later button taking the earlier one's taps), the row's end padding dropped so the last
+// box ends where the rows' own ⋯ boxes do; an add button alone at a heading's end keeps its touch-hit square
+describe("the headings' icon buttons on a touch screen (#11511)", () => {
+  const TOUCH_BOX = "[@media(pointer:coarse)]:size-11";
+  const ROW_END = "[@media(pointer:coarse)]:pr-0";
+  const classes = (el: Element | null | undefined) => el?.className.split(/\s+/) ?? [];
+  const add = (scope: string) => host.querySelector(`${scope} [aria-label="新建 Agent"]`);
+
+  it("give the Agents title row's + a 44 px box, the complete list's and the paged one's, and no other heading's", async () => {
+    await render([]);
+    expect(classes(add("[data-sidebar-agents-controls]"))).toContain(TOUCH_BOX);
+    expect(classes(add("[data-sidebar-agents-controls]")?.parentElement)).toEqual(expect.arrayContaining(["px-2", ROW_END]));
+    expect(classes(host.querySelector('[aria-label="新对话"]'))).not.toContain(TOUCH_BOX);
+    expect(classes(host.querySelector('[aria-label="新对话"]'))).toContain("touch-hit");
+    expect(classes(host.querySelector('[aria-label="新对话"]')?.parentElement)).not.toContain(ROW_END);
+    act(() => root.unmount());
+    root = createRoot(host);
+    await render(["sessions_list", "sessions_lookup", "sessions_todo", "sessions_agents_only"]);
+    expect(classes(add("[data-sidebar-agents]"))).toContain(TOUCH_BOX);
+    expect(classes(add("[data-sidebar-agents]")?.parentElement)).toEqual(expect.arrayContaining(["px-2", ROW_END]));
+  });
+
+  it("leave Pending's + alone at its heading's end", async () => {
+    await render(["sessions_dimensions"]);
+    const pending = add("[data-sidebar-rows]");
+    expect(pending).not.toBeNull();
+    expect(classes(pending)).not.toContain(TOUCH_BOX);
+    expect(classes(pending)).toContain("touch-hit");
+  });
+
+  it("hide the search box's ⌘K on a screen without hover (a landscape phone is wide enough for it)", async () => {
+    await render([]);
+    const hint = host.querySelector("aside button kbd")?.parentElement;
+    expect(classes(hint)).toEqual(expect.arrayContaining(["hidden", "sm:inline-flex", "[@media(hover:none)]:hidden"]));
+  });
+});
+
 describe("the heading box's token", () => {
   const css = readFileSync(join(__dirname, "../styles.css"), "utf8");
 

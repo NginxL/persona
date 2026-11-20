@@ -75,7 +75,8 @@ func (s *Service) todoAskRoutes() {
 	// to-do or an id no ask of its row can have; 409 ask_stale (with todo, its row now) when that ask no longer waits,
 	// answer_in_session for a run's ask, not_declinable for Don't handle on an ask that has none, and the retry route's
 	// 409s for a failed start it does not start; then the accept route's codes: 423 a node's refusal, 502
-	// accept_not_taken, 503 the store.
+	// accept_not_taken, 503 the store, each delivered "none"; 502 send_in_doubt when the words may be with the Agent
+	// (delivered "unknown") or are, with what followed failed ("yes").
 	s.handle("POST /api/v1/todos/{id}/asks/{ask}/answer", s.postTodoAskAnswer)
 }
 
@@ -86,29 +87,29 @@ func (s *Service) postTodoAskAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	var in assistantwire.TodoAskAnswer
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTodoAnswerBody)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
-		apierr.Write(w, http.StatusBadRequest, err)
+		writeTypedNothing(w, http.StatusBadRequest, "", err)
 		return
 	}
 	if err := checkTodoAnswer(in); err != nil {
-		apierr.Write(w, http.StatusBadRequest, err)
+		writeTypedNothing(w, http.StatusBadRequest, "", err)
 		return
 	}
 	ctx, id, askID := r.Context(), r.PathValue("id"), r.PathValue("ask")
 	if err := s.ensureTodosLoaded(ctx); err != nil {
-		apierr.Write(w, http.StatusServiceUnavailable, errTodosUnavailable)
+		writeTypedNothing(w, http.StatusServiceUnavailable, "", errTodosUnavailable)
 		return
 	}
 	if _, ok := s.todoNow(id); !ok {
-		apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", errors.New("todo not found"))
+		writeTypedNothing(w, http.StatusNotFound, "todo_not_found", errors.New("todo not found"))
 		return
 	}
 	ask, err := s.ownAskOf(id, askID)
 	switch {
 	case errors.Is(err, errAnswerInSession):
-		apierr.WriteCode(w, http.StatusConflict, "answer_in_session", err)
+		writeTypedNothing(w, http.StatusConflict, "answer_in_session", err)
 		return
 	case err != nil:
-		apierr.WriteCode(w, http.StatusNotFound, "ask_not_found", err)
+		writeTypedNothing(w, http.StatusNotFound, "ask_not_found", err)
 		return
 	}
 	out := assistantwire.TodoAskAnswered{Ask: askID, Outcome: assistantwire.TodoAskOutcomeAnswered}
@@ -221,8 +222,8 @@ func (s *Service) answerDecision(ctx context.Context, ask ownAsk, in assistantwi
 	default:
 		result, err = s.acceptTryFromBrief(ctx, ask.todo, ask.round)
 	}
-	if errors.Is(err, db.ErrTodoCompleted) { // the send's guard: the to-do closed, or the round ended, while it went
-		return errAskStale
+	if errors.Is(err, db.ErrTodoCompleted) && writeDelivered(err) == "none" {
+		return errAskStale // the send's guard: the to-do closed, or the round ended, before anything went out
 	}
 	if err != nil {
 		return err
@@ -319,34 +320,42 @@ func (s *Service) answerRetry(ctx context.Context, ask ownAsk, in assistantwire.
 }
 
 // writeAnswerError writes err as the answer route answers it (true), the accept and retry routes' codes for theirs;
-// false when err is nil.
+// false when err is nil. Every refusal says delivered (todo_write_outcome.go): words that may be with the Agent
+// already are 502 send_in_doubt, before any other reading of err, and anything else typed nothing. A failed start
+// started again starts after the answer (startPlanTaskAsync), so none of its failures went out.
 func (s *Service) writeAnswerError(w http.ResponseWriter, r *http.Request, id string, err error) bool {
 	var refused retryRefused
 	var notRetried startNotRetried
-	switch {
-	case err == nil:
+	if err == nil {
 		return false
+	}
+	if delivered := writeDelivered(err); delivered != "none" && !errors.As(err, &notRetried) {
+		writeInDoubt(w, http.StatusBadGateway, err, delivered, answerInDoubtKeys)
+		return true
+	}
+	switch {
 	case errors.Is(err, errAskStale):
 		body := apierr.LocalizedBody(http.StatusConflict, "ask_stale", err, i18n.OfWriter(w))
 		if row, ok := s.answeredRow(r.Context(), id); ok {
 			body["todo"] = row
 		}
+		body["delivered"] = "none"
 		apierr.WriteBody(w, http.StatusConflict, body)
 	case errors.Is(err, errNotDeclinable):
-		apierr.WriteCode(w, http.StatusConflict, "not_declinable", err)
+		writeTypedNothing(w, http.StatusConflict, "not_declinable", err)
 	case errors.Is(err, errDecisionOption), errors.Is(err, errAnswerNeeded), errors.Is(err, errAnswerNotForThis):
-		apierr.Write(w, http.StatusBadRequest, err)
+		writeTypedNothing(w, http.StatusBadRequest, "", err)
 	case errors.Is(err, errAcceptStore):
-		apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
+		writeTypedNothing(w, http.StatusServiceUnavailable, "", i18n.Err("http-status.unavailable"))
 	case errors.Is(err, db.ErrTodoNotFound):
-		apierr.WriteCode(w, http.StatusNotFound, "todo_not_found", err)
+		writeTypedNothing(w, http.StatusNotFound, "todo_not_found", err)
 	case errors.As(err, &notRetried) && (errors.Is(err, errTaskNotRetryable) || errors.Is(err, errTaskNotInPlan) ||
 		errors.Is(err, errMachineOffline) || errors.As(err, &refused) || errors.Is(err, errPlanNotFound) || errors.Is(err, errPlanNotOpen)):
-		apierr.Write(w, http.StatusConflict, err) // a start the retry route refuses too: nothing started
+		writeTypedNothing(w, http.StatusConflict, "", err) // a start the retry route refuses too: nothing started
 	case nodeRefusal(err): // nothing was typed: 423 with the node's code, as the accept route answers (#7343)
-		apierr.CallStatus(w, http.StatusLocked, err)
+		writeNodeRefusal(w, err)
 	default: // nothing taken; the owner can answer again
-		apierr.WriteCode(w, http.StatusBadGateway, "accept_not_taken", i18n.Err("assistant-reports.accept_not_taken",
+		writeTypedNothing(w, http.StatusBadGateway, "accept_not_taken", i18n.Err("assistant-reports.accept_not_taken",
 			i18n.Args{"error": clip(oneLine(i18n.Localize(err, s.requestCtxLang(r.Context()))), 120)}))
 	}
 	return true

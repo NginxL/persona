@@ -96,6 +96,190 @@ struct ModelSwitchTests {
         #expect(second == ["effort": "high"]) // an older caller's body is unchanged
     }
 
+    @Test func busyEffortReturnsThePendingChoice() async throws {
+        let hub = FakeHub()
+        hub.on("POST", "/api/v1/sessions/box/s1/modes", json: #"{"ok":true,"pending_effort":"high"}"#)
+        let key = SessionKey(machineID: "box", sessionID: "s1")
+        #expect(try await hub.client.setModes(key, effort: "high", queueEffort: true) == "high")
+        let body = try #require(hub.sent("POST", "/api/v1/sessions/box/s1/modes").first?.body)
+        #expect((try JSONSerialization.jsonObject(with: body) as? [String: Any])?["queue_effort"] as? Bool == true)
+        let row = try session(#","effort":"low","pending_effort":"high","effort_change_failed":true"#)
+        #expect(row.effort == "low")
+        #expect(row.pendingEffort == "high")
+        #expect(row.effortChangeFailed == true)
+    }
+
+    @MainActor @Test func summaryConfirmationWinsOverCachedEffort() throws {
+        let pending = try session(#","effort":"low","pending_effort":"high""#)
+        let confirmed = try session(#","effort":"high","waiting":false"#)
+        let merged = confirmed.preservingDetails(from: pending)
+        #expect(merged.effort == "high")
+        #expect(merged.pendingEffort == nil)
+    }
+
+    @MainActor @Test func followUpsWaitForConfirmationAndGoInOrder() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/sessions/box/s1"
+        hub.on("POST", path + "/modes", json: #"{"ok":true,"pending_effort":"high"}"#)
+        hub.on("POST", path + "/messages", json: #"{"ok":true}"#)
+        let app = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        app.forgetRestoredForTests()
+        app.apiForTests = hub.client
+        app.linksUpForTests = true
+        let row = try session(#","effort":"low","agent":"claude""#, state: "working")
+        let key = row.key
+        app.applySessions([key.machineRef: [row]])
+
+        #expect(await app.setModes(key, effort: "high"))
+        #expect(app.latest(key)?.effort == "low")
+        #expect(app.latest(key)?.pendingEffort == "high")
+        #expect(app.sendNow(key, text: "first"))
+        #expect(app.sendNow(key, text: "second"))
+        #expect(app.chat(key).pending.map(\.state) == [.waiting, .waiting])
+        #expect(hub.sent("POST", path + "/messages").isEmpty)
+
+        var confirmed = row
+        confirmed.effort = "high"
+        app.applySessions([key.machineRef: [confirmed]])
+        for _ in 0..<300 where app.chat(key).pending.contains(where: { $0.state != .sent }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let texts = try hub.sent("POST", path + "/messages").map { request in
+            let body = try #require(request.body)
+            return (try JSONSerialization.jsonObject(with: body) as? [String: Any])?["text"] as? String
+        }
+        #expect(texts == ["first", "second"])
+        #expect(app.chat(key).pending.map(\.state) == [.sent, .sent])
+    }
+
+    @MainActor @Test func earlyRefusalKeepsItsIDUntilEffortIsConfirmed() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/sessions/box/s1/messages"
+        hub.on("POST", path) { _ in
+            throw APIError(status: 409, message: "Thinking effort is changing", fields: [
+                "code": "effort_change_pending", "delivered": "none", "effort": "high",
+            ])
+        }
+        let app = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        app.forgetRestoredForTests()
+        app.apiForTests = hub.client
+        app.linksUpForTests = true
+        var row = try session(#","effort":"low","agent":"claude""#)
+        let key = row.key
+        app.applySessions([key.machineRef: [row]])
+
+        #expect(app.sendNow(key, text: "follow-up"))
+        let originalID = try #require(app.chat(key).pending.first?.id)
+        for _ in 0..<300 where app.chat(key).pending.first?.state == .sending {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        app.flushOutbox()
+        for _ in 0..<300 where app.flushingOutbox.contains(key.group) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(app.chat(key).pending.first?.state == .waiting)
+        #expect(app.chat(key).pending.first?.refused == true)
+        app.flushOutbox()
+        for _ in 0..<300 where app.flushingOutbox.contains(key.group) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(app.chat(key).pending.first?.id == originalID)
+        #expect(hub.sent("POST", path).count == 1)
+
+        hub.on("POST", path, json: #"{"ok":true}"#)
+        row.effort = "high"
+        app.applySessions([key.machineRef: [row]])
+        for _ in 0..<300 where app.chat(key).pending.first?.state != .sent {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(hub.sent("POST", path).count == 2)
+        #expect(app.chat(key).pending.first?.state == .sent)
+        #expect(app.chat(key).pending.first?.id != originalID)
+    }
+
+    @MainActor @Test func keepingCurrentEffortAfterALostChangeRequeuesFailedFollowUpsInOrder() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/sessions/box/s1/messages"
+        hub.on("POST", path, json: #"{"ok":true}"#)
+        let app = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        app.forgetRestoredForTests()
+        app.apiForTests = hub.client
+        app.linksUpForTests = true
+        let row = try session(#","effort":"low","agent":"claude""#)
+        let key = row.key
+        app.applySessions([key.machineRef: [row]])
+
+        var first = PendingMessage(text: "first", images: [], state: .failed)
+        first.requiredEffort = "high"
+        first.failure = "missing confirmation"
+        first.stalledSince = .distantPast
+        first.refused = true
+        var second = PendingMessage(text: "second", images: [], state: .failed)
+        second.requiredEffort = "low"
+        var uncertain = PendingMessage(text: "check the receipt", images: [], state: .failed)
+        uncertain.requiredEffort = "high"
+        uncertain.mayHaveArrived = true
+        let store = app.chat(key)
+        store.pending = [first, second, uncertain]
+
+        #expect(app.canKeepOutboxEffort(key, effort: "low"))
+        await app.keepCurrentEffort(key, effort: "low")
+        #expect(store.pending.map(\.requiredEffort) == ["low", "low", "high"])
+        #expect(store.pending.map(\.state) == [.waiting, .waiting, .failed])
+        #expect(store.pending.map(\.id) == [first.id, second.id, uncertain.id])
+        #expect(store.pending[0].failure == nil)
+        #expect(store.pending[0].stalledSince == nil)
+        #expect(!app.canKeepOutboxEffort(key, effort: "low"))
+
+        for _ in 0..<300 where store.pending.prefix(2).contains(where: { $0.state != .sent }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let texts = try hub.sent("POST", path).map { request in
+            let body = try #require(request.body)
+            return (try JSONSerialization.jsonObject(with: body) as? [String: Any])?["text"] as? String
+        }
+        #expect(texts == ["first", "second"])
+        #expect(store.pending.map(\.state) == [.sent, .sent, .failed])
+        #expect(store.pending[0].id != first.id)
+        #expect(store.pending[1].id == second.id)
+        #expect(store.pending[2] == uncertain)
+    }
+
+    @MainActor @Test func retryAfterALostChangeUsesTheCurrentEffort() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/sessions/box/s1/messages"
+        hub.on("POST", path, json: #"{"ok":true}"#)
+        let app = AppModel(stateFolder: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        app.forgetRestoredForTests()
+        app.apiForTests = hub.client
+        app.linksUpForTests = false
+        let row = try session(#","effort":"low","agent":"claude""#)
+        let key = row.key
+        app.applySessions([key.machineRef: [row]])
+
+        var failed = PendingMessage(text: "follow-up", images: [], state: .failed)
+        failed.requiredEffort = "high"
+        failed.refused = true
+        let store = app.chat(key)
+        store.pending = [failed]
+        app.retry(key, failed)
+
+        for _ in 0..<300 where store.pending.first?.state == .sending {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(store.pending.first?.state == .waiting)
+        #expect(hub.sent("POST", path).isEmpty)
+        app.linksUpForTests = true
+        app.flushOutbox()
+        for _ in 0..<300 where store.pending.first?.state != .sent {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(hub.sent("POST", path).count == 1)
+        #expect(store.pending.first?.state == .sent)
+        #expect(store.pending.first?.requiredEffort == nil)
+        #expect(store.pending.first?.id != failed.id)
+    }
+
     /// "Other Model…" (#1644): a typed ID goes through …/modes like a listed one; the list it comes with is the
     /// session's launcher's.
     @Test func aTypedModelGoesThroughModes() async throws {

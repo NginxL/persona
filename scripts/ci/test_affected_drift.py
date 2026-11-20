@@ -4,10 +4,10 @@ The drift test plans a probe set of tracked paths with check-fast (--dry-run --e
 with CI's lanes (scripts/ci/paths.py) and the watcher's (scripts/operations/pr_watch_verify.py), and with the readers
 affected_drift.Readers works out from the tests themselves (the Go packages, runtime packages and scripts suites
 check-fast must run where CI runs a whole lane). The probes are derived, never listed: up to two tracked files for
-every pattern of CI's lanes, the first file of every top-level directory and of each directory below it, every tracked
-path check-fast.sh names, and every path that has a reader. A new mapping in one of the three that the others miss
-fails here, and so does a reader check-fast stops finding; scripts/ci/affected_drift.py prints the same comparison for
-every tracked file.
+every pattern of CI's lanes and of check-fast's table (scripts/ci/check_fast_map.py), every suite the table names, the
+first file of every top-level directory and of each directory below it, every tracked path check-fast.sh names, and
+every path that has a reader. A new mapping in one of the three that the others miss fails here, and so does a reader
+check-fast stops finding; scripts/ci/affected_drift.py prints the same comparison for every tracked file.
 """
 import fnmatch
 from pathlib import Path
@@ -20,6 +20,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import affected_drift  # noqa: E402
+import check_fast_map  # noqa: E402
 import paths  # noqa: E402
 import pr_watch_verify  # noqa: E402
 
@@ -42,6 +43,7 @@ def probes(tracked, readers):
     found = set()
     patterns = [p for lane, lane_patterns in paths.FILTERS.items() if lane != "scripts" for p in lane_patterns]
     patterns += paths.SHARED
+    patterns += check_fast_map.patterns() + check_fast_map.suites()
     names = _NAMED.findall((ROOT / "scripts/test/check-fast.sh").read_text())
     patterns += [expanded.rstrip(".,;)") for name in names for expanded in _braces(name)]
     for pattern in patterns:

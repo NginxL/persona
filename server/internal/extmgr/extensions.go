@@ -585,6 +585,16 @@ func (ps *extensions) changed(c extension.Change) {
 	ps.kept.forgetProvider(c.ID) // and give other values, or none
 	// A removed provider's Always rules for hand-offs go with it (secret_handoff_rules.go).
 	if c.Kind == "removed" {
+		if c.Old != nil && c.Old.Full != nil && ps.h.avatars != nil {
+			for _, api := range c.Old.Full.APIs() {
+				if api.Prefix == "lark" {
+					ps.h.avatars.Drop(larkAvatarCache(c.ID))
+				}
+			}
+			for _, source := range c.Old.Full.Messaging() {
+				ps.h.avatars.Drop(messagingAvatarCache(source.ID))
+			}
+		}
 		ps.forgetAssistantData(ctx, c.ID) // what the assistant read of its data directory goes with it
 		if n, err := ps.h.removeHandoffRules(ctx, c.ID, ""); err != nil {
 			ps.logf("plugin %s removed: its hand-off rules were not: %v", c.ID, err)
@@ -832,7 +842,7 @@ func (hp *hubExtension) setProxy(id string) {
 			if res.Header.Get("Cache-Control") == "" {
 				res.Header.Set("Cache-Control", "no-store")
 			}
-			return nil
+			return addLarkAvatarResponse(res)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Cache-Control", "no-store")

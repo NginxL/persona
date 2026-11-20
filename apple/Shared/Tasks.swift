@@ -484,6 +484,12 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var stage: String?
     /// The pull request its work is in (`pr_url`, #2768); nil from a hub without it.
     var prURL: String?
+    /// `code` or `general` (`stage_kind`, #3380): general work draws no stage bar, since its status already says how it
+    /// goes. Nil from a hub without it, which keeps the bar for any stage.
+    var stageKind: String?
+    /// Closed with nothing left to deploy (`stage_done`, #11590): the bar ends with Done after `stage`. False while open,
+    /// for work that went out or waits to, and from a hub without it.
+    var stageDone: Bool
     /// Started from the main conversation while Notify Main-Chat Tasks Only in the Main Chat was on (#1731, fixed when the hub made it):
     /// the main conversation tells the user about it, nothing else does (the island, notifications, badges, the watch).
     /// Its card in the conversation shows as always. False from a hub without it.
@@ -534,7 +540,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         case doneAt = "done_at", createdAt = "created_at", updatedAt = "updated_at", reopenedAt = "reopened_at", seenAt = "seen_at", planID = "plan_id", startError = "start_error",
              doneBy = "done_by", doneReason = "done_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
              remindAt = "remind_at", remindedAt = "reminded_at", partOf = "part_of", restoredAt = "restored_at",
-             somedayUntil = "someday_until"
+             somedayUntil = "someday_until", stageKind = "stage_kind", stageDone = "stage_done"
     }
 
     init(id: String, title: String, notes: String? = nil, doneAt: Date? = nil, createdAt: Date? = nil, updatedAt: Date? = nil,
@@ -544,7 +550,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
          remindedAt: Date? = nil, priority: String? = nil, ask: TodoAsk? = nil, reopenedAt: Date? = nil,
          delivery: TodoDelivery? = nil, manager: String? = nil, seenAt: Date? = nil, decisionReview: DecisionReview? = nil,
          orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil, check: TodoCheck? = nil,
-         partOf: String? = nil, after: [String]? = nil, restoredAt: Date? = nil, somedayUntil: Date? = nil) {
+         partOf: String? = nil, after: [String]? = nil, restoredAt: Date? = nil, somedayUntil: Date? = nil,
+         stageKind: String? = nil, stageDone: Bool = false) {
         self.id = id
         self.title = title
         self.notes = notes
@@ -581,6 +588,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.after = after
         self.restoredAt = restoredAt
         self.somedayUntil = somedayUntil
+        self.stageKind = stageKind
+        self.stageDone = stageDone
     }
 
     init(from decoder: Decoder) throws {
@@ -633,6 +642,9 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         after = (try? c.decodeIfPresent([String].self, forKey: .after)) ?? nil
         restoredAt = (try? c.decodeIfPresent(Date.self, forKey: .restoredAt)) ?? nil
         somedayUntil = (try? c.decodeIfPresent(Date.self, forKey: .somedayUntil)) ?? nil
+        // New (#3380, #11590): absent from older hubs; one that does not decode is as if there were none.
+        stageKind = (try? c.decodeIfPresent(String.self, forKey: .stageKind)) ?? nil
+        stageDone = (try? c.decodeIfPresent(Bool.self, forKey: .stageDone)) ?? false
     }
 
     /// An ended task cannot keep an old decision card alive.
@@ -728,6 +740,10 @@ nonisolated struct TodoDelivery: Codable, Hashable, Sendable {
     var gate: String?
     var unblock: String?
     var at: Date?
+
+    var waitsForOwner: Bool {
+        unblock == "user" && (state == "pr" || state == "merged" || state == "off")
+    }
 
     enum CodingKeys: String, CodingKey { case state, gate, unblock, at }
 

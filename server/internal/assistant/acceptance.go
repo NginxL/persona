@@ -64,7 +64,7 @@ type acceptAsk struct {
 	DueAt      time.Time `json:"due_at,omitzero"`
 	ByDefault  bool      `json:"by_default,omitempty"`
 	// AgentReply pauses the default while the supervisor checks an owner message in the task's Agent chat.
-	// It is not an option selection; only an explicit answer ends the decision.
+	// A handled reply takes the ask out of the owner's queue and leaves verification to the supervisor.
 	AgentReply *decisionAgentReply `json:"agent_reply,omitempty"`
 	// ByAssistant: a deployed task the supervising assistant accepted itself, not a big feature (ownerVerifies, #3205).
 	ByAssistant bool `json:"by_assistant,omitempty"`
@@ -83,6 +83,10 @@ type acceptAsk struct {
 	Response      string           `json:"response,omitempty"`
 	// Chosen: the option the owner chose when it was not the recommended one.
 	Chosen string `json:"chosen,omitempty"`
+	// Check: the recurring schedule whose progress check raised this decision (schedule_todo.go, #11587). The option
+	// the owner takes is about the supervisor's approach, so it goes to the task's supervisor, not its Agent
+	// (checkDecided).
+	Check string `json:"check,omitempty"`
 	// ForBriefing: a decision that can wait (#4930, decision_wait.go), raised without a push and without a card, while
 	// it waits for a briefing to bring it to the owner; cleared once one did, or once it was pushed after all, at
 	// PushedAt: its card is due from then (retryAcceptance).

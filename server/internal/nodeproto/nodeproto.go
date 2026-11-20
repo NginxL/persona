@@ -69,6 +69,8 @@ const (
 	AssistantSupervisionInstructions = "assistant_supervision_instructions"
 	// SessionSkills: session.skills and validated explicit skill selections on ordinary session.send.
 	SessionSkills = "session_skills_v1"
+	// TaskExecution validates task directories and refuses execution substitutions.
+	TaskExecution = "task_execution"
 	// OwnerControls separates verified owner actions from legacy RPCs that can carry arbitrary params.
 	OwnerControls = "owner_controls_v1"
 	// SourcePermissions isolates node-attested Agent messages from caller parameters.
@@ -171,6 +173,9 @@ const (
 	// "Tool search behind a gateway"). Only then do the hub's words for tool_search_unsupported say Persona now sends
 	// every tool there; an older node keeps tool search on, and a retry meets the same refusal.
 	AssistantToolSearchFallback = "assistant_tool_search_fallback"
+	// AgentDirsBlocked: node.configure's agent_dirs_blocked, the Agent folder rules that block (#10053): the node keeps
+	// sessions working there out of every list and sends nothing of them. Without it the manager only hides them.
+	AgentDirsBlocked = "agent_dirs_blocked"
 	// NodeLanes: the node answers rpc.lanes and frames its connection when the manager asks, its messages on the lanes of
 	// ControlLane and BulkLane (docs/protocol/protocol.md "Lanes"). Without it the manager never asks, and the connection
 	// stays JSON lines.
@@ -227,8 +232,14 @@ const (
 // (nodeupdate.Restart), and persona-link's scheduled-task supervisor restarts it without its usual delay.
 const RestartExitCode = 75
 
+// TaskWorkspace supports explicit backend-created task workspaces.
+const TaskWorkspace = "task_workspace_v1"
+
+// MarkdownCloseout means the node recognizes the terminal-readable work report as well as archived XML.
+const MarkdownCloseout = "closeout.markdown.v1"
+
 // Announced is what a node built from this code announces.
-var Announced = []string{TaskInstructions, SourcePermissions, OwnerControls, SessionSkills, ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, MCPWait, Sessions, SessionEchoStatus, ModelConfiguration, AssistantConfigDir, AssistantSupervisionInstructions, AssistantServiceTier, SessionStartSpeed, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow, LauncherSwitchIdle, PaneCwd, NodeUpdateIdle, PaneNewSpace, MachineDiagnose, StartGoal, StartContinue, LauncherCheckAssistantTurn, StartAnswer, AssistantToolSearchFallback, NodeLanes}
+var Announced = []string{MarkdownCloseout, TaskWorkspace, TaskInstructions, SourcePermissions, OwnerControls, SessionSkills, ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, MCPWait, Sessions, SessionEchoStatus, ModelConfiguration, AssistantConfigDir, AssistantSupervisionInstructions, AssistantServiceTier, SessionStartSpeed, TaskExecution, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow, LauncherSwitchIdle, PaneCwd, NodeUpdateIdle, PaneNewSpace, MachineDiagnose, StartGoal, StartContinue, LauncherCheckAssistantTurn, StartAnswer, AssistantToolSearchFallback, AgentDirsBlocked, NodeLanes}
 
 // ShareProjection is the bounded complete-source sharing projection, not light Items.
 const ShareProjection = "share_projection.v1"

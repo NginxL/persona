@@ -1,10 +1,13 @@
 package node
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
 func closeoutTranscript(t *testing.T, lines ...string) string {
@@ -44,6 +47,31 @@ func TestTurnWorked(t *testing.T) {
 	}
 	if turnWorked("") || turnWorked(filepath.Join(t.TempDir(), "missing.jsonl")) {
 		t.Error("an unreadable transcript counts as a turn that worked")
+	}
+}
+
+func TestStopRecognizesOnlyTheCompleteTerminalReport(t *testing.T) {
+	n, asked := closeoutHookNode(t, func(method string, raw json.RawMessage) (any, error) {
+		var request assistantwire.CloseoutCheckRequest
+		if method != assistantwire.MethodCloseoutCheck || json.Unmarshal(raw, &request) != nil || request.SessionID != "s" {
+			t.Errorf("unexpected request %s %s", method, raw)
+		}
+		return assistantwire.CloseoutCheckResponse{Reason: "Please report the work already done."}, nil
+	})
+	p := closeoutTranscript(t, coUserAsk, coEditCall, coToolResult, coAnswer)
+	report := "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n\n---"
+	for _, tc := range []struct {
+		text string
+		hold bool
+	}{{report, false}, {strings.Replace(report, "Status: done", "Status: blocked", 1), false},
+		{"<closeout status=\"done\">verified: four entries</closeout>", false},
+		{strings.TrimSuffix(report, "---"), true}, {"    " + report, true}, {"> " + strings.ReplaceAll(report, "\n", "\n> "), true}} {
+		in := hookInput{HookEventName: "Stop", SessionID: "s", TranscriptPath: p, LastAssistantMessage: tc.text}
+		before := asked.Load()
+		got := n.closeoutStop(t.Context(), sockRequest{}, in)
+		if (got != nil) != tc.hold || (asked.Load() > before) != tc.hold {
+			t.Errorf("held = %v for %q", got, tc.text)
+		}
 	}
 }
 

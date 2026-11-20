@@ -47,13 +47,6 @@ func tierRank(t string) int {
 	return 0
 }
 
-func clipRunesTo(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n])
-	}
-	return s
-}
-
 const (
 	mergeMax    = 20 // rows one merge takes
 	mergeCtxMax = 6000

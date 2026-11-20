@@ -38,7 +38,7 @@ var (
 	// Stable read commands also work when the manager has not configured CLI risk discovery, or the lookup gets no
 	// answer (a wrapper on the login shell's PATH that cannot find the real lark-cli from the node's, #8389). Only an
 	// unknown risk falls back here: what lark-cli reports wins. Each is "Risk: read" in lark-cli 1.0.54.
-	larkCLIKnownReads = map[string]bool{"docs/+fetch": true, "im/+chat-messages-list": true, "im/+messages-search": true,
+	larkCLIKnownReads = map[string]bool{"docs/+fetch": true, "contact/+search-user": true, "im/+chat-messages-list": true, "im/+messages-search": true,
 		"im/+messages-mget": true, "im/+threads-messages-list": true, "im/+chat-search": true}
 	// larkCLIReadVerbs name what a command does when lark-cli cannot be asked (#11193): a shortcut (`calendar +agenda`,
 	// `task +get-my-tasks`, `im +chat-messages-list`) or a generated method (`calendar events list`) named by one of them

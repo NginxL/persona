@@ -1089,8 +1089,14 @@ export function RowCheck({ ops, x }: { ops: RowOps | undefined; x: OpTarget }) {
   );
 }
 
-/** The ⋯ at a row's end (hover devices show it on hover, and on focus): the same menu as a right click. */
-export function RowMore({ ops, x, open }: { ops: RowOps | undefined; x: OpTarget; open: () => void }) {
-  if (!ops) return null;
-  return <IconButton icon="more" label={t("files-ops.row_more", { name: x.name })} onClick={(e) => ops.menu(x, { anchor: e.currentTarget }, open)} size={26} iconSize={13} />;
+/** A row's end: Copy path and the ⋯ with the same menu as a right click, shown on hover (or focus). A touch screen, with
+ *  no hover and on iOS no right click, always shows the ⋯, its only way to the row's menu (which has Copy path, so not
+ *  that button as well). */
+export function RowEnd({ ops, x, open }: { ops: RowOps | undefined; x: OpTarget; open: () => void }) {
+  return (
+    <span className="flex items-center pr-2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+      <IconButton icon="copy" label={t("files-ops.copy_path")} onClick={() => copyText(x.path)} size={26} iconSize={13} className="[@media(hover:none)]:hidden" />
+      {ops && <IconButton icon="more" label={t("files-ops.row_more", { name: x.name })} onClick={(e) => ops.menu(x, { anchor: e.currentTarget }, open)} size={26} iconSize={13} />}
+    </span>
+  );
 }

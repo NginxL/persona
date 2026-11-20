@@ -184,6 +184,9 @@
   "pi_too_title": "pi on the computers in its scope can use this provider too, without a models.json",
   "show_botmux": "Show botmux sessions in Agents",
   "show_botmux_hint": "Syncs across devices on this hub. Hiding sessions here keeps them available for tasks.",
+  "use_herdr_tab_name": "Use the herdr tab name as the session name",
+  "use_herdr_tab_name_hint": "Shows the tab name first and syncs this preference across devices on this hub.",
+  "herdr_tab_name_saving": "Saving session naming preference…",
   "show_botmux_inventory": "A computer’s “Also show botmux sessions” switch controls which sessions reach the hub.",
   "show_botmux_computers": "Open Computers",
   "botmux_saving": "Saving…"

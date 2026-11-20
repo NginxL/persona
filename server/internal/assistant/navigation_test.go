@@ -290,3 +290,137 @@ func TestNavigationOverview(t *testing.T) {
 		t.Fatalf("PUT %d cards: %d, want 200", overviewCardsMost, code)
 	}
 }
+
+// Overview's own sections (#10905) are entries of the same list, {"section", "hidden"?}: kept, answered and pushed as
+// the apps write them, of their own shape; a list of only cards from an app that does not know them (#9745's web)
+// leaves them where they are, and Reset ([]) takes them back to the default with the cards.
+func TestNavigationOverviewSections(t *testing.T) {
+	s, hub := navigationService(t, newSettingsBoardStore())
+	keys := func(v any) string {
+		var out []string
+		for _, e := range v.([]any) {
+			m := e.(map[string]any)
+			k := fmt.Sprint(m["section"])
+			if m["section"] == nil {
+				k = fmt.Sprintf("%v/%v", m["extension"], m["id"])
+			}
+			if m["hidden"] == true {
+				k += "!"
+			}
+			out = append(out, k)
+		}
+		return strings.Join(out, " ")
+	}
+	arranged := `[{"section":"in_progress"},{"extension":"example-quota","id":"left"},{"section":"needs_you"},` +
+		`{"extension":"example-today","id":"agenda","span":"full"},{"section":"working","hidden":true},{"section":"computers"}]`
+	code, got := navigationCall(t, s, "PUT", `{"overview":`+arranged+`}`, roleFull)
+	const want = "in_progress example-quota/left needs_you example-today/agenda working! computers"
+	if code != http.StatusOK || keys(got["overview"]) != want {
+		t.Fatalf("PUT sections: %d %v", code, got)
+	}
+	if sent := hub.take(); len(sent) != 1 || keys(sent[0]["overview"]) != want {
+		t.Fatalf("told %v", sent)
+	}
+	// a section is only its id (and hidden): no card's fields come back with it
+	first := got["overview"].([]any)[0].(map[string]any)
+	if len(first) != 1 || first["section"] != "in_progress" {
+		t.Fatalf("a section came back as %v", first)
+	}
+	if _, got = navigationCall(t, s, "GET", "", roleAnswer); keys(got["overview"]) != want {
+		t.Fatalf("GET: %v", got)
+	}
+
+	// #9745's web moves its cards (Agenda first, Needs me installed since) and knows no section: they stay where they are
+	navigationCall(t, s, "PUT", `{"overview":[{"extension":"example-today","id":"agenda"},{"extension":"example-today","id":"needs"},`+
+		`{"extension":"example-quota","id":"left","hidden":true}]}`, roleFull)
+	const merged = "in_progress example-today/agenda needs_you example-today/needs example-quota/left! working! computers"
+	if _, got = navigationCall(t, s, "GET", "", roleFull); keys(got["overview"]) != merged {
+		t.Fatalf("a list of only cards moved the sections: %s, want %s", keys(got["overview"]), merged)
+	}
+	if sent := hub.take(); len(sent) != 1 || keys(sent[0]["overview"]) != merged {
+		t.Fatalf("told %v, want what was kept", sent)
+	}
+	// fewer cards than before: the others' places go, the sections stay
+	navigationCall(t, s, "PUT", `{"overview":[{"extension":"example-quota","id":"left"}]}`, roleFull)
+	if _, got = navigationCall(t, s, "GET", "", roleFull); keys(got["overview"]) != "in_progress example-quota/left needs_you working! computers" {
+		t.Fatalf("one card: %s", keys(got["overview"]))
+	}
+	// a list that names a section is taken as it is
+	navigationCall(t, s, "PUT", `{"overview":[{"extension":"example-quota","id":"left"},{"section":"computers"}]}`, roleFull)
+	if _, got = navigationCall(t, s, "GET", "", roleFull); keys(got["overview"]) != "example-quota/left computers" {
+		t.Fatalf("a list with a section: %s", keys(got["overview"]))
+	}
+	// Reset takes the sections back with the cards
+	navigationCall(t, s, "PUT", `{"overview":`+arranged+`}`, roleFull)
+	navigationCall(t, s, "PUT", `{"overview":[]}`, roleFull)
+	if _, got = navigationCall(t, s, "GET", "", roleFull); got["overview"] == nil || len(got["overview"].([]any)) != 0 {
+		t.Fatalf("Reset: %v", got)
+	}
+	// a section a newer web has (an id of the shape) is kept
+	navigationCall(t, s, "PUT", `{"overview":[{"section":"later_section"},{"section":"in_progress"}]}`, roleFull)
+	if _, got = navigationCall(t, s, "GET", "", roleFull); keys(got["overview"]) != "later_section in_progress" {
+		t.Fatalf("a newer web's section: %s", keys(got["overview"]))
+	}
+	hub.take()
+
+	for _, bad := range []string{
+		`{"overview":[{"section":"In-progress"}]}`,
+		`{"overview":[{"section":"in progress"}]}`,
+		`{"overview":[{"section":"` + strings.Repeat("x", 33) + `"}]}`,
+		`{"overview":[{"section":"in_progress","extension":"example-quota","id":"left"}]}`,
+		`{"overview":[{"section":"in_progress","id":"left"}]}`,
+		`{"overview":[{"section":"in_progress","span":"full"}]}`,
+		`{"overview":[{"section":"in_progress"},{"section":"in_progress","hidden":true}]}`,
+		`{"overview":[{"section":""}]}`,
+		`{"overview":[{"section":1}]}`,
+	} {
+		if code, _ := navigationCall(t, s, "PUT", bad, roleFull); code != http.StatusBadRequest {
+			t.Fatalf("PUT %s: %d, want 400", bad, code)
+		}
+	}
+	if sent := hub.take(); len(sent) != 0 {
+		t.Fatalf("refused changes told the apps %v", sent)
+	}
+
+	// cards and sections count together toward the most there may be; a list of only cards that would go past it
+	// with the stored sections is taken as it is
+	var many []string
+	for i := 0; i < overviewCardsMost; i++ {
+		many = append(many, fmt.Sprintf(`{"extension":"example-%d","id":"card"}`, i))
+	}
+	if code, _ := navigationCall(t, s, "PUT", `{"overview":[{"section":"in_progress"},`+strings.Join(many, ",")+`]}`, roleFull); code != http.StatusBadRequest {
+		t.Fatalf("PUT %d cards and a section: %d, want 400", overviewCardsMost, code)
+	}
+	if code, got := navigationCall(t, s, "PUT", `{"overview":[`+strings.Join(many, ",")+`]}`, roleFull); code != http.StatusOK || len(got["overview"].([]any)) != overviewCardsMost {
+		t.Fatalf("PUT %d cards over stored sections: %d", overviewCardsMost, code)
+	}
+}
+
+// keepSections on its own: where the cards of a list that names no section go among the stored sections.
+func TestKeepSections(t *testing.T) {
+	card := func(id string) overviewPlace { return overviewPlace{Extension: "example", ID: id} }
+	section := func(id string) overviewPlace { return overviewPlace{Section: id} }
+	show := func(l []overviewPlace) string {
+		var out []string
+		for _, c := range l {
+			out = append(out, c.Section+c.ID)
+		}
+		return strings.Join(out, " ")
+	}
+	for _, c := range []struct {
+		stored, list []overviewPlace
+		want         string
+	}{
+		{nil, []overviewPlace{card("a")}, "a"},
+		{[]overviewPlace{card("a"), card("b")}, []overviewPlace{card("b"), card("a")}, "b a"},
+		{[]overviewPlace{section("s"), card("a"), section("t"), card("b")}, []overviewPlace{card("b"), card("a"), card("c")}, "s b t a c"},
+		{[]overviewPlace{section("s"), section("t")}, []overviewPlace{card("a")}, "s t a"},
+		{[]overviewPlace{card("a"), section("s"), card("b")}, []overviewPlace{card("c")}, "c s"},
+		{[]overviewPlace{section("s")}, nil, ""},
+		{[]overviewPlace{section("s"), card("a")}, []overviewPlace{section("t"), card("a")}, "t a"},
+	} {
+		if got := show(keepSections(c.stored, c.list)); got != c.want {
+			t.Errorf("keepSections(%s, %s) = %q, want %q", show(c.stored), show(c.list), got, c.want)
+		}
+	}
+}

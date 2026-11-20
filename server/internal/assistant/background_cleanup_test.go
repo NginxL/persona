@@ -33,6 +33,10 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 		tree.armed = false
 		tree.runs.Done()
 	}
+	if tree.wakeTimer != nil {
+		tree.wakeTimer.Stop()
+		tree.wakeTimer, tree.wake = nil, time.Time{}
+	}
 	tree.mu.Unlock()
 
 	s.todoViewsStop()

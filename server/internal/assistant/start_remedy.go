@@ -107,7 +107,7 @@ func (s *Service) beginRemedy(ctx context.Context, planID string, i int, t PlanT
 		return false
 	}
 	todo, ok := s.todoNow(t.TodoID)
-	if !ok || todo.Supervision == nil || todo.DoneAt != nil || s.agentSupervised(todo) { // a leader has no start remedies
+	if !ok || todo.Supervision == nil || todo.DoneAt != nil || s.agentSupervised(todo) { // a task leader's agent has no start remedies
 		return false
 	}
 	attempt := 0
@@ -150,14 +150,23 @@ func (s *Service) remedyOf(ctx context.Context, id string) (Todo, *TaskPlan, int
 	return todo, p, i, nil
 }
 
-// remedyTool is the task a remedy tool names, checked: the main conversation's own, and its start being remedied.
-func (s *Service) remedyTool(ctx context.Context, self, id string) (Todo, *TaskPlan, int, *StartRemedy, error) {
-	if !s.isMain(ctx, self) {
-		return Todo{}, nil, 0, nil, errors.New("only the main conversation remedies a task's start")
+// startRemedyAllowed limits start remedies to the main conversation or the task's current configured leader. Other
+// leaders, ordinary side conversations, former leaders and the background supervisor cannot operate this task.
+func (s *Service) startRemedyAllowed(ctx context.Context, self string, todo Todo) bool {
+	if s.isMain(ctx, self) {
+		return true
 	}
+	return todo.Supervision != nil && todo.Supervision.Supervisor == self && s.isLeader(ctx, self)
+}
+
+// remedyTool is the task a remedy tool names, checked: the main conversation or its current leader, and its start being remedied.
+func (s *Service) remedyTool(ctx context.Context, self, id string) (Todo, *TaskPlan, int, *StartRemedy, error) {
 	todo, p, i, err := s.remedyOf(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return todo, nil, 0, nil, err
+	}
+	if !s.startRemedyAllowed(ctx, self, todo) {
+		return todo, nil, 0, nil, errors.New("only the main conversation or the task's current leader remedies its start")
 	}
 	r := p.Tasks[i].Start
 	if r == nil || r.State != remedying {
@@ -256,12 +265,12 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 	if err != nil {
 		return "", err
 	}
-	if !s.isMain(ctx, self) {
-		return "", errors.New("only the main conversation retries a task's start")
-	}
 	todo, p, i, err := s.remedyOf(ctx, strings.TrimSpace(a.TodoID))
 	if err != nil {
 		return "", err
+	}
+	if !s.startRemedyAllowed(ctx, self, todo) {
+		return "", errors.New("only the main conversation or the task's current leader retries its start")
 	}
 	pt := p.Tasks[i]
 	if pt.RequestGate != "" || s.planRequestGate(pt) != "" {
@@ -393,7 +402,7 @@ func (s *Service) giveUpStart(ctx context.Context, id, by string, told bool) {
 	if pt.Start == nil || pt.Start.State != remedying {
 		return
 	}
-	if s.taskStartOnWay(id) {
+	if s.taskStartOnWay(id) || pt.Queue != nil {
 		return
 	}
 	reason := cmp.Or(pt.Start.Reason, pt.Error)
@@ -444,7 +453,7 @@ func (s *Service) remedyWatch(ctx context.Context, t Todo, now time.Time, histor
 	if err != nil {
 		return
 	}
-	if r := p.Tasks[i].Start; r != nil && r.State == remedying && !r.Until.IsZero() && now.After(r.Until) {
+	if r := p.Tasks[i].Start; r != nil && r.State == remedying && p.Tasks[i].Queue == nil && !r.Until.IsZero() && now.After(r.Until) {
 		s.giveUpStart(ctx, t.ID, "hub", false)
 	}
 }

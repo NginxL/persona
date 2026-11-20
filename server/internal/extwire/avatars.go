@@ -9,7 +9,7 @@ import (
 // source names (an Inbox thing, a conversation, a message's sender, an account), and one hub path the apps load it
 // from. A source's value is an https address the manager fetches (on the open internet only) or one of the source's
 // own media refs whose bytes its extension gives; either way it names fixed bytes (a changed picture gets a new
-// value). The apps never see the value: the lists give them AvatarURL's path, the route draws the picture.
+// value). The lists give apps AvatarURL's path; thread pages also keep their legacy refs for older clients.
 
 // AvatarsRoute answers the picture an AvatarURL path names, drawn at ?size=<px> (the manager's, extmgr/avatars.go).
 const AvatarsRoute = "GET /api/v1/avatars/{source}/{value}"

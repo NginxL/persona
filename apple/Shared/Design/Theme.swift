@@ -552,6 +552,9 @@ nonisolated enum Theme {
         static let dot: CGFloat = 8
         static let dotL: CGFloat = 9
         static let dotXL: CGFloat = 10
+        /// How much of its circle the working arc (◐) draws, and the line it is drawn with (#10465).
+        static let workingArcSweep: CGFloat = 0.72
+        static let workingArcLine: CGFloat = 2
         static let markXS: CGFloat = 12
         static let markS: CGFloat = 14
         static let mark: CGFloat = 15
@@ -789,6 +792,9 @@ nonisolated enum Theme {
         /// A compositor request, not a guaranteed upper bound on rendering frequency.
         static let breathMinimumFPS: Float = 10
         static let breathPreferredFPS: Float = 30
+        /// One turn of the working arc (◐, a to-do being worked on, #10465), the To-dos list's only other loop: paused
+        /// off screen, still with Reduce Motion.
+        static let workingArcTurn: TimeInterval = 1
         /// What opens in the chat fades in over the space it takes; its height does not animate (`unfolding`). What
         /// closes there goes at once (#3005); `conceal` is for what fades away elsewhere (a menu, an inbox event).
         static let revealTime = 0.28

@@ -5,7 +5,7 @@ import Foundation
 /// (#1731) sessions left out, wrapping around from the open one.
 enum NextNeedsYou {
     static func next(after current: SessionKey?, in sessions: [Session], muted: (Session) -> Bool) -> SessionKey? {
-        let order = sessions.filter { $0.state == .needsYou && !muted($0) }
+        let order = sessions.filter { $0.hiddenByDirectory != true && $0.state == .needsYou && !muted($0) }
             .sorted { ($0.stateSince ?? .distantPast) < ($1.stateSince ?? .distantPast) }
             .map(\.key)
         guard !order.isEmpty else { return nil }

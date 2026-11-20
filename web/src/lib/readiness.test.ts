@@ -141,7 +141,8 @@ describe("turn errors", () => {
   it("names the affected launcher and keeps it with the repair action", async () => {
     await initI18n("en");
     try {
-      expect(turnErrorFix("not_logged_in", "team-relay")?.title).toBe("team-relay · Model not connected: Claude Code CLI isn't signed in");
+      expect(turnErrorFix("not_logged_in", "team-relay")?.title).toBe("team-relay · Model not connected: not signed in");
+      expect(turnErrorFix("not_logged_in", "claude")?.title).toBe("claude · Model not connected: Claude Code CLI isn't signed in");
       expect(turnErrorFix("auth_failed", "team-relay")?.title).toBe("team-relay · Model not connected: the key is wrong");
       expect(turnErrorFix("model_route", "team-relay")?.title).toBe("team-relay · Model not connected: this model isn't available");
       expect(turnErrorFix("auth_failed", "team-relay")?.launcher).toBe("team-relay");
@@ -185,12 +186,36 @@ describe("turn errors", () => {
     try {
       for (const [lang, [cli, desktop, command, key]] of Object.entries(words)) {
         await initI18n(lang);
-        const fix = turnErrorFix("not_logged_in")!;
+        // The built-in Claude launcher keeps these words; without launcher metadata the card is generic (#10918).
+        const fix = turnErrorFix("not_logged_in", "claude")!;
         expect(fix.title).toContain(cli);
         expect(fix.detail).toContain(desktop);
         expect(fix.detail).toContain(command);
         expect(fix.detail).toContain(key);
+        const unknown = turnErrorFix("not_logged_in")!;
+        expect(unknown.title).not.toContain(cli);
+        expect(unknown.detail).not.toContain(desktop);
       }
+    } finally {
+      await initI18n("zh-Hans");
+    }
+  });
+
+  it("names another launcher and asks it to sign in, and says something generic with no launcher (#10918)", async () => {
+    await initI18n("en");
+    try {
+      const other = turnErrorFix("not_logged_in", "team-relay")!;
+      expect(other.title).toBe("team-relay · Model not connected: not signed in");
+      expect(other.detail).toContain("team-relay");
+      expect(other.detail).not.toContain("Claude");
+      expect(other.action).toBe("connect_model");
+      expect(other.launcher).toBe("team-relay");
+
+      const unknown = turnErrorFix("not_logged_in")!;
+      expect(unknown.title).toBe("Model not connected: not signed in");
+      expect(unknown.detail).toBe("Sign in to the model service on that computer, or use an API key instead.");
+      expect(unknown.action).toBe("connect_model");
+      expect(unknown.launcher).toBeUndefined();
     } finally {
       await initI18n("zh-Hans");
     }

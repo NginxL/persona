@@ -124,10 +124,10 @@
     <string name="settings_notify_quiet_end">終了</string>
     <string name="settings_notify_quiet_footer">この時間帯は、エージェントの完了は通知しません（朝の「今日の確認事項」カードにまとまります）。対応が必要なものは音を鳴らさずに届きます。アシスタントに頼んだリマインダーはいつもどおり届きます。いずれかのデバイスがおやすみ時間の間は、チャットボットからの未回答カードのお知らせも後回しにします。このスマートフォンのタイムゾーンで判断します。</string>
     <string name="settings_notify_quiet_footer_zone">この時間帯は、エージェントの完了は通知しません（朝の「今日の確認事項」カードにまとまります）。対応が必要なものは音を鳴らさずに届きます。アシスタントに頼んだリマインダーはいつもどおり届きます。いずれかのデバイスがおやすみ時間の間は、チャットボットからの未回答カードのお知らせも後回しにします。現在は設定した場所の%1$sで判断します。ここで変更すると、このスマートフォンのタイムゾーンで判断します。</string>
-    <string name="settings_notify_low_distraction">通知を抑えるモード</string>
+    <string name="settings_notify_low_distraction">プッシュ通知の優先度フィルター</string>
     <string name="settings_notify_low_distraction_subtitle">対応が必要なことだけ通知し、ほかはブリーフィングに回します</string>
     <string name="settings_notify_low_distraction_footer">すべてのデバイスに適用されます。オンにすると、質問、承認、あなたにしかできない判断、設定したリマインダー、メイン会話からのお知らせは通常どおり通知されます。タスクの結果、「確認してください」の依頼、ほかの会話のお知らせはブリーフィングと「保留された通知」に回り、エージェントの完了は通知されません。</string>
-    <string name="settings_notify_low_distraction_save_failed">保存できなかったため、通知を抑えるモードを元に戻しました。</string>
+    <string name="settings_notify_low_distraction_save_failed">保存できなかったため、プッシュ通知の優先度フィルターを元に戻しました。</string>
     <string name="settings_reading">読み込み中</string>
     <string name="settings_retry_read">再読み込み</string>
     <string name="settings_saving">保存中…</string>

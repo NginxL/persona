@@ -18,5 +18,7 @@
   "pin_rotated_pending": "官方签名公钥已更新，目录用新公钥验签通过前，暂不允许安装",
   "settings_load_failed": "无法加载市场镜像设置，请重试。",
   "settings_save_failed": "无法保存市场镜像设置，请重试。",
-  "settings_invalid": "镜像 URL 无效。请使用不含凭据、查询或片段的 HTTPS 地址；目录须填写完整 JSON URL。"
+  "settings_invalid": "镜像 URL 无效。请使用不含凭据、查询或片段的 HTTPS 地址；目录须填写完整 JSON URL。",
+  "not_from_market": "这个扩展不是从扩展市场安装的",
+  "refresh_rate_limited": "最近已经要求这个市场重新读取过了，请稍后再试"
 }

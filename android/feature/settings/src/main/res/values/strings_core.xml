@@ -125,10 +125,10 @@
     <string name="settings_notify_quiet_end">Until</string>
     <string name="settings_notify_quiet_footer">During these hours you\'re not told when an agent finishes (the morning\'s Today card sums it up), and things that need you arrive without a sound. Reminders you asked the assistant for still come as usual. A chat bot\'s nudges about unanswered cards also wait while any of your devices is in its quiet hours. In this phone\'s time zone.</string>
     <string name="settings_notify_quiet_footer_zone">During these hours you\'re not told when an agent finishes (the morning\'s Today card sums it up), and things that need you arrive without a sound. Reminders you asked the assistant for still come as usual. A chat bot\'s nudges about unanswered cards also wait while any of your devices is in its quiet hours. They\'re in %1$s, where they were set; changing them here puts them in this phone\'s time zone.</string>
-    <string name="settings_notify_low_distraction">Low-distraction mode</string>
+    <string name="settings_notify_low_distraction">Push grading</string>
     <string name="settings_notify_low_distraction_subtitle">Only what needs you notifies you; the rest waits for the briefing</string>
     <string name="settings_notify_low_distraction_footer">For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation\'s notices still notify you; task results, “Please verify” requests and other conversations\' notices wait for the briefing and Held pushes, and finished agents stay silent.</string>
-    <string name="settings_notify_low_distraction_save_failed">Couldn\'t save; low-distraction mode is back as it was.</string>
+    <string name="settings_notify_low_distraction_save_failed">Couldn\'t save; push grading is back as it was.</string>
     <string name="settings_reading">Reading</string>
     <string name="settings_retry_read">Try again</string>
     <string name="settings_saving">Saving…</string>

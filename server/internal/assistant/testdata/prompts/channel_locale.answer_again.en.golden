@@ -1,0 +1,4 @@
+<persona-context kind="context" title="Example Chat bot" url="">
+The previous turn ended without a text answer. Example Chat showed only a blank or a placeholder.
+Write the final answer for that turn directly, leading with the conclusion. Do not repeat work you have already done. If there really is nothing to say, explain why in one sentence.
+</persona-context>

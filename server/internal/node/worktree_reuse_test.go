@@ -80,7 +80,7 @@ func TestWorktreePrepareBranchLookupDoesNotChangeCreation(t *testing.T) {
 			t.Fatalf("unused branch %q should preserve normal preparation: %v %v", branch, got, err)
 		}
 	}
-	if _, err := w.n.worktreeCreate(t.Context(), "", "", w.repo, "fix/reuse", filepath.Join(w.home, "duplicate")); err == nil {
+	if _, err := w.n.worktreeCreate(t.Context(), "", "", w.repo, "fix/reuse", filepath.Join(w.home, "duplicate"), "", nil); err == nil {
 		t.Fatal("general worktree creation must still refuse a branch checked out elsewhere")
 	}
 }

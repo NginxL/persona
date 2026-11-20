@@ -22,7 +22,6 @@ test('native catalog preserves new IDs, defaults and only advertised thinking va
 
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-models-'))
-  t.after(() => rmSync(home, { recursive: true, force: true }))
   const catalog = (value) => writeFileSync(join(home, 'catalog.json'), JSON.stringify(value))
   catalog({ models: entries })
   const agyDir = join(home, 'settings')
@@ -36,7 +35,7 @@ async function fixture(t, options = {}) {
   const n = await startFakeNode(t)
   const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, checkTimeoutMs: options.checkTimeoutMs, personadBin: '/missing', socketPath: n.path, log: () => {},
     modelsTimeoutMs: options.modelsTimeoutMs, catalogEveryMs: options.catalogEveryMs, catalogMaxMs: options.catalogMaxMs })
-  t.after(() => runtime.stop())
+  t.after(async () => { await runtime.stop(); rmSync(home, { recursive: true, force: true }) })
   runtime.start()
   await n.ready
   const calls = () => readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)

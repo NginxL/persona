@@ -41,6 +41,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		WhyOwner      string           `json:"why_owner"`
 		Options       []DecisionOption `json:"options"`
 		CostOfWaiting string           `json:"cost_of_waiting"`
+		QuestionQuote string           `json:"question_quote"`
 		// needs_user: the decision can wait for the next daily briefing instead of a push now (#4930, decision_wait.go).
 		CanWait bool `json:"can_wait"`
 		// accepted: what was done beyond the brief (#3822, task_brief_result.go).
@@ -154,8 +155,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	if a.UserCheck && verdict != reviewAccepted {
 		return "", fmt.Errorf("user_check applies to accepted only")
 	}
+	deliveryNote := ""
 	if verdict == reviewAccepted { // done_needs_delivery: its PR is live first (supervise_review_delivery.go)
-		if err := s.acceptedDeliveryError(ctx, t, strings.TrimSpace(a.Link), a.Outcome); err != nil {
+		if deliveryNote, err = s.acceptedDeliveryError(ctx, t, strings.TrimSpace(a.Link), a.Outcome); err != nil {
 			return "", err
 		}
 	}
@@ -170,11 +172,32 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		// Its supervisor is a task leader's agent, whose supervision messages do not know parked_due (task_leader.go).
 		return "", fmt.Errorf("task %s is supervised by a task leader agent: parking applies to tasks a conversation supervises", t.ID)
 	}
+	if verdict == reviewParked {
+		if err := s.verifyParkInteraction(t, park.Evidence); err != nil {
+			return "", err
+		}
+	}
+	var priorReply *decisionAgentReply
+	mayRaiseDecision := verdict == reviewNeedsUser || verdict == reviewRework && decided && t.Supervision != nil && t.Supervision.Round >= maxReworkRounds
+	if mayRaiseDecision && scheduledCheckOf(ctx) == "" {
+		priorReply = s.priorDecisionReply(ctx, t, cmp.Or(strings.TrimSpace(a.QuestionQuote), decision.Reason))
+	}
+	if priorReply != nil {
+		// Fence any older card answer or default while we hand the already-answered question back.
+		s.reviewDismissals.actions.acquire(t.ID)
+		defer s.reviewDismissals.actions.release(t.ID)
+		cur, ok := s.todoNow(t.ID)
+		if !ok || cur.DoneAt != nil || !cur.UpdatedAt.Equal(t.UpdatedAt) ||
+			s.activeTodoOf(priorReply.MachineID, priorReply.SessionID) != t.ID {
+			return "", fmt.Errorf("the task changed while checking the Agent conversation: review it again")
+		}
+	}
 	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	judgedDone := false    // it was waiting for review: the judge had found it done
 	var criteriaErr error
 	var v Supervision
+	var reviewedAt time.Time
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 			if verdict == reviewAccepted && t.DoneAt == nil && v.Waits != nil {
@@ -212,6 +235,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				}
 			}
 			r := TaskReview{At: time.Now().UTC(), Verdict: verdict, Checks: checks, Note: note, UserCheck: a.UserCheck}
+			reviewedAt = r.At
 			v.applyChecks(checks, r.At, "supervisor:"+self)
 			if verdict == reviewNeedsUser {
 				r.WhyOwner, r.Reason, r.Recommend = decision.WhyOwner, decision.Reason, decision.Recommend
@@ -235,6 +259,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				r.Evidence.RecordedBy = self
 			}
 			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
+			if priorReply != nil && verdict == reviewNeedsUser {
+				v.State = reviewPending
+			}
 			v.Reviews = append(v.Reviews, r)
 			if len(v.Reviews) > 20 {
 				v.Reviews = v.Reviews[len(v.Reviews)-20:]
@@ -346,7 +373,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		authorized := isMain || background || t.Supervision != nil && t.Supervision.Supervisor == self ||
 			t.Supervision == nil && t.Origin == self
 		cleanup := s.finishTaskTerminal(ctx, t, acceptedHere && authorized && a.Outcome != outcomeCannot && !a.UserCheck)
-		against := terminalCleanupWords(cleanup) + result.words()
+		against := terminalCleanupWords(cleanup) + result.words() + deliveryNote
 		if gaps := result.unsettled(); len(gaps) > 0 {
 			against += " You accepted it with criteria of its brief not shown met: if one no longer applies, say so with task_scope before accepting next time."
 		}
@@ -372,7 +399,18 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		return fmt.Sprintf("Task %s is accepted and closed. Tell the user the result in a line or two "+
 			"if they are waiting for it, and hand out or schedule anything that follows (deploy, TestFlight, closing an issue).", t.ID) + against, nil
 	case reviewNeedsUser:
+		if priorReply != nil {
+			choice, err := s.keepPriorDecisionReply(ctx, t, decision, priorReply, reviewedAt)
+			if err != nil {
+				return "", err
+			}
+			if choice != "" {
+				return fmt.Sprintf("Recorded the owner's exact choice %q from the Agent conversation. No card was sent. Review the task's result.", choice), nil
+			}
+			return "The owner already replied in the Agent conversation. The reply was handed to you for review and no card was sent. Verify the result or clarify the question.", nil
+		}
 		conclusion.Outcome, conclusion.Reason, conclusion.Recommend, conclusion.Decision = outcomeDecide, decision.Reason, decision.Recommend, decision
+		conclusion.Check = scheduledCheckOf(ctx) // raised by a recurring check (escalateScheduledTodo), never by a model's call
 		reversible := false
 		switch {
 		case !deadline.IsZero():
@@ -610,16 +648,16 @@ func pickTaskAgent(agents []proto.Session) proto.Session {
 // (routedFromAssistant); an agent closed after a stretch of work is resumed first (that can take minutes: it goes on in
 // the background). What it says about it: "sent to the agent" or "being sent".
 func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, error) {
-	return s.sendToTaskAs(ctx, t, text, false)
+	return s.sendTaskInput(ctx, t, text, false, nil, true)
 }
 
 // sendToTaskAs is sendToTask; with wait, a closed agent's resume and send is waited for too (up to 5 minutes), so the
-// caller learns whether the text reached it (inboxToAgent, #7346).
+// caller learns whether the text reached it (inboxToAgent, #7346). It is a relay, not rework, and never resumes a stopped Agent.
 func (s *Service) sendToTaskAs(ctx context.Context, t Todo, text string, wait bool) (string, error) {
-	return s.sendTaskInput(ctx, t, text, wait, nil)
+	return s.sendTaskInput(ctx, t, text, wait, nil, false)
 }
 
-func (s *Service) sendTaskInput(ctx context.Context, t Todo, text string, wait bool, event *taskInboxEvent) (string, error) {
+func (s *Service) sendTaskInput(ctx context.Context, t Todo, text string, wait bool, event *taskInboxEvent, rework bool) (string, error) {
 	agents := s.taskAgents(ctx, t)
 	if len(agents) == 0 {
 		return "", errors.New("the task has no agent")
@@ -633,15 +671,28 @@ func (s *Service) sendTaskInput(ctx context.Context, t Todo, text string, wait b
 		}
 	}
 	live, _ := liveTaskAgents(agents)
-	if len(live) == 0 { // stopped agents are read-only (#4754): Persona's follow-ups start nothing (tasks_successor.go)
+	resumeStopped := false
+	if len(live) == 0 {
 		if event != nil && event.Retried {
 			return "", errors.New("the event's agent is stopped and read-only")
 		}
-		return "", errTaskAgentsStopped
+		if !rework {
+			return "", errTaskAgentsStopped // relays, digests and external events never resume a stopped Agent
+		}
+		if _, ok := s.taskSpaceOf(ctx, t.ID); !ok {
+			return "", errTaskAgentsStopped // other stopped tasks' follow-ups still start nothing (tasks_successor.go)
+		}
+		resumeStopped = true
 	}
-	c := pickTaskAgent(live)
+	c := pickTaskAgent(agents)
+	if len(live) > 0 {
+		c = pickTaskAgent(live)
+	}
 	if _, ok := s.device(ctx, c.MachineID); !ok {
 		return "", errors.New("its machine is offline")
+	}
+	if resumeStopped {
+		return s.resumeStoppedTaskAgent(ctx, t, c, text)
 	}
 	send := func(ctx context.Context) error {
 		// The user may complete or reopen the task during session lookup or before an offline send starts.
@@ -700,6 +751,19 @@ func (s *Service) sendTaskInput(ctx context.Context, t Todo, text string, wait b
 		return "", err
 	}
 	return "sent to the agent", nil
+}
+
+// resumeStoppedTaskAgent resumes only an explicit rework of a recorded herdr leader task. The ordinary guarded
+// resume path supplies context compaction, stop provenance, the task workspace, and the resume note on the card.
+func (s *Service) resumeStoppedTaskAgent(ctx context.Context, t Todo, c proto.Session, text string) (string, error) {
+	am, ok := s.device(ctx, c.MachineID)
+	if !ok {
+		return "", errors.New("its machine is offline")
+	}
+	if err := s.resumeAllowed(ctx, t.Origin, am, c, "rework of this task", nil); err != nil {
+		return "", err
+	}
+	return s.resumeAndSend(ctx, t.Origin, am, c, map[string]any{"text": text}, "rework of this task", text, "", nil)
 }
 
 // ownerWaitError refuses accepting task id while its latest stretch of work stopped on a decision only the owner can

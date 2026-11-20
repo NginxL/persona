@@ -25,6 +25,8 @@ var startPrimitives = []string{"startOn", "start", "startConversationOn", "start
 // startWrappers pass a start on: their callers are the entry points.
 var startWrappers = map[string]string{
 	"startTaskAgent": "a planned task's agent start (tasks_placement.go), called by runPlanTaskStart",
+	// the same start into a prepared backend workspace (#11687), called only by startTaskAgent: startPlan's ledger
+	"startBackendTask": "a planned task's agent start in its backend workspace (tasks_backend_launch.go), called by startTaskAgent",
 }
 
 // supervisedStarts are the entry points that give their work a ledger, and the function that does it: it must call
@@ -67,7 +69,7 @@ var startOptOuts = map[string]string{
 var supervisionCalls = []string{"superviseTodo", "supervisePlanTask", "updateSupervision", "adoptAgent", "adoptAgentAs", "quietAgentTask", "ensureSupervisor"}
 
 func TestEveryStartPathIsSupervisedOrOptedOut(t *testing.T) {
-	funcs := parsePackageFuncs(t)
+	funcs := parsePackageFuncs(t, ".")
 	entries := startEntries(funcs)
 	var missing []string
 	for _, name := range entries {
@@ -107,9 +109,11 @@ func TestEveryStartPathIsSupervisedOrOptedOut(t *testing.T) {
 // pkgFunc is a function of the package as parsed: its file, the names it calls (the Service's methods, s.x; a local
 // function value called start is no start), and every identifier in it.
 type pkgFunc struct {
-	file   string
-	calls  map[string]bool
-	idents map[string]bool
+	file                   string
+	calls                  map[string]bool
+	idents                 map[string]bool
+	hasCall                bool
+	startOutsideComparison bool
 }
 
 func (f pkgFunc) callsAny(names []string) bool {
@@ -119,9 +123,9 @@ func (f pkgFunc) callsAny(names []string) bool {
 func (f pkgFunc) mentions(ident string) bool { return f.idents[ident] }
 
 // parsePackageFuncs reads the package's own files (no tests); a method and a function of one name are merged.
-func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
+func parsePackageFuncs(t *testing.T, dir string) map[string]pkgFunc {
 	t.Helper()
-	paths, err := filepath.Glob("*.go")
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,9 +152,10 @@ func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
 			if !ok {
 				f = pkgFunc{file: path, calls: map[string]bool{}, idents: map[string]bool{}}
 			}
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
+			ast.PreorderStack(fd.Body, nil, func(n ast.Node, parents []ast.Node) bool {
 				switch x := n.(type) {
 				case *ast.CallExpr:
+					f.hasCall = true
 					switch fn := x.Fun.(type) {
 					case *ast.SelectorExpr: // the Service's own methods only (s.start, not a timer's or a process's)
 						if recv, ok := fn.X.(*ast.Ident); ok && recv.Name == "s" {
@@ -159,6 +164,12 @@ func parsePackageFuncs(t *testing.T) map[string]pkgFunc {
 					}
 				case *ast.Ident:
 					f.idents[x.Name] = true
+					if x.Name == "DeviceSessionStart" {
+						expr, comparison := parents[len(parents)-1].(*ast.BinaryExpr)
+						if !comparison || (expr.Op != token.EQL && expr.Op != token.NEQ) {
+							f.startOutsideComparison = true
+						}
+					}
 				}
 				return true
 			})
@@ -180,7 +191,9 @@ func startEntries(funcs map[string]pkgFunc) []string {
 		if slices.Contains(startPrimitives, name) || startWrappers[name] != "" {
 			continue // a primitive or a wrapper is no entry of its own: its callers are
 		}
-		if f.mentions("DeviceSessionStart") || f.callsAny(starts) {
+		// A pure method-name comparison (tracksNodeWrite) sends nothing. Keep a
+		// comparison followed by a dynamic call and every other use of the method.
+		if (f.mentions("DeviceSessionStart") && (f.hasCall || f.startOutsideComparison)) || f.callsAny(starts) {
 			seen[name] = true
 		}
 	}
@@ -190,4 +203,32 @@ func startEntries(funcs map[string]pkgFunc) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A method-name classifier is not a start. Passing, forwarding, or checking a
+// method before invoking it must still expose that entry to the supervision guard.
+func TestStartPathsDistinguishMethodChecksFromWrites(t *testing.T) {
+	dir := t.TempDir()
+	const src = `package example
+func classifies(m string) bool { return m == DeviceSessionStart || m != DeviceSessionSend }
+func direct() { call(DeviceSessionStart) }
+func forwarded() string { return DeviceSessionStart }
+func checked(m string) { if m == DeviceSessionStart { call(m) } }
+func countsAsAResume(s *Service) { s.start() }
+`
+	if err := os.WriteFile(filepath.Join(dir, "starts.go"), []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := startEntries(parsePackageFuncs(t, dir))
+	if want := []string{"checked", "countsAsAResume", "direct", "forwarded"}; !slices.Equal(got, want) {
+		t.Errorf("start entries = %v, want %v", got, want)
+	}
+}
+
+func TestRetiredLeaderReworkUsesSupervisedResume(t *testing.T) {
+	funcs := parsePackageFuncs(t, ".")
+	if !funcs["sendTaskInput"].calls["resumeStoppedTaskAgent"] ||
+		!funcs["resumeStoppedTaskAgent"].calls["resumeAndSend"] || supervisedStarts["resumeAndSend"] != "resumeAndSend" {
+		t.Fatal("rework must resume the retired leader through the supervised agent resume")
+	}
 }

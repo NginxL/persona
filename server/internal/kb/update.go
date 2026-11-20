@@ -45,8 +45,8 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	selecting := sel != nil && facts.Selected()
 	unchanged := func() (int, error) {
 		if exists {
-			// No new lines, but the source may report a new state (a pull request merged): record it all the same.
-			if err := e.recordChatState(c.ID, sc); err != nil {
+			// The source can report a new URL or state without adding a message.
+			if err := e.recordChatSource(c.ID, sc); err != nil {
 				return 0, err
 			}
 			e.index(KindChat, c.ID, c.Name, c.Tagging, c.OneLine, c.LastAt)
@@ -178,7 +178,7 @@ func (e *Engine) Ingest(ctx context.Context, src Source, sc SourceChat, msgs []S
 	}
 	c.Messages += len(lines)
 	c.Pending += len(lines)
-	stateChanged := noteChatState(c, sc, time.Now())
+	stateChanged, _ := noteChatSource(c, sc, time.Now())
 	usual := ""
 	if selecting {
 		usual = sel.UsualRule(ret, facts)
@@ -222,7 +222,9 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	case KindChat, KindPerson, KindProject, KindRecording, KindTopic:
 		meta = e.Store.path(kind, id, "meta.json")
 		d.Path = e.Store.path(kind, id)
-		d.Summary = e.Store.Summary(kind, id)
+		if kind != KindProject {
+			d.Summary = e.Store.Summary(kind, id)
+		}
 	case KindDoc, KindMeeting, KindEvent:
 		meta = filepath.Join(e.Store.Dir, kind, SafeID(id)+".json")
 		d.Path = meta
@@ -234,6 +236,7 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	var hub HubTranscript
 	var raw []byte
 	var err error
+	var project *Project
 	if kind == KindRecording {
 		// Its files with its meeting.json and the hub's transcript, read together: detail.segments is the transcript of
 		// record, detail.meta has the transcription.
@@ -242,6 +245,9 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		if err == nil && raw == nil {
 			err = ErrNotFound
 		}
+	} else if kind == KindProject {
+		project, err = e.projectDetail(d)
+		raw = d.Meta
 	} else {
 		raw, err = os.ReadFile(meta)
 	}
@@ -252,14 +258,12 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	if kind == KindRecording {
 		d.Meta = metaWithNameSource(metaWithMeeting(raw, meeting))
 	}
-	if kind == KindProject {
-		d.Log = e.Store.Log(id, 30)
-		if p, ok := e.Store.Project(id); ok {
-			for _, x := range p.Moments {
-				if m, ok := e.Store.MomentPost(x.ID); ok {
-					f := momentForPrompt(m, x.Note, 200, e.Store.Zone())
-					d.Moments = append(d.Moments, MomentRef{ID: m.ID, Author: f.Author, Text: f.Text, At: m.At, Comments: m.CommentCount, Note: x.Note})
-				}
+	if project != nil {
+		d.Sources = e.projectSources(project, e.projectSourceLookup())
+		for _, x := range project.Moments {
+			if m, ok := e.Store.MomentPost(x.ID); ok {
+				f := momentForPrompt(m, x.Note, 200, e.Store.Zone())
+				d.Moments = append(d.Moments, MomentRef{ID: m.ID, Author: f.Author, Text: f.Text, At: m.At, Comments: m.CommentCount, Note: x.Note})
 			}
 		}
 	}
@@ -428,11 +432,15 @@ func (e *Engine) applyUser(kind, id string, uu UserUpdate) (string, error) {
 	u.Profile = nil
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
+	uu.Update = u
 	if kind == KindProject {
+		if err := e.projectSourceUpdate(id, &uu); err != nil {
+			return "", err
+		}
 		u = e.projectUpdate(u)
 	}
 	uu.Update = u
-	out, err := e.apply(kind, id, u, userEdit(uu))
+	out, err := e.apply(kind, id, uu, userEdit(uu), UserWriter)
 	if err == nil && u.MergeInto == "" {
 		err = e.claim(kind, out, u, "", nil, nil)
 	}
@@ -453,7 +461,8 @@ func (e *Engine) putProfile(pid, writer string, p *PersonProfile) (*PersonProfil
 	return before, nil
 }
 
-func (e *Engine) apply(kind, id string, u Update, le linkEdit) (string, error) {
+func (e *Engine) apply(kind, id string, uu UserUpdate, le linkEdit, writer string) (string, error) {
+	u := uu.Update
 	now := time.Now().UTC()
 	switch kind {
 	case KindProject:
@@ -487,6 +496,15 @@ func (e *Engine) apply(kind, id string, u Update, le linkEdit) (string, error) {
 				return "", errors.New("a project needs a name")
 			}
 			p = &Project{Slug: Slug(name), Name: name, Kind: "short", Status: "active", Created: now}
+		}
+		if uu.ProjectMode != nil {
+			p.Mode = *uu.ProjectMode
+			if p.Mode == "full" {
+				p.Mode = ""
+			}
+		}
+		if uu.SourceURLs != nil {
+			p.SourceURLs = uu.SourceURLs
 		}
 		if u.Name != "" {
 			p.Name = u.Name
@@ -565,7 +583,7 @@ func (e *Engine) apply(kind, id string, u Update, le linkEdit) (string, error) {
 			return "", err
 		}
 		if u.Summary != "" {
-			if err := e.Store.putSummary(KindProject, p.Slug, u.Summary, true); err != nil {
+			if err := e.Store.putSummary(KindProject, p.Slug, u.Summary, true, writer); err != nil {
 				return "", err
 			}
 		}
@@ -811,10 +829,10 @@ func (e *Engine) ProjectsForDir(machine, dir string) []*Project {
 // entries names and ranks linked entities (at most 30 chats and 30 people).
 func (e *Engine) entries(projects, chats, people []string) []Entry {
 	var out []Entry
+	catalog := e.projectSourceLookup()
 	for _, slug := range projects {
 		if p, ok := e.Store.Project(slug); ok && p.Live() {
-			out = append(out, Entry{Kind: KindProject, ID: p.Slug, Name: p.Name, OneLine: p.OneLine, Importance: p.Importance,
-				Relevance: p.Relevance, Tags: p.Tags, Updated: p.Updated, Extra: p.Kind + " · " + p.Status})
+			out = append(out, e.projectEntry(p, catalog))
 		}
 	}
 	var cs, ps []Entry

@@ -2,6 +2,7 @@ import { t } from "../i18n";
 import { MANAGER_HEADER } from "./manager-choice";
 import { api, enc } from "./api";
 import type { ProviderAPI, ProviderModel } from "./providers";
+import type { ModelCandidates } from "./model-candidates";
 
 export interface ModelBinding {
   provider?: string;
@@ -56,6 +57,8 @@ export interface ModelPurpose {
   status?: string;
   fields?: string[];
   provider_ids?: string[];
+  /** Candidate model settings are offered by an extension's own purpose. */
+  candidates?: ModelCandidates;
   /** Main chat only: the runtimes it can run on (an older hub: none, no "Runtime" row). */
   runtimes?: string[];
   /** Main chat only (#4633): the profiles its new conversations can start in (an older hub: none, no row). */

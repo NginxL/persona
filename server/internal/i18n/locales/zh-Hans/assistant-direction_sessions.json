@@ -1,0 +1,15 @@
+{
+  "full_access_required": "把会话归入常驻方向需要有完整权限的设备。",
+  "machine_not_found": "这台电脑不在当前助理的管理范围内。",
+  "session_not_found": "这个会话不在当前助理的管理范围内。",
+  "direction_not_found": "这个常驻方向不存在。",
+  "direction_ended": "这个常驻方向已结束。",
+  "direction_full": "每个常驻方向最多归入 {max} 个会话。",
+  "supervised_task": "这个 Agent 跟随它尚未结束的受监督任务，请改为移动任务。",
+  "main_conversation": "主对话不能归入常驻方向。",
+  "background_supervisor": "后台主管会话不能归入常驻方向。",
+  "leader_conversation": "常驻方向的主管对话不能再归入某个常驻方向。",
+  "space_mismatch": "这个会话和常驻方向不在同一空间。",
+  "unavailable": "暂时无法读取或保存常驻方向的会话，请重试。",
+  "ended_task_not_found": "找不到这个已结束任务的位置，请重新读取第一页。"
+}

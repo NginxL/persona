@@ -41,6 +41,7 @@ func TestScheduledTodoPriorConversationsRemainExcluded(t *testing.T) {
 	f.answerNode(DeviceSessionItems, func(string, json.RawMessage) (any, error) {
 		return map[string]any{"items": []proto.Item{{Kind: proto.KindText, Role: "assistant", Text: "Checked again; no batch started"}}}, nil
 	})
+	assessTodoBaseline(t, s, task.ID)
 	_, result := assessTodoRun(t, s, task.ID, func() {
 		cur, _ := s.todoNow(todo.ID)
 		cur.Agents = []TodoAgent{{MachineID: "server", SessionID: "older-patrol"}}
@@ -72,6 +73,7 @@ func TestScheduledTodoUnknownBaselineDoesNotInventProgress(t *testing.T) {
 			task := todoProgressTask(todo.ID)
 			setTasks(s, task)
 			if initialStreak {
+				assessTodoBaseline(t, s, task.ID)
 				assessTodoRun(t, s, task.ID, nil)
 			}
 			todo.Agents = []TodoAgent{{MachineID: "box", SessionID: "worker"}}
@@ -84,8 +86,9 @@ func TestScheduledTodoUnknownBaselineDoesNotInventProgress(t *testing.T) {
 				return map[string]any{"items": []proto.Item{{Kind: proto.KindText, Role: "assistant", Text: "A pre-existing artifact"}}}, nil
 			})
 			_, unknown := assessTodoRun(t, s, task.ID, nil)
-			if unknown.State != "unknown" {
-				t.Fatalf("an unreadable baseline was not unknown: %+v", unknown)
+			// The first linked run is a baseline even when it cannot read an Agent; a later one is unknown.
+			if want := map[bool]string{false: "baseline", true: "unknown"}[initialStreak]; unknown.State != want {
+				t.Fatalf("an unreadable baseline was not %s: %+v", want, unknown)
 			}
 			f.mu.Lock()
 			unreadable = false
@@ -189,11 +192,14 @@ func TestScheduledTodoDelayedHistoryReplayPreservesNewerAssessment(t *testing.T)
 			store := &scheduleWriteStore{Store: &memStore{}}
 			s, _ := newQuietServiceOn(t, store)
 			s.superviseTimes.gather = time.Hour
+			s.todoAskAfter = time.Nanosecond
 			todo := Todo{ID: "delayed-replay", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}}
 			putTodo(s, todo)
 			task := todoProgressTask(todo.ID)
 			setTasks(s, task)
 			at := time.Now().UTC()
+			baselineTask, baseline := pendingTodoRun(t, s, task.ID, at.Add(-time.Minute))
+			s.finishScheduledTodo(t.Context(), baselineTask, baseline)
 			firstTask, first := pendingTodoRun(t, s, task.ID, at)
 			store.failWrites(runsKey)
 			s.finishScheduledTodo(t.Context(), firstTask, first)
@@ -216,6 +222,7 @@ func TestScheduledTodoDelayedHistoryReplayPreservesNewerAssessment(t *testing.T)
 				cur, _ := s.todoNow(todo.ID)
 				s, _ = newQuietServiceOn(t, store)
 				s.superviseTimes.gather = time.Hour
+				s.todoAskAfter = time.Nanosecond
 				putTodo(s, cur)
 			}
 			s.finishScheduledTodo(t.Context(), firstTask, first)
@@ -295,10 +302,12 @@ func TestScheduledTodoEvictedPendingRunStillAssessed(t *testing.T) {
 	store := &memStore{}
 	s, _ := newQuietServiceOn(t, store)
 	s.superviseTimes.gather = time.Hour
+	s.todoAskAfter = time.Nanosecond
 	todo := Todo{ID: "evicted-pending", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}}
 	putTodo(s, todo)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	for count := 1; count <= 2; count++ {
 		dispatched, run := pendingTodoRun(t, s, task.ID, time.Now().UTC())
 		for i := 0; i <= maxRuns; i++ {

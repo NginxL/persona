@@ -21,6 +21,7 @@ OUT = os.environ.get("PERSONA_DEMO_OUTPUT", os.path.join(HERE, "..", "..", "appl
 os.environ.update(MOCK_TASKS="1", MOCK_RICH="1")
 sys.path.insert(0, HERE)
 import mock_hub as m  # noqa: E402
+import mail_mock  # noqa: E402  the mail domain mock_hub loaded (scripts/mock/mock_domains.py)
 
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$")
 DAY = re.compile(r"^\d{4}-\d\d-\d\d$")
@@ -198,7 +199,7 @@ data = {
     "runs": m.RUNS,
     "memory": m.MEMORY,
     "inbox": m.INBOX,
-    "mail_accounts": m.MAIL_ACCOUNTS,
+    "mail_accounts": mail_mock.MAIL_ACCOUNTS,
     "mail": MAIL,
     "lark": LARK,
     "lark_conversations": m.LARK_CHATS,

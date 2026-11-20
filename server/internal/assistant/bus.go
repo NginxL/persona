@@ -85,6 +85,7 @@ type BusHub struct {
 	helloOnce sync.Once
 
 	events  chan busEvent // the hub's events, taken in the order they came
+	conns   atomic.Uint64 // the connections whose hello was answered: the current one's number (busEvent.conn)
 	pending atomic.Int64  // events received and not yet taken
 	// answering: the hub's requests being answered now (a tool call, an app's call): idle (idle.go) waits for them.
 	answering atomic.Int64
@@ -101,6 +102,21 @@ type BusHub struct {
 type busEvent struct {
 	name   string
 	params json.RawMessage
+	conn   uint64 // the connection it came on (BusHub.conns as it was read)
+}
+
+// hubConnKey holds, in a ctx, the connection to the hub an event came on (busEvent.conn).
+type hubConnKey struct{}
+
+// ctx is ctx for handling ev: it says which connection ev came on (hubConnOf).
+func (ev busEvent) ctx(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hubConnKey{}, ev.conn)
+}
+
+// hubConnOf is the connection to the hub the event ctx handles came on: 0 for one that did not come over the bus.
+func hubConnOf(ctx context.Context) uint64 {
+	conn, _ := ctx.Value(hubConnKey{}).(uint64)
+	return conn
 }
 
 var _ Hub = (*BusHub)(nil)
@@ -136,7 +152,7 @@ func NewBusHub(o BusOptions) *BusHub {
 					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
+					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
 					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
 					assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability}}
 		},
@@ -207,6 +223,7 @@ func (b *BusHub) CredentialRevoked(ctx context.Context, id string) (bool, error)
 // onHello keeps the hub's answer to manager.hello. A new connection: the hub shows nothing of the assistant until it
 // reports the whole of it again.
 func (b *BusHub) onHello(res json.RawMessage) error {
+	b.conns.Add(1) // what the hub's events say of the hub is that connection's (busEvent.conn)
 	var h Hello
 	if err := json.Unmarshal(res, &h); err != nil {
 		return err
@@ -529,7 +546,11 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 		defer memtrim.AfterLarge(len(p.Body))
 		return serveHTTP(ctx, b.httpHandler(s), p, s.lang)
 	case assistantwire.MethodTools:
-		return map[string]any{"tools": s.Tools(ctx)}, nil
+		var target SessionRef
+		if err := decode(&target); err != nil {
+			return nil, err
+		}
+		return map[string]any{"tools": s.ToolsFor(ctx, target.MachineID, target.SessionID)}, nil
 	case assistantwire.MethodTool:
 		var p ToolCall
 		if err := decode(&p); err != nil {
@@ -579,11 +600,19 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			return nil, &rpc.Error{Code: assistantwire.CodeUndeliveredAhead, Message: "older messages to this conversation wait to go in"}
 		}
 		ctx, note := withLauncherNote(ctx)
+		// The owner's message, which the hub sends and reports: its parameters may move a direction's notes block
+		// (direction_notes.go), settled by the hub's notice, or now when they are refused and nothing is sent. A
+		// message they were already given for is the hub's retry, which moves nothing: it is tied to its first attempt
+		// while that one waits for its notice (notesOwnerCarry).
+		msg, _ := p.Params["client_msg_id"].(string)
+		ctx, carry := s.notesOwnerCarry(ctx, p.SessionID, msg)
 		params, err := s.SendParams(ctx, p)
 		if err != nil {
+			s.notesOwnerRefused(ctx, carry)
 			s.appSendRefused(p.MachineID, p.SessionID, err) // the hub sends nothing: no ConversationSent (north_star.go)
 			return nil, err
 		}
+		s.notesOwnerSent(ctx, carry, msg)
 		if *note != "" {
 			return map[string]any{"params": params, "launcher_note": *note}, nil
 		}
@@ -889,7 +918,7 @@ func (b *BusHub) event(ctx context.Context, ev busEvent) error {
 		if err := decode(&p); err != nil {
 			return err
 		}
-		go s.ConversationSent(context.WithoutCancel(ctx), p)
+		go s.ConversationSent(ev.ctx(context.WithoutCancel(ctx)), p) // with the connection it came on (direction_notes.go)
 	case assistantwire.EventInteractionResolved:
 		var p InteractionResolved
 		if err := decode(&p); err != nil {

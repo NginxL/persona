@@ -179,4 +179,51 @@ describe.sequential("composer keyboard sending without a reliable pointer query"
     expect(box().value).toBe("/compact");
     expect(onSend).not.toHaveBeenCalled();
   });
+  it("Ctrl/Cmd+Enter hands the queue over now while the agent works, after the message is queued", async () => {
+    const order: string[] = [];
+    const onSend = vi.fn(async (m: Outgoing) => { order.push(`send:${m.text}`); return true; });
+    const onSendNow = vi.fn(async () => { order.push("now"); });
+    mount({ working: true, onSend, onSendNow });
+    await type("steer");
+    await press({ ctrlKey: true });
+    await type("steer too");
+    await press({ metaKey: true });
+    expect(order).toEqual(["send:steer", "now", "send:steer too", "now"]);
+  });
+
+  it("Ctrl+Enter also sends now while the agent waits on you; plain Enter only queues", async () => {
+    const onSend = vi.fn(async (_m: Outgoing) => true);
+    const onSendNow = vi.fn();
+    mount({ needsYou: true, onSend, onSendNow });
+    await type("queued");
+    await press();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSendNow).not.toHaveBeenCalled();
+    await type("now");
+    await press({ ctrlKey: true });
+    expect(onSendNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ctrl+Enter on an idle agent is a normal send, and an empty box sends nothing", async () => {
+    const onSend = vi.fn(async (_m: Outgoing) => true);
+    const onSendNow = vi.fn();
+    mount({ onSend, onSendNow });
+    await type("hello");
+    await press({ ctrlKey: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSendNow).not.toHaveBeenCalled();
+    mount({ working: true, onSend, onSendNow });
+    await type("");
+    await press({ ctrlKey: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSendNow).not.toHaveBeenCalled();
+  });
+
+  it("does not send now when the message did not go", async () => {
+    const onSendNow = vi.fn();
+    mount({ working: true, onSend: async () => false, onSendNow });
+    await type("lost");
+    await press({ ctrlKey: true });
+    expect(onSendNow).not.toHaveBeenCalled();
+  });
 });

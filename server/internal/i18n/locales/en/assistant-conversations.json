@@ -3,7 +3,9 @@
   "archive_background_supervisor": "The background supervisor can’t be archived",
   "background_supervisor": "Background supervisor",
   "background_supervisor_former": "Background supervisor · until {month}/{day}",
+  "notice_delivery_refused": "This conversation refused an update from Persona about a task or a chat. It was not delivered and will not be sent again.",
   "relay_delivery_failed": "Message could not be delivered",
   "supervision_delivery_failed": "This conversation cannot receive task follow-up instructions. Open the task to see its latest status and reports, and use a Claude Code or Codex supervisor to follow up.",
+  "supervision_delivery_refused": "This conversation refused a task follow-up message, and it will not be sent again. Open the task to see its latest status and reports.",
   "supervision_reviewer_required": "Choose a Claude Code or Codex supervisor before starting this task."
 }

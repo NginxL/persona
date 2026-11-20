@@ -51,6 +51,7 @@ type (
 	Device              = assistantwire.Device
 	ClientApp           = assistantwire.ClientApp
 	ConfiguredLauncher  = assistantwire.ConfiguredLauncher
+	LauncherRecovery    = assistantwire.LauncherRecovery
 	HubModels           = assistantwire.HubModels
 	AppCall             = assistantwire.AppCall
 	ModelBinding        = assistantwire.ModelBinding
@@ -117,6 +118,10 @@ const (
 	FeishuPost            = assistantwire.FeishuPost
 	FeishuText            = assistantwire.FeishuText
 	FeishuUpdateCard      = assistantwire.FeishuUpdateCard
+	FeishuCardCreate      = assistantwire.FeishuCardCreate
+	FeishuCardUpdate      = assistantwire.FeishuCardUpdate
+	FeishuCardStream      = assistantwire.FeishuCardStream
+	FeishuCardSettings    = assistantwire.FeishuCardSettings
 	FeishuPin             = assistantwire.FeishuPin
 	FeishuRecall          = assistantwire.FeishuRecall
 	FeishuCotCreate       = assistantwire.FeishuCotCreate

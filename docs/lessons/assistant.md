@@ -1,6 +1,15 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- `--allowedTools` and `--disallowedTools` govern approval, not a reliable tool-visibility boundary (#11736). Per-conversation MCP narrowing must filter the actual `sessionMCPTools` response and repeat the same decision at the assistant's call entry (`guardRefusal`). Changing only launch flags can leave stale clients or direct calls with the old tool set; hiding a tool is not a substitute for call admission.
+
+- Automatic-continuation triage and channel mirrors observe the same finished turn concurrently (#11848). The retry wake timestamp is not yet durable when the first mirror runs; gate Feishu and extension mirrors on the session's transient classification and the transient-retry switch instead. Cover several transient attempts, the later terminal error, and delivery with retry disabled.
+
+- Snapshot sequence numbers must order application as well as computation (#10514). `publish` numbered snapshots under `pubMu` but applied their interaction lists later, so a delayed older list could withdraw a prepared approval installed by a newer one. Recheck the sequence under `pubMu` immediately before `askOnPhone`; skip only superseded interaction lists and leave current omissions and explicit lifecycle endings unchanged. Force two real publishers across an existing leaf-mutex gate, then prove the owner's Allow returns once and applies once.
+
+- A publisher gate must not hold a mutex needed to create the state the test waits for (#11572). The out-of-order snapshot fixture held `tasks.quiet.mu`; after prepared-card registration gained a cache-miss session lookup, that lookup waited on the same mutex and the test spun before the fresh publisher. Seed the already-observed session list with `fleetKeepPrevious` so the real prepared path bypasses that unrelated lookup, and keep the production ordering guard proved by mutation rather than weakening the race assertions.
+
 - Moving temporary model outages to a durable manager retry must not swallow the node's other bounded recovery paths (#10444). Keep unavailable-model chains, recent transient 404s, safeguards refusals, gateway-quota recovery and tool-search resends on their existing contracts; only the outage classes owned by the new scheduler change. Tests of node-internal recovery can use a recoverable missing-model failure, while scheduled failure-fallback tests need a permanent error such as 401. Run the combined recovery tests after merging newer origin-attestation and delivery changes. Exercise the real hub interrupt and owner-message paths too: a direct `UserStopped` test misses a hub that notifies only Assistant, and `/exit` or `/quit` starts no turn that could cancel the wake.
+
 - Negotiate external runtime supervision policy explicitly, and isolate per-session rule layers outside `~/.persona/assistant` (#11173). Hardcoding `SourceKind == SourceRuntime` as unsupported blocks capable runtimes like Antigravity CLI, while dropping the guard or concatenating `supervision_instructions` into user message text weakens compaction durability and role isolation (#10338, #11121). Gate policy delivery on explicit `caps.supervision_policy` / `capabilities.supervision_policy` (defaulting absent or unknown to unsupported so DSH and older runtimes keep exact fail-closed behavior). On `agy acp`, verify append vs. replace semantics empirically before choosing a channel: `_meta.antigravity.systemPrompt.append` accumulates across `session/resume` calls and cannot be cleared on demotion, whereas per-session managed directories under `<agyDir>/persona-supervision/<rawId>` passed via `additionalDirectories` load into `<user_rules>` on every turn, reflect atomic edits and deletions on the next turn, leave shared `~/.persona/assistant/AGENTS.md` untouched, keep concurrent ordinary chats isolated, and fail closed with `assistant_supervision_runtime` when ACP lacks `additionalDirectories`, disk writes fail, or policy exceeds the two-file 48,000-byte (`AGENTS.md` + `GEMINI.md`) cap.
 
 - Recover an untold completion by native turn identity, not transcript revision (#10686). Trailing transcript bookkeeping must not suppress an already judged signal. Revalidate the complete current ledger entry under its lock and enqueue without rewriting it, so an older recovery snapshot cannot replace a newer turn or judgment. Exercise both PostgreSQL-backed manager restart and stale-snapshot rejection, with replay disabled as a negative control.
@@ -8,6 +17,7 @@
 - A rendered prompt used as a source-snapshot fingerprint must compare with the call's captured language (#6272). Re-reading the current language while committing a valid model answer makes a preference change look like a concurrent source edit. Freeze the wrapper language, keep the source comparison, and test both a locale-only change and real source changes. Audit natural-language parsers too: a conservative Chinese uncertainty check must recognize uncertainty in newly supported English and Japanese outputs. Shared recording inputs must keep their recording-language contract rather than inheriting a non-recording wrapper accidentally.
 - Persist a complete delivery round before its first external send (#10393). Saving only when the call returns handles a returned error but loses the result if the manager exits inside the call, after task acceptance has committed. Keep the original timestamp/key and acceptance metadata on disk while retaining an in-memory claim to block overlapping sends. Every other book save must preserve that prepared record too; retry must not send from memory when its preparation could not be saved. Use a child-process exit at the real provider boundary and a fresh manager on the same disposable database to prove recovery, with the returned-error case as a control.
 - A review wake is not a completion verdict (#8373). PR events and judged-done candidates share the same signal. Keep its wording neutral, preserve the actual reason and criterion evidence, and leave acceptance gates and display grouping unchanged.
+- A parked wait can cite a PR while waiting for a separate deployment or verification (#9775). Enroll the exact PR from an explicit event binding. Keep the source receipt and review transition together and identify the notification by that park. Test both a stage PR with terminal facts and a PR named only in the park.
 
 - Detect missing final replies on the settled exchange (#10427). A session preview can carry the previous answer
   through a tool-only turn. Check the current transcript and verified input provenance, then test that a follow-up
@@ -184,7 +194,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 
 - Push delivery is per destination, not just per conversation (#1896). A shared `notify_user` mark lets one successful channel suppress another channel's failed delivery, while an unmarked extension push duplicates its turn-end mirror. Key delivery by channel, machine and session, record only confirmed sends, and apply the same check to main-chat mirrors, scheduled-task mirrors and Lark mirror retries. Test mixed successes and failures, including text split across several sends.
 
-- A copy sent beside a filtered push must follow the filter's answer, and the answer about it must count the copy (#8268). `notify_user` copied every notice to the Feishu bot and the channels after `notify.request`, without reading `held`, so low-distraction mode held nothing for an owner who reads Persona through the bot; and with that owner's phone pushes off the tool answered "the user was not alerted" for a notice whose Feishu copy had landed, and the conversation sent it again. Gate the copy on the hub's answer for the same push (not on the assistant's own reading of the switch: the hub levels by conversation and related key), and say in the tool's answer which copies went out, failed or are not confirmed yet.
+- A copy sent beside a filtered push must follow the filter's answer, and the answer about it must count the copy (#8268). `notify_user` copied every notice to the Feishu bot and the channels after `notify.request`, without reading `held`, so push grading held nothing for an owner who reads Persona through the bot; and with that owner's phone pushes off the tool answered "the user was not alerted" for a notice whose Feishu copy had landed, and the conversation sent it again. Gate the copy on the hub's answer for the same push (not on the assistant's own reading of the switch: the hub levels by conversation and related key), and say in the tool's answer which copies went out, failed or are not confirmed yet.
 
 - A one-shot send that forgets its record on failure loses what it was for (2026-11-07, #7). The "Please verify" card is asked once, when a task's deploying turn ends; a failed or timed-out send used to drop the claim, and nothing asked the owner again. Keep the record (the ask, without a message id) and retry from a sweep, under a key per round (`uuid`) so a timeout that did land is not a second card, and only within the hour Feishu remembers a key (`acceptPostWindow`, as the nudge's `nudgeRetryWindow`); past it, fall back to the card-less path the briefing and board already show. Whatever a sweep or a load reads back may hold a claim saved mid-flight (no time) or a null entry: clean the map that was read, before it becomes the book, and never dereference an entry unchecked.
 
@@ -674,6 +684,20 @@ after it (`inDoubt` in `web/src/lib/outbox.ts`; `isEcho` in `web/src/lib/echo.ts
 `CLOCK_SLACK_MS`); one whose copy arrived before the answer did was already settled while it went (`flight.echoed()`
 in ChatView). A refusal never settles by words.
 
+## A node's error keeps only its words past the bus, and a call can fail after the node did it (2026-11-19, #10465)
+
+A to-do's message or answer that fails has to say whether it typed anything, or a phone offers to send again what the
+Agent already has. Two readings looked right and were not. An RPC error that crosses the bus keeps its code and its
+message, not its Go type: a deadline that ran out past the bus reaches the manager as an `*rpc.Error` whose message is
+`context deadline exceeded`, which `errors.Is(err, context.DeadlineExceeded)` does not match. Read it by that exact
+message (`noSendAnswer` in `sendUnknown`, or `apierr.NodeCode`, which reads it as `timeout`), never `errors.Is` alone.
+And `Service.call` can fail after the node answered OK: it checks the deletion ledger again and decodes the answer.
+Such an error of a `session.send` or `session.start` is `completedNodeWriteError` (`afterNodeWrite`), which the to-do
+routes read as typed (`writeDelivered`, `server/internal/assistant/todo_write_outcome.go`). #11274 found the same two
+pitfalls from the Agent-send side at the same time, and the two changes now share `sendUnknown` and that type. The
+to-do routes read a little more as in doubt than `sendUnknown` does (a connection that ended mid-answer, any other
+network error). A refusal said "nothing typed" wrongly is the unsafe side: when in doubt, say `unknown`.
+
 ## Name the thing an event is about, and keep what was done for it (#5718)
 
 Completion handling started only on a session list going from `working` to `done` / `idle`, and remembered "this stretch
@@ -839,3 +863,27 @@ the hub's record of what was sent before looking at the client.
 When merging no-output turn handling, keep account-sealed compaction ahead of `no_output` / `stopped` handling in triage
 and clients. A generic kind must not restore Continue for a permanent error; ordinary silent turns keep their own text
 and Continue. Test both paths together, including the clients' independent invalid and plain-text flags.
+
+## The hub's codes reach the manager in two shapes (#11393)
+
+A relay refusal was classified with `errors.As(err, &rpc.Error{})` alone. That misses the hub's own codes: over the bus,
+`busError` gives `machine_offline`, `node_closed` and `no_device` back as a `codedError` that wraps a Go error kind
+(`apierr.ErrOffline`, `rpc.ErrClosed`, `ErrNoDevice`), not an `*rpc.Error`, and the manager's own machines answer
+`apierr.ErrOffline` with no code at all. Read from the code, `conversation_send` to a computer that was away returned
+the error instead of queueing the message as #10194 meant it to. Read a code from either shape (`relayErrCode`) and
+test each failure in the shape production delivers it (`busError(&rpc.Error{…})`), not only as a bare `*rpc.Error`.
+
+## A plan's new Agent is a new round, and a shared conversation's latest turn is nobody's reply (#11553)
+
+A continuation (`task_plan` `continues`) reopened an accepted to-do and refreshed its ledger's criteria, but left
+`state: accepted` with the earlier round's acceptance as the latest review. Every client and the hub's triage read
+"open + accepted + latest review accepted" as an acceptance that stands, a rule made for more work sent to an accepted
+task's Agent (#3156). So the continued to-do showed **Accepted** in Working, went to Just finished whenever its new
+Agent stopped, and `superviseJudged` dropped its stops. Reset the terminal verdict where the new round starts
+(`takeTodoForTask`) and keep the history. Leave the send-after-acceptance path alone, and pin both directions in tests.
+
+A linked scheduled run read its explanation from the latest turn of the conversation it went to. In a source
+conversation shared with other work, two runs due in the same minute both read the second run's answer, and the first
+to-do's no-progress decision quoted another task. Find the run's own prompt by its run key (`runKeyIn`) and take the
+reply after it, up to the next message that opened a turn. Refuse turns that a queued message mixed. Test with real
+transcript pages (`runChat`), not bare item lists.

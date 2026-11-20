@@ -178,7 +178,7 @@ func (s *Service) startRepairAgent(ctx context.Context, broken Device, left []La
 	title := fmt.Sprintf("修复 %s 上的启动器", broken.Name)
 	todo, err := s.newTodo(ctx, title, prompt, "", "", true)
 	if err == nil {
-		err = s.linkTodoAgent(ctx, todo.ID, am.ID, sid, title, cwd, "")
+		err = s.linkTodoAgent(ctx, todo.ID, am.ID, sid, title, cwd, res.Session.Agent)
 	}
 	if err != nil {
 		s.logf("launcher health: %s: repair todo: %v", broken.ID, err)

@@ -21,7 +21,7 @@
   "problem_failed": "Couldn't read the gateway; these are its last numbers",
   "problem_error": "The gateway couldn't read this account just now; these are the numbers it had stored",
   "window_model_label": "{name} {window} ({model}): {percent} used",
-  "not_connected": "Not set up",
+  "not_connected": "No quota data connected",
   "connect_action": "Set up with assistant",
   "connect_hint_claude": "No usage data yet; ask the assistant to wire up statusLine or a gateway source",
   "connect_hint_agy": "The CLI reports no quota percentage locally; ask the assistant to connect a pool gateway if used",

@@ -101,13 +101,15 @@ async function run(browser, size, theme) {
     assert(text.includes("Only the example screenshots are left."), "the user's own rounds stay shown");
     assert(text.includes("Two example invoices") || text.includes("two example invoices"), "a round that told the user stays shown");
     if (folded) {
-      assert.equal(await rounds.count(), 1, "only the round without a final reply folds");
+      assert.equal(await rounds.count(), 2, "the routine relay and scheduled rounds both fold");
       assert(!text.includes(prompt), "no scheduled prompt in the main chat");
       const answer = chat.getByText("The fictional release notes mention the export button.", { exact: true });
-      assert.equal(await answer.count(), 1, "the completed reply is visible despite the failed notification");
-      assert.equal(await answer.locator("xpath=ancestor::*[@data-supervision]").count(), 0);
-      assert.equal(await chat.locator("[data-work-group] > button[aria-expanded=false]").count(), 2, "both tool traces stay closed");
-      await rounds.locator(":scope > button").click();
+      assert.equal(await answer.count(), 0, "a routine relay reply stays folded after a failed notification");
+      assert.equal(await chat.locator("[data-work-group] > button[aria-expanded=false]").count(), 1, "the tool trace stays closed");
+      await rounds.first().locator(":scope > button").click();
+      const relayOpened = await chat.textContent();
+      assert(relayOpened.includes("The fictional release notes mention the export button."), "the routine reply remains available when opened");
+      await rounds.nth(1).locator(":scope > button").click();
       const opened = await chat.textContent();
       assert(opened.includes("Checking the example inboxes."), "the scheduled round's work shows when opened");
       assert(!opened.includes(prompt), "the scheduled prompt stays hidden when opened");

@@ -70,11 +70,11 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   type Selection = { kind: "run"; id: string; fromRow: boolean }
     | { kind: "command"; task: BackgroundTask; cwd?: string; owner: string; manager?: string; fromRow: boolean };
   const asks = (p: BackgroundPanelObject, previous?: Selection | null): Selection | null => {
-    if (p.run) return { kind: "run", id: p.run, fromRow: false };
+    if (p.run) return { kind: "run", id: p.run, fromRow: p.from === "overview" };
     if (!p.task) return null;
     const task = [...otherBackground(session), ...(session?.background_ended ?? [])].find((entry) => entry.id === p.task);
     const same = previous?.kind === "command" && previous.task.id === p.task && previous.owner === owner && previous.manager === session?.manager;
-    return task ? { kind: "command", task, cwd: same ? previous.cwd : session?.cwd, owner, manager: session?.manager, fromRow: Boolean(same && previous.fromRow) }
+    return task ? { kind: "command", task, cwd: same ? previous.cwd : session?.cwd, owner, manager: session?.manager, fromRow: p.from === "overview" || Boolean(same && previous.fromRow) }
       : same ? previous : null;
   };
   const [asked, setAsked] = useState(opened);
@@ -107,12 +107,17 @@ export function BackgroundPanel({ mid, sid, opened, onClose }: { mid: string; si
   // Keep the last task metadata when it leaves both lists; disappearance does not report its outcome.
   if (command && currentCommand && command.task !== currentCommand) setShown({ ...command, task: currentCommand });
   useEffect(() => {
-    if ((shown?.kind === "run" && !run) || (command && !commandCurrent)) setShown(null);
-  }, [shown, run, command, commandCurrent]);
+    const retired = (shown?.kind === "run" && !run) || (command && !commandCurrent);
+    if (retired) setShown(null);
+    // A fallback list has no overview to return to. Clear the origin so ChatView shows the overview again and a row
+    // opened from this list keeps the list's own Back behavior.
+    if (opened.from === "overview" && (retired || !shown)) openPanel({ kind: "background", mid, sid });
+  }, [shown, run, command, commandCurrent, opened.from, mid, sid]);
   useEffect(() => { if (!owned) onClose(); }, [owned, onClose]);
   const rememberList = () => { listTop.current = list.current?.querySelector<HTMLElement>("[data-background-list]")?.scrollTop ?? 0; };
   const goBack = () => {
     if (!shown) return;
+    if (opened.from === "overview") { onClose(); return; }
     back.current = { kind: shown.kind, id: shown.kind === "run" ? shown.id : shown.task.id, top: listTop.current };
     setShown(null);
     openPanel({ kind: "background", mid, sid });

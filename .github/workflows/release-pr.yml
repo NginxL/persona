@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: release-pr-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}
@@ -33,6 +34,7 @@ jobs:
       build: ${{ steps.plan.outputs.build }}
       commit: ${{ steps.plan.outputs.commit }}
       source_commit: ${{ steps.plan.outputs.source_commit }}
+      check_run_id: ${{ steps.merge-check.outputs.id }}
     steps:
       - name: Resolve and validate the release PR
         id: source
@@ -147,10 +149,22 @@ jobs:
             printf 'commit=%s\n' "$GIT_COMMIT"
             printf 'source_commit=%s\n' "$(python3 -c 'import json; print(json.load(open("release/plan.json"))["source_commit"])')"
           } >> "$GITHUB_OUTPUT"
+      - name: Bind the required check to the exact proposed merge result
+        id: merge-check
+        if: steps.plan.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+          PR_NUMBER: ${{ steps.plan.outputs.pr }}
+        run: |
+          set -euo pipefail
+          test "$COMMIT" = "${{ github.event.pull_request.merge_commit_sha || github.sha }}"
+          python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" pending --commit "$COMMIT" --pr "$PR_NUMBER" > "$RUNNER_TEMP/release-check-id.txt"
+          printf 'id=%s\n' "$(cat "$RUNNER_TEMP/release-check-id.txt")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: steps.source.outputs.number != '0'
         with:
-          name: release-pr-plan-${{ steps.plan.outputs.pr }}-${{ steps.plan.outputs.commit }}
+          name: release-pr-plan-${{ steps.source.outputs.number }}
           path: release/plan.json
           if-no-files-found: error
           retention-days: 2
@@ -178,7 +192,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - name: Prepare the public GitHub update source without a personal config
         run: |
@@ -198,14 +212,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release/downloads
-          cd build-publish/bin
-          for name in *.gz VERSION SHA256SUMS latest.json install.sh; do
-            test -f "$name"
-            cp "$name" "$OLDPWD/release/downloads/$name"
+          for path in build-publish/bin/*.gz build-publish/bin/VERSION build-publish/bin/SHA256SUMS build-publish/bin/latest.json build-publish/install.sh; do
+            test -f "$path"
+            cp "$path" "release/downloads/${path##*/}"
           done
-          cd "$OLDPWD"
-          python3 scripts/operations/release_pr.py --repository "${{ github.repository }}" --channel "${{ needs.plan.outputs.channel }}" bind-cli-web --plan release/plan.json --downloads release/downloads
+          result=0
+          python3 scripts/operations/release_pr.py --repository "${{ github.repository }}" --channel "${{ needs.plan.outputs.channel }}" bind-cli-web --plan release/plan.json --downloads release/downloads || result=$?
+          if [[ "$result" -ne 0 ]]; then
+            printf 'bind-cli-web failed with exit %s; its exact error is above. These unverified artifacts are diagnostic only.\n' "$result" >&2
+            exit "$result"
+          fi
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: release-pr-cli-web-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
           path: |
@@ -244,8 +262,8 @@ jobs:
           printf '%s\n' "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
-          path: release
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
+          path: ${{ runner.temp }}/release-plan
       - name: Prepare protected Android signing configuration without logging secrets
         env:
           PERSONA_ANDROID_CERTIFICATE_SHA256: ${{ secrets.PERSONA_ANDROID_CERTIFICATE_SHA256 }}
@@ -267,29 +285,32 @@ jobs:
           python3 scripts/release/android_tag_release.py \
             --config "$RUNNER_TEMP/persona-android/android.json" \
             --worktree "$GITHUB_WORKSPACE" --commit "${{ needs.plan.outputs.commit }}" \
-            --version "${{ needs.plan.outputs.version }}" --receipt release/android-receipt.json
+            --version "${{ needs.plan.outputs.version }}" --receipt "$RUNNER_TEMP/android-receipt.json"
       - name: Verify the signed APK and Android index against the release plan
         run: |
           set -euo pipefail
-          mkdir -p release/downloads
+          mkdir -p release/downloads "$RUNNER_TEMP/release-downloads"
+          cp "$RUNNER_TEMP/android-receipt.json" "$RUNNER_TEMP/release-downloads/android-receipt.json"
           python3 - <<'PY'
           import hashlib,json,os,shutil
           from pathlib import Path
-          plan=json.loads(Path('release/plan.json').read_text())
-          receipt=json.loads(Path('release/android-receipt.json').read_text())
+          plan=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-plan/plan.json').read_text())
+          receipt=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').read_text())
           assert receipt['commit']==plan['commit']
           assert len(receipt['assets'])==2
           for item in receipt['assets']:
               path=Path(item['path'])
               assert path.is_file()
               assert hashlib.sha256(path.read_bytes()).hexdigest()==item['sha256']
-              shutil.copyfile(path,Path('release/downloads')/item['name'])
-          index=json.loads(Path('release/downloads/android.json').read_text())
+              shutil.copyfile(path,Path(os.environ['RUNNER_TEMP']+'/release-downloads')/item['name'])
+          index=json.loads(Path(os.environ['RUNNER_TEMP']+'/release-downloads/android.json').read_text())
           assert index['version']==plan['version']
           assert index['source_sha']==plan['commit']
           assert index['name'].startswith('Persona-')
-          assert index['sha256']==hashlib.sha256(Path('release/downloads',index['name']).read_bytes()).hexdigest()
-          Path('release/android-receipt.json').unlink()
+          assert index['sha256']==hashlib.sha256(Path(os.environ['RUNNER_TEMP']+'/release-downloads',index['name']).read_bytes()).hexdigest()
+          for name in ('Persona-'+plan['version']+'-android.apk','android.json'):
+              shutil.copyfile(Path(os.environ['RUNNER_TEMP']+'/release-downloads')/name,Path('release/downloads')/name)
+          Path(os.environ['RUNNER_TEMP']+'/release-downloads/android-receipt.json').unlink()
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -313,7 +334,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - uses: actions/download-artifact@v4
         with:
@@ -429,7 +450,9 @@ jobs:
 
   windows:
     name: Verify Windows programs natively and sign the desktop package
-    needs: [plan, cli-web, android, apple]
+    # Windows consumes only CLI/Web and Android artifacts. An unrelated Apple failure must not hide a native Windows
+    # execution or signing regression; the final aggregate still requires every platform to succeed.
+    needs: [plan, cli-web, android]
     if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
     runs-on: windows-latest
     timeout-minutes: 120
@@ -448,10 +471,6 @@ jobs:
         with:
           name: release-pr-android-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
           path: release/downloads
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-pr-apple-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
-          path: release
       - name: Run every Windows CLI on its matching native architecture
         shell: pwsh
         run: |
@@ -515,10 +534,23 @@ jobs:
   verify:
     name: All available release-PR checks passed
     needs: [plan, cli-web, android, apple, windows]
-    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    # A failed or skipped dependency normally skips this whole job, including its failure-conclusion step. Always run
+    # the aggregate for an actual release plan so the exact merge-result check cannot remain pending indefinitely.
+    if: always() && needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Require every platform job to succeed before verification
+        env:
+          CLI_WEB: ${{ needs.cli-web.result }}
+          ANDROID: ${{ needs.android.result }}
+          APPLE: ${{ needs.apple.result }}
+          WINDOWS: ${{ needs.windows.result }}
+        run: |
+          set -euo pipefail
+          for result in "$CLI_WEB" "$ANDROID" "$APPLE" "$WINDOWS"; do
+            test "$result" = success || { echo "A required platform failed or did not complete: $result" >&2; exit 1; }
+          done
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.plan.outputs.commit }}
@@ -526,7 +558,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-pr-plan-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
+          name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: release
       - uses: actions/download-artifact@v4
         with:
@@ -581,7 +613,20 @@ jobs:
           }
           Path('release/plan.json').write_text(json.dumps(plan,indent=2)+'\n')
           PY
+      - name: Mark the exact merge result verified only after every platform succeeded
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_RUN_ID: ${{ needs.plan.outputs.check_run_id }}
+        run: python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" conclude --check-run-id "$CHECK_RUN_ID" --conclusion success
+      - name: Mark the exact merge result failed when any platform failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_RUN_ID: ${{ needs.plan.outputs.check_run_id }}
+        run: python3 scripts/operations/release_merge_check.py --repository "${{ github.repository }}" conclude --check-run-id "$CHECK_RUN_ID" --conclusion failure
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: release-pr-verified-${{ needs.plan.outputs.pr }}-${{ needs.plan.outputs.commit }}
           path: release/
@@ -591,7 +636,7 @@ jobs:
   merge:
     name: Merge the verified release PR for post-merge verification
     needs: [plan, verify]
-    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != '' && github.event_name == 'pull_request' && github.actor == 'chyroc' && github.triggering_actor == 'chyroc'
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != '' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: persona-release
@@ -606,12 +651,13 @@ jobs:
           persist-credentials: false
       - name: Squash the exact verified PR head, then require the main merge to be verified again
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ needs.plan.outputs.pr }}
           HEAD: ${{ needs.plan.outputs.source_commit }}
         run: |
           set -euo pipefail
+          test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; refusing an unverifiable merge actor' >&2; exit 1; }
           gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,isDraft,baseRefName,headRefOid,headRepository,author,title,mergeCommit > release/merge-pr.json
           gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '{merge_commit_sha}' > release/merge-pr-rest.json
           python3 - <<'PY'

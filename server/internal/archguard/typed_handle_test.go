@@ -12,8 +12,11 @@ import (
 
 // Node.handle's parameters are typed per method namespace (#7891 stage 2, #8089): a namespace listed here decodes each
 // method's request into its own struct (internal/node/handle_<namespace>.go) and names its methods with constants. The
-// shared parameter struct in handle may not get back a field only that namespace read, and node.go may not spell one of
-// its method names as a string literal again. Add a row in every PR that types a namespace; never remove one.
+// shared parameter struct may not get back a field only that namespace read, and node.go may not spell one of its
+// method names as a string literal again. Add a row in every PR that types a namespace; never remove one.
+//
+// handle is the reload gate, and handleMethod dispatches and declares the shared struct (since #11687; started task
+// workspaces and backend Git calls dispatch again without passing the gate). The guard reads the dispatch.
 var typedHandleNamespaces = []struct {
 	prefix string   // the method-name prefix, "file." for file.read
 	fields []string // the shared struct's fields only this namespace read
@@ -36,10 +39,11 @@ func TestTypedHandleNamespacesStayTyped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const dispatch = "handleMethod"
 	shared := map[string]bool{}
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "handle" || fn.Recv == nil {
+		if !ok || fn.Name.Name != dispatch || fn.Recv == nil {
 			continue
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -58,12 +62,12 @@ func TestTypedHandleNamespacesStayTyped(t *testing.T) {
 		})
 	}
 	if len(shared) == 0 {
-		t.Fatal("handle's shared parameter struct (var p struct) not found")
+		t.Fatalf("%s's shared parameter struct (var p struct) not found in %s: if the dispatch moved, point the guard at it", dispatch, path)
 	}
 	for _, ns := range typedHandleNamespaces {
 		for _, field := range ns.fields {
 			if shared[field] {
-				t.Errorf("handle's shared parameter struct has %s again: %s methods decode into their own struct (internal/node/handle_*.go, #8089)", field, ns.prefix)
+				t.Errorf("%s's shared parameter struct has %s again: %s methods decode into their own struct (internal/node/handle_*.go, #8089)", dispatch, field, ns.prefix)
 			}
 		}
 	}

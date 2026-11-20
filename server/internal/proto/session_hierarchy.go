@@ -34,6 +34,8 @@ func (s Session) IsSubtask() bool {
 // member is empty): these sparse fields inline would take every row past its size class (TestSessionFitsItsSizeClass).
 // The Deleted flag describes no ancestry; it shares this storage to preserve the allocation budget for ordinary rows.
 type SessionHierarchy struct {
+	// HiddenByDirectory is manager-owned visibility, not collection or archive state.
+	HiddenByDirectory bool `json:"hidden_by_directory,omitempty"`
 	// CompletedTodo is display-only task ownership. Keep this sparse reference out of every Session's hot row.
 	CompletedTodo *TodoRef `json:"completed_todo,omitempty"`
 	// ParentAgentID is the session on the same machine a side session was started from (docs/protocol/protocol.md
@@ -145,10 +147,25 @@ type SessionChildren struct {
 }
 
 func (h *SessionHierarchy) empty() bool {
-	return h.ParentAgentID == "" && h.StartedAt.IsZero() && h.AskingParentSessionID == "" && h.FoldedUnder == "" && h.FoldedAs == "" &&
+	return !h.HiddenByDirectory && h.ParentAgentID == "" && h.StartedAt.IsZero() && h.AskingParentSessionID == "" && h.FoldedUnder == "" && h.FoldedAs == "" &&
 		h.FoldedSide == "" &&
 		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil && len(h.Aliases) == 0 &&
 		len(h.BackgroundEnded) == 0 && !h.Deleted
+}
+
+// HiddenByDirectory reports the manager's directory visibility without growing every session row.
+func (s *Session) HiddenByDirectory() bool {
+	return s.Hierarchy != nil && s.Hierarchy.HiddenByDirectory
+}
+
+// SetHiddenByDirectory preserves sparse metadata shared by session copies.
+func (s *Session) SetHiddenByDirectory(hidden bool) {
+	if s.HiddenByDirectory() == hidden {
+		return
+	}
+	h := s.hierarchy()
+	h.HiddenByDirectory = hidden
+	s.setHierarchy(h)
 }
 
 // CompletedTodo is the last completed association for navigation, never active work.

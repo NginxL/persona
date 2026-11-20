@@ -25,7 +25,7 @@ func TestPluginSkills(t *testing.T) {
 	// The user's own example-notes wins.
 	_ = os.MkdirAll(filepath.Join(user, "example-notes"), 0o755)
 	_ = os.WriteFile(filepath.Join(user, "example-notes", "SKILL.md"), []byte("mine\n"), 0o644)
-	if err := Sync(dir, user, nil, t.Logf); err != nil {
+	if err := Sync(dir, user, Selection{}, t.Logf); err != nil {
 		t.Fatal(err)
 	}
 	if stamp, err := os.ReadFile(filepath.Join(dir, ".persona-extension-skills")); err != nil || string(stamp) != "example-feed=example d1\n" {
@@ -38,7 +38,7 @@ func TestPluginSkills(t *testing.T) {
 		t.Fatal("the user's own wins:", target)
 	}
 	var sources []string
-	for _, s := range List(user, nil) {
+	for _, s := range List(user, Selection{}) {
 		sources = append(sources, s.Name+"/"+s.Source)
 	}
 	if !slices.Contains(sources, "example-feed/plugin") || !slices.Contains(sources, "example-notes/user") || slices.Contains(sources, "example-notes/plugin") {
@@ -53,7 +53,7 @@ func TestPluginSkills(t *testing.T) {
 	if _, err := ApplyPlugins(plugins, []PluginSkill{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Sync(dir, user, nil, t.Logf); err != nil {
+	if err := Sync(dir, user, Selection{}, t.Logf); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "example-feed")); err == nil {
@@ -82,14 +82,14 @@ func TestPluginSkillAfterTheUsersGoes(t *testing.T) {
 	}
 	_ = os.MkdirAll(filepath.Join(user, "example-feed"), 0o755)
 	_ = os.WriteFile(filepath.Join(user, "example-feed", "SKILL.md"), []byte("mine\n"), 0o644)
-	if err := Sync(dir, user, nil, t.Logf); err != nil {
+	if err := Sync(dir, user, Selection{}, t.Logf); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(filepath.Join(user, "example-feed")); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := Sync(dir, user, nil, t.Logf); err != nil {
+		if err := Sync(dir, user, Selection{}, t.Logf); err != nil {
 			t.Fatal(err)
 		}
 		if b, _ := os.ReadFile(filepath.Join(dir, "example-feed", "SKILL.md")); string(b) != "plugin\n" {
@@ -98,7 +98,7 @@ func TestPluginSkillAfterTheUsersGoes(t *testing.T) {
 	}
 	// A stamp that says it was copied while it is not: copied again.
 	_ = os.RemoveAll(filepath.Join(dir, "example-feed"))
-	if err := Sync(dir, user, nil, t.Logf); err != nil {
+	if err := Sync(dir, user, Selection{}, t.Logf); err != nil {
 		t.Fatal(err)
 	}
 	if !isCopy(filepath.Join(dir, "example-feed")) {

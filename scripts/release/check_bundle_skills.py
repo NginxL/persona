@@ -21,11 +21,20 @@ DESCRIPTION = re.compile(rb"(?m)^description:")
 
 
 def redistributable(source: str) -> set:
-    """The keys of `var Redistributable = map[string]string{…}` in embed.go."""
+    """The keys of `var Redistributable = map[string]string{…}` in embed.go.
+
+    A key may be a quoted string or a simple constant declared elsewhere in the same file, such as workGuideName.
+    Resolving that constant must not accidentally accept an unregistered skill.
+    """
     m = re.search(r"var Redistributable = map\[string\]string\{(.*?)\n\}", source, re.S)
     if not m:
         raise SystemExit(f"{EMBED_GO}: no Redistributable map")
-    return set(re.findall(r'^\s*"([^"]+)"\s*:', m.group(1), re.M))
+    keys = set(re.findall(r'^\s*"([^"]+)"\s*:', m.group(1), re.M))
+    for key in re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', m.group(1), re.M):
+        declaration = re.search(r'^\s*(?:const\s+)?\(?\s*' + re.escape(key) + r'\s*=\s*"([^"]+)"\s*(?://.*)?$', source, re.M)
+        if declaration:
+            keys.add(declaration.group(1))
+    return keys
 
 
 def check(binary: bytes, allowed: set) -> list:

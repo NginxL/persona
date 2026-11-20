@@ -645,3 +645,14 @@ describe("a complete copy on a paging hub", () => {
     expect(host.querySelector("output")!.dataset.titles).toContain("round 4");
   });
 });
+
+it("filters hidden rows before folding and restores them when the rule is disabled", async () => {
+  const parent = row("parent", { hidden_by_directory: true });
+  const child = row("child", { folded_under: "parent" });
+  fixture.state = { sessions: { demo: [parent, child] }, features: [], loaded: true };
+  await mount();
+  expect(host.textContent).toBe("child");
+  await act(async () => publish({ sessions: { demo: [{ ...parent, hidden_by_directory: false }, child] } }));
+  expect(host.textContent).toBe("parent");
+  expect(fixture.api).not.toHaveBeenCalled();
+});

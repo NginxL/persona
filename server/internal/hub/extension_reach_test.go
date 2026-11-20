@@ -256,6 +256,58 @@ func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
 	}
 }
 
+// The literal self-refresh route has no object id to route by. The authenticated extension token alone chooses its
+// manager; explicitly naming another manager is not an alternate path to that manager's markets.
+func TestExtensionSelfMarketRefreshStaysOnTokenManager(t *testing.T) {
+	_, url, a, b := reachHub(t)
+	beforeA, beforeB := len(reached(a)), len(reached(b))
+	// guardManager answers RPCs but does not take an HTTP relay. Stop after the dispatch this test is about; the real
+	// manager's immediate 202 and its background read are covered in extmgr.
+	const path = "/api/v1/extensions/-/self/market/refresh"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url+path, strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer "+extTokenPrefix+"bx-token")
+	req.Header.Set("Content-Type", "application/json")
+	answered := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			err = resp.Body.Close()
+		}
+		answered <- err
+	}()
+	eventually(t, 5*time.Second, "the token manager's self refresh", func() bool { return len(reached(b)) > beforeB })
+	cancel()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled self refresh did not return")
+	}
+	if got := reached(a)[beforeA:]; len(got) != 0 {
+		t.Fatalf("the other manager received the self refresh: %v", got)
+	}
+	calls := reached(b)[beforeB:]
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], extwire.MethodAccept+" ") {
+		t.Fatalf("the token owner's manager did not receive exactly one self refresh: %v", calls)
+	}
+	for _, tc := range []struct {
+		path   string
+		header map[string]string
+	}{
+		{"/api/v1/extensions/-/self/market/refresh", map[string]string{ManagerHeader: assistantwire.AssistantID}},
+		{"/api/v1/extensions/-/self/market/refresh?manager=" + assistantwire.AssistantID, nil},
+	} {
+		beforeA, beforeB = len(reached(a)), len(reached(b))
+		if code, out := extDo(t, url, http.MethodPost, tc.path, "", tc.header); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+			t.Fatalf("naming the other manager: %d %s", code, out)
+		}
+		if len(reached(a)) != beforeA || len(reached(b)) != beforeB {
+			t.Fatalf("a refused manager selector reached a manager: A %v, B %v", reached(a)[beforeA:], reached(b)[beforeB:])
+		}
+	}
+}
+
 // Every route an extension's token can open (extwire.RouteScopes) is bounded to its manager one way or another; a new
 // one has to say how here. "path": its machine, session, card or conversation is in the path (extensionReach);
 // "manager": it goes to the extension's own manager (requestManager, byConversation, byTodo, mergeList), which is held to its
@@ -322,6 +374,8 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/assistant/leaders":                    "manager",
 		"GET /api/v1/assistant/dispatch-policy":            "manager",
 		"PUT /api/v1/assistant/dispatch-policy":            "manager",
+		"GET /api/v1/assistant/dispatch-guard":             "manager",
+		"PUT /api/v1/assistant/dispatch-guard":             "manager",
 		"GET /api/v1/assistant/worker-presets":             "manager",
 		"GET /api/v1/assistant/start-defaults":             "manager",
 		"PUT /api/v1/assistant/start-defaults":             "manager",
@@ -345,6 +399,7 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"DELETE /api/v1/todos/{id}/agents/{mid}/{sid}":      "path",
 		"PUT /api/v1/todos/{id}/spaces/{mid}/{space...}":    "path",
 		"DELETE /api/v1/todos/{id}/spaces/{mid}/{space...}": "path",
+		"POST /api/v1/extensions/-/self/market/refresh":     "manager",
 		"/api/v1/extensions/{id}/":                          "manager",
 	}
 	for route := range extwire.RouteScopes {

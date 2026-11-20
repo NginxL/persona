@@ -12,6 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -105,6 +109,47 @@ func TestCallErrorDelivery(t *testing.T) {
 				t.Fatalf("%d %v", w.Code, body)
 			}
 		})
+	}
+}
+
+// A node's not_found for a session's history keeps its reason through the devices manager that carries the computer,
+// here played on the real bus as in send_held_test.go: the app gets the reason as the node gave it, the sentence for it
+// in the request's language and the node's words as the detail (#11388).
+func TestSessionItemsNotFoundReasonThroughItsManager(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "box", Name: "Studio Mac"})
+	m.managed, m.peer = true, &busNode{h: h, id: "box", done: make(chan struct{})}
+	registerMachine(h, m)
+	h.bus.idents = &memIdents{}
+	mux := http.NewServeMux()
+	h.busRoutes(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	token, err := h.createBusToken(context.Background(), assistantwire.AssistantID, "Test manager")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const words = "transcript for session s1 not found"
+	connectGuardManagerWith(t, srv.URL, assistantwire.AssistantID, token, func(method string, raw json.RawMessage) (any, error) {
+		var c devicewire.NodeCall
+		if method != devicewire.MethodCall || json.Unmarshal(raw, &c) != nil || c.Method != "session.items" {
+			return map[string]any{}, nil
+		}
+		return nil, &rpc.Error{Code: proto.CodeNotFound, Message: words, Data: json.RawMessage(`{"reason":"no_transcript"}`)}
+	})
+	h.devices.mu.Lock()
+	h.devices.upOpen = map[string]bool{devicesOwner: true}
+	h.devices.mu.Unlock()
+	for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/box/s1/items?turns=2", nil)
+		r.SetPathValue("sid", "s1")
+		rec := httptest.NewRecorder()
+		h.sessionItems(langRecorder{rec, lang}, r, m)
+		body := errorResponse(t, rec)
+		if rec.Code != http.StatusNotFound || body["code"] != proto.CodeNotFound || body["reason"] != proto.NotFoundNoTranscript ||
+			body["error"] != i18n.T(lang, "apierr-apierr.session_no_transcript") || body["detail"] != words {
+			t.Errorf("%s: %d %v", lang, rec.Code, body)
+		}
 	}
 }
 

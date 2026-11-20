@@ -57,6 +57,9 @@ import { LauncherBlockedHelp } from "./LauncherBlockedHelp";
 import { launcherTitle, namedLauncher, namesFromProviders, providerIdNote, providerLabel, providerTitle, type Named } from "../lib/provider-names";
 import { WorkSessionForm } from "./WorkSessionForm";
 import { NewAgentModel, useModelList } from "./NewAgentModel";
+import { ProjectDocumentContext, ProjectDocumentSource, projectDocumentText, type ProjectDocumentSnapshot } from "./NewAgentProjectDocument";
+
+const PROJECT_DOCUMENT_HOSTS = new Set(["herdr", "herdr-core", "tern"]);
 
 // several forwarded at once (#3838): their bar, from the group's chunk, which Forward to has loaded by then
 const ForwardGroupBar = lazyPage(() => import("./chat/ForwardGroup").then((m) => m.ForwardGroupBar));
@@ -176,6 +179,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   };
   const [loadingDirs, setLoadingDirs] = useState(false);
   const [prompt, setPrompt] = useState(() => localStorage.getItem("draft:new-agent") ?? "");
+  const [projectDocument, setProjectDocument] = useState<{ snapshot: ProjectDocumentSnapshot; owner: string; manager: string } | null>(null);
   const keys = useMemo(browserStartKeys, []);
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   // messages forwarded to a new Agent (#3899, #3838, lib/forward.ts): their card over the first message, which carries
@@ -185,6 +189,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const submitted = useRef(false);
   const preparation = useRef<AbortController | null>(null);
+  const documentPreparation = useRef<AbortController | null>(null);
   const promptRevision = useRef(0);
   const credential = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
   const knownDefault = useKnownDefault();
@@ -202,10 +207,12 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   const retirePreparation = () => {
     const previous = preparation.current;
     preparation.current = null;
+    documentPreparation.current = null;
     previous?.abort();
   };
   const dismiss = () => {
     retirePreparation();
+    setProjectDocument(null);
     // Keep admission closed until another opening, including events in the same React batch.
     submitted.current = true;
     onClose();
@@ -271,6 +278,9 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     setWtError("");
     return retirePreparation;
   }, [open, preset, mid, cwd, workspace, manager, credential, targetOnline]);
+  useLayoutEffect(() => {
+    if (!open) setProjectDocument(null);
+  }, [open]);
   // a Paseo workspace picked from the list (#8856) can still start in a new worktree of its repository, which Paseo
   // makes as a workspace of its own; an Orca one makes its worktrees through Orca's own New Worktree
   const paseoPicked = workspacePicked && workspace?.host === "paseo";
@@ -543,6 +553,29 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // (prompt_optional, docs/integrations/codex.md "Starting without a first message"), an older one needs it
   const codex = agent === "codex";
   const needsFirst = codex && launchers.find((l) => l.name === listLauncher)?.prompt_optional !== true;
+  const documentHost = opensIn ?? hostDefault;
+  // An explicit launcher family must agree with the catalog. Older Claude entries use launcherAgent's default.
+  const documentAgent = listEntry?.agent_type || listEntry?.agent || agent;
+  const documentScope = picked && listEntry && !loadingModels && !workspace && !desktopStart
+    && documentAgent === agent && (agent === "claude" || codex) && PROJECT_DOCUMENT_HOSTS.has(documentHost)
+    ? JSON.stringify([credential, manager, mid, documentHost, listLauncher, agent]) : null;
+  const documentContextCurrent = !projectDocument || (projectDocument.owner === credential && projectDocument.manager === manager);
+  useLayoutEffect(() => {
+    if (!documentPreparation.current) return;
+    retirePreparation();
+    submitted.current = false;
+    setWtBusy(false);
+    setWtError("");
+  }, [documentScope]);
+  const documentBlock = useMemo(() => projectDocument ? projectDocumentText(projectDocument.snapshot) : "", [projectDocument]);
+  const documentMessage = useMemo(() => {
+    if (!documentBlock) return "";
+    const draft = forwards.length ? withContexts(forwards, prompt, attachments.some((file) => file.mime.startsWith("image/"))) : prompt.trim();
+    return draft ? `${draft}\n\n${documentBlock}` : documentBlock;
+  }, [documentBlock, forwards, prompt, attachments]);
+  let documentBlocked: string | null = null;
+  if (projectDocument && !documentContextCurrent) documentBlocked = t("newagent.project_document_changed_connection");
+  else if (projectDocument && !documentScope) documentBlocked = t("newagent.project_document_unsupported");
   // the launcher this start runs (the chosen one, or the one Model settings' default runs) when this computer can't start
   // it now (#1643): said under the box with a way to see how to fix it; Start stays enabled
   const runs = launchersOf === mid ? listLauncher : "";
@@ -650,18 +683,21 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
 
   const start = () => {
     if (!open || submitted.current || loadingModels || !workspaceCurrent || !online.some((m) => m.id === mid) || !(cwd.trim() || desktopScratch)) return;
+    if (documentBlocked || (projectDocument && (projectDocument.owner !== credentialOwner()
+      || projectDocument.manager !== (getState().machines.find((m) => m.id === mid)?.manager || defaultManager())))) return;
     // Read ownership at admission too: credential/store changes can precede React's next render.
     if (workspace && (workspace.owner !== credentialOwner()
       || workspace.manager !== (getState().machines.find((m) => m.id === mid)?.manager || defaultManager()))) return;
     submitted.current = true;
     const controller = new AbortController();
     preparation.current = controller;
+    documentPreparation.current = projectDocument ? controller : null;
     const owner = credentialOwner();
     const token = getToken();
     const revision = promptRevision.current;
     // who opened New agent for something of its own hears the Agent started (Inbox's "New agent…", #5933)
     const onStarted = preset?.onStarted;
-    const sent = forwards.length ? withContexts(forwards, prompt, attachments.some((a) => a.mime.startsWith("image/"))) : prompt.trim();
+    const sent = documentMessage || (forwards.length ? withContexts(forwards, prompt, attachments.some((a) => a.mime.startsWith("image/"))) : prompt.trim());
     const snapshot = { text: sent, attachments: [...attachments] };
     const current = () => preparation.current === controller && !controller.signal.aborted && owner === credentialOwner()
       && getState().machines.some((m) => m.id === mid && m.online)
@@ -689,7 +725,10 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
       : undefined;
     // what every start of this sheet goes with (each run of a comparison too)
     const launcherDefaultEffort = agent === "agy" && !!launcher && !picks.effort;
-    const target = { launcher, ...picks, launcherDefaultEffort: launcherDefaultEffort || undefined, permissionMode: permissionMode || undefined, host: opensIn, ultracode: ultra,
+    const target = { launcher: projectDocument ? listLauncher : launcher, ...picks,
+      nameHint: projectDocument ? `${projectDocument.snapshot.project}/${projectDocument.snapshot.document} r${projectDocument.snapshot.revision}` : undefined,
+      launcherDefaultEffort: launcherDefaultEffort || undefined, permissionMode: permissionMode || undefined,
+      host: projectDocument ? documentHost : opensIn, ultracode: ultra,
       ...(codex ? { agentType: "codex", inlinePrompt: true } : inline) };
     const launch = (dir: string, workspaceId: string | undefined) => {
       if (!current()) return;
@@ -739,6 +778,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
         .finally(() => {
           if (!current()) return;
           preparation.current = null;
+          documentPreparation.current = null;
           setWtBusy(false);
         });
       return;
@@ -787,7 +827,19 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
     );
 
   return (
-    <>
+    <ProjectDocumentContext value={{
+      open, scope: documentScope, busy: wtBusy, attached: projectDocument?.snapshot ?? null, blocked: documentBlocked,
+      onAttach: (snapshot) => {
+        if (!open || !documentScope || submitted.current || credential !== credentialOwner()) return;
+        setProjectDocument((current) => current ?? { snapshot, owner: credential, manager });
+        firstMessage.current?.focus();
+      },
+      onRemove: () => {
+        if (submitted.current) return;
+        setProjectDocument(null);
+        firstMessage.current?.focus();
+      },
+    }}>
       <Dialog
         open={open}
         onClose={dismiss}
@@ -799,7 +851,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
             <Button tone="quiet" onClick={dismiss}>
               {t("common.cancel")}
             </Button>
-            <Button tone="primary" busy={wtBusy} disabled={loadingModels || !workspaceCurrent || !online.some((m) => m.id === mid) || !(cwd.trim() || desktopScratch) || (needsFirst && !prompt.trim())} onClick={start}>
+            <Button tone="primary" busy={wtBusy} disabled={loadingModels || !workspaceCurrent || !targetOnline || !(cwd.trim() || desktopScratch) || Boolean(documentBlocked) || (needsFirst && !prompt.trim() && !projectDocument)} onClick={start}>
               {runCount > 1 ? t("newagent.start_runs", { count: runCount }) : t("newagent.start")}
             </Button>
           </>
@@ -1003,6 +1055,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
                 releaseAttachments(attachments.filter((a) => a.id === id));
                 setAttachments((current) => current.filter((a) => a.id !== id));
               }} /></div>}
+              <ProjectDocumentSource />
               <textarea
                 ref={firstMessage}
                 value={prompt}
@@ -1047,11 +1100,11 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
                     onHelp={(name) => {
                       // a provider left out here: its page in Settings, where "Computers" turns its own-service rule off
                       if (!skipped.some((u) => u.name === name)) return setHelpFor(name);
-                      onClose();
+                      dismiss();
                       navigate(providersPath(name));
                     }}
                     onConfigure={() => {
-                      onClose();
+                      dismiss();
                       navigate(settingsHref("models", null, false, null, "providers"));
                     }}
                   />
@@ -1105,7 +1158,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
                 block={helpBlock}
                 onTryAnyway={() => pickModel({ launcher: helpLauncher.name, model: "", effort: "" })}
                 onAddProvider={() => {
-                  onClose();
+                  dismiss();
                   navigate("/settings?tab=models&add=1"); // the provider wizard, as readiness's connect_model
                 }}
                 onClose={() => setHelpFor("")}
@@ -1115,7 +1168,7 @@ function AgentForm({ open, onClose, preset }: NewAgentProps) {
         </div>
       </Dialog>
       {adding.dialog}
-    </>
+    </ProjectDocumentContext>
   );
 }
 

@@ -5,8 +5,9 @@ import { api, credentialOwner, onCredentialChange } from "./api";
 
 const LEGACY = "persona.agentHideBotmux";
 const PATH = "/agents/display-settings";
-export interface AgentsDisplay { show_botmux: boolean; configured: boolean }
-interface State { value: AgentsDisplay | null; saving: boolean; error?: unknown; retryShow?: boolean }
+export interface AgentsDisplay { show_botmux: boolean; configured: boolean; use_herdr_tab_name?: boolean }
+type DisplayChange = { show_botmux: boolean } | { use_herdr_tab_name: boolean };
+interface State { value: AgentsDisplay | null; saving: boolean; error?: unknown; change?: DisplayChange }
 let state: State = { value: null, saving: false };
 let revision = 0;
 let reading: Promise<void> | undefined;
@@ -15,7 +16,8 @@ const snapshot = () => state;
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 const set = (next: State) => { state = next; listeners.forEach((f) => f()); };
 function checked(value: AgentsDisplay): AgentsDisplay {
-  if (typeof value.show_botmux !== "boolean" || typeof value.configured !== "boolean") throw new Error("Invalid Agents display settings");
+  if (typeof value.show_botmux !== "boolean" || typeof value.configured !== "boolean" ||
+    (value.use_herdr_tab_name !== undefined && typeof value.use_herdr_tab_name !== "boolean")) throw new Error("Invalid Agents display settings");
   return value;
 }
 function legacyHidden() { try { return localStorage.getItem(LEGACY) === "1"; } catch { return false; } }
@@ -36,9 +38,9 @@ export function refreshAgentsDisplay(): Promise<void> {
       }
       if (mine !== revision) return;
       if (value.configured) forgetLegacy();
-      set(state.retryShow === undefined ? { value, saving: false } : { ...state, value });
+      set(state.change === undefined ? { value, saving: false } : { ...state, value });
     } catch (error) {
-      if (mine === revision && state.retryShow === undefined) set({ ...state, error });
+      if (mine === revision && state.change === undefined) set({ ...state, error });
     }
   })();
   reading = work;
@@ -46,18 +48,19 @@ export function refreshAgentsDisplay(): Promise<void> {
   return work;
 }
 
-export async function saveAgentsDisplay(show: boolean): Promise<void> {
+export async function saveAgentsDisplay(input: boolean | DisplayChange): Promise<void> {
   credentialOwner();
   if (state.saving) return;
   const mine = ++revision;
-  set({ value: state.value, saving: true });
+  const change = typeof input === "boolean" ? { show_botmux: input } : input;
+  set({ value: state.value, saving: true, change });
   try {
-    const value = checked(await api<AgentsDisplay>(PATH, { method: "PUT", json: { show_botmux: show } }));
+    const value = checked(await api<AgentsDisplay>(PATH, { method: "PUT", json: change }));
     if (mine !== revision) return;
     if (value.configured) forgetLegacy();
     set({ value, saving: false });
   } catch (error) {
-    if (mine === revision) set({ ...state, saving: false, error, retryShow: show });
+    if (mine === revision) set({ ...state, saving: false, error });
   }
 }
 
@@ -72,10 +75,14 @@ export function useAgentsDisplay() {
 }
 
 export function retryAgentsDisplay(): Promise<void> {
-  return state.retryShow === undefined ? refreshAgentsDisplay() : saveAgentsDisplay(state.retryShow);
+  return state.change === undefined ? refreshAgentsDisplay() : saveAgentsDisplay(state.change);
 }
 
 export function useBotmuxHidden(): boolean {
   // An unavailable preference might hide these sessions. Keep the last acknowledged choice.
   return useAgentsDisplay().value?.show_botmux !== true;
+}
+
+export function useHerdrTabName(): boolean {
+  return useAgentsDisplay().value?.use_herdr_tab_name === true;
 }

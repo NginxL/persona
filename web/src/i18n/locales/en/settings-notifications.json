@@ -67,9 +67,9 @@
   "island_hint": "Counts of Agents that need you, are working or finished, around the notch; point at it for the list",
   "island_footer": "Only in the Persona desktop app on this Mac. Click a row in the list to open that Agent.",
   "island_failed": "Couldn't change it: {error}",
-  "low_distraction": "Low-distraction mode",
+  "low_distraction": "Push grading",
   "low_distraction_hint": "Only what needs you notifies you; the rest waits for the briefing",
   "low_distraction_footer": "For all your devices. When on, questions, approvals, decisions only you can make, your reminders and the main conversation's notices still notify you; task results, “Please verify” requests and other conversations' notices wait for the briefing and Held pushes, and finished agents stay silent.",
-  "low_distraction_load_failed": "Couldn't load low-distraction mode",
-  "low_distraction_unsupported": "This hub doesn't support low-distraction mode yet. Update the hub to turn it on here."
+  "low_distraction_load_failed": "Couldn't load push grading",
+  "low_distraction_unsupported": "This hub doesn't support push grading yet. Update the hub to turn it on here."
 }

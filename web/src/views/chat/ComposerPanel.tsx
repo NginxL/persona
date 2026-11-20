@@ -18,7 +18,8 @@ import { modeTitle } from "../../lib/session-actions";
 import type { Machine, Session } from "../../lib/types";
 import type { Workspace, WorkspaceList } from "../../lib/workspace-board";
 import { useStore } from "../../lib/store";
-import { hasFinePointer } from "../../lib/viewport";
+import { useCloseOnBack } from "../../lib/back-close";
+import { hasFinePointer, NARROW, useMedia } from "../../lib/viewport";
 import { useComposition } from "../../lib/ime";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
@@ -268,6 +269,8 @@ export function ComposerPanel({
     document.addEventListener("pointerdown", down);
     return () => document.removeEventListener("pointerdown", down);
   }, [from, onClose]);
+  // on a narrow screen Back closes it too, staying in the chat
+  useCloseOnBack(from === "plus", () => onClose(false), useMedia(NARROW));
 
   // the search box takes the keys at once; not on a touch screen alone, where the focus would raise the keyboard over the rows
   const searchBox = useRef<HTMLInputElement>(null);

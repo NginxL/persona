@@ -32,3 +32,10 @@ describe("othersWaiting", () => {
     expect(othersWaiting(3, undefined)).toBe(3);
   });
 });
+
+it("excludes directory-hidden sessions from every attention count", () => {
+  const hidden = { hidden_by_directory: true };
+  expect(stateCounts([session("n", "needs_you", hidden), session("u", "unread", hidden), session("w", "working", hidden), session("v", "needs_you")]))
+    .toEqual({ needs: 1, working: 0, waiting: 0, unread: 0, badge: 1 });
+  expect(othersWaiting(1, session("n", "needs_you", hidden))).toBe(1);
+});

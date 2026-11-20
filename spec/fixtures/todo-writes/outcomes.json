@@ -1,0 +1,472 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "message_taken",
+      "description": "The to-do's Agent takes the message.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go sendToTaskAgent"
+      ],
+      "input": {
+        "route": "message",
+        "what": "taken"
+      },
+      "expected": {
+        "status": 200,
+        "state": "delivered",
+        "receipt": "done"
+      }
+    },
+    {
+      "name": "message_no_agent",
+      "description": "The to-do has no Agent that can take it: refused before anything went out.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go routeToTaskAs (route_no_agent)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "no_agent"
+      },
+      "expected": {
+        "status": 409,
+        "code": "conflict",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "message_not_this_conversation",
+      "description": "The to-do is not this conversation's: refused before anything went out.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go routeToTaskAs (route_no_task)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "not_this_conversation"
+      },
+      "expected": {
+        "status": 409,
+        "code": "conflict",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "message_refused",
+      "description": "The Agent's computer refused the message with a code of its own and typed nothing.",
+      "source": [
+        "server/internal/assistant/todo_write_outcome.go writeDelivered (sendUnknown false)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "refused"
+      },
+      "expected": {
+        "status": 409,
+        "code": "conflict",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "message_not_sent",
+      "description": "The send never left the manager.",
+      "source": [
+        "server/internal/assistant/todo_write_outcome.go writeDelivered (rpc.ErrNotSent)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "not_sent"
+      },
+      "expected": {
+        "status": 409,
+        "code": "conflict",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "message_in_doubt",
+      "description": "The node's answer to the send never came back, so the message may have been typed.",
+      "source": [
+        "server/internal/assistant/todo_write_outcome.go writeDelivered (sendUnknown: startResultUnknown)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "in_doubt"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "message_node_not_sure",
+      "description": "The node says typing stopped part way: the message may have arrived.",
+      "source": [
+        "server/internal/assistant/todo_write_outcome.go writeDelivered (sendUnknown: nodeMayHaveTaken)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "node_not_sure"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "message_start_in_doubt",
+      "description": "Every Agent had stopped; the new Agent the message starts never answered its start, so it may have the message as its first.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go routeToTaskAs",
+        "server/internal/assistant/tasks_successor.go startTaskSuccessor"
+      ],
+      "input": {
+        "route": "message",
+        "what": "start_in_doubt"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "message_start_refused",
+      "description": "Every Agent had stopped; the new Agent's start was refused before it ran.",
+      "source": [
+        "server/internal/assistant/tasks_successor.go startTaskSuccessor"
+      ],
+      "input": {
+        "route": "message",
+        "what": "start_refused"
+      },
+      "expected": {
+        "status": 409,
+        "code": "conflict",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "message_typed_then_not_kept",
+      "description": "The Agent took the message, then the conversation's routed item could not be written.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go sendToTaskAgent (wordsSent)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "typed_then_not_kept"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "yes",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "message_typed_then_deleted",
+      "description": "The node took the message, then the Agent's conversation was marked deleted before the manager answered: the Agent has it.",
+      "source": [
+        "server/internal/assistant/service.go call (afterNodeWrite)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "typed_then_deleted"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "yes",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "message_start_then_not_kept",
+      "description": "Every Agent had stopped; the new Agent started with the message as its first, then the conversation's routed item could not be written.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go routeToTaskAs (wordsSent)"
+      ],
+      "input": {
+        "route": "message",
+        "what": "start_then_not_kept"
+      },
+      "expected": {
+        "status": 409,
+        "code": "send_in_doubt",
+        "delivered": "yes",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_words_taken",
+      "description": "The decision's Agent takes the owner's words; the decision is recorded.",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionTextLocked"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "taken",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "state": "delivered",
+        "receipt": "done"
+      }
+    },
+    {
+      "name": "answer_words_no_agent",
+      "description": "No Agent can take the words: they are recorded and handed to the supervisor (a 200 that says delivered none).",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionTextLocked",
+        "server/internal/assistant/acceptance_reply.go decisionNotDelivered"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "no_agent",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "delivered": "none",
+        "state": "delivered",
+        "receipt": "done"
+      }
+    },
+    {
+      "name": "answer_words_in_doubt",
+      "description": "The node's answer to the send never came back, so the words may have been typed.",
+      "source": [
+        "server/internal/assistant/todo_write_outcome.go writeDelivered"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "in_doubt",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_words_start_in_doubt",
+      "description": "Every Agent had stopped; the new Agent the owner's words start never answered its start, so it may have them as its first.",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionTextLocked",
+        "server/internal/assistant/tasks_successor.go startTaskSuccessor"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "start_in_doubt",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_words_typed_then_gone",
+      "description": "The Agent took the words, then the to-do was gone before the decision was recorded.",
+      "source": [
+        "server/internal/assistant/decision.go answerDecisionTextLocked (wordsSent)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "typed_then_gone",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "yes",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_words_typed_then_not_kept",
+      "description": "The Agent took the words, then the conversation's routed item could not be written.",
+      "source": [
+        "server/internal/assistant/tasks_follow.go sendToTaskAgent (wordsSent)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "typed_then_not_kept",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "yes",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_words_refused",
+      "description": "The Agent's computer refused the words with a code of its own and typed nothing.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go writeAnswerError (nodeRefusal)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "refused",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 423,
+        "code": "input_draft",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "answer_option_in_doubt",
+      "description": "An option other than the recommended one, its send in doubt.",
+      "source": [
+        "server/internal/assistant/decision.go chooseOption"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "in_doubt",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_recommendation_in_doubt",
+      "description": "The recommended option, its send in doubt.",
+      "source": [
+        "server/internal/assistant/acceptance_reply.go acceptTryAsDismissalLocked",
+        "server/internal/assistant/conclusion.go takeRecommendation"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "in_doubt",
+        "answer": {
+          "option": "Ryokan Hanami"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "send_in_doubt",
+        "delivered": "unknown",
+        "state": "unknown",
+        "receipt": "unknown"
+      }
+    },
+    {
+      "name": "answer_option_not_sent",
+      "description": "An option whose send never left the manager: nothing taken.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go writeAnswerError (accept_not_taken)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "not_sent",
+        "answer": {
+          "option": "Kaede"
+        }
+      },
+      "expected": {
+        "status": 502,
+        "code": "accept_not_taken",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "answer_round_over",
+      "description": "The ask the id names no longer waits.",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go answerDecision (ask_stale)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "round_over",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "code": "ask_stale",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    },
+    {
+      "name": "answer_no_such_todo",
+      "description": "The to-do is not there before anything runs (unlike answer_words_typed_then_gone).",
+      "source": [
+        "server/internal/assistant/todo_asks_routes.go postTodoAskAnswer (todo_not_found)"
+      ],
+      "input": {
+        "route": "answer",
+        "what": "no_such_todo",
+        "answer": {
+          "text": "Ryokan Hanami, please"
+        }
+      },
+      "expected": {
+        "status": 404,
+        "code": "todo_not_found",
+        "delivered": "none",
+        "state": "failed",
+        "receipt": "failed"
+      }
+    }
+  ]
+}

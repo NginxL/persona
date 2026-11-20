@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -13,8 +14,8 @@ import (
 )
 
 // The user's navigation choices (#9071, docs/protocol/protocol.md "Navigation"): the page the apps open on, how the
-// sidebar's pages are arranged (their order, the ones put away, the groups) and how Overview's extension cards are
-// (their order, the ones hidden, their widths: #9745). The default
+// sidebar's pages are arranged (their order, the ones put away, the groups) and how Overview is (its extension cards'
+// order, the ones hidden, their widths: #9745; its own sections among them: #10905). The default
 // manager keeps them for the hub, and a hub has one owner, so they are the user's: every device of theirs follows. Kept
 // in the settings table under navigationKey (a key of its own: no migration). A field never stored is left out of the
 // answer, so an app tells "never chosen" from "the default chosen" (an empty start) and may hand over a choice it kept
@@ -28,46 +29,90 @@ type navigation struct {
 	Start *string `json:"start,omitempty"`
 	// Pages is the sidebar's arrangement, as the web keeps it (web/src/lib/sidebar-pages.ts): a page's key as for Start.
 	Pages *sidebarPages `json:"pages,omitempty"`
-	// Overview is Overview's extension cards as the user arranged them, as the web keeps it (web/src/lib/overview-cards.ts).
-	// An empty list is the default chosen (every card in the hub's order, half a row), not "never chosen".
+	// Overview is Overview's extension cards and its own sections as the user arranged them, as the web keeps it
+	// (web/src/lib/overview-cards.ts). An empty list is the default chosen (the sections in their order, then every card
+	// in the hub's order, half a row: the cards last, #11147), not "never chosen".
 	Overview *[]overviewPlace `json:"overview,omitempty"`
 }
 
 // overviewPlace is one of Overview's cards (an extension's overview_card, docs/extensions/extensions.md "UI slots") as
 // the user placed it: the extension's id and the card's, whether it is hidden, and its width: half a row ("" or "half",
-// the default) or the whole row ("full"). Which cards there are is the apps' business: one the list names that is not
-// there now is passed over, and one it does not name comes after the named ones.
+// the default) or the whole row ("full"). Or one of Overview's own sections (#10905): its id in Section, whether it
+// is hidden, and nothing else. Which cards and sections there are is the apps' business: one the list names that is
+// not there now is passed over, and one it does not name keeps its place by default (web/src/lib/overview-cards.ts).
 type overviewPlace struct {
-	Extension string `json:"extension"`
-	ID        string `json:"id"`
+	Extension string `json:"extension,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Section   string `json:"section,omitempty"`
 	Hidden    bool   `json:"hidden,omitempty"`
 	Span      string `json:"span,omitempty"`
 }
 
-// overviewCardsMost: cards in the list, as many as the sidebar's pages.
+// overviewCardsMost: cards and sections in the list, as many as the sidebar's pages.
 const overviewCardsMost = sidebarPagesMost
 
-// checkOverview says what in cards is not of the shape the apps write: ids as an extension's and a UI contribution's
-// (extension.ValidID), each card once, and a width of "half" or "full".
+// overviewSection is a section's id: the web's (needs_you, in_progress, …) and, so a newer web's is kept, any of that shape.
+var overviewSection = lazyre.New(`^[a-z][a-z0-9_]{0,31}$`)
+
+// checkOverview says what in cards is not of the shape the apps write: a card's ids as an extension's and a UI
+// contribution's (extension.ValidID) and a width of "half" or "full"; a section's id of its shape and no card's fields;
+// each card and section once.
 func checkOverview(cards []overviewPlace) error {
 	if len(cards) > overviewCardsMost {
-		return fmt.Errorf("overview: at most %d cards", overviewCardsMost)
+		return fmt.Errorf("overview: at most %d cards and sections", overviewCardsMost)
 	}
 	seen := make(map[string]bool, len(cards))
 	for _, c := range cards {
-		if !extension.ValidID(c.Extension) || !extension.ValidID(c.ID) {
+		k := c.Extension + "/" + c.ID
+		switch {
+		case c.Section != "":
+			if !overviewSection.MatchString(c.Section) || c.Extension != "" || c.ID != "" || c.Span != "" {
+				return fmt.Errorf("overview: %q is not one of Overview's sections", c.Section)
+			}
+			k = c.Section // a card's key has a "/"
+		case !extension.ValidID(c.Extension) || !extension.ValidID(c.ID):
 			return fmt.Errorf("overview: %q / %q is not an extension's card", c.Extension, c.ID)
-		}
-		if c.Span != "" && c.Span != "half" && c.Span != "full" {
+		case c.Span != "" && c.Span != "half" && c.Span != "full":
 			return fmt.Errorf("overview: a card's span is half or full, not %q", c.Span)
 		}
-		k := c.Extension + "/" + c.ID
 		if seen[k] {
 			return fmt.Errorf("overview: %s more than once", k)
 		}
 		seen[k] = true
 	}
 	return nil
+}
+
+// keepSections is what a change to list leaves of Overview: list, unless it names cards and no section while the stored
+// one names sections. Such a list comes from an app that does not know the sections (#9745's web): the sections stay
+// where they are, the cards take the stored cards' places in list's order, and one the stored list did not have goes
+// after the last of them (none: where the cards are by default, last, under the sections, #11147). An empty list
+// (Reset) is taken as it is, as is one that would hold more than the most there may be.
+func keepSections(stored, list []overviewPlace) []overviewPlace {
+	if len(list) == 0 || slices.ContainsFunc(list, func(c overviewPlace) bool { return c.Section != "" }) ||
+		!slices.ContainsFunc(stored, func(c overviewPlace) bool { return c.Section != "" }) {
+		return list
+	}
+	out := make([]overviewPlace, 0, len(stored)+len(list))
+	next, after := 0, -1
+	for _, c := range stored {
+		if c.Section == "" {
+			if next == len(list) {
+				continue
+			}
+			c, next = list[next], next+1
+			after = len(out) + 1
+		}
+		out = append(out, c)
+	}
+	if after < 0 {
+		after = len(out)
+	}
+	out = slices.Insert(out, after, list[next:]...)
+	if len(out) > overviewCardsMost {
+		return list
+	}
+	return out
 }
 
 // sidebarPages: the pages in the user's order; those switched into the list or put under More; the groups in their
@@ -206,8 +251,13 @@ func (s *Service) putNavigation(w http.ResponseWriter, r *http.Request) {
 		ev["pages"] = n.Pages
 	}
 	if body.Overview != nil {
-		n.Overview = body.Overview
-		ev["overview"] = *n.Overview
+		var stored []overviewPlace
+		if n.Overview != nil {
+			stored = *n.Overview
+		}
+		kept := keepSections(stored, *body.Overview)
+		n.Overview = &kept
+		ev["overview"] = kept
 	}
 	if err := st.PutSetting(r.Context(), navigationKey, n); err != nil {
 		apierr.Write(w, http.StatusServiceUnavailable, err)

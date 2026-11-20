@@ -3,6 +3,7 @@ package assistant
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -29,13 +30,13 @@ func cardTags(t *testing.T, c botAnswerCard) ([]string, string) {
 }
 
 func TestAnswerCards(t *testing.T) {
-	if got := answerCards(i18n.ZhHans, "# 标题\n正文", true, []string{"step"}, "foot"); got != nil {
+	if got := answerCards(i18n.ZhHans, nil, "# 标题\n正文", true, []string{"step"}, "foot"); got != nil {
 		t.Fatalf("quiet: %v", got)
 	}
 
 	const foot = "FOOT-MARK"
 	long := "# 长\n" + strings.Repeat("## 节\n"+strings.Repeat("字", 3000)+"\n", 4)
-	cards := answerCards(i18n.ZhHans, long, false, []string{"运行 · ls"}, foot)
+	cards := answerCards(i18n.ZhHans, nil, long, false, []string{"运行 · ls"}, foot)
 	if len(cards) < 2 {
 		t.Fatalf("%d cards", len(cards))
 	}
@@ -53,7 +54,7 @@ func TestAnswerCards(t *testing.T) {
 		}
 	}
 
-	cards = answerCards(i18n.ZhHans, "正文", false, nil, foot)
+	cards = answerCards(i18n.ZhHans, nil, "正文", false, nil, foot)
 	tags, js := cardTags(t, cards[0])
 	if len(cards) != 1 || strings.Contains(js, "collapsible_panel") || strings.Count(js, foot) != 1 {
 		t.Fatalf("steps nil: tags %v", tags)
@@ -65,7 +66,7 @@ func TestAnswerCardsPanelBudget(t *testing.T) {
 	// '<' expands to "&#60;" in card Markdown, packing the first card's answer near its byte budget.
 	packed := "# H\n" + strings.Repeat("<", 2400) + strings.Repeat("字", 3600)
 	t.Run("pathological on packed card", func(t *testing.T) {
-		cards := answerCards(i18n.ZhHans, packed, false, pathologicalSteps(40), "FOOT-MARK")
+		cards := answerCards(i18n.ZhHans, nil, packed, false, pathologicalSteps(40), "FOOT-MARK")
 		for i, ac := range cards {
 			if n := len(ac.card.JSON()); n > answerCardMaxBytes {
 				t.Fatalf("card %d is %d JSON bytes, want <= %d", i, n, answerCardMaxBytes)
@@ -85,13 +86,13 @@ func TestAnswerCardsPanelBudget(t *testing.T) {
 		}
 	})
 	t.Run("empty steps no panel", func(t *testing.T) {
-		js := answerCards(i18n.ZhHans, packed, false, []string{}, "FOOT-MARK")[0].card.JSON()
+		js := answerCards(i18n.ZhHans, nil, packed, false, []string{}, "FOOT-MARK")[0].card.JSON()
 		if len(js) > answerCardMaxBytes || strings.Contains(js, "collapsible_panel") {
 			t.Fatalf("empty steps rendered a panel or card over budget: %d bytes", len(js))
 		}
 	})
 	t.Run("short line unchanged", func(t *testing.T) {
-		js := answerCards(i18n.ZhHans, "正文内容", false, []string{"STEP-PLAIN-MARK `ls`"}, "FOOT-MARK")[0].card.JSON()
+		js := answerCards(i18n.ZhHans, nil, "正文内容", false, []string{"STEP-PLAIN-MARK `ls`"}, "FOOT-MARK")[0].card.JSON()
 		if !strings.Contains(js, "- STEP-PLAIN-MARK `ls`") || len(js) > answerCardMaxBytes {
 			t.Fatalf("short panel changed or card over budget: %s", js)
 		}
@@ -118,7 +119,7 @@ func TestAnswerCardsWriteChartsAsNumbersBeforeCutting(t *testing.T) {
 		{"across the cut", strings.Repeat("说", botAnswerPiece-100) + "\n\n" + across + "\n\n后面的话", "近 7 天步数", "8,007"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cards := answerCards(i18n.ZhHans, tc.answer, false, nil, "FOOT")
+			cards := answerCards(i18n.ZhHans, nil, tc.answer, false, nil, "FOOT")
 			var all string
 			for i, c := range cards {
 				_, js := cardTags(t, c)
@@ -131,5 +132,27 @@ func TestAnswerCardsWriteChartsAsNumbersBeforeCutting(t *testing.T) {
 				t.Errorf("the chart is not written as numbers:\n%s", all)
 			}
 		})
+	}
+}
+
+// A link's button says what it opens: a page of the hub's web app by the page, a Feishu document as one, any other
+// site by its name.
+func TestLinkNamer(t *testing.T) {
+	name := linkNamer(i18n.ZhHans, "https://hub.example.com")
+	for _, c := range []struct{ u, want string }{
+		{"https://hub.example.com/persona/c1", "打开会话"},
+		{"https://hub.example.com/s/server/a1", "打开会话"},
+		{"https://hub.example.com/todos/t1", "打开待办"},
+		{"https://hub.example.com/inbox", "打开收件箱"},
+		{"https://hub.example.com/kb/people/p1", "打开知识库"},
+		{"https://hub.example.com/machines", "打开网页版"},
+		{"https://example.feishu.cn/docx/AbC", "打开飞书文档"},
+		{"https://example.feishu.cn/calendar", "打开 example.feishu.cn"},
+		{"https://www.github.com/nwverse/persona", "打开 github.com"},
+	} {
+		u, _ := url.Parse(c.u)
+		if got := name(u); got != c.want {
+			t.Errorf("%s: %q, want %q", c.u, got, c.want)
+		}
 	}
 }

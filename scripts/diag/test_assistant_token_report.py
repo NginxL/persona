@@ -59,9 +59,14 @@ class ClassifyTests(unittest.TestCase):
 
 
     def test_injected_messages_without_a_source_block(self):
-        limit = rendered("prompts/agents/limit_continue.md")
+        for language in ("en", "ja"):
+            limit = rendered(f"assistant/testdata/prompts/agent_language.limit.{language}.golden")
+            self.assertEqual(report.classify(limit)[0], "followup")
+            # Older transcripts lack the structured source but retain the exact
+            # localized marker, which must still distinguish Persona from the owner.
+            legacy = limit.split("<persona-limit-continue />", 1)[1]
+            self.assertEqual(report.classify("<persona-limit-continue />" + legacy)[0], "followup")
         lost = rendered("prompts/assistant/lost_tasks.md").replace('{{join .Tasks "\\n- "}}', "tail -f build.log")
-        self.assertEqual(report.classify(limit)[0], "followup")
         self.assertEqual(report.classify(SNAPSHOT + lost)[0], "system")
 
     def test_relayed_message_from_another_conversation(self):
@@ -236,6 +241,21 @@ class ReportTests(unittest.TestCase):
             report.print_text(s)
         self.assertNotIn("private", out.getvalue())
         self.assertIn("?", out.getvalue())
+
+    def test_codex_since_keeps_submicrosecond_precision(self):
+        rows = [{"type": "session_meta", "payload": {}}]
+        for total, (timestamp, output) in enumerate([
+            ("2026-11-20T08:00:00Z", 400),
+            ("2026-11-20T09:00:00.000000001+01:00", 2),
+            ("2026-11-20T08:00:00.000000002Z", 3),
+            ("unknown", 500),
+        ], start=1):
+            rows.append({"type": "event_msg", "timestamp": timestamp,
+                         "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": total},
+                             "last_token_usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": output}}}})
+        filtered = self.run_lines(rows, since="2026-11-20T08:00:00.000000001Z")
+        self.assertEqual((filtered["total"]["model_calls"], filtered["total"]["output_tokens"]), (2, 5))
+        self.assertEqual(self.run_lines(rows)["total"]["output_tokens"], 905)
 
     def test_codex_environment_context_is_not_a_new_round(self):
         def ev(payload):

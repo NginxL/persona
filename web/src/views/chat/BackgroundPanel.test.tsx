@@ -16,12 +16,14 @@ vi.hoisted(() => {
   })) as unknown as typeof window.matchMedia;
 });
 
-import { provideBackgroundChat, type BackgroundPanel as Asked } from "../../lib/background-panel";
+import { backgroundPanelOf, provideBackgroundChat, type BackgroundPanel as Asked } from "../../lib/background-panel";
 import { setToken } from "../../lib/api";
-import { closePanel, getPanel, openPanel } from "../../lib/panel";
-import { reset, upsertSession } from "../../lib/store";
+import { closePanel, getPanel, openPanel, usePanel } from "../../lib/panel";
+import { getSession, reset, upsertSession } from "../../lib/store";
+import { emptyTaskIndex } from "../../lib/tasks";
 import type { BackgroundTask, LoopInfo, Session, Workflow } from "../../lib/types";
 import { BackgroundPanel, backgroundSections } from "./BackgroundPanel";
+import { SessionOverview } from "./SessionOverview";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -170,6 +172,61 @@ describe("the list", () => {
 });
 
 describe("a background task", () => {
+  it("returns to Session overview instead of the unvisited Background tasks list", async () => {
+    put({ background: [shell] });
+    const session = getSession("m", "s")!;
+    function OverviewAndPanel() {
+      const opened = backgroundPanelOf(usePanel(), "m", "s");
+      return <>
+        <SessionOverview id="overview" session={session} machineName="Machine" items={[]} tasks={emptyTaskIndex()} children={[]} hidden={opened?.from === "overview"} />
+        {opened && <BackgroundPanel mid="m" sid="s" opened={opened} onClose={closePanel} />}
+      </>;
+    }
+    act(() => root.render(<OverviewAndPanel />));
+    const overview = q("[data-session-overview]")!;
+    const scroller = overview.querySelector<HTMLElement>(".overflow-y-auto")!;
+    scroller.scrollTop = 120;
+    const open = () => {
+      act(() => overview.querySelector<HTMLElement>('[data-bg-task="b1"] [data-bg-row-button]')!.click());
+      return flush();
+    };
+    await open();
+    expect(getPanel()).toEqual({ kind: "background", mid: "m", sid: "s", task: "b1", from: "overview" });
+    expect(overview.hidden).toBe(true);
+    const back = q('[data-background-panel] button[aria-label="返回"], [data-session-overview] button[aria-label="返回"]');
+    expect(back).not.toBeNull();
+    expect(document.activeElement).toBe(back);
+    act(() => back!.click());
+    expect(q("[data-session-overview]")).toBe(overview);
+    expect(overview.hidden).toBe(false);
+    expect(scroller.scrollTop).toBe(120);
+    expect(getPanel()).toBeNull();
+    expect(q("[data-background-panel]")).toBeNull();
+
+    await open();
+    act(() => q("[data-background-panel] header button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    expect(q("[data-session-overview]")).toBe(overview);
+    expect(overview.hidden).toBe(false);
+    expect(scroller.scrollTop).toBe(120);
+    expect(getPanel()).toBeNull();
+    expect(q("[data-background-panel]")).toBeNull();
+  });
+
+  it("keeps list-originated Back and Escape on the Background tasks list", async () => {
+    put({ background: [shell] });
+    draw();
+    const listed = { kind: "background", mid: "m", sid: "s" } as const;
+    for (const key of ["Back", "Escape"]) {
+      act(() => q('[data-bg-task="b1"] [data-bg-row-button]')!.click());
+      await flush();
+      expect(getPanel()).toEqual({ ...listed, task: "b1" });
+      if (key === "Back") act(() => q('button[aria-label="返回"]')!.click());
+      else act(() => q("header button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+      expect(q("[data-background-list]")).not.toBeNull();
+      expect(getPanel()).toEqual(listed);
+    }
+  });
+
   it("opens output inside Background tasks, retaining Open as file and a separate copy action", () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -463,6 +520,39 @@ describe("a run's detail", () => {
     expect(q('[data-background-detail="w2"]')).not.toBeNull();
     draw({ kind: "background", mid: "m", sid: "s" });
     expect(q("[data-background-list]")).not.toBeNull();
+  });
+
+  it("clears an overview detail's origin when its run disappears, so the next detail returns to the list", async () => {
+    put({ workflows: [run("w1"), run("w2")] });
+    const session = getSession("m", "s")!;
+    function OverviewAndPanel() {
+      const opened = backgroundPanelOf(usePanel(), "m", "s");
+      return <>
+        <SessionOverview id="overview" session={session} machineName="Machine" items={[]} tasks={emptyTaskIndex()} children={[]} hidden={opened?.from === "overview"} />
+        {opened && <BackgroundPanel mid="m" sid="s" opened={opened} onClose={closePanel} />}
+      </>;
+    }
+    act(() => root.render(<OverviewAndPanel />));
+    act(() => openPanel({ kind: "background", mid: "m", sid: "s", run: "w1", from: "overview" }));
+    await flush();
+    const overview = q("[data-session-overview]")!;
+    expect(overview.hidden).toBe(true);
+    expect(document.activeElement).toBe(q('[data-background-detail="w1"] button[aria-label="返回"]'));
+
+    put({ workflows: [run("w2")] });
+    await flush();
+    const listed = { kind: "background", mid: "m", sid: "s" } as const;
+    expect(getPanel()).toEqual(listed);
+    expect(overview.hidden).toBe(false);
+    expect(q("[data-background-list]")).not.toBeNull();
+
+    act(() => q('[data-background-panel] [data-bg-run="w2"] [data-bg-row-button]')!.click());
+    await flush();
+    expect(q('[data-background-detail="w2"]')).not.toBeNull();
+    act(() => q('[data-background-detail="w2"] button[aria-label="返回"]')!.click());
+    expect(q("[data-background-list]")).not.toBeNull();
+    expect(q("[data-background-panel]")).not.toBeNull();
+    expect(getPanel()).toEqual(listed);
   });
 
   it("falls back to the list when the run is gone from the session", () => {

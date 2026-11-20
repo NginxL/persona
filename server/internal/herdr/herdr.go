@@ -474,18 +474,29 @@ func (a Agent) SessionID() string {
 	return ""
 }
 
+// Version is the running server's version (ServerVersion), else the CLI's (`herdr --version`).
 func (c *Client) Version(ctx context.Context) string {
-	var pong struct {
-		Version string `json:"version"`
-	}
-	if c.rpc(ctx, "ping", nil, &pong) == nil && pong.Version != "" {
-		return pong.Version
+	if v := c.ServerVersion(ctx); v != "" {
+		return v
 	}
 	out, err := exec.CommandContext(ctx, c.Bin, "--version").Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(out)), "herdr"))
+}
+
+// ServerVersion is the version the server on c's socket answers ping with ("0.9.5"), "" when it does not answer or
+// names none. It never falls back to the CLI's: a binary upgraded in place says the new version while the server that
+// was started from the old one still runs.
+func (c *Client) ServerVersion(ctx context.Context) string {
+	var pong struct {
+		Version string `json:"version"`
+	}
+	if c.rpc(ctx, "ping", nil, &pong) != nil {
+		return ""
+	}
+	return pong.Version
 }
 
 func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
@@ -922,7 +933,8 @@ func (c *Client) PaneReportMetadata(ctx context.Context, paneID, source string, 
 // authority an older node left for source without clearing another integration's (such as herdr:pi). Only when herdr
 // rejects the session report with resume_not_accepted (an agent process herdr does not detect natively, such as a
 // compatible CLI) does it claim the pane with pane.report_agent first. herdr types argv into the restored pane's
-// shell, quoting elements that need it; no element may contain an apostrophe. Older herdr ignores resume_argv.
+// shell, quoting elements that need it; no element may contain an apostrophe. herdr before 0.9.2 answers ok and drops
+// resume_argv: callers check ServerVersion first (node/herdrresume.go herdrDropsResume).
 func (c *Client) PaneReportResume(ctx context.Context, pane, source, agent, sessionID string, argv []string) error {
 	seq := ReportSeq()
 	_ = c.rpc(ctx, "pane.clear_agent_authority", map[string]any{

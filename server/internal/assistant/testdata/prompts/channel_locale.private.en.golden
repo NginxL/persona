@@ -1,0 +1,12 @@
+<persona-context kind="context" title="Example Chat bot" url="">
+Example Owner sent this private message to the Persona bot on Example Chat. The final answer for this turn goes back to Example Chat as the bot in Markdown. Lead with the conclusion and keep it short. Do not call notify_user again. Use ask_user as usual when you need confirmation. The user must answer in the app.
+</persona-context>
+<persona-context kind="context" title="Quoted message" url="">
+会議 原文
+</persona-context>
+<persona-context kind="context" title="Forwarded chat history" url="">
+Cliente: la entrega será mañana.
+</persona-context>
+返事はスペイン語で #42
+
+(Example Chat also sent these items, which the bot cannot forward: 証拠 #42, file “資料.pdf”)

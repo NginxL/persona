@@ -1,4 +1,6 @@
 {
+  "kind_todo_handoff": "結果待ち",
+  "handoff_deadline": "結果の期限 {time}",
   "kind_person_reply": "返信待ち",
   "kind_merge_review": "レビュー・マージ待ち",
   "kind_external_event": "外部の変更待ち",

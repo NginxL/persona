@@ -102,9 +102,14 @@ func (n *Node) promptChanged(id, pane, rev string, d *screen.Dialog) error {
 
 // sendOpts are the optional fields of session.send.
 type sendOpts struct {
-	ClientMsgID string `json:"client_msg_id"`
+	ClientMsgID    string `json:"client_msg_id"`
+	TaskID         string `json:"task_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkspaceLabel string `json:"workspace_label"`
 	// ClearDraft is the draft the user saw in a refusal and chose to clear: cleared only if the box still shows it.
 	ClearDraft string `json:"clear_draft"`
+	// WaitForEffort says the sender can keep the message if the thinking effort is still pending.
+	WaitForEffort bool `json:"wait_for_effort"`
 	// DismissNotice: a notice that Enter only closes («Enter to continue», no options) is closed before the text is
 	// typed. Any other dialog is refused as before.
 	DismissNotice bool `json:"dismiss_notice"`

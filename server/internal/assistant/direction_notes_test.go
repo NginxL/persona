@@ -100,16 +100,16 @@ func TestDirectionNotesRoute(t *testing.T) {
 // A leader's role policy carries its own notes and its project's goal, and only its own: without notes it is the
 // supervision instructions byte for byte, another leader's policy never changes, and clearing them restores it.
 func TestDirectionNotesReachTheLeaderPolicy(t *testing.T) {
-	s, _ := notesEnv(t)
+	s, f := notesEnv(t)
 	ctx := context.Background()
 	policy := prompts.RenderSupervisionInstructions()
-	if got := mustSupervisionInstructions(t, s, ctx, "server", "conv_lead"); got != policy {
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != policy {
 		t.Fatal("a leader without notes has a different policy")
 	}
-	if _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number."); err != nil {
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number.", nil); err != nil {
 		t.Fatal(err)
 	}
-	got := mustSupervisionInstructions(t, s, ctx, "server", "conv_lead")
+	got := dispatchedPolicy(t, s, "conv_lead")
 	if !strings.HasPrefix(got, policy+"\n\n") || !strings.Contains(got, "Readings: the store build number.") ||
 		!strings.Contains(got, "Ship the weather app on iOS and Android") || !strings.Contains(got, "「Weather」") {
 		t.Fatalf("policy = %q", strings.TrimPrefix(got, policy))
@@ -117,9 +117,9 @@ func TestDirectionNotesReachTheLeaderPolicy(t *testing.T) {
 	if other := mustSupervisionInstructions(t, s, ctx, "server", "conv_other"); other != policy {
 		t.Fatal("another leader's policy changed")
 	}
-	// Dispatch carries it: what the node is told to append is the same text.
-	p := map[string]any{"session_id": "conv_lead", "text": "go on"}
-	if err := s.putSupervisionInstructions(ctx, "server", "conv_lead", p); err != nil || p["supervision_instructions"] != got {
+	// The manager's own sends carry it too: what the node is told to append is the same text.
+	f.answerNode(DeviceSessionSend, nodeTakes)
+	if sent, err := managerSend(s, "conv_lead"); err != nil || sent != got {
 		t.Fatalf("dispatched policy differs: %v", err)
 	}
 	// The per-message context names the project's status; its one-line summary changing never touches the policy.
@@ -133,13 +133,13 @@ func TestDirectionNotesReachTheLeaderPolicy(t *testing.T) {
 	if err := e.Store.PutProject(pr); err != nil {
 		t.Fatal(err)
 	}
-	if again := mustSupervisionInstructions(t, s, ctx, "server", "conv_lead"); again != got {
+	if again := dispatchedPolicy(t, s, "conv_lead"); again != got {
 		t.Fatal("a project summary rewrite changed the leader's policy")
 	}
-	if _, err := s.setDirectionNotes(ctx, "conv_lead", ""); err != nil {
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if back := mustSupervisionInstructions(t, s, ctx, "server", "conv_lead"); back != policy {
+	if back := dispatchedPolicy(t, s, "conv_lead"); back != policy {
 		t.Fatal("cleared notes left the policy changed")
 	}
 	if c := s.Context(ctx, ContextParams{MachineID: "server", SessionID: "conv_lead"}); strings.Contains(c.Text, "Android beta out") {
@@ -153,10 +153,10 @@ func TestDirectionNotesReachTheLeaderPolicy(t *testing.T) {
 func TestDirectionNotesReachNewAgents(t *testing.T) {
 	s, _ := notesEnv(t)
 	ctx := context.Background()
-	if _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number."); err != nil {
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number.", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.setDirectionNotes(ctx, "conv_other", "Infra rule: back up first."); err != nil {
+	if _, _, err := s.setDirectionNotes(ctx, "conv_other", "Infra rule: back up first.", nil); err != nil {
 		t.Fatal(err)
 	}
 	got := s.withProjectContext(ctx, "box", "/code/weather/ios", "", "Fix the login page")
@@ -206,7 +206,7 @@ func TestDirectionNotesReachALeadersOwnTask(t *testing.T) {
 	}
 	b.m["lead1"] = &direction{MachineID: "server", Project: "another-project", By: directionByUser, At: time.Now(), Name: "Platform"}
 	b.mu.Unlock()
-	if _, err := s.setDirectionNotes(context.Background(), "lead1", "Heavy gates run on the shared runner."); err != nil {
+	if _, _, err := s.setDirectionNotes(context.Background(), "lead1", "Heavy gates run on the shared runner.", nil); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{

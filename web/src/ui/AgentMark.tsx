@@ -22,7 +22,7 @@ import { agentLetter, agentName, isMarked, markId, sessionAgent, type AgentSurfa
 import { cx } from "./atoms";
 import claudeMark from "./brands/claude.svg";
 import codexMark from "./brands/codex.svg";
-import cursorMark from "./brands/cursor.svg";
+import cursorMark from "./brands/cursor.svg?no-inline";
 import geminiMark from "./brands/gemini.svg";
 import opencodeMark from "./brands/opencode.svg";
 import piMark from "./brands/pi.svg";

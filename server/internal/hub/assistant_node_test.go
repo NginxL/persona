@@ -19,10 +19,12 @@ type assistantNode struct {
 	m     *Machine
 	mu    sync.Mutex
 	known map[string]bool
-	made  int // conversations started, for the next id
-	sends []map[string]any
-	kept  []string     // the last node.configure keep_sessions
-	items []proto.Item // session.items answers this (assistant_titles_test.go)
+	// Exact synthetic launcher/model pairs accepted by launchers.model.check; other pairs remain unsupported.
+	modelChecks map[string]string
+	made        int // conversations started, for the next id
+	sends       []map[string]any
+	kept        []string     // the last node.configure keep_sessions
+	items       []proto.Item // session.items answers this (assistant_titles_test.go)
 	// assistant.handoff answers handoff; assistant.compact notes the session and answers compactErr
 	// (assistant_main_test.go).
 	handoff    map[string]any
@@ -44,6 +46,10 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		switch method {
+		case "launchers.model.check":
+			if agent := n.modelChecks[fmt.Sprint(p["name"])+"\x00"+fmt.Sprint(p["model"])]; agent != "" {
+				return map[string]any{"agent": agent}, nil
+			}
 		case "assistant.prepare":
 			return map[string]any{"cwd": "/home/me/.persona/assistant"}, nil
 		case "node.configure":

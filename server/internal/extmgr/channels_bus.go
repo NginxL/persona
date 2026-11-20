@@ -116,6 +116,10 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		ChatID     string               `json:"chat_id"`   // feishu.post / feishu.text: the chat to send into (default: the owner's)
 		InThread   bool                 `json:"in_thread"` // feishu.post / feishu.text: a reply goes into the parent's thread
 		Exclusive  bool                 `json:"exclusive"` // feishu.pin: the bot's other pins in the chat come off
+		CardID     string               `json:"card_id"`   // feishu.card_*: the card entity
+		Element    string               `json:"element"`   // feishu.card_stream: the element streamed into
+		Sequence   int64                `json:"sequence"`  // feishu.card_*: the write's place, larger than the last
+		Streaming  bool                 `json:"streaming"` // feishu.card_settings
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &a); err != nil {
@@ -220,6 +224,18 @@ func (h *Manager) feishuCall(ctx context.Context, method string, params json.Raw
 		return map[string]any{"message_id": id}, err
 	case assistantwire.FeishuUpdateCard:
 		return map[string]any{}, api.UpdateCard(ctx, a.MessageID, a.Card)
+	case assistantwire.FeishuCardCreate:
+		if a.Card == "" {
+			return nil, errors.New("feishu.card_create needs a card")
+		}
+		id, err := api.CardCreate(ctx, a.Card)
+		return map[string]any{"card_id": id}, feishuCoded(err)
+	case assistantwire.FeishuCardUpdate:
+		return map[string]any{}, feishuCoded(api.CardUpdate(ctx, a.CardID, a.Card, a.Sequence))
+	case assistantwire.FeishuCardStream:
+		return map[string]any{}, feishuCoded(api.CardStream(ctx, a.CardID, a.Element, a.Text, a.Sequence))
+	case assistantwire.FeishuCardSettings:
+		return map[string]any{}, feishuCoded(api.CardSettings(ctx, a.CardID, a.Streaming, a.Sequence))
 	case assistantwire.FeishuPin:
 		if err := checkOwnDMMessage(ctx, api, set, a.MessageID); err != nil {
 			return nil, err

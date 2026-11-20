@@ -37,3 +37,17 @@ for (const kind of ['fresh', 'existing', 'linked', 'dangling']) {
     assert.equal(prepareSocketDirectory(join(home, 'sockets', 'node.sock'), home, {}), join(home, 'sockets'))
   })
 }
+
+test('assistant and health workspaces recognize manager IDs only under a state root', () => {
+  const home = '/example'
+  const env = { PERSONA_HOME: '~/profile' }
+  for (const name of ['assistant', 'health', 'assistant-m-01aef', 'health-m-f0']) {
+    for (const root of ['.persona', '.jarvis', 'profile']) {
+      assert.equal(isAssistantDir(join(home, root, name), home, env), true)
+    }
+    assert.equal(isAssistantDir(join(home, 'project', name), home, env), false)
+  }
+  for (const name of ['assistant-bin', 'assistant-hooks', 'assistant-m-', 'health-m-AF', 'assistant-m-0g', 'health-m-a\n']) {
+    assert.equal(isAssistantDir(join(home, '.persona', name), home, env), false)
+  }
+})

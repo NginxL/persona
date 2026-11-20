@@ -63,15 +63,24 @@
       },
       "tier": {
         "type": "string",
-        "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved before approval and shown on the card; explicit launcher/model/effort overrides"
+        "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved before approval and shown on the card; explicit launcher/model/effort/speed overrides"
+      },
+      "speed": {
+        "type": "string",
+        "enum": [
+          "standard",
+          "fast",
+          "ultrafast"
+        ],
+        "description": "new-start speed; explicit choice overrides the tier. standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
       },
       "effort": {
         "type": "string",
-        "description": "Explicit effort override; omit to use the tier or purpose default."
+        "description": "Explicit effort; omit for tier/purpose default."
       },
       "model": {
         "type": "string",
-        "description": "Explicit model override: a model id the agent takes (an alias such as opus, or a gateway's own id; letters, digits and . _ - / : @ [ ] only, or a leading ~ as in ~vendor/model-latest). Omit to use the tier or purpose default."
+        "description": "Explicit model id or alias the agent takes; omit for the tier or purpose default."
       }
     }
   }

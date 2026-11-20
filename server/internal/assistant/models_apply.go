@@ -16,6 +16,10 @@ import (
 // applyModel fills params (a node call's: session.start, assistant.send…) with what purpose id runs on; a launcher,
 // model or effort already in params is this call's own pick. The permission mode is left as it is.
 func (s *Service) applyModel(ctx context.Context, id string, params map[string]any) error {
+	return s.applyModelBinding(ctx, id, params, false)
+}
+
+func (s *Service) applyModelBinding(ctx context.Context, id string, params map[string]any, launcherDefaultModel bool) error {
 	p, err := s.modelPurposeDef(ctx, id)
 	if err != nil {
 		return err
@@ -38,7 +42,10 @@ func (s *Service) applyModel(ctx context.Context, id string, params map[string]a
 	if model, _ := params["model"].(string); strings.TrimSpace(model) != "" {
 		b.Model = strings.TrimSpace(model) // this call's pick: finishModel refuses one that is no model id
 	} else {
-		delete(params, "model") // none picked ("" or blanks): the binding's
+		delete(params, "model")
+		if launcherDefaultModel {
+			b.Model = "" // the parent explicitly ran without a model override
+		}
 	}
 	if effort, _ := params["effort"].(string); effort != "" {
 		b.Effort = effort

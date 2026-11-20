@@ -2,8 +2,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("../styles.css?raw", () => ({ default: "" }));
-import { contrast, meetContrast, MIN_TEXT_CONTRAST } from "./extension-theme";
+import { contrast, extensionThemeTokens, meetContrast, MIN_ROLE_CONTRAST, MIN_TEXT_CONTRAST } from "./extension-theme";
 import { ACCENT_PRESETS, accentTokens, PRESET_COLORS } from "./look";
+import { COLORS } from "../lib/extension-ui-v6";
+import { BUILTIN_PAGE_COLORS } from "../lib/sidebar-icons";
 
 // The default palette's text tokens must stay readable as small text (WCAG AA 4.5:1) on every background token
 // (#2804); the same backgrounds extension themes are checked against (extension-theme.ts).
@@ -138,6 +140,27 @@ describe("default palette contrast", () => {
       for (const bg of BACKGROUNDS) expect(contrast(ink, t[bg]), `on --${bg}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(ink, t.surface)).toBeLessThan(contrast(t.ink, t.surface));
       expect(contrast(ink, t.surface)).toBeGreaterThan(contrast(t["ink-2"], t.surface));
+    });
+    // #10822, Colored sidebar icons: a page's icon in a named color (--hue-*, lib/sidebar-icons.ts) lies on the sidebar's
+    // --canvas, and on --hover under the pointer and the gliding highlight; the open page's icon is --ink on --hover-2, as
+    // in Monochrome. An icon is a graphic, so 3:1. Every named color, since an extension's nav_page may name any of them.
+    const hueOf = (name: string) => [...css.matchAll(new RegExp(`--hue-${name}:\\s*(#[0-9a-f]{6})\\b`, "gi"))][scheme === "light" ? 0 : 1]?.[1] ?? "";
+    it(`${scheme}: every named color reads at 3:1 as a sidebar page's icon on the canvas and the hover fill`, () => {
+      const short = COLORS.flatMap((name) => ["canvas", "hover"].map((bg) => {
+        expect(hueOf(name), `--hue-${name}`).toMatch(/^#[0-9a-f]{6}$/i);
+        const ratio = contrast(hueOf(name), t[bg]);
+        return ratio < MIN_ROLE_CONTRAST ? `--hue-${name} on --${bg}: ${ratio.toFixed(2)}` : "";
+      })).filter(Boolean);
+      expect(short).toEqual([]);
+      for (const name of Object.values(BUILTIN_PAGE_COLORS)) expect(COLORS, name).toContain(name);
+      expect(contrast(t.ink, t["hover-2"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${scheme}: no theme color or extension theme moves the named colors or the sidebar's backgrounds`, () => {
+      const theme = { extension: "example-theme", extension_name: "Example Theme", id: "sea", name: "Sea", light: { accent: "#1d4ed8" }, dark: { accent: "#8ab4ff" } };
+      const sets = [...ACCENT_PRESETS.map((p) => accentTokens(PRESET_COLORS[p].accent)[scheme]), extensionThemeTokens(theme, scheme)];
+      expect(Object.keys(sets.at(-1)!)).toContain("--accent");
+      const moved = sets.flatMap((tokens) => Object.keys(tokens)).filter((k) => k.startsWith("--hue-") || ["--canvas", "--hover", "--hover-2", "--ink"].includes(k));
+      expect(moved).toEqual([]);
     });
     it(`${scheme}: --ink-3 stays a step quieter than --ink-2`, () => {
       expect(contrast(t["ink-3"], t.surface)).toBeLessThan(contrast(t["ink-2"], t.surface));

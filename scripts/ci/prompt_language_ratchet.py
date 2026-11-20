@@ -2,7 +2,7 @@
 """Keep the inventory of CJK prompts without language handling from growing.
 
 This is a structural migration guard, not a translation-quality check. A template
-handles language when an if action tests .Language/.Lang, directly or through a
+handles language when an if or else-if action tests .Language/.Lang, directly or through a
 template included with the same data. Existing omissions are recorded by filename
 and directory count; replacing an old omission with a new file is not allowed.
 There are no source exemptions. --update only removes resolved entries.
@@ -31,7 +31,7 @@ CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 COMMENT = re.compile(r"{{-?\s*/\*.*?\*/\s*-?}}", re.S)
 ACTION = re.compile(r"{{-?\s*(.*?)\s*-?}}", re.S)
 QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`', re.S)
-LANGUAGE = re.compile(r"^if\s+.*\.(?:Language|Lang)\b", re.S)
+LANGUAGE = re.compile(r"^(?:else\s+)?if\s+.*\.(?:Language|Lang)\b", re.S)
 INCLUDE = re.compile(r'^template\s+"([^"]+)"\s+\.$')
 
 

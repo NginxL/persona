@@ -64,7 +64,7 @@ NUMBERED = frozenset(_frozen("hub", (
     "0421_hub_settings", "0424_device_relay_error", "0425_device_features", "0426_handed_over",
     "0434_live_activity_start_budget", "0435_push_device_lifecycle", "0462_phone_write_queue",
     "0490_owner_subjects", "0491_share_routing", "0505_client_password", "0522_hub_push_sent",
-    "0530_device_voip", "0541_push_registration_transfer"
+    "0530_device_voip", "0532_device_token_scopes", "0541_push_registration_transfer"
 )) | _frozen("manager", (
     "0001_init", "0002_settings", "0003_session_views", "0004_inbox", "0041_kb_entities",
     "0051_machine_metrics", "0061_node_session_tasks", "0071_sent_messages", "0171_todos",

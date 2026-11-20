@@ -187,6 +187,10 @@ func (n *Node) persistModes(id, mode, effort string) {
 
 // currentModes is the session's mode and effort: from its transcript, or what the app set since.
 func (n *Node) currentModes(id string, m quickMeta) (mode, effort string) {
+	return n.currentModesWithEffort(id, m, terminalEffort{})
+}
+
+func (n *Node) currentModesWithEffort(id string, m quickMeta, confirmed terminalEffort) (mode, effort string) {
 	mode, effort = m.mode, m.effort
 	if mode != "" && !slices.Contains(permissionModes, mode) && n.isAssistantSession(id) {
 		mode = modeFromCodex(mode, m.sandbox) // a Codex rollout records its approval policy and sandbox
@@ -211,8 +215,11 @@ func (n *Node) currentModes(id string, m quickMeta) (mode, effort string) {
 			mode = set.Mode
 		}
 		if set.Effort != "" && set.EffortAt.After(m.effortAt) {
-			effort = set.Effort
+			effort, m.effortAt = set.Effort, set.EffortAt
 		}
+	}
+	if confirmed.at.After(m.effortAt) {
+		effort = confirmed.value
 	}
 	return mode, effort
 }
@@ -240,11 +247,24 @@ func (n *Node) modesOf(id string) (mode, effort string) {
 			m = n.meta(p, st)
 		}
 	}
+	n.mu.Lock()
+	a := n.agents[id]
+	n.mu.Unlock()
+	if a.Agent == "claude" && a.PaneID != "" {
+		_, confirmed := n.switches().terminalEfforts(id)
+		if confirmed.pane == a.PaneID {
+			return n.currentModesWithEffort(id, m, confirmed)
+		}
+	}
 	return n.currentModes(id, m)
 }
 
 // setModes changes a running session's permission mode and / or effort level ("" leaves one as it is).
 func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
+	return n.updateModes(ctx, id, mode, effort, nil)
+}
+
+func (n *Node) updateModes(ctx context.Context, id, mode, effort string, pending *bool) error {
 	if !n.isAssistantSession(id) {
 		if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
 			return err
@@ -316,7 +336,7 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 		if n.runtimeAssistant(id) {
 			if h, _, _ := n.runtimes.belongs(id); h != nil {
 				cctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
-				_ = h.peer.Call(cctx, "session.modes", map[string]any{"session_id": id, "permission_mode": mode, "effort": effort}, nil)
+				_ = h.peer.Call(cctx, "session.modes", map[string]any{"session_id": id, "permission_mode": mode, "effort": effort, "assistant": true}, nil)
 				cancel()
 			}
 		}
@@ -354,33 +374,32 @@ func (n *Node) setModes(ctx context.Context, id, mode, effort string) error {
 			n.dropModeRestart(id, mode)
 		}
 	}
+	if effort != "" {
+		unlock, err := n.inputTurn(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	unlockModes := n.switches().modesInput.lock(id)
+	defer unlockModes()
 	pane, err := n.paneFor(ctx, id)
 	if err != nil {
 		return n.noPaneForModes(id)
 	}
-	// The /effort picker makes herdr report the agent as blocked; the hub would turn that into a "needs you" push.
-	n.mu.Lock()
-	n.driving[id] = true
-	n.mu.Unlock()
-	defer func() {
-		n.mu.Lock()
-		delete(n.driving, id)
-		n.mu.Unlock()
-	}()
 	if mode != "" {
-		if err := n.tuiSetMode(ctx, pane, mode); err != nil {
+		stopDriving := n.driveModes(id)
+		err := n.tuiSetMode(ctx, pane, mode)
+		stopDriving()
+		if err != nil {
 			return err
 		}
 		n.noteModes(id, mode, "")
 	}
 	if effort != "" {
-		if a, ok := n.agent(id); ok && (a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked) {
-			return fmt.Errorf("Agent 正在工作，这一轮结束后再改思考强度")
-		}
-		if err := n.tuiSetEffort(ctx, pane, effort); err != nil {
+		if err := n.setTerminalEffort(ctx, id, pane, effort, pending); err != nil {
 			return err
 		}
-		n.noteModes(id, "", effort)
 	}
 	n.notifySessions()
 	return nil

@@ -40,6 +40,7 @@ func TestAssistantOverTheBus(t *testing.T) {
 	t.Cleanup(func() { taskSettleDelay = old })
 	n := newAssistantNode(t, h) // the assistant's machine, "server"
 	n.m.info.Home = "/home/me"
+	n.m.online = true // runTask's execution guard sees this in-process peer as an online machine (#6806, as #11718).
 	now := time.Now().UTC()
 	editSessions(n.m, func([]proto.Session) []proto.Session {
 		return []proto.Session{{SessionID: "main-1", Cwd: convDir, Title: "长期对话", UpdatedAt: now},

@@ -23,7 +23,7 @@ nonisolated enum Supervision {
         }
     }
 
-    static func visible(_ items: [Item], results: [String: Item], live: Bool) -> Bool {
+    static func visible(_ items: [Item], results: [String: Item], live: Bool, routineMainRelay: Bool = false) -> Bool {
         if items.contains(where: { it in
             it.supervisionUser == true || it.fold?.supervisionUser == true ||
                 (Injected.of(it).map { $0.isSupervision && $0.level == "user" } ?? false)
@@ -47,7 +47,7 @@ nonisolated enum Supervision {
                 if disposition == "silent" { silent = true }
             }
         }
-        return !live && !silent && hasBackgroundReply(items)
+        return !live && !silent && !routineMainRelay && hasBackgroundReply(items)
     }
 
     private static func hasBackgroundReply(_ items: [Item]) -> Bool {

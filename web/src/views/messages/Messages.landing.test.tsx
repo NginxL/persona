@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LarkConversation } from "../../lib/lark-chats";
 
 vi.mock("../../lib/store", async (original) => ({ ...(await original<typeof import("../../lib/store")>()), useLarkOn: () => true }));
+// Collect the component graph before the tests' deadlines. page() still gives each test fresh list stores.
+await import("./Messages");
 // a fresh module per test: the chat list is the tab's own store
 const page = async () => {
   vi.resetModules();
@@ -24,9 +26,10 @@ let host: HTMLDivElement;
 let root: Root;
 let pages: Record<string, { conversations: LarkConversation[]; next_cursor?: string }>;
 const opened: string[] = [];
-const flush = async (n = 20) => {
-  for (let i = 0; i < n; i++) await act(async () => { await Promise.resolve(); });
-};
+const landed = () => vi.waitFor(async () => {
+  await act(async () => {});
+  expect(opened).toHaveLength(1);
+});
 
 beforeEach(() => {
   opened.length = 0;
@@ -66,7 +69,7 @@ describe("opening a chat from Messages", () => {
     pages = { "": { conversations: [row("oc_1", { unread: 2940, read_position: "164574" })] } };
     const Messages = await page();
     await act(async () => root.render(<Messages id="oc_1" onToggleSidebar={() => {}} />));
-    await flush();
+    await landed();
     expect(opened.map(around)).toEqual(["164575"]);
   });
 
@@ -74,7 +77,7 @@ describe("opening a chat from Messages", () => {
     pages = { "": { conversations: [row("oc_1", { unread: 0, read_position: "500" })] } };
     const Messages = await page();
     await act(async () => root.render(<Messages id="oc_1" onToggleSidebar={() => {}} />));
-    await flush();
+    await landed();
     expect(opened.map(around)).toEqual([null]);
   });
 
@@ -82,7 +85,7 @@ describe("opening a chat from Messages", () => {
     pages = { "": { conversations: [row("oc_1")], next_cursor: "2" }, "2": { conversations: [row("oc_9", { unread: 5, read_position: "40" })] } };
     const Messages = await page();
     await act(async () => root.render(<Messages id="oc_9" onToggleSidebar={() => {}} />));
-    await flush();
+    await landed();
     expect(opened.map(around)).toEqual(["41"]);
   });
 });

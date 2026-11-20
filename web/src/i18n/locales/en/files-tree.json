@@ -9,6 +9,5 @@
   "openFailedInline": "Can't open: {error}",
   "retry": "Retry",
   "tooMany": "Too many files, only the first 2000 are listed",
-  "gitIgnored": "{path} (ignored by Git)",
-  "copyPath": "Copy path"
+  "gitIgnored": "{path} (ignored by Git)"
 }

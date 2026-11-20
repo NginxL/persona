@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,14 +16,17 @@ import (
 // fetched by the hub: the supervisor must inspect the linked source before recording it. nil means a legacy park
 // without recorded evidence, not a verified contact. RecordedBy is set by task_review, never trusted from its input.
 type ParkEvidence struct {
-	Kind       string                        `json:"kind"`
-	Target     string                        `json:"target"`
-	URL        string                        `json:"url,omitempty"`
-	Wake       string                        `json:"wake"`
-	Contact    *ParkContact                  `json:"contact,omitempty"`
-	Ready      bool                          `json:"ready,omitempty"`
-	RecordedBy string                        `json:"recorded_by,omitempty"`
-	Reply      *connectorwire.LarkReplyWatch `json:"reply,omitempty"`
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	URL    string `json:"url,omitempty"`
+	Wake   string `json:"wake"`
+	// InteractionID is an external_event's existing pending owner request, verified against this task's worker.
+	InteractionID string                        `json:"interaction_id,omitempty"`
+	PREvent       string                        `json:"pr_event,omitempty"`
+	Contact       *ParkContact                  `json:"contact,omitempty"`
+	Ready         bool                          `json:"ready,omitempty"`
+	RecordedBy    string                        `json:"recorded_by,omitempty"`
+	Reply         *connectorwire.LarkReplyWatch `json:"reply,omitempty"`
 }
 
 // ParkContact names an already sent request, not a draft, a proposed reminder or a send whose outcome is unknown.
@@ -58,6 +62,7 @@ func readParkEvidence(input *ParkEvidence, waitingOn, until string, now time.Tim
 	}
 	e := input.clone()
 	e.Kind, e.Target, e.URL, e.Wake = strings.TrimSpace(e.Kind), strings.TrimSpace(e.Target), strings.TrimSpace(e.URL), strings.TrimSpace(e.Wake)
+	e.InteractionID = strings.TrimSpace(e.InteractionID)
 	e.RecordedBy = ""
 	var missing []string
 	text := func(name, value string, limit int) {
@@ -119,10 +124,34 @@ func readParkEvidence(input *ParkEvidence, waitingOn, until string, now time.Tim
 	if e.Kind != "person_reply" && e.Kind != "merge_review" && (e.Contact != nil || e.Ready) {
 		missing = append(missing, "evidence.contact and ready apply to person_reply/merge_review only")
 	}
+	if e.InteractionID != "" && e.Kind != "external_event" {
+		missing = append(missing, "evidence.interaction_id (an existing pending owner request on an external_event only)")
+	}
 	if e.Reply != nil && (e.Kind != "person_reply" || !parkReplyBinding(e)) {
 		missing = append(missing, "evidence.reply (person_reply only: larkcli source, brand, app_id, account_open_id, person_open_id, chat_id, thread_id and request_message_id matching the sent topic link)")
 	}
+	if e.PREvent != "" && (e.Kind != "external_event" || !externalPREvent(e.PREvent) || githubParkPRURL(e.URL) == "") {
+		missing = append(missing, "evidence.pr_event (external_event with a GitHub PR URL: terminal or terminal_or_review)")
+	}
 	return e, missing
+}
+
+// verifyParkInteraction binds a park only to a live request of its own worker. Releasing the worker does not resolve
+// its request; dismissing the link or a failed start does make it ineligible. Projection checks liveness again on every read.
+func (s *Service) verifyParkInteraction(t Todo, e *ParkEvidence) error {
+	if e == nil || e.InteractionID == "" {
+		return nil
+	}
+	ix, ok := s.pendingIx(e.InteractionID)
+	if !ok {
+		return fmt.Errorf("evidence.interaction_id %q is not a pending owner request", e.InteractionID)
+	}
+	for _, a := range t.Agents {
+		if a.DismissedAt == nil && a.StartError == "" && a.MachineID == ix.MachineID && a.SessionID == ix.SessionID {
+			return nil
+		}
+	}
+	return fmt.Errorf("evidence.interaction_id %q is not a pending owner request of task %s's worker", e.InteractionID, t.ID)
 }
 
 func parkSourceURL(raw string) bool {

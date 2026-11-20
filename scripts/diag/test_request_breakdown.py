@@ -185,6 +185,32 @@ class RequestTests(unittest.TestCase):
             excluded = json.loads(subprocess.check_output(command + ["--request-breakdown", "--since", "2026-11-19"]))
             self.assertEqual(excluded["request_breakdown"]["rows"], [])
 
+    def test_cli_since_matches_usage_and_request_rows_across_offsets(self):
+        samples = [
+            ("2026-11-20T08:00:00.001Z", "fresh", 11),
+            ("2026-11-20T09:00:00+02:00", "followup", 400),
+            ("2026-11-20T00:01:00-08:00", "resume", 13),
+            ("2026-11-20T09:00:00+01:00", "compaction", 3),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.jsonl"
+            rows = []
+            for timestamp, lifecycle, output in samples:
+                rows.append({"type": "assistant", "timestamp": timestamp,
+                             "message": {"id": lifecycle, "usage": {"output_tokens": output}}})
+                rows.append(dict(exported(lifecycle), timestamp=timestamp))
+            path.write_text("\n".join(map(json.dumps, rows)))
+            command = [sys.executable, "-B", str(Path(report.__file__)), "--json", "--request-breakdown", str(path)]
+            result = json.loads(subprocess.check_output(command + ["--since", "2026-11-20T08:00:00Z"]))
+            self.assertEqual((result["total"]["model_calls"], result["total"]["output_tokens"]), (3, 27))
+            captured = [row["lifecycle"] for row in result["request_breakdown"]["rows"]
+                        if row["boundary"] == "anthropic_request_content"]
+            self.assertEqual(captured, ["fresh", "resume", "compaction"])
+            invalid = subprocess.run(command + ["--since", "2026-11-31"], capture_output=True, text=True)
+            self.assertEqual(invalid.returncode, 2)
+            self.assertIn("--since", invalid.stderr)
+            self.assertEqual(invalid.stdout, "")
+
     def test_documented_capture_fixture(self):
         r = report.Report(request_breakdown=True)
         r.add_file(str(Path(__file__).with_name("testdata") / "request_breakdown.jsonl"))

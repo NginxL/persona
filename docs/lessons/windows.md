@@ -185,9 +185,11 @@ See [windows.md](../operations/windows.md) ("Codex") and [codex.md](../integrati
 
 A terminal newline is input, not a safe way to delimit a message. On Windows, herdr prompts use explicit bracketed
 paste followed by a separate Enter, checking that the same Agent is still in front and has not opened a dialog.
-This applies to Claude Code and other detected runtimes too. Codex starts open an empty composer, paste the complete
-first message, and still require the rollout to contain that complete message before reporting success. The startup
-readiness and delivery checks share one timeout. Codex App messages already use structured input on its IPC bus.
+This applies to Claude Code and other detected runtimes too. Codex starts with a supplied first message instead use
+the protected launch file and one native argv value, bypassing the terminal input stream entirely. Resolve npm shims
+to the native executable on the final managed-provider hop too. Keep full rollout matching and precise failure
+cleanup: argv acceptance is not a delivery receipt. Windows limits the quoted command line to 32,767 UTF-16 units
+including NUL; reject overflow without truncation or a paste fallback. Codex App uses structured IPC input.
 
 Codex can display a paste as `[Pasted Content N chars]` followed by literal tail text, or several chips. An anchored
 chip-only check rejects such a composer even when the input arrived. Match chip lengths in Unicode characters and
@@ -209,3 +211,10 @@ Close the owned pane before requesting Codex's reversible native archive. Never 
 matching first line as cleanup authority. Adopted panes remain the user's, and cleanup failures remain visible and
 must finish before another start with the same directory and launcher. A deployed incident needs its own version
 and transport evidence; a source-level transport regression alone does not prove which installed boundary failed.
+
+A native acceptance later failed even with a mixed-chip matcher: a long visible prefix appeared without its line
+separators/non-BMP character, followed by two chips. Screen text cannot distinguish renderer loss from actual input
+loss. Codex 0.170.0's external editor exports `composer_text_with_pending`, including expanded paste elements; a
+disposable pane with a process-local read-only capture editor can measure that actual draft without submitting it.
+Never relax the matcher to silently ignore missing characters. Process-boundary regressions must run the real
+private-file helper and receiver; on WSL, execute the Windows PE variant too, not only a fake composer.

@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The workbench (feishu_workbench*.go, feishu_companions.go, #1961): off, the bot is what it was; on, /home pins one
@@ -114,7 +116,7 @@ func TestWorkbenchHomeIsPinnedAndTheOnlyOne(t *testing.T) {
 	if h, _ := e.command("/home"); !h {
 		t.Fatal("/home not handled with the workbench on")
 	}
-	if js := e.postJSON(0); !strings.Contains(js, wbT(l, "home_title")) || !strings.Contains(js, `"to":"start"`) {
+	if js := e.postJSON(0); !strings.Contains(js, wbT(l, "home_title")) || !strings.Contains(js, `"value":"to=start"`) {
 		t.Fatalf("the home card: %s", js)
 	}
 	e.mu.Lock()
@@ -248,11 +250,15 @@ func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 		if got := open["default_url"]; got != "https://example.com" {
 			t.Fatalf("the original navigation URL changed: %v", got)
 		}
-		homeLabel := wbT(e.s.botLang(context.Background()), "btn_home")
+		homeLabel := wbT(e.s.botLang(context.Background()), "stamp_home")
 		if strings.Contains(homeLabel, "\n") {
 			t.Fatalf("the localized Workbench label wraps: %q", homeLabel)
 		}
-		home := behaviorPayload(t, buttonPayload(t, card, homeLabel), "callback")
+		homeButton := buttonPayload(t, card, homeLabel)
+		if homeButton["type"] != "text" || homeButton["size"] != "small" {
+			t.Fatalf("the way back is not a small text button: %v", homeButton)
+		}
+		home := behaviorPayload(t, homeButton, "callback")
 		value, _ := home["value"].(map[string]any)
 		if value["a"] != "nav" || value["to"] != "home" {
 			t.Fatalf("the Workbench callback changed: %v", value)
@@ -506,5 +512,49 @@ func TestWorkbenchSourceIsAName(t *testing.T) {
 		if got := wbSource(i18n.En, c.it); got != c.want {
 			t.Errorf("%+v: %q, want %q", c.it, got, c.want)
 		}
+	}
+}
+
+// tokenSpanStore is the chat's store that also sums the machines' usage (db.DB's UsageSpans), with made-up spans.
+type tokenSpanStore struct {
+	Store
+	spans []db.UsageSpan
+}
+
+func (u tokenSpanStore) UsageSpans(context.Context, []time.Time, db.UsageBy) ([]db.UsageSpan, error) {
+	return u.spans, nil
+}
+
+// What waits for the owner is rows pressed whole: a card that holds something up comes down. An agent's row says its
+// state as a tag, not a coloured dot.
+func TestWorkbenchHomeRowsArePressedWhole(t *testing.T) {
+	e := newWorkbenchEnv(t, workbenchOnFeatures)
+	e.s.fleet.interactions["ix_q"] = &pending{ix: proto.Interaction{ID: "ix_q", MachineID: "box", SessionID: "ag1", Kind: proto.IxQuestion,
+		Questions: []proto.Question{{Question: "用哪个库？"}}}}
+	card, _, _ := e.s.homeCard(context.Background(), workbenchOnFeatures)
+	js := card.JSON()
+	if !strings.Contains(js, `"tag":"interactive_container"`) || !strings.Contains(js, `"value":{"a":"nav","id":"ix_q","to":"ix"}`) ||
+		!strings.Contains(js, `"content":"等你 1"`) {
+		t.Fatalf("the home card: %s", js)
+	}
+	sess := proto.Session{State: proto.StateWorking, LastText: "在跑**测试**"}
+	row := agentRowMarkdown(i18n.ZhHans, "修登录", "", "box", sess, 70)
+	if row != "<text_tag color='blue'>工作中</text_tag> **修登录** · box\n<font color='grey'>在跑测试</font>" {
+		t.Fatalf("agent row %q", row)
+	}
+	// An agent named by its herdr tab shows its other name under the label.
+	row = agentRowMarkdown(i18n.ZhHans, "登录", "修登录的测试", "box", sess, 70)
+	if row != "<text_tag color='blue'>工作中</text_tag> **登录** · box\n修登录的测试\n<font color='grey'>在跑测试</font>" {
+		t.Fatalf("agent row with a secondary name %q", row)
+	}
+}
+
+// Sending a draft goes out under the owner's name: its button asks first in Feishu's dialog, Redraft does not.
+func TestDraftCardSendAsksFirst(t *testing.T) {
+	s := newTestService(t, newFakeHub())
+	it := InboxItem{ID: "i1", Source: "lark", Title: "项目群", Sender: "张三", Preview: "明天能发吗？"}
+	js := s.draftCard(context.Background(), it, "可以，明早发。", nil, "").JSON()
+	if n := strings.Count(js, `"confirm":`); n != 1 || !strings.Contains(js, `"op":"send"`) || !strings.Contains(js, `"op":"redraft"`) {
+		t.Fatalf("the draft card asks first %d times: %s", n, js)
 	}
 }

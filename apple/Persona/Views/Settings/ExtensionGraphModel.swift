@@ -38,8 +38,8 @@ nonisolated struct ExtensionGraphTransform: Codable, Equatable, Sendable {
         }
         let scale = min(max(min(viewport.width / content.width, viewport.height / content.height), minimum), maximum)
         return ExtensionGraphTransform(scale: scale,
-            x: (viewport.width - content.width * scale) / 2,
-            y: (viewport.height - content.height * scale) / 2)
+            x: (viewport.width - content.width * scale) / Double(2),
+            y: (viewport.height - content.height * scale) / Double(2))
     }
 }
 

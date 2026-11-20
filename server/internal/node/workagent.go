@@ -148,6 +148,13 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 		done()
 		return nil, n.abandonStart(ctx, created, kind, err)
 	}
+	if kind == agyAgent {
+		// In a folder agy has not trusted (a new worktree), its trust dialog holds the input box (agytrust.go, #11424).
+		if err := n.agyTrustFolder(ctx, pane); err != nil {
+			done()
+			return nil, n.abandonStart(ctx, created, kind, err)
+		}
+	}
 	n.noteWorkAgent(ctx, launch, pane, id, cwd, launcher, kind, model, effort)
 	if prompt != "" {
 		// Typed once, then checked in the background until the agent is seen taking it (workagent_first.go, #11345).
@@ -200,7 +207,7 @@ func (n *Node) finishPiStart(ctx context.Context, launch host.Launcher, created 
 
 // noteWorkAgent records the session as Persona's, bound to its pane, so herdr resumes it the way it was started.
 func (n *Node) noteWorkAgent(ctx context.Context, launch host.Launcher, pane, id, cwd, launcher, kind, model, effort string) {
-	n.state.put(id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, StartedAt: time.Now().UTC()})
+	n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, ModelEffort: effort, StartedAt: time.Now().UTC()})
 	n.bindPane(pane, id)
 	n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, Model: model, Effort: effort, ID: id})
 }
@@ -395,6 +402,10 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 			return nil, fmt.Errorf("send: %w", err), true
 		}
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
+		// Working until herdr shows the turn, so an interrupt right after the send stops it (worksent.go, #11437).
+		n.workSent.mark(a.PaneID, time.Now())
+		n.notifySessionsSoon()
+		time.AfterFunc(workSentGrace+100*time.Millisecond, func() { n.notifySessionsSoon() })
 		return okResult(nil), nil, true
 	case "session.interrupt":
 		return okResult(n.sendKeys(ctx, a.PaneID, "escape")), nil, true

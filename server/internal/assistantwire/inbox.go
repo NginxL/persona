@@ -437,7 +437,8 @@ type InboxMute struct {
 }
 
 // InboxNeedsYou is EventInboxNeedsYou's params: how many open items are in "Needs you" (status action; the ones not
-// triaged yet count), the connectors' among them: the number the apps' Inbox badge shows of this manager's list.
+// triaged yet count), the connectors' among them, read or not: this manager's inbox part of the switchers' badges. The
+// apps' Inbox badge is not this number: it counts only the unread ones.
 type InboxNeedsYou struct {
 	Count int `json:"count"`
 }

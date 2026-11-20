@@ -35,16 +35,25 @@ internal enum class TodoStage(val wire: String, @StringRes val label: Int) {
     }
 }
 
+/** The names of a bar's steps: the six, or once done (#11590) the ones the work went through and Done. */
+internal fun todoStageSteps(stage: TodoStage, done: Boolean): List<Int> =
+    if (done) TodoStage.entries.take(stage.ordinal + 1).map { it.label } + R.string.agents_todo_stage_done
+    else TodoStage.entries.map { it.label }
+
 /**
  * One to-do's stage as a bar (iOS `TodoStageBar`): Plan → Develop → Review → Merge → Deploy → Verified, the steps before
- * the current one ticked green, the current one in the accent color with a ring, the ones ahead hollow.
+ * the current one ticked green, the current one in the accent color with a ring, the ones ahead hollow. Work closed with
+ * nothing left to deploy ([done], the hub's `stage_done`, #11590) ends with Done after the steps it went through, every
+ * one ticked: no current step is left behind, and no step it never took is ticked.
  */
 @Composable
-internal fun TodoStageBar(stage: TodoStage, modifier: Modifier = Modifier) {
+internal fun TodoStageBar(stage: TodoStage, modifier: Modifier = Modifier, done: Boolean = false) {
     val palette = PersonaTheme.palette
-    val current = stage.ordinal
-    val steps = TodoStage.entries
-    val label = stringResource(R.string.agents_todo_stage_a11y, stringResource(stage.label), current + 1, steps.size)
+    val steps = todoStageSteps(stage, done)
+    // Once done every step is passed: the current one is past the last.
+    val current = if (done) steps.size else stage.ordinal
+    val label = if (done) stringResource(R.string.agents_todo_stage_a11y, stringResource(R.string.agents_todo_stage_done), steps.size, steps.size)
+    else stringResource(R.string.agents_todo_stage_a11y, stringResource(stage.label), current + 1, steps.size)
     Row(modifier.fillMaxWidth().testTag("todo-stage").clearAndSetSemantics { contentDescription = label }) {
         steps.forEachIndexed { index, step ->
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
@@ -53,7 +62,7 @@ internal fun TodoStageBar(stage: TodoStage, modifier: Modifier = Modifier) {
                     Dot(index, current)
                     Connector(reached = index < current, shown = index < steps.size - 1, Modifier.weight(1f))
                 }
-                Text(stringResource(step.label), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                Text(stringResource(step), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                     style = PersonaTheme.type.caption,
                     color = when { index == current -> palette.accent; index < current -> palette.ink; else -> palette.ink3 })
             }

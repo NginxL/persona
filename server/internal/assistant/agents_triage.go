@@ -51,7 +51,7 @@ type triageOut struct {
 func (s *Service) triageTurnModel(ctx context.Context, v *workView, machine string, c proto.Session) (w *proto.WorkState, same bool, err error) {
 	ask, reply := s.triageRead(ctx, machine, c)
 	if reply == "" {
-		reply = strings.TrimSpace(c.LastText)
+		reply = turnReplyText(c.LastText, false)
 	}
 	if reply == "" {
 		return &proto.WorkState{}, false, nil
@@ -357,18 +357,8 @@ func (s *Service) lastTurnRead(ctx context.Context, machine, sid string) (ask, a
 	if err := s.call(cctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": 1, "lazy_images": true}, &res); err != nil {
 		return "", "", nil, err
 	}
-	for _, it := range res.Items {
-		if it.Kind == proto.KindText && it.Role == "user" && strings.TrimSpace(it.Text) != "" {
-			ask = strings.TrimSpace(it.Text)
-			break
-		}
-	}
-	for i := len(res.Items) - 1; i >= 0; i-- {
-		if it := res.Items[i]; it.Kind == proto.KindText && it.Role == "assistant" && strings.TrimSpace(it.Text) != "" {
-			return ask, strings.TrimSpace(it.Text), res.Items, nil
-		}
-	}
-	return ask, "", res.Items, nil
+	ask, answer = turnExchange(res.Items)
+	return ask, answer, res.Items, nil
 }
 
 // clipMiddleRunes keeps a long text's first and last n runes: a last answer says what was done first and what is

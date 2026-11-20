@@ -17,6 +17,7 @@ func scheduledTodoFixture(t *testing.T) (*Service, *fakeHub, Todo) {
 	setTasks(s)
 	s.turnPoll = time.Millisecond
 	s.superviseTimes.gather = time.Hour
+	s.todoAskAfter = time.Nanosecond // the escalation's mechanics, not its floor (TestScheduledTodoAskWaitsForTheFloor)
 	todo := Todo{ID: "todo-backfill", Title: "Backfill", Origin: "conv1",
 		Supervision: &Supervision{Supervisor: "conv1", DoneWhen: []string{"Backfill verified"},
 			Criteria: []db.TodoCriterion{{Criterion: "Backfill verified", State: "pending"}}}}
@@ -115,24 +116,34 @@ func TestScheduledTodoQuietNoProgressRegression(t *testing.T) {
 			SessionID: sid, Status: proto.StatusIdle, State: proto.StateIdle})
 	}
 	f.mu.Unlock()
-	for count := 1; count <= 2; count++ {
+	// The first run sets the baseline; the two after it see no progress.
+	for n, want := range []struct {
+		state string
+		count float64
+	}{{"baseline", 0}, {"no_progress", 1}, {"no_progress", 2}} {
 		if _, err := runNow(t, s, id); err != nil {
 			t.Fatal(err)
 		}
 		waitFor(t, "a completed run's persisted progress assessment", func() bool {
 			_, runs := scheduleState(s)
-			if len(runs) != count {
+			if len(runs) != n+1 {
 				return false
 			}
-			p, _ := scheduleJSON(t, runs[count-1])["todo_progress"].(map[string]any)
-			return p != nil && p["state"] == "no_progress"
+			p, _ := scheduleJSON(t, runs[n])["todo_progress"].(map[string]any)
+			return p != nil && p["state"] == want.state
 		})
 		_, runs := scheduleState(s)
-		p := scheduleJSON(t, runs[count-1])["todo_progress"].(map[string]any)
-		if p["no_progress"] != float64(count) || !strings.Contains(p["reason"].(string), "six execution slots") {
-			t.Fatalf("no-progress count or run reason lost: %+v", p)
+		p := scheduleJSON(t, runs[n])["todo_progress"].(map[string]any)
+		got, _ := p["no_progress"].(float64)
+		if got != want.count {
+			t.Fatalf("no-progress count lost: %+v", p)
 		}
-		if count == 1 {
+		// The reason is what the hub saw, never the run's own summary (#11587).
+		if reason := p["reason"].(string); want.state == "no_progress" &&
+			(strings.Contains(reason, "six execution slots") || !strings.Contains(reason, "没有新回复")) {
+			t.Fatalf("the no-progress reason is not the hub's evidence: %+v", p)
+		}
+		if n == 1 {
 			s.supervise.mu.Lock()
 			signals := len(s.supervise.pending)
 			s.supervise.mu.Unlock()
@@ -148,8 +159,8 @@ func TestScheduledTodoQuietNoProgressRegression(t *testing.T) {
 	cur, _ := s.todoNow(todo.ID)
 	review := cur.Supervision.Reviews[len(cur.Supervision.Reviews)-1]
 	if len(review.Options) != 2 || review.Reason == "" || review.Recommend != review.Options[0].Label ||
-		!strings.Contains(review.Note, "six execution slots") {
-		t.Fatalf("the owner cannot choose a different approach or keep waiting: %+v", review)
+		strings.Contains(review.Reason, "six execution slots") || !strings.Contains(review.Note, "没有新回复") {
+		t.Fatalf("the owner cannot choose a different approach or keep waiting, or is told the run's summary: %+v", review)
 	}
 	if cur.DoneAt != nil {
 		t.Fatal("escalation closed the to-do")

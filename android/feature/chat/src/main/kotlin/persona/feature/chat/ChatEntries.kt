@@ -116,7 +116,8 @@ class ChatDraftEditor(
                 try {
                     Snapshot.withMutableSnapshot {
                         if (!touched && !state.hasContent) {
-                            if (read.attachments.isEmpty()) state.editMessage(read.text) else state.load(read.composerDraft())
+                            if (read.attachments.isEmpty() && !read.hasPickedSavedPrompt) state.editMessage(read.text)
+                            else state.load(read.composerDraft())
                             state.sessionVersion = read.sessionVersion
                         }
                     }
@@ -146,8 +147,10 @@ class ChatDraftEditor(
                 val text = if (repository.structured) draft.text
                     else ChatComposerState(draft).let { if (it.ready) it.message() else draft.text }
                 val version = draft.sessionVersion.takeIf { repository.structured && (text.isNotEmpty() || attachments.isNotEmpty()) }
-                if (text != previous.text || attachments != previous.attachments || version != previous.sessionVersion)
-                    saved = repository.save(key, text, previous.version, attachments, version)
+                val picked = repository.structured && draft.hasPickedSavedPrompt
+                if (text != previous.text || attachments != previous.attachments || version != previous.sessionVersion ||
+                    picked != previous.hasPickedSavedPrompt)
+                    saved = repository.save(key, text, previous.version, attachments, version, picked)
                 error.value = null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error.value = R.string.chat_draft_save_failed }

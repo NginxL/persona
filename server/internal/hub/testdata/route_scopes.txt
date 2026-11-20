@@ -143,6 +143,8 @@ assistant.ask        GET /api/v1/assistant/capabilities
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
 -                    GET /api/v1/assistant/directions/offers
 -                    GET /api/v1/assistant/directions/tree
+-                    GET /api/v1/assistant/directions/{id}
+dispatch.guard       GET /api/v1/assistant/dispatch-guard
 assistant.dispatch_policy GET /api/v1/assistant/dispatch-policy
 -                    GET /api/v1/assistant/feishu/notices
 -                    GET /api/v1/assistant/followups
@@ -240,6 +242,7 @@ kb.read              GET /api/v1/kb/{kind}/{id}
 machines.read        GET /api/v1/machines
 machines.read        GET /api/v1/machines/{id}/metrics
 machines.read        GET /api/v1/machines/{id}/usage
+-                    GET /api/v1/machines/{mid}/agent-dirs/hidden
 -                    GET /api/v1/machines/{mid}/agy-settings
 -                    GET /api/v1/machines/{mid}/botmux
 -                    GET /api/v1/machines/{mid}/browser
@@ -275,6 +278,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/git/status
 -                    GET /api/v1/machines/{mid}/grok-settings
 -                    GET /api/v1/machines/{mid}/health/reports
+-                    GET /api/v1/machines/{mid}/held-messages
 -                    GET /api/v1/machines/{mid}/herdr
 -                    GET /api/v1/machines/{mid}/iphone
 -                    GET /api/v1/machines/{mid}/launchers
@@ -338,6 +342,8 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/places
 todos.read           GET /api/v1/todos/{id}
+-                    GET /api/v1/todos/{id}/backend-workspace
+-                    GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}
 todos.read           GET /api/v1/todos/{id}/decisions
 -                    GET /api/v1/todos/{id}/images/{image}
 todos.read           GET /api/v1/todos/{id}/repositories
@@ -470,6 +476,7 @@ todos.write          POST /api/v1/assistant/workspace-naming/preview
 -                    POST /api/v1/extensions/-/install
 -                    POST /api/v1/extensions/-/operations/{op}/retry
 -                    POST /api/v1/extensions/-/preview
+market.refresh_own   POST /api/v1/extensions/-/self/market/refresh
 -                    POST /api/v1/extensions/{id}/-/assistant-data/apply
 -                    POST /api/v1/extensions/{id}/-/attach
 -                    POST /api/v1/extensions/{id}/-/auth/logout
@@ -631,6 +638,10 @@ todos.write          POST /api/v1/todos
 -                    POST /api/v1/todos/retitle
 -                    POST /api/v1/todos/{id}/accept
 -                    POST /api/v1/todos/{id}/asks/{ask}/answer
+-                    POST /api/v1/todos/{id}/backend-workspace/cancel
+-                    POST /api/v1/todos/{id}/backend-workspace/cleanup
+-                    POST /api/v1/todos/{id}/backend-workspace/prepare
+-                    POST /api/v1/todos/{id}/backend-workspace/start
 -                    POST /api/v1/todos/{id}/decision-dismiss
 -                    POST /api/v1/todos/{id}/decision-undo-dismiss
 todos.write          POST /api/v1/todos/{id}/decisions
@@ -667,6 +678,7 @@ todos.write          POST /api/v1/todos/{id}/workspace-naming/preview
 -                    PUT /api/v1/assistant/conversations/{id}/tags
 -                    PUT /api/v1/assistant/directions/{id}/name
 -                    PUT /api/v1/assistant/directions/{id}/notes
+dispatch.guard       PUT /api/v1/assistant/dispatch-guard
 assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/feishu/companions
 -                    PUT /api/v1/assistant/memory/{name}
@@ -675,6 +687,7 @@ assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/routines
 -                    PUT /api/v1/assistant/saved-prompts/order
 -                    PUT /api/v1/assistant/saved-prompts/{id}
+-                    PUT /api/v1/assistant/sessions/{mid}/{sid}/direction
 assistant.start_defaults PUT /api/v1/assistant/start-defaults
 -                    PUT /api/v1/assistant/tasks/{id}
 -                    PUT /api/v1/assistant/urgent-call
@@ -702,6 +715,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/launchers/{name}
 -                    PUT /api/v1/looks/current
 -                    PUT /api/v1/machines/{id}/name
+-                    PUT /api/v1/machines/{mid}/agent-dirs/hidden
 -                    PUT /api/v1/machines/{mid}/agy-settings
 -                    PUT /api/v1/machines/{mid}/botmux
 -                    PUT /api/v1/machines/{mid}/browser

@@ -67,6 +67,7 @@ export type TriageRule =
   | "superseded"
   | "agent_asks"
   | "owner_decides"
+  | "delivery_ok"
   | "agent_running"
   | "parked"
   | "closed"
@@ -131,7 +132,7 @@ function shelvable(todo: Todo, now: number): boolean {
  *  1. failed_start    the task's agent never started                    → Waiting on you (retry or remove), Done after 48 h;
  *     superseded      … and a related to-do (its row) really finished   → Just finished (24 h), then Done (#3713)
  *  2. agent_asks      an agent asks (question, approval) or was cut off → Waiting on you
- *  3. owner_decides   review says needs_user, or a decision / "cannot" ask → Waiting on you
+ *  3. owner_decides   review says needs_user, a decision / "cannot" ask, or delivery_ok → Waiting on you
  *  4. agent_running   an agent is working or starting                   → Working
  *  5. closed          done_at set                                       → Just finished (24 h), then Done
  *  6. accepted        the latest review accepted it (even reopened)     → Just finished (24 h), then Done
@@ -165,8 +166,8 @@ export function triage(todo: Todo, lookup: SessionLookup | undefined, now: numbe
     return at("done", "failed_start");
   }
   if (status === "needs_you" || status === "interrupted") return at("waiting", "agent_asks");
-  // a decision the owner chose Don't handle on no longer waits on them (decisionDismissed)
   if (!todo.done_at && !decisionDismissed(todo) && (reviewState(todo) === "needs_user" || ask?.outcome === "decide" || ask?.outcome === "cannot")) return at("waiting", "owner_decides");
+  if (heldDelivery(todo)?.unblock === "user") return at("waiting", "delivery_ok");
   // rule 8's signals, read here so rule 9 yields to them: a turn or review nobody has looked at stays Just finished
   const finished = status === "unread" || reviewState(todo) === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done";
   // a parked hold is its supervisor's reading of the latest turn: an agent session left unread does not hide its PR
@@ -243,7 +244,8 @@ export type OwnerWait = "failed_start" | "agent_asks" | "owner_decides" | "deliv
  */
 export function waitsOnOwner(todo: Todo, t: Triage): OwnerWait | null {
   if (!countsAsOpen(todo, t)) return null;
-  if (t.section === "waiting" && (t.rule === "failed_start" || t.rule === "agent_asks" || t.rule === "owner_decides")) return t.rule;
+  const rule = t.rule;
+  if (t.section === "waiting" && (rule === "failed_start" || rule === "agent_asks" || rule === "owner_decides" || rule === "delivery_ok")) return rule;
   return heldDelivery(todo)?.unblock === "user" ? "delivery_ok" : null;
 }
 
@@ -253,21 +255,27 @@ export function agentOnIt(t: Triage): boolean {
   return t.section === "working";
 }
 
+/** Why the sidebar's To-dos badge counts a to-do (ownerNeeds): what it waits on the owner for (rule 1, OwnerWait), or
+ *  `unattended`, no Agent is on it and none of its pieces carries it (rule 4). The To-dos page says it on the row's mark
+ *  (#11838); a later reason is one more member here, decided in ownerNeeds, so the badge and the mark keep one rule. */
+export type OwnerNeed = OwnerWait | "unattended";
+
 /**
- * The to-dos the sidebar's To-dos badge counts (#11085), by id: the open ones (countsAsOpen) that need the owner, not
- * those Agents are on. Quiet tasks (#1731) are left out, as before. Among the rest, the first rule that holds wins:
+ * The to-dos the sidebar's To-dos badge counts (#11085), by id, each with why (OwnerNeed): the open ones (countsAsOpen)
+ * that need the owner, not those Agents are on. Quiet tasks (#1731) are left out, as before. Among the rest, the first
+ * rule that holds wins:
  *
- *  1. it waits on the owner (waitsOnOwner)                                          → counts
+ *  1. it waits on the owner (waitsOnOwner)                                          → counts, for what it waits on
  *  2. one of its own Agents is on it (agentOnIt)                                    → does not count
  *  3. its pieces carry it: a to-do under it (`part_of`, at any depth) has an Agent on it or waits on the owner,
  *     and a piece that waits counts by itself, so the request is not counted twice   → does not count
  *  4. anything else: a personal to-do no Agent was ever on, and whatever has no sign of an Agent on it (its Agents
- *     stopped, finished work nobody has looked at, a PR waiting on others)           → counts
+ *     stopped, finished work nobody has looked at, a PR waiting on others)           → counts, `unattended`
  *
  * The page's "Not done" stays countsAsOpen, so the badge is never more than it. A `part_of` loop is walked once. Its
- * size is the badge's number.
+ * size is the badge's number, and the To-dos page marks exactly these rows (lib/todo-owner-needs.ts reads it for both).
  */
-export function ownerBadge(todos: Todo[], lookup: SessionLookup | undefined, now: number, restored: ReadonlyMap<string, number> = new Map()): ReadonlySet<string> {
+export function ownerNeeds(todos: Todo[], lookup: SessionLookup | undefined, now: number, restored: ReadonlyMap<string, number> = new Map()): ReadonlyMap<string, OwnerNeed> {
   // decided on every to-do, as the page decides it (quiet ones too: their Agents and asks still carry a request)
   const superseded = supersededFailedStarts(todos);
   const placed = new Map(todos.map((td) => [td.id, triage(td, lookup, now, restored.get(td.id) ?? 0, superseded.has(td.id))]));
@@ -291,13 +299,20 @@ export function ownerBadge(todos: Todo[], lookup: SessionLookup | undefined, now
     }
     return false;
   };
-  const counted = new Set<string>();
+  const counted = new Map<string, OwnerNeed>();
   for (const td of todos) {
     const t = placed.get(td.id)!;
     if (td.quiet || !countsAsOpen(td, t)) continue;
-    if (waitsOnOwner(td, t) || (!agentOnIt(t) && !carried(td.id))) counted.add(td.id);
+    const wait = waitsOnOwner(td, t);
+    if (wait) counted.set(td.id, wait);
+    else if (!agentOnIt(t) && !carried(td.id)) counted.set(td.id, "unattended");
   }
   return counted;
+}
+
+/** The ids ownerNeeds counts: the badge's to-dos, its number their count. */
+export function ownerBadge(todos: Todo[], lookup: SessionLookup | undefined, now: number, restored: ReadonlyMap<string, number> = new Map()): ReadonlySet<string> {
+  return new Set(ownerNeeds(todos, lookup, now, restored).keys());
 }
 
 /** Whether a to-do's checkbox shows it open: not closed, or a failed start still waiting on the owner (rule 1), which

@@ -120,7 +120,7 @@ class GroupRuntime internal constructor(
             HubConnectionConfig(credentials.hubId.takeUnless { it.startsWith("legacy-") }, credentials.fp,
                 credentials.deviceToken, pairingEndpoints(credentials), settings.version, systemOrigins = credentials.systemOrigins.toSet(),
                 deviceId = credentials.deviceId,
-                clientFeatures = setOf("lock_test", "extension_operations", "extension_auth", "managers"), build = settings.build, os = settings.os,
+                clientFeatures = setOf("lock_test", "extension_operations", "extension_auth", "managers", "closeout.markdown.v1"), build = settings.build, os = settings.os,
                 heartbeatPolicy = settings.heartbeatPolicy, members = members, center = isCenter, centerHubId = group.centerHubId,
                 tunnels = tunnels),
             initialNetwork(),

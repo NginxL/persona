@@ -323,3 +323,27 @@ func TestSessionEngineHistory(t *testing.T) {
 		t.Fatalf("no history left a hierarchy: %+v", s.Hierarchy)
 	}
 }
+
+// Directory visibility is sparse and copy-on-write, like the other row metadata.
+func TestSessionHiddenByDirectoryCopyOnWrite(t *testing.T) {
+	var a Session
+	a.SetHiddenByDirectory(false)
+	if a.Hierarchy != nil {
+		t.Fatal("default visibility allocated sparse metadata")
+	}
+	a.SetHiddenByDirectory(true)
+	b := a
+	b.SetHiddenByDirectory(false)
+	if !a.HiddenByDirectory() || b.HiddenByDirectory() || b.Hierarchy != nil {
+		t.Fatal("visibility update mutated a shared row")
+	}
+	kept := a.Hierarchy
+	if n := testing.AllocsPerRun(100, func() { a.SetHiddenByDirectory(true) }); n != 0 || a.Hierarchy != kept {
+		t.Fatal("unchanged visibility allocated")
+	}
+	a.SetFold("parent", "", "", nil)
+	a.SetHiddenByDirectory(false)
+	if a.HiddenByDirectory() || a.FoldedUnder() != "parent" {
+		t.Fatal("visibility update dropped other metadata")
+	}
+}

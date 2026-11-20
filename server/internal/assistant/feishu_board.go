@@ -277,7 +277,7 @@ type boardRow struct {
 // waiting first, then the to-dos waiting for the owner to verify them, the longest waiting first.
 func (s *Service) boardRows(ctx context.Context, l i18n.Lang, web string, now time.Time) []boardRow {
 	var rows []boardRow
-	for _, ix := range s.pendingInteractions() {
+	for _, ix := range s.visiblePendingInteractions() {
 		if s.interactionEnded(ix.ID) { // over, though its entry is still being taken away
 			continue
 		}

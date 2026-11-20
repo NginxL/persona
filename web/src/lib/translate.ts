@@ -365,15 +365,15 @@ export function translateMail(account: string, uid: number, mailbox: string, tar
 }
 
 /** The Feishu chats to pick from: the pinned ones, then the recent ones. */
-export async function larkChatChoices(token: string): Promise<{ id: string; name: string; avatar?: string; is_group?: boolean }[]> {
-  type Conv = { id: string; name?: string; avatar?: string; is_group?: boolean };
+export async function larkChatChoices(token: string): Promise<{ id: string; name: string; avatar?: string; avatar_url?: string; is_group?: boolean }[]> {
+  type Conv = { id: string; name?: string; avatar?: string; avatar_url?: string; is_group?: boolean };
   const [pinned, recent] = await Promise.all([
     api<{ conversations?: Conv[] }>("/lark/pinned", { token }).catch(() => ({ conversations: [] as Conv[] })),
     api<{ conversations?: Conv[] }>(`/lark/conversations?scope=${enc("chats")}&limit=60`, { token }),
   ]);
   const out: Conv[] = [];
   for (const c of [...(pinned.conversations ?? []), ...(recent.conversations ?? [])]) if (!out.some((x) => x.id === c.id)) out.push(c);
-  return out.map((c) => ({ id: c.id, name: c.name || c.id, avatar: c.avatar, is_group: c.is_group }));
+  return out.map((c) => ({ id: c.id, name: c.name || c.id, avatar: c.avatar, avatar_url: c.avatar_url, is_group: c.is_group }));
 }
 
 /** Tests only. */

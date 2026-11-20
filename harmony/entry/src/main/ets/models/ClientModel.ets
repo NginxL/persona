@@ -929,7 +929,7 @@ export class ClientModel {
   private projectMessages(items: readonly TranscriptItem[], running: boolean): ChatMessage[] {
     const turns: TranscriptItem[][] = []; let turn: TranscriptItem[] = [];
     items.forEach((item: TranscriptItem) => {
-      if (item.role === 'user' && item.kind === 'text' && turn.length > 0) { turns.push(turn); turn = []; }
+      if (turn.length > 0 && (item.wake === true || (item.role === 'user' && item.kind === 'text'))) { turns.push(turn); turn = []; }
       turn.push(item);
     });
     if (turn.length) turns.push(turn);

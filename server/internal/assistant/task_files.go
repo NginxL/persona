@@ -276,7 +276,7 @@ func (s *Service) taskAnswer(ctx context.Context, machine, sid string, items []p
 		full.FullSize > 0 || strings.TrimSpace(full.Text) == "" {
 		return text
 	}
-	return strings.TrimSpace(full.Text)
+	return turnReplyText(full.Text, false)
 }
 
 // lastTurnAnswer is the latest turn's answer whole (lastTurn with the paged tail read again).

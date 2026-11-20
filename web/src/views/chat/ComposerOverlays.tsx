@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { t } from "../../i18n";
-import { enterSends, hasFinePointer } from "../../lib/viewport";
+import { useCloseOnBack } from "../../lib/back-close";
+import { enterSends, hasFinePointer, NARROW, useMedia } from "../../lib/viewport";
 import { useComposition } from "../../lib/ime";
 import { EASE } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -39,6 +40,8 @@ function ExpandedComposer({ value, placeholder, selection, onChange, onCollapse,
     el.setSelectionRange(start.current[0], start.current[1]);
   }, []);
   const sel = (): [number, number] => [field.current?.selectionStart ?? value.length, field.current?.selectionEnd ?? value.length];
+  // Back collapses it, as the collapse button does, and stays in the chat
+  useCloseOnBack(true, () => onCollapse(sel()), useMedia(NARROW));
   return (
     <div
       ref={panel}

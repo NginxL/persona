@@ -8,7 +8,7 @@ struct LarkConversationRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            LarkAvatarImage(name: conversation.name, url: conversation.avatar, isGroup: conversation.isGroup, size: Theme.Size.avatarXL)
+            LarkAvatarImage(name: conversation.name, url: conversation.picture, account: conversation.account, size: Theme.Size.avatarXL)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 HStack(spacing: Theme.Space.s) {
                     Text(conversation.name).font(Theme.Font.bodyStrong).foregroundStyle(.primary).lineLimit(1)

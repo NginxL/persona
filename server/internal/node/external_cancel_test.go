@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/osproc"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 const externalCancelNative = `#!/bin/sh
@@ -174,6 +175,52 @@ func TestExternalCancelColdCompactionInitialization(t *testing.T) {
 	cliWait(t, "the later compaction", func() bool { return strings.Contains(f.file("external-stdin"), "/compact") })
 	if strings.Count(f.file("external-stdin"), "/compact") != 1 || f.proc(id).model.StartupContext != nil {
 		t.Fatal("a canceled compaction replayed or persisted its startup context")
+	}
+}
+
+// Pruning a refused only turn leaves no transcript to resume. If the process starts but exits before it can accept
+// /compact, that failed start must not leave the conversation looking like a new one still within its start bound.
+func TestColdCompactionFailureDropsStartOfRefusedOnlyConversation(t *testing.T) {
+	f, launcher, execution, _ := externalAssistantFixture(t)
+	id := execution.External.SessionID
+	cwd := t.TempDir()
+	started := time.Now().Add(-time.Hour).UTC()
+	f.n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, IsMain: true, StartedAt: started})
+	path := writeTranscript(t, f.n.home, cwd, id, started, refusalTurnLines("one")...)
+	f.n.setPath(id, path)
+	externalMergeModelReply(f, launcher, execution)
+
+	// initialize is acknowledged only after the native process closed its stdin, so spawn returns to a deterministic
+	// /compact write failure. The process then exits without reading any further input.
+	body := strings.Replace(externalTestNative,
+		`printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s"}}\n' "$id" ;;`,
+		`exec 0<&-
+      printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s"}}\n' "$id"
+      exit 1 ;;`, 1)
+	writeFile(t, filepath.Join(f.dir, "example-native"), body)
+	if err := f.n.assistantCompact(t.Context(), id, false); err == nil {
+		t.Fatal("compaction accepted a process that exited before /compact")
+	}
+	if got := f.n.transcriptPath(id); got != "" {
+		t.Fatalf("the refused only transcript was not pruned: %q", got)
+	}
+	if input := f.file("external-stdin"); !strings.Contains(input, `"subtype":"initialize"`) || strings.Contains(input, "/compact") {
+		t.Fatalf("the process did not reach the intended failure: input %q", input)
+	}
+	if p := f.proc(id); p != nil {
+		select {
+		case <-p.exited:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the failed process did not exit")
+		}
+	}
+	cliWait(t, "the failed process to be forgotten", func() bool { return f.proc(id) == nil })
+	if f.n.startsBegun.within(id, f.n.startWait()) {
+		t.Error("the failed compaction left a startsBegun note")
+	}
+	res, err := f.n.handle(context.Background(), "session.items", json.RawMessage(`{"session_id":"`+id+`","turns":2}`))
+	if rpcCode(err) != codeNotFound || notFoundReason(err) != proto.NotFoundNoTranscript {
+		t.Errorf("after the failed compaction: want not_found no_transcript, got %v %v", res, err)
 	}
 }
 

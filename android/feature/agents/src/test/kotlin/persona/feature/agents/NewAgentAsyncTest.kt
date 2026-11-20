@@ -191,18 +191,21 @@ class NewAgentAsyncTest {
     }
 
     /** A restored forward keeps the other block beside it and the words after them. */
-    @Test fun aPendingForwardStartKeepsItsOtherContexts() = test {
+    @Test fun aPendingForwardStartKeepsAllPickedMessagesAndOtherContexts() = test {
         val forward = "<persona-context kind=\"forward\" title=\"转发自 Persona · Persona\" url=\"persona://session/m/s?at=x%230\"" +
             " msg=\"x#0\" role=\"persona\" author=\"Persona\" chat=\"Persona\">\n原文\n</persona-context>"
         val context = "<persona-context kind=\"context\" title=\"修复登录\" url=\"\">\n页面原文\n</persona-context>"
-        val saved = forward + "\n" + context + "\n\n看这个"
+        val forwards = listOf(forward, forward.replace("x%230", "y%231").replace("x#0", "y#1").replace("原文", "其他原文")).joinToString("\n")
+        val saved = forwards + "\n" + context + "\n\n看这个"
         val store = MemoryStore().apply {
             operation = AgentStartOperation("op", AgentStartRequest("first", "/code", "claude", async = true), saved, "first-id")
         }
         val model = NewAgentViewModel(Service(), store, machines, Sender())
         try {
             advanceUntilIdle()
-            assertEquals(forward, model.state.value.context)
+            model.forwardContext(null)
+            assertEquals(saved, model.state.value.pending?.firstMessage)
+            assertEquals(forwards, model.state.value.context)
             assertEquals(context + "\n\n看这个", model.state.value.prompt)
         } finally { model.viewModelScope.cancel() }
     }

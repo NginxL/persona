@@ -166,11 +166,31 @@ func (b builtinSources) via(ctx context.Context, src *subscriptionsui.Builtin) {
 	via := &subscriptionsui.Via{}
 	if s, _, err := b.h.subs.Get(ctx, subscriptions.MigrationID(src.ID)); err == nil {
 		via.On, via.Subscription = s.Migrated != nil, s.ID
+		if via.On {
+			src.Read = subscriptionRead(s) // the Inbox round no longer reads it (#11762)
+		}
 	}
 	if withheld[src.ID] && !via.On {
 		return // not offered yet
 	}
 	src.Via = via
+}
+
+// subscriptionRead is a switched source's latest read as its default subscription's runs keep it, as sourceReads
+// would: the latest attempt, the latest that worked, and why the latest failed while it did. Stored, so a restart
+// keeps it. None before its first run.
+func subscriptionRead(s subscriptions.Subscription) *subscriptionsui.Read {
+	if s.LastRunAt == nil {
+		return nil
+	}
+	r := &subscriptionsui.Read{At: *s.LastRunAt, OK: s.LastOKAt}
+	if s.Error != nil {
+		r.Error = s.Error.Code
+		if r.Error == "" {
+			r.Error = assistantwire.ReadFailed
+		}
+	}
+	return r
 }
 
 // SetMigrated reads source id's Inbox feed through its default subscription (on) or as before, named as the source.

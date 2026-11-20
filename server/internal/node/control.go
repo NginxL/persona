@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
 	"github.com/nwverse/persona/server/internal/shellcmd"
+	"github.com/nwverse/persona/server/internal/taskworkspace"
 )
 
 func newUUID() string {
@@ -36,6 +38,16 @@ func newUUID() string {
 // agentType is the agent the user picked for the launcher (claude, codex, traex, omp, pi, cursor, agy); empty: what
 // the launcher runs.
 func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspaceID, mode, effort, tabName, newID, agentType string, options ...modelExecution) (_ *proto.Session, startErr error) {
+	if id := cmp.Or(resume, newID); id != "" {
+		// Until its process is listed, a read of it is an empty page (startingSession): a Resume keeps the record's
+		// first start time, and its transcript may be gone (healClaudeRefusalTranscript) or never written (#11450).
+		drop := n.startsBegun.begin(id, n.startWait())
+		defer func() {
+			if startErr != nil {
+				drop()
+			}
+		}()
+	}
 	execution := executionOption(options)
 	if err := checkStartSpeedValue(execution.Speed, resume); err != nil {
 		return nil, err
@@ -153,6 +165,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if !proto.FasterSpeed(execution.Speed) {
 		argv, codex = n.codexLauncher(ctx, launcher)
 	}
+	if backend := backendLaunchFrom(ctx); backend != nil && codex && mode != "plan" {
+		for _, repo := range backend.executor.journal.Repositories {
+			argv = append(argv, "--add-dir", repo.CommonDir)
+		}
+	}
 	if codex && execution.SecretTicket != "" { // Codex would start without the values (secretenv.go)
 		return nil, refusal(secretEnvAgentCode, secretEnvAgentText, nil)
 	}
@@ -227,16 +244,9 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err != nil {
 		return nil, err
 	}
-	ws := workspaceID
-	if ws == "" {
-		if ws, err = n.workspaceFor(ctx, launch, cwd); err != nil {
-			return nil, err
-		}
-	} else if _, ok := launch.(*herdrHost); ok {
-		// A start into a workspace it names (a task's worktree) brings back a herdr server that stopped since, as
-		// workspaceFor does for the others: an agent always runs in the engine's terminal (#4754). What herdr then says
-		// is reported as before.
-		_ = n.ensureHerdr(ctx, "start a session in a workspace")
+	ws, err := n.tabSpace(ctx, launch, cwd, workspaceID)
+	if err != nil {
+		return nil, err
 	}
 	if codex && kind != traexAgent { // codex_start.go
 		if resume != "" { // a Codex thread is resumed above: this id is not one
@@ -277,6 +287,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
 	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
 		Plugins: n.claudeLoadsPlugins(ctx), TaskInstructionFile: instructionFile}
+	if backend := backendLaunchFrom(ctx); backend != nil && mode != "plan" {
+		for _, repo := range backend.executor.journal.Repositories {
+			spec.AdditionalDirs = append(spec.AdditionalDirs, repo.CommonDir)
+		}
+	}
 	lineSpec := spec
 	if execution.FastMode {
 		lineSpec.Settings, err = n.claudeFastModeSettings(ctx, launcher, settings, cwd)
@@ -333,7 +348,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if legs, ok := engineHistoryOf(ctx); ok { // a switch from the other engine starts this one (engine_switch.go)
 		st.EngineHistory = legs
 	}
-	n.state.put(id, st)
+	n.putAgentState(ctx, launch, id, st)
 	n.noteModes(id, mode, effort) // shown before the first prompt writes them down
 	// The fresh shell at rest first: a question its startup files ask would eat the typed line's head (#2570).
 	if err := n.settleShell(ctx, pane); err != nil {
@@ -359,6 +374,16 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	typed.done()
 	if err != nil {
 		return nil, n.startTabFailed(ctx, launch, created, ws, id, err)
+	}
+	if b := backendLaunchFrom(ctx); b != nil && a.Cwd != b.executor.journal.Plan.RootPath {
+		if resume == "" {
+			err := b.executor.recordLaunchSession(id)
+			n.closeNewTab(ctx, launch, created, ws)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return nil, taskworkspace.Failure("result_mismatch", "start", b.executor.journal.OperationID, "", b.executor.journal.Plan.RootPath)
 	}
 	n.bindPane(pane, id)
 	n.starts.recovered(id)

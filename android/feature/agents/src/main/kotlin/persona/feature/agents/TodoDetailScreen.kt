@@ -362,8 +362,11 @@ fun TodoDetailScreen(
                 }
             }
 
-            // Where its work stands (#4636, iOS TodoStageBar): only for a stage this build knows
-            TodoStage.of(todo.stage)?.let { stage -> item(key = "stage") { JCard { TodoStageBar(stage) } } }
+            // Where its work stands (#4636, iOS TodoStageBar): only for a stage this build knows, never for general work
+            // (#3380, as the web and iOS), and ending with Done once closed with nothing left to deploy (#11590)
+            TodoStage.of(todo.stage)?.takeIf { todo.stageKind != "general" }?.let { stage ->
+                item(key = "stage") { JCard { TodoStageBar(stage, done = todo.stageDone) } }
+            }
             // Due date, reminder and priority (#4636, iOS TodoPlanSection), saved as they change
             item(key = "plan") {
                 val feedback = LocalAppFeedback.current

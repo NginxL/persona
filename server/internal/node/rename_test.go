@@ -9,7 +9,43 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/proto"
 )
+
+func TestRenameHerdrTabIfCurrentRejectsStaleInventory(t *testing.T) {
+	n, f, cwd := herdrNode(t)
+	ctx := context.Background()
+	const tab = "w1:t1"
+	setLabel := func(label string) {
+		f.reply("session.snapshot", snapshot(nil,
+			[]any{map[string]any{"tab_id": tab, "workspace_id": "w1", "label": label, "number": 1}},
+			[]any{claudeAgent(sidA, proto.StatusIdle, "w1:p1", tab, "w1", cwd, "CLI title")}, nil))
+	}
+	setLabel("agent-1")
+	if err := n.refreshHosts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.reply("tab.rename", map[string]any{})
+	params, _ := json.Marshal(map[string]string{"session_id": sidA, "tab_id": tab, "expected_tab_name": "agent-1", "tab_name": "Fix export"})
+	if _, err := n.handle(ctx, assistantwire.DeviceSessionRenameTabIfCurrent, params); err != nil {
+		t.Fatalf("current name was refused: %v", err)
+	}
+	setLabel("Owner's new name")
+	if _, err := n.handle(ctx, assistantwire.DeviceSessionRenameTabIfCurrent, params); err == nil {
+		t.Fatal("stale name was accepted after the owner renamed it")
+	}
+	count := 0
+	for _, request := range f.trace() {
+		if strings.Contains(request, "tab.rename") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one tab rename, got %v", f.trace())
+	}
+}
 
 // shortTitleWait makes a kept title look for its transcript every few milliseconds, for a second at most.
 func shortTitleWait(t *testing.T) {

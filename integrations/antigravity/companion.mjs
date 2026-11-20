@@ -6,8 +6,12 @@
 // as launchd / systemd keep it), it installs the version the node carries as current and exits once idle; its
 // supervisor starts it again on the new code (KeepAlive / Restart=always). --no-update: never.
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { selfPackage } from '../runtime-sdk/index.js'
+import { installMediaGuard } from './lib/media-guard.js'
 import { createAgyRuntime } from './lib/runtime.js'
 
 const { values } = parseArgs({
@@ -43,6 +47,12 @@ const runtime = createAgyRuntime({
 })
 
 runtime.start()
+// Pictures agy cannot send are refused before read_file opens them (lib/media-guard.js). --no-media-guard: not written.
+if (!process.argv.includes('--no-media-guard')) {
+  const agyDir = values['agy-dir'] || process.env.ANTIGRAVITY_CLI_CONFIG_DIR || join(homedir(), '.gemini', 'antigravity-cli')
+  const dir = installMediaGuard({ agyDir, script: fileURLToPath(new URL('./media-guard.mjs', import.meta.url)), log })
+  if (dir) log(`media guard: ${dir}`)
+}
 alive = setInterval(() => {}, 1 << 30)
 log('started Antigravity (agy) runtime for Persona')
 

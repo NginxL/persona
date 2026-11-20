@@ -36,7 +36,9 @@ type tabKey struct{ kind, space, slot string }
 // fold under counts them all, whatever their depth, by their own states, how many of them are its workers, and how
 // many are side sessions, by their own states.
 func foldSessions(list []proto.Session, hidden map[string]bool) sessionFold {
-	listed := func(s *proto.Session) bool { return (!s.Archived || s.Assistant) && !hidden[s.SessionID] }
+	listed := func(s *proto.Session) bool {
+		return (!s.Archived || s.Assistant) && !s.HiddenByDirectory() && !hidden[s.SessionID]
+	}
 	if !mayFold(list, listed) {
 		return sessionFold{} // what the walk below finds for such a list, without the index it builds
 	}
@@ -267,6 +269,10 @@ func (f sessionFold) apply(list []proto.Session) {
 // its rows and keeps it for the rows decorated on their own (foldSubset) and the cards sent to the apps (withTask)
 // until the next complete list.
 func (s *Service) foldInventory(machine string, list []proto.Session) {
+	// Include remembered archive rows added after live inventory decoration.
+	for i := range list {
+		list[i].SetHiddenByDirectory(s.hiddenByDirectory(machine, list[i]))
+	}
 	var hidden map[string]bool
 	for k := range s.reviewerSessions() {
 		if k[0] == machine {

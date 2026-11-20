@@ -277,7 +277,7 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 			return Todo{}, false, err
 		}
 		t.Supervision = &v
-		s.setTaskStageKind(ctx, t.ID, "", "", taskStageKind(false, v.DoneWhen, t.PRURL), false)
+		s.restage(ctx, t.ID, nil) // by its new criteria; a read-only start still holds
 		return t, false, nil
 	}
 	title, retitle := s.adoptedTitle(ctx, c, title, prompt)
@@ -296,7 +296,7 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 		s.dropAdoption(ctx, todo.ID, err)
 		return Todo{}, false, fmt.Errorf("supervise it: %w", err)
 	}
-	s.setTaskStageKind(ctx, todo.ID, "", "", taskStageKind(false, doneWhen, todo.PRURL), false)
+	s.restage(ctx, todo.ID, nil)
 	todo.Supervision = &v
 	s.briefFor(ctx, s.callerOrigin(ctx, self), todo, doneWhen, expect) // before its agent is linked (task_brief.go)
 	if err := s.linkTodoAgent(ctx, todo.ID, am.ID, c.SessionID, title, c.Cwd, c.Agent); err != nil {
@@ -714,13 +714,14 @@ func (s *Service) agentTool(ctx context.Context, machine, session, name string, 
 // false is no signal: it goes into the queue of questions that can wait (later.go) when a briefing will list it.
 func (s *Service) reportToSupervisor(ctx context.Context, machine, session string, args json.RawMessage, now time.Time) (string, error) {
 	var a struct {
-		Kind     string            `json:"kind"`
-		Text     string            `json:"text"`
-		Evidence []string          `json:"evidence"`
-		Step     int               `json:"step"`
-		Steps    int               `json:"steps"`
-		Urgent   *bool             `json:"urgent"`
-		Criteria []criterionReport `json:"criteria"`
+		Kind     string              `json:"kind"`
+		Text     string              `json:"text"`
+		Evidence []string            `json:"evidence"`
+		Step     int                 `json:"step"`
+		Steps    int                 `json:"steps"`
+		Urgent   *bool               `json:"urgent"`
+		Criteria []criterionReport   `json:"criteria"`
+		Handoff  *taskHandoffReceipt `json:"handoff_receipt"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
@@ -736,6 +737,9 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 	}
 	if session == "" {
 		return "Nobody receives this: the call came from outside an agent session.", errNoSupervisor
+	}
+	if a.Handoff != nil {
+		return s.reportTaskHandoff(ctx, machine, session, *a.Handoff, a.Kind, text, a.Evidence, now)
 	}
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return "", err

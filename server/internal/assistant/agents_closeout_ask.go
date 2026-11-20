@@ -87,7 +87,8 @@ func (s *Service) sendCloseoutAsk(ctx context.Context, e db.SessionWork, c proto
 	}
 	e.WakeAt, e.Work.CloseoutAsk = nil, closeoutAskSent
 	s.putWork(ctx, e)
-	if err := s.sendToSession(ctx, k[0], c.SessionID, renderCloseoutAsk(answerLanguage(s.hello(ctx).Locale))); err != nil {
+	language := answerLanguage(s.hello(ctx).Locale)
+	if err := s.sendToSession(ctx, k[0], c.SessionID, renderCloseoutAsk(language, s.closeoutForm(k[0], language))); err != nil {
 		s.logf("work %s/%s: %s: %v", k[0], short(k[1]), closeoutAskSentEvent, err)
 		at := now.Add(2 * time.Minute).UTC()
 		e.WakeAt, e.Work.CloseoutAsk = &at, closeoutAskPending
@@ -106,6 +107,6 @@ func closeoutAskOutcome(w proto.WorkState) string {
 	return closeoutAskIgnoredEvent
 }
 
-func renderCloseoutAsk(language string) string {
-	return prompts.RenderAgentCloseoutAsk(prompts.AgentCloseoutAsk{Form: closeout.Example, Language: language})
+func renderCloseoutAsk(language, form string) string {
+	return prompts.RenderAgentCloseoutAsk(prompts.AgentCloseoutAsk{Form: form, Language: language})
 }

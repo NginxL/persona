@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"time"
@@ -38,18 +39,18 @@ func (e *launcherOtherKind) rpcError(l i18n.Lang) *rpc.Error {
 	return &rpc.Error{Code: assistantwire.CodeLauncherOtherKind, Message: i18n.Localize(e.message(), l), Data: data}
 }
 
-// assistantKind is the conversation kind an agent name stands for: "claude", "codex", or "" (a runtime, or unknown),
+// assistantKind is the conversation kind an agent name stands for, or "" when unknown,
 // as the node tells a conversation's kind.
 func assistantKind(agent string) string {
 	switch agent {
-	case "claude", "codex":
+	case "claude", "codex", "agy":
 		return agent
 	}
 	return ""
 }
 
 // otherKindPick refuses launcher, picked for a message to conversation sid on machine, when it runs the other agent
-// kind. Anything unknown (a conversation the machine doesn't list, a launcher list that didn't come, a runtime) lets
+// kind. Anything unknown (a conversation the machine doesn't list or a launcher list that didn't come) lets
 // the message go as before: nothing is refused on a guess.
 func (s *Service) otherKindPick(ctx context.Context, machine, sid, launcher string) error {
 	c, known := s.session(ctx, machine, sid)
@@ -80,7 +81,7 @@ func (s *Service) launcherAgent(ctx context.Context, machine, name string) strin
 		agent, _ := s.externalLauncherAgent(ctx, machine, name)
 		return agent
 	}
-	if name == "claude" || name == "codex" {
+	if assistantKind(name) != "" {
 		return name
 	}
 	if m, managed := s.managedNamed(ctx, name); managed {
@@ -94,7 +95,7 @@ func (s *Service) launcherAgent(ctx context.Context, machine, name string) strin
 	}
 	for _, l := range picker {
 		if l.Name == name {
-			return l.AgentType
+			return cmp.Or(l.AgentType, l.Agent)
 		}
 	}
 	return ""

@@ -376,7 +376,10 @@ func (s *Service) quietBackgroundReply(machine string, sess proto.Session) bool 
 	}, &page); err != nil {
 		return false
 	}
-	return transcript.BackgroundReplyMissing(page.Items)
+	if transcript.BackgroundReplyMissing(page.Items) {
+		return true
+	}
+	return s.mainBackgroundFolded(ctx) && s.isMain(ctx, sess.SessionID) && transcript.RoutineConversationReply(page.Items)
 }
 
 // reportSlack is how long before its turn started a scheduled run or notice may have been sent (the node starts the

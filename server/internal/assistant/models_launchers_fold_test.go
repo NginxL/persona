@@ -155,6 +155,11 @@ func TestGatewayProviderListOneRowPerModel(t *testing.T) {
 	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gateway-api", BaseURL: "https://gateway.example.com/v1",
 		Model: "claude-opus-5-5", Models: []proto.ProviderModel{{ID: "claude-opus-5-5"}}}, DisplayName: "Gateway API"})
 	f.agentModels = map[string][]proto.AgentModel{"gateway-api": gatewayCatalog()}
+	for i, m := range f.agentModels["gateway-api"] {
+		if m.Resolved == "claude-opus-5-5" {
+			f.agentModels["gateway-api"][i].ResolvedOffered = true
+		}
+	}
 	want := []string{
 		"default Default (recommended) → claude-opus-5-5",
 		"claude-opus-5-5 Opus 5.5 [opus fable sonnet haiku]",
@@ -171,6 +176,9 @@ func TestGatewayProviderListOneRowPerModel(t *testing.T) {
 		}
 		if got := rowsText(res.Models); !slices.Equal(got, want) {
 			t.Fatalf("%s:\n%s", path, strings.Join(got, "\n"))
+		}
+		if strings.Contains(r.Body.String(), "resolved_offered") {
+			t.Fatalf("%s returned internal node catalog metadata", path)
 		}
 	}
 	res, err := s.askLauncherModels(ctx, "server", "gateway-api", false)

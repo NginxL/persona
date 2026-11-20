@@ -186,7 +186,12 @@ type AgentDelegate struct {
 	Rules    string // the user's own rules, trimmed: manager.json agents.delegate.rules
 }
 
-func RenderAgentDelegate(d AgentDelegate) string { return render("agents/delegate", d) }
+func RenderAgentDelegate(d AgentDelegate) string {
+	if d.Language == "zh-Hans" || d.Language == "简体中文" {
+		d.Language = ""
+	}
+	return render("agents/delegate", d)
+}
 
 // AgentDelegateInput is the question to decide on and what is known around it (agents/delegate_input).
 type AgentDelegateInput struct {
@@ -267,6 +272,10 @@ func RenderTaskWorker() string { return render("agents/task_worker", struct{}{})
 // which depends on a switch. language is the user's language by its own name; empty keeps the original Chinese.
 func RenderTaskFiles(language string) string {
 	return render("agents/task_files", struct{ Language string }{language})
+}
+
+func RenderWorkspaceRepositories(rows, language string) string {
+	return render("agents/workspace_repositories", struct{ Rows, Language string }{rows, language})
 }
 
 // TaskHandoff describes the scoped entries the assignment's actual launcher can use.

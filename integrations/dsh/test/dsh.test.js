@@ -1667,4 +1667,38 @@ test('a session waiting on a DSH Web dialog reports blocked with attention reaso
   assert.equal(settledRow.attention_reason, undefined)
 })
 
+test('updated_at advances with session events and timeContext even when controller.list keeps lastPromptAt (#11893)', async (t) => {
+  const { n, ctl, ev, rt } = await setup(t)
+  const now = Date.now()
+  const promptAt = now - 3 * 3_600_000
+  const otherAt = now - 600_000
+  const finishAt = now - 5_000
+  const projAt = now - 30_000
+
+  ctl.add('session-long', { cwd: '/w/app', updatedAt: promptAt, running: true })
+  ctl.add('session-other', { cwd: '/w/app', updatedAt: otherAt, running: false })
+  ctl.add('session-proj', {
+    cwd: '/w/app',
+    updatedAt: now - 10 * 86_400_000,
+    running: false,
+    projections: { kind: 'cached', asOfSeq: 5, values: { timeContext: { lastMessageTime: projAt } } },
+  })
+  rt.start()
+  await n.ready
+  await until('initial list', () => rowOf(n, 'session-long') && rowOf(n, 'session-proj'))
+  assert.equal(rowOf(n, 'session-proj').updated_at, new Date(projAt).toISOString())
+
+  // DSH keeps summary.updatedAt at lastPromptAt while the turn finishes hours later.
+  ctl.sessions.get('session-long').summary.running = false
+  emitOn(ctl, ev, 'session-long', [
+    { type: 'assistant/message', seq: 10, time: finishAt - 1000, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'PR opened' }] } } },
+    { type: 'turn/end', seq: 11, time: finishAt, data: { reason: { kind: 'completed' } } },
+  ])
+  await until('updated_at reflects turn/end', () => rowOf(n, 'session-long')?.updated_at === new Date(finishAt).toISOString())
+  const list = n.last('runtime.sessions').sessions
+  assert.equal(list[0].session_id, 'session-long', 'newly finished long turn ranks first')
+  assert.equal(list[0].status, 'done')
+})
+
+
 

@@ -149,6 +149,7 @@ func (s *Service) tryQueuedRelay(ctx context.Context, machine, to string, head *
 	} else {
 		// A duplicate relay is less harmful than a lost one when there is no owner to ask. Retry under the same id.
 		s.logf("relay to %s: no match after %d transcript checks; trying again", short(to), relayLookLimit)
+		s.handoverRetried(msg.Handover) // an answer that went in meanwhile did not answer it (relay_handover.go)
 	}
 	msg.Looks, msg.LookAfter = 0, time.Time{}
 

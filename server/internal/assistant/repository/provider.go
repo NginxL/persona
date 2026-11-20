@@ -2,13 +2,13 @@ package repository
 
 import (
 	"context"
-	"net"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/repositorywire"
 )
 
 // Providers (docs/extensions/repository-providers.md): GitHub and GitLab are built in and work offline as before; an
@@ -34,20 +34,10 @@ const (
 var BuiltinHosts = []string{"github.com", "www.github.com", "api.github.com", "ssh.github.com", "gitlab.com", "altssh.gitlab.com"}
 
 // LinkLabel is a provider's own word for a link kind (MR for pull_request). Kinds stay issue and pull_request.
-type LinkLabel struct {
-	Kind  string `json:"kind"`
-	Label string `json:"label"`
-}
+type LinkLabel = repositorywire.LinkLabel
 
 // ProviderInfo is one source of repositories, as clients list it (GET /api/v1/assistant/repositories/providers).
-type ProviderInfo struct {
-	ID        string      `json:"id"`
-	Name      string      `json:"name"`
-	Builtin   bool        `json:"builtin"`
-	Hosts     []string    `json:"hosts"`
-	State     string      `json:"state"`
-	LinkKinds []LinkLabel `json:"link_kinds,omitempty"`
-}
+type ProviderInfo = repositorywire.ProviderInfo
 
 // Builtins are GitHub and GitLab. Their self-hosted instances are chosen explicitly, as before.
 func Builtins() []ProviderInfo {
@@ -59,12 +49,7 @@ func Builtins() []ProviderInfo {
 
 // Parsed is an address as its provider normalized it. ProviderName is an extension provider's name (the snapshot kept
 // beside the identity); DisplayName the provider's own name for the repository. Both are empty for the built-ins.
-type Parsed struct {
-	Identity     Identity
-	CloneURL     string
-	ProviderName string
-	DisplayName  string
-}
+type Parsed = repositorywire.Parsed
 
 // Description is what repo.describe says about a link: its title and, optionally, open, closed or merged.
 type Description struct {
@@ -88,9 +73,7 @@ func (e *ProviderError) Error() string {
 }
 
 // AnswerError is an extension's answer the manager refused; Why says which rule it broke.
-type AnswerError struct{ Why string }
-
-func (e *AnswerError) Error() string { return "repository provider answer: " + e.Why }
+type AnswerError = repositorywire.AnswerError
 
 // Extensions are the provider extensions (extmgr.Manager). Lists and lookups never block or call a program; every call
 // is bounded and its answer re-checked (Check*Answer). Errors are *ProviderError.
@@ -115,34 +98,12 @@ func ExtensionProvider(extension, contribution string) string {
 // SplitExtensionProvider is the extension and contribution of an ext: provider id; false for the built-ins and for
 // anything malformed.
 func SplitExtensionProvider(provider string) (extension, contribution string, ok bool) {
-	rest, found := strings.CutPrefix(provider, "ext:")
-	if !found {
-		return "", "", false
-	}
-	extension, contribution, found = strings.Cut(rest, "/")
-	if !found || !validProviderPart(extension) || !validProviderPart(contribution) {
-		return "", "", false
-	}
-	return extension, contribution, true
+	return repositorywire.SplitExtensionProvider(provider)
 }
 
 // IsExtensionProvider: provider is a well-formed ext: id.
 func IsExtensionProvider(provider string) bool {
-	_, _, ok := SplitExtensionProvider(provider)
-	return ok
-}
-
-// validProviderPart matches the manifest's ID pattern, ^[a-z0-9][a-z0-9_-]{0,31}$.
-func validProviderPart(s string) bool {
-	if s == "" || len(s) > 32 {
-		return false
-	}
-	for i, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || i > 0 && (r == '_' || r == '-')) {
-			return false
-		}
-	}
-	return true
+	return repositorywire.IsExtensionProvider(provider)
 }
 
 // Registry routes an address to its provider: the built-ins here, offline and unchanged, the rest to Extensions
@@ -248,147 +209,61 @@ var credentialKeys = []string{"token", "access_token", "private_token", "auth", 
 func CheckProviderRemote(info ProviderInfo, remote string) error {
 	host, ok := RemoteHost(remote)
 	if !ok || !slices.Contains(info.Hosts, host) || strings.ContainsFunc(remote, unicode.IsControl) {
-		return &AnswerError{"the address is not on the provider's hosts"}
+		return &AnswerError{Why: "the address is not on the provider's hosts"}
 	}
 	if strings.HasPrefix(remote, "git@") && !strings.Contains(remote, "://") {
 		return nil
 	}
 	u, err := url.Parse(remote)
 	if err != nil {
-		return &AnswerError{"not an address"}
+		return &AnswerError{Why: "not an address"}
 	}
 	if u.Scheme == "ssh" {
 		if u.User == nil || u.User.String() != "git" {
-			return &AnswerError{"an ssh address names the git user only"}
+			return &AnswerError{Why: "an ssh address names the git user only"}
 		}
 		return nil
 	}
 	if u.User != nil {
-		return &AnswerError{"credentials in the address"}
+		return &AnswerError{Why: "credentials in the address"}
 	}
 	query, err := url.ParseQuery(u.RawQuery)
 	if err != nil {
-		return &AnswerError{"not an address"}
+		return &AnswerError{Why: "not an address"}
 	}
 	for key := range query {
 		if slices.Contains(credentialKeys, strings.ToLower(key)) {
-			return &AnswerError{"credentials in the address"}
+			return &AnswerError{Why: "credentials in the address"}
 		}
 	}
 	return nil
 }
 
 // ParseAnswer is repo.parse's answer as the program sent it.
-type ParseAnswer struct {
-	InstanceURL, Path, CanonicalURL, CloneURL, DisplayName string
-}
+type ParseAnswer = repositorywire.ParseAnswer
 
 // CheckParseAnswer re-checks repo.parse's answer: an https instance on one of the provider's hosts with nothing but an
 // authority, a path of plain segments, canonical_url = instance_url/path, a credential-free clone address on its hosts
 // and a one-line display name. The identity's provider is info.ID.
 func CheckParseAnswer(info ProviderInfo, a ParseAnswer) (Parsed, error) {
-	instance, err := url.Parse(a.InstanceURL)
-	if err != nil || len(a.InstanceURL) > 2048 || instance.Scheme != "https" || instance.User != nil || instance.Opaque != "" ||
-		instance.RawQuery != "" || instance.ForceQuery || instance.Fragment != "" || instance.Path != "" || instance.RawPath != "" {
-		return Parsed{}, &AnswerError{"instance_url is not an https address with only a host"}
-	}
-	host := instance.Hostname()
-	if host != strings.ToLower(host) || !slices.Contains(info.Hosts, host) {
-		return Parsed{}, &AnswerError{"instance_url is not on the provider's hosts"}
-	}
-	if port := instance.Port(); port != "" {
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port || n == 443 {
-			return Parsed{}, &AnswerError{"instance_url has a bad port"}
-		}
-	} else if strings.HasSuffix(instance.Host, ":") {
-		return Parsed{}, &AnswerError{"instance_url has a bad port"}
-	}
-	if "https://"+instance.Host != a.InstanceURL {
-		return Parsed{}, &AnswerError{"instance_url is not in canonical form"}
-	}
-	if !plainPath(a.Path, 20) {
-		return Parsed{}, &AnswerError{"path is not 1 to 20 plain segments of at most 512 bytes"}
-	}
-	if a.CanonicalURL != a.InstanceURL+"/"+a.Path {
-		return Parsed{}, &AnswerError{"canonical_url is not instance_url/path"}
-	}
-	out := Parsed{Identity: Identity{Provider: info.ID, InstanceURL: a.InstanceURL, Path: a.Path, CanonicalURL: a.CanonicalURL},
-		ProviderName: info.Name, DisplayName: oneLine(a.DisplayName, 80)}
-	if a.CloneURL != "" && a.CloneURL != a.CanonicalURL {
-		if err := CheckProviderClone(info, a.CloneURL); err != nil {
-			return Parsed{}, err
-		}
-		out.CloneURL = a.CloneURL
-	}
-	return out, nil
+	return repositorywire.CheckParseAnswer(info, a)
 }
 
 // plainPath: 1 to most segments of URL-unreserved characters, none empty, . or .., at most 512 bytes.
 func plainPath(path string, most int) bool {
-	parts := strings.Split(path, "/")
-	if path == "" || len(path) > 512 || len(parts) > most {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
-			return false
-		}
-		for _, r := range part {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-._~", r)) {
-				return false
-			}
-		}
-	}
-	return true
+	return repositorywire.PlainPath(path, most)
 }
 
 // CheckProviderClone: raw is a credential-free clone address on one of the provider's hosts (https, ssh://git@ or
 // git@host:path).
 func CheckProviderClone(info ProviderInfo, raw string) error {
-	host, ok := cloneHost(raw)
-	if !ok || !slices.Contains(info.Hosts, host) {
-		return &AnswerError{"clone_url is not a credential-free address on the provider's hosts"}
-	}
-	return nil
+	return repositorywire.CheckProviderClone(info, raw)
 }
 
 // cloneHost is the host of a clone address that is safe to store and hand to git: https with no user, ssh://git@ or
 // git@host:path, with a plain path and no query or fragment.
 func cloneHost(raw string) (string, bool) {
-	if len(raw) > 2048 || raw == "" || strings.ContainsAny(raw, " \t\r\n\\") || strings.ContainsFunc(raw, unicode.IsControl) {
-		return "", false
-	}
-	if strings.HasPrefix(raw, "git@") && !strings.Contains(raw, "://") {
-		host, path, ok := strings.Cut(strings.TrimPrefix(raw, "git@"), ":")
-		if !ok || host == "" || host != strings.ToLower(host) || strings.ContainsAny(host, "/@[]") || !plainPath(strings.TrimPrefix(path, "/"), 64) {
-			return "", false
-		}
-		return host, true
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
-		return "", false
-	}
-	switch u.Scheme {
-	case "https":
-		if u.User != nil {
-			return "", false
-		}
-	case "ssh":
-		if u.User == nil || u.User.String() != "git" {
-			return "", false
-		}
-	default:
-		return "", false
-	}
-	host := u.Hostname()
-	if host == "" || host != strings.ToLower(host) || strings.HasSuffix(u.Host, ":") || net.ParseIP(host) != nil && strings.Contains(host, ":") {
-		return "", false
-	}
-	if !plainPath(strings.TrimPrefix(u.Path, "/"), 64) {
-		return "", false
-	}
-	return host, true
+	return repositorywire.CloneHost(raw)
 }
 
 // LinkAnswer is repo.link's answer as the program sent it.
@@ -401,16 +276,16 @@ type LinkAnswer struct {
 // under the repository's own, with no query or fragment. The title is kept on one line, at most 1024 bytes.
 func CheckLinkAnswer(repo Identity, in LinkInput, a LinkAnswer) (TaskLink, error) {
 	if a.Kind != "issue" && a.Kind != "pull_request" {
-		return TaskLink{}, &AnswerError{"kind is not issue or pull_request"}
+		return TaskLink{}, &AnswerError{Why: "kind is not issue or pull_request"}
 	}
 	if !linkNumber(a.Number) {
-		return TaskLink{}, &AnswerError{"number is not 1 to 20 digits without a leading zero"}
+		return TaskLink{}, &AnswerError{Why: "number is not 1 to 20 digits without a leading zero"}
 	}
 	if in.Kind != "" && (in.Kind != a.Kind || in.Number != a.Number) {
-		return TaskLink{}, &AnswerError{"the link is not the one asked about"}
+		return TaskLink{}, &AnswerError{Why: "the link is not the one asked about"}
 	}
 	if !underRepository(repo, a.CanonicalURL) {
-		return TaskLink{}, &AnswerError{"canonical_url is not an https address under the repository's"}
+		return TaskLink{}, &AnswerError{Why: "canonical_url is not an https address under the repository's"}
 	}
 	return TaskLink{Kind: a.Kind, Number: a.Number, CanonicalURL: a.CanonicalURL, Title: clipBytes(oneLine(a.Title, 1024), 1024)}, nil
 }
@@ -418,27 +293,11 @@ func CheckLinkAnswer(repo Identity, in LinkInput, a LinkAnswer) (TaskLink, error
 // underRepository: link is an https address strictly below repo's canonical URL, with plain segments and no
 // credentials, query or fragment.
 func underRepository(repo Identity, link string) bool {
-	rest, ok := strings.CutPrefix(link, repo.CanonicalURL+"/")
-	if !ok || len(link) > 2048 || !strings.HasPrefix(link, "https://") {
-		return false
-	}
-	u, err := url.Parse(link)
-	if err != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" {
-		return false
-	}
-	return plainPath(strings.TrimSuffix(rest, "/"), 20)
+	return repositorywire.UnderRepository(repo, link)
 }
 
 func linkNumber(n string) bool {
-	if n == "" || len(n) > 20 || n[0] == '0' {
-		return false
-	}
-	for _, c := range n {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	return repositorywire.LinkNumber(n)
 }
 
 // CheckDescribeAnswer keeps repo.describe's title on one line (at most 1024 bytes) and its state only when it is
@@ -452,14 +311,7 @@ func CheckDescribeAnswer(title, state string) Description {
 
 // oneLine is s with its words joined by single spaces and control characters dropped, cut to most runes with "…".
 func oneLine(s string, most int) string {
-	if !utf8.ValidString(s) {
-		s = strings.ToValidUTF8(s, "")
-	}
-	s = strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
-	if utf8.RuneCountInString(s) <= most {
-		return s
-	}
-	return string([]rune(s)[:most-1]) + "…"
+	return repositorywire.OneLine(s, most)
 }
 
 // clipBytes cuts s to at most most bytes on a rune boundary.

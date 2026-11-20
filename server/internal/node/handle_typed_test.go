@@ -148,7 +148,7 @@ func TestTypedHandleParamsDecodeAsTheSharedStructDid(t *testing.T) {
 		},
 		{
 			name:   methodWorktreeCreate,
-			sample: `{"composer":false,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"feat","path":"/wt","parent_workspace_id":"w0","auto_name":true,"for_agent":true,"locale":"en"}`,
+			sample: `{"composer":false,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"feat","path":"/wt","parent_workspace_id":"w0","auto_name":true,"for_agent":true,"open_workspace":false,"locale":"en"}`,
 			legacy: &struct {
 				Composer          bool   `json:"composer"`
 				Kind              string `json:"kind"`
@@ -159,6 +159,7 @@ func TestTypedHandleParamsDecodeAsTheSharedStructDid(t *testing.T) {
 				ParentWorkspaceID string `json:"parent_workspace_id"`
 				AutoName          bool   `json:"auto_name"`
 				ForAgent          bool   `json:"for_agent"` // added after the split (#10624)
+				OpenWorkspace     *bool  `json:"open_workspace"`
 			}{},
 			typed: &worktreeCreateParams{},
 			same: func(l, n any) bool {

@@ -120,6 +120,24 @@ class ProviderPasteShotsTest {
         rule.onNodeWithText("Found on your computers").assertDoesNotExist()
     }
 
+    @Test fun connectionHintsDescribeTheChosenProviderOnTheManualForm() {
+        val providers = Providers()
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                NewProviderPage(providers, onBack = {}, onSaved = {}, machines = machines)
+            }
+        }
+        rule.onNodeWithText("Custom compatible gateway").performClick()
+        rule.onNodeWithText("Without an available Direct API provider", substring = true).assertExists()
+        rule.onNodeWithText("Claude Code on your computer", substring = true).assertExists()
+        rule.onNodeWithText("Direct API").performClick()
+        rule.onNodeWithText("The hub calls this API directly", substring = true).assertExists()
+        rule.onNodeWithText("without starting an Agent", substring = true).assertExists()
+        rule.onNodeWithText("Claude Code launcher").performClick()
+        rule.onNodeWithText("Without an available Direct API provider", substring = true).assertExists()
+        assertTrue(providers.added.isEmpty())
+    }
+
     @Test fun oneModelUsesSingular() {
         rule.setContent {
             PersonaTheme(reduceMotion = true) {

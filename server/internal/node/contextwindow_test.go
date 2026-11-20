@@ -1,12 +1,15 @@
 package node
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -207,5 +210,207 @@ func TestQuickMetaContextCodex(t *testing.T) {
 	m := readQuickMeta(path, st)
 	if m.contextTokens != 6 || m.contextWindow != 475_000 {
 		t.Fatalf("codex context = %d / %d, want 6 / 475000", m.contextTokens, m.contextWindow)
+	}
+}
+
+func ctxReplyModel(model, id string, input, cacheRead, cacheCreate int) string {
+	return `{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"model":"` + model + `","id":"` + id +
+		`","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":` + strconv.Itoa(input) +
+		`,"cache_read_input_tokens":` + strconv.Itoa(cacheRead) + `,"cache_creation_input_tokens":` + strconv.Itoa(cacheCreate) + `,"output_tokens":5}}}`
+}
+
+func TestLookupProviderModelAndLauncherWindow(t *testing.T) {
+	catalog := proto.ManagedLauncher{
+		Name: "gw-catalog",
+		Models: []proto.ProviderModel{
+			{ID: "gemini-4-carbon", ContextWindow: 1_000_000},
+			{ID: "route-narrow/gemini-4-carbon", ContextWindow: 512_000},
+			{ID: "kimi-k3.1-pro", ContextWindow: 1_000_000},
+			{ID: "glm-5.3", ContextWindow: 256_000},
+			{ID: "vendor/flash-uncensored", ContextWindow: 128_000},
+			{ID: "claude-sonnet-4-6", ContextWindow: 200_000},
+		},
+	}
+	capped := catalog
+	capped.Name = "gw-max"
+	capped.MaxContext = 1_000_000
+
+	undeclared := proto.ManagedLauncher{
+		Name:   "gw-bare",
+		Models: []proto.ProviderModel{{ID: "gemini-4-carbon"}},
+	}
+
+	for _, tc := range []struct {
+		name           string
+		launcher       *proto.ManagedLauncher
+		model          string
+		recorded, used int
+		fallbacks      []string
+		want           int
+	}{
+		{"exact non-Claude catalog model", &catalog, "gemini-4-carbon", 0, 86_000, nil, 1_000_000},
+		{"gateway-routed non-Claude echo matches bare catalog id", &catalog, "route-gemini-4-carbon/gemini-4-carbon", 0, 129_102, nil, 1_000_000},
+		{"multi-hop gateway echo matches bare catalog id", &catalog, "passthrough/route-a/kimi-k3.1-pro[1m]", 0, 45_000, nil, 1_000_000},
+		{"exact routed catalog entry beats bare suffix entry", &catalog, "route-narrow/gemini-4-carbon", 0, 45_000, nil, 512_000},
+		{"glm catalog window", &catalog, "glm-5.3", 0, 120_464, nil, 256_000},
+		{"bare echo matches vendor-prefixed catalog entry", &catalog, "flash-uncensored", 0, 32_000, nil, 128_000},
+		{"MaxContext overrides per-model window and covers unlisted gateway models", &capped, "glm-5.3", 0, 120_464, nil, 1_000_000},
+		{"MaxContext covers routed unlisted gateway model", &capped, "route-x/custom-flash-uncensored", 0, 64_000, nil, 1_000_000},
+		{"recorded Codex rollout window beats MaxContext", &capped, "gpt-5", 475_000, 26_279, nil, 475_000},
+		{"200k catalog entry promotes to 1M when usage exceeds 200k and MaxContext is unset", &catalog, "claude-sonnet-4-6", 0, 340_000, nil, 1_000_000},
+		{"200k catalog entry promotes to 1M on explicit [1m] suffix when MaxContext is unset", &catalog, "claude-sonnet-4-6[1m]", 0, 50_000, nil, 1_000_000},
+		{"fallback session model matches catalog when transcript echoed an opaque endpoint id", &catalog, "ep-opaque-id", 0, 90_000, []string{"route-a/gemini-4-carbon"}, 1_000_000},
+		{"undeclared gateway model stays 0", &undeclared, "route-a/gemini-4-carbon", 0, 90_000, nil, 0},
+		{"undeclared Claude model keeps built-in window", &undeclared, "claude-opus-4-6", 0, 61_000, nil, 200_000},
+		{"undeclared native 1M Claude model keeps 1M", &undeclared, "claude-opus-5-5", 0, 61_000, nil, 1_000_000},
+		{"bracketed placeholder stays 0 on bare catalog", &catalog, "<synthetic>", 0, 5_000, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contextWindowWithLauncher(tc.launcher, tc.model, tc.recorded, tc.used, tc.fallbacks...); got != tc.want {
+				t.Fatalf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTerminalSessionManagedLauncherContextWindow(t *testing.T) {
+	n, _ := runtimeNode(t)
+	launcherCache.Lock()
+	launcherCache.list, launcherCache.at, launcherCache.fetching = []proto.Launcher{}, time.Now(), false
+	launcherCache.Unlock()
+	t.Cleanup(func() {
+		launcherCache.Lock()
+		launcherCache.list, launcherCache.at, launcherCache.fetching = nil, time.Time{}, false
+		launcherCache.Unlock()
+		freshOffline()
+	})
+
+	const (
+		liveID     = "11111111-0000-4000-8000-000000000001"
+		inferredID = "11111111-0000-4000-8000-000000000002"
+		offlineID  = "11111111-0000-4000-8000-000000000003"
+		echoed     = "route-gemini-4-carbon/gemini-4-carbon"
+		gwURL      = "https://gw-ctx.example.com"
+	)
+
+	cwd := "/w/app"
+	for id, tokens := range map[string]int{liveID: 129_100, inferredID: 86_522, offlineID: 384_191} {
+		writeTranscript(t, n.home, cwd, id, time.Now().Add(-time.Minute),
+			`{"type":"user","uuid":"u1","timestamp":"2026-11-04T10:00:00Z","cwd":"/w/app","message":{"role":"user","content":"hi"}}`,
+			ctxReplyModel(echoed, "m1", 2, tokens, 0),
+			strings.Repeat(" ", 4096))
+	}
+
+	// Prime the offline cache before the launcher catalog arrives, verifying setCatalog invalidates it.
+	n.state.put(liveID, sessionState{Launcher: "gw-ag", Cwd: cwd, Model: "gemini-4-carbon", StartedAt: time.Now()})
+	n.state.put(offlineID, sessionState{Launcher: "gw-ag", Cwd: cwd, Model: "gemini-4-carbon", StartedAt: time.Now()})
+	n.agents = map[string]host.Agent{
+		liveID:     {Agent: "claude", PaneID: "w1:p1", Cwd: cwd, AgentStatus: proto.StatusWorking},
+		inferredID: {Agent: "claude", PaneID: "w1:p2", Cwd: cwd, AgentStatus: proto.StatusIdle},
+	}
+	n.cdirs = &claudeDirs{
+		byPID:     map[int]string{},
+		bySession: map[string]procEnv{inferredID: {BaseURL: gwURL, Model: "gemini-4-carbon[1m]"}},
+		scanned:   time.Now(),
+		scan:      func() map[int]procEnv { return nil },
+	}
+
+	before := n.sessionList(context.Background(), false)
+	byID := map[string]proto.Session{}
+	for _, s := range before {
+		byID[s.SessionID] = s
+	}
+	if s := byID[liveID]; s.ContextWindow != 0 || s.Model != echoed {
+		t.Fatalf("before catalog: live %+v", s)
+	}
+	if s := byID[offlineID]; s.ContextWindow != 0 || s.Model != echoed {
+		t.Fatalf("before catalog: offline %+v", s)
+	}
+
+	n.setCatalog([]proto.ManagedLauncher{{
+		Name:       "gw-ag",
+		BaseURL:    gwURL,
+		Model:      "gemini-4-carbon",
+		MaxContext: 1_000_000,
+		Models:     []proto.ProviderModel{{ID: "gemini-4-carbon", ContextWindow: 1_000_000}},
+		Withheld:   true,
+	}})
+
+	after := n.sessionList(context.Background(), false)
+	byID = map[string]proto.Session{}
+	for _, s := range after {
+		byID[s.SessionID] = s
+	}
+
+	if s := byID[liveID]; s.Model != echoed || s.Launcher != "gw-ag" || s.ContextTokens != 129_102 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("live terminal session: model=%q launcher=%q tokens=%d window=%d", s.Model, s.Launcher, s.ContextTokens, s.ContextWindow)
+	}
+	if s := byID[inferredID]; s.Model != echoed || s.Launcher != "gw-ag" || s.ContextTokens != 86_524 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("inferred terminal session: model=%q launcher=%q tokens=%d window=%d", s.Model, s.Launcher, s.ContextTokens, s.ContextWindow)
+	}
+	if s := byID[offlineID]; s.Model != echoed || s.Launcher != "gw-ag" || s.ContextTokens != 384_193 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("offline session: model=%q launcher=%q tokens=%d window=%d", s.Model, s.Launcher, s.ContextTokens, s.ContextWindow)
+	}
+	if tokens, window := n.contextUse(liveID); tokens != 129_102 || window != 1_000_000 {
+		t.Fatalf("contextUse = %d / %d, want 129102 / 1000000", tokens, window)
+	}
+}
+
+func TestRuntimeSessionManagedLauncherContextWindow(t *testing.T) {
+	n, _ := runtimeNode(t)
+	t.Cleanup(freshOffline)
+
+	const (
+		txMax     = "eeeeeeee-0000-4000-8000-000000000001"
+		txCatalog = "eeeeeeee-0000-4000-8000-000000000002"
+		txOver    = "eeeeeeee-0000-4000-8000-000000000003"
+		echoed    = "route-gemini-4-carbon/gemini-4-carbon"
+	)
+
+	n.setCatalog([]proto.ManagedLauncher{
+		{
+			Name:       "gw-max",
+			Model:      "gemini-4-carbon",
+			MaxContext: 1_000_000,
+			Models:     []proto.ProviderModel{{ID: "gemini-4-carbon", ContextWindow: 1_000_000}},
+		},
+		{
+			Name:   "gw-models",
+			Model:  "kimi-k3.1-pro",
+			Models: []proto.ProviderModel{{ID: "kimi-k3.1-pro", ContextWindow: 1_000_000}},
+		},
+	})
+	n.state.put("paseo-max", sessionState{Launcher: "gw-max", Cwd: "/w/app", Model: "gemini-4-carbon", StartedAt: time.Now()})
+
+	writeTranscript(t, n.home, "/w/app", txMax, time.Now().Add(-time.Minute),
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/w/app","message":{"role":"user","content":"hi"}}`,
+		ctxReplyModel(echoed, "m1", 2, 170_823, 0), strings.Repeat(" ", 4096))
+	writeTranscript(t, n.home, "/w/app", txCatalog, time.Now().Add(-time.Minute),
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/w/app","message":{"role":"user","content":"hi"}}`,
+		ctxReplyModel("route-k/kimi-k3.1-pro", "m2", 2, 95_000, 0), strings.Repeat(" ", 4096))
+	writeTranscript(t, n.home, "/w/app", txOver, time.Now().Add(-time.Minute),
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/w/app","message":{"role":"user","content":"hi"}}`,
+		ctxReplyModel("claude-sonnet-4-5", "m3", 2, 80_000, 0), strings.Repeat(" ", 4096))
+
+	rt := dialRuntime(t, n, paseoHello())
+	_ = rt.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "paseo-max", "transcript": txMax, "agent": "claude", "model": echoed, "status": "idle"},
+		{"session_id": "paseo-cat", "transcript": txCatalog, "agent": "claude", "launcher": "gw-models", "model": "route-k/kimi-k3.1-pro", "status": "idle"},
+		{"session_id": "paseo-over", "transcript": txOver, "agent": "claude", "launcher": "gw-max", "model": "claude-fable-5-2[1m]", "status": "idle"},
+	}})
+	waitFor(t, "runtime sessions listed", func() bool {
+		g := listed(t, n)
+		return g["paseo-max"].SessionID != "" && g["paseo-cat"].SessionID != "" && g["paseo-over"].SessionID != ""
+	})
+
+	got := listed(t, n)
+	if s := got["paseo-max"]; s.Model != echoed || s.ContextTokens != 170_825 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("paseo-max: model=%q tokens=%d window=%d", s.Model, s.ContextTokens, s.ContextWindow)
+	}
+	if s := got["paseo-cat"]; s.Model != "route-k/kimi-k3.1-pro" || s.ContextTokens != 95_002 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("paseo-cat: model=%q tokens=%d window=%d", s.Model, s.ContextTokens, s.ContextWindow)
+	}
+	if s := got["paseo-over"]; s.ContextWindow != 200_000 {
+		t.Fatalf("paseo-over overload fallback window=%d, want 200000", s.ContextWindow)
 	}
 }

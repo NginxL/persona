@@ -109,19 +109,14 @@ func (s *Service) decisionToldLocked(ctx context.Context, id, label, machine, se
 		return false, err
 	}
 	s.deadlineAnswered(ctx, id, a.AskedAt)
-	if st := s.todoDB(); st != nil {
-		at, dec := decisionNow(), "dec_"+randomHex(8)
-		if ok, err := s.insertDecision(ctx, st, db.TodoDecisionRow{ID: dec, TodoID: id,
-			Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")), Choice: decisionText(label),
-			Reason: decisionText(said), Source: db.DecisionManual, SourceMachine: machine, SourceSession: session,
-			CreatedAt: at}); err != nil {
-			return false, err
-		} else if ok {
-			s.ownerDecided(id, dec, a.WhyOwner)
-			s.decisionsChanged(ctx, id, at)
-		}
+	if err := s.recordToldDecision(ctx, id, a, label, machine, session, said); err != nil {
+		return false, err
 	}
-	s.userDecided(ctx, id)
+	if a.Check != "" { // a recurring check's decision goes to the supervisor, as from its card (#11747)
+		s.checkDecided(ctx, t, a, label)
+	} else {
+		s.userDecided(ctx, id)
+	}
 	chosen := label
 	if label == a.Recommend {
 		chosen = "" // as "OK" takes it
@@ -129,4 +124,21 @@ func (s *Service) decisionToldLocked(ctx context.Context, id, label, machine, se
 	s.endAsk(ctx, id, a.AskedAt, "", chosen)
 	completeDismissal()
 	return true, nil
+}
+
+// recordToldDecision records the owner's exact choice without sending it to the Agent.
+func (s *Service) recordToldDecision(ctx context.Context, id string, a *acceptAsk, label, machine, session, said string) error {
+	if st := s.todoDB(); st != nil {
+		at, dec := decisionNow(), "dec_"+randomHex(8)
+		if ok, err := s.insertDecision(ctx, st, db.TodoDecisionRow{ID: dec, TodoID: id,
+			Question: cmp.Or(a.Reason, i18n.T(s.botLang(ctx), "assistant-reports.verdict_decide")), Choice: decisionText(label),
+			Reason: decisionText(said), Source: db.DecisionManual, SourceMachine: machine, SourceSession: session,
+			CreatedAt: at}); err != nil {
+			return err
+		} else if ok {
+			s.ownerDecided(id, dec, a.WhyOwner)
+			s.decisionsChanged(ctx, id, at)
+		}
+	}
+	return nil
 }

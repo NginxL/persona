@@ -17,5 +17,13 @@
   "terminal_renderer_standard": "标准",
   "terminal_renderer_webgl": "WebGL",
   "terminal_renderer_activation": "更改后新打开的终端。已经打开的终端保持原来的渲染方式和已输入的内容，直到重新打开它或刷新页面。",
-  "terminal_renderer_rollback": "选择「标准」。如果某个终端里的 WebGL 出错，该终端会自动改回标准渲染，这项设置也会一并改回。"
+  "terminal_renderer_rollback": "选择「标准」。如果某个终端里的 WebGL 出错，该终端会自动改回标准渲染，这项设置也会一并改回。",
+  "work_area": "助手",
+  "work_title": "按需加载工作管理指南",
+  "work_hint": "助手处理待办、分派工作或检查结果时，按需查阅指南并加载相关工具。",
+  "work_scope": "适用于所有设备上的当前助手。",
+  "work_activation": "开始新对话即可完整应用。已打开的对话可能保留原来的指引和工具信息。",
+  "work_rollback": "关闭后开启新对话，即可恢复原来的指引和工具加载方式。",
+  "work_saved": "已保存。开始新对话即可完整应用此设置。",
+  "work_unsupported": "请更新当前助手以使用此设置。"
 }

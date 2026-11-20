@@ -3,6 +3,7 @@ package feishubot
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -96,12 +97,20 @@ func byTag(els []map[string]any, tag string) []map[string]any {
 	return out
 }
 
-// buttonURLs is the open_url addresses of the column_set buttons.
+// buttonURLs is the open_url addresses of the column_set buttons, then of their "more" menu's entries.
 func buttonURLs(els []map[string]any) (urls, labels []string) {
 	for _, cs := range byTag(els, "column_set") {
 		for _, col := range cs["columns"].([]any) {
 			for _, b := range col.(map[string]any)["elements"].([]any) {
 				btn := b.(map[string]any)
+				if btn["tag"] == "overflow" {
+					for _, o := range btn["options"].([]any) {
+						opt := o.(map[string]any)
+						labels = append(labels, opt["text"].(map[string]any)["content"].(string))
+						urls = append(urls, opt["multi_url"].(map[string]any)["url"].(string))
+					}
+					continue
+				}
 				labels = append(labels, btn["text"].(map[string]any)["content"].(string))
 				beh := btn["behaviors"].([]any)[0].(map[string]any)
 				if beh["type"] != "open_url" {
@@ -423,11 +432,35 @@ func TestAnswerLinks(t *testing.T) {
 		t.Fatalf("buttons not last: %v", tagsOf(els))
 	}
 	urls, labels := buttonURLs(els)
-	want := []string{"https://a.example/doc", "https://b.example/x", "http://c.example/", "https://d.example/"}
+	want := []string{"https://a.example/doc", "https://b.example/x", "http://c.example/", "https://d.example/", "https://e.example/", "https://f.example"}
 	if fmt.Sprint(urls) != fmt.Sprint(want) {
 		t.Fatalf("urls %v", urls)
 	}
 	if labels[0] != "设计文档" || labels[1] != "b.example" {
+		t.Fatalf("labels %v", labels)
+	}
+	// Past three, two show and the rest are in the row's "more" menu.
+	if row := els[len(els)-1]["columns"].([]any); len(row) != 3 || row[2].(map[string]any)["elements"].([]any)[0].(map[string]any)["tag"] != "overflow" {
+		t.Fatalf("row %v", row)
+	}
+}
+
+// A bare address's button says what it opens, as the caller names it; a link's own words stay its label.
+func TestAnswerLinkLabels(t *testing.T) {
+	label := func(u *url.URL) string {
+		if u.Host == "persona.example" {
+			return "Open the chat"
+		}
+		return "Open " + u.Host
+	}
+	a := RenderAnswerWith("见 https://persona.example/persona/c1 和 [设计](https://doc.example/x)，还有 https://b.example/y", 6000, 5, label)
+	c := a.Parts[0].Fill(a.Parts[0].Card(""))
+	var els []map[string]any
+	for _, e := range cardMap(t, c)["body"].(map[string]any)["elements"].([]any) {
+		els = append(els, e.(map[string]any))
+	}
+	_, labels := buttonURLs(els)
+	if strings.Join(labels, "|") != "设计|Open the chat|Open b.example" {
 		t.Fatalf("labels %v", labels)
 	}
 }

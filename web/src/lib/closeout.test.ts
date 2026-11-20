@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { closeoutClaim, closeoutContradicted, closeoutLine, closeoutSuffix, shownCloseout, stripCloseout } from "./closeout";
+import { closeoutClaim, closeoutContradicted, closeoutLine, closeoutSuffix, shownCloseout } from "./closeout";
+import { stripCloseout } from "./closeout-text";
 import { sessionPreview } from "./format";
 import { orphanedLine } from "./todos";
 import type { Closeout, Session } from "./types";
@@ -75,6 +77,16 @@ describe("sessionPreview with a closeout", () => {
 });
 
 describe("stripCloseout", () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../../spec/fixtures/work-reports/terminal.json", import.meta.url), "utf8")) as {
+    cases: { name: string; text: string; display: string }[];
+  };
+  it.each(fixture.cases)("shows the same reply above the card: $name", ({ text, display }) => {
+    expect(stripCloseout(text)).toBe(display);
+  });
+  it("keeps a report from an incomplete reply visible", () => {
+    const done = fixture.cases.find((c) => c.name === "done")!;
+    expect(stripCloseout(done.text, false)).toBe(done.text);
+  });
   const block = '<closeout status="done" merged="yes" deployed="n/a">\ndid: 改了导出\nverified: untested\n</closeout>';
   it("takes out exactly the block", () => {
     expect(stripCloseout(`修好了。\n\n${block}`)).toBe("修好了。");

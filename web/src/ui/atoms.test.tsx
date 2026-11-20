@@ -126,6 +126,8 @@ describe("dialog", () => {
     const html = renderDialog(<button type="button">启动</button>);
     expect(html).toContain('class="min-h-0 flex-1 overflow-y-auto overscroll-contain');
     expect(html).toMatch(/flex shrink-0 [^"]* max-sm:pb-\[calc\(10px\+env\(safe-area-inset-bottom\)\)\]">.*启动/);
+    // marked for the toasts on a phone, which keep clear of it
+    expect(html).toMatch(/<div data-dialog-footer="true" class="flex shrink-0 [^"]*">.*启动/);
     // without a footer the body keeps the safe area
     expect(renderDialog()).toContain("max-sm:pb-[calc(16px+env(safe-area-inset-bottom))]");
   });

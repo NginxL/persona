@@ -38,7 +38,7 @@ object AssistantSettingsPreview {
     @Volatile var open: String? = null
 }
 
-private enum class SettingsPart { Home, Notes, Memory, MemoryFile, Places, PlaceEditor, Proactive, Skills }
+private enum class SettingsPart { Home, Notes, Memory, MemoryFile, Places, PlaceEditor, Proactive, Skills, Prompts }
 private enum class SettingsSheet { Machine, Zone }
 
 /**
@@ -90,6 +90,7 @@ private fun AssistantSettingsDetails(
     val state by controller.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
+    val savedPrompts = LocalSavedPromptsStore.current
     val preview = remember { AssistantSettingsPreview.open.also { AssistantSettingsPreview.open = null } }
     var part by rememberSaveable { mutableStateOf(when (preview) {
         "notes" -> SettingsPart.Notes
@@ -98,6 +99,7 @@ private fun AssistantSettingsDetails(
         "new-place" -> SettingsPart.PlaceEditor
         "proactive" -> SettingsPart.Proactive
         "skills" -> SettingsPart.Skills
+        "prompts" -> SettingsPart.Prompts
         else -> SettingsPart.Home
     }) }
     var memoryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -178,7 +180,14 @@ private fun AssistantSettingsDetails(
             closeEndedTerminals = { scope.launch { controller.setCloseEndedTerminals(it) } },
             supervisorModel = onModelConfiguration?.let { open -> { open(BackgroundSupervisor.PURPOSE, owner) } },
             onStandingAuthorizations = onStandingAuthorizations, standingCount = standingCount,
-            owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } })
+            owner = owner, permission = { scope.launch { controller.setDefaultPermission(it) } },
+            showSavedPrompts = savedPrompts != null)
+        SettingsPart.Prompts -> {
+            if (savedPrompts != null) key(savedPrompts) { SavedPromptsPage(savedPrompts) { part = SettingsPart.Home } }
+            else JListPage(title = stringResource(R.string.assistant_saved_prompts_title), onBack = { part = SettingsPart.Home }) {
+                item { JLoading(text = stringResource(R.string.assistant_settings_loading)) }
+            }
+        }
         SettingsPart.Notes -> NotesPart(shown, onBack = { part = SettingsPart.Home }) { text -> controller.saveNotes(text) }
         SettingsPart.Memory -> MemoryPart(shown, machine, machineName, onBack = { part = SettingsPart.Home },
             onRefresh = { scope.launch { controller.loadMemory() } },
@@ -274,6 +283,7 @@ private fun SettingsHome(
     standingCount: Int = 0,
     owner: String = persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER,
     permission: (String) -> Unit = {},
+    showSavedPrompts: Boolean = false,
 ) {
     val config = state.config
     val ready = config != null && !state.busy
@@ -288,6 +298,13 @@ private fun SettingsHome(
         }
         if (config == null && state.loading) item("loading") { JLoading(text = stringResource(R.string.assistant_settings_loading)) }
         state.notice?.let { notice -> item("notice") { JNotice(notice.text.resolve(resources), status = if (notice.error) Status.NeedsYou else Status.Unknown) } }
+        if (showSavedPrompts) {
+            item("in-chats") { JSectionHeader(stringResource(R.string.assistant_saved_prompts_in_chats)) }
+            rows("in-chats", listOf({
+                JRow(stringResource(R.string.assistant_saved_prompts_title), subtitle = stringResource(R.string.assistant_saved_prompts_entry),
+                    leadingIcon = PersonaIcons.document, onClick = { open(SettingsPart.Prompts) })
+            }))
+        }
         if (config != null) {
             item("default-permission") {
                 AssistantDefaultPermission(config.defaultPermissionMode ?: "default", ready,

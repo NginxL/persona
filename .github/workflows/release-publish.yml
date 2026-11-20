@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: 'Merged release PR number whose exact main merge commit is still current'
+        description: 'Merged release PR number whose verified merge commit is an ancestor of current main'
         required: true
         type: number
 
@@ -140,7 +140,7 @@ jobs:
             printf 'version=%s\n' "$version"
             printf 'commit=%s\n' "$MERGE_COMMIT"
           } >> "$GITHUB_OUTPUT"
-      - name: Verify the merged PR and main are this exact source
+      - name: Verify the merged PR and current main retain this exact source
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -152,7 +152,10 @@ jobs:
           set -euo pipefail
           version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" verify-merged-pr --pr-json release/merged-pr.json --commit "$COMMIT" --actor "$ACTOR")"
           test "$version" = "${{ steps.source.outputs.version }}"
-          test "$(git ls-remote "https://github.com/$REPOSITORY.git" refs/heads/main | cut -f1)" = "$COMMIT"
+          # Ordinary PRs may merge during the exact-source post-merge build. Keep this verified commit as the tag
+          # source, but require it to be retained by main rather than racing a moving branch head.
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$COMMIT" FETCH_HEAD
       - name: Download the release PR's exact verified artifacts
         uses: actions/download-artifact@v4
         with:
@@ -187,12 +190,13 @@ jobs:
           PY
       - name: Create the immutable tag only after the merged source passed every platform check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           TAG: v${{ steps.source.outputs.version }}
           COMMIT: ${{ steps.source.outputs.commit }}
         run: |
           set -euo pipefail
+          test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; refusing an unauthorized tag actor' >&2; exit 1; }
           existing="$(git ls-remote --tags "https://github.com/$REPOSITORY.git" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
           if [[ -n "$existing" ]]; then
             printf '%s\n' "$existing" | grep -F "$COMMIT" >/dev/null || {
@@ -206,7 +210,7 @@ jobs:
           test "$(git rev-parse "$TAG^{commit}")" = "$COMMIT"
       - name: Mark the Release as owned by this verified release PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           TAG: v${{ steps.source.outputs.version }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -347,6 +351,13 @@ jobs:
             cmp "$path" "release/independent/$name"
             printf 'independent_download_verified %s %s\n' "$name" "$(shasum -a 256 "release/independent/$name" | awk '{print $1}')"
           done
+      - name: Advance only the verified stable Latest pointer
+        if: needs.authorize.outputs.channel == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v${{ needs.authorize.outputs.version }}
+        run: python3 scripts/operations/stable_release.py --repository "$REPOSITORY" --tag "$TAG" --manifest release/downloads/latest.json
       - name: Advance only the authenticated beta pointer
         if: needs.authorize.outputs.channel == 'beta'
         env:

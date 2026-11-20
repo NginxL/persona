@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -82,6 +84,27 @@ func sameTags(t *testing.T, got []proto.Item, want map[string]string) {
 		if g[id] != c {
 			t.Fatalf("tags %v, want %v", g, want)
 		}
+	}
+}
+
+func TestEchoRuntimeRebindsToNativeLineWithClientMessageID(t *testing.T) {
+	var log echoLog
+	at := time.Now()
+	log.expect(echoRecord{SessionID: "agy-session", ClientMsgID: "sent", Text: "Check this", Images: 1, SentAt: at})
+	live := []proto.Item{{ID: "1@live#0", Seq: 1, Role: "user", Kind: proto.KindText, ClientMsgID: "sent"}}
+	if found := log.match("agy-session", echoInRuntime, live); len(found) != 1 || found[0].Line != "1@live" {
+		t.Fatalf("live match: %+v", found)
+	}
+	native := []proto.Item{
+		{ID: "2@native#0", Seq: 2, Role: "user", Kind: proto.KindText, Text: "/plan Check this", ClientMsgID: "sent"},
+		{ID: "2@native#media0", Seq: 2, Role: "user", Kind: proto.KindImage},
+	}
+	if found := log.match("agy-session", echoInRuntime, native); len(found) != 1 || found[0].Line != "2@native" {
+		t.Fatalf("native match: %+v", found)
+	}
+	sameTags(t, log.tag("agy-session", echoInRuntime, native), map[string]string{"2@native#0": "sent", "2@native#media0": "sent"})
+	if found := log.match("agy-session", echoInRuntime, native); len(found) != 0 {
+		t.Fatalf("already matched: %+v", found)
 	}
 }
 
@@ -272,6 +295,39 @@ func pageItems(t *testing.T, n *Node, id string) []proto.Item {
 // that line in pages, and the hub is told what was expected and what was found. A node started again knows nothing
 // until the hub hands its records back (session.echoes): then the same page carries the id again, and a message it
 // was still waiting for when it stopped is found.
+func TestEchoTiesAnImageOnlyClaudeStart(t *testing.T) {
+	n, fake, home := herdrNode(t)
+	withSubmitGrace(t, 60*time.Millisecond)
+	withFirstPromptWaits(t, 500*time.Millisecond, 3*time.Second)
+	cwd := mkdir(t, filepath.Join(home, "project"))
+	startPane(t, fake, screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi"))
+	const image = "aW1hZ2U="
+	const clientID = "image-only-start"
+	fake.after(func(call herdrCall) {
+		if call.Method != "agent.prompt" {
+			return
+		}
+		prompt := str(call.Params["text"])
+		if !strings.HasPrefix(prompt, "<attached_images>") || !strings.Contains(prompt, "\npath:") {
+			t.Errorf("missing Claude attachment paths in %q", prompt)
+		}
+		text, _ := json.Marshal(prompt)
+		blocks := fmt.Sprintf(`[{"type":"image","source":{"type":"base64","media_type":"image/png","data":%q}},{"type":"text","text":%s}]`, image, text)
+		appendTranscript(t, home, cwd, startedID(fake), userBlocks("image-input", time.Now(), blocks))
+	})
+	if _, err := request(t, n, "session.start", map[string]any{
+		"cwd": cwd, "workspace_id": "w1", "client_msg_id": clientID,
+		"images": []proto.Image{{Mime: "image/png", Data: image}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.firstWait.Wait()
+	items := pageItems(t, n, startedID(fake))
+	if len(items) == 0 || items[0].ClientMsgID != clientID {
+		t.Fatalf("image-only start did not match its transcript: %+v", items)
+	}
+}
+
 func TestEchoAcrossSendPagesAndRestart(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, home+"/proj")

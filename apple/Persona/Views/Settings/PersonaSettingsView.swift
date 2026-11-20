@@ -172,8 +172,9 @@ struct PersonaPicker: View {
         let here = store.isOnPhone(p)
         return Button {
             guard !selected else { return }
+            let selection = store.tap(p, api: model.api)
             Task {
-                await store.choose(p, api: model.api)
+                await selection?.value
                 if store.current.id == p.id { Haptics.success() }
             }
         } label: {

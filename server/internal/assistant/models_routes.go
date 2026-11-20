@@ -71,6 +71,14 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 			}
 		}
 	}
+	if p.Candidates != nil {
+		for _, provider := range s.candidateProviders(ctx, p.Effective.Provider) {
+			id := "launcher." + provider.Name
+			if slices.Contains(p.ProviderIDs, id) {
+				p.Candidates.DirectProviderIDs = append(p.Candidates.DirectProviderIDs, id)
+			}
+		}
+	}
 	if p.Kind == "launcher" {
 		p.Fields = append(p.Fields, "effort")
 	}
@@ -83,7 +91,9 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 		p.Status = room // it follows a main chat on Codex, say: no room starts until a Claude Code launcher is picked here
 	} else if scope := s.purposeScopeStatus(ctx, l, p.Effective.Provider, p.MachineID); p.Kind == "launcher" && scope != "" {
 		p.Status = scope // the provider is out of the main chat's computer's scope: why it does not run there
-	} else if !slices.Contains(p.ProviderIDs, p.Effective.Provider) {
+	} else if !slices.Contains(p.ProviderIDs, p.Effective.Provider) && !s.mainChatOffers(ctx, p) {
+		// The provider list leaves out a runtime's launchers: one the main chat's picker offers on its computer is not
+		// incompatible (#11772); one gone from that computer, or one there that can't run the assistant, still is.
 		p.Status = mc(l, "status_provider_incompatible")
 		if p.Kind == "api" && strings.HasPrefix(p.Effective.Provider, "legacy.") && s.legacyModelConfig(ctx, p.Effective.Provider).BaseURL == "" {
 			p.Status = mc(l, s.noAPIStatus(ctx))

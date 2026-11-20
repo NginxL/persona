@@ -111,7 +111,7 @@ func (env *workerMemoryEnv) record(t *testing.T) {
 	t.Helper()
 	// Test-only contract for the shared completion path: both report_to_supervisor(done) and a WorkDone transition call
 	// this method with these same fields. Turn and itemIndex come from that turn's transcript item.
-	env.s.recordWorkerOutcome(context.Background(), env.todo, "box", "s1", env.cwd, 7, 2,
+	env.s.recordWorkerOutcome(context.Background(), env.todo, "box", "s1", env.cwd, 7, 2, "report-call", true,
 		workerMemoryConclusion, []string{workerMemoryPR, workerMemoryIssue})
 }
 
@@ -132,8 +132,9 @@ func assertOriginalWorkerMemory(t *testing.T, records []kb.ProjectMemoryRecord) 
 	if got.Conclusion != workerMemoryConclusion || !slices.Equal(got.Links, []string{workerMemoryPR, workerMemoryIssue}) {
 		t.Fatalf("original outcome was not preserved: %+v", got)
 	}
-	if got.Decision != "" || got.Reason != "" {
-		t.Fatalf("an unavailable model invented decision/reason: %+v", got)
+	if got.Decision != "" || got.Reason != "" || got.Type != kb.ProjectMemoryOutcome ||
+		got.Verification != kb.ProjectMemoryAgentReported || got.RecordedAt == "" {
+		t.Fatalf("an unavailable model invented decision/reason or lost provenance: %+v", got)
 	}
 }
 
@@ -175,6 +176,264 @@ func TestWorkerMemoryReportThenDoneWritesOnceAndPreservesLog(t *testing.T) {
 	assertFileUnchanged(t, env.log, before)
 }
 
+// Parallel tool calls in one assistant line share a Seq but not an item or tool-use ID. Different outcomes must not
+// disappear, and WorkDone reuses the latest report's full identity instead of writing a third record.
+func TestWorkerMemorySameSequenceReportsKeepDistinctItems(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	const first = "Fixed the first retry loop."
+	const second = "Fixed the second retry loop."
+	input := func(text string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"kind": "done", "text": text})
+		return raw
+	}
+	items := []proto.Item{
+		{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Fix both retry loops."},
+		{ID: "report-a", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-a",
+			ToolName: "report_to_supervisor", ToolInput: input(first), TS: turnEnd.Add(-time.Second)},
+		{ID: "report-b", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-b",
+			ToolName: "report_to_supervisor", ToolInput: input(second), TS: turnEnd.Add(-time.Second)},
+	}
+	env.f.setItems(items...)
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", first, nil, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	if got := workerMemoryRecords(t, env.e, "explicit"); len(got) != 1 || got[0].Conclusion != first {
+		t.Fatalf("first same-Seq report was not recorded once: %+v", got)
+	}
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", second, nil, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 2 || records[0].ID == records[1].ID {
+		t.Fatalf("same-Seq reports collided: %+v", records)
+	}
+	seen := map[string]bool{}
+	for _, record := range records {
+		seen[record.Conclusion] = true
+	}
+	if !seen[first] || !seen[second] {
+		t.Fatalf("same-Seq reports lost content: %+v", records)
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: second}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	records = workerMemoryRecords(t, env.e, "explicit")
+	seen = map[string]bool{}
+	for _, record := range records {
+		seen[record.Conclusion] = true
+	}
+	if len(records) != 2 || !seen[first] || !seen[second] {
+		t.Fatalf("WorkDone duplicated or replaced a same-Seq report: %+v", records)
+	}
+}
+
+// Exact duplicate handoffs are retries, not two outcomes. Only different report content needs a distinct durable item.
+// Timestamps may differ between the two calls; the normalized report payload determines the durable semantic key.
+func TestWorkerMemoryExactDuplicateReportsStayOne(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	items := []proto.Item{
+		{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Fix both retry loops."},
+		{ID: "report-a", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-a",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput(), TS: turnEnd},
+		{ID: "report-b", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-b",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput(), TS: turnEnd.Add(time.Second)},
+	}
+	env.f.setItems(items...)
+	for _, at := range []time.Time{turnEnd, turnEnd.Add(time.Second)} {
+		env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion,
+			[]string{workerMemoryPR, workerMemoryIssue}, at)
+		env.s.tasks.outcomeRuns.Wait()
+	}
+	assertOriginalWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
+}
+
+// Identical parallel report text and timestamps are disambiguated by their evidence links, not by which one happens to
+// appear last in the transcript page.
+func TestWorkerMemorySameSequenceIdenticalTextUsesEvidence(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	input := func(evidence string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"kind": "done", "text": workerMemoryConclusion, "evidence": []string{evidence}})
+		return raw
+	}
+	items := []proto.Item{
+		{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Fix both retry loops."},
+		{ID: "report-a", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-a",
+			ToolName: "report_to_supervisor", ToolInput: input(workerMemoryPR), TS: turnEnd},
+		{ID: "report-b", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-b",
+			ToolName: "report_to_supervisor", ToolInput: input(workerMemoryIssue), TS: turnEnd},
+	}
+	env.f.setItems(items...)
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion, []string{workerMemoryPR}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion, []string{workerMemoryIssue}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 2 {
+		t.Fatalf("identical parallel reports collapsed: %+v", records)
+	}
+	links := map[string]bool{}
+	for _, record := range records {
+		if len(record.Links) == 1 {
+			links[record.Links[0]] = true
+		}
+	}
+	if !links[workerMemoryPR] || !links[workerMemoryIssue] {
+		t.Fatalf("identical parallel reports lost their distinct evidence: %+v", records)
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: workerMemoryConclusion}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	if got := workerMemoryRecords(t, env.e, "explicit"); len(got) != 2 {
+		t.Fatalf("WorkDone duplicated an identical parallel report: %+v", got)
+	}
+}
+
+// Non-URL evidence is part of the accepted report too, so it can distinguish otherwise identical parallel calls.
+func TestWorkerMemorySameSequenceIdenticalTextUsesNonURLEvidence(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	input := func(evidence string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"kind": "done", "text": workerMemoryConclusion, "evidence": []string{evidence}})
+		return raw
+	}
+	items := []proto.Item{
+		{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Fix both retry loops."},
+		{ID: "report-a", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-a",
+			ToolName: "report_to_supervisor", ToolInput: input("test A passed"), TS: turnEnd},
+		{ID: "report-b", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-b",
+			ToolName: "report_to_supervisor", ToolInput: input("test B passed"), TS: turnEnd},
+	}
+	env.f.setItems(items...)
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion, []string{"test A passed"}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion, []string{"test B passed"}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 2 || records[0].ID == records[1].ID {
+		t.Fatalf("non-URL evidence did not distinguish parallel reports: %+v", records)
+	}
+}
+
+// An ambiguous legacy prefix cannot prove which parallel item it recorded, so it must not suppress a new keyed outcome.
+func TestWorkerMemoryParallelItemIgnoresAmbiguousLegacyID(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	const earlier = "The earlier parallel outcome."
+	const current = "The current parallel outcome."
+	legacy := kb.ProjectMemoryRecord{ID: workerMemoryID(env.todo.ID, "box", "s1", 1, 1), TodoID: env.todo.ID,
+		Agent: "s1", Turn: 1, ItemIndex: 1, Conclusion: earlier}
+	if err := env.e.AppendProjectMemory("explicit", legacy); err != nil {
+		t.Fatal(err)
+	}
+	input := func(text string) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"kind": "done", "text": text})
+		return raw
+	}
+	env.f.setItems(
+		proto.Item{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+		proto.Item{ID: "report-a", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-a",
+			ToolName: "report_to_supervisor", ToolInput: input(earlier), TS: turnEnd},
+		proto.Item{ID: "report-b", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "call-b",
+			ToolName: "report_to_supervisor", ToolInput: input(current), TS: turnEnd})
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", current, nil, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	seen := map[string]bool{}
+	for _, record := range records {
+		seen[record.Conclusion] = true
+	}
+	if len(records) != 2 || !seen[earlier] || !seen[current] {
+		t.Fatalf("ambiguous legacy ID suppressed a parallel outcome: %+v", records)
+	}
+}
+
+// Records written before item keys were added still deduplicate the same outcome and do not invoke the model again.
+func TestRecordWorkerOutcomeLegacyIDPreventsDuplicate(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	legacy := kb.ProjectMemoryRecord{ID: workerMemoryID(env.todo.ID, "box", "s1", 7, 2), TodoID: env.todo.ID,
+		Agent: "s1", Turn: 7, ItemIndex: 2, Conclusion: workerMemoryConclusion}
+	if err := env.e.AppendProjectMemory("explicit", legacy); err != nil {
+		t.Fatal(err)
+	}
+	env.record(t)
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 1 || records[0].ID != legacy.ID {
+		t.Fatalf("legacy ID was appended again with a new key: %+v", records)
+	}
+	env.f.mu.Lock()
+	asked := len(env.f.outcomeAsked)
+	env.f.mu.Unlock()
+	if asked != 0 {
+		t.Fatalf("an already recorded legacy outcome called the model %d time(s)", asked)
+	}
+}
+
+// The legacy writer selected only the last final text block, so earlier text in the same assistant line does not make
+// its legacy ID ambiguous or cause a duplicate keyed append.
+func TestWorkerMemoryEarlierTextDoesNotDisableLegacyDedupe(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	legacy := kb.ProjectMemoryRecord{ID: workerMemoryID(env.todo.ID, "box", "s1", 1, 1), TodoID: env.todo.ID,
+		Agent: "s1", Turn: 1, ItemIndex: 1, Conclusion: workerMemoryConclusion}
+	if err := env.e.AppendProjectMemory("explicit", legacy); err != nil {
+		t.Fatal(err)
+	}
+	items := []proto.Item{
+		{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+		{ID: "earlier", Seq: 2, Kind: proto.KindText, Role: "assistant", Text: "Working"},
+		{ID: "answer", Seq: 2, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion},
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: workerMemoryConclusion}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 1 || records[0].ID != legacy.ID {
+		t.Fatalf("earlier text disabled unambiguous legacy dedupe: %+v", records)
+	}
+	env.f.mu.Lock()
+	asked := len(env.f.outcomeAsked)
+	env.f.mu.Unlock()
+	if asked != 0 {
+		t.Fatalf("legacy dedupe repeated the model call %d time(s)", asked)
+	}
+}
+
+// Unrelated tools in the same assistant line were never outcome candidates, so they do not make a legacy report ID
+// ambiguous or cause a duplicate keyed append.
+func TestWorkerMemoryUnrelatedToolKeepsLegacyDedupe(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	legacy := kb.ProjectMemoryRecord{ID: workerMemoryID(env.todo.ID, "box", "s1", 1, 1), TodoID: env.todo.ID,
+		Agent: "s1", Turn: 1, ItemIndex: 1, Conclusion: workerMemoryConclusion}
+	if err := env.e.AppendProjectMemory("explicit", legacy); err != nil {
+		t.Fatal(err)
+	}
+	env.f.setItems(
+		proto.Item{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+		proto.Item{ID: "report", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput(), TS: turnEnd},
+		proto.Item{ID: "bash", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "bash-call",
+			ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"go test ./..."}`), TS: turnEnd})
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion,
+		[]string{workerMemoryPR, workerMemoryIssue}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 1 || records[0].ID != legacy.ID {
+		t.Fatalf("unrelated tool disabled legacy dedupe: %+v", records)
+	}
+	env.f.mu.Lock()
+	asked := len(env.f.outcomeAsked)
+	env.f.mu.Unlock()
+	if asked != 0 {
+		t.Fatalf("legacy dedupe repeated the model call %d time(s)", asked)
+	}
+}
+
 // Ownership is explicit todo.Project first, then ProjectsForWork(machine,cwd). With neither, even a project whose name
 // is the todo's title receives nothing.
 func TestRecordWorkerOutcomeOwnership(t *testing.T) {
@@ -197,6 +456,12 @@ func TestRecordWorkerOutcomeOwnership(t *testing.T) {
 					if got := workerMemoryRecords(t, env.e, slug); len(got) != 0 {
 						t.Errorf("%s received an unowned outcome: %+v", slug, got)
 					}
+				}
+				env.f.mu.Lock()
+				asked := len(env.f.outcomeAsked)
+				env.f.mu.Unlock()
+				if asked != 0 {
+					t.Fatalf("unowned outcome called the model %d time(s), want zero", asked)
 				}
 				return
 			}
@@ -222,24 +487,44 @@ func TestRecordWorkerOutcomeModelFailurePreservesOriginal(t *testing.T) {
 	assertDirectWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
 }
 
-// A successful extraction supplies the structured decision while retaining the report's existing evidence links.
+// A successful extraction supplies every structured decision and pitfall while retaining the report's evidence links.
 func TestRecordWorkerOutcomeModelDecision(t *testing.T) {
 	env := newWorkerMemoryEnv(t)
 	env.setProject(t, "explicit")
 	env.f.mu.Lock()
-	env.f.outcome = `{"outcome":"Bounded the retry loop.","links":["` + workerMemoryPR + `"],"decisions":[{"question":"How should retries work?","choice":"Keep a bound","reason":"It prevents duplicate work."}],"pitfalls":[]}`
+	env.f.outcome = `{"outcome":"Bounded the retry loop.","links":["` + workerMemoryPR + `"],
+		"decisions":[{"question":"How should retries work?","choice":"Keep a bound","reason":"It prevents duplicate work."},
+		{"question":"When should work stop?","choice":"After the check","reason":"The evidence is complete."}],
+		"pitfalls":["A retry used to duplicate work.","The old test missed the second decision."]}`
 	env.f.mu.Unlock()
 	env.record(t)
 	records := workerMemoryRecords(t, env.e, "explicit")
-	if len(records) != 1 {
-		t.Fatalf("worker memory records = %+v, want one", records)
+	if len(records) != 5 {
+		t.Fatalf("worker memory records = %+v, want outcome + two decisions + two pitfalls", records)
 	}
-	got := records[0]
-	if got.Conclusion != "Bounded the retry loop." || got.Decision != "Keep a bound" || got.Reason != "It prevents duplicate work." {
-		t.Fatalf("model outcome was not recorded: %+v", got)
+	outcome := records[0]
+	if outcome.Type != kb.ProjectMemoryOutcome || outcome.Conclusion != "Bounded the retry loop." ||
+		outcome.Verification != kb.ProjectMemoryAgentReported || outcome.RecordedAt == "" {
+		t.Fatalf("model outcome was not recorded with provenance: %+v", outcome)
 	}
-	if !slices.Equal(got.Links, []string{workerMemoryPR, workerMemoryIssue}) {
-		t.Fatalf("model outcome lost existing links: %+v", got.Links)
+	if !slices.Equal(outcome.Links, []string{workerMemoryPR, workerMemoryIssue}) {
+		t.Fatalf("model outcome lost existing links: %+v", outcome.Links)
+	}
+	decisions := []kb.ProjectMemoryRecord{records[3], records[4]}
+	if decisions[0].Type != kb.ProjectMemoryDecision || decisions[0].Question != "When should work stop?" ||
+		decisions[0].Decision != "After the check" || decisions[0].Reason != "The evidence is complete." ||
+		decisions[1].Question != "How should retries work?" || decisions[1].Decision != "Keep a bound" {
+		t.Fatalf("decisions were not retained newest first: %+v", decisions)
+	}
+	pitfalls := records[1:3]
+	if pitfalls[0].Type != kb.ProjectMemoryPitfall || pitfalls[0].Conclusion != "The old test missed the second decision." ||
+		pitfalls[1].Conclusion != "A retry used to duplicate work." {
+		t.Fatalf("pitfalls were not retained: %+v", pitfalls)
+	}
+	for _, record := range records[1:] {
+		if record.Verification != kb.ProjectMemoryAgentReported || record.RecordedAt != outcome.RecordedAt {
+			t.Fatalf("typed record provenance = %+v", record)
+		}
 	}
 }
 
@@ -314,6 +599,104 @@ func TestWorkerMemoryDoneUsesCapturedTurn(t *testing.T) {
 	}
 }
 
+// WorkDone can win the write before the report path. The selected report's evidence must survive even when the final
+// answer and work artifacts contain no links.
+func TestWorkerMemoryDonePreservesReportEvidence(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	items := []proto.Item{
+		{ID: "prompt", Seq: 10, Kind: proto.KindText, Role: "user", Text: "Fix the retry loop."},
+		{ID: "report", Seq: 11, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput()},
+		{ID: "report-result", Seq: 12, Kind: proto.KindToolResult, Role: "tool", ToolUseID: "report-call", Text: "sent"},
+		{ID: "answer", Seq: 13, Kind: proto.KindText, Role: "assistant", Text: "Finished without links in the reply."},
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: workerMemoryConclusion}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	assertOriginalWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
+}
+
+// A later unrelated turn must not inherit a todo that had already completed before that turn ended.
+func TestWorkerMemoryDoneSkipsTurnAfterTodoCompletion(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	completedAt := turnEnd.Add(-time.Hour)
+	env.s.todos.mu.Lock()
+	env.s.todos.todos[env.todo.ID].DoneAt = &completedAt
+	delete(env.s.todos.activeBySession, [2]string{"box", "s1"})
+	env.s.todos.mu.Unlock()
+	items := []proto.Item{
+		{ID: "later-prompt", Seq: 20, Kind: proto.KindText, Role: "user", Text: "Unrelated later turn"},
+		{ID: "later-answer", Seq: 21, Kind: proto.KindText, Role: "assistant", Text: "Unrelated later outcome"},
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: "Unrelated later outcome"}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	if got := workerMemoryRecords(t, env.e, "explicit"); len(got) != 0 {
+		t.Fatalf("later unrelated turn wrote to the completed todo: %+v", got)
+	}
+}
+
+// The todo captured at the WorkDone handoff remains authoritative even when the worker is already linked to a newer one.
+func TestWorkerMemoryDoneUsesPinnedTodo(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	newer := env.todo
+	newer.ID = "todo_newer"
+	newer.Title = "A newer assignment"
+	newer.Project = "other"
+	env.s.runWorkerOutcome = func(run func()) {
+		putTodo(env.s, newer)
+		run()
+	}
+	items := []proto.Item{
+		{ID: "prompt-1", Seq: 10, Kind: proto.KindText, Role: "user", Text: "First turn"},
+		{ID: "answer-1", Seq: 11, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion},
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: workerMemoryConclusion}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	records := workerMemoryRecords(t, env.e, "explicit")
+	if len(records) != 1 || records[0].TodoID != env.todo.ID {
+		t.Fatalf("pinned todo did not own the WorkDone record: %+v", records)
+	}
+	if got := workerMemoryRecords(t, env.e, "other"); len(got) != 0 {
+		t.Fatalf("a newer todo captured the old WorkDone record: %+v", got)
+	}
+}
+
+// Directory fallback is captured with the todo. A later session cwd change cannot move the old outcome to a new project.
+func TestWorkerMemoryDoneUsesPinnedCwd(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "")
+	if _, err := env.e.Apply(kb.KindProject, "other", kb.Update{Dirs: []string{"box:/code/other"}}); err != nil {
+		t.Fatal(err)
+	}
+	env.s.runWorkerOutcome = func(run func()) {
+		env.f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Cwd: "/code/other",
+			Status: proto.StatusDone, UpdatedAt: turnEnd, LastText: workerMemoryConclusion})
+		run()
+	}
+	items := []proto.Item{
+		{ID: "prompt", Seq: 10, Kind: proto.KindText, Role: "user", Text: "First turn"},
+		{ID: "answer", Seq: 11, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion},
+	}
+	work := db.SessionWork{MachineID: "box", SessionID: "s1", TurnAt: turnEnd,
+		Work: proto.WorkState{Phase: proto.WorkDone, Line: workerMemoryConclusion}}
+	env.s.goRecordWorkerDone(context.Background(), work, items)
+	env.s.tasks.outcomeRuns.Wait()
+	if got := workerMemoryRecords(t, env.e, "fallback"); len(got) != 1 {
+		t.Fatalf("pinned cwd did not retain the fallback project: %+v", got)
+	}
+	if got := workerMemoryRecords(t, env.e, "other"); len(got) != 0 {
+		t.Fatalf("later session cwd moved the old outcome: %+v", got)
+	}
+}
+
 // The opening prompt and item offset are absolute even when the latest capped page starts after the prompt.
 func TestWorkerIdentityStableAcrossCappedPage(t *testing.T) {
 	prompt := proto.Item{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"}
@@ -359,19 +742,91 @@ func TestWorkerMemoryDoneSkipsReleasedAgent(t *testing.T) {
 	}
 }
 
-// Once the report's turn has a final answer, its asynchronous report reader yields to the pinned WorkDone writer.
-func TestWorkerReportIndexYieldsCompletedTurn(t *testing.T) {
+// A final answer does not erase the report's stable identity; WorkDone can reuse it without a second write.
+func TestWorkerReportIndexFindsCompletedTurnReport(t *testing.T) {
 	items := []proto.Item{
 		{Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
 		{Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call", ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput()},
 		{Seq: 3, Kind: proto.KindToolResult, Role: "tool", ToolUseID: "report-call"},
 		{Seq: 4, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion},
 	}
-	if got := workerReportIndex(items, workerMemoryConclusion, turnEnd, true); got != -1 {
-		t.Fatalf("pending report claimed a completed turn at %d", got)
+	if got := workerReportIndex(items, workerMemoryConclusion, turnEnd); got != 1 {
+		t.Fatalf("completed turn report was not found at index 1: %d", got)
 	}
-	if got := workerReportIndex(items, "", time.Time{}, false); got != 1 {
+	if got := workerReportIndex(items, "", time.Time{}); got != 1 {
 		t.Fatalf("WorkDone did not reuse report item: %d", got)
+	}
+}
+
+// Capturing the todo's recorded cwd must not add a synchronous session RPC to the report response path.
+func TestWorkerMemoryReportDoesNotReadSessionAtHandoff(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	env.f.setItems(
+		proto.Item{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+		proto.Item{ID: "report", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput(), TS: turnEnd})
+	reads := 0
+	env.s.runWorkerOutcome = func(run func()) {
+		env.f.mu.Lock()
+		for _, call := range env.f.calls {
+			if call.Method == DeviceSessionGet {
+				reads++
+			}
+		}
+		env.f.mu.Unlock()
+		run()
+	}
+	env.s.goRecordWorkerReport(context.Background(), env.todo, "box", "s1", workerMemoryConclusion,
+		[]string{workerMemoryPR, workerMemoryIssue}, turnEnd)
+	env.s.tasks.outcomeRuns.Wait()
+	if reads != 0 {
+		t.Fatalf("report handoff made %d synchronous session.get call(s), want zero", reads)
+	}
+	assertOriginalWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
+}
+
+// WorkDone uses only evidence accepted by reportToSupervisor; it cannot resurrect a URL clipped or capped out of the
+// live report, even though the transcript retains the original JSON.
+func TestWorkerReportEvidenceLinksUsesAcceptedEvidence(t *testing.T) {
+	input := func(evidence []string) proto.Item {
+		raw, _ := json.Marshal(map[string]any{"kind": "done", "text": workerMemoryConclusion, "evidence": evidence})
+		return proto.Item{Kind: proto.KindToolUse, Role: "assistant", ToolName: "report_to_supervisor", ToolInput: raw}
+	}
+	extra := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", workerMemoryPR}
+	if got := workerReportEvidenceLinks(input(extra)); len(got) != 0 {
+		t.Fatalf("WorkDone retained a capped-out URL: %+v", got)
+	}
+	accepted := append([]string{workerMemoryPR}, extra[:7]...)
+	if got := workerReportEvidenceLinks(input(accepted)); len(got) != 1 || got[0] != workerMemoryPR {
+		t.Fatalf("WorkDone lost accepted evidence: %+v", got)
+	}
+}
+
+// Live evidence has already been trimmed, clipped and capped by reportToSupervisor; apply the same acceptance rules to
+// the transcript's original JSON before comparing it, or a valid report can become impossible to find.
+func TestWorkerReportIndexNormalizesEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		transcript []string
+		live       []string
+	}{
+		{name: "caps at eight", transcript: []string{"https://example.com/1", "https://example.com/2", "https://example.com/3", "https://example.com/4", "https://example.com/5", "https://example.com/6", "https://example.com/7", "https://example.com/8", "https://example.com/9"},
+			live: []string{"https://example.com/1", "https://example.com/2", "https://example.com/3", "https://example.com/4", "https://example.com/5", "https://example.com/6", "https://example.com/7", "https://example.com/8"}},
+		{name: "trims and clips", transcript: []string{"  " + strings.Repeat("x", 299) + " https://example.com/after"},
+			live: []string{clip(strings.Repeat("x", 299)+" https://example.com/after", 300)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"kind": "done", "text": workerMemoryConclusion, "evidence": tc.transcript})
+			items := []proto.Item{
+				{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+				{ID: "report", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call",
+					ToolName: "report_to_supervisor", ToolInput: raw, TS: turnEnd},
+			}
+			if got := workerReportIndex(items, workerMemoryConclusion, turnEnd, tc.live); got != 1 {
+				t.Fatalf("normalized evidence did not find the accepted report: %d", got)
+			}
+		})
 	}
 }
 
@@ -386,6 +841,20 @@ func TestWorkerMemoryReportWritesWithTriageDisabled(t *testing.T) {
 			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput()},
 		proto.Item{Seq: 3, Kind: proto.KindToolResult, Role: "tool", ToolUseID: "report-call"},
 		proto.Item{Seq: 4, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion})
+	env.reportDone(t, turnEnd)
+	assertOriginalWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
+}
+
+// With triage enabled, a final answer without a committed WorkDone must not discard the already successful done report.
+func TestWorkerMemoryReportWritesAfterFinalAnswerWithoutWorkDone(t *testing.T) {
+	env := newWorkerMemoryEnv(t)
+	env.setProject(t, "explicit")
+	env.f.setItems(
+		proto.Item{ID: "prompt", Seq: 1, Kind: proto.KindText, Role: "user", Text: "Start"},
+		proto.Item{ID: "report", Seq: 2, Kind: proto.KindToolUse, Role: "assistant", ToolUseID: "report-call",
+			ToolName: "report_to_supervisor", ToolInput: workerMemoryReportInput()},
+		proto.Item{ID: "report-result", Seq: 3, Kind: proto.KindToolResult, Role: "tool", ToolUseID: "report-call"},
+		proto.Item{ID: "answer", Seq: 4, Kind: proto.KindText, Role: "assistant", Text: workerMemoryConclusion})
 	env.reportDone(t, turnEnd)
 	assertOriginalWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
 }

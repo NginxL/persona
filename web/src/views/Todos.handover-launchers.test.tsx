@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
 // Handing a to-do to a new agent picks a launcher like "New agent" does (#1643): not one this computer's terminal can't
 // run by default, and a blocked one is still a choice with why; with a hub that names its default, that comes first and is
-// picked (#4384). The hub is faked; the data made up.
+// picked (#4384). On a phone the dialog's buttons are its sheet's footer (#11511). The hub is faked; the data made up.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../i18n";
 import { setToken } from "../lib/api";
-import { getState } from "../lib/store";
-import type { Launcher, Machine } from "../lib/types";
+import { getState, upsertSession } from "../lib/store";
+import type { Launcher, Machine, Session } from "../lib/types";
 
+// wide unless a case says it is a phone (lib/viewport.ts keeps one list per query and reads `matches` each time)
+const screen = vi.hoisted(() => ({ phone: false }));
 vi.hoisted(() => {
   window.matchMedia = ((query: string) => ({
-    matches: false,
+    get matches() {
+      return screen.phone && query === "(max-width: 639px)";
+    },
     media: query,
     onchange: null,
     addEventListener() {},
@@ -232,4 +236,71 @@ it("blocks button and keyboard starts when every computer goes offline", async (
   await open();
   expect(launch.disabled).toBe(false);
   expect(prompt.value).toBe("Keep this draft");
+});
+
+describe("the hand-over dialog's buttons and agent rows", () => {
+  const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name)!;
+  const footerButtons = () => [...document.querySelectorAll<HTMLButtonElement>("[data-dialog-footer] button")].map((b) => b.textContent?.trim());
+  // no agent the cases above started
+  beforeEach(() => void (getState().sessions = {}));
+  afterEach(() => {
+    screen.phone = false;
+    getState().sessions = {};
+  });
+
+  it("keeps Cancel and the tab's primary in the sheet's footer on a phone, above the keyboard, with ⌘↩ still handing over", async () => {
+    vi.useFakeTimers();
+    screen.phone = true;
+    launchers = [{ name: "claude" }];
+    await open();
+    expect(footerButtons()).toEqual([t("common.cancel"), t("todos.launch_and_hand")]);
+    await act(async () => button(t("todos.tab_existing")).click());
+    // no live agent: Send takes its place there, unavailable
+    expect(footerButtons()).toEqual([t("common.cancel"), t("todos.send_and_hand")]);
+    expect(button(t("todos.send_and_hand")).disabled).toBe(true);
+    await act(async () => button(t("todos.tab_new")).click());
+    const prompt = document.querySelector<HTMLTextAreaElement>("textarea")!;
+    await act(async () => prompt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(requests.filter((r) => r.path === "/sessions" && r.init.method === "POST")).toHaveLength(1);
+  });
+
+  it("ends the form with them on a wide screen, as before", async () => {
+    launchers = [{ name: "claude" }];
+    await open();
+    expect(document.querySelector("[data-dialog-footer]")).toBeNull();
+    const row = button(t("todos.launch_and_hand")).parentElement!;
+    expect(row.className).toBe("mt-2 flex justify-end gap-2");
+    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual([t("common.cancel"), t("todos.launch_and_hand")]);
+  });
+
+  it("lists the live agents as one radio group: Tab reaches the picked one, the arrows move the pick", async () => {
+    launchers = [{ name: "claude" }];
+    const agent = (sid: string, title: string, updated_at: string) => ({ machine_id: "mac", session_id: sid, title, cwd: "/demo", status: "idle", updated_at }) as Session;
+    upsertSession(agent("first", "First agent", "2026-11-09T09:00:00Z"));
+    upsertSession(agent("second", "Second agent", "2026-11-09T08:00:00Z"));
+    await open();
+    await act(async () => button(t("todos.tab_existing")).click());
+    const group = document.querySelector<HTMLElement>('[role="radiogroup"]')!;
+    expect(document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent).toBe(t("todos.pick_agent"));
+    const radios = () => [...group.querySelectorAll<HTMLButtonElement>('button[role="radio"]')];
+    expect(radios().map((r) => r.textContent)).toEqual([expect.stringContaining("First agent"), expect.stringContaining("Second agent")]);
+    expect(radios().map((r) => [r.getAttribute("aria-checked"), r.tabIndex])).toEqual([["true", 0], ["false", -1]]);
+    act(() => radios()[0].focus());
+    await act(async () => radios()[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(radios().map((r) => [r.getAttribute("aria-checked"), r.tabIndex])).toEqual([["false", -1], ["true", 0]]);
+    expect(document.activeElement).toBe(radios()[1]);
+    // from the last, round to the first, and back
+    await act(async () => radios()[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(radios().map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    await act(async () => radios()[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(radios().map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    // a tap picks as well
+    await act(async () => radios()[0].click());
+    expect(radios().map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    await act(async () => radios()[1].click());
+    await act(async () => button(t("todos.send_and_hand")).click());
+    await flush();
+    expect(requests.filter((r) => r.init.method === "POST").map((r) => r.path)).toContain("/sessions/mac/second/messages");
+  });
 });

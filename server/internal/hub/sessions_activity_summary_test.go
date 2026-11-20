@@ -69,6 +69,13 @@ func TestRuntimeSummaryKeepsTheModelPick(t *testing.T) {
 	}
 }
 
+func TestRuntimeSummaryKeepsEffortChange(t *testing.T) {
+	row := runtimeSummary(proto.Session{Effort: "low", PendingEffort: new("high"), EffortChangeFailed: true})
+	if row.Effort != "low" || row.PendingEffort == nil || *row.PendingEffort != "high" || !row.EffortChangeFailed {
+		t.Fatalf("effort status lost: %+v", row)
+	}
+}
+
 // A Just finished row stays one on its summary row (#9751): the apps' lists are mostly summary rows, and the web drops
 // what a summary row leaves out of work.
 func TestRuntimeSummaryKeepsJustFinished(t *testing.T) {

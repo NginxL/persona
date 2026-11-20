@@ -163,7 +163,7 @@ func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.
 	}
 	switch {
 	case p.Device == DeviceAll && p.Method == DeviceInteractionsList:
-		out, err := json.Marshal(map[string]any{"interactions": s.pendingInteractions()})
+		out, err := json.Marshal(map[string]any{"interactions": s.visiblePendingInteractions()})
 		return out, true, err
 	case p.Device == DeviceAll:
 		return nil, false, nil

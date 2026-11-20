@@ -74,8 +74,9 @@ func (s *Service) supervisionInstructions(ctx context.Context, machine, id strin
 	} else if guest {
 		return "", nil
 	}
-	// A leader's own direction notes follow its policy (direction_notes.go): changing them restarts only this one.
-	return s.leaderPolicy(ctx, id, prompts.RenderSupervisionInstructions()), nil
+	// A leader's own direction notes follow its policy (direction_notes.go): changing them restarts only this one, on
+	// a send that finds it idle.
+	return s.leaderPolicy(ctx, id, prompts.RenderSupervisionInstructions(), leadIdle(c, known)), nil
 }
 
 func (s *Service) putSupervisionInstructions(ctx context.Context, machine, id string, p map[string]any) error {

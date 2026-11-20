@@ -53,6 +53,7 @@ var turnAfterTurn = []string{
 // six weeks earlier, still written to in its first day's directory, outside the two weeks node looked at — showed a
 // finished thread, idle, its new turn nowhere. Each pane's title names its thread.
 func TestCodexPanesAreFoundByTheThreadInTheirTitle(t *testing.T) {
+	withCodexWaits(t)
 	n, home := testNode(t)
 	n.metas, n.bgScans, n.panes, n.panePIDs = map[string]quickMeta{}, map[string]*bgScan{}, map[string]string{}, map[string]panePID{}
 	now := time.Now()
@@ -86,12 +87,16 @@ func TestCodexPanesAreFoundByTheThreadInTheirTitle(t *testing.T) {
 	n.panes["w:p9"] = staleStart
 	n.setAgents([]host.Agent{
 		pane("w:p9", "Unrecognised current title | repo", proto.StatusBlocked),
-		pane("w:p1", "repo", proto.StatusIdle), // a new thread: no name, guessed after the named ones
+		pane("w:p1", "repo", proto.StatusIdle), // no thread name or identity yet
 		pane("w:p2", "[ . ] Action Required | 补测多客户端请求特征 | repo", proto.StatusBlocked),
 		pane("w:p3", "[ ! ] Action Required | 一个很长很长的线程名字会... | repo", proto.StatusBlocked),
 		resumed,
 	})
-	want := map[string]string{"w:p5": oldThread, "w:p2": newThread, "w:p3": longName, "w:p1": otherNew}
+	wait := n.codexWaitOf("w:p1")
+	if wait == nil || !isCodexWaitID(wait.id) {
+		t.Fatal("the unnamed pane needs its own waiting row")
+	}
+	want := map[string]string{"w:p5": oldThread, "w:p2": newThread, "w:p3": longName, "w:p1": wait.id}
 	for id, a := range n.agents {
 		if want[a.PaneID] != id {
 			t.Errorf("pane %s shows %s, want %s", a.PaneID, id, want[a.PaneID])

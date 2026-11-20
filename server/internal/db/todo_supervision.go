@@ -160,11 +160,11 @@ func (d *DB) ReviewDoneTodo(ctx context.Context, id, reason string, accepted boo
 // LinkTodoReviewer records the independent reviewer of a supervised task's change (#2173) on its todo: source
 // "review", via the review run's id, released from the start, so it never counts as one of the task's working agents
 // (the judge, rework, closing). Written once; a link already there stays as it is.
-func (d *DB) LinkTodoReviewer(ctx context.Context, todoID, machineID, sessionID, title, cwd, via string, at time.Time) error {
+func (d *DB) LinkTodoReviewer(ctx context.Context, todoID, machineID, sessionID, title, cwd, agent, via string, at time.Time) error {
 	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_agents (todo_id, machine_id, session_id, linked_at, released_at, title, cwd, agent, start_error, source, via)
-		SELECT $1, $2, $3, $4, $4, $5, $6, '', '', 'review', $7 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
+		SELECT $1, $2, $3, $4, $4, $5, $6, $7, '', 'review', $8 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
 		ON CONFLICT (todo_id, machine_id, session_id) DO NOTHING`,
-		todoID, machineID, sessionID, at, title, cwd, via)
+		todoID, machineID, sessionID, at, title, cwd, agent, via)
 	if err != nil {
 		return err
 	}

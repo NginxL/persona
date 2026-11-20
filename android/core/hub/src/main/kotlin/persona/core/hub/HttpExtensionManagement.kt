@@ -62,7 +62,7 @@ import okhttp3.Response
  * (`plugins`, `plugin`, `plugin_name`): [legacy] is that hub (its hello has no `extensions` feature). The types read both.
  */
 class HttpExtensionManagement internal constructor(
-    private val request: suspend (String, String, RequestBody?) -> Response,
+    private val request: suspend (String, String, RequestBody?, Long?) -> Response,
     override val available: Flow<Boolean> = flowOf(true),
     /** The app's side of every view's context: time zone, language, platform, UI version (read on each call). */
     private val device: () -> ExtensionUiContext = { deviceContext() },
@@ -71,11 +71,20 @@ class HttpExtensionManagement internal constructor(
     private val streamConnection: OkHttpHubConnection? = null,
     private val iconBase: () -> String? = { streamConnection?.route?.value?.endpoint?.url },
 ) : ExtensionManagement {
+    internal constructor(
+        request: suspend (String, String, RequestBody?) -> Response,
+        available: Flow<Boolean> = flowOf(true),
+        device: () -> ExtensionUiContext = { deviceContext() },
+        legacy: Boolean = false,
+        streamConnection: OkHttpHubConnection? = null,
+        iconBase: () -> String? = { streamConnection?.route?.value?.endpoint?.url },
+    ) : this({ path, method, body, _ -> request(path, method, body) }, available, device, legacy, streamConnection, iconBase)
+
     override val nativeStream = streamConnection?.let { connection ->
         extensionStreamBindings(connection) { "paired" to "primary" }
     } ?: flowOf(null)
-    constructor(connection: OkHttpHubConnection, available: Flow<Boolean>, legacy: Boolean = false) : this({ path, method, body ->
-        connection.request(path, method, body, buffered = !persona.core.contracts.api.ExtensionIconPath.matches(path))
+    constructor(connection: OkHttpHubConnection, available: Flow<Boolean>, legacy: Boolean = false) : this({ path, method, body, timeout ->
+        connection.request(path, method, body, buffered = !persona.core.contracts.api.ExtensionIconPath.matches(path), readTimeoutSeconds = timeout)
     }, available, legacy = legacy, streamConnection = connection)
 
     private val base = if (legacy) "api/v1/plugins" else "api/v1/extensions"
@@ -172,7 +181,7 @@ class HttpExtensionManagement internal constructor(
     /** Catalog icons have their own allowlist; the signed ui.image route stays unchanged. */
     override suspend fun icon(path: String): ByteArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         require(persona.core.contracts.api.ExtensionIconPath.matches(path)) { "Invalid extension icon path" }
-        request(path, "GET", null).use { response ->
+        request(path, "GET", null, null).use { response ->
             if (!response.isSuccessful) throw HubFailure.from(response)
             val type = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
             if (type != "image/png") throw HubFailure(HubError.Protocol)
@@ -194,7 +203,7 @@ class HttpExtensionManagement internal constructor(
     override suspend fun uiImage(path: String): ByteArray {
         require(isImagePath(path)) { "Invalid image path" }
         return try {
-            request(path, "GET", null).use { response ->
+            request(path, "GET", null, null).use { response ->
                 if (!response.isSuccessful) throw HubFailure.from(response)
                 val type = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
                 if (type !in ImageTypes) throw HubFailure(HubError.Protocol)
@@ -246,7 +255,8 @@ class HttpExtensionManagement internal constructor(
      */
     private suspend fun uiCall(extension: String, ui: String, body: JsonObject): String = try {
         // the source subscription pages (#2041) are the manager's own, drawn and pressed as an extension's page
-        call(if (extension == SUBSCRIPTIONS_UI) "/api/v1/subscriptions/-/ui" else path(extension, "-", "ui", id(ui)), "POST", body)
+        call(if (extension == SUBSCRIPTIONS_UI) "/api/v1/subscriptions/-/ui" else path(extension, "-", "ui", id(ui)), "POST", body,
+            readTimeoutSeconds = UI_READ_TIMEOUT_SECONDS)
     } catch (failure: HubFailure) {
         if (failure.status == 404 && failure.code == "unsupported") throw ExtensionUiUnsupported()
         if (failure.status == 404 && failure.code == "not_found") throw ExtensionUiNotFound(failure.message)
@@ -399,8 +409,8 @@ class HttpExtensionManagement internal constructor(
         return lines.mapNotNull { runCatching { JsonCodec.decodeFromJsonElement(SubscriptionSummaryLine.serializer(), it) }.getOrNull() }
     }
 
-    private suspend fun call(path: String, method: String, body: JsonObject? = null): String = try {
-        request(path, method, body?.toString()?.toRequestBody(json)).use { response ->
+    private suspend fun call(path: String, method: String, body: JsonObject? = null, readTimeoutSeconds: Long? = null): String = try {
+        request(path, method, body?.toString()?.toRequestBody(json), readTimeoutSeconds).use { response ->
             if (!response.isSuccessful) throw HubFailure.from(response)
             response.body?.string().orEmpty()
         }
@@ -469,6 +479,8 @@ class HttpExtensionManagement internal constructor(
          * (#9727). The native stream sends the same version, but its components still exclude graphs and receive rows.
          */
         const val UI_VERSION = 10
+        /** Exceeds the hub's 20 s uiTimeout (server/internal/extmgr/extension_ui.go) and matches iOS APIClient / ExtensionUIStreamController (30 s). */
+        internal const val UI_READ_TIMEOUT_SECONDS = 30L
 
         /** The hub's own picture route (UI version 6), the one path a view's picture is fetched from with credentials. */
         private val ImagePath = Regex("/api/v1/extensions/[A-Za-z0-9_-]{1,64}/-/image/[A-Za-z0-9_.-]{1,1900}")

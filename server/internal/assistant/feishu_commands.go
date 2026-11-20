@@ -161,8 +161,6 @@ func (s *Service) botCommand(ctx context.Context, f FeishuFeatures, messageID, t
 // statusPendingMax bounds a /status card's pending rows so a long queue can't get the card refused.
 const statusPendingMax = 5
 
-var ixIcons = map[string]string{proto.IxQuestion: "❓ ", proto.IxPlan: "📋 ", proto.IxPermission: "🔐 ", proto.IxScreen: "🖥 ", proto.IxElicitation: "📝 "}
-
 // pendingQuestion is one line saying what a pending interaction waits for; "" when it says nothing.
 func pendingQuestion(ix proto.Interaction) string {
 	switch ix.Kind {
@@ -194,6 +192,10 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 	to := i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": feishubot.EscapeMarkdown(label)})
 	head.WriteString(to)
 	fb.WriteString(fallbackText.Replace(i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": label}))) // ends its own line
+	if rt.secondary != "" {
+		head.WriteString(feishubot.EscapeMarkdown(rt.secondary) + "\n")
+		fb.WriteString(fallbackText.Replace(rt.secondary) + "\n")
+	}
 	if running := len(s.channelRuns(channel.Feishu)); running > 0 {
 		waiting := i18n.T(l, "assistant-feishu_cards.status_waiting", i18n.Args{"count": running})
 		head.WriteString(waiting)
@@ -213,17 +215,17 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 			}
 		}
 	}
-	stateKey := "assistant-feishu_cards.status_state_offline" // offline, unknown or unset: never an idle machine
+	stateKey, color := "assistant-feishu_cards.status_state_offline", feishubot.Neutral // offline, unknown or unset: never an idle machine
 	switch sess.State {
 	case proto.StateNeedsYou:
-		stateKey = "assistant-feishu_cards.status_state_waiting"
+		stateKey, color = "assistant-feishu_cards.status_state_waiting", feishubot.Orange
 	case proto.StateWorking:
-		stateKey = "assistant-feishu_cards.status_state_working"
+		stateKey, color = "assistant-feishu_cards.status_state_working", feishubot.Blue
 	case proto.StateUnread, proto.StateIdle:
 		stateKey = "assistant-feishu_cards.status_state_idle"
 	}
 	state := i18n.T(l, stateKey)
-	line := state
+	line := feishubot.InlineTag(state, color)
 	fmt.Fprintf(&fb, "%s\n", fallbackText.Replace(state))
 	if sess.LastText != "" {
 		last := clip(oneLine(sess.LastText), 90)
@@ -238,7 +240,7 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 	card.Markdown(line)
 
 	var pending []proto.Interaction
-	for _, ix := range s.pendingInteractions() {
+	for _, ix := range s.visiblePendingInteractions() {
 		if ix.MachineID == rt.machine && ix.SessionID == sess.SessionID && pendingQuestion(ix) != "" {
 			pending = append(pending, ix)
 		}
@@ -252,16 +254,25 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 		fb.WriteString(none + "\n")
 		return card, strings.TrimSpace(fb.String())
 	}
-	open := s.openButton(ctx, rt.machine, sess.SessionID) // every row is the same conversation: build it once
+	open := s.openButton(ctx, rt.machine, sess.SessionID) // every row is the same conversation: one link under them
 	shown := pending
 	if len(pending) > statusPendingMax {
 		shown = pending[:statusPendingMax]
 	}
 	for _, ix := range shown {
 		q := clip(pendingQuestion(ix), 120)
-		card.Markdown(ixIcons[ix.Kind] + "**" + feishubot.EscapeMarkdown(q) + "**").Buttons(open)
-		fmt.Fprintf(&fb, "- %s%s\n", ixIcons[ix.Kind], fallbackText.Replace(q))
+		kind := ""
+		if key := ixKindTags[ix.Kind]; key != "" {
+			kind = i18n.T(l, key)
+		}
+		md := "**" + feishubot.EscapeMarkdown(q) + "**"
+		if kind != "" {
+			md = feishubot.InlineTag(kind, feishubot.Orange) + " " + md
+		}
+		card.Markdown(md)
+		fmt.Fprintf(&fb, "- %s\n", strings.TrimSpace(kind+" "+fallbackText.Replace(q)))
 	}
+	card.AppendToLinks(open)
 	if more := len(pending) - len(shown); more > 0 {
 		key := "assistant-feishu_cards.status_more_pending"
 		if open == nil { // no web app to send the reader to: just count them
@@ -405,7 +416,7 @@ func (s *Service) conversationsCard(ctx context.Context) (*feishubot.Card, strin
 			line += " · " + botAgo(l, sess.UpdatedAt)
 		}
 		if sess.LastText != "" {
-			line += "\n" + feishubot.EscapeMarkdown(clip(oneLine(sess.LastText), 80))
+			line += "\n<font color='grey'>" + feishubot.EscapeMarkdown(clip(oneLine(sess.LastText), 80)) + "</font>"
 		}
 		kind := targetPersona
 		if sess.SessionID == main {
@@ -446,7 +457,7 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 	for _, d := range s.devices(ctx) {
 		list, _ := s.sessions(ctx, d.ID)
 		for _, sess := range list {
-			if sess.Assistant || sess.State == proto.StateOffline || sess.State == proto.StateUnknown {
+			if sess.Assistant || sess.HiddenByDirectory() || sess.State == proto.StateOffline || sess.State == proto.StateUnknown {
 				continue
 			}
 			if sess.State == proto.StateIdle && time.Since(sess.UpdatedAt) > 48*time.Hour {
@@ -468,7 +479,7 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 	})
 	l := s.botLang(ctx)
 	title := i18n.T(l, "assistant-feishu_cards.agents_title")
-	c := feishubot.NewCard(title, feishubot.Purple, i18n.T(l, "assistant-feishu_cards.agents_summary"))
+	c := feishubot.NewCard(title, feishubot.Blue, i18n.T(l, "assistant-feishu_cards.agents_summary"))
 	startNew := feishubot.Btn(i18n.T(l, "assistant-feishu_cards.start_new"), feishubot.Primary, map[string]any{"a": "start_form"})
 	if len(rows) == 0 {
 		empty := i18n.T(l, "assistant-feishu_cards.no_agents")
@@ -476,7 +487,7 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 	}
 	var b strings.Builder
 	b.WriteString(title + "\n")
-	icons := map[string]string{proto.StateNeedsYou: "🔴", proto.StateWorking: "🟢", proto.StateUnread: "🔵", proto.StateIdle: "⚪️"}
+	preferTab := s.useHerdrTabName(ctx)
 	for i, r := range rows {
 		if i == 10 {
 			more := i18n.T(l, "assistant-feishu_cards.more_agents", i18n.Args{"count": len(rows) - 10})
@@ -484,15 +495,13 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 			b.WriteString(more + "\n")
 			break
 		}
-		label := clip(oneLine(agentLabel(r.sess)), botListNameMost)
+		primary, secondary := feishuSessionNames(r.sess, preferTab)
+		label := clip(oneLine(primary), botListNameMost)
 		name := clip(oneLine(r.d.Name), botListNameMost)
-		line := icons[r.sess.State] + " **" + feishubot.EscapeMarkdown(label) + "** · " + feishubot.EscapeMarkdown(name) + " · " + i18n.T(l, "assistant-feishu_cards.state_"+r.sess.State)
-		if r.sess.LastText != "" {
-			line += "\n" + feishubot.EscapeMarkdown(clip(oneLine(r.sess.LastText), 90))
-		}
-		c.Markdown(line).Buttons(feishubot.Btn(i18n.T(l, "assistant-feishu_cards.chat_here"), feishubot.Default,
-			map[string]any{"a": "switch", "k": targetAgent, "m": r.d.ID, "s": r.sess.SessionID, "t": label + " · " + name}))
-		fmt.Fprintf(&b, "- %s %s · %s\n", icons[r.sess.State], fallbackText.Replace(label), fallbackText.Replace(name))
+		// The row is pressed whole: the chat's messages go to that agent from then on.
+		c.Row(map[string]any{"a": "switch", "k": targetAgent, "m": r.d.ID, "s": r.sess.SessionID, "t": label + " · " + name},
+			agentRowMarkdown(l, label, secondary, name, r.sess, 90))
+		fmt.Fprintf(&b, "- %s · %s · %s\n", fallbackText.Replace(label), fallbackText.Replace(name), i18n.T(l, "assistant-feishu_cards.state_"+r.sess.State))
 	}
 	return c.Buttons(startNew), strings.TrimSpace(b.String())
 }
@@ -506,7 +515,7 @@ func (s *Service) startAgentCard(ctx context.Context, prompt string) *feishubot.
 		}
 	}
 	l := s.botLang(ctx)
-	c := feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.start_title"), feishubot.Purple, i18n.T(l, "assistant-feishu_cards.start_title"))
+	c := feishubot.NewCard(i18n.T(l, "assistant-feishu_cards.start_title"), feishubot.Blue, i18n.T(l, "assistant-feishu_cards.start_title"))
 	if len(opts) == 0 {
 		return c.Markdown(i18n.T(l, "assistant-feishu_cards.no_machines"))
 	}

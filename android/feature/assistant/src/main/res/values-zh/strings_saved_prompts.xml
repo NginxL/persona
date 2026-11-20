@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_saved_prompts_in_chats">聊天中</string>
+    <string name="assistant_saved_prompts_title">已保存的提示词</string>
+    <string name="assistant_saved_prompts_entry">从聊天的 / 列表复用常用指令</string>
+    <string name="assistant_saved_prompts_new">新建提示词</string>
+    <string name="assistant_saved_prompts_edit">编辑提示词</string>
+    <string name="assistant_saved_prompts_actions">/%1$s 的操作</string>
+    <string name="assistant_saved_prompts_up">上移</string>
+    <string name="assistant_saved_prompts_down">下移</string>
+    <string name="assistant_saved_prompts_empty">没有已保存的提示词</string>
+    <string name="assistant_saved_prompts_use">在聊天中输入 /，即可将保存的提示词填入消息框。此列表在你的设备间同步。</string>
+    <string name="assistant_saved_prompts_unavailable">暂不支持保存提示词</string>
+    <string name="assistant_saved_prompts_unavailable_detail">请更新中枢，以便在此助理中使用已保存的提示词。</string>
+    <string name="assistant_saved_prompts_load_failed">无法加载已保存的提示词</string>
+    <string name="assistant_saved_prompts_write_failed">无法更改已保存的提示词。%1$s</string>
+    <string name="assistant_saved_prompts_save_failed">无法保存提示词。%1$s</string>
+    <string name="assistant_saved_prompts_delete_title">删除“/%1$s”？</string>
+    <string name="assistant_saved_prompts_delete_detail">这会将此提示词从所有设备的 / 列表中移除。</string>
+    <string name="assistant_saved_prompts_name">名称</string>
+    <string name="assistant_saved_prompts_name_hint">这是聊天中 / 后的一个词。</string>
+    <string name="assistant_saved_prompts_name_rule">请输入 1 至 32 个字母、数字、组合标记、连字符、下划线或句点。</string>
+    <string name="assistant_saved_prompts_name_taken">已存在同名提示词。</string>
+    <string name="assistant_saved_prompts_text">提示词内容</string>
+    <string name="assistant_saved_prompts_text_rule">请输入 1 至 8,000 个字符，可以使用换行和制表符。</string>
+    <string name="assistant_saved_prompts_text_count">%1$d / 8,000 个字符</string>
+</resources>

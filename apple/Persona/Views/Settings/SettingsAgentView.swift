@@ -5,6 +5,10 @@ struct SettingsAgentView: View {
     var body: some View {
         SettingsForm {
             Section {
+                NavigationLink { HiddenAgentDirsView() } label: {
+                    SettingsRow(title: String(localized: "agentDirs.title", defaultValue: "Agent Folders"), symbol: Theme.Icon.options, tint: Theme.ai)
+                }
+                .lineLimit(1)
                 NavigationLink(value: SettingsPage.claude) {
                     SettingsRow(title: String(localized: "Claude Code Settings"), symbol: Theme.Icon.options, tint: Theme.Hue.orange)
                 }

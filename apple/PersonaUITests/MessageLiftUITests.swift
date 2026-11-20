@@ -922,8 +922,9 @@ final class MessageLiftUITests: XCTestCase {
                         let y = probe.bottom ? f.maxY - 10 : f.minY + 10
                         guard band.contains(CGPoint(x: band.midX, y: y)), f.height >= 20 else { continue }
                         left.removeAll { $0.name == probe.name }
-                        // One line: its other end was this press already.
-                        if let other = pressedAt[probe.message], abs(other - y) < 20 { continue }
+                        // One line: its other end was this press already, except the reported second press at
+                        // long-end-top, which proves the first lift was really put back (#9687).
+                        if let other = pressedAt[probe.message], abs(other - y) < 20, probe.name != "long-end-top" { continue }
                         pressedAt[probe.message] = y
                         let at = CGPoint(x: min(f.minX + 24, band.maxX - 8), y: y)
                         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at.x, dy: at.y)).press(forDuration: 0.6)
@@ -967,12 +968,16 @@ final class MessageLiftUITests: XCTestCase {
         return lifted.waitForExistence(timeout: 2) && bar.exists
     }
 
-    /// A tap beside the lifted message puts it back (nothing is selected in it).
+    /// A tap on the scrim puts it back (nothing is selected in it). Below the message, clear the whole bar: Select
+    /// Messages extends past the lifted message's frame.
     @MainActor private func putTheLiftBack(_ name: String) {
         let l = lifted.frame
-        let y = l.minY > 140 ? l.minY / 2 : (l.maxY + app.frame.maxY) / 2
+        let select = app.buttons["chat.selectMessages"]
+        let bottom = select.exists ? max(l.maxY, select.frame.maxY) : l.maxY
+        let y = l.minY > 140 ? l.minY / 2 : (bottom + app.frame.maxY) / 2
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width * 0.1, dy: y)).tap()
         if lifted.exists { XCTAssertTrue(lifted.waitForNonExistence(timeout: 3), "\(name): the lift did not close") }
+        XCTAssertFalse(app.buttons["chat.pickCancel"].exists, "\(name): the scrim tap entered Select Messages")
     }
 
     /// Where to press words in the chat: down to a line above a folded message's Expand, which sits under what shows of

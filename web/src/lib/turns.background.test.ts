@@ -22,7 +22,7 @@ const narration = (seq: number): Item => ({ ...answer(seq, "Checking."), narrati
 const call = (seq: number, name: string, tool_input: Record<string, unknown> = {}): Item => ({ id: `t${seq}#0`, seq, role: "assistant", kind: "tool_use", tool_use_id: `call${seq}`, tool_name: name, tool_input });
 const result = (seq: number, use: Item, text = "ok", is_error = false): Item => ({ id: `r${seq}#0`, seq, role: "user", kind: "tool_result", tool_use_id: use.tool_use_id, text, is_error });
 
-const on = { background: true };
+const on = { background: true, main: true };
 const kinds = (lines: ChatLine[]) => lines.map((l) => l.kind);
 const users = (lines: ChatLine[]) => lines.flatMap((l) => l.kind === "segment" ? [l.seg.user] : l.kind === "supervision" ? l.lines.flatMap((c) => c.kind === "segment" ? [c.seg.user] : []) : []);
 
@@ -50,13 +50,23 @@ describe("background rounds in the main conversation", () => {
     }
   });
 
-  it("shows final replies from relayed messages and scheduled runs under the default fold setting", () => {
-    for (const input of [relayed(1), scheduled(1, "daily"), scheduled(1, "once")]) {
+  it("shows final replies from scheduled runs under the default fold setting", () => {
+    for (const input of [scheduled(1, "daily"), scheduled(1, "once")]) {
       const reply = answer(2, "The new release is ready.");
       const [line] = chatLines([input, reply], on);
       expect(line.kind === "segment" && line.seg.answer).toEqual(reply);
       expect(users([line])[0]?.promptHidden).toBe(input.injected ? true : undefined);
     }
+  });
+
+  it("keeps a routine main-conversation relay reply folded and replayable", () => {
+    const reply = answer(2, "The delegated check finished.");
+    const [line] = chatLines([relayed(1), reply], on);
+    expect(line.kind).toBe("supervision");
+    expect(line.kind === "supervision" && line.lines.flatMap((child) => child.kind === "segment" ? [child.seg.answer] : [])).toContainEqual(reply);
+    // The same round in a leader conversation keeps the existing visible-reply behavior.
+    const [leader] = chatLines([relayed(1), reply], { background: true });
+    expect(leader.kind).toBe("segment");
   });
 
   it("keeps a round that asked the user (ask_user) shown, its prompt still hidden", () => {

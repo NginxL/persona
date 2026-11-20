@@ -55,7 +55,10 @@ type chatReplyBook struct {
 	running sync.Mutex // one round's batches at a time
 	mu      sync.Mutex
 	told    map[string]*chatTold // by chatReplyKey
-	wg      sync.WaitGroup       // the rounds being told
+	// refused: by conversation, when the owner was pushed that it refused a chat_reply for good (chatReplyRefused); one
+	// push until a chat_reply goes into it again or chatReplyWindow is over. In memory: a restart may push once more.
+	refused map[string]time.Time
+	wg      sync.WaitGroup // the rounds being told
 }
 
 // chatTold is what one conversation was told of one chat: the messages told or queued (when last handed), and when a
@@ -92,6 +95,11 @@ func (b *chatReplyBook) pruneLocked(now time.Time) {
 		}
 		if len(told.ids) == 0 && now.Sub(told.went) > chatReplyGap {
 			delete(b.told, key)
+		}
+	}
+	for to, at := range b.refused {
+		if now.Sub(at) > chatReplyWindow {
+			delete(b.refused, to)
 		}
 	}
 }
@@ -334,19 +342,46 @@ func (s *Service) chatReplyGoing(to, thread string) bool {
 }
 
 // chatReplyDelivered: a chat_reply went into conversation to; the next one about that chat waits chatReplyGap. Its
-// messages count as told, also when it was queued before a restart.
+// messages count as told, also when it was queued before a restart. A refusal of to's is over: the next one is pushed.
 func (s *Service) chatReplyDelivered(to string, msg relayMsg) {
-	if msg.Chat == nil {
-		return
-	}
 	b := &s.chatReplies
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	delete(b.refused, to)
+	b.wentLocked(to, msg, time.Now())
+}
+
+// chatReplyRefused: conversation to refused chat_reply msg for good (relayRefused). It counts as gone for the gap, so
+// the chat's next batch waits chatReplyGap and what comes meanwhile merges into that one, not a try and a refusal per
+// batch; its messages count as told. True when the owner is to be pushed: the first such refusal by to since a
+// chat_reply last went into it, within chatReplyWindow.
+func (s *Service) chatReplyRefused(to string, msg relayMsg) bool {
+	b := &s.chatReplies
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	b.wentLocked(to, msg, now)
+	if at, pushed := b.refused[to]; pushed && now.Sub(at) <= chatReplyWindow {
+		return false
+	}
+	if b.refused == nil {
+		b.refused = map[string]time.Time{}
+	}
+	b.refused[to] = now
+	return true
+}
+
+// wentLocked notes chat_reply msg as gone into conversation to at now: the gap starts, its messages are told. b.mu is
+// held.
+func (b *chatReplyBook) wentLocked(to string, msg relayMsg, now time.Time) {
+	if msg.Chat == nil {
+		return
+	}
 	told := b.toldLocked(to, msg.Chat.Thread)
-	told.went = time.Now()
+	told.went = now
 	for _, id := range msg.Chat.IDs {
 		if _, ok := told.ids[id]; !ok {
-			told.ids[id] = told.went
+			told.ids[id] = now
 		}
 	}
 }

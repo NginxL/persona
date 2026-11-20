@@ -69,7 +69,7 @@ func archiveChat(it issue) kb.SourceChat {
 	owner, name, _ := strings.Cut(it.repo(), "/")
 	state, at := archiveState(it)
 	return kb.SourceChat{ID: fmt.Sprintf("%s-%s-%d", owner, name, it.Number), Name: fmt.Sprintf("%s#%d %s", name, it.Number, it.Title),
-		Kind: kind, UpdatedAt: it.UpdatedAt, State: state, StateAt: at}
+		Kind: kind, UpdatedAt: it.UpdatedAt, State: state, StateAt: at, SourceURL: it.HTMLURL}
 }
 
 // errArchiveMoved: GitHub answered with another thread than the one asked (a repository renamed or an issue moved).

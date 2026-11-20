@@ -3,6 +3,7 @@
   "computer_away": "The assistant's computer is not connected",
   "gone": "This conversation no longer exists",
   "sending_now": "This message is being sent right now. Try again in a moment.",
+  "busy": "Waits for this conversation's current work to finish, then goes in",
   "behind": "Waits behind earlier messages that did not go in",
   "may_have_gone_in": "It may already have gone in. Check the conversation before you retry",
   "not_saved": "This could not be saved. Try again in a moment."

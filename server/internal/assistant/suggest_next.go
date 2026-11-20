@@ -9,28 +9,16 @@ import (
 
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/ai"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The next-message suggestion (docs/assistant/assistant.md "Next-message suggestions", #4644): the strip over an
-// empty composer (#2978) has two sources and one field, proto.Session.Suggestion.
-//
-//   - A Claude Code session in a terminal keeps the one Claude Code draws on its own screen, which the node reads
-//     (node/suggestion.go). No model call is made for it here.
-//   - Every other chat (Persona's own conversations, Codex and the other runtimes, a Claude session with no terminal)
-//     gets one from a small model under the suggest.next purpose, when the user turned the switch on
-//     (Settings.NextSuggestions, off by default).
-//
-// One call per turn: after a turn that ended well (not failed, not interrupted, not a subagent's), and only while an
-// app has the chat open (the hub watches the session for it). Every app with the chat open sees the same one; a new
-// turn or a message going in drops it and cancels a call still on its way. The model reads at most the last
-// suggestMaxMessages visible user and assistant messages, suggestMaxChars characters in all: no tool calls or
-// results, no thinking, no images or attachments, and it runs with no tools. An answer that is not one short line
-// shows nothing: there is no stand-in and no retry. Whatever the source, a suggestion that names a command, a path, a
-// link, a secret-looking string or a risky action (riskyWords) is marked SuggestionRisky: the apps fill it in but
-// offer no one-tap send.
+// The strip over an empty composer displays Session.Suggestion. An agent can offer a specific next step
+// when it finishes a turn. Otherwise a Claude Code terminal can supply its native hint, or an opted-in
+// small model can propose one for a watched chat. All three go through the same risk check. The fill and
+// send actions belong to the owner (docs/assistant/assistant.md "Next-message suggestions").
 
 const purposeSuggestNext = "suggest.next"
 
@@ -45,9 +33,14 @@ const (
 // suggestCallTimeout bounds the whole suggestion (reading the messages, the model call); tests shorten it.
 var suggestCallTimeout = 45 * time.Second
 
-// nextSuggest is one session's hub-made suggestion: the one shown, or the call making it.
+type suggestedReply struct {
+	text     string
+	proposed bool // explicitly offered in the agent's final work report
+}
+
+// nextSuggest holds one session's visible suggestion or its in-flight read.
 type nextSuggest struct {
-	text   string
+	suggestedReply
 	cancel context.CancelFunc // the call still on its way; nil once it answered
 }
 
@@ -65,13 +58,9 @@ func (s *Service) nextSuggestionsOn(ctx context.Context) bool {
 	return v != nil && *v
 }
 
-// hubSuggests says whether the hub makes sess's suggestion: not for a Claude Code terminal session (it has its own),
-// nor for a subagent.
-func hubSuggests(sess *proto.Session) bool {
-	if sess.IsSubagent || sess.ParentThreadID != "" || strings.Contains(sess.SessionID, "@") {
-		return false
-	}
-	return !claudeInTerminal(sess)
+// Standalone chats can offer a reply; a child agent cannot speak for its parent's turn.
+func standaloneSuggestion(sess *proto.Session) bool {
+	return !sess.IsSubagent && sess.ParentThreadID == "" && !strings.Contains(sess.SessionID, "@")
 }
 
 // claudeInTerminal: Claude Code in a terminal pane, whose suggestion the node reads off the screen.
@@ -113,15 +102,15 @@ func (s *Service) suggestDrop(machine, sid string) bool {
 // the turn's one suggestion when the rules say so, and reports whether it did.
 func (s *Service) suggestTurnEnded(machine string, sess proto.Session) bool {
 	ctx := context.Background()
-	if !hubSuggests(&sess) || !s.nextSuggestionsOn(ctx) {
+	if !standaloneSuggestion(&sess) || sess.PendingInteractions > 0 || sess.Starting {
 		return false
 	}
 	if text, _ := latestTurnError(sess); text != "" { // a failed turn
 		return false
 	}
-	if !s.sessionWatched(machine, sess.SessionID) { // nobody has it open
-		return false
-	}
+	// An explicit proposal belongs to this turn even if its owner opens the app later.
+	// Only an opted-in, watched chat without its own terminal hint may call the model.
+	model := !claudeInTerminal(&sess) && s.sessionWatched(machine, sess.SessionID) && s.nextSuggestionsOn(ctx)
 	cctx, cancel := context.WithTimeout(ctx, suggestCallTimeout)
 	st := &nextSuggest{cancel: cancel}
 	k := [2]string{machine, sess.SessionID}
@@ -138,68 +127,79 @@ func (s *Service) suggestTurnEnded(machine string, sess proto.Session) bool {
 	}
 	go func() {
 		defer cancel()
-		text := s.makeSuggestion(cctx, machine, sess.SessionID)
+		reply := s.makeSuggestion(cctx, machine, sess.SessionID, model)
 		b.mu.Lock()
-		current := b.m[k] == st && cctx.Err() == nil
-		if current {
-			st.text, st.cancel = text, nil
-			if text == "" {
-				delete(b.m, k)
-			}
+		if b.m[k] != st {
+			reply = suggestedReply{} // a later turn owns the entry
+		} else if cctx.Err() != nil || reply.text == "" {
+			delete(b.m, k)
+			reply = suggestedReply{}
+		} else {
+			st.suggestedReply, st.cancel = reply, nil
 		}
 		done := b.done
 		b.mu.Unlock()
-		if !current {
-			text = ""
-		}
-		if text != "" {
+		if reply.text != "" {
 			s.publishSessions(machine) // the apps get it with the list
 		}
 		if done != nil {
-			done(machine, sess.SessionID, text)
+			done(machine, sess.SessionID, reply.text)
 		}
 	}()
 	return true
 }
 
-// hubSuggestions are the machine's hub-made suggestions shown now, by session; nil for none.
-func (s *Service) hubSuggestions(machine string) map[string]string {
+// hubSuggestions snapshots the machine's current suggestions by session.
+func (s *Service) hubSuggestions(machine string) map[string]suggestedReply {
 	b := &s.nextSug
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	var out map[string]string
+	var out map[string]suggestedReply
 	for k, st := range b.m {
 		if k[0] == machine && st.text != "" {
 			if out == nil {
-				out = map[string]string{}
+				out = map[string]suggestedReply{}
 			}
-			out[k[1]] = st.text
+			out[k[1]] = st.suggestedReply
 		}
 	}
 	return out
 }
 
-// decorateSuggestion puts the hub's suggestion on a session the node has none for, while it is not working, and
-// marks a risky one (from either source).
-func decorateSuggestion(sess *proto.Session, hub map[string]string) {
-	if sess.Suggestion == "" && sess.Status != proto.StatusWorking && hubSuggests(sess) {
-		sess.Suggestion = hub[sess.SessionID]
+// A reported next step takes precedence over a guess from the terminal or the small model.
+// Each source uses the same fill-only treatment for a risky suggestion.
+func decorateSuggestion(sess *proto.Session, hub map[string]suggestedReply) {
+	if r := hub[sess.SessionID]; r.text != "" && standaloneSuggestion(sess) &&
+		(sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle) && sess.PendingInteractions == 0 &&
+		(r.proposed || sess.Suggestion == "" && !claudeInTerminal(sess)) {
+		sess.Suggestion = r.text
 	}
 	sess.SuggestionRisky = sess.Suggestion != "" && suggestionRisky(sess.Suggestion)
 }
 
-// makeSuggestion reads the chat's last visible messages and asks the model for the user's next one; "" for none.
-func (s *Service) makeSuggestion(ctx context.Context, machine, sid string) string {
+// makeSuggestion reads one completed turn for an offered next step. A chat eligible for a
+// model suggestion reads its normal context once and uses it only if the agent offered none.
+func (s *Service) makeSuggestion(ctx context.Context, machine, sid string, model bool) suggestedReply {
 	var res struct {
 		Items []proto.Item `json:"items"`
 	}
-	if err := s.call(ctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": suggestTurns, "lazy_images": true}, &res); err != nil {
+	count := 1
+	if model {
+		count = suggestTurns
+	}
+	if err := s.call(ctx, machine, DeviceSessionItems, map[string]any{"session_id": sid, "turns": count, "lazy_images": true}, &res); err != nil {
 		s.logf("suggest %s: %v", short(sid), err)
-		return ""
+		return suggestedReply{}
+	}
+	if step := s.reportedNextStep(ctx, machine, sid, res.Items); step != "" {
+		return suggestedReply{text: step, proposed: true}
+	}
+	if !model || ctx.Err() != nil {
+		return suggestedReply{}
 	}
 	turns := suggestionTurns(res.Items)
 	if len(turns) == 0 {
-		return ""
+		return suggestedReply{}
 	}
 	system := prompts.RenderNextMessage(prompts.NextMessage{Language: answerLanguage(s.hello(ctx).Locale)})
 	r, err := s.purposeModel(purposeSuggestNext).Chat(ctx, ai.Request{System: system,
@@ -208,12 +208,50 @@ func (s *Service) makeSuggestion(ctx context.Context, machine, sid string) strin
 		if ctx.Err() == nil && !ai.IsPaused(err) {
 			s.logf("suggest %s: %v", short(sid), err)
 		}
-		return ""
+		return suggestedReply{}
 	}
 	if r.Truncated {
+		return suggestedReply{}
+	}
+	return suggestedReply{text: cleanSuggestion(r.Text)}
+}
+
+// reportedNextStep only reads the most recent assistant answer, after the last user input,
+// tool or thought. A truncated preview cannot establish where its work report ends.
+func (s *Service) reportedNextStep(ctx context.Context, machine, sid string, items []proto.Item) string {
+	_, last := splitLastTurn(items)
+	for i := len(last) - 1; i >= 0; i-- {
+		it := last[i]
+		if it.Kind == turnDurationKind || it.Kind == proto.KindNotice && !it.IsError && it.Text != userStoppedNotice && it.ModelRefusal == nil {
+			continue
+		}
+		if !proposalAnswer(it) {
+			return ""
+		}
+		if it.FullSize > 0 {
+			if it.ID == "" {
+				return ""
+			}
+			full, err := (busTranscript{s: s, machine: machine, session: sid}).Full(ctx, it.ID)
+			if err != nil || full.ID != it.ID || full.FullSize > 0 || !proposalAnswer(full) {
+				return ""
+			}
+			it = full
+		}
+		if record := deliveryCloseout(it.Text); record != "" {
+			c, _, _ := closeout.Parse(record)
+			return c.Next
+		}
 		return ""
 	}
-	return cleanSuggestion(r.Text)
+	return ""
+}
+
+// Only the agent's own visible text can offer its owner an action.
+func proposalAnswer(it proto.Item) bool {
+	return it.Role == "assistant" && it.Kind == proto.KindText && !it.IsError && it.Task == nil &&
+		it.ModelRefusal == nil && !it.CodexHeartbeatQuiet &&
+		it.Injected == nil && it.Source == nil && it.From == "" && !it.Wake && it.ToolUseID == "" && it.Image == nil
 }
 
 // suggestionTurns are the visible user and assistant messages the model reads: the last suggestMaxMessages, oldest

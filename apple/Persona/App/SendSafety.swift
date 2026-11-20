@@ -59,7 +59,60 @@ nonisolated struct HeldRetryOffer: Hashable, Codable {
     }
 }
 
+/// The one startup read, plus the receipt changes and session rows that arrive before it finishes.
+/// Everything but the detached file read stays on AppModel's main actor.
+final class HeldRetryRestoration {
+    let read: Task<Set<HeldRetryOffer>, Never>
+    var done: Task<Void, Never>?
+    var changes: [(Set<HeldRetryOffer>) -> Set<HeldRetryOffer>] = []
+    var reconciliations: [[MachineRef: [Session]]] = []
+    var recordsChanges = true
+
+    init(in folder: URL?) {
+        read = Task.detached(priority: .utility) { HeldRetryOffer.read(in: folder) }
+    }
+}
+
 extension AppModel {
+    func startHeldRetryRestoration() {
+        let restoration = HeldRetryRestoration(in: stateFolder)
+        heldRetryRestoration = restoration
+        restoration.done = Task { [weak self] in
+            let stored = await restoration.read.value
+            self?.finishHeldRetryRestoration(stored)
+        }
+    }
+
+    private func waitForHeldRetryRestoration() async {
+        if let done = heldRetryRestoration?.done { await done.value }
+    }
+
+    private func finishHeldRetryRestoration(_ stored: Set<HeldRetryOffer>) {
+        guard let restoration = heldRetryRestoration else { return }
+        var restored = stored
+        for change in restoration.changes { restored = change(restored) }
+        let reconciliations = restoration.reconciliations
+        // Publish without rewriting an unchanged file or recording the restoration as another change.
+        restoration.recordsChanges = false
+        heldRetryReceipts = restored
+        heldRetryRestoration = nil
+        if restored != stored { HeldRetryOffer.save(restored, in: stateFolder) }
+        for rows in reconciliations { reconcileHeldRetries(rows) }
+    }
+
+    /// Apply a change now and replay it over the older disk snapshot if the startup read is still pending.
+    /// Unlike a property observer, this also records a clear or removal which is a no-op on the initially empty set.
+    func updateHeldRetryReceipts(_ change: @escaping (Set<HeldRetryOffer>) -> Set<HeldRetryOffer>) {
+        guard let restoration = heldRetryRestoration else {
+            heldRetryReceipts = change(heldRetryReceipts)
+            return
+        }
+        restoration.changes.append(change)
+        restoration.recordsChanges = false
+        heldRetryReceipts = change(heldRetryReceipts)
+        restoration.recordsChanges = true
+    }
+
     /// Managing a held copy belongs to this device's own credential at the hub that advertised it.
     func canManageHeld(_ group: String) -> Bool {
         heldPairing(group) != nil
@@ -85,6 +138,10 @@ extension AppModel {
 
     /// Reconcile only the receipt's own operation, on its paired manager. A paged/filtered list can omit a whole chat.
     func reconcileHeldRetries(_ rows: [MachineRef: [Session]]) {
+        if let restoration = heldRetryRestoration {
+            restoration.reconciliations.append(rows)
+            return
+        }
         guard !heldRetryReceipts.isEmpty else { return }
         let remaining = heldRetryReceipts.filter { offer in
             let target = offer.target, key = target.session
@@ -92,7 +149,7 @@ extension AppModel {
                   heldTarget(key, target.id, row: row) == target else { return true }
             return row.undelivered?.first { $0.id == target.id }.flatMap { HeldRetryOffer(target, $0) } == offer
         }
-        if remaining != heldRetryReceipts { heldRetryReceipts = remaining }
+        if remaining != heldRetryReceipts { updateHeldRetryReceipts { _ in remaining } }
     }
 
     /// Only the computer being away is recoverable by holding a message. Its manager must still be reachable.
@@ -116,7 +173,15 @@ extension AppModel {
     func sendPending(_ key: SessionKey, _ msg: PendingMessage, clearDraft: String? = nil) async -> SendOutcome {
         noteFailure(key, msg.id, nil)
         // Restored outbox entries wait for metadata; opaque IDs do not identify a writable source.
-        guard let session = session(key) else { return .waiting }
+        guard let session = latest(key) else { return .waiting }
+        if let effort = effortRequests[key] ?? session.pendingEffort {
+            holdForEffort(key, msg.id, effort: effort)
+            return .effortWaiting
+        }
+        if let effort = msg.requiredEffort, session.effort != effort {
+            noteFailure(key, msg.id, String(localized: "Thinking effort could not be confirmed. Choose it again before resending."))
+            return .failed
+        }
         guard session.canSend else {
             noteFailure(key, msg.id, session.sourceSubtitle ?? String(localized: "This session is view-only"))
             return .failed
@@ -140,14 +205,14 @@ extension AppModel {
             // the outbox's clock; once the drop's grace is over the outbox takes it (flushOutbox).
             let launcher = assistantLaunchers[key], model = assistantModels[key]
             #if os(iOS)
-            let holds = !session.assistant && canManageHeld(key.group)
+            let holds = !session.assistant && msg.requiredEffort == nil && canManageHeld(key.group)
             #else
             let holds = false
             #endif
             let reply = try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
                 try await api.sendReply(key, text: msg.text, images: msg.images, launcher: launcher, model: model,
                                         clientMsgID: msg.id.uuidString, clearDraft: clearDraft, via: msg.via, opID: msg.id,
-                                        holdsAgentMessages: holds)
+                                        holdsAgentMessages: holds, waitForEffort: session.agent == "claude")
             }
             if reply.kept {
                 // The manager kept it. Its row now carries its status to every device.
@@ -161,6 +226,15 @@ extension AppModel {
                 toast = Toast(String(localized: "Sent. The Agent will read it after the question on the computer is answered."))
             }
             return .sent
+        } catch let e as APIError where e.code == "effort_change_pending" {
+            // The node refused before typing. The operation receipt keeps the refusal under this ID.
+            markRefused(key, msg.id)
+            guard let effort = e.fields["effort"] else {
+                noteFailure(key, msg.id, e.shown ?? e.localizedDescription)
+                return .failed
+            }
+            holdForEffort(key, msg.id, effort: effort)
+            return .effortWaiting
         } catch let e as APIError where e.code == "input_draft" {
             Haptics.attention()
             markRefused(key, msg.id)
@@ -219,6 +293,8 @@ extension AppModel {
     }
 
     private func changeUndelivered(_ key: SessionKey, _ id: String, retry: Bool, target: HeldActionTarget?, offer: HeldRetryOffer?) async {
+        // The existing guards below must see the restored receipt before another Retry or Delete can run.
+        await waitForHeldRetryRestoration()
         guard let row = latest(key), let message = row.undelivered?.first(where: { $0.id == id }),
               !retry || message.canRetry, let client = api(key.group) else { return }
         if message.heldForComputer {
@@ -263,7 +339,7 @@ extension AppModel {
             let stillHere = heldTarget(key, target.id, row: row) == target
             if !retry {
                 if stillHere { patchListedSession(key) { $0.undelivered?.removeAll { $0.id == target.id } } }
-                heldRetryReceipts = heldRetryReceipts.filter { $0.target != target }
+                updateHeldRetryReceipts { receipts in receipts.filter { $0.target != target } }
                 return
             }
             guard let offer = HeldRetryOffer(target, message),
@@ -272,7 +348,7 @@ extension AppModel {
             // The POST belongs to this pairing even if its chat is no longer showing. A push on this same
             // target may already have replaced or removed its instruction while the request was in flight.
             if stillHere, row?.undelivered?.first(where: { $0.id == target.id }).flatMap({ HeldRetryOffer(target, $0) }) != offer { return }
-            heldRetryReceipts.insert(offer)
+            updateHeldRetryReceipts { $0.union([offer]) }
             guard stillHere, let row else { return }
             // The lookup may lag a push about another device's actions. Update only the operation we asked about
             // and keep a change to that operation which landed during the read. A missing session can be temporary.
@@ -287,13 +363,18 @@ extension AppModel {
                 if let next { row.undelivered?[index] = next }
                 else { row.undelivered?.remove(at: index) }
             }
-            heldRetryReceipts.remove(offer)
+            updateHeldRetryReceipts { $0.subtracting([offer]) }
         } catch {
             if heldTarget(key, target.id, row: latest(key)) == target { show(error) }
         }
     }
 
-    private func noteFailure(_ key: SessionKey, _ id: UUID, _ reason: String?) {
+    private func holdForEffort(_ key: SessionKey, _ id: UUID, effort: String) {
+        guard let i = chat(key).pending.firstIndex(where: { $0.id == id }) else { return }
+        chat(key).pending[i].requiredEffort = effort
+    }
+
+    func noteFailure(_ key: SessionKey, _ id: UUID, _ reason: String?) {
         guard let i = chat(key).pending.firstIndex(where: { $0.id == id }) else { return }
         chat(key).pending[i].failure = reason
     }

@@ -26,11 +26,12 @@ import (
 // fleetDevs is the manager's device layer for the fleet's tests: machines with the sessions their nodes list, and a
 // node whose calls a test answers.
 type fleetDevs struct {
-	mu       sync.Mutex
-	machines map[string]*fleetNode
-	order    []string
-	usage    assistantwire.UsageSummary
-	capacity proto.CapacitySnapshot // what CapacitySnapshot answers (capacity_test.go)
+	mu           sync.Mutex
+	machines     map[string]*fleetNode
+	order        []string
+	usage        assistantwire.UsageSummary
+	capacity     proto.CapacitySnapshot // what CapacitySnapshot answers (capacity_test.go)
+	gatewayRetry func(source, provider string, now time.Time) time.Time
 	// attention is every Persona Link summary handed over (SetAttention), in order.
 	attention []link.Attention
 	// linkDesktop: the manager has a Persona Link desktop; confirmed: the cards its app confirmed it handed to
@@ -52,11 +53,16 @@ type fleetDevs struct {
 
 type fleetNode struct {
 	name, home, trust string
+	homeReal          string // home with its links followed, when the node says it is another path
 	sessions          []proto.Session
 	lists             int // how many times its whole list was read (Sessions)
 	connected         time.Time
 	// away: its node is not connected (Summary and List say not reachable); its sessions stay as last listed.
 	away bool
+	// shownUntil: shown as before until then while its node is away (Shown, devices.Shown.Until); unlisted: its node
+	// has given no list on this connection yet (Shown's Listed false).
+	shownUntil time.Time
+	unlisted   bool
 	// call answers the node's methods (nil: {}); calls are the ones it got.
 	call  func(method string, params json.RawMessage) (any, error)
 	calls []fleetCall
@@ -141,7 +147,7 @@ func (d *fleetDevs) List() []devices.Summary {
 	var out []devices.Summary
 	for _, id := range d.order {
 		n := d.machines[id]
-		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: !n.away, Reachable: !n.away})
+		out = append(out, devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Trust: n.trust, Online: !n.away, Reachable: !n.away})
 	}
 	return out
 }
@@ -160,7 +166,18 @@ func (d *fleetDevs) Summary(id string) (devices.Summary, bool) {
 	if n == nil || !slices.Contains(d.order, id) {
 		return devices.Summary{}, false
 	}
-	return devices.Summary{ID: id, Name: n.name, Home: n.home, Trust: n.trust, Online: !n.away, Reachable: !n.away}, true
+	return devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Trust: n.trust, Online: !n.away, Reachable: !n.away}, true
+}
+
+// Shown is the node's shownUntil and unlisted, as the devices say them.
+func (d *fleetDevs) Shown(id string) (devices.Shown, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.machines[id]
+	if n == nil {
+		return devices.Shown{}, false
+	}
+	return devices.Shown{Listed: !n.unlisted, Until: n.shownUntil}, true
 }
 
 func (d *fleetDevs) Sessions(id string) ([]proto.Session, bool) {
@@ -242,6 +259,13 @@ func (d *fleetDevs) CapacitySnapshot(context.Context) proto.CapacitySnapshot {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.capacity
+}
+
+func (d *fleetDevs) GatewayRetryAt(source, provider string, now time.Time) time.Time {
+	if d.gatewayRetry != nil {
+		return d.gatewayRetry(source, provider, now)
+	}
+	return time.Time{}
 }
 
 func (d *fleetDevs) SetAttention(a link.Attention) {

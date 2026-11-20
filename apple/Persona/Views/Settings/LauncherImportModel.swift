@@ -26,6 +26,8 @@ import Observation
 
     private(set) var phase: Phase = .machine
     var machine = ""
+    /// Set only when the user chose a single alias in Add Provider.
+    var alias: String?
     private(set) var preview: LauncherImportPreview?
     /// The providers ticked, by name (all of them once the preview is in).
     var picked: Set<String> = []
@@ -51,7 +53,7 @@ import Observation
         error = nil
         outdated = false
         do {
-            let p = try await api.launcherImportPreview(machine: machine)
+            let p = try await api.launcherImportPreview(machine: machine, alias: alias)
             preview = p
             picked = Set(p.providers.map(\.name))
             phase = .preview
@@ -69,7 +71,7 @@ import Observation
         error = nil
         do {
             // In the order the hub listed them.
-            result = try await api.importLaunchers(machine: machine, providers: providers.map(\.name).filter(picked.contains))
+            result = try await api.importLaunchers(machine: machine, providers: providers.map(\.name).filter(picked.contains), alias: alias)
             phase = .done
         } catch {
             self.error = error.shown ?? error.localizedDescription
@@ -80,6 +82,7 @@ import Observation
     /// Back to choosing a machine.
     func restart() {
         phase = .machine
+        alias = nil
         preview = nil
         picked = []
         result = nil

@@ -17,7 +17,10 @@ vi.mock("../settings/ExtensionView", () => ({
 }));
 
 import { loadPages } from "../../lib/lazy-page";
-import { OverviewCards } from "./ExtensionSlots";
+// Overview draws its rows of cards (#10905), and holds their one fold
+import { OverviewBody } from "../OverviewBody";
+
+const NONE = { needs_you: null, waiting_on_computer: null, in_progress: null, working: null, unread: null, computers: null };
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,7 +30,7 @@ const mount = async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root.render(<OverviewCards />));
+  await act(async () => root.render(<OverviewBody sections={NONE} editing={false} onDone={() => {}} />));
   for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
 };
 const unmount = () => {

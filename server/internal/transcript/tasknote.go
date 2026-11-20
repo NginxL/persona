@@ -100,6 +100,9 @@ func taskNote(xml string) (*proto.TaskNote, string) {
 	return n, noteText(n)
 }
 
+// BackgroundTaskUpdate identifies the generic task notice on its way from a node or runtime to the hub.
+const BackgroundTaskUpdate = "后台任务有更新"
+
 // noteText is the notice's one line: "Background command done · <title>", "Monitor event · <the event's first line>"… (in Chinese).
 func noteText(n *proto.TaskNote) string {
 	failed := "失败"
@@ -141,7 +144,7 @@ func noteText(n *proto.TaskNote) string {
 		}
 	default:
 		if n.Title == "" {
-			return "后台任务有更新"
+			return BackgroundTaskUpdate
 		}
 		return n.Title
 	}

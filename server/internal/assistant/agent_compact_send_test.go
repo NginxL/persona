@@ -100,7 +100,7 @@ func TestResumeCompactionFailureFallsBackWithTheReason(t *testing.T) {
 		t.Fatal("a failed compaction passed for a delivery")
 	}
 	for _, want := range []string{"could not compact full0001 on box", "Error during compaction: prompt is too long",
-		"resumed and now rests with its context", "nothing was sent", "start a replacement", "task_plan with continues", "agent_start"} {
+		"It was resumed and runs with its context as it was", "nothing was sent", "start a replacement", "task_plan with continues", "agent_start"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal lacks %q: %v", want, err)
 		}
@@ -178,7 +178,7 @@ func TestSendToARunningNearlyFullAgentWhoseCompactionFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed compaction passed for a delivery")
 	}
-	for _, want := range []string{"could not compact live0001 on box", "did not start compacting", "keeps its context as it was",
+	for _, want := range []string{"could not compact live0001 on box", "did not start compacting", "keeps running with its context as it was",
 		"nothing was sent", "start a replacement"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal lacks %q: %v", want, err)
@@ -274,5 +274,28 @@ func TestSendToANearlyFullCodexOnItsAppServerCompactsFirst(t *testing.T) {
 	}
 	if sends := sessionSendCalls(f); len(sends) != 1 || sends[0]["compact_if_full"] != true {
 		t.Fatalf("session.send: %v", sends)
+	}
+}
+
+// A Codex that quit while it was to compact (it installed its own update) is named in the refusal with the step and
+// what its terminal shows, and nothing is sent (#11316).
+func TestResumeCompactionSaysWhereCodexQuit(t *testing.T) {
+	s, f := newQuietService(t)
+	c := stoppedBoxAgent("codx0001")
+	c.Agent, c.SourceKind, c.ContextTokens, c.ContextWindow = "codex", "codex_history", 428111, 475000
+	f.setSessions("box", c)
+	resumingNode(f)
+	f.answerNode(DeviceSessionSend, func(string, json.RawMessage) (any, error) {
+		return nil, &rpc.Error{Code: proto.CodeCompactFailed, Message: "its context is nearly full (428111 of 475000 tokens) and compacting it " +
+			"failed: the agent quit after /compact was typed, before any compaction was recorded; its terminal shows:\n" +
+			"Update ran successfully! Please restart Codex.. The message was not sent", Data: json.RawMessage(`{"agent_quit":true,"delivered":"none"}`)}
+	})
+	_, err := runJSON(t, s, "conv1", "agent_send", map[string]any{"machine": "box", "session_id": "codx0001",
+		"text": "go on", "resume": true, "resume_why": "needs its context", "task": map[string]any{"title": "接着做"}})
+	if err == nil || !strings.Contains(err.Error(), "the agent quit after /compact was typed") ||
+		!strings.Contains(err.Error(), "Please restart Codex") || !strings.Contains(err.Error(), "nothing was sent") ||
+		!strings.Contains(err.Error(), "its process quit again") || !strings.Contains(err.Error(), "compact_failed") ||
+		strings.Contains(err.Error(), "runs with its context") {
+		t.Fatalf("refusal: %v", err)
 	}
 }

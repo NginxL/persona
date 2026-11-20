@@ -40,14 +40,22 @@ export const sessionLauncher = (s: Partial<Pick<Session, "launcher" | "agent" | 
 };
 
 /** The id without its 1M marker, lower case: the model both spellings name. */
-const bareModel = (v: string): string => v.trim().toLowerCase().replace(/\[1m\]$/, "");
+export const bareModel = (v: string | undefined): string => (v ?? "").trim().toLowerCase().replace(/\[1m\]$/, "");
+
+export const rowModelIds = (m: Pick<AgentModel, "id" | "resolved" | "aliases">) => [m.id, m.resolved, ...(m.aliases ?? [])];
+
+/** Whether `m` names `model` without folding away a gateway routing prefix: equal after trimming and ignoring `[1m]`. */
+export const namesWholeModel = (m: Pick<AgentModel, "id" | "resolved" | "aliases">, model: string | undefined): boolean => {
+  const target = bareModel(model);
+  return !target || rowModelIds(m).some((v) => bareModel(v) === target);
+};
 
 /** Whether two ids name one model: equal after trimming, ignoring case and the 1M marker, or one is the other's "/"
  *  suffix at a boundary (a gateway routing the model under a prefix, or a launcher's vendored id against the bare
  *  echo). Empty ids never match. Mirrors the hub's rule (proto.SameLauncherModel). */
 export function sameLauncherModel(a: string | undefined, b: string | undefined): boolean {
-  const x = bareModel(a ?? "");
-  const y = bareModel(b ?? "");
+  const x = bareModel(a);
+  const y = bareModel(b);
   if (!x || !y) return false;
   if (x === y) return true;
   return (x.includes("/") && x.endsWith("/" + y)) || (y.includes("/") && y.endsWith("/" + x));
@@ -58,9 +66,7 @@ export function sameLauncherModel(a: string | undefined, b: string | undefined):
  *  folded into the row (`aliases`, #10365), any case. A gateway may echo a routed name or the other 1M spelling, which
  *  sameLauncherModel folds. The model panel matches its rows and saved setups by the same rule. */
 export function isCurrentModel(m: Pick<AgentModel, "id" | "resolved" | "aliases"> & { name?: string }, current: string | undefined): boolean {
-  if (!current) return false;
-  const c = current.toLowerCase();
-  return [m.id, m.resolved, ...(m.aliases ?? [])].some((v) => v && (v.toLowerCase() === c || sameLauncherModel(current, v)));
+  return Boolean(current) && rowModelIds(m).some((v) => sameLauncherModel(current, v));
 }
 
 /** `/model` alone (what the slash menu fills in, with or without the space) in the box. */

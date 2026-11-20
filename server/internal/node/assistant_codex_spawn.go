@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/osproc"
@@ -22,9 +23,14 @@ func codexArgs(bin, key string, windows ...int) []string {
 	return codexArgsForHome(bin, key, "", true, windows...)
 }
 
-func (n *Node) codexAssistantArgs(key, home string, windows ...int) ([]string, bool) {
+func (n *Node) codexAssistantArgs(key, home, cwd string, windows ...int) ([]string, bool) {
 	personaMCPOnly := n.hubSupportsPersonaContracts()
-	return codexArgsForHome(n.bin, key, home, !personaMCPOnly, windows...), personaMCPOnly
+	args := codexArgsForHome(n.bin, key, home, !personaMCPOnly, windows...)
+	if assistantskills.WorkGuideReady(cwd) {
+		// A discovery in the current turn changes which original MCP tools Codex can call.
+		args = append(args, "-c", "features.mcp_tool_list_changed=true")
+	}
+	return args, personaMCPOnly
 }
 
 // codexArgsForHome: windows[0] is a compact limit to pass (a managed launcher's declared one, #3066, capped for the
@@ -100,7 +106,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	if err := execution.check("codex"); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(cwd, 0o700); err != nil {
+	if err := n.prepareAssistantCwd(cwd, execution.Strict); err != nil {
 		return nil, err
 	}
 	root, memDir := n.codexDirs(cwd)
@@ -110,7 +116,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 		return nil, err
 	}
 	compaction := n.assistantCompactionPolicy(launcher, cwd, "", execution)
-	args, personaMCPOnly := n.codexAssistantArgs(key, n.dir, compaction.codexLimit())
+	args, personaMCPOnly := n.codexAssistantArgs(key, n.dir, cwd, compaction.codexLimit())
 	cmd := n.codexAssistantCommand(shell, launcher, args)
 	cmd.Dir = root
 	cmd.Env = identity.Environment(os.Environ(), "PERSONA_ASSISTANT=1")

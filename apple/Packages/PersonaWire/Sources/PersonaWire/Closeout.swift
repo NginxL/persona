@@ -187,6 +187,33 @@ public nonisolated struct Closeout: Codable, Hashable, Sendable {
 
     // MARK: - The raw block in a reply
 
+    // The public Markdown v1 form has a dedicated heading, three required facts and a final thematic break.
+    private static let report = try! NSRegularExpression(pattern: #"(?:^|\n)(### Persona (?:work report|工作报告|作業報告)\r?\n(?:\r?\n)?- Status: (?:done|not_done|blocked)\r?\n- Merged: (?:yes|no|n/a)\r?\n- Deployed: (?:yes|no|n/a)\r?\n(?:- (?:Did|Artifact|Delivery|Unblock|Verified|Missing|Waiting|Next): [^\r\n]+\r?\n)*(?:\r?\n)?---)(?=[\t \r\n]*(?:\n<oai-mem-citation>[\s\S]*?</oai-mem-citation>[\t \r\n]*)?$)"#) // i18n-ignore: the report heading as Persona writes it in each language
+    private static let reportFence = try! NSRegularExpression(pattern: #"^[\t ]*(`{3,}|~{3,})([^\r\n]*)"#, options: .anchorsMatchLines)
+
+    private static func insideReportFence(_ text: String, before end: Int) -> Bool {
+        let source = text as NSString
+        var open = ""
+        reportFence.enumerateMatches(in: text, range: NSRange(location: 0, length: end)) { match, _, _ in
+            guard let match else { return }
+            let fence = source.substring(with: match.range(at: 1))
+            if open.isEmpty {
+                open = fence
+            } else if fence.hasPrefix(open), source.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespaces).isEmpty {
+                open = ""
+            }
+        }
+        return !open.isEmpty
+    }
+
+    private static func finalReport(_ text: String, in range: NSRange) -> NSTextCheckingResult? {
+        // The published heading starts with these literal ASCII bytes. A grapheme search makes ordinary long replies expensive.
+        guard (text as NSString).range(of: "### Persona ", options: .literal).location != NSNotFound,
+              let match = report.firstMatch(in: text, range: range),
+              !insideReportFence(text, before: match.range.location) else { return nil }
+        return match
+    }
+
     private static let block = try! NSRegularExpression(pattern: #"<closeout\b[^>]*>[\s\S]*?</closeout>"#)
     private static let fenceOpen = try! NSRegularExpression(pattern: #"(^|\n)[ \t]*(`{3,}|~{3,})[^\n`]*\n[ \t]*\z"#)
     private static let fenceClose = try! NSRegularExpression(pattern: #"^[ \t]*\n[ \t]*(`{3,}|~{3,})[ \t]*(?=\n|\z)"#)
@@ -194,9 +221,15 @@ public nonisolated struct Closeout: Codable, Hashable, Sendable {
     /// `text` without its last closeout block, the one the hub read (it takes the last): the card above the transcript
     /// says it, so the reply does not say it again as raw text. Only the block goes, with the blank lines it leaves
     /// and a code fence that held nothing else; text without a block comes back as it is.
-    public static func strip(_ text: String) -> String {
+    public static func strip(_ text: String, complete: Bool = true) -> String {
         let all = text as NSString
-        guard let last = block.matches(in: text, range: NSRange(location: 0, length: all.length)).last else { return text }
+        let range = NSRange(location: 0, length: all.length)
+        if complete, let match = finalReport(text, in: range) {
+            let before = trimmingEnd(all.substring(to: match.range.location))
+            let after = trimmingStart(all.substring(from: NSMaxRange(match.range)))
+            return before.isEmpty || after.isEmpty ? before + after : before + "\n\n" + after
+        }
+        guard let last = block.matches(in: text, range: range).last else { return text }
         var before = all.substring(to: last.range.location)
         var after = all.substring(from: last.range.location + last.range.length)
         // A fence around the block alone goes with it: an empty code box says nothing.
@@ -217,7 +250,8 @@ public nonisolated struct Closeout: Codable, Hashable, Sendable {
 
     /// Whether `text` holds a closeout block.
     public static func holdsBlock(_ text: String) -> Bool {
-        block.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        return finalReport(text, in: range) != nil || block.firstMatch(in: text, range: range) != nil
     }
 
     private static func trimmingEnd(_ s: String) -> String {

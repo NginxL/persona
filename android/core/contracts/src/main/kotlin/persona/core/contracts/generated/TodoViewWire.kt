@@ -82,6 +82,58 @@ object TodoReason {
 }
 
 /**
+ * The line keys produced by this version of the projection; see the Line keys table in
+ * spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+ */
+object TodoLineKey {
+    const val FAILED_START = "failed_start"
+    const val AGENT_ASKS = "agent_asks"
+    const val INTERRUPTED = "interrupted"
+    const val DECISION = "decision"
+    const val DECISION_DEFAULT = "decision_default"
+    const val CANNOT = "cannot"
+    const val AWAITS_REPLY = "awaits_reply"
+    const val WORKING = "working"
+    const val PERSONA_WORKING = "persona_working"
+    const val STARTING = "starting"
+    const val BACKGROUND = "background"
+    const val PARKED = "parked"
+    const val FINISHED = "finished"
+    const val ACCEPTED = "accepted"
+    const val DEPLOYED = "deployed"
+    const val PR_OPEN = "pr_open"
+    const val USAGE_LIMIT = "usage_limit"
+    const val RUN_WAITS = "run_waits"
+    const val FINISHED_SEEN = "finished_seen"
+    const val COMPLETED = "completed"
+    const val CANCELED = "canceled"
+    const val REPORTED = "reported"
+    const val SUPERSEDED = "superseded"
+    const val SOMEDAY = "someday"
+    val ALL = listOf("failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday")
+}
+
+/**
+ * The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on
+ * the wire.
+ */
+object TodoLineArg {
+    const val AT = "at"
+    const val BY = "by"
+    const val DEFAULT_AT = "default_at"
+    const val ERROR = "error"
+    const val ON = "on"
+    const val REASON = "reason"
+    const val RECOMMEND = "recommend"
+    const val RESETS_AT = "resets_at"
+    const val RUN = "run"
+    const val STEP = "step"
+    const val TEXT = "text"
+    const val UNTIL = "until"
+    val ALL = listOf("at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until")
+}
+
+/**
  * The row's second line as a key and its arguments, never words: each client says it in its own language
  * (spec/fixtures/todo-view/README.md lists every key and its arguments).
  */
@@ -374,7 +426,9 @@ data class TodoCounts(
     val open: Int = 0,
     /**
      * N: the to-dos in the Needs you section, each once however many of its runs ask; Can wait and quiet tasks are
-     * not counted. The To-dos row's badge, the bar's Needs you and the Needs you header show it.
+     * not counted. For the To-dos V1 design's To-dos row badge, the bar's Needs you and the Needs you header. Of the
+     * clients only iOS reads it, behind the V1 gate that is off in release builds; the release clients count their
+     * To-dos row by rules of their own.
      */
     @SerialName("needs_you") val needsYou: Int = 0,
     /**

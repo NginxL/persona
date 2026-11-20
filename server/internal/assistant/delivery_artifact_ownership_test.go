@@ -18,6 +18,9 @@ const researchNoPRCloseout = "<closeout status=\"done\" merged=\"n/a\" deployed=
 	"artifact: doc docs/research.md\nartifact: url https://github.com/o/r/issues/4\n" +
 	"verified: Research findings checked against the original criteria.\n</closeout>"
 
+const researchMarkdown = "### Persona work report\n\n- Status: done\n- Merged: n/a\n- Deployed: n/a\n" +
+	"- Artifact: doc docs/research.md\n- Verified: Research findings checked against the original criteria.\n\n---"
+
 const relatedMemoryFooter = "\n<oai-mem-citation>\n<citation_entries>\n" +
 	"notes.md:1-2|note=[related work https://github.com/o/r/pull/10]\n" +
 	"</citation_entries>\n</oai-mem-citation>"
@@ -43,6 +46,7 @@ func researchDeliveryTask(t *testing.T) (*Service, *fakeHub, Todo, string) {
 func TestResearchReferencesAreNotDeliveryPRs(t *testing.T) {
 	for _, text := range []string{
 		"Related work: https://github.com/o/r/pull/9 and https://github.com/o/r/pull/10\n" + researchNoPRCloseout,
+		"Related work: https://github.com/o/r/pull/9\n" + researchMarkdown,
 		"Related PR #9 is background for https://github.com/o/r/issues/4\n" + researchNoPRCloseout,
 		"Background: https://github.com/o/r/pull/9\n" + researchNoPRCloseout,
 		"PR #9 is related work, not this research's delivery.\n" + researchNoPRCloseout,
@@ -73,6 +77,9 @@ func TestAcceptedResearchDropsUnownedPRReferences(t *testing.T) {
 			s.watchDeploy(ctx, todo.ID, deployWatch{PR: wrong, Since: time.Now()})
 			s.setTaskDelivery(ctx, todo.ID, TodoDelivery{State: deliveryMerged})
 			report := researchNoPRCloseout
+			if current == "9" {
+				report = researchMarkdown
+			}
 			if current == "10" {
 				report += relatedMemoryFooter
 			}
@@ -241,11 +248,17 @@ func TestUnknownPRHistoryRequiresExplicitDeliveryEvidence(t *testing.T) {
 func TestReportedPRRequiresTaskOwnedCloseout(t *testing.T) {
 	pr := "https://github.com/o/r/pull/5"
 	explicit := "<closeout status=\"done\" merged=\"no\" deployed=\"no\">\nartifact: pr " + pr + "\n</closeout>"
+	markdown := strings.Replace(researchMarkdown, "doc docs/research.md", "pr "+pr, 1)
 	for _, tc := range []struct {
 		name  string
 		items []proto.Item
 		want  string
 	}{
+		{"indented Markdown example", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: "    " + markdown}}, ""},
+		{"own final Markdown", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: markdown + relatedMemoryFooter}}, pr},
+		{"clipped Markdown", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: markdown, FullSize: 10000}}, ""},
+		{"Markdown written by user", []proto.Item{{Role: "user", Kind: proto.KindText, Text: markdown}, {Role: "assistant", Kind: proto.KindText, Text: "That is a prior result."}}, ""},
+		{"Markdown from another turn", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: markdown}, {Role: "user", Kind: proto.KindText, Text: "Review a different note."}, {Role: "assistant", Kind: proto.KindText, Text: "Still checking."}}, ""},
 		{"ordinary related link", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: "Related work: " + pr}}, ""},
 		{"document artifact", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: "<closeout status=\"done\">\nartifact: doc " + pr + "\n</closeout>"}}, ""},
 		{"URL artifact", []proto.Item{{Role: "assistant", Kind: proto.KindText, Text: "<closeout status=\"done\">\nartifact: url " + pr + "\n</closeout>"}}, ""},

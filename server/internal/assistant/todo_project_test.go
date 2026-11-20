@@ -190,3 +190,92 @@ func TestTaskOutcomeGoesToTheTodosProject(t *testing.T) {
 		t.Fatalf("with its project gone: %v", got)
 	}
 }
+
+func TestDirectionForTodoAndProjectPrecedence(t *testing.T) {
+	env := projectEnv(t, nil)
+	s := env.s
+	ctx := context.Background()
+	e := kbEng(t, s)
+	other, _ := e.Store.Project("诊断能力")
+	other.Dirs = []string{"box:/code/other"}
+	if err := e.Store.PutProject(other); err != nil {
+		t.Fatal(err)
+	}
+	setSettings(t, s, func(v *Settings) { v.Main = "main"; v.Leaders = []string{"lead"} })
+	b := &s.directions
+	b.mu.Lock()
+	if !s.directionsLocked(ctx) {
+		t.Fatal("directions unreadable")
+	}
+	b.m["lead"] = &direction{Project: "社群运营", By: directionByUser}
+	b.mu.Unlock()
+
+	worker := Todo{ID: "worker", Supervision: &Supervision{Supervisor: "lead"}}
+	if id, d, ok := s.directionForTodo(ctx, worker); !ok || id != "lead" || d.Project != "社群运营" {
+		t.Fatalf("direct direction = %q, %+v, %v", id, d, ok)
+	}
+	leader := Todo{ID: "leader-task", Supervision: &Supervision{Supervisor: "lead"},
+		Agents: []TodoAgent{{MachineID: "box", SessionID: "leader1", Source: sourceLeader}}}
+	putTodo(s, leader)
+	worker.Supervision.Supervisor = leaderRef("box", "leader1")
+	if id, _, ok := s.directionForTodo(ctx, worker); !ok || id != "lead" {
+		t.Fatalf("leaderAbove direction = %q, %v", id, ok)
+	}
+	worker.Supervision.Supervisor = "lead"
+	worker.Project = "诊断能力"
+	if got := s.projectsForTask(ctx, e, worker, "box", "/code/other"); len(got) != 1 || got[0].Slug != "诊断能力" {
+		t.Fatalf("todo.Project must beat direction and cwd: %+v", got)
+	}
+	worker.Project = ""
+	if got := s.projectsForTask(ctx, e, worker, "box", "/code/other"); len(got) != 1 || got[0].Slug != "社群运营" {
+		t.Fatalf("direction must beat cwd: %+v", got)
+	}
+	setSettings(t, s, func(v *Settings) { v.Leaders = nil })
+	if _, _, ok := s.directionForTodo(ctx, worker); ok {
+		t.Fatal("a former leader must not provide a direction")
+	}
+	if got := s.projectsForTask(ctx, e, worker, "box", "/code/other"); len(got) != 1 || got[0].Slug != "诊断能力" {
+		t.Fatalf("cwd fallback = %+v", got)
+	}
+}
+
+func TestPlanContextUsesCurrentTodoProject(t *testing.T) {
+	env := projectEnv(t, nil)
+	putTodo(env.s, Todo{ID: "worker", Project: "诊断能力", Supervision: &Supervision{Supervisor: "lead"}})
+	got := env.s.todoForPlanContext(&PlanTask{TodoID: "worker", Project: "社群运营"})
+	if got.Project != "诊断能力" {
+		t.Fatalf("a stale plan project overrode the live todo: %+v", got)
+	}
+}
+
+func TestDirectionForTodoRejectsAmbiguousLeaderHistory(t *testing.T) {
+	env := projectEnv(t, nil)
+	s := env.s
+	ctx := context.Background()
+	e := kbEng(t, s)
+	other, _ := e.Store.Project("诊断能力")
+	other.Dirs = []string{"box:/code/other"}
+	if err := e.Store.PutProject(other); err != nil {
+		t.Fatal(err)
+	}
+	setSettings(t, s, func(v *Settings) { v.Main = "main"; v.Leaders = []string{"lead-a", "lead-b"} })
+	s.directions.mu.Lock()
+	if !s.directionsLocked(ctx) {
+		t.Fatal("directions unreadable")
+	}
+	s.directions.m["lead-a"] = &direction{Project: "社群运营", By: directionByUser}
+	s.directions.m["lead-b"] = &direction{Project: "诊断能力", By: directionByUser}
+	s.directions.mu.Unlock()
+	released := time.Now()
+	putTodo(s, Todo{ID: "old-leader", Supervision: &Supervision{Supervisor: "lead-a"},
+		Agents: []TodoAgent{{MachineID: "box", SessionID: "leader1", Source: sourceLeader, ReleasedAt: &released}}})
+	putTodo(s, Todo{ID: "current-leader", Supervision: &Supervision{Supervisor: "lead-b"},
+		Agents: []TodoAgent{{MachineID: "box", SessionID: "leader1", Source: sourceLeader}}})
+	worker := Todo{ID: "worker", Supervision: &Supervision{Supervisor: leaderRef("box", "leader1")}}
+	if _, _, ok := s.directionForTodo(ctx, worker); ok {
+		t.Fatal("two different leader directions must not be chosen by map order")
+	}
+	if got := s.projectsForTask(ctx, e, worker, "box", "/code/other"); len(got) != 1 || got[0].Slug != "诊断能力" {
+		t.Fatalf("ambiguous direction must leave the cwd fallback: %+v", got)
+	}
+}

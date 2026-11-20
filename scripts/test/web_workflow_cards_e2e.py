@@ -11,7 +11,7 @@ plain row. A change moves the card in place (the detail's counts roll, not with 
 "后台 workflow · <phase> · N/M+ · 还有 n 个" from the run's start, its count whole at 390 wide in English and Japanese
 too; the top bar's Background tasks button opens the panel's list, a run's detail there has "在对话中查看" bringing the
 call into view; the sidebar row's count.
-Light / dark × 1280 / 390.
+Light / dark × 1280 / 390, plus the Session overview detail and return at the largest web text size.
 
     MOCK_WORKFLOW_CARDS=1 PORT=18772 python3 scripts/mock/mock_hub.py &
     (cd web && PERSONA_HUB_URL=http://127.0.0.1:18772 npx vite --port 5182 --strictPort &)
@@ -114,6 +114,44 @@ def open_in_panel(page, card, task, tag):
 def close_panel(page):
     page.locator('aside[aria-label="后台任务"]').get_by_role("button", name="关闭面板").click()
     expect(page.locator('aside[aria-label="后台任务"]')).to_have_count(0)
+
+
+def mod_b(page):
+    page.keyboard.press(("Meta" if sys.platform == "darwin" else "Control") + "+b")
+
+
+def check_overview_shortcut_memory(page, trigger, overview, row, panel, shot):
+    """Cmd+B restores a detail only while its overview origin survives; invalid memory falls back to ordinary Files."""
+    row.click()
+    expect(overview).to_be_hidden()
+    expect(panel.locator('[data-background-detail="wffail"]')).to_have_count(1)
+    mod_b(page)
+    expect(panel).to_have_count(0)
+    expect(overview).to_be_visible()
+    expect(row).to_be_focused()
+    mod_b(page)
+    expect(panel.locator('[data-background-detail="wffail"]')).to_have_count(1)
+    expect(overview).to_be_hidden()
+    expect(panel.get_by_role("button", name="返回")).to_be_focused()
+
+    # The exact regression: remember the detail with Cmd+B, remove its origin, then ask Cmd+B to reopen it.
+    mod_b(page)
+    expect(panel).to_have_count(0)
+    expect(overview).to_be_visible()
+    trigger.click()
+    expect(overview).to_have_count(0)
+    expect(trigger).to_have_attribute("aria-pressed", "false")
+    mod_b(page)
+    files = page.locator('aside[aria-label="文件"]')
+    expect(files).to_have_count(1)
+    expect(panel).to_have_count(0)
+    expect(overview).to_have_count(0)
+    shot("overview-shortcut-origin-off")
+    files.get_by_role("button", name="关闭面板").click()
+    expect(files).to_have_count(0)
+    trigger.click()
+    expect(overview).to_be_visible()
+    expect(panel).to_have_count(0)
 
 
 def run(browser, base, hub, token, size, theme, shots, reduce):
@@ -304,21 +342,77 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     shot("completed-page")
     ok(f"{tag}: completed in place: 已完成, 11/11 Agent, 11 squares done, the time it took")
 
-    # The overview lists the runs. Opening a detail or jumping to its call keeps the overview open.
+    # The overview stays mounted while its detail takes the side panel. Back and real-keyboard Escape restore its
+    # scroll and row focus. A separate wide-screen pass replaces an already-open panel without comparing widths.
     trigger = page.locator("[data-session-overview-trigger]")
     trigger.click()
     overview = page.locator("[data-session-overview]")
     expect(overview.locator("[data-bg-run]")).to_have_count(4)
+    scroller = overview.locator(":scope > div.overflow-y-auto")
+    scroller.evaluate("(e) => { e.scrollTop = e.scrollHeight; }")
+    list_top = scroller.evaluate("(e) => e.scrollTop")
     shot("overview")
-    overview.locator('[data-bg-run="wffail"] [data-bg-row-button]').click()
+    row = overview.locator('[data-bg-run="wffail"] [data-bg-row-button]')
     panel = page.locator('aside[aria-label="后台任务"]')
-    expect(panel.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
+    back = panel.get_by_role("button", name="返回")
+    for way in ("Back", "Escape"):
+        if way == "Back":
+            row.click()
+        else:
+            row.focus()
+            page.keyboard.press("Enter")
+        expect(overview).to_be_hidden()
+        expect(panel.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
+        expect(back).to_be_focused()
+        page.wait_for_timeout(300)  # let the side panel's entry animation finish before the capture
+        shot(f"overview-detail-{way.lower()}")
+        if way == "Back":
+            back.click()
+        else:
+            page.keyboard.press("Escape")
+        expect(panel).to_have_count(0)
+        expect(overview).to_be_visible()
+        expect(row).to_be_focused()
+        expect(scroller).to_have_js_property("scrollTop", list_top)
+        shot(f"overview-return-{way.lower()}")
+    if size == "wide":
+        panel, _ = open_in_panel(page, small, "wfrun", tag)
+        row.click()
+        expect(panel.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
+        expect(back).to_be_focused()
+        back.click()
+        expect(panel).to_have_count(0)
+        expect(overview).to_be_visible()
+        expect(row).to_be_focused()
+    if size == "wide":
+        # Closing the origin also closes its dependent detail. Reopening must never leave a pressed toggle over a
+        # mounted but hidden overview, or a stale detail whose Back cannot restore its origin.
+        row.click()
+        expect(overview).to_be_hidden()
+        expect(panel.locator('[data-background-detail="wffail"]')).to_have_count(1)
+        trigger.click()
+        expect(panel).to_have_count(0)
+        expect(overview).to_have_count(0)
+        expect(trigger).to_have_attribute("aria-pressed", "false")
+        shot("overview-toggle-off")
+        trigger.click()
+        expect(overview).to_be_visible()
+        expect(trigger).to_have_attribute("aria-pressed", "true")
+        expect(panel).to_have_count(0)
+        shot("overview-toggle-return")
+        check_overview_shortcut_memory(page, trigger, overview, row, panel, shot)
+        ok(f"{tag}: the overview toggle and Cmd+B never restore a detail without its origin")
+    row.click()
     panel.locator('[data-workflow-card="failed"] [data-workflow-jump]').click()
     if size == "narrow":
         expect(panel).to_have_count(0)  # it covered the chat
-    expect(overview).to_be_visible()
+        expect(overview).to_be_visible()
+    else:
+        expect(overview).to_be_hidden()
+    expect(trigger).to_have_attribute("aria-pressed", "true")
     expect(main.locator('[data-tool-use="toolu_wf_failed"]')).to_be_in_viewport()
-    ok(f"{tag}: the overview stays open and the workflow detail can jump to its call")
+    ok(f"{tag}: Back and real-keyboard Escape restore overview scroll and row focus"
+       + (" after panel replacement too" if size == "wide" else "") + "; jump reaches its call")
 
     if size == "wide":
         # the sidebar's row for this agent, where the sidebar lists agents (its default now lists pages only)
@@ -334,6 +428,73 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     if errors:
         fail(f"{tag}: page errors: {errors[:3]}")
     ctx.close()
+
+
+def overview_large(browser, base, hub, token, size, theme, shots):
+    """The overview/detail/return screens at the largest web text size, with the same real-keyboard return."""
+    tag = f"{size}/{theme}/large-text"
+    step(hub, 0)
+    ctx = browser.new_context(viewport=SIZES[size], device_scale_factor=2, has_touch=size == "narrow",
+                              color_scheme=theme, locale="zh-CN")
+    ctx.add_init_script(f"localStorage.setItem('persona.theme', '{theme}'); localStorage.setItem('persona.text-size', 'large')")
+    page = ctx.new_page()
+    page.set_default_timeout(15000)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(base + "/overview?token=" + token)
+    page.wait_for_load_state("networkidle")
+    page.goto(base + CHAT)
+    expect(page.locator("html")).to_have_attribute("data-text-size", "large")
+    prefix = f"workflow-cards-{size}-{theme}-large"
+
+    def shot(name):
+        if shots:
+            page.wait_for_timeout(300)
+            page.screenshot(path=os.path.join(shots, f"{prefix}-{name}.png"))
+
+    page.locator("[data-session-overview-trigger]").click()
+    overview = page.locator("[data-session-overview]")
+    expect(overview.locator("[data-bg-run]")).to_have_count(4)
+    scroller = overview.locator(":scope > div.overflow-y-auto")
+    scroller.evaluate("(e) => { e.scrollTop = e.scrollHeight; }")
+    list_top = scroller.evaluate("(e) => e.scrollTop")
+    shot("overview")
+    row = overview.locator('[data-bg-run="wffail"] [data-bg-row-button]')
+    row.focus()
+    page.keyboard.press("Enter")
+    panel = page.locator('aside[aria-label="后台任务"]')
+    expect(overview).to_be_hidden()
+    expect(panel.get_by_role("button", name="返回")).to_be_focused()
+    shot("overview-detail-escape")
+    page.keyboard.press("Escape")
+    expect(panel).to_have_count(0)
+    expect(overview).to_be_visible()
+    expect(row).to_be_focused()
+    expect(scroller).to_have_js_property("scrollTop", list_top)
+    shot("overview-return-escape")
+    if size == "wide":
+        trigger = page.locator("[data-session-overview-trigger]")
+        row.focus()
+        page.keyboard.press("Enter")
+        expect(overview).to_be_hidden()
+        expect(panel.locator('[data-background-detail="wffail"]')).to_have_count(1)
+        trigger.click()
+        expect(panel).to_have_count(0)
+        expect(overview).to_have_count(0)
+        expect(trigger).to_have_attribute("aria-pressed", "false")
+        shot("overview-toggle-off")
+        trigger.click()
+        expect(overview).to_be_visible()
+        expect(trigger).to_have_attribute("aria-pressed", "true")
+        expect(panel).to_have_count(0)
+        shot("overview-toggle-return")
+        check_overview_shortcut_memory(page, trigger, overview, row, panel, shot)
+    if page.evaluate(OVERFLOW) > 0:
+        fail(f"{tag}: the page scrolls sideways")
+    if errors:
+        fail(f"{tag}: page errors: {errors[:3]}")
+    ctx.close()
+    ok(f"{tag}: overview, detail and real-keyboard return keep focus and scroll at the largest text size")
 
 
 def bar_in(browser, base, hub, token, locale, shots):
@@ -381,6 +542,9 @@ def main():
                 for theme in ("light", "dark"):
                     run(browser, a.base.rstrip("/"), a.hub.rstrip("/"), a.token, size, theme, a.shots, False)
             run(browser, a.base.rstrip("/"), a.hub.rstrip("/"), a.token, a.only or "wide", "light", a.shots, True)
+            for size in [a.only] if a.only else SIZES:
+                for theme in ("light", "dark"):
+                    overview_large(browser, a.base.rstrip("/"), a.hub.rstrip("/"), a.token, size, theme, a.shots)
             if a.only != "wide":
                 for locale in ("en-US", "ja-JP"):
                     bar_in(browser, a.base.rstrip("/"), a.hub.rstrip("/"), a.token, locale, a.shots)

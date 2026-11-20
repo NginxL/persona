@@ -16,6 +16,7 @@ const FAKE = fileURLToPath(new URL('./fake-acp-rewind.mjs', import.meta.url))
 const AT = '2026-01-02T12:00:00Z'
 const RESET = '2026-01-03T18:00:00Z'
 const MESSAGE = 'Individual quota reached. Resets in 30h.'
+const TRANSIENT_401 = 'UNAUTHENTICATED (code 401): Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.'
 const input = { step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: AT, content: 'Check the result.' }
 const error = {
   type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE', metadata: { createdAt: AT },
@@ -54,6 +55,35 @@ test('ordinary rate limits and malformed metadata keep their native error withou
   assert.equal(nativeErrorStep({ ...error, status: 'CORTEX_STEP_STATUS_CANCELLED' }, 0), null)
 })
 
+// The shape Antigravity records when the model service refuses a picture it cannot decode (a truncated JPEG).
+const INVALID_MEDIA_TEXT = 'INVALID_ARGUMENT (code 400): Request contains an invalid argument.'
+const invalidMedia = {
+  type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE', status: 'CORTEX_STEP_STATUS_DONE', metadata: { createdAt: AT },
+  errorMessage: { error: {
+    userErrorMessage: 'Agent execution terminated due to error.', modelErrorMessage: INVALID_MEDIA_TEXT, shortError: INVALID_MEDIA_TEXT,
+    errorCode: 400, userErrorNumber: 2011,
+    details: JSON.stringify({ error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT', details: [
+      { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'INVALID_MEDIA', domain: 'cloudcode-pa.googleapis.com', metadata: { error_number: '2011' } },
+    ] } }),
+  } },
+}
+
+test('a request the service refuses as it is names its cause and is the user\'s to fix', () => {
+  const step = nativeErrorStep(invalidMedia, 3)
+  assert.deepEqual(step.turn_error, { turn_error: `${INVALID_MEDIA_TEXT} (INVALID_MEDIA)`, turn_error_kind: 'user' })
+  assert.equal(stepsToItems([input, step]).items.at(-1).text, `API Error: ${INVALID_MEDIA_TEXT} (INVALID_MEDIA)`)
+  const generic = (errorCode, shortError) => nativeErrorStep({ ...invalidMedia, errorMessage: { error: {
+    userErrorMessage: 'Agent execution terminated due to error.', shortError, errorCode } } }, 0).turn_error
+  // Only the wording changes for failures worth a Continue, or the transient 401 the runtime retries.
+  assert.deepEqual(generic(503, 'UNAVAILABLE (code 503): overloaded'), { turn_error: 'UNAVAILABLE (code 503): overloaded' })
+  assert.deepEqual(generic(401, TRANSIENT_401), { turn_error: TRANSIENT_401 })
+  assert.deepEqual(generic(408, 'DEADLINE_EXCEEDED (code 408)'), { turn_error: 'DEADLINE_EXCEEDED (code 408)' })
+  assert.deepEqual(generic(400, undefined), { turn_error: 'Agent execution terminated due to error.', turn_error_kind: 'user' })
+  // A specific message of the user's own stays as it is.
+  assert.deepEqual(nativeErrorStep({ ...invalidMedia, errorMessage: { error: { userErrorMessage: 'Model not available', errorCode: 404 } } }, 0)
+    .turn_error, { turn_error: 'Model not available', turn_error_kind: 'user' })
+})
+
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-turn-error-'))
   const config = join(home, 'config')
@@ -71,9 +101,10 @@ async function fixture(t, options = {}) {
     trajectory: { cascadeId: RAW, steps: [
       { type: 'CORTEX_STEP_TYPE_USER_INPUT', metadata: { source: 'CORTEX_STEP_SOURCE_USER_EXPLICIT' }, userInput: { items: [{ text: input.content }] } },
       ...Array.from({ length: options.padding || 0 }, () => ({ type: 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' })),
-      ...(options.rpcError ? [] : [error]),
+      ...(options.rpcError ? [] : [options.nativeError || error]),
     ] },
     promptError: options.rpcError,
+    promptPlan: options.promptPlan,
   }
   writeFileSync(nativeFile, JSON.stringify(snapshot))
   const db = new DatabaseSync(join(config, 'conversation_summaries.db'))
@@ -85,7 +116,8 @@ async function fixture(t, options = {}) {
   writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' '${home}' "$@"\n`)
   chmodSync(binary, 0o700)
   const node = await startFakeNode(t)
-  const runtimeOptions = { home, agyDir: config, agyBin: binary, socketPath: node.path, log: () => {} }
+  const runtimeOptions = { home, agyDir: config, agyBin: binary, personadBin: binary, socketPath: node.path, log: () => {},
+    transient401RetryDelayMs: options.retryDelay ?? 10, exportPollMs: 20 }
   let runtime = createAgyRuntime(runtimeOptions)
   t.after(async () => { await runtime.stop(); db.close(); rmSync(home, { recursive: true, force: true }) })
   runtime.start()
@@ -106,7 +138,99 @@ async function fixture(t, options = {}) {
     runtime.start()
     await until('restarted inventory', () => node.all('runtime.sessions').length > before)
   }
-  return { node, row, calls, items, write, state, refresh, restart, transcript, nativeFile }
+  return { node, row, calls, items, write, state, refresh, restart, transcript, nativeFile, idle: () => runtime.idle() }
+}
+
+for (const exported of [false, true]) {
+  test(`retries one transient 401 ${exported ? 'recorded in the transcript' : 'returned by ACP'} without duplicating the user message`, async (t) => {
+    const { node, row, calls, items, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+      { error: TRANSIENT_401, export: exported, undatedStep: exported }, { reply: 'Finished.', export: exported },
+    ] })
+    const send = (text, client_msg_id) => node.peer.call('session.send', { session_id: SESSION, text, client_msg_id })
+    await send('Continue.', 'request-1')
+    await until('retry succeeds', () => row()?.last_text === 'Finished.' && idle())
+    assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 2)
+    assert.equal(row().turn_error, undefined)
+    const page = await items()
+    const users = page.items.filter((item) => item.role === 'user')
+    assert.deepEqual(users.map((item) => item.text), [input.content, 'Continue.'])
+    assert.equal(users.at(-1).client_msg_id, 'request-1')
+    assert.equal(page.items.some((item) => item.text?.includes('UNAUTHENTICATED')), false)
+    if (exported) {
+      await send('Continue.', 'request-2')
+      await until('next send settles', idle)
+      assert.equal((await items()).items.filter((item) => item.text === 'Continue.').length, 2)
+    }
+  })
+}
+
+test('a plan-mode 401 retries despite a previous reply flushing and whole-second export timestamps', async (t) => {
+  const prior = { prompt: 'Earlier request.', reply: 'Earlier reply.' }
+  const { node, calls, items, row, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+    { reply: prior.reply },
+    { error: TRANSIENT_401, export: true, planMode: true, wholeSeconds: true, flushReply: prior },
+    { reply: 'Finished.', export: true, planMode: true, wholeSeconds: true },
+  ] })
+  await node.peer.call('session.send', { session_id: SESSION, text: prior.prompt })
+  await until('previous turn settles without native export', () => row()?.last_text === prior.reply && idle())
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.', client_msg_id: 'plan-retry' })
+  await until('plan retry settles', () => row()?.last_text === 'Finished.' && idle())
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 3)
+  const page = await items()
+  assert.deepEqual(page.items.map((item) => item.text), [input.content, prior.prompt, prior.reply, '/plan Continue.', 'Finished.'])
+  assert.equal(page.items[3].client_msg_id, 'plan-retry')
+})
+
+for (const [reason, plan, attempts, retryDelay] of [
+  ['revoked login', [{ error: `${TRANSIENT_401}; invalid_grant` }], 1],
+  ['non-adjacent expired refresh token', [{ error: `${TRANSIENT_401}; refresh_token for this account has expired` }], 1],
+  ['revoked account credential', [{ error: `${TRANSIENT_401}; revoked the account login credential` }], 1],
+  ['explicit sign-in request', [{ error: `${TRANSIENT_401} Please sign in.` }], 1],
+  ['assistant text', [{ error: TRANSIENT_401, reply: 'Partial answer' }], 1],
+  ['tool work', [{ error: TRANSIENT_401, tool: true }], 1],
+  ['tool work received during the delay', [{ error: TRANSIENT_401, lateTool: 30 }], 1, 250],
+  ['a second transient failure', [{ error: TRANSIENT_401 }, { error: TRANSIENT_401 }], 2],
+]) {
+  test(`does not retry after ${reason}`, async (t) => {
+    const { node, row, calls } = await fixture(t, { initialCount: 1, promptPlan: plan, retryDelay })
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.' })
+    await until('failure published', () => row()?.turn_error?.startsWith(TRANSIENT_401))
+    assert.equal(calls().filter((call) => call.method === 'session/prompt').length, attempts)
+  })
+}
+
+test('interrupt aborts the transient 401 delay and settles the turn', async (t) => {
+  const { node, row, calls, idle } = await fixture(t, { initialCount: 1, retryDelay: 60_000,
+    promptPlan: [{ error: TRANSIENT_401 }, { reply: 'Next.' }] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.' })
+  await until('first prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.equal((await node.peer.call('session.interrupt', { session_id: SESSION })).settled, true)
+  assert.equal(idle(), true)
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 1)
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Try again.' })
+  await until('next send completes', () => row()?.last_text === 'Next.')
+})
+
+for (const assistant of [false, true]) {
+  test(`assistant sends use assistant MCP after ${assistant ? 'assistant' : 'ordinary'} modes`, async (t) => {
+    const { node, calls } = await fixture(t, { initialCount: 1 })
+    const modes = (flags = {}) => node.peer.call('session.modes', { session_id: SESSION, permission_mode: 'default', ...flags })
+    const resumes = () => calls().filter((call) => call.method === 'session/resume').map((call) => call.params.mcpServers[0])
+    const assistantMcp = (server) => server.env.some(({ name, value }) => name === 'PERSONA_ASSISTANT' && value === '1')
+    await modes({ assistant })
+    await modes()
+    assert.deepEqual(resumes().map(assistantMcp), [assistant])
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.', assistant: true })
+    await modes()
+    assert.deepEqual(resumes().map(assistantMcp), assistant ? [true] : [false, true])
+    const loads = calls().filter((call) => call.method === 'session/resume')
+    if (!assistant) {
+      assert.notEqual(loads[0].worker, loads[1].worker)
+      const closed = calls().find((call) => call.method === 'session/close')
+      assert.equal(closed?.worker, loads[0].worker)
+    }
+    assert.match(resumes().at(-1).args[0], /mcp-proxy\.mjs$/)
+  })
 }
 
 test('runtime recovers an omitted native error through a cached bounded tail without resuming the session', async (t) => {
@@ -128,6 +252,15 @@ test('runtime recovers an omitted native error through a cached bounded tail wit
   await restart()
   assert.equal((await items()).items.at(-1).text, `API Error: ${MESSAGE}`)
   await until('quota recovered after restart', () => row()?.turn_error === MESSAGE)
+})
+
+test('an omitted invalid-media failure reaches the session row as the user\'s to fix, not a Continue', async (t) => {
+  const { row, items, calls } = await fixture(t, { nativeError: invalidMedia })
+  assert.equal((await items()).items.at(-1).text, `API Error: ${INVALID_MEDIA_TEXT} (INVALID_MEDIA)`)
+  await until('invalid media published', () => row()?.turn_error_kind === 'user')
+  assert.equal(row().turn_error, `${INVALID_MEDIA_TEXT} (INVALID_MEDIA)`)
+  assert.equal(row().turn_error_code, undefined)
+  assert.equal(calls().some((call) => ['session/resume', 'session/prompt'].includes(call.method)), false)
 })
 
 test('new user input and successful response clear the old native failure', async (t) => {
@@ -171,6 +304,22 @@ test('a rejected ACP prompt publishes its failure through the normal session row
   assert.equal(row().turn_error, undefined)
 })
 
+
+test('an attached picture that is cut short is not sent; the words and complete pictures are', async (t) => {
+  const { node, calls } = await fixture(t)
+  const seg = (marker, body) => Buffer.concat([Buffer.from([0xff, marker, 0, body.length + 2]), body])
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), seg(0xdb, Buffer.alloc(65)), seg(0xc0, Buffer.alloc(9)),
+    seg(0xda, Buffer.alloc(8)), Buffer.from([0x12, 0x34, 0xff, 0xd9])])
+  const whole = jpeg.toString('base64')
+  const cut = jpeg.subarray(0, jpeg.length - 2).toString('base64')
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Look at these.', images: [
+    { media_type: 'image/jpeg', data: whole }, { media_type: 'image/jpeg', data: cut }] })
+  await until('prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  const blocks = calls().find((call) => call.method === 'session/prompt').params.prompt
+  assert.deepEqual(blocks.filter((b) => b.type === 'image').map((b) => b.data), [whole])
+  assert.match(blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'), /Look at these\./)
+  assert.match(blocks.at(-1).text, /1 attached picture was incomplete or damaged and not sent/)
+})
 
 test('listing idle sessions does not start native error probes', async (t) => {
   const { calls, refresh } = await fixture(t)

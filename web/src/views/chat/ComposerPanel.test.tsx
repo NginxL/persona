@@ -6,6 +6,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { onOverlayEntry } from "../../lib/back-close";
 import { loadPages } from "../../lib/lazy-page";
 import { getContexts } from "../../lib/links";
 import { applyCompleteSessions } from "../../lib/store";
@@ -36,11 +37,14 @@ beforeAll(async () => {
   act(() => applyCompleteSessions([{ machine_id: "m2", session_id: "other", title: "Fix the login page", agent: "claude", cwd: "/code/site", updated_at: "2026-11-12T10:00:00Z" } as Session]));
 });
 
-// a precise pointer unless a test takes it away (lib/viewport.ts keeps one list per query, so the switch is read live)
+// a precise pointer on a wide screen unless a test changes that (lib/viewport.ts keeps one list per query, so the
+// switches are read live)
 let fine = true;
+let narrow = false;
 beforeEach(() => {
   fine = true;
-  vi.stubGlobal("matchMedia", (q: string) => ({ get matches() { return q.includes("fine") && fine; }, media: q, addEventListener() {}, removeEventListener() {} }));
+  narrow = false;
+  vi.stubGlobal("matchMedia", (q: string) => ({ get matches() { return q === "(max-width: 1023px)" ? narrow : q.includes("fine") && fine; }, media: q, addEventListener() {}, removeEventListener() {} }));
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   Element.prototype.scrollIntoView ??= () => {};
   api.mockClear();
@@ -230,6 +234,55 @@ describe("the + (#5324)", () => {
     // the caret back in the box, as after any other pick
     await act(async () => void (await new Promise((r) => requestAnimationFrame(r))));
     expect(document.activeElement).toBe(box());
+  });
+});
+
+describe("Back with the + panel open (#11442)", () => {
+  // jsdom's Back lands as a popstate on a real timer, after back-close's own 0 ms one
+  beforeEach(() => void vi.useRealTimers());
+  const settleBack = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+  const goBack = () => act(async () => {
+    const popped = new Promise((r) => addEventListener("popstate", r, { once: true }));
+    history.back();
+    await popped;
+  });
+
+  it("closes it on a narrow screen and stays on the page", async () => {
+    narrow = true;
+    const at = location.href;
+    render();
+    click(plus());
+    expect(panel()?.dataset.composerPanel).toBe("plus");
+    expect(onOverlayEntry()).toBe(true);
+    await goBack();
+    expect(panel()).toBeNull();
+    expect(location.href).toBe(at);
+    expect(onOverlayEntry()).toBe(false);
+  });
+
+  it("closed from the page (the + again, Esc), takes its entry back off, leaving no Back that does nothing", async () => {
+    narrow = true;
+    render();
+    click(plus());
+    expect(onOverlayEntry()).toBe(true);
+    click(plus());
+    expect(panel()).toBeNull();
+    await settleBack();
+    expect(onOverlayEntry()).toBe(false);
+    click(plus());
+    expect(onOverlayEntry()).toBe(true);
+    press(search()!, "Escape");
+    expect(panel()).toBeNull();
+    await settleBack();
+    expect(onOverlayEntry()).toBe(false);
+  });
+
+  it("adds no entry on a wide screen", async () => {
+    render();
+    const before = history.state;
+    click(plus());
+    expect(panel()).not.toBeNull();
+    expect(history.state).toBe(before);
   });
 });
 

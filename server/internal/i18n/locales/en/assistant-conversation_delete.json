@@ -1,6 +1,7 @@
 {
   "deleted": "Conversation deleted",
   "protected": "The main chat and background supervisor cannot be deleted. Clear the main chat's context first, then delete its archived conversation.",
+  "lead_protected": "A pinned chat can't be deleted. Unpin it first, then delete it.",
   "busy": "This conversation is working or has waiting messages or requests. Finish or stop that work before deleting it.",
   "unknown": "Conversation not found",
   "invalid": "Choose a computer and a valid conversation.",

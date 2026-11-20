@@ -2,6 +2,8 @@ Report to the Persona assistant that handed you this task and reviews it (your s
 
 Report individual done_when entries as they change with `criteria`: `number` is the one-based position in the task's ordered done_when, `state` is pending / met / not_met, and evidence is required for met and not_met (a command plus output, a link or the gap). Omitted entries keep their previous state; pending resets an entry. This persists immediately and updates the task's count, but is an agent report, not the supervisor's acceptance. The supervisor receives the entries and evidence in its supervision message and still reviews the task itself.
 
+For a to-do handoff, copy handoff_receipt from the request and report the head you checked. Use done with the result and evidence, or blocked for a failed check. The report goes to the originating to-do’s supervisor.
+
 ```json
 {
   "type": "object",
@@ -20,6 +22,17 @@ Report individual done_when entries as they change with `criteria`: `number` is 
       "maxItems": 8,
       "items": { "type": "string" },
       "description": "links, command output, file paths that show it (a PR, CI, a screenshot)"
+    },
+    "handoff_receipt": {
+      "type": "object",
+      "required": ["todo_id", "id", "head", "check"],
+      "additionalProperties": false,
+      "properties": {
+        "todo_id": { "type": "string" },
+        "id": { "type": "string" },
+        "head": { "type": "string" },
+        "check": { "type": "string" }
+      }
     },
     "criteria": {
       "type": "array",

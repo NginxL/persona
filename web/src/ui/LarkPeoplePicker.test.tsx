@@ -5,7 +5,7 @@ import { act, useState, type KeyboardEvent } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { LarkPerson } from "../lib/lark-people";
-import { useLarkPeoplePicker, type FindPeople, type PeoplePicker } from "./LarkPeoplePicker";
+import { LarkPeopleMenu, useLarkPeoplePicker, type FindPeople, type PeoplePicker } from "./LarkPeoplePicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,6 +96,25 @@ async function aliceShownWhileBobLoads() {
 }
 
 describe("useLarkPeoplePicker Enter / Tab", () => {
+  it("draws member pictures through their owning hub, including legacy paths and missing pictures", () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const result = { ...picker, token: { start: 0, end: 1, query: "" }, rows: [
+      { ...alice, avatar: "/agent/v1/media/old-alice", avatar_url: "/api/v1/avatars/lark/YWxpY2U?lark_account=4" },
+      { ...bob, avatar: "/agent/v1/media/bob?ol_account=4" },
+      { user_id: "other", name: "Other", avatar: "https://example.test/external.png" },
+    ] };
+    act(() => root.render(<LarkPeopleMenu picker={result} manager="docs-owner" />));
+    const options = host.querySelectorAll("[role=option]");
+    const aliceUrl = new URL(options[0].querySelector("img")!.src);
+    expect(aliceUrl.pathname).toBe("/api/v1/avatars/lark/YWxpY2U");
+    expect([aliceUrl.searchParams.get("lark_account"), aliceUrl.searchParams.get("size"), aliceUrl.searchParams.get("manager")]).toEqual(["4", "24", "docs-owner"]);
+    const bobUrl = new URL(options[1].querySelector("img")!.src);
+    expect(bobUrl.pathname).toBe("/api/v1/lark/media/bob");
+    expect([bobUrl.searchParams.get("ol_account"), bobUrl.searchParams.get("manager")]).toEqual(["4", "docs-owner"]);
+    expect(options[2].querySelector("img")).toBeNull();
+    expect(options[2].textContent).toContain("Other");
+  });
+
   it("picks from the current query's results", async () => {
     await type("hi @al");
     await settle(() => vi.advanceTimersByTime(140));

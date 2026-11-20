@@ -6,7 +6,7 @@ import { loadPages } from "../../lib/lazy-page";
 import { getContexts, removeContext } from "../../lib/links";
 import { sendDraft } from "../../lib/drafts";
 import { parseQueued } from "../../lib/queue";
-import { restoreQueued } from "./QueueStrip";
+import { restoreQueued } from "./queue-restore";
 import { t } from "../../i18n";
 import { skillContext, skillDraft } from "../../lib/skill-mentions";
 import { onModelPicker } from "../../lib/model-switch";

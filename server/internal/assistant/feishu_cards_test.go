@@ -75,8 +75,13 @@ func TestBotCommandListCardsClipAndFallback(t *testing.T) {
 	if n := strings.Count(card, "["); n > 10*25 {
 		t.Fatalf("/agents card carries %d unclipped name groups", n)
 	}
-	if n := strings.Count(fallback, "\n- "); n != 10 || !strings.Contains(fallback, "🔴") || strings.ContainsAny(fallback, "*_[`") {
-		t.Fatalf("/agents fallback rows=%d, icon or escaping wrong: %q", n, fallback)
+	// Each row says its state in words (the card shows it as a tag), not as a coloured dot.
+	if n := strings.Count(fallback, "\n- "); n != 10 || !strings.Contains(fallback, i18n.T("", "assistant-feishu_cards.state_needs_you")) ||
+		strings.Contains(fallback, "🔴") || strings.ContainsAny(fallback, "*_[`") {
+		t.Fatalf("/agents fallback rows=%d, state or escaping wrong: %q", n, fallback)
+	}
+	if !strings.Contains(card, `"tag":"interactive_container"`) {
+		t.Fatalf("/agents rows are not pressed whole: %s", card)
 	}
 	// The card's tail offers starting a new agent without typing /start.
 	if !strings.Contains(card, `"a":"start_form"`) {
@@ -608,5 +613,94 @@ func TestFeishuPlanCardClipClosesItsCodeBlock(t *testing.T) {
 	}
 	if head, ok := strings.CutSuffix(planCard(strings.Repeat("\n", 6000)), note); !ok || len([]rune(head)) > maxPlanRunes {
 		t.Fatalf("a plan of line breaks: %d runes, note last %v", len([]rune(head)), ok)
+	}
+}
+
+// The cards that ask the owner: who asks in the header (the conversation, the computer under it), orange, the kind as
+// a tag; one row of actions ending in a "more" menu with dismissing and the conversation's page; an approval that
+// lets the agent go on by itself asks first.
+func TestInteractionCardsLook(t *testing.T) {
+	f, _ := feishuHub("ou_a", time.Unix(100, 0))
+	withWebBot(f, "https://hub.example.com")
+	s := newTestService(t, f)
+	ctx := context.Background()
+	for _, c := range []struct {
+		ix      proto.Interaction
+		tag     string
+		confirm int
+	}{
+		{proto.Interaction{ID: "ix_q", MachineID: "server", SessionID: "g1", SessionTitle: "修登录", Kind: proto.IxQuestion,
+			Questions: []proto.Question{{Question: "用哪个库？", Options: []proto.QuestionOption{{Label: "A"}, {Label: "B"}}, Recommend: "B"}}}, "提问", 0},
+		{proto.Interaction{ID: "ix_plan", MachineID: "server", SessionID: "g1", SessionTitle: "修登录", Kind: proto.IxPlan, Plan: "1. 改\n2. 测"}, "计划", 1},
+		{proto.Interaction{ID: "ix_p", MachineID: "server", SessionID: "g1", SessionTitle: "修登录", Kind: proto.IxPermission, ToolName: "Bash"}, "审批", 1},
+		{proto.Interaction{ID: "ix_s", MachineID: "server", SessionID: "g1", SessionTitle: "修登录", Kind: proto.IxScreen, Screen: "$ "}, "终端", 0},
+	} {
+		js := s.interactionCard(ctx, c.ix).JSON()
+		for _, want := range []string{`"template":"orange"`, `"content":"修登录"}`, `"content":"` + c.tag + `"}`, `"tag":"overflow"`,
+			`"url":"https://hub.example.com/s/server/g1"`} {
+			if !strings.Contains(js, want) {
+				t.Errorf("%s card lacks %s: %s", c.ix.Kind, want, js)
+			}
+		}
+		for _, bad := range []string{"❓", "📋", "🔐", "🖥"} {
+			if strings.Contains(js, bad) {
+				t.Errorf("%s card has %s: %s", c.ix.Kind, bad, js)
+			}
+		}
+		if n := strings.Count(js, `"confirm":`); n != c.confirm {
+			t.Errorf("%s card asks first %d times, want %d: %s", c.ix.Kind, n, c.confirm, js)
+		}
+	}
+}
+
+// An agent that goes by its herdr tab name is named by it on the card asking the owner and on the card once answered,
+// its CLI title at the end of the subtitle.
+func TestInteractionCardHerdrSessionNames(t *testing.T) {
+	s := newTestService(t, newFakeHub())
+	ctx := context.Background()
+	if err := s.store().PutSetting(ctx, agentsUseHerdrTabNameKey, true); err != nil {
+		t.Fatal(err)
+	}
+	d := newFleetDevs()
+	d.add("server", "box")
+	d.setSessions("server", []proto.Session{{SessionID: "g1", Title: "CLI session name", SpaceKind: "herdr", SlotID: "w1:t1",
+		SlotName: "Export work", State: proto.StateNeedsYou, UpdatedAt: time.Now()}})
+	s.devs = d
+	ix := proto.Interaction{ID: "ix_p", MachineID: "server", SessionID: "g1", SessionTitle: "CLI session name",
+		Kind: proto.IxPermission, ToolName: "Bash"}
+	for _, c := range []struct {
+		name string
+		card *feishubot.Card
+	}{{"asking", s.interactionCard(ctx, ix)}, {"answered", s.answeredCard(ctx, ix, "允许")}} {
+		h := c.card.Header
+		if h.Title.Content != "Export work" || h.Subtitle == nil || !strings.HasSuffix(h.Subtitle.Content, "CLI session name") {
+			t.Errorf("%s card's header: %s", c.name, c.card.JSON())
+		}
+	}
+}
+
+// The option the asker recommends is the card's primary button.
+func TestQuestionCardRecommendIsPrimary(t *testing.T) {
+	s := newTestService(t, newFakeHub())
+	ix := proto.Interaction{ID: "ix_q", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "用哪个库？",
+		Options: []proto.QuestionOption{{Label: "A"}, {Label: "B"}}, Recommend: "B"}}}
+	js := s.interactionCard(context.Background(), ix).JSON()
+	if !strings.Contains(js, `"text":{"tag":"plain_text","content":"B"},"type":"primary"`) ||
+		strings.Contains(js, `"text":{"tag":"plain_text","content":"A"},"type":"primary"`) {
+		t.Fatalf("card %s", js)
+	}
+}
+
+// With the option the asker recommends as the primary button, the written answer's submit is not one too.
+func TestQuestionCardOnePrimary(t *testing.T) {
+	s := newTestService(t, newFakeHub())
+	ix := proto.Interaction{ID: "ix_q", Kind: proto.IxQuestion, Questions: []proto.Question{{Question: "用哪个库？",
+		Options: []proto.QuestionOption{{Label: "A"}, {Label: "B"}}, Recommend: "B"}}}
+	if n := strings.Count(s.interactionCard(context.Background(), ix).JSON(), `"type":"primary"`); n != 1 {
+		t.Fatalf("%d primary buttons", n)
+	}
+	ix.Questions[0].Recommend = ""
+	if n := strings.Count(s.interactionCard(context.Background(), ix).JSON(), `"type":"primary"`); n != 1 {
+		t.Fatalf("%d primary buttons without a recommendation", n)
 	}
 }

@@ -143,3 +143,44 @@ func TestContextShrank(t *testing.T) {
 		t.Fatal("contextShrank")
 	}
 }
+
+// Before /compact goes into a Codex just resumed, its update offer (whose default, Update now, installs and quits
+// Codex) is skipped with Esc, any other dialog with numbered options is never taken for the input box, and a plain
+// input box is neither (#11316).
+func TestCodexStartupScreen(t *testing.T) {
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join("..", "screen", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	for _, c := range []struct {
+		name, text string
+		skip       bool
+		dialog     bool
+	}{
+		{"update offer 0.153", cxUpdateOffer, true, false},
+		{"update offer 0.169", cxUpdate0169, true, false},
+		{"other setup choice", strings.Replace(cxUpdate0169, "Update available", "Other setup", 1), false, true},
+		{"trust", cxTrust0153, false, true},
+		{"exec approval", read("codex-0.163.0-exec-approval-120.txt"), false, true},
+		{"ready", cxReady, false, false},
+		{"starting MCP", cxMCP, false, false},
+		{"loading", cxLoading, false, false},
+		{"empty box 0.163", read("codex-0.163.0-empty-120.txt"), false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			skip, dialog := codexStartupScreen(c.text)
+			if (skip != nil) != c.skip || (dialog != "") != c.dialog {
+				t.Fatalf("codexStartupScreen = %v, %q", skip, dialog)
+			}
+			if c.skip && (len(skip) != 1 || skip[0] != "escape") {
+				t.Fatalf("keys %v", skip)
+			}
+		})
+	}
+	if got := clipLine("a\n  b   c", 3); got != "a b…" {
+		t.Fatalf("clipLine = %q", got)
+	}
+}

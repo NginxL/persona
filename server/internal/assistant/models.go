@@ -148,7 +148,7 @@ var modelPurposes = []ModelPurpose{
 	{ID: "kb.moments", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.topics", Group: "group_processing", Kind: "api", Parent: "kb"}, // knowledge points by topic (kb/topics.go)
 	{ID: "assistant.title", Group: "group_processing", Kind: "api", Parent: "kb"},
-	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // New chat: a direction or a quick chat (route.go)
+	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // Suggest a supervisor for a new agent (agent_route.go).
 	{ID: "agent.title", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "todo.title", Group: "group_processing", Kind: "api", Parent: "kb"}, // a task's todo (assistant/todo_titles.go)
 	// A meeting or note named while it records (kb/recording_title.go, #8873): a few short calls a recording.
@@ -386,7 +386,7 @@ func (s *Service) modelPurposeDef(ctx context.Context, id string) (ModelPurpose,
 				// A task's own conversation starts on the assistant's machine (schedule.go runTask), so its override
 				// is held to that machine's launchers. A conversation it came from keeps its own launcher and does not
 				// use this purpose.
-				machine := cmp.Or(s.settings(ctx).MachineID, t.MachineID)
+				machine := cmp.Or(t.ExecutionMachineID, s.settings(ctx).MachineID, t.MachineID)
 				return ModelPurpose{ID: id, CategoryID: "assistant", Name: t.Label, Group: mc(l, "group_assistant"), Kind: "launcher", Parent: "assistant", MachineID: machine}, nil
 			}
 		}

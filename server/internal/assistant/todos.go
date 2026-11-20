@@ -84,6 +84,7 @@ type Todo struct {
 	// OtherPRs: the observed facts of its earlier PRs (PRs), newest first (#7935); the apps show each open one.
 	OtherPRs      []TodoPRStatus `json:"other_prs,omitempty"`
 	StageKind     string         `json:"stage_kind,omitempty"` // code or general; absent on older hubs
+	StageDone     bool           `json:"stage_done,omitempty"` // closed, nothing left to deploy: Done ends the strip (stageDone, set by formatTodo, #11590)
 	stageVerified bool           // explicit acceptance, kept with the stage setting
 	planPending   bool           // a live plan-approval card; never persisted as progress
 	// PRs are the earlier PRs its agents named before PRURL, newest last (reports.go todoStage.PRs): the Inbox links
@@ -255,29 +256,30 @@ func sessionSpaceKey(machineID string, c proto.Session) string {
 
 // ensureTodosLoaded reads the todos from the store the first time; an error says why they can't be read.
 func (s *Service) ensureTodosLoaded(ctx context.Context) error {
-	b := &s.todos
-	b.mu.RLock()
-	if b.loaded {
-		b.mu.RUnlock()
-		return nil
-	}
-	b.mu.RUnlock()
-
-	b.mu.Lock()
-	if b.loaded {
-		b.mu.Unlock()
-		return nil
-	}
-	err := s.loadTodosLocked(ctx)
-	loaded := b.loaded
-	b.mu.Unlock()
+	loaded, err := s.loadTodoInventory(ctx)
 	if loaded {
-		// The links as read are the ones the marks go by from now on: one that goes away later syncs its machine
-		// again (syncLinkedTodoTokens), even before any of the links changed.
 		s.syncLinkedTodoTokens()
-		s.sweepSourceReports() // a todo that closed while the assistant was away still tells where it came from
+		s.sweepSourceReports()
 	}
 	return err
+}
+
+// loadTodoInventory reads durable state without publishing session lists.
+func (s *Service) loadTodoInventory(ctx context.Context) (bool, error) {
+	b := &s.todos
+	b.mu.RLock()
+	loaded := b.loaded
+	b.mu.RUnlock()
+	if loaded {
+		return false, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.loaded {
+		return false, nil
+	}
+	err := s.loadTodosLocked(ctx)
+	return b.loaded, err
 }
 
 func (s *Service) loadTodosLocked(ctx context.Context) error {
@@ -701,6 +703,7 @@ func copyTodoLocked(t *Todo) Todo {
 func formatTodo(t Todo) Todo {
 	out := t
 	out.Delivery = currentDelivery(t)
+	out.StageDone = stageDone(t) // before the wire's done_by hides a cancellation
 	if out.Source != nil && out.Source.ReportFullReply {
 		source := *out.Source
 		source.ReportText = "" // the delivery payload is not part of the to-do list
@@ -933,6 +936,7 @@ func (s *Service) todoRoutes() {
 	s.todoImageRoutes()
 	s.todoRepositoryRoutes()
 	s.workspaceNamingRoutes()
+	s.taskWorkspaceRoutes()
 	s.taskReviewDismissalRoutes()
 	s.todoDecisionRoutes()
 	s.todoThreadRoutes()
@@ -2026,7 +2030,7 @@ func (s *Service) TodoHandoff(ctx context.Context, h TodoHandoff) (TodoHandoffRe
 			if t.Supervision != nil {
 				lead = t.Supervision.Supervisor
 			}
-			text = s.withProjectContext(ctx, h.MachineID, h.Cwd, lead, text) // a new agent: its project's background first
+			text = s.withProjectContextForTodo(ctx, h.MachineID, h.Cwd, lead, t, text) // a new agent: its project's background first
 		}
 	}
 	res := TodoHandoffResult{Found: true, Title: t.Title, DoneAt: t.DoneAt, Text: text}

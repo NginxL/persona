@@ -58,7 +58,8 @@ func (s *assistantStore) PutSetting(_ context.Context, key string, v any) error 
 func TestMainConversationFollowsTheAssistantLauncher(t *testing.T) {
 	h := newTestHub(t)
 	h.store = &assistantStore{memStore: newMemStore(), cfg: assistant.Settings{MachineID: "box", Launcher: "ccc", Main: "main-1"}}
-	m := newMachine(h, MachineConfig{ID: "box", Name: "box"})
+	m := newMachine(h, MachineConfig{ID: "box", Name: "box",
+		LauncherRecovery: &assistantwire.LauncherRecovery{WaitSeconds: 1}})
 	h.byID["box"] = m
 	h.machines = append(h.machines, m)
 	hubIn, nodeOut := io.Pipe()
@@ -106,8 +107,6 @@ func TestMainConversationFollowsTheAssistantLauncher(t *testing.T) {
 		// The chat's menu: the app sends both; a model alone keeps the conversation's launcher.
 		{"side-2", `{"text":"hi","launcher":"other","model":"m2"}`, "other", "m2"},
 		{"side-2", `{"text":"hi","model":"m9"}`, "sss", "m9"},
-		// a launcher deleted since (claude-mac → claude-example-cli): back to the configured one
-		{"side-3", `{"text":"hi"}`, "ccc", ""},
 		// a scheduled task's own conversation follows the setting like the main one (#1544); a pick still wins
 		{"daily-4", `{"text":"hi"}`, "ccc", ""},
 		{"daily-4", `{"text":"hi","launcher":"other"}`, "other", ""},
@@ -126,6 +125,20 @@ func TestMainConversationFollowsTheAssistantLauncher(t *testing.T) {
 		if (l != "" || model != "") && fp == "" {
 			t.Errorf("%s %s: no model fingerprint", c.sid, c.body)
 		}
+	}
+
+	// A launcher deleted since the conversation started is refused after bounded rediscovery, not silently replaced.
+	mu.Lock()
+	got = nil
+	mu.Unlock()
+	if code, out := call(t, mux, "POST", "/api/v1/sessions/box/side-3/messages", h.cfg.Token, `{"text":"hi"}`); code != http.StatusBadRequest {
+		t.Fatalf("gone side launcher: %d %v", code, out)
+	}
+	mu.Lock()
+	sent := got["launcher"]
+	mu.Unlock()
+	if sent != nil {
+		t.Fatalf("gone side launcher sent on %q", sent)
 	}
 }
 

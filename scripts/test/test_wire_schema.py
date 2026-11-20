@@ -69,7 +69,13 @@ def todo_views():
     timeline, result and recap todo-rounds expects with what the item route carries of them, every answer and
     reply todo-asks holds, and every decision push's todo todo-push expects."""
     for where, c in domain_cases("todo-view"):
-        yield "TodoSummary", f"{where}.expected.view", c["expected"]["view"]
+        view = c["expected"]["view"]
+        yield "TodoSummary", f"{where}.expected.view", view
+        if line := view.get("line"):
+            # Verify the present producer's vocabulary. A consumer can still read a newer, unknown line or argument.
+            yield "TodoLineKey", f"{where}.expected.view.line.key", line["key"]
+            for key in line.get("args", {}):
+                yield "TodoLineArg", f"{where}.expected.view.line.args", key
     for where, c in domain_cases("todo-counts"):
         yield "TodoCounts", f"{where}.expected.counts", c["expected"]["counts"]
         yield "TodoPlaces", f"{where}.expected.places", c["expected"]["places"]

@@ -3,8 +3,8 @@
 // Agent's page, the way back, and the chat's place (#5096).
 import { afterEach, describe, expect, it } from "vitest";
 import { agentOpenMode, setAgentOpenMode } from "./agent-open";
-import { chatPlaceIn, chatPlaceOf, dropChatPlace, handoffFrom, leaveChat, openAgent, openTask, taskRoute } from "./handoff";
-import { closePanel, getPanel } from "./panel";
+import { chatPlaceIn, chatPlaceOf, dropChatPlace, handoffFrom, leaveChat, openAgent, openTask, panelIn, taskRoute } from "./handoff";
+import { closePanel, getPanel, openPanel } from "./panel";
 import { getState, reset, type State } from "./store";
 import type { Todo } from "./todos";
 
@@ -89,6 +89,63 @@ describe("leaving a conversation", () => {
     leaveChat({ name: "session", mid: "m1", sid: "s2" });
     expect(location.pathname).toBe("/s/m1/s2");
     expect(handoffFrom()).toBeUndefined();
+  });
+});
+
+describe("leaving a conversation from its side panel (Open Agent page)", () => {
+  const back = () => new Promise<void>((done) => {
+    addEventListener("popstate", () => setTimeout(done, 0), { once: true });
+    history.back();
+  });
+
+  it("opens the task's panel again and puts the main chat back where it was, on Back (the strip's return too)", async () => {
+    history.replaceState(null, "", "/persona/c1");
+    chat({ top: 300, height: 1500, client: 600 });
+    // the panel's own chat scroller comes after the main one's and is not the conversation's place
+    const aside = document.createElement("aside");
+    const inPanel = document.createElement("div");
+    inPanel.setAttribute("data-chat-scroll", "");
+    aside.append(inPanel);
+    document.body.prepend(aside);
+    openPanel({ kind: "task", todo: "t1" });
+    leaveChat({ name: "session", mid: "m1", sid: "s1" }, true, getPanel()!);
+    closePanel();
+    expect(location.pathname).toBe("/s/m1/s1");
+    expect(handoffFrom()).toEqual({ path: "/persona/c1" });
+    expect(panelIn()).toBeUndefined();
+    await back();
+    expect(location.pathname).toBe("/persona/c1");
+    expect(getPanel()).toEqual({ kind: "task", todo: "t1" });
+    expect(chatPlaceIn()).toEqual({ end: false, line: "b", offset: -40 });
+  });
+
+  it("keeps an Agent's panel too, and nothing for other panels or a plain hand-off", async () => {
+    history.replaceState(null, "", "/persona");
+    leaveChat({ name: "session", mid: "m1", sid: "s1" }, true, { kind: "agent", mid: "m1", sid: "s1" });
+    await back();
+    expect(getPanel()).toEqual({ kind: "agent", mid: "m1", sid: "s1" });
+    closePanel();
+    leaveChat({ name: "session", mid: "m1", sid: "s1" }, true, { kind: "files", mid: "m1", sid: "s1", cwd: "/example" });
+    await back();
+    expect(getPanel()).toBeNull();
+    // a hand-off with no panel clears what an earlier one kept on this entry
+    leaveChat({ name: "session", mid: "m1", sid: "s1" }, true, { kind: "task", todo: "t1" });
+    await back();
+    closePanel();
+    chat({ top: 900, height: 1500, client: 600 });
+    leaveChat({ name: "session", mid: "m1", sid: "s1" });
+    await back();
+    expect(getPanel()).toBeNull();
+    expect(panelIn({ sidePanel: { kind: "link", url: "https://example.com/" } })).toBeUndefined();
+  });
+
+  it("keeps the panel for Back when it leaves from an overlay's entry", async () => {
+    history.replaceState({ personaOverlay: "o1" }, "", "/persona/c1");
+    leaveChat({ name: "session", mid: "m1", sid: "s1" }, true, { kind: "task", todo: "t1" });
+    expect(panelIn()).toBeUndefined();
+    history.replaceState(null, "", "/persona/c1");
+    dispatchEvent(new PopStateEvent("popstate"));
+    expect(getPanel()).toEqual({ kind: "task", todo: "t1" });
   });
 });
 

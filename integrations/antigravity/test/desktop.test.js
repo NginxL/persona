@@ -40,9 +40,13 @@ test('desktop attaches to existing sessions, follows transcripts, and routes onl
   const read = await node.peer.call('session.items', { session_id })
   assert.equal(read.items[0].text, 'hi')
   await node.peer.call('session.watch', { session_id })
-  appendFileSync(file, JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'hello' }) + '\n')
+  appendFileSync(file, [
+    { step_index: 1, type: 'PLANNER_RESPONSE', content: 'hello' },
+    { step_index: 2, type: 'GENERIC', content: 'captured', media: [{ mime_type: 'image/png', uri: 'capture.png' }] },
+  ].map((step) => JSON.stringify(step)).join('\n') + '\n')
   await until(() => node.last('session.items'))
-  assert.equal(node.last('session.items').items[0].text, 'hello')
+  assert.deepEqual(node.last('session.items').items.map((item) => item.kind), ['text', 'tool_result'])
+  assert.deepEqual((await node.peer.call('session.items', { session_id })).items.map((item) => item.kind), ['text', 'text', 'tool_result'])
   await node.peer.call('session.send', { session_id, text: 'next', client_msg_id: 'one' })
   await node.peer.call('session.send', { session_id, text: 'next', client_msg_id: 'one' })
   await node.peer.call('session.interrupt', { session_id })

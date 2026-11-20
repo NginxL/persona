@@ -14,8 +14,9 @@ import (
 
 // Parked tasks (docs/assistant/todos.md "Parked tasks"). New parks require a typed external wait and source-backed
 // evidence (park_evidence.go). An owner decision belongs in needs_user, never a new owner_priority park. Existing
-// records remain readable without inventing contacts. A parked task stays open: no ask, no push, no conclusion
-// card, and none of the signals that say work stopped (stalled, idle, orphaned, overdue, undecidable). At its time its
+// records remain readable without inventing contacts. A parked task stays open: no new ask, push or conclusion card.
+// A verified interaction_id instead keeps the worker's existing pending request in Needs you, without another card.
+// No stalled, idle, orphaned, overdue or undecidable signal is raised for the park. At its time its
 // supervisor gets one parked_due signal: decide, park again with a new reason, or close it. Its agent starting a turn
 // (someone sent it something) ends the parking, and it is supervised as before. So does a decision of the owner's
 // recorded on a task parked for them or for someone else (parkDecided, #8044): its supervisor gets the decision.
@@ -56,11 +57,12 @@ const maxReparks = 3
 // sentence, until when, what kind of thing it waits on, and how many times in a row it was parked with no agent turn
 // in between (1: parked once).
 type Parked struct {
-	Reason    string        `json:"reason"`
-	Until     time.Time     `json:"until"`
-	WaitingOn string        `json:"waiting_on"`
-	Count     int           `json:"count"`
-	Evidence  *ParkEvidence `json:"evidence,omitempty"`
+	Reason    string             `json:"reason"`
+	Until     time.Time          `json:"until"`
+	WaitingOn string             `json:"waiting_on"`
+	Count     int                `json:"count"`
+	Evidence  *ParkEvidence      `json:"evidence,omitempty"`
+	Handoff   *taskHandoffTarget `json:"handoff,omitempty"`
 }
 
 // parking is what holds v parked now: its latest review, when the ledger's state is parked and that review parked it.
@@ -81,7 +83,12 @@ func (v *Supervision) parked() *Parked {
 	if r == nil {
 		return nil
 	}
-	return &Parked{Reason: r.Reason, Until: r.Until, WaitingOn: r.WaitingOn, Count: max(1, r.Parks), Evidence: r.Evidence.clone()}
+	p := &Parked{Reason: r.Reason, Until: r.Until, WaitingOn: r.WaitingOn, Count: max(1, r.Parks), Evidence: r.Evidence.clone()}
+	if r.Handoff != nil {
+		target := r.Handoff.Target
+		p.Handoff = &target
+	}
+	return p
 }
 
 // parseParkUntil reads a park's time: a duration ("3d", "36h", "2d12h", "90m") or an RFC 3339 time; "" is parkDefault
@@ -179,15 +186,19 @@ func parkedAnswer(id string, p Parked, loc *time.Location) string {
 			"it too, and a supervision message brings you the decision."
 	}
 	left := 1 + maxReparks - p.Count
+	asked := "the user is not asked"
+	if p.Evidence != nil && p.Evidence.InteractionID != "" {
+		asked = "no new request is created: the existing linked owner request remains actionable"
+	}
 	again := fmt.Sprintf("It can be parked again %d more time(s) with no agent turn in between.", left)
 	if left <= 0 {
 		again = "It cannot be parked again unless its agent works in between: next time, decide or close it."
 	}
-	return fmt.Sprintf("Task %s is parked until %s (waiting_on %s; parked %d time(s) in a row). It stays open; the user is not asked, and "+
+	return fmt.Sprintf("Task %s is parked until %s (waiting_on %s; parked %d time(s) in a row). It stays open; %s, and "+
 		"no stalled, idle, orphaned or overdue signal is raised for it meanwhile.%s At that time a supervision message (parked_due) brings it "+
 		"back to you: decide, park it again with a new reason, or close it. Its agent starting a turn ends the parking (anything sent "+
 		"to it does that, so tell it what it needs before you park, not after).%s %s", id, p.Until.In(loc).Format(toolTimeLayout), p.WaitingOn,
-		p.Count, owner, decided, again)
+		p.Count, asked, owner, decided, again)
 }
 
 // parkedDueSignal: supervised open task t is parked and its time came, and no supervision message carried that yet
@@ -199,7 +210,7 @@ func parkedDueSignal(t Todo, now time.Time) (superviseSignal, bool) {
 		return superviseSignal{}, false
 	}
 	r := v.parking()
-	if r == nil || !r.DueAt.IsZero() || now.Before(r.Until) {
+	if r == nil || r.Handoff != nil || !r.DueAt.IsZero() || now.Before(r.Until) {
 		return superviseSignal{}, false
 	}
 	return superviseSignal{Todo: t.ID, Kind: sigParkedDue, Key: parkKey(r), Detail: r.Reason,
@@ -241,7 +252,9 @@ func decisionEndsPark(source string) bool {
 
 // parkWaitsForDecision: a task parked waiting on on waits for an answer (the owner's call, or someone else's), which
 // a decision of the owner's recorded on it may be.
-func parkWaitsForDecision(on string) bool { return on == parkOwnerPriority || on == parkSomeoneElse }
+func parkWaitsForDecision(on string) bool {
+	return on == parkOwnerPriority || on == parkSomeoneElse || on == parkTodoHandoff
+}
 
 // decidedPark is the latest park of v that a recorded decision ended (parkDecided), whatever was reviewed since: a
 // review that followed it, parking it again included, does not mean its supervisor heard of the decision, so the
@@ -404,6 +417,6 @@ func (s *Service) parkedEntry(ctx context.Context, r *TaskReview) *prompts.Super
 // parkedHealth is a parked task's supervision in the snapshot's words: until when and why.
 func parkedHealth(p *Parked, loc *time.Location) string {
 	on := map[string]string{parkOwnerPriority: "等用户定优先级", parkSomeoneElse: "等别人", parkExternalEvent: "等外部的事", // i18n-ignore: the snapshot is the assistant's prompt
-		parkDate: "等到时间"}[p.WaitingOn] // i18n-ignore: the snapshot is the assistant's prompt
+		parkDate: "等到时间", parkTodoHandoff: "等另一条待办回传结果"}[p.WaitingOn] // i18n-ignore: the snapshot is the assistant's prompt
 	return fmt.Sprintf("已搁置到 %s（%s）：%s", p.Until.In(loc).Format("01-02 15:04"), on, p.Reason) // i18n-ignore: the snapshot is the assistant's prompt
 }

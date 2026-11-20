@@ -7,6 +7,7 @@
   "not_delivered": "Not delivered: {error}",
   "interrupted": "Interrupted",
   "interrupt_failed": "Couldn't interrupt: {error}",
+  "send_now_failed": "Couldn't send now: {error}",
   "new_chat": "New chat",
   "session": "Session",
   "not_found_title": "Conversation not found",
@@ -130,5 +131,6 @@
   "todo_completed_label": "To-do (Completed): {title}",
   "export": "Export Conversation…",
   "side_sessions_count": "Side sessions ({count})",
-  "side_sessions_needs_you": "A side session needs you"
+  "side_sessions_needs_you": "A side session needs you",
+  "open_agent_page": "Open Agent page"
 }

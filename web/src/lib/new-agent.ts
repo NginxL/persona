@@ -38,6 +38,8 @@ export interface AgentLaunch {
   host?: string;
   /** Turn ultracode on once Claude is up (#3428); only ever true: off is what a new Claude is (docs/protocol/protocol.md). */
   ultracode?: boolean;
+  /** Optional title source when the first message contains private project content. */
+  nameHint?: string;
   text: string;
   attachments: LocalAttachment[];
   todoId?: string;
@@ -63,7 +65,7 @@ export interface AgentLaunch {
 }
 
 /** `open: false` starts it without opening its conversation (Compare runs starts several and opens their page, #8916). */
-export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "agentType" | "workSession" | "inlinePrompt" | "model" | "effort" | "launcherDefaultEffort" | "permissionMode" | "host" | "ultracode" | "text" | "attachments" | "todoId">, options: { open?: boolean } = {}) {
+export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "agentType" | "workSession" | "inlinePrompt" | "model" | "effort" | "launcherDefaultEffort" | "permissionMode" | "host" | "ultracode" | "text" | "nameHint" | "attachments" | "todoId">, options: { open?: boolean } = {}) {
   const launch: AgentLaunch = { ...input, id: `local-${uuid()}`, phase: "creating", uploaded: {}, ...launchOpIds() };
   putLaunch(launch);
   if (options.open !== false) navigate({ name: "session", mid: launch.machineId, sid: launch.id });
@@ -129,7 +131,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
         if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
         let r: { session: Session };
         try {
-          r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text || undefined });
+          r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, name_hint: launch.nameHint, prompt: launch.text || undefined });
         } catch (e) {
           if (!launch.text && e instanceof ApiError && (e.code === "codex_needs_prompt" || e.code === "work_prompt_required")) throw new Error(t("lib-new-agent.launcher_needs_text"));
           throw e;
@@ -144,7 +146,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
         try {
           const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
             ...target, effort: launch.effort || undefined, permission_mode: launch.permissionMode || undefined,
-            ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.text || undefined,
+            ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.nameHint ?? (launch.text || undefined),
           });
           session = r.session;
         } catch (e) {

@@ -667,6 +667,11 @@ These suggestions apply only to creation and do not establish ownership for clos
 - **Delegate to herdr**: herdr 0.9 has `worktree create` (socket `worktree.create {workspace_id, branch, path, focus}`, CLI fallback `herdr worktree create --workspace … --branch … --path … --no-focus`):
   check out existing branch, otherwise create from workspace HEAD. New workspace carries worktree provenance, grouped under original, recognized by herdr sidebar grouping too. No computer focus stealing (like other menu actions); web navigates itself.
   herdr and Orca implement `host.Worktreer` (`CanWorktree` checks `herdr worktree --help`, `WorktreesDir`, `CreateWorktree`).
+  When no herdr workspace holds the repository (none is open there, or the one there has tabs in different folders, so it is no
+  reliable source), the node calls `herdr worktree create --cwd <repository root>` instead of opening a plain workspace: herdr
+  makes it from that repository, and the workspace still carries its `worktree.repo_key`, so the sidebar files it under the repository.
+  When an Agent's tab opens in a worktree the assistant made for it, the worktree's first shell (marked, below and
+  `docs/integrations/engines.md`) closes at once if nothing is in it, so the workspace holds the Agent's tab, named for its task, not an empty `1` beside it.
 - **Delegate to Orca** (#5325, `node/hostorca_worktree.go`): Orca runtime's `worktree.create {repo: "id:<project id>", name, branchNameOverride, baseBranch?, parentWorktree, activate: false}` (the one call `orca worktree create` makes).
   The new worktree is Orca's own: listed under the source workspace in Orca's sidebar (`parentWorktree`) and in Persona's workspaces; not activated, no setup hooks, no focus stealing. Orca opens a terminal in it itself; the node waits up to 5 seconds for it and points the web client at it.
   - Branch: an existing local branch is checked out as is (no `baseBranch`), otherwise created from the source workspace's HEAD like herdr (`baseBranch` is the current branch as git reads it now, the commit on a detached HEAD; Orca uses the local branch, unpushed commits included, measured 2026-11-05).

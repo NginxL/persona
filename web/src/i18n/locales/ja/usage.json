@@ -21,7 +21,7 @@
   "problem_failed": "ゲートウェイを読み取れませんでした。前回の数値を表示しています",
   "problem_error": "ゲートウェイがこのアカウントを読めませんでした。保存済みの数値を表示しています",
   "window_model_label": "{name} {window}（{model}）：{percent}使用済み",
-  "not_connected": "未設定",
+  "not_connected": "利用量データ未連携",
   "connect_action": "アシスタントで設定",
   "connect_hint_claude": "利用量データが未連携です。statusLine またはゲートウェイの設定を依頼できます",
   "connect_hint_agy": "CLI はローカルで利用率を返しません。プールゲートウェイ利用時は連携を依頼できます",

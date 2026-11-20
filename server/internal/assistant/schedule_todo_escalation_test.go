@@ -52,6 +52,7 @@ func TestScheduledTodoTaskLeaderEscalation(t *testing.T) {
 			}
 			task := todoProgressTask(worker.ID)
 			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			_, first := assessTodoRun(t, s, task.ID, nil)
 			if first.State != "no_progress" || first.NoProgress != 1 {
 				t.Fatalf("first worker assessment: %+v", first)
@@ -115,8 +116,10 @@ func TestScheduledTodoEscalationMarkerRecovery(t *testing.T) {
 			}
 			s, _ := newQuietServiceOn(t, store)
 			s.superviseTimes.gather = time.Hour
+			s.todoAskAfter = time.Nanosecond
 			task := todoProgressTask("marker-recovery")
 			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			assessTodoRun(t, s, task.ID, nil)
 			run, _ := assessTodoRun(t, s, task.ID, nil)
 			original, _ := s.todoNow(task.TodoID)
@@ -164,6 +167,7 @@ func TestScheduledTodoEscalationMarkerRecovery(t *testing.T) {
 			if tc.restart {
 				s, _ = newQuietServiceOn(t, store)
 				s.superviseTimes.gather = time.Hour
+				s.todoAskAfter = time.Nanosecond
 			}
 			retry := func() {
 				t.Helper()
@@ -224,6 +228,7 @@ func TestScheduledTodoEscalationIdentityResetsWithProgress(t *testing.T) {
 	s, _, todo := scheduledTodoFixture(t)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	assessTodoRun(t, s, task.ID, nil)
 	first, _ := assessTodoRun(t, s, task.ID, nil)
 	assessTodoRun(t, s, task.ID, func() {

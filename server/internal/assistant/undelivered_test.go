@@ -917,3 +917,58 @@ func TestUndeliveredRetryInDoubtLooksFromTheFirstTry(t *testing.T) {
 		t.Fatalf("sent %d times, want 2", n)
 	}
 }
+
+// A conversation at work whose task-follow-up role changed refuses the owner's message (CodeConversationBusy, nothing
+// typed). The hub keeps it; it says it waits for the work to end, a session list that still shows the conversation
+// working does not wake it, one that shows it settled sends it at once, and the send resolves the role again then
+// (supervision_instructions), so the message never runs on the old role.
+func TestUndeliveredBusyRoleChangeWaitsForTheWorkToEnd(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	kept, err := s.KeepUndelivered(context.Background(), assistantwire.KeepUndeliveredParams{MachineID: "server", SessionID: "conv1",
+		Params: map[string]any{"text": "where are we?", "client_msg_id": "msg-busy"}, Human: true, Code: assistantwire.CodeConversationBusy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saysBusy := false
+	for _, l := range []string{"en", "zh-Hans", "ja"} {
+		saysBusy = saysBusy || kept.Error == i18n.T(i18n.Lang(l), "assistant-undelivered.busy")
+	}
+	if kept.State != proto.UndeliveredWaiting || !saysBusy {
+		t.Fatalf("kept as %+v, want waiting with the busy reason", kept)
+	}
+	if q := undeliveredOf(t, s, "conv1"); len(q) != 1 || !q[0].WaitIdle {
+		t.Fatalf("kept %+v, want it waiting for the work to end", q)
+	}
+	working := DeviceSessions{MachineID: "server", Sessions: []proto.Session{{SessionID: "conv1", Status: proto.StatusWorking}}}
+	s.undeliveredSeen(working)
+	s.undeliveredPass(context.Background(), time.Now())
+	if got := ownerSends(f); len(got) != 0 {
+		t.Fatalf("sent %q while the conversation still works", got)
+	}
+	// A due try that is refused busy again keeps waiting for the work to end.
+	failSends(f, &rpc.Error{Code: assistantwire.CodeConversationBusy, Message: "busy"})
+	s.undeliveredPass(context.Background(), time.Now().Add(time.Hour))
+	if q := undeliveredOf(t, s, "conv1"); len(q) != 1 || !q[0].WaitIdle || q[0].State != proto.UndeliveredWaiting || q[0].inDoubt() {
+		t.Fatalf("after a busy try: %+v", q)
+	}
+	failSends(f, nil)
+	s.undeliveredSeen(working)
+	s.undeliveredPass(context.Background(), time.Now())
+	if n := sendCalls(f, "msg-busy"); n != 1 {
+		t.Fatalf("%d tries, want only the busy one while it works", n)
+	}
+	s.undeliveredSeen(DeviceSessions{MachineID: "server", Sessions: []proto.Session{{SessionID: "conv1", Status: proto.StatusIdle}}})
+	s.undeliveredPass(context.Background(), time.Now())
+	if n := sendCalls(f, "msg-busy"); n != 2 {
+		t.Fatalf("%d tries, want it sent once the conversation settled", n)
+	}
+	f.mu.Lock()
+	sent := f.agentSent[len(f.agentSent)-1]
+	f.mu.Unlock()
+	if _, resolved := sent["supervision_instructions"]; !resolved {
+		t.Fatalf("sent %+v without the role resolved at send time", sent)
+	}
+	if q := undeliveredOf(t, s, "conv1"); len(q) != 0 {
+		t.Fatalf("still kept: %+v", q)
+	}
+}

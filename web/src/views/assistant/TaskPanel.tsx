@@ -2,8 +2,6 @@
 // agent's own chat — everything the Agents page does works here — and, with several agents, a switch between them. Opened
 // while Agents open in the side panel (lib/agent-open.ts, #5424); loaded with the first one (SidePanel).
 
-// the question a failed start's tab stopped on, answered here (#10365): only for such a failure
-const ShellQuestion = lazy(() => import("../ShellQuestionCard"));
 import { lazy, Suspense, useState } from "react";
 import { isRemovable, openAsk } from "../../lib/todos";
 import { statusWord } from "../../lib/todo-wait-reason";
@@ -22,6 +20,10 @@ import { href, type Route } from "../../lib/router";
 import { t } from "../../i18n";
 import { startInFlight, useFeed } from "../../lib/feed";
 import { TaskWorkspaceLine } from "./TaskWorkspace";
+
+// the question a failed start's tab stopped on, answered here (#10365): only for such a failure. After the imports: in
+// development Vite turns `import { lazy }` into a const at its place, which a call above it would read too early.
+const ShellQuestion = lazy(() => import("../ShellQuestionCard"));
 
 /** ⋯'s "Open in new window": the page the panel shows, as its own tab (⌘-click on the link does the same). */
 function openInWindow(to: Route): MenuItem {
@@ -71,7 +73,8 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
           key={`${chosen.machine_id}/${chosen.session_id}`}
           mid={chosen.machine_id}
           sid={chosen.session_id}
-          panel={{ onClose, title: todo.title, sub: subtitle, items: taskItems, beside: switcher.length > 1 ? <AgentSwitch agents={switcher} /> : undefined }}
+          // the bubble before × opens the Agent shown (the one ⌄ picked) as its own page
+          panel={{ onClose, page: { name: "session", mid: chosen.machine_id, sid: chosen.session_id }, title: todo.title, sub: subtitle, items: taskItems, beside: switcher.length > 1 ? <AgentSwitch agents={switcher} /> : undefined }}
           // what the task's result waits on from the user (#2056), and what its agent last reported, as it wrote it (#3181),
           // over its agent's chat
           banner={openAsk(todo) || reportText(todo.supervision) || planned?.workspace ? (
@@ -147,7 +150,7 @@ function PanelMore({ items }: { items: MenuItem[] }) {
 export function AgentPanel({ mid, sid, onClose }: { mid: string; sid: string; onClose: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatView key={`${mid}/${sid}`} mid={mid} sid={sid} panel={{ onClose, items: [openInWindow({ name: "session", mid, sid })] }} />
+      <ChatView key={`${mid}/${sid}`} mid={mid} sid={sid} panel={{ onClose, page: { name: "session", mid, sid }, items: [openInWindow({ name: "session", mid, sid })] }} />
     </div>
   );
 }

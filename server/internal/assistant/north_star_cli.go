@@ -16,7 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/managerconf"
 )
 
-// NorthStarCommand is `personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief lang]`: the
+// NorthStarCommand is `personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief lang] [--weekly]`: the
 // north-star readout (north_star.go) against the built-in manager's database, read-only, without a running manager and
 // without migrating anything: a baseline from a build that never recorded it. Both databases are opened with read-only
 // transactions. On top of what GET /api/v1/assistant/north-star reads, it counts the app messages the hub's client_ops
@@ -28,6 +28,7 @@ func NorthStarCommand(ctx context.Context, args []string, stdout, stderr io.Writ
 	split := flags.String("split", "", "an RFC 3339 time: availability before and from it (a deployment)")
 	tz := flags.String("tz", "", "the time zone (default: the assistant's setting, else this machine's)")
 	brief := flags.String("brief", "", "print the briefing's opening lines in this language (en, zh-Hans, ja) instead of JSON: today until now against yesterday until the same time")
+	weekly := flags.Bool("weekly", false, "print four seven-calendar-day weeks ending before the reading day")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -66,6 +67,18 @@ func NorthStarCommand(ctx context.Context, args []string, stdout, stderr io.Writ
 		hub = manager // a manager that never moved keeps the hub's tables beside its own
 	}
 	now := time.Now()
+	if *weekly {
+		if *split != "" || *brief != "" {
+			return errors.New("--weekly cannot be combined with --split or --brief")
+		}
+		out, err := northStarWeeklyCommand(ctx, manager, hub, *date, *tz, now)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
 	ns, err := northStarCommand(ctx, manager, hub, *date, *split, *tz, now)
 	if err != nil {
 		return err
@@ -106,6 +119,10 @@ func northStarCommand(ctx context.Context, manager, hub *db.DB, date, split, tz 
 	if err != nil {
 		return NorthStar{}, err
 	}
+	return northStarCommandWindow(ctx, manager, hub, since, until, at, loc)
+}
+
+func northStarCommandWindow(ctx context.Context, manager, hub *db.DB, since, until, at time.Time, loc *time.Location) (NorthStar, error) {
 	roles, err := rolesNow(ctx, manager)
 	if err != nil {
 		return NorthStar{}, err

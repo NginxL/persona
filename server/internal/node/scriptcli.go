@@ -81,6 +81,9 @@ func (n *Node) handleAsk(ctx context.Context, req sockRequest) nodeclient.AskRep
 		return nodeclient.AskReply{Status: nodeclient.AskUnavailable, Error: "this node is not connected to a hub"}
 	}
 	sid, title := n.scriptSession(req.Pane, a.Cwd)
+	if n.sessionBlocked(sid, a.Cwd) {
+		return nodeclient.AskReply{Status: nodeclient.AskUnavailable, Error: "this folder is blocked in Persona"}
+	}
 	now := time.Now()
 	ix := proto.Interaction{
 		ID: scriptInteractionID(req.Attempt), SessionID: sid, SessionTitle: title, Cwd: a.Cwd,
@@ -174,6 +177,9 @@ func (n *Node) notifyCall(ctx context.Context, req sockRequest, spoolID string) 
 		"level": level, "silent": nr.Silent,
 	}
 	if sid, _ := n.scriptSession(req.Pane, ""); sid != "" {
+		if n.sessionBlocked(sid, n.sessionCwd(sid)) {
+			return nodeclient.NotifyReply{Reason: "this folder is blocked in Persona"}, nil
+		}
 		params["session_id"] = sid // a tap opens that session; a muted session gets nothing
 	}
 	if spoolID != "" {

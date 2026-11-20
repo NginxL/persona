@@ -3,6 +3,7 @@ package feishubot
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -23,6 +24,7 @@ type Card struct {
 
 type cardHeader struct {
 	Title       plain  `json:"title"`
+	Subtitle    *plain `json:"subtitle,omitempty"` // who or where, under the title
 	Template    string `json:"template,omitempty"`
 	TextTagList []any  `json:"text_tag_list,omitempty"` // tags on the right of the title
 }
@@ -38,15 +40,18 @@ type plain struct {
 
 func text(s string) plain { return plain{Tag: "plain_text", Content: s} }
 
-// Header colors.
+// Header colors. A header's color is the card's state (docs/extensions/bots.md "Cards"): orange, the
+// owner is to act; red, urgent or failed; blue, under way or only to know; green, done; grey, over. Tags take the same
+// names, and Neutral (grey) for what only says the card's kind.
 const (
-	Blue   = "blue"
-	Green  = "green"
-	Orange = "orange"
-	Red    = "red"
-	Grey   = "grey"
-	Purple = "purple"
-	Wathet = "wathet"
+	Blue    = "blue"
+	Green   = "green"
+	Orange  = "orange"
+	Red     = "red"
+	Grey    = "grey"
+	Purple  = "purple"
+	Wathet  = "wathet"
+	Neutral = "neutral"
 )
 
 // NewCard starts a card; an empty title leaves the header out. summary is what the chat list shows for it (an
@@ -126,6 +131,19 @@ func LinkBtn(label, url string) Button {
 	return Button{"tag": "button", "text": text(label), "type": Default, "behaviors": []any{open}}
 }
 
+// PageBtn is LinkBtn for a page of Persona's web app: on the desktop it opens in Feishu's sidebar (SidebarURL), the
+// chat staying where it was; on the phone as any link.
+func PageBtn(label, u string) Button {
+	b := LinkBtn(label, u)
+	b["behaviors"].([]any)[0].(map[string]any)["pc_url"] = SidebarURL(u)
+	return b
+}
+
+// SidebarURL is u opened in Feishu's half-width sidebar on the desktop (an applink; Feishu 3.41 and later).
+func SidebarURL(u string) string {
+	return "https://applink.feishu.cn/client/web_url/open?mode=sidebar-semi&url=" + url.QueryEscape(u)
+}
+
 // buttonRow lays buttons side by side, wrapping onto more lines on a narrow screen.
 func buttonRow(bs []Button) map[string]any {
 	cols := make([]any, len(bs))
@@ -145,15 +163,19 @@ func (c *Card) Buttons(bs ...Button) *Card {
 	return c
 }
 
-// AppendToLinks adds a navigation button to the last row when that row already consists only of open_url actions. A
-// callback action row (approval, form or another command) stays separate from navigation. Otherwise this is Buttons.
+// AppendToLinks adds a button to the card's last row of links: a link joins them as Link does, any other button (a
+// way back to the workbench) is added to the last row when that row consists only of links. A callback action row
+// (approval, form or another command) stays separate from navigation. Otherwise this is Buttons.
 func (c *Card) AppendToLinks(b Button) *Card {
 	if len(b) == 0 {
 		return c
 	}
+	if it, ok := linkButton(b); ok {
+		return c.addLink(it)
+	}
 	if len(c.Body.Elements) > 0 {
 		row, ok := c.Body.Elements[len(c.Body.Elements)-1].(map[string]any)
-		if ok && row["tag"] == "column_set" && row["flex_mode"] == "flow" && linkColumns(row["columns"]) {
+		if _, links := linkRowItems(row); ok && links {
 			cols, _ := row["columns"].([]any)
 			row["columns"] = append(cols, buttonRow([]Button{b})["columns"].([]any)...)
 			return c
@@ -162,47 +184,189 @@ func (c *Card) AppendToLinks(b Button) *Card {
 	return c.Buttons(b)
 }
 
-// linkColumns reports whether every button in a row opens a URL, rather than invoking a command callback.
-func linkColumns(raw any) bool {
-	cols, ok := raw.([]any)
-	if !ok || len(cols) == 0 {
+// linkRowMost is how many links a row shows as buttons; past that it shows one less and a "more" menu with the rest.
+const linkRowMost = 3
+
+// linkItem is one link of a row of links: what it says, where it goes, and where it goes on the desktop (pc).
+type linkItem struct{ label, url, pc string }
+
+// Link adds a link to the card's row of links, the last element when it is one, else a new one at the end: at most
+// linkRowMost buttons, the rest in the row's "more" menu, each address once. A link a card cannot open is left out.
+func (c *Card) Link(label, u string) *Card { return c.addLink(linkItem{label, u, u}) }
+
+// PageLink is Link for a page of Persona's web app, opened in Feishu's sidebar on the desktop (PageBtn).
+func (c *Card) PageLink(label, u string) *Card { return c.addLink(linkItem{label, u, SidebarURL(u)}) }
+
+func (c *Card) addLink(it linkItem) *Card {
+	if it.label = strings.TrimSpace(it.label); it.label == "" || !linkOK(it.url) {
+		return c
+	}
+	if i := c.linkRowAt(); i >= 0 {
+		items, _ := linkRowItems(c.Body.Elements[i])
+		for _, x := range items {
+			if x.url == it.url {
+				return c
+			}
+		}
+		c.Body.Elements[i] = linkRow(append(items, it))
+		return c
+	}
+	c.Body.Elements = append(c.Body.Elements, linkRow([]linkItem{it}))
+	return c
+}
+
+// linkRowAt is where the card's row of links is: its last element, or the last before the small print that ends the
+// card (an answer's foot, a line of facts); -1 when there is none.
+func (c *Card) linkRowAt() int {
+	for i := len(c.Body.Elements) - 1; i >= 0; i-- {
+		if _, ok := linkRowItems(c.Body.Elements[i]); ok {
+			return i
+		}
+		if !smallPrint(c.Body.Elements[i]) {
+			return -1
+		}
+	}
+	return -1
+}
+
+// smallPrint: el is a line of small grey text (Note, Meta).
+func smallPrint(el any) bool {
+	m, ok := el.(map[string]any)
+	if !ok {
 		return false
 	}
-	for _, rawCol := range cols {
-		col, ok := rawCol.(map[string]any)
-		if !ok {
-			return false
+	switch m["tag"] {
+	case "div":
+		t, _ := m["text"].(map[string]any)
+		return t["text_size"] == "notation"
+	case "markdown":
+		return m["text_size"] == "notation"
+	}
+	return false
+}
+
+// linkRow lays links out as a row: all as buttons up to linkRowMost, else one less and a "more" menu.
+func linkRow(items []linkItem) map[string]any {
+	shown := items
+	var rest []linkItem
+	if len(items) > linkRowMost {
+		shown, rest = items[:linkRowMost-1], items[linkRowMost-1:]
+	}
+	var bs []Button
+	for _, it := range shown {
+		b := LinkBtn(it.label, it.url)
+		if it.pc != "" {
+			b["behaviors"].([]any)[0].(map[string]any)["pc_url"] = it.pc
 		}
-		elements, ok := col["elements"].([]any)
-		if !ok {
-			return false
+		bs = append(bs, b)
+	}
+	if len(rest) > 0 {
+		var menu []MenuItem
+		for _, it := range rest {
+			menu = append(menu, MenuItem{Label: it.label, URL: it.url, PC: it.pc})
+		}
+		bs = append(bs, Overflow(map[string]any{"a": "nop"}, menu...))
+	}
+	return buttonRow(bs)
+}
+
+// linkRowItems are the links of a row of links (link buttons, then a "more" menu of links); ok is false for any
+// other element.
+func linkRowItems(el any) (items []linkItem, ok bool) {
+	row, isMap := el.(map[string]any)
+	if !isMap || row["tag"] != "column_set" || row["flex_mode"] != "flow" {
+		return nil, false
+	}
+	cols, _ := row["columns"].([]any)
+	if len(cols) == 0 {
+		return nil, false
+	}
+	for _, rawCol := range cols {
+		col, isMap := rawCol.(map[string]any)
+		if !isMap {
+			return nil, false
+		}
+		elements, _ := col["elements"].([]any)
+		if len(elements) == 0 {
+			return nil, false
 		}
 		for _, rawElement := range elements {
-			var button Button
-			switch b := rawElement.(type) {
+			var b Button
+			switch x := rawElement.(type) {
 			case Button:
-				button = b
+				b = x
 			case map[string]any:
-				button = Button(b)
+				b = Button(x)
 			default:
-				return false
+				return nil, false
 			}
-			if button["tag"] != "button" {
-				return false
+			if it, isLink := linkButton(b); isLink {
+				items = append(items, it)
+				continue
 			}
-			behaviors, ok := button["behaviors"].([]any)
-			if !ok || len(behaviors) == 0 {
-				return false
+			menu, isMenu := linkMenu(b)
+			if !isMenu {
+				return nil, false
 			}
-			for _, rawBehavior := range behaviors {
-				behavior, ok := rawBehavior.(map[string]any)
-				if !ok || behavior["type"] != "open_url" {
-					return false
-				}
-			}
+			items = append(items, menu...)
 		}
 	}
-	return true
+	return items, true
+}
+
+// linkButton is b as a link when it is a button that only opens one.
+func linkButton(b Button) (linkItem, bool) {
+	if b["tag"] != "button" {
+		return linkItem{}, false
+	}
+	behaviors, _ := b["behaviors"].([]any)
+	if len(behaviors) != 1 {
+		return linkItem{}, false
+	}
+	beh, isMap := behaviors[0].(map[string]any)
+	if !isMap || beh["type"] != "open_url" {
+		return linkItem{}, false
+	}
+	var it linkItem
+	it.url, _ = beh["default_url"].(string)
+	it.pc, _ = beh["pc_url"].(string)
+	it.label = plainContent(b["text"])
+	return it, it.url != ""
+}
+
+// plainContent is a plain_text's words, as built or as read back from JSON.
+func plainContent(v any) string {
+	switch t := v.(type) {
+	case plain:
+		return t.Content
+	case map[string]any:
+		s, _ := t["content"].(string)
+		return s
+	}
+	return ""
+}
+
+// linkMenu is the links of b when it is a "more" menu of links only.
+func linkMenu(b Button) ([]linkItem, bool) {
+	if b["tag"] != "overflow" {
+		return nil, false
+	}
+	opts, _ := b["options"].([]any)
+	var items []linkItem
+	for _, raw := range opts {
+		o, isMap := raw.(map[string]any)
+		if !isMap {
+			return nil, false
+		}
+		mu, _ := o["multi_url"].(map[string]any)
+		u, _ := mu["url"].(string)
+		if u == "" {
+			return nil, false
+		}
+		pc, _ := mu["pc_url"].(string)
+		items = append(items, linkItem{plainContent(o["text"]), u, pc})
+	}
+	return items, len(items) > 0
 }
 
 // Form adds a form: its fields (Input, Select, MarkdownBlock) and the submit buttons under them.

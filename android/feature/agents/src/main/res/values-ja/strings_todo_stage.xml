@@ -7,5 +7,6 @@
     <string name="agents_todo_stage_merge">マージ</string>
     <string name="agents_todo_stage_deploy">デプロイ</string>
     <string name="agents_todo_stage_verify">検証済み</string>
+    <string name="agents_todo_stage_done">完了</string>
     <string name="agents_todo_stage_a11y">ステージ：%1$s（%3$dステップ中%2$d）</string>
 </resources>

@@ -1,4 +1,6 @@
 {
+  "kind_todo_handoff": "等待结果",
+  "handoff_deadline": "回传截止于 {time}",
   "kind_person_reply": "等回复",
   "kind_merge_review": "等评审或合并",
   "kind_external_event": "等外部变化",

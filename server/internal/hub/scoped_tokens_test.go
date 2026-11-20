@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -210,6 +211,27 @@ func TestScopedDeviceToken(t *testing.T) {
 	}
 	if code, out := call(t, mux, "GET", "/api/v1/sessions", readToken, ""); code != http.StatusUnauthorized {
 		t.Fatalf("revoked token: %d %v", code, out)
+	}
+}
+
+func TestScopedDeviceAgentRouteScopes(t *testing.T) {
+	h := &Hub{apiMux: http.NewServeMux()}
+	h.extensionRoutesRelayed(h.apiMux)
+	checked := 0
+	for pattern, want := range extwire.RouteScopes {
+		method, path, _ := strings.Cut(pattern, " ")
+		if path != "/api/v1/agents" && !strings.HasPrefix(path, "/api/v1/agents/") {
+			continue
+		}
+		path = strings.ReplaceAll(path, "{id}", "src%3Ak1")
+		r := httptest.NewRequest(method, path, nil)
+		if got := h.scopedDeviceRoute(r); got != want {
+			t.Errorf("%s: got scope %q, want %q", pattern, got, want)
+		}
+		checked++
+	}
+	if checked != 7 {
+		t.Fatalf("checked %d Agent routes, want all 7", checked)
 	}
 }
 

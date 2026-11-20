@@ -150,6 +150,48 @@ struct UndeliveredTests {
         return try #require(HeldRetryOffer(model.heldTarget(key, id, row: row), message))
     }
 
+    private func waitForHeldRetry(_ model: AppModel, _ offer: HeldRetryOffer) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !model.heldRetryDisabled(offer), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(model.heldRetryDisabled(offer), "the persisted held-retry receipt was not published")
+    }
+
+    /// #11431: this suite is on the main actor, so no restored value can be published between `init` and the first
+    /// expectation. Receipts already there prove that the initializer waited for the file read. After a yield, the
+    /// restored receipt must disable the matching Retry.
+    @Test func persistedHeldRetryReceiptsArriveAfterStartup() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = try heldModel(FakeHub(), folder: folder)
+        let check = try visibleOffer(model)
+        HeldRetryOffer.save([check], in: folder)
+
+        let opened = AppModel(stateFolder: folder)
+        #expect(opened.heldRetryReceipts.isEmpty, "AppModel.init must not read held-retry receipts on the main actor")
+        try await waitForHeldRetry(opened, check)
+    }
+
+    /// #11431: a receipt recorded while the startup read is pending survives the older snapshot's arrival. Keep the
+    /// folder read-only during that change so its save cannot race and replace the snapshot this test is restoring.
+    @Test func aRetryStateChangeDuringRestorationIsNotOverwritten() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = try heldModel(FakeHub(), folder: folder)
+        let messages = ["x", "y", "z"].map { heldJSON.replacingOccurrences(of: #""id":"x""#, with: #""id":"\#($0)""#) }
+        model.applySessions([ref: [try agent(messages.joined(separator: ","))]])
+        let persisted = try visibleOffer(model)
+        let newer = try visibleOffer(model, id: "y")
+        let marker = try visibleOffer(model, id: "z")
+        HeldRetryOffer.save([persisted, marker], in: folder)
+
+        let opened = AppModel(stateFolder: folder)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        opened.heldRetryReceipts.insert(newer)
+        #expect(opened.heldRetryReceipts == [newer], "the newer change must be made while restoration is still pending")
+        try await waitForHeldRetry(opened, marker)
+        #expect(opened.heldRetryDisabled(persisted), "the rest of the persisted snapshot is restored too")
+        #expect(opened.heldRetryDisabled(newer), "restoration must not replace a newer retry-state change")
+    }
+
     @Test func aSuccessfulHeldCheckCannotBeRetriedUnderTheSameInstruction() async throws {
         let hub = FakeHub()
         let model = try heldModel(hub)
@@ -204,6 +246,7 @@ struct UndeliveredTests {
         answerDetail(hub, heldJSON)
         await model.retryUndelivered(key, "x", shown: check)
         let opened = try heldModel(hub, folder: folder)
+        try await waitForHeldRetry(opened, check)
         await opened.retryUndelivered(key, "x", shown: try visibleOffer(opened))
         #expect(actions == ["checked"])
         #expect(opened.heldRetryDisabled(check))
@@ -243,6 +286,7 @@ struct UndeliveredTests {
         #expect(model.heldRetryDisabled(check))
         let opened = try heldModel(hub, folder: folder)
         opened.link("")?.received(HubHello(features: ["agent_message_hold", "sessions_lookup"]))
+        try await waitForHeldRetry(opened, check)
         #expect(opened.heldRetryDisabled(try visibleOffer(opened)))
         await opened.retryUndelivered(key, "x")
         #expect(hub.sent("POST", retryPath).count == 2)

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 1,
+  "id": "example-garden",
+  "name": "Example Garden",
+  "version": "1.0.0",
+  "engines": {"extension_protocol": 1},
+  "runtime": {"command": "bin/example-garden", "rpc": "stdio"},
+  "contributes": {"ui": [
+    {"id": "garden", "title": "Garden", "placement": "nav_page", "icon": "calendar", "icon_color": "#2e7d32"}
+  ]}
+}

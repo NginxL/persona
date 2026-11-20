@@ -191,9 +191,10 @@ func (s *Service) briefRoutes() {
 
 	// POST /api/v1/todos/{id}/accept {"asked_at"}: the Accept button of a `brief` item. It verifies the task when asked_at is
 	// the round that waits now; a button of an earlier round, or a task already verified, is 409. A decision whose
-	// recommendation could not be sent to the task's agent is 502 (423 with the node's code when the node refused it, such
-	// as dialog_open, #7343), and asks that cannot be read or an acceptance that
-	// cannot be saved is 503; either way nothing was taken (conclusion.go, errAcceptStore). A decision also takes
+	// recommendation could not be sent to the task's agent is 502 accept_not_taken (423 with the node's code when the node
+	// refused it, such as dialog_open, #7343), and asks that cannot be read or an acceptance that
+	// cannot be saved is 503; either way nothing was taken (conclusion.go, errAcceptStore). A send whose answer may have
+	// reached the agent, or did before what followed failed, is 502 send_in_doubt (todo_write_outcome.go). A decision also takes
 	// {"option"}: the label of the option chosen (the recommended one is what the plain press takes; no such option is
 	// 400), or {"response"}: decide_yourself, not_what_i_asked or explain_first, which takes nothing and goes to the
 	// task's supervisor (decision.go; any other value is 400).
@@ -236,6 +237,13 @@ func (s *Service) briefRoutes() {
 			apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return
 		}
+		if delivered := writeDelivered(err); err != nil && delivered != "none" {
+			// The words may be with the Agent already, or are (todo_write_outcome.go): a failure every app shows, never
+			// "nothing was changed", so the owner looks before taking it again. The button works again (the round still
+			// waits), as for any 502.
+			writeInDoubt(w, http.StatusBadGateway, err, delivered, answerInDoubtKeys)
+			return
+		}
 		if nodeRefusal(err) {
 			// The node refused with a code it words itself (a dialog open in the terminal, a draft in its input box):
 			// that code and the node's details, so the app can say what to do first instead of "try again later".
@@ -243,12 +251,12 @@ func (s *Service) briefRoutes() {
 			// (apierr.Call): on this route the apps already installed (iOS, Android, older web pages) read any 409 as
 			// "this round is over" and lock the button, though nothing reached the agent. 423 Locked (the terminal is
 			// held by the dialog) is a failure to every one of them, which shows the hub's sentence and keeps the button.
-			apierr.CallStatus(w, http.StatusLocked, err)
+			writeNodeRefusal(w, err)
 			return
 		}
-		if err != nil { // another delivery failure: nothing taken, the button works again
+		if err != nil { // another delivery failure: nothing typed or taken, the button works again
 			// In the request's language, the reason too when the hub words it (an offline computer, no agent).
-			apierr.WriteCode(w, http.StatusBadGateway, "accept_not_taken", i18n.Err("assistant-reports.accept_not_taken",
+			writeTypedNothing(w, http.StatusBadGateway, "accept_not_taken", i18n.Err("assistant-reports.accept_not_taken",
 				i18n.Args{"error": clip(oneLine(i18n.Localize(err, s.requestCtxLang(r.Context()))), 120)}))
 			return
 		}

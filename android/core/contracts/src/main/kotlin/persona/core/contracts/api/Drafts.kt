@@ -47,6 +47,7 @@ data class DraftSnapshot(
     val scope: HubScope, val key: DraftKey, val text: String = "", val version: Long = 0,
     val attachments: List<DraftAttachment> = emptyList(),
     val sessionVersion: DraftSessionVersion? = null,
+    val hasPickedSavedPrompt: Boolean = false,
 )
 
 interface DraftRepository {
@@ -63,6 +64,11 @@ interface DraftRepository {
         check(attachments.isEmpty() && sessionVersion == null) { "Structured drafts are not supported" }
         return save(key, text, expectedVersion)
     }
+    /** Structured stores can also keep the provenance of an unchanged saved-prompt body. */
+    suspend fun save(
+        key: DraftKey, text: String, expectedVersion: Long,
+        attachments: List<DraftAttachment>, sessionVersion: DraftSessionVersion?, hasPickedSavedPrompt: Boolean,
+    ): DraftSnapshot = save(key, text, expectedVersion, attachments, sessionVersion)
 }
 
 /** Callers clear only the submitted editor revision, and only after this call succeeds. */

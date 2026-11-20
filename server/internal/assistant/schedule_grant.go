@@ -51,9 +51,18 @@ type StartGrant struct {
 
 // grantBasis names what a grant is given under: t's prompt, where its runs go, its space and what the hub adds to its
 // prompt. A plan keeps its round's (PlanTask.ScheduleBasis), so a Start after the schedule changed grants nothing.
-func (t Task) grantBasis() string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{strings.TrimSpace(t.Prompt), t.MachineID, t.SessionID, t.Space,
-		strconv.FormatBool(t.Facts), strconv.FormatBool(t.Report)}, "\x00")))
+func (t Task) grantBasis(binding ...ModelBinding) string {
+	parts := []string{strings.TrimSpace(t.Prompt), t.MachineID, t.SessionID, t.Space,
+		strconv.FormatBool(t.Facts), strconv.FormatBool(t.Report)}
+	// Keep existing grants valid when there are no execution overrides, but bind a grant to an explicit target.
+	if t.ExecutionMachineID != "" || t.Cwd != "" {
+		parts = append(parts, t.ExecutionMachineID, t.Cwd)
+	}
+	if len(binding) > 0 {
+		raw, _ := json.Marshal(binding[0])
+		parts = append(parts, "model", string(raw))
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -65,22 +74,50 @@ func (t Task) grantEligible() bool {
 }
 
 // liveGrant is t's grant while it still applies: given under t as it is now, with a kind in it.
-func (t Task) liveGrant() *StartGrant {
+func (t Task) liveGrant(basis ...string) *StartGrant {
+	want := t.grantBasis()
+	if len(basis) > 0 {
+		want = basis[0]
+	}
 	g := t.StartGrant
-	if g == nil || len(g.Kinds) == 0 || g.Basis != t.grantBasis() {
+	if g == nil || len(g.Kinds) == 0 || g.Basis != want {
 		return nil
 	}
 	return g
 }
 
-// dropStaleGrants clears every grant that no longer applies before a list is saved: the owner gave it to a schedule
-// that has since changed its prompt or where it runs. liveGrant checks again at use, for what changes in memory only.
-func dropStaleGrants(tasks []Task) {
+// Revoke grants on persisted task edits using only the task rows. The task editor checks model changes before
+// its atomic save. Authorization still checks the authoritative model and round at use.
+func dropEditedTaskGrants(previous, tasks []Task) {
+	bases := make(map[string]string)
+	for _, task := range previous {
+		if task.StartGrant != nil {
+			bases[task.ID] = task.grantBasis()
+		}
+	}
 	for i := range tasks {
-		if tasks[i].StartGrant != nil && tasks[i].liveGrant() == nil {
+		if old, ok := bases[tasks[i].ID]; ok && tasks[i].StartGrant != nil && old != tasks[i].grantBasis() {
 			tasks[i].StartGrant = nil
 		}
 	}
+}
+
+// Read the authoritative model record for granting or consuming authorization. Untouched tasks retain their
+// legacy hash and inheritance; configured tasks bind to the effective execution configuration.
+// Unlike resolveModel(task.ID), this accepts the already-locked task without reacquiring the schedule lock.
+func (s *Service) taskGrantBasis(ctx context.Context, t Task) (string, error) {
+	record, err := s.modelRecord(ctx, "task."+t.ID)
+	if err != nil {
+		return "", err
+	}
+	if record.Binding == (ModelBinding{}) {
+		return t.grantBasis(), nil
+	}
+	base, err := s.taskModelBaseline(ctx, s.taskMachine(ctx, t))
+	if err != nil {
+		return "", err
+	}
+	return t.grantBasis(mergeModel(base, record.Binding)), nil
 }
 
 type scheduleGrantKey struct{}
@@ -102,20 +139,27 @@ func (s *Service) grantScheduleKind(ctx context.Context, id string, t PlanTask) 
 	if t.ScheduleBasis == "" {
 		return
 	}
+	s.models.mu.Lock()
+	defer s.models.mu.Unlock()
 	sc, err := s.lockedSchedule(ctx)
 	if err != nil {
 		s.logf("schedule grant: task %s: %v", id, err)
 		return
 	}
 	i := sc.indexLocked(id)
-	if i < 0 || !sc.tasks[i].grantEligible() || sc.tasks[i].grantBasis() != t.ScheduleBasis {
+	if i < 0 || !sc.tasks[i].grantEligible() {
 		sc.mu.Unlock() // gone, or no longer the schedule whose round the owner saw: nothing granted
 		return
 	}
+	basis, err := s.taskGrantBasis(ctx, sc.tasks[i])
+	if err != nil || basis != t.ScheduleBasis {
+		sc.mu.Unlock()
+		return
+	}
 	tasks := slices.Clone(sc.tasks)
-	g := tasks[i].liveGrant()
+	g := tasks[i].liveGrant(basis)
 	if g == nil {
-		g = &StartGrant{Basis: tasks[i].grantBasis(), GrantedAt: time.Now().UTC()}
+		g = &StartGrant{Basis: basis, GrantedAt: time.Now().UTC()}
 	} else {
 		cp := *g
 		cp.Kinds = slices.Clone(g.Kinds)
@@ -204,8 +248,9 @@ func (s *Service) scheduleGrantRoutes() {
 // schedRound is a round the hub sent for scheduled task task into a conversation: what task_plan from that
 // conversation checks its turn against (scheduledRoundOf). In memory only: after a hub restart a round's plan asks.
 type schedRound struct {
-	task string
-	at   time.Time
+	task  string
+	at    time.Time
+	basis string
 }
 
 // roundTTL bounds how long after it was sent a round's turn may still hand out work under its schedule's grant.
@@ -214,7 +259,7 @@ const roundTTL = 2 * time.Hour
 func roundKey(machine, session string) string { return machine + "\x00" + session }
 
 // noteRound records that the hub is sending a round of task into session on machine.
-func (s *Service) noteRound(machine, session, task string, at time.Time) {
+func (s *Service) noteRound(machine, session, task, basis string, at time.Time) {
 	if machine == "" || session == "" {
 		return
 	}
@@ -226,7 +271,7 @@ func (s *Service) noteRound(machine, session, task string, at time.Time) {
 	k := roundKey(machine, session)
 	// Its own earlier round there is over by now (one round of a task at a time, sched.begin): this one replaces it.
 	list := slices.DeleteFunc(s.sched.rounds[k], func(r schedRound) bool { return r.task == task || at.Sub(r.at) > roundTTL })
-	s.sched.rounds[k] = append(list, schedRound{task: task, at: at})
+	s.sched.rounds[k] = append(list, schedRound{task: task, at: at, basis: basis})
 }
 
 // endRound forgets task's round in session once its turn ended (watchScheduledRun), and its clean mark.
@@ -303,6 +348,11 @@ func (s *Service) scheduledRoundOf(ctx context.Context, machine, session string)
 	if !ok {
 		return Task{}, false
 	}
+	basis, err := s.taskGrantBasis(ctx, t)
+	if err != nil || basis != r.basis {
+		return Task{}, false
+	}
+	t.runGrantBasis = r.basis
 	items, read := s.lastTurnItems(ctx, machine, session)
 	if !read {
 		return Task{}, false
@@ -458,7 +508,15 @@ func scheduledTurn(items []proto.Item) bool {
 // scheduleGrantCover is what the grant of t, whose round task_plan is called in, lets start without the card: nil when
 // t has no live grant or the round is not clean.
 func (s *Service) scheduleGrantCover(ctx context.Context, t Task, machine, session string) func(PlanTask) bool {
-	g := t.liveGrant()
+	current, ok := s.scheduledTask(ctx, t.ID)
+	if !ok {
+		return nil
+	}
+	basis, err := s.taskGrantBasis(ctx, current)
+	if err != nil || basis != t.runGrantBasis {
+		return nil
+	}
+	g := current.liveGrant(basis)
 	if g == nil || !s.cleanRound(ctx, t, machine, session) {
 		return nil
 	}

@@ -1536,7 +1536,8 @@ struct InboxRow: View {
                     .scaledFrame(width: Theme.Size.avatar, height: Theme.Size.avatar)
                     .overlay(ThemedIcon(Theme.Icon.moments).font(Theme.Font.bodyStrong).foregroundStyle(LarkColor.text("orange") ?? Theme.accent))
             } else if item.isLark {
-                LarkAvatarImage(name: item.title, url: item.avatar, isGroup: item.lark?.isGroup ?? false, size: Theme.Size.avatar)
+                LarkAvatarImage(name: item.title, url: item.avatarURL ?? item.avatar, account: item.lark?.olAccount, size: Theme.Size.avatar)
+                    .environment(\.larkManager, AppModel.shared.linkManager(item.manager))
             } else {
                 // A connector's thread picture (the other person, a group's own) over the initial; the initial alone
                 // without one, mail's included.
@@ -1819,7 +1820,7 @@ struct InboxDetailView: View {
         if current.doc != nil {
             InboxDocDetailView(item: current)
         } else if current.connector != nil {
-            InboxConnectorDetailView(item: current)
+            InboxConnectorDetailView(item: current, manager: model.itemManager(current.manager))
         } else if let m = current.moment {
             LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(current.manager)) // the post and its comments, as a shared Moments card opens
         } else if item.larkConversation != nil || item.mailSummary != nil {

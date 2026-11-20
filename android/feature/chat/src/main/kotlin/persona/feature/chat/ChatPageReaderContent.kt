@@ -20,14 +20,19 @@ import persona.core.contracts.SessionKey
 import persona.core.contracts.UndeliveredMessage
 import persona.core.contracts.WorkState
 import persona.core.contracts.api.ChatRepository
+import persona.core.contracts.api.ChannelSources
 import persona.core.contracts.api.OutboxMessage
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.MessageSendReceipt
 import persona.core.contracts.api.ChatComposerService
 import persona.core.designsystem.*
 import persona.core.domain.lines.ChatLine
+import persona.core.domain.lines.isUserMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+
+/** The Assistant feature supplies its source mark and label for an externally opened conversation. */
+val LocalOpeningMessageSource = staticCompositionLocalOf<(Session) -> (@Composable () -> Unit)?> { { null } }
 
 /** The reader inside a ChatPage's JPage content slot. This is the same reader/navigation/outbox code, moved behind a
  * narrow state-holder boundary to keep ChatPage itself below ART's method limit. No second UI state is created. */
@@ -113,6 +118,19 @@ internal fun ChatPageReaderContent(
     // The closeout card takes the room under the top bar; the list then starts right under the card.
     val padding = if (closeoutShown != null) PaddingValues(bottom = pagePaddingValues.calculateBottomPadding()) else pagePaddingValues
     val closeoutReplyId = remember(lines, closeoutShown != null) { if (closeoutShown != null) closeoutReplyId(lines) else null }
+    val sourceFor = LocalOpeningMessageSource.current
+    val externalSource = remember(session, renderStyle, sourceFor) {
+        session?.takeIf { renderStyle == ChatRenderStyle.Assistant }?.let(sourceFor)
+    }
+    // A cache with an unknown boundary or a partial page may only contain a later user message.
+    val opening = remember(externalSource, snapshot.olderBoundaryKnown, snapshot.hasOlder, snapshot.items) {
+        if (externalSource != null && snapshot.olderBoundaryKnown && !snapshot.hasOlder)
+            snapshot.items.firstOrNull(::isUserMessage)
+        else null
+    }
+    val channels = LocalChannels.current
+    val openingChannel = remember(opening?.clientMsgId, channels) { ChannelSources.of(opening?.clientMsgId, channels) }
+    val openingSource: (@Composable () -> Unit)? = if (openingChannel != null) ({ JChannelSource(openingChannel) }) else externalSource
     Column(Modifier.fillMaxSize()) {
         if (search.selected != null) ReturnChip { search.returnToOrigin(chatList) }
         search.notice?.let { Text(it, Modifier.padding(horizontal = horizontalPadding), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
@@ -196,6 +214,12 @@ internal fun ChatPageReaderContent(
                         ChatSearchHighlight(search, line.contentKey) {
                             androidx.compose.runtime.CompositionLocalProvider(LocalAssistantTaskHost provides taskHost,
                                 LocalTurnErrorFixAction provides fixModel, LocalOpenRecap provides openRecap) {
+                                val pictures = contentUserImages[line.id].orEmpty()
+                                val isOpening = opening != null && when (line) {
+                                    is ChatLine.Row -> line.row.item?.id == opening.id || pictures.any { it.id == opening.id }
+                                    is ChatLine.UserImages -> line.images.any { it.id == opening.id }
+                                    else -> false
+                                }
                                 ChatLineContent(line, key, loader,
                                     line.recordedDuration(snapshot.recordedTurnDurations),
                                     onToggle, onExpand, folding, foldErrors,
@@ -205,7 +229,7 @@ internal fun ChatPageReaderContent(
                                     onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = onFullText,
                                     style = renderStyle, agentSession = session, textUpdates = textUpdates,
                                     liveText = snapshot.liveText, streamingItemIds = snapshot.streamingItemIds,
-                                    userImages = contentUserImages[line.id].orEmpty(),
+                                    userImages = pictures, openingSource = if (isOpening) openingSource else null,
                                     imagesInUserBubble = line.id in contentHiddenImages,
                                     workRunning = (line as? ChatLine.Step)?.let { contentWorkGroups[it.groupId]?.live } == true,
                                     lastWorkStep = (line as? ChatLine.Step)?.let {

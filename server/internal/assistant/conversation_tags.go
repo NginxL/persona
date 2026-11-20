@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -79,7 +80,8 @@ func (s *Service) conversationTagsSet() (map[string][]string, bool) {
 	return out, true
 }
 
-// conversationTagsRecords returns the book's records by conversation id; false while it could not be read.
+// conversationTagsRecords snapshots the map under its lock; writers replace records rather than mutating them.
+// A publisher may iterate this snapshot after unlocking, including while a later write adds or drops tags.
 func (s *Service) conversationTagsRecords() (map[string]*conversationTags, bool) {
 	b := &s.tags
 	b.mu.Lock()
@@ -87,7 +89,7 @@ func (s *Service) conversationTagsRecords() (map[string]*conversationTags, bool)
 	if !s.tagsLocked(context.Background()) {
 		return nil, false
 	}
-	return b.m, true
+	return maps.Clone(b.m), true
 }
 
 var (

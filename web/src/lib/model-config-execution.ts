@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import { api, enc } from "./api";
 import { MANAGER_HEADER } from "./manager-choice";
+import type { CandidateUpdate } from "./model-candidates";
 import { modelSummary, providerAgent, providerName, RUNTIMES, runtimeLabel, type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody } from "./model-config";
 import type { Machine } from "./types";
 
@@ -239,7 +240,7 @@ export function resetPatch(p: ModelPurpose, runtime = "", configDir?: string): R
   return ownRecord(p) ? { ...patch, provider: null, model: null, effort: null } : patch;
 }
 
-export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null>, manager?: string): Promise<ModelPurposeBody> {
+export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null | CandidateUpdate>, manager?: string): Promise<ModelPurposeBody> {
   return api(`/model-config/purposes/${enc(p.id)}`, { method: "PATCH", json: patch, headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 }
 

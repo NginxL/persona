@@ -53,8 +53,8 @@ const typeInto = async (el: HTMLTextAreaElement, value: string) => {
   });
 };
 const agentRow = (title: string) =>
-  [...dialog().querySelectorAll<HTMLElement>("div.cursor-pointer")].find((r) => r.textContent?.includes(title));
-const picked = () => [...dialog().querySelectorAll<HTMLElement>("div.cursor-pointer")].find((r) => r.className.includes("bg-accent"))?.textContent ?? "";
+  [...dialog().querySelectorAll<HTMLElement>("[role=radio]")].find((r) => r.textContent?.includes(title));
+const picked = () => [...dialog().querySelectorAll<HTMLElement>("[role=radio]")].find((r) => r.className.includes("bg-accent"))?.textContent ?? "";
 
 const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
 const todo: Todo = { id: "t1", title: "整理发布清单", created_at: iso(7_200_000), updated_at: iso(3_600_000) };
@@ -130,7 +130,7 @@ describe("交给 Agent 对话框开着时", () => {
       },
     });
     await openHandover();
-    const rows = [...dialog().querySelectorAll<HTMLElement>("div.cursor-pointer")];
+    const rows = [...dialog().querySelectorAll<HTMLElement>("[role=radio]")];
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining("Closed task agent"),
       expect.stringContaining("Recent"),
@@ -186,7 +186,7 @@ describe("交给 Agent 对话框开着时", () => {
     });
     await openHandover();
     expect(picked()).toContain("Linked closed");
-    const send = [...dialog().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("发送") && !b.disabled);
+    const send = [...dialog().querySelectorAll<HTMLButtonElement>("button:not([role=radio])")].find((b) => b.textContent?.includes("发送") && !b.disabled);
     await click(send);
     expect(api).toHaveBeenCalledWith("/sessions/m2/same/messages", expect.objectContaining({
       method: "POST",

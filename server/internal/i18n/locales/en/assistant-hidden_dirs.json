@@ -1,0 +1,11 @@
+{
+  "title": "Agent folders",
+  "block": "Block Agent sessions in {path} on {machine}: that computer stops collecting them, so nothing in Persona shows or counts them, and their permission requests are left to the agent's own interface",
+  "hide": "Hide Agent sessions in {path} on {machine} from Agents and Persona's view (they keep running and stay recorded; active supervised tasks stay visible)",
+  "add_off": "Add Agent folder rule {path} on {machine}, switched off (it does nothing until you switch it on)",
+  "switch_on": "Switch on Agent folder rule {path} on {machine}",
+  "switch_off": "Switch off Agent folder rule {path} on {machine} (its sessions show again; the rule stays)",
+  "to_block": "Change Agent folder rule {path} on {machine} to Block (that computer stops collecting its sessions)",
+  "to_hide": "Change Agent folder rule {path} on {machine} to Hide (its sessions are collected again but stay out of Agents and Persona's view)",
+  "remove": "Delete Agent folder rule {path} on {machine} (its sessions show again)"
+}

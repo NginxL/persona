@@ -98,115 +98,62 @@ func TestCodexFirstPasteWaitsForItsVisibleTail(t *testing.T) {
 	}
 }
 
-// Model both launch policies, and a modal arriving between readiness and the
-// post-paste check. The transcript, not the chip, determines startup success.
-func TestCodexStartupSkipsUpdateAndConfirmsCompletePrompt(t *testing.T) {
-	for _, tc := range []struct {
-		name              string
-		windows, late     bool
-		retained, partial bool
-		pastes            int
-	}{
-		{name: "Windows update before paste", windows: true, pastes: 1},
-		{name: "Unix argv update", pastes: 0},
-		{name: "Windows update consumes paste", windows: true, late: true, pastes: 2},
-		{name: "Windows update retains paste", windows: true, late: true, retained: true, pastes: 1},
-		{name: "Windows partial transcript refuses success", windows: true, partial: true, pastes: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+// Even if an older CLI displays an update offer, native-argv startup only
+// skips the offer. It never pastes or presses Enter to deliver the prompt.
+func TestCodexNativeStartupSkipsUpdateAndConfirmsCompletePrompt(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%v", partial), func(t *testing.T) {
 			n, f := stalledCodexNode(t)
 			withCodexWaits(t)
-			codexStartPaste, codexStartWait = tc.windows, time.Second
-			oldStep := codexStep
-			codexStep = 5 * time.Millisecond
-			t.Cleanup(func() { codexStep = oldStep })
+			codexStartWait = time.Second
 			home := filepath.Dir(n.dir)
 			cwd := filepath.Join(home, "proj")
-			prefix := strings.Repeat("Context 中文\n", 150)
-			tail := "Final instruction: reply only COMPLETE_MESSAGE_OK."
-			prompt := prefix + tail
-			shown := fmt.Sprintf("› [Pasted Content %d chars]%s\n  GPT-6.1-Sol xhigh · ~      ⚠ 4 warnings · f2 to view\n", len([]rune(prefix)), tail)
-			var mu sync.Mutex
-			pastes, skips, submits := 0, 0, 0
+			prompt := "Context 中文 🧪\n\nAll lines, quotes \" and $HOME stay literal.\nFinal line."
 			f.after(func(c herdrCall) {
-				mu.Lock()
-				defer mu.Unlock()
-				switch {
-				case c.Method == "pane.send_input" && strings.Contains(str(c.Params["text"]), "codex-start"):
-					if tc.late {
-						f.setScreen("w1:p2", cxReady)
-					} else {
-						f.setScreen("w1:p2", cxUpdate0169)
-					}
-				case isKeys("escape")(c):
-					skips++
-					if tc.retained {
-						f.setScreen("w1:p2", shown)
-					} else {
-						f.setScreen("w1:p2", cxReady)
-					}
-					if !tc.windows {
-						writeWaitRollout(t, home, cwd, startThread, time.Now(), prompt)
-					}
-				case c.Method == "pane.send_text":
-					pastes++
-					if str(c.Params["text"]) != pasteStart+prompt+pasteEnd {
-						t.Error("paste did not contain exactly one complete frame")
-					}
-					if tc.late && pastes == 1 {
-						f.setScreen("w1:p2", cxUpdate0169)
-					} else {
-						f.setScreen("w1:p2", shown)
-					}
-				case isKeys("enter")(c):
-					submits++
+				if c.Method == "pane.send_input" && strings.Contains(str(c.Params["text"]), "codex-start") {
+					f.setScreen("w1:p2", cxUpdate0169)
+				}
+				if isKeys("escape")(c) {
 					first := prompt
-					if tc.partial {
+					if partial {
 						first = "Context 中文"
 					}
 					writeWaitRollout(t, home, cwd, startThread, time.Now(), first)
 					f.setScreen("w1:p2", cxReady)
-				case c.Method == "pane.send_keys":
-					t.Errorf("unexpected startup keys %v", keysOf(c))
 				}
 			})
-			s, err := n.startCodex(context.Background(), n.defaultHost().(host.Launcher), cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
-			if tc.partial {
+			session, err := n.startCodex(context.Background(), n.defaultHost().(host.Launcher), cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
+			if partial {
 				if err == nil || len(f.trace("tab.close", "pane.close")) == 0 {
-					t.Fatalf("partial transcript succeeded or left its pane: %+v %v", s, err)
+					t.Fatalf("partial first message succeeded or left its pane: %+v %v", session, err)
 				}
-			} else if err != nil || s.SessionID != startThread {
-				t.Fatalf("complete prompt not confirmed: %+v %v", s, err)
+			} else if err != nil || session.SessionID != startThread {
+				t.Fatalf("native start not confirmed: %+v %v", session, err)
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			wantSubmits := 0
-			if tc.windows {
-				wantSubmits = 1
+			if len(f.trace("pane.send_text", "agent.prompt")) != 0 {
+				t.Fatal("native first prompt went through terminal input")
 			}
-			if skips != 1 || pastes != tc.pastes || submits != wantSubmits {
-				t.Fatalf("skip/paste/submit=%d/%d/%d, want 1/%d/%d", skips, pastes, submits, tc.pastes, wantSubmits)
+			for _, c := range f.calls() {
+				if c.Method == "pane.send_keys" && !isKeys("escape")(c) {
+					t.Fatalf("startup sent %v instead of Escape", keysOf(c))
+				}
 			}
 		})
 	}
 }
 
-func TestCodexStartupUpdateDoesNotOverwriteDraftOrLoop(t *testing.T) {
+// Waiting rows still protect a user's draft and never submit into a modal.
+func TestCodexWaitingInputUpdateDoesNotOverwriteDraftOrLoop(t *testing.T) {
 	for _, next := range []string{cxUpdate0169, "› somebody else's draft\n\n  gpt-6 xhigh · /tmp/proj\n"} {
 		t.Run(next[:min(12, len(next))], func(t *testing.T) {
-			n, f := stalledCodexNode(t)
+			n, f, _ := codexNode(t, "idle")
 			withCodexWaits(t)
-			codexStartPaste, codexStartWait = true, time.Second
-			oldStep := codexStep
-			codexStep = 5 * time.Millisecond
-			t.Cleanup(func() { codexStep = oldStep })
-			f.setScreen("w1:p2", cxReady)
-			f.screenSteps("w1:p2", func(c herdrCall) bool { return c.Method == "pane.send_text" || isKeys("escape")(c) }, cxReady, cxUpdate0169, next)
+			f.screenSteps(cxPane, func(c herdrCall) bool { return c.Method == "pane.send_text" || isKeys("escape")(c) }, cxReady, cxUpdate0169, next)
 			ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
 			defer cancel()
-			_, err := n.startCodex(ctx, n.defaultHost().(host.Launcher), filepath.Join(filepath.Dir(n.dir), "proj"), "codex", []string{"codex"}, modelExecution{}, "heading\nbody", "w1", "", "")
-			if err == nil || len(f.trace("pane.send_text")) != 1 || len(f.trace("pane.send_keys")) != 1 || len(f.trace("tab.close", "pane.close")) == 0 {
-				t.Fatalf("update recovery overwrote/submitted/looped or left pane open: %v, %v", err, f.trace("pane.send_text", "pane.send_keys", "tab.close"))
+			err := n.typeCodexFirst(ctx, cxPane, "heading\nbody")
+			if err == nil || len(f.trace("pane.send_text")) != 1 || len(f.trace("pane.send_keys")) != 1 {
+				t.Fatalf("waiting input overwrote/submitted/looped: %v", err)
 			}
 		})
 	}

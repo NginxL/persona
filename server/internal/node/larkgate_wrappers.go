@@ -231,7 +231,9 @@ func shellCommandUnknown(cmd string, includeCLI bool, depth int) bool {
 			}
 		}
 		if i := shellScriptIndex(rest); i >= 0 {
-			unknown = unknown || dynamic[offset+i] || shellCommandUnknown(rest[i], includeCLI, depth+1)
+			// A dynamic script is opaque here. A literal one is classified recursively by classifyLarkAt after its own
+			// assignments have been normalized; checking its expansions again here would lose those literal bindings.
+			unknown = unknown || dynamic[offset+i]
 		}
 		return !unknown
 	})

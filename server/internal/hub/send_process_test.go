@@ -91,7 +91,7 @@ func TestSendOnceProcessHelper(t *testing.T) {
 	if phase == "first" && outcome == "unknown" {
 		go func() { <-started; peer.Close(io.ErrUnexpectedEOF) }()
 	}
-	err = h.sendOnce(ctx, h.byID["box"], "session.send", map[string]any{"session_id": "s1", "client_msg_id": "model-retry:s1:1:1", "text": "Continue"})
+	err = h.sendOnce(ctx, h.byID["box"], "session.send", map[string]any{"session_id": "s1", "client_msg_id": "model-retry:s1:1:1", "text": "Continue"}, "")
 	if outcome == "delivered" && err != nil {
 		t.Fatal(err)
 	}

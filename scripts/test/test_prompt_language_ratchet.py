@@ -34,9 +34,11 @@ class PromptLanguageRatchetTests(unittest.TestCase):
             "agents/comment.md": '{{/* if .Language */}}\n用中文写',
             "agents/data.md": 'The field is .Language. 中文',
             "agents/quoted.md": '{{if eq .Title ".Language"}}中文{{end}}',
+            "agents/else_if.md": '{{if .Handled}}Done{{else if eq .Language "English"}}Hello{{else}}你好{{end}}',
+            "agents/else_other.md": '{{if .Handled}}Done{{else if .Quiet}}安静{{end}}',
             "agents/plain.md": "English instructions",
         })
-        self.assertEqual(got, {"agents": ["agents/comment.md", "agents/data.md", "agents/old.md", "agents/quoted.md"]})
+        self.assertEqual(got, {"agents": ["agents/comment.md", "agents/data.md", "agents/else_other.md", "agents/old.md", "agents/quoted.md"]})
 
     def test_same_count_cannot_hide_new_file(self):
         old = {"agents": ["agents/old.md"]}

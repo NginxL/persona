@@ -132,7 +132,7 @@ func (h *orcaHost) resolveWorktree(ctx context.Context, trees []orcart.Worktree,
 
 	// 3. Not in any registered worktree: try safe auto-registration if it is a Git repo
 	// and not a forbidden directory (~, /, /tmp).
-	if h.canAutoRegister(path) {
+	if backendLaunchFrom(ctx) == nil && h.canAutoRegister(path) {
 		if gitRoot, err := findGitRoot(path); err == nil && gitRoot != "" {
 			if addErr := h.c.RepoAdd(ctx, gitRoot, "git"); addErr == nil {
 				// Re-fetch worktrees after repo.add.

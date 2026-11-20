@@ -17,5 +17,6 @@
   "node_no_model_http": "This computer’s node can’t send model requests yet. Update the node",
   "node_no_engine_switch": "This computer’s node can’t switch a running agent between Claude Code and Codex yet. Update the node",
   "node_no_model_run": "This computer’s node can’t answer model requests with a launcher yet. Update the node",
+  "node_no_task_execution": "This computer cannot use task execution options yet. Update Persona on this computer and try again.",
   "node_no_start_goal": "This computer’s node can’t set a goal when an Agent starts yet. Update the node"
 }

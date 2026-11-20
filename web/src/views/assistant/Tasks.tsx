@@ -39,7 +39,7 @@ import {
 } from "../../lib/feed";
 import { backgroundWorkLine, type BackgroundWork } from "../../lib/background-work";
 import { workflowCounts } from "../../lib/workflows";
-import { dockAgents, type DockAgent, interruption, isRemovable, mostUrgentAgent, openAsk, orphanedLine, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
+import { dockAgents, type DockAgent, isRemovable, mostUrgentAgent, openAsk, orphanedLine, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import { openAgent, openTask } from "../../lib/handoff";
 import { navigate } from "../../lib/router";
@@ -61,12 +61,13 @@ const HeldPushesEntry = lazyPage(() => import("./HeldPushes").then((m) => m.Held
 // same chunk has a suggested rule's line (#5802), which comes with the first card that carries one, and a task whose
 // Agent did not start (#10365), which comes with the first such row.
 const NeedsYouPart = lazy(() => import("./TaskDecision"));
+const WaitingTaskRow = lazy(() => import("./WaitingTaskRow"));
 /** The suggested rule's line of a card, drawn right after it; nothing for a card without the field, unless Always
  *  was answered on it here (the line then says what was made, though the hub sent the card again without the field). */
 const ruleLine = (of: RuleCard) => (of.suggestion || underCard.made?.has(of.id!)) && <Suspense fallback={null}><NeedsYouPart rule={of} /></Suspense>;
 underCard.line = ruleLine;
 import { SentLine } from "./Sent";
-import { feedWake, HandoffCard, HandoffCards, taskHandoffs } from "./Handoff";
+import { feedWake, HandoffCard, HandoffCards, TASK_LINE_SLACK_MS, taskHandoffs } from "./Handoff";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
 import { useChosenManager, useLinkManager } from "../../lib/manager-choice";
@@ -124,7 +125,7 @@ function taskNowIn(s: State, todo: Todo, plans: Record<string, TaskPlan>): TaskN
 type TaskNow = { status: TodoStatus; lead?: Session; wait?: WaitReason };
 
 /** A task's status and lead agent (undefined without the task). */
-function useTaskNow(todo: Todo | undefined): TaskNow | undefined {
+export function useTaskNow(todo: Todo | undefined): TaskNow | undefined {
   const plans = useFeed((s) => s.plans);
   return useStore((s) => (todo ? taskNowIn(s, todo, plans) : undefined));
 }
@@ -456,7 +457,7 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
     if (item.kind === "plan") {
       const shown = plan ?? itemPlan(item);
       if (!shown) return null;
-      return shown.state === "started" ? <PlanHandoffs plan={shown} /> : <PlanCard plan={shown} />;
+      return shown.state === "started" ? <PlanHandoffs plan={shown} since={item.at} /> : <PlanCard plan={shown} />;
     }
     if (item.kind === "task") return planned ? null : <TaskHandoffs item={item} />;
     if (item.kind === "message" && !cardSent(item) && !cardFiled(item)) return null;
@@ -762,13 +763,34 @@ const EMPTY_FEED: FeedItem[] = [];
 const EMPTY_CARDS: TaskCardMetadata[] = [];
 
 /** A started plan's tasks in the conversation (#3700, #5096): a hand-off card for each Agent they started (one per task
- *  while its Agent is starting, or says why it did not start), in plan order; live to-do titles over the plan's. */
-function PlanHandoffs({ plan }: { plan: TaskPlan }) {
+ *  while its Agent is starting, or says why it did not start), in plan order; live to-do titles over the plan's. `since`:
+ *  the plan line's time, so each card keeps the Agents this plan started (#11854). */
+function PlanHandoffs({ plan, since }: { plan: TaskPlan; since?: string }) {
   const plans = useFeed((s) => s.plans);
   const handoffs = useStoreRows((s) =>
-    plan.tasks.flatMap((task, i) => taskHandoffs(task.todo_id ? s.todos.find((x) => x.id === task.todo_id) : undefined, { key: `${plan.id}/${i}`, title: task.title, error: task.error, todoId: task.todo_id }, "created", plans, s.todosLoaded)),
+    plan.tasks.flatMap((task, i) => {
+      const id = planTaskTodo(plan, i, s.todos);
+      // a later plan that continued the to-do holds it now; this plan's todo_id was cleared then (tasks_start.go)
+      const superseded = Boolean(id && !task.todo_id && Object.values(plans).some((p) => p.id !== plan.id && p.tasks.some((x) => x.todo_id === id)));
+      return taskHandoffs(id ? s.todos.find((x) => x.id === id) : undefined, { key: `${plan.id}/${i}`, title: task.title, error: task.error, todoId: id, superseded }, "created", plans, s.todosLoaded, since);
+    }),
   );
   return <HandoffCards handoffs={handoffs} />;
+}
+
+/** The to-do plan task i ran on: its todo_id, or, once a later plan continued that to-do and cleared it (#11854), the
+ *  one it continued or reused, else the one only this task can have made (the to-do keeps the plan it came from). A
+ *  task that failed to start keeps none: its card says why. */
+function planTaskTodo(plan: TaskPlan, i: number, todos: Todo[]): string | undefined {
+  const task = plan.tasks[i];
+  if (!task) return undefined;
+  if (task.todo_id) return task.todo_id;
+  if (task.error || plan.state !== "started") return undefined;
+  if (task.continues || task.reuse_todo) return task.continues || task.reuse_todo;
+  const bare = plan.tasks.filter((x) => !x.todo_id && !x.error && !x.continues && !x.reuse_todo);
+  const held = new Set(plan.tasks.map((x) => x.todo_id || x.continues || x.reuse_todo).filter(Boolean));
+  const made = todos.filter((x) => x.plan_id === plan.id && !held.has(x.id));
+  return bare.length === 1 && made.length === 1 ? made[0]!.id : undefined;
 }
 
 /** A task the conversation dispatched on its own (agent_start), or one made of an Agent already running
@@ -776,7 +798,7 @@ function PlanHandoffs({ plan }: { plan: TaskPlan }) {
 function TaskHandoffs({ item }: { item: FeedItem }) {
   const plans = useFeed((s) => s.plans);
   const wake = feedWake(field(item, "wake"));
-  const handoffs = useStoreRows((s) => (item.ref ? taskHandoffs(s.todos.find((x) => x.id === item.ref), { key: item.id, title: "", todoId: item.ref }, wake, plans, s.todosLoaded) : []));
+  const handoffs = useStoreRows((s) => (item.ref ? taskHandoffs(s.todos.find((x) => x.id === item.ref), { key: item.id, title: "", todoId: item.ref }, wake, plans, s.todosLoaded, item.at, TASK_LINE_SLACK_MS) : []));
   return <HandoffCards handoffs={handoffs} />;
 }
 
@@ -1042,44 +1064,15 @@ export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nes
         <NeedsYouPart rowKey={item.key} failed={todo} countsOpenAttr={taskOpenAttr} />
       </Suspense>
     );
-  return <WaitingTaskRow rowKey={rowKey} todo={todo} status={status} countsOpenAttr={taskOpenAttr} />;
+  return (
+    <Suspense fallback={<div data-needs-row={rowKey} {...taskOpenAttr} className="truncate rounded-control bg-field px-3 py-2 text-sm">{todo.title}</div>}>
+      <WaitingTaskRow rowKey={rowKey} todo={todo} status={status} countsOpenAttr={taskOpenAttr} />
+    </Suspense>
+  );
 }
 
 /** The buttons under a Needs you task row's words (Continue; Retry and Remove), lined up with them. */
 export const ROW_ACTIONS = "flex items-center gap-4 pl-6 text-[12.5px]";
-
-/** A task in Needs you that only waits (#8237): cut off by the model service, with why and Continue (its receipt card's
- *  until then); waiting for review, with what it handed in; else what it waits for. The title opens the task. */
-function WaitingTaskRow({ rowKey, todo, status, countsOpenAttr }: { rowKey?: string; todo: Todo; status: TodoStatus; countsOpenAttr: { "data-counts-open"?: string } }) {
-  const task = useTaskNow(todo);
-  const retrying = useRetrying(todo.id);
-  const summary = useFeed((s) => {
-    const done = (todo.origin ? s.feeds[todo.origin] ?? EMPTY_FEED : EMPTY_FEED).filter((it) => it.kind === "receipt" && it.ref === todo.id && field(it, "state") !== "failed").at(-1);
-    return done ? field(done, "summary") : undefined;
-  });
-  const cutOff = status === "interrupted";
-  const cut = cutOff ? interruption(task?.lead) : undefined;
-  const canContinue = cutOff && (cut ? cut.canContinue : true);
-  const line = cut ? cut.reason : todo.supervision?.state === "pending_review" ? (summary && plainMarkdown(summary)) || progressOf(task?.lead)?.text : undefined;
-  return (
-    <div data-needs-row={rowKey} {...countsOpenAttr} data-waiting-task={todo.id} className={cx("flex flex-col gap-1.5 rounded-control px-3 py-2 text-sm", cutOff ? "bg-danger-wash" : "bg-field")}>
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon name={cutOff ? "info" : "hand"} className={cx("shrink-0", cutOff ? "text-red" : "text-attention")} />
-        <button type="button" onClick={() => openTask(todo.id)} className="min-w-0 flex-1 truncate text-left hover:underline">{todo.title}</button>
-        <span className={cx("shrink-0 text-xs", cutOff ? "text-ink" : "text-ink-2")}>{cut?.invalid ? t("lib-api-errors.invalid_label") : waitsLabel(todo, status, task?.status === status ? task.wait : undefined)}</span>
-      </div>
-      {line && <div className={cx("pl-6 text-xs", cut && !cut.canContinue ? "whitespace-normal" : "truncate", cutOff ? "text-ink" : "text-ink-2")}>{line}</div>}
-      {canContinue && (
-        <div className={ROW_ACTIONS}>
-          <button type="button" data-continue-task={todo.id} disabled={retrying} onClick={() => retryTaskNow(todo, "continue")} className="touch-hit inline-flex items-center gap-1 whitespace-nowrap font-semibold text-ink hover:underline disabled:opacity-50 disabled:hover:no-underline">
-            <Icon name="retry" size={12} />
-            {retrying ? t("assistant-tasks.retrying") : t("assistant-tasks.continue")}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** An Agent that belongs to no task, working: one row of In progress that opens its page. */
 function RunningAgentRow({ session, activity }: { session: Session; activity?: BackgroundWork }) {

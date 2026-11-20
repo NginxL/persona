@@ -173,6 +173,59 @@ class ForwardTest {
             ChatLinkContextsSaver.restore(listOf("contexts-v2", "quote", "Claude", "", "x", "i", "m")))
     }
 
+    @Test fun severalForwardsMatchTheSharedWritingReadingAndBudgetCases() {
+        val file = File(requireNotNull(System.getProperty("persona.repo.root")), "spec/fixtures/forward/several.json")
+        val fixtures = Json.parseToJsonElement(file.readText()).jsonObject
+        val budget = fixtures.getValue("budget").jsonObject
+        assertEquals(budget.text("most").toInt(), ForwardMessage.MOST)
+        for (case in budget.getValue("cases").jsonArray.map { it.jsonObject }) {
+            val limit = ForwardMessage.limit(case.text("count").toInt())
+            assertEquals(case.text("limit").toInt(), limit)
+            val long = "🌻".repeat(limit + 1)
+            val shortened = ForwardMessage.ref(long, source(), res, limit = limit).text
+            assertEquals("🌻".repeat(limit) + "\n\n" + res.getString(R.string.chat_forward_cut), shortened)
+        }
+        for (case in fixtures.getValue("write").jsonArray.map { it.jsonObject }) {
+            val refs = case.getValue("blocks").jsonArray.map { value ->
+                val b = value.jsonObject
+                ChatLinkContext(ForwardMessage.KIND, b.text("title"), b.text("url"), b.text("text"), msg = b.text("msg"),
+                    extra = b.strings("attributes"))
+            }
+            assertEquals(case.text("message"), forwardMessage(case.text("note"), refs, res))
+            assertTrue(forwardMessage("", refs, res).endsWith(res.getString(R.string.chat_forward_several_no_note)))
+            val (restored, note) = ForwardMessage.splitAll(case.text("message"))
+            assertEquals(case.text("message"), forwardMessage(note, restored, res))
+        }
+        for (case in fixtures.getValue("read").jsonArray.map { it.jsonObject }) {
+            val (blocks, note) = parseContexts(case.text("message"))
+            val ids = case.getValue("msgs").jsonArray.map { it.jsonPrimitive.content }
+            val groups = case.getValue("groups").jsonArray.map { run -> run.jsonArray.map { ids[it.jsonPrimitive.content.toInt()] } }
+            assertEquals(case.text("rest"), note)
+            assertEquals(groups, bubbleForwardGroups(blocks).map { run -> run.map { it.attributes["msg"] } })
+        }
+    }
+
+    @Test fun selectionUsesChatOrderAndTheThirtyMessageBoundary() {
+        val pick = ForwardPick()
+        val rows = (1..31).map { MessageTarget("message-$it", "Text $it", user = it % 2 == 0) }
+        pick.open(rows[15])
+        pick.start()
+        rows.asReversed().filterNot { it == rows[15] || it == rows[0] }.forEach(pick::toggle)
+        pick.toggle(rows[0])
+        assertTrue(pick.refused)
+        assertEquals(30, pick.selected?.size)
+        pick.choose(rows.map { persona.core.contracts.Item(it.id, role = "user", kind = "text", text = it.text) })
+        assertEquals(rows.drop(1), pick.sheet)
+        pick.dismiss()
+        assertEquals(30, pick.selected?.size)
+        pick.toggle(rows.last())
+        pick.toggle(rows.first())
+        assertFalse(pick.refused)
+        pick.end()
+        assertNull(pick.selected)
+        assertNull(pick.sheet)
+    }
+
     // ---------------------------------------------------------------- targets
 
     private fun session(machine: String, id: String, state: String = "idle", updated: String, agent: String? = null,
@@ -263,24 +316,75 @@ class ForwardTest {
         val opened = Opened()
         val f = forwarding(opened, main)
         val photos = SessionKey("studio", "photos")
-        deliverForward(ForwardTarget.Chat(photos), ref, key, f, res)
+        deliverForward(ForwardTarget.Chat(photos), listOf(ForwardPlacement(ref)), key, f, res)
         assertEquals(listOf(photos to false), opened.chats)
         val placed = ForwardPlacements.take(photos).single()
         assertEquals("从 MacBook Pro 转发 · 发到 Mac Studio 上的 Claude", placed.ref.route)
         // The route is shown, never sent.
         assertEquals(ref.xml(), placed.ref.xml())
-        deliverForward(ForwardTarget.Persona, ref, key, f, res)
+        deliverForward(ForwardTarget.Persona, listOf(ForwardPlacement(ref)), key, f, res)
         assertEquals(main to true, opened.chats.last())
         assertEquals("从 MacBook Pro 转发 · 发给 Persona", ForwardPlacements.take(main).single().ref.route)
         // No main conversation yet: Persona's new conversation takes it.
-        deliverForward(ForwardTarget.Persona, ref, key, forwarding(opened, null), res)
+        deliverForward(ForwardTarget.Persona, listOf(ForwardPlacement(ref)), key, forwarding(opened, null), res)
         assertEquals(1, opened.home)
         assertEquals(listOf(ref.id), ForwardPlacements.home.map { it.id })
         ForwardPlacements.home = emptyList()
-        deliverForward(ForwardTarget.NewAgent, ref, key, f, res)
+        deliverForward(ForwardTarget.NewAgent, listOf(ForwardPlacement(ref)), key, f, res)
         assertEquals(listOf(ref.xml()), opened.agents)
         assertEquals(ref.copy(route = null).xml(), ForwardMessage.read(opened.agents.single())?.xml())
         assertNull(ForwardPlacements.waiting(SessionKey("macbook", "tests")))
+    }
+
+    @Test fun severalForwardsReachEachTargetOnceAndKeepTheirOrder() {
+        val refs = (1..4).map { ForwardMessage.ref("message $it", source().copy(item = "part-$it"), res) }
+        val items = refs.map { ForwardPlacement(it) }
+        val opened = Opened()
+        val f = forwarding(opened, main)
+        val photos = SessionKey("studio", "photos")
+        for ((target, destination) in listOf(ForwardTarget.Chat(photos) to photos, ForwardTarget.Persona to main)) {
+            deliverForward(target, items, key, f, res)
+            assertEquals(refs.map { it.xml() }, ForwardPlacements.take(destination).map { it.ref.xml() })
+        }
+        assertEquals(listOf(photos to false, main to true), opened.chats)
+        deliverForward(ForwardTarget.Persona, items, key, forwarding(opened, null), res)
+        assertEquals(1, opened.home)
+        assertEquals(refs.map { it.xml() }, ForwardPlacements.home.map { it.xml() })
+        ForwardPlacements.home = emptyList()
+        deliverForward(ForwardTarget.NewAgent, items, key, f, res)
+        assertEquals(refs.map { it.xml() }, ForwardMessage.readAll(opened.agents.single()).map { it.xml() })
+        ForwardPlacements.takeNewAgent(opened.agents.single())
+    }
+
+    @Test fun aRepeatedNewAgentRouteReleasesItsPreviousPhotosAndKeepsMessageOwnership() {
+        val first = ForwardMessage.ref("A", source().copy(item = "same"), res)
+        val other = ForwardMessage.ref("B", source().copy(key = SessionKey("elsewhere", "another"), item = "same"), res)
+        fun placed(ref: ChatLinkContext, id: String, lost: Int) = ForwardPlacement(ref, RestoredPhotos(
+            listOf(ComposerAttachment(id, "same.png", "content://example/$id", image = true)), lost))
+        val old = listOf(placed(first, "old-a", 0), placed(other, "old-b", 2))
+        val replacement = listOf(placed(first, "new-a", 1), placed(other, "new-b", 0))
+        val opened = Opened()
+        val discarded = mutableListOf<RestoredPhotos>()
+        val target = forwarding(opened, main)
+        deliverForward(ForwardTarget.NewAgent, old, key, target, res, discarded::add)
+        deliverForward(ForwardTarget.NewAgent, replacement, key, target, res, discarded::add)
+        assertEquals(old.map { it.photos }, discarded)
+        assertEquals(1, opened.agents.distinct().size)
+        val context = opened.agents.last()
+        assertEquals(replacement, ForwardPlacements.takeNewAgent(context))
+        assertTrue(ForwardPlacements.takeNewAgent(context).isEmpty())
+    }
+
+    @Test fun equalLocalMessageIdsFromDifferentChatsCanShareADestinationDraft() {
+        val first = ForwardMessage.ref("First transcript", source().copy(item = "msg-1"), res)
+        val second = ForwardMessage.ref("Second transcript", source().copy(key = SessionKey("studio", "independent"), item = "msg-1"), res)
+        val target = SessionKey("studio", "combined")
+        try {
+            assertTrue(ForwardPlacements.place(target, first))
+            assertTrue(ForwardPlacements.place(target, second))
+            assertFalse(ForwardPlacements.place(target, first.copy(route = "updated route")))
+            assertEquals(listOf(first, second), ForwardPlacements.waiting(target)?.map { it.ref })
+        } finally { ForwardPlacements.take(target) }
     }
 
     @Test fun thePressedMessageSaysWhoWroteItAndWhere() {

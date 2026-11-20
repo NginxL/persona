@@ -1,9 +1,9 @@
-import type { ParkContact, ParkEvidence } from "./supervision";
+import type { ParkContact, Parked, ParkEvidence } from "./supervision";
 import { sentWaitContact, waitSource, waitStart } from "./task-wait";
 import { openAsk, type PRFacts, type Todo } from "./todos";
 
 export interface TaskWait {
-  kind: ParkEvidence["kind"] | "legacy";
+  kind: ParkEvidence["kind"] | "legacy" | "todo_handoff";
   target?: string;
   since?: number;
   sinceRequest: boolean;
@@ -17,6 +17,7 @@ export interface TaskWait {
   overdue: boolean;
   canRemind: boolean;
   sources: string[];
+  handoff?: Parked["handoff"];
 }
 
 /** Lazy display projection. The caller supplies only fresh, eligible merge waits; no lifecycle classification or write. */
@@ -33,8 +34,14 @@ export function taskWait(todo: Todo, now: number, merges: readonly PRFacts[] = [
   const contact = contactKind ? sentWaitContact(e, now) : undefined;
   const deadline = p?.until ? Date.parse(p.until) : NaN;
   const until = Number.isFinite(deadline) && deadline > 0 ? deadline : undefined;
-  const contactDue = contact ? Date.parse(contact.sent_at) + (kind === "merge_review" ? 72 : 24) * 3_600_000 : undefined;
   const start = waitStart(todo, now);
+  if (p?.handoff) {
+    return {
+      kind: "todo_handoff", handoff: p.handoff, since: start.at, sinceRequest: true,
+      until, overdue: until !== undefined && until <= now, contactExpected: false, canRemind: false, sources: [],
+    };
+  }
+  const contactDue = contact ? Date.parse(contact.sent_at) + (kind === "merge_review" ? 72 : 24) * 3_600_000 : undefined;
   return {
     kind,
     target: e?.target?.trim() || undefined,

@@ -224,11 +224,9 @@ final class AvatarUploadModel: Identifiable {
     /// The avatar the hub made (after a successful upload). Kept when it could not be downloaded here yet: trying again
     /// downloads it, without sending the image again (the hub would make a second one).
     private(set) var made: UploadedLook?
-    /// Made, on this device and chosen: nothing more to do.
+    /// The new pack is on this device.
     private(set) var done = false
-    /// What the store had heard of the hub's choices when the image went (`PersonaStore.heard`): a choice heard since
-    /// is newer than the upload's `choose`.
-    @ObservationIgnored private var asked = 0
+    @ObservationIgnored private var receipt: PersonaStore.SelectionReceipt?
     @ObservationIgnored private let deps: Deps
 
     init(image: CGImage, deps: Deps = .live) {
@@ -258,21 +256,21 @@ final class AvatarUploadModel: Identifiable {
         LookUpload(name: trimmedName, subtitle: trimmedSubtitle.isEmpty ? nil : trimmedSubtitle, image: image, choose: true)
     }
 
-    /// Crops, encodes and sends the image; then the new avatar is downloaded and chosen here. True once it is chosen
-    /// here; false (with `error`) when it was not made, or was made but could not be downloaded: then the next call only
-    /// tries the download again. One at a time: a second tap while it runs does nothing.
+    /// Crop, send and download the avatar. A retry after the hub accepted the upload finishes getting the pack.
+    /// One at a time: a second tap while it runs does nothing.
     func upload() async -> Bool {
         guard canUpload else { return false }
-        guard let api = deps.api() else {
+        let store = deps.store()
+        guard let api = deps.api(), let request = receipt?.started ?? store.mark(for: api), store.isCurrent(request) else {
             error = String(localized: "Not connected to the hub yet")
             return false
         }
         uploading = true
         defer { uploading = false }
         error = nil
-        let look: UploadedLook
-        if let made {
-            look = made
+        let accepted: PersonaStore.SelectionReceipt
+        if let receipt {
+            accepted = receipt
         } else {
             let source = image, rect = crop.rect
             let encoded = await Task.detached(priority: .userInitiated) { () -> String? in
@@ -283,32 +281,22 @@ final class AvatarUploadModel: Identifiable {
                 return false
             }
             do {
-                asked = deps.store().heard
-                look = try await api.uploadLook(body(image: encoded))
+                guard store.isCurrent(request) else { return false }
+                let look = try await api.uploadLook(body(image: encoded))
+                accepted = store.receipt(for: look.id, since: request)
+                receipt = accepted
+                made = look
             } catch {
                 self.error = Self.message(for: error)
                 return false
             }
-            made = look
         }
-        guard await adopt(look, api: api) else {
+        guard await store.adopt(accepted, api: api) else {
             error = String(localized: "The avatar was made, but this device couldn't download it. Try again.")
             return false
         }
         done = true
         return true
-    }
-
-    /// The new avatar in the store's list, on the phone and chosen. The list is read after the hub answered: a refresh
-    /// that was under way may have asked before the avatar was made (`PersonaStore.reload`). The upload's `choose` chose
-    /// it on the hub already: it is not sent again, and another device's choice heard since (newer) stays. True once
-    /// it is on this device: chosen here, or replaced on the hub meanwhile.
-    private func adopt(_ look: UploadedLook, api: APIClient) async -> Bool {
-        let store = deps.store()
-        if !store.offered.contains(where: { $0.id == look.id }) { await store.reload(api) }
-        guard let p = store.offered.first(where: { $0.id == look.id }) else { return false }
-        await store.choose(p, api: api, onHub: asked)
-        return store.isOnPhone(p)
     }
 
     /// The hub's message for a refusal as it is (it is in the user's language already); for no answer at all, a line
@@ -377,7 +365,7 @@ final class AvatarUploadsModel {
     func delete(_ p: Persona) async -> Bool {
         guard canDelete(p), !deleting.contains(p.id), let api = deps.api() else { return false }
         let store = deps.store()
-        let asked = store.heard // what the hub pushes after its own push of the default is newer (`PersonaStore.choose`)
+        guard let asked = store.mark(for: api) else { return false }
         deleting.insert(p.id)
         defer { deleting.remove(p.id) }
         do {
@@ -389,9 +377,13 @@ final class AvatarUploadsModel {
             return false
         }
         error = nil
-        if store.chosenID == p.id { await store.choose(.builtin, api: api, onHub: asked) } // the hub chose it already
+        guard store.isCurrent(asked) else { return true }
+        if store.chosenID == p.id {
+            let receipt = store.receipt(for: Persona.builtinID, since: asked)
+            _ = await store.adopt(receipt, api: api)
+        }
         // Read after the delete: a refresh under way may still list it.
-        await store.reload(api)
+        await store.reload(api, since: asked)
         return true
     }
 }

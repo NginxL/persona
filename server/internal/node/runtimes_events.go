@@ -50,6 +50,12 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 	if !ready {
 		return // hello first
 	}
+	var about struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(params, &about) == nil && about.SessionID != "" && n.runtimeSessionBlocked(about.SessionID, "") {
+		return // a blocked Agent folder (agentdirs.go): nothing of it is sent
+	}
 	switch event {
 	case "usage.report":
 		n.runtimeUsageReport(h, params, time.Now())
@@ -102,7 +108,7 @@ func (n *Node) runtimeEvent(h *runtimeConn, event string, params json.RawMessage
 
 // normalizeRuntimeSessions keeps the sessions a runtime may list (valid ids, once each) and fills what the apps expect:
 // the agent and its label, the space kind (the runtime's id). It works in place: the rows kept are list's first ones,
-// in list's own array, the rest cleared, so list is the caller's to give up.
+// in list's own array, the rest cleared, so list is the caller's to give up. Rows share read-only capabilities when equal.
 func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Session {
 	h.mu.Lock()
 	rt, agent, label, caps, daemon := h.hello.Runtime, h.hello.Agent, h.hello.Name, h.hello.Caps, h.daemon != ""
@@ -123,7 +129,7 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 	_, engine := engineRuntimes[rt]
 	ownWorkspaces := engine && caps.Workspaces && !daemon
 	seen := make(map[string]bool, len(list))
-	capsBuf := make([]proto.SessionCapabilities, 0, len(list))
+	capsByValue := map[proto.SessionCapabilities]*proto.SessionCapabilities{}
 	boolTrue, boolFalse := true, false
 	capBool := func(v bool) *bool {
 		if v {
@@ -208,13 +214,18 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		if !modes || claudeModes {
 			permissionModes = 0
 		}
-		capsBuf = append(capsBuf, proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
+		rowCaps := proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
 			SupervisionPolicy: caps.Assistant && caps.SupervisionPolicy && !sub,
 			Close:             capBool(caps.Close), Rename: capBool(caps.Rename && !sub), Modes: capBool(claudeModes),
-			Rewind: capBool(rewind), RewindCode: capBool(rewindCode),
+			Rewind: capBool(rewind), RewindCode: capBool(rewindCode), Fork: caps.Fork && !sub,
+			QueueEdit: capBool(caps.QueueEdit && !sub), QueueSendNow: capBool(caps.QueueSendNow && !sub),
 			Model:           capBool(caps.Modes && caps.Model && keeps(own.Model) && !strings.Contains(s.SessionID, subagentSep)),
-			PermissionModes: permissionModes})
-		s.Capabilities = &capsBuf[len(capsBuf)-1]
+			PermissionModes: permissionModes}
+		if s.Capabilities = capsByValue[rowCaps]; s.Capabilities == nil {
+			s.Capabilities = new(proto.SessionCapabilities)
+			*s.Capabilities = rowCaps
+			capsByValue[rowCaps] = s.Capabilities
+		}
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.
 		if s.PaneID != "" && validPane(s.PaneID) {
@@ -299,6 +310,9 @@ func (n *Node) runtimeAsk(ctx context.Context, h *runtimeConn, params json.RawMe
 	}
 	if !n.runtimes.owns(h, ix.SessionID) {
 		return nil, fmt.Errorf("session %s is not listed by this runtime", ix.SessionID)
+	}
+	if n.runtimeSessionBlocked(ix.SessionID, ix.Cwd) {
+		return proto.Resolution{Dismiss: true}, nil // a blocked Agent folder (agentdirs.go): handed back to the computer
 	}
 	rt := h.id()
 	// An id the runtime chose is the same when it asks again: the runtime SDK asks the next node with the same card

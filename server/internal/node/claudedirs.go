@@ -43,6 +43,9 @@ type claudeDirs struct {
 	scanned   time.Time
 	report    func(dirs []string) // tells the hub about newly found directories
 	scan      func() map[int]procEnv
+
+	// runs: session a live claude runs -> that claude, when the scan read its command line (offlauncher.go).
+	runs map[string]claudeRun
 }
 
 // procEnv is what the scan keeps from a running claude's environment: its config directory, and the API endpoint
@@ -51,10 +54,14 @@ type procEnv struct {
 	ConfigDir string // CLAUDE_CONFIG_DIR
 	BaseURL   string // ANTHROPIC_BASE_URL
 	Model     string // ANTHROPIC_MODEL
+	// From its command line, not its environment (offlauncher.go): Cmd says it was kept (not on Windows, scanClaudeProcesses), MCPConfig
+	// is then each --mcp-config value it was started with, NUL-separated ("" for none).
+	Cmd       bool
+	MCPConfig string
 }
 
 func newClaudeDirs() *claudeDirs {
-	return &claudeDirs{byPID: map[int]string{}, bySession: map[string]procEnv{}, scan: scanClaudeProcesses}
+	return &claudeDirs{byPID: map[int]string{}, bySession: map[string]procEnv{}, runs: map[string]claudeRun{}, scan: scanClaudeProcesses}
 }
 
 // defaultClaudeDir is the inherited legacy default, also kept for old-session discovery.
@@ -221,6 +228,14 @@ func (n *Node) cwdBlocked(cwd string) bool {
 	if cwd == "" {
 		return false
 	}
+	if n.agentDirBlocked(cwd) { // a blocked Agent folder (agentdirs.go)
+		return true
+	}
+	return n.claudeDirBlocks(cwd)
+}
+
+// claudeDirBlocks: cwd is under a blocked Claude config folder (the claude_dirs_blocked part of cwdBlocked).
+func (n *Node) claudeDirBlocks(cwd string) bool {
 	d := n.cdirs
 	if d == nil {
 		return false
@@ -228,11 +243,7 @@ func (n *Node) cwdBlocked(cwd string) bool {
 	d.mu.Lock()
 	blocked := d.blocked
 	d.mu.Unlock()
-	if len(blocked) == 0 {
-		return false
-	}
-	real, _ := filepath.EvalSymlinks(proto.ExpandHome(cwd, n.home))
-	return proto.ClaudeDirBlocked(cwd, n.home, blocked) || (real != "" && proto.ClaudeDirBlocked(real, n.home, blocked))
+	return n.dirMatches(cwd, blocked)
 }
 
 func (n *Node) blockedBy(dir, real string, patterns []string) bool {
@@ -343,16 +354,33 @@ func (n *Node) refreshClaudeDirs() {
 	d.mu.Unlock()
 	// Which session each claude runs: its sessions/<pid>.json (found through the directory just scanned).
 	bySession := map[string]procEnv{}
+	runs := map[string]claudeRun{}
+	twice := map[string]bool{}
 	for pid, e := range envs {
-		if e.BaseURL == "" && e.Model == "" {
+		launcher := e.BaseURL != "" || e.Model != ""
+		if !launcher && !e.Cmd {
 			continue
 		}
-		if id := readClaudeSessionID(n.claudeSessionFile(pid)); id != "" {
+		id := readClaudeSessionID(n.claudeSessionFile(pid))
+		if id == "" {
+			continue
+		}
+		if launcher {
 			bySession[id] = e
+		}
+		if e.Cmd {
+			_, twice[id] = runs[id]
+			runs[id] = claudeRun{PID: pid, Start: procStartMark(pid), MCPConfig: e.MCPConfig}
+		}
+	}
+	for id, two := range twice {
+		if two { // two claudes have it open: which one is it is not for the scan to say
+			delete(runs, id)
 		}
 	}
 	d.mu.Lock()
 	d.bySession = bySession
+	d.runs = runs
 	var added []string
 	for _, dir := range byPID {
 		if !slices.Contains(d.found, dir) {
@@ -387,6 +415,20 @@ func (n *Node) sessionEnv(id string) (procEnv, bool) {
 	return e, ok
 }
 
+// sessionRun is the live claude running session id as the last scan saw it (false when none was seen, two were, or the
+// scan cannot read command lines here).
+func (n *Node) sessionRun(id string) (claudeRun, bool) {
+	d := n.cdirs
+	if d == nil {
+		return claudeRun{}, false
+	}
+	n.refreshClaudeDirs()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, ok := d.runs[id]
+	return r, ok
+}
+
 var (
 	claudeConfigEnvRe = envVarRe("CLAUDE_CONFIG_DIR")
 	anthropicBaseRe   = envVarRe("ANTHROPIC_BASE_URL")
@@ -410,9 +452,11 @@ func parseProcEnv(env string) procEnv {
 }
 
 // scanClaudeProcesses maps this user's running claude processes to the variables procEnv keeps from their
-// environment (processes with none of them are left out: default directory, default endpoint). Linux reads the
-// environ of the claudes in the shared walk of this user's /proc entries (userProcesses); macOS asks ps once for all;
-// Windows reads the process table (scanClaudeProcessesOS).
+// environment and command line. Linux reads the environ of the claudes in the shared walk of this user's /proc entries
+// (userProcesses); macOS asks ps once for all; Windows reads the process table (scanClaudeProcessesOS). Windows keeps
+// no command line, and so leaves out the processes that set none of the variables (default directory and endpoint):
+// how the start's --mcp-config path reaches claude through PowerShell and Git Bash is not verified, and a different
+// spelling would list every Agent off its launcher (offlauncher.go).
 func scanClaudeProcesses() map[int]procEnv {
 	out := map[int]procEnv{}
 	if runtime.GOOS == "windows" {
@@ -424,9 +468,9 @@ func scanClaudeProcesses() map[int]procEnv {
 				continue
 			}
 			env, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
-			if pe := parseProcEnv(string(env)); pe != (procEnv{}) {
-				out[pid] = pe
-			}
+			pe := parseProcEnv(string(env))
+			pe.Cmd, pe.MCPConfig = true, claudeMCPConfigs(argv)
+			out[pid] = pe
 		}
 		return out
 	}
@@ -451,9 +495,9 @@ func parsePSEnv(s string) map[int]procEnv {
 		if err != nil || !isClaudeCmd(f[1:]) {
 			continue
 		}
-		if pe := parseProcEnv(line); pe != (procEnv{}) {
-			out[pid] = pe
-		}
+		pe := parseProcEnv(line)
+		pe.Cmd, pe.MCPConfig = true, psMCPConfigs(line)
+		out[pid] = pe
 	}
 	return out
 }

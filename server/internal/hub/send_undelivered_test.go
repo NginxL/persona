@@ -152,6 +152,51 @@ func TestSendWithUnknownOutcomeIsKeptForLandedCheck(t *testing.T) {
 	}
 }
 
+// The node refuses the owner's message because the conversation is at work while its task-follow-up role changes
+// (CodeConversationBusy, nothing typed). The owner used to get 409 "wait and try again" on every send (five in a row
+// while a background script ran for 25 minutes); now the message is kept, the app is told it waits, and the manager
+// sends it once the work ends, on the new role. Other 409 refusals are still answered as before.
+func TestSendRefusedBusyForARoleChangeIsKept(t *testing.T) {
+	var tries atomic.Int32
+	h, m, k := undeliveredHub(t, func(context.Context) error {
+		tries.Add(1)
+		return &rpc.Error{Code: assistantwire.CodeConversationBusy, Message: "role changed while at work"}
+	})
+	c := sendSubscriber(h, "box", "s1")
+	w := sendAs(h, m, `{"text":"where are we?","client_msg_id":"keep-busy"}`)
+	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"delivered":"later"`) {
+		t.Fatalf("answer: %d %s, want 202 kept", w.Code, w.Body)
+	}
+	if kept := k.keeps(); len(kept) != 1 || kept[0].Code != assistantwire.CodeConversationBusy || kept[0].Params["text"] != "where are we?" {
+		t.Fatalf("kept %+v", kept)
+	}
+	if event := nextSendState(t, c); event.State != proto.MessageSendProcessing {
+		t.Fatalf("first state %+v", event)
+	}
+	if event := nextSendState(t, c); event.State != proto.MessageSendKept {
+		t.Fatalf("final state %+v", event)
+	}
+	if again := sendAs(h, m, `{"text":"where are we?","client_msg_id":"keep-busy"}`); again.Code != http.StatusAccepted {
+		t.Fatalf("retry: %d %s", again.Code, again.Body)
+	}
+	if tries.Load() != 1 || len(k.keeps()) != 1 {
+		t.Fatalf("tries=%d keeps=%d, want one each", tries.Load(), len(k.keeps()))
+	}
+}
+
+// Another 409 refusal (here a launcher of another kind) is not a wait: the owner still gets it, and nothing is kept.
+func TestSendRefusedForAnotherReasonIsNotKept(t *testing.T) {
+	h, m, k := undeliveredHub(t, func(context.Context) error {
+		return &rpc.Error{Code: assistantwire.CodeLauncherOtherKind, Message: "another kind", Data: json.RawMessage(`{"delivered":"none"}`)}
+	})
+	if w := sendAs(h, m, `{"text":"hi","client_msg_id":"keep-other"}`); w.Code != http.StatusConflict {
+		t.Fatalf("answer: %d %s, want 409", w.Code, w.Body)
+	}
+	if kept := k.keeps(); len(kept) != 0 {
+		t.Fatalf("kept %+v", kept)
+	}
+}
+
 // Older owner messages to the conversation are kept: the manager refuses to prepare a newer one, and the hub keeps it
 // behind them without typing anything.
 func TestSendBehindKeptMessagesIsKeptToo(t *testing.T) {

@@ -463,6 +463,31 @@ def terminal_result(screen, marker, schema):
     return value
 
 
+def agent_state(pane):
+    agents = command("agent", "list", timeout=20).get("agents", [])
+    return next((item for item in agents if item.get("pane_id") == pane), None)
+
+
+def prompt_started(pane):
+    """A startup stall does not prove Herdr rejected the submitted prompt."""
+    agent = agent_state(pane)
+    return agent is not None and agent.get("agent_status") in ("working", "done", "blocked")
+
+
+def submit_prompt(pane, prompt):
+    """Keep an accepted prompt on its original pane across observation stalls."""
+    try:
+        command("agent", "prompt", pane, prompt, "--wait", "--until", "working",
+                "--until", "blocked",
+                "--timeout", str(int(_config.get("lifetime_seconds", 7200)) * 1000),
+                timeout=int(_config.get("prompt_timeout_seconds", 120)))
+    except RuntimeError as error:
+        if "agent prompt produced no observed state change" not in str(error):
+            raise
+        if not prompt_started(pane):
+            raise RuntimeError("interactive reviewer prompt did not start: " + str(error)) from error
+
+
 def run(slot, flags):
     global _cleanup_tab, _cleanup_scope
     root = Path(_config["runtime_directory"]).expanduser()
@@ -526,10 +551,7 @@ def run(slot, flags):
                 session_id = wait_session_id(session_path, pane, unit)
                 transcript = transcript_path(os.getcwd(), session_id)
                 wait_agent(pane, unit)
-                command("agent", "prompt", pane, prompt, "--wait", "--until", "working",
-                        "--until", "blocked",
-                        "--timeout", str(int(_config.get("lifetime_seconds", 7200)) * 1000),
-                        timeout=int(_config.get("prompt_timeout_seconds", 120)))
+                submit_prompt(pane, prompt)
                 value = wait_transcript(transcript, marker, schema, pane, unit,
                                         int(_config.get("lifetime_seconds", 7200)))
                 result = {"is_error": False, "subtype": "success", "result": "",

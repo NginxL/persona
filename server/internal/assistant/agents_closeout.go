@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -29,13 +28,14 @@ func (s *Service) closeoutCheck(ctx context.Context, machine string, p assistant
 	if c, ok := s.session(ctx, machine, p.SessionID); ok && c.Assistant {
 		return out
 	}
-	out.Reason = renderCloseoutRequired(answerLanguage(s.hello(ctx).Locale))
+	language := answerLanguage(s.hello(ctx).Locale)
+	out.Reason = renderCloseoutRequired(language, s.closeoutForm(machine, language))
 	s.workEvent(machine, p.SessionID, "closeout_asked", nil)
 	return out
 }
 
-func renderCloseoutRequired(language string) string {
-	return prompts.RenderAgentCloseoutRequired(prompts.AgentCloseoutRequired{Form: closeout.Example, Language: language})
+func renderCloseoutRequired(language, form string) string {
+	return prompts.RenderAgentCloseoutRequired(prompts.AgentCloseoutRequired{Form: form, Language: language})
 }
 
 // closeoutDone is the work state of a turn whose closeout says done: no model is asked. The line is the first thing
