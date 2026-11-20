@@ -15,7 +15,7 @@ const server = createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk)
   const params = JSON.parse(Buffer.concat(chunks).toString())
   const method = req.url.split('/').at(-1)
-  appendFileSync(calls, JSON.stringify({ method, params }) + '\n')
+  appendFileSync(calls, JSON.stringify({ worker: process.pid, method, params }) + '\n')
   const snapshot = JSON.parse(readFileSync(`${directory}/trajectory.json`, 'utf8'))
   if (snapshot.fail && method === 'RevertToCascadeStep') {
     res.writeHead(409).end(JSON.stringify({ message: 'Native rewind refused' }))
@@ -83,7 +83,7 @@ const input = createInterface({ input: process.stdin })
 let prompts = 0
 input.on('line', (line) => {
   const req = JSON.parse(line)
-  appendFileSync(calls, JSON.stringify(req) + '\n')
+  appendFileSync(calls, JSON.stringify({ worker: process.pid, ...req }) + '\n')
   if (req.id === undefined) return
   if (req.method === 'session/list') openService()
   const snapshot = JSON.parse(readFileSync(`${directory}/trajectory.json`, 'utf8'))

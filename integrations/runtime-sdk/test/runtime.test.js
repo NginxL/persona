@@ -38,6 +38,71 @@ test('fork advertises native support and returns the driver response', async (t)
   assert.deepEqual(await node.peer.call('session.fork', params), { session_id: 's2' })
 })
 
+test('assistant worker PID snapshots report updates and replay only live workers after reconnect', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  assert.equal(rt.assistantPid('s1', 110), false)
+  assert.throws(() => rt.assistantPid('s1', -1), TypeError)
+  await rt.start()
+  await until('first PID report', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  rt.assistantPid('s2', 220)
+  rt.assistantPid('s1', 0)
+  await until('s1 removed', () => node.last('runtime.assistant_pids')?.pids.s2 === 220 && !node.last('runtime.assistant_pids').pids.s1)
+  const peer = node.peer
+  const reports = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('replayed on new connection', () => node.peer !== peer && node.all('runtime.assistant_pids').length > reports)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: { s2: 220 } })
+  rt.assistantPid('s2', 0)
+  await until('empty snapshot', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+})
+
+test('the last assistant worker exiting while the hub is down replays an empty snapshot when it returns', async (t) => {
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
+  const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+    runtime: 'toy', assistant: true, socketPath: node.path, retryMs: 20, refreshMs: 0,
+  })
+  t.after(() => rt.stop())
+  await rt.start()
+  await until('connected and listed', () => rt.hubConnected && node.last('runtime.sessions'))
+  rt.assistantPid('s1', 110)
+  await until('worker reported', () => node.last('runtime.assistant_pids')?.pids.s1 === 110)
+  node.setHub(false)
+  await until('hub gone', () => !rt.hubConnected)
+  rt.assistantPid('s1', 0)
+  await until('worker removed', () => Object.keys(node.last('runtime.assistant_pids').pids).length === 0)
+  const reports = node.all('runtime.assistant_pids').length
+  const peer = node.peer
+  node.setHub(true)
+  await until('snapshot replayed', () => node.all('runtime.assistant_pids').length > reports)
+  assert.equal(node.peer, peer)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+  node.setHub(false)
+  await until('hub gone again', () => !rt.hubConnected)
+  const beforeReconnect = node.all('runtime.assistant_pids').length
+  peer.close()
+  await until('next socket sends its empty snapshot', () => node.peer !== peer && node.all('runtime.assistant_pids').length > beforeReconnect)
+  assert.deepEqual(node.last('runtime.assistant_pids'), { pids: {} })
+})
+
+for (const [assistant, features] of [[true, []], [false, ['assistant_pids']]]) {
+  test(`assistant PID reports require both sides to opt in (assistant=${assistant})`, async (t) => {
+    const node = await startFakeNode(t, { features })
+    const rt = createRuntime(minimal({ start: async () => ({}), send: async () => {} }), {
+      runtime: 'toy', assistant, socketPath: node.path, refreshMs: 0,
+    })
+    t.after(() => rt.stop())
+    await rt.start()
+    await until('runtime listed', () => node.last('runtime.sessions'))
+    assert.equal(rt.assistantPid('s1', 110), false)
+    await rt.pushNow()
+    assert.equal(node.last('runtime.assistant_pids'), undefined)
+  })
+}
+
 test('a list carries the transcripts the runtime names as its own though it does not list them', async (t) => {
   const n = await startFakeNode(t)
   let past = ['aaaaaaaa-0000-4000-8000-0000000000a1']

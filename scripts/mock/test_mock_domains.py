@@ -212,6 +212,12 @@ MOVED = {
     "kb_selection_mock": ("#11543", ("KB_SELECTION_MESSAGES", "KB_SELECTION_DOCS", "KB_SELECTION", "kb_selection_defaults",
                                      "kb_selection_problem", "kb_selection_route")),
     "mail_mock": ("#11543", ("MAIL_ACCOUNTS", "MAIL_LOG", "MAIL_FULL", "MS_CONFIG", "mail_area")),
+    "hub_update_mock": ("#11649", ("HUB_UPDATE_MODE", "HUB_UPDATE", "hub_update_state", "HELD_REASON", "hub_update_history",
+                                   "set_hub_update_mode", "HUB_UPDATE_HISTORY")),
+    # Not the made-up people's shorthands (_ZHANG, _LI, _ALICE): names that short may come back for something else.
+    "imessage_mock": ("#11649", ("_imessage_status", "_im_person", "IMESSAGE_CHATS", "IMESSAGE_MESSAGES")),
+    "saved_prompts_mock": ("#11649", ("SAVED_PROMPTS", "saved_prompt_name_ok", "push_saved_prompts", "save_saved_prompt",
+                                      "saved_prompts_route")),
 }
 
 
@@ -519,13 +525,39 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("MOCK_PROBE=1  the test's probe domain", out)
         self.assertIn("MOCK_DESKTOPS=1  features list desktops", out)
         self.assertIn("MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection", out)
+        self.assertIn("MOCK_SAVED_PROMPTS=1|old  Settings › Saved Prompts", out)
 
     def test_the_moved_domains_answer(self):
         # Every module in DOMAINS registered on mock_hub.py's own globals (the mock would not have started otherwise),
-        # and these routes are the modules' now (#11543).
+        # and these routes are the modules' now (#11543, #11649).
         self.assertEqual(self.get("/api/v1/kb/selection")["version"], 1)
         self.assertEqual(sorted(self.get("/mock/mail")), ["accounts_added", "deleted", "flags", "sent", "tested"])
         self.assertEqual([a["id"] for a in self.get("/api/v1/mail/accounts")["accounts"]], ["acc1"])
+        # Without MOCK_HUB_UPDATE a hub from before the update page: no state, its history all the same.
+        with self.assertRaises(HTTPError) as gone:
+            self.get("/api/v1/hub/update")
+        with gone.exception:
+            self.assertEqual(gone.exception.code, 404)
+        self.assertEqual([x["result"] for x in self.get("/api/v1/hub/update/history")["history"]], ["updated", "rolled_back"])
+        self.assertEqual(self.get("/mock/hub_update?mode=held"), {"ok": True})
+        try:
+            self.assertIn("held", self.get("/api/v1/hub/update")["latest"])
+            self.assertEqual(self.get("/api/v1/hub/update/history")["history"][0]["result"], "held")
+        finally:
+            self.get("/mock/hub_update")
+        # Messages' reader, from the connector mock_hub.py keeps (IMESSAGE_STATUS).
+        self.assertEqual(self.get("/api/v1/imessage")["status"], "ok")
+        chats = self.get("/api/v1/imessage/chats")["chats"]
+        self.assertEqual(len(chats), 8)
+        self.assertEqual(len(self.get("/api/v1/imessage/chats/%s/messages" % chats[0]["id"])["messages"]), 9)
+        self.assertEqual(self.call("DELETE", "/api/v1/imessage/data", {})[0], 409)  # "Give to Persona" is on
+        # Saved prompts: none without MOCK_SAVED_PROMPTS; a request naming a manager the hub would not reach is
+        # mock_hub.py's still (404 no_manager).
+        self.assertEqual(self.get("/api/v1/assistant/saved-prompts"), {"prompts": []})
+        with self.assertRaises(HTTPError) as unknown:
+            self.get("/api/v1/assistant/saved-prompts?manager=m-nope")
+        with unknown.exception:
+            self.assertEqual((unknown.exception.code, json.load(unknown.exception)["code"]), (404, "no_manager"))
 
 
 def frame(stream):

@@ -2593,87 +2593,8 @@ def save_place(body, pid):
     return {"place": place}, 200
 
 
-# Saved prompts (Settings › Saved Prompts, #7329): the user's own "/" prompts, as the manager keeps them
-# (assistant/saved/prompts.go). None by default, so the "/" list of every other screenshot stays as it was;
-# MOCK_SAVED_PROMPTS=1 has three; MOCK_SAVED_PROMPTS=old is an assistant from before them (its routes answer 404).
-SAVED_PROMPTS = [
-    {"id": "sp1", "name": "review", "text": "Review this diff for security issues. List each finding with its file and line, and say how bad it is.",
-     "created_at": ago(days=4), "updated_at": ago(days=4)},
-    {"id": "sp2", "name": "release-notes", "text": "Write the release notes for the commits since the last tag: what changed for users first, then the fixes.",
-     "created_at": ago(days=2), "updated_at": ago(days=1)},
-    {"id": "sp3", "name": "standup", "text": "Write today's standup from my commits and merged PRs:\n- done\n- next\n- blocked",
-     "created_at": ago(hours=5), "updated_at": ago(hours=5)},
-] if os.environ.get("MOCK_SAVED_PROMPTS") == "1" else []
-
-
-def saved_prompt_name_ok(name):
-    """One word of letters, digits, combining marks and - _ . (the manager's savedPromptNameRune), at most 32."""
-    return 0 < len(name) <= 32 and all(c in "-_." or unicodedata.category(c)[0] == "L" or unicodedata.category(c) in ("Nd", "Mn") for c in name)
-
-
-def push_saved_prompts():
-    for send, _ in list(LIVE):
-        try:
-            send(from_default({"type": "assistant_saved_prompts"}))
-        except Exception:
-            pass
-
-
-def save_saved_prompt(body, pid):
-    """Adds a saved prompt (pid None) or changes prompt pid, as the manager does: (answer, status)."""
-    name = str(body.get("name") or "").strip().removeprefix("/")
-    text = str(body.get("text") or "").replace("\r\n", "\n").strip()
-    if not saved_prompt_name_ok(name):
-        return {"error": "A prompt needs a name of at most 32 letters, digits, “-”, “_” or “.”, with no spaces."}, 400
-    if not text or len(text) > 8000:
-        return {"error": "A prompt needs some text, at most 8000 characters."}, 400
-    if any(x["name"].lower() == name.lower() and x["id"] != pid for x in SAVED_PROMPTS):
-        return {"error": f"There is already a prompt called “/{name}”."}, 409
-    now = ago()
-    if pid:
-        for x in SAVED_PROMPTS:
-            if x["id"] == pid:
-                x.update(name=name, text=text, updated_at=now)
-                push_saved_prompts()
-                return {"prompt": x}, 200
-        return {"error": "That saved prompt is gone."}, 404
-    if len(SAVED_PROMPTS) >= 100:
-        return {"error": "You can save at most 100 prompts."}, 400
-    prompt = {"id": f"sp{uuid.uuid4().hex[:8]}", "name": name, "text": text, "created_at": now, "updated_at": now}
-    SAVED_PROMPTS.append(prompt)
-    push_saved_prompts()
-    return {"prompt": prompt}, 200
-
-
-def saved_prompts_route(h, p, method):
-    """The saved prompts' routes; False when p is not one of them."""
-    base = "/api/v1/assistant/saved-prompts"
-    if p != base and not p.startswith(base + "/"):
-        return False
-    if os.environ.get("MOCK_SAVED_PROMPTS") == "old":
-        h.send_json({"error": "not found"}, 404)
-    elif p == base and method == "GET":
-        h.send_json({"prompts": SAVED_PROMPTS})
-    elif p == base and method == "POST":
-        h.send_json(*save_saved_prompt(json.loads(h.last_body or b"{}"), None))
-    elif p == base + "/order" and method == "PUT":
-        ids = json.loads(h.last_body or b"{}").get("ids") or []
-        if sorted(ids) != sorted(x["id"] for x in SAVED_PROMPTS) or len(set(ids)) != len(ids):
-            h.send_json({"error": "The saved prompts changed on another device. Reload the list and try again."}, 409)
-        else:
-            SAVED_PROMPTS[:] = [next(x for x in SAVED_PROMPTS if x["id"] == i) for i in ids]
-            push_saved_prompts()
-            h.send_json({"prompts": SAVED_PROMPTS})
-    elif method == "PUT":
-        h.send_json(*save_saved_prompt(json.loads(h.last_body or b"{}"), p.rsplit("/", 1)[1]))
-    elif method == "DELETE":
-        pid = p.rsplit("/", 1)[1]
-        SAVED_PROMPTS[:] = [x for x in SAVED_PROMPTS if x["id"] != pid]
-        push_saved_prompts()
-        h.send_json({"ok": True})
-    else:
-        h.send_json({"error": "method not allowed"}, 405)
-    return True
+# Saved prompts (Settings › Saved Prompts, /api/v1/assistant/saved-prompts…, MOCK_SAVED_PROMPTS) are
+# scripts/mock/saved_prompts_mock.py's, a domain (#11649).
 
 MEMORY = [
     {"name": "MEMORY.md", "content": "- [早报格式](morning-format.md) — 一屏以内，结论先行", "updated_at": ago(days=1)},
@@ -13287,61 +13208,9 @@ def _imessage_connector():
     return {**base, "account": name, "via": name + " 上的「信息」", "enabled": True}
 
 
-def _imessage_status():
-    if PLUGINS_MODE and not _imessage_connector().get("enabled"):
-        return None
-    name = _imessage_connector().get("account")
-    return {**IMESSAGE_STATUS, "machine": name} if name else IMESSAGE_STATUS
+# Messages' reader (GET /api/v1/imessage, …/chats and a chat's …/messages, PUT …/settings, DELETE …/data) is
+# scripts/mock/imessage_mock.py's, a domain (#11649). The connector above stays here: GET /api/v1/connectors lists it.
 
-
-def _im_person(handle, name=None):
-    return {"handle": handle, "name": name} if name else {"handle": handle}
-
-
-_ZHANG, _LI, _ALICE = _im_person("+15550100", "张三"), _im_person("+15550101", "李四"), _im_person("alice@example.com", "Alice Example")
-IMESSAGE_CHATS = [
-    {"id": "imessage-0a1b2c3d4e5f", "name": "张三", "members": [_ZHANG], "services": ["SMS", "iMessage"], "last": ago(minutes=8),
-     "preview": "👍 好的，周五见 🎉", "unread": 1},
-    {"id": "imessage-1b2c3d4e5f60", "name": "周末徒步", "group": True, "members": [_ZHANG, _LI, _ALICE], "services": ["iMessage"],
-     "last": ago(minutes=40), "preview": "张三：我也去", "unread": 2},
-    {"id": "imessage-2c3d4e5f6071", "name": "12345", "members": [_im_person("12345")], "services": ["SMS"], "last": ago(hours=3),
-     "preview": "【示例】验证码 123456，5 分钟内有效", "unread": 1},
-    {"id": "imessage-3d4e5f607182", "name": "Alice Example", "members": [_ALICE], "services": ["iMessage"], "last": ago(hours=20),
-     "preview": "[语音]"},
-    {"id": "imessage-4e5f60718293", "name": "李四、+15550102", "group": True, "members": [_LI, _im_person("+15550102")],
-     "services": ["iMessage"], "last": ago(days=2), "preview": "收到", "from_me": True},
-    {"id": "imessage-5f6071829304", "name": "王五", "members": [_im_person("+15550103", "王五")], "services": ["iMessage"],
-     "last": ago(days=4), "preview": "示例：明天把文件带上", "from_me": True},
-    {"id": "imessage-607182930415", "name": "示例快递", "members": [_im_person("95500")], "services": ["SMS"], "last": ago(days=9),
-     "preview": "【示例快递】您的包裹已放到驿站，取件码 ••••"},
-    {"id": "imessage-718293041526", "name": "赵六", "members": [_im_person("+15550104", "赵六")], "services": ["iMessage", "RCS"],
-     "last": ago(days=40), "preview": "[图片]"},
-]
-IMESSAGE_MESSAGES = {
-    "imessage-0a1b2c3d4e5f": [
-        {"id": "1", "at": ago(days=1, hours=3), "kind": "message", "sender": _ZHANG, "text": "示例：今天的快递到了吗", "service": "SMS"},
-        {"id": "2", "at": ago(days=1, hours=2, minutes=55), "kind": "message", "from_me": True, "text": "到了，谢谢", "service": "SMS"},
-        {"id": "3", "at": ago(minutes=50), "kind": "message", "sender": _ZHANG, "text": "示例消息：周五下午三点见，地方还是上次那家咖啡馆", "service": "iMessage"},
-        {"id": "5", "at": ago(minutes=46), "kind": "message", "from_me": True, "text": "好的，我准时到", "service": "iMessage",
-         "reply_to": "示例消息：周五下午三点见，地方还是上次那家咖啡馆"},
-        {"id": "6", "at": ago(minutes=40), "kind": "message", "sender": _ZHANG, "service": "iMessage",
-         "attachments": [{"kind": "image", "name": "IMG_0001.HEIC", "mime": "image/heic", "size": 1234567}]},
-        {"id": "7", "at": ago(minutes=30), "kind": "message", "from_me": True, "text": "改一下：三点半", "service": "iMessage", "edited": True},
-        {"id": "8", "at": ago(minutes=20), "kind": "message", "sender": _ZHANG, "service": "iMessage", "unsent": True},
-        {"id": "9", "at": ago(minutes=12), "kind": "message", "sender": _ZHANG, "service": "iMessage", "undecoded": True},
-        {"id": "10", "at": ago(minutes=8), "kind": "message", "sender": _ZHANG, "text": "👍 好的，周五见 🎉", "service": "iMessage", "unread": True},
-    ],
-    "imessage-1b2c3d4e5f60": [
-        {"id": "12", "at": ago(hours=2), "kind": "event", "from_me": True, "text": "你把群名改成「周末徒步」"},
-        {"id": "13", "at": ago(hours=1, minutes=58), "kind": "message", "sender": _LI, "text": "@张三 明天的示例行程改到十点出发"},
-        {"id": "14", "at": ago(hours=1, minutes=50), "kind": "message", "sender": _ALICE, "text": "示例：带水和零食",
-         "attachments": [{"kind": "file", "name": "路线.pdf", "mime": "application/pdf", "size": 345678}]},
-        {"id": "15", "at": ago(hours=1, minutes=45), "kind": "message", "sender": _ALICE, "text": "还有防晒"},
-        {"id": "16", "at": ago(hours=1, minutes=30), "kind": "event", "from_me": True, "text": "你把+15550102加进了群聊"},
-        {"id": "17", "at": ago(minutes=42), "kind": "message", "from_me": True, "text": "我开车，能坐四个人"},
-        {"id": "18", "at": ago(minutes=40), "kind": "message", "sender": _ZHANG, "text": "我也去", "unread": True},
-    ],
-}
 
 if os.environ.get("MOCK_INBOX") == "empty":
     INBOX.clear()
@@ -21816,70 +21685,9 @@ def net_control(path, q):
 # half of them in a new order): the working agents' last line alternates between one line and two (the row's height),
 # and one of them finishes and starts again every three rounds (its space changes rank). ScrollUnderPushTests.
 # MOCK_CHURN=1 also puts a screenshot (a tool result image) in the middle of the first conversation's work.
-# MOCK_HUB_UPDATE=available|waiting|notice|held|docker|docker-pinned|beta: the hub's version and its updating itself
-# (docs/operations/hub-update.md): a newer release to install (auto-update off), an update waiting for two busy agents, "Automatic updates enabled"
-# told for the first time, a newer release auto-update holds back (its code does not contain the hub's commit, with
-# the held line in the history), or a Docker hub with a newer image (on :latest, or on a pinned version tag). behind
-# (#8108): up to date against a build-time source whose newest release is older than the hub (source_behind). Unset:
-# GET /api/v1/hub/update is 404 (a hub from before), no line anywhere.
-HUB_UPDATE_MODE = os.environ.get("MOCK_HUB_UPDATE", "")
-HUB_UPDATE = {}
 
-
-def hub_update_state():
-    if not HUB_UPDATE:
-        latest = {"version": "v0.3.1-4-gdef5678-202611030900", "build": 202611030900, "released": ago(minutes=40),
-                  "notes": "会话列表改成增量推送，更省电；灵动岛偶尔不更新的问题修好了。", "newer": True, "bad": False}
-        HUB_UPDATE.update({"version": "v0.3.0-12-gabc1234-202611021500", "build": 202611021500, "channel": "release",
-                           "can_update": True, "latest": latest, "state": "available", "busy": [], "auto": False,
-                           "auto_notice": False, "last_check": ago(minutes=20), "confirmed": True})
-        if HUB_UPDATE_MODE == "beta":
-            HUB_UPDATE.update(source="beta", version="0.6.2", latest={"version": "0.7.0-beta.1", "build": 202611171300,
-                                                                     "newer": True, "bad": False})
-        elif HUB_UPDATE_MODE == "waiting":
-            HUB_UPDATE.update(state="waiting_idle", auto=True, busy=[
-                {"machine_id": "macbook", "machine": "MacBook", "session_id": "a1f3c2d4-0000-4000-8000-000000000001", "title": "给天气 App 加主屏幕小组件"},
-                {"machine_id": "server", "machine": "构建服务器", "session_id": "b2", "title": "整理发布脚本"}])
-        elif HUB_UPDATE_MODE == "held":
-            HUB_UPDATE.update(auto=True)
-            HUB_UPDATE["latest"] = dict(latest, held=HELD_REASON)
-        elif HUB_UPDATE_MODE == "notice":
-            HUB_UPDATE.update(state="idle", auto=True, auto_notice=True)
-            HUB_UPDATE["latest"] = dict(latest, version=HUB_UPDATE["version"], build=HUB_UPDATE["build"], newer=False)
-        elif HUB_UPDATE_MODE == "behind":
-            HUB_UPDATE.update(state="idle", auto=True, update_url="https://site.example.com/dl", update_url_from="build", source_behind=True)
-            HUB_UPDATE["latest"] = {"version": "v0.1.17-177-g563f7fde5b-202611071005", "build": 202611071005,
-                                    "released": "2026-11-07T10:05:00Z", "newer": False, "bad": False}
-        elif HUB_UPDATE_MODE in ("docker", "docker-pinned"):
-            pinned = HUB_UPDATE_MODE == "docker-pinned"
-            HUB_UPDATE.update(version="0.3.0", build=0, channel="docker", can_update=False, auto=False,
-                              why_not="Docker 里的 hub 由新镜像更新（docker compose pull && docker compose up -d）",
-                              image={"name": "ghcr.io/owner/persona", "tag": "0.3.0" if pinned else "latest", "pinned": pinned})
-            HUB_UPDATE["latest"] = {"version": "0.3.1", "build": 0, "newer": True, "bad": False}
-    return HUB_UPDATE
-
-
-HELD_REASON = "新版本（提交 def56789）不包含这个 hub 正在运行的提交 abc12345：发布用的代码比这里的旧，或在另一条分支上，自动装了会退回"
-
-
-def hub_update_history():
-    held = [{"from_version": "v0.3.0-12-gabc1234-202611021500", "to_version": "v0.3.1-4-gdef5678-202611030900", "to_build": 202611030900,
-             "started": ago(minutes=20), "ended": ago(minutes=20), "result": "held", "reason": HELD_REASON, "auto": True}]
-    return (held if HUB_UPDATE_MODE == "held" else []) + HUB_UPDATE_HISTORY  # newest first, like the hub
-
-
-def set_hub_update_mode(mode):
-    global HUB_UPDATE_MODE
-    HUB_UPDATE_MODE = mode
-    HUB_UPDATE.clear()
-
-
-HUB_UPDATE_HISTORY = [
-    {"from_version": "v0.2.9-30-g1111111-202610311200", "to_version": "v0.3.0-12-gabc1234-202611021500", "to_build": 202611021500,
-     "started": ago(hours=20), "ended": ago(hours=20), "result": "updated", "auto": True},
-    {"from_version": "v0.2.9-30-g1111111-202610311200", "to_version": "v0.3.0-9-g2222222-202611011800", "to_build": 202611011800,
-     "started": ago(hours=40), "ended": ago(hours=40), "result": "rolled_back", "reason": "这些机器 2 分钟内没连回来：构建服务器", "auto": True},
-]
+# The hub's own update (MOCK_HUB_UPDATE: GET /api/v1/hub/update and …/history, PUT …/settings, POST …/update, GET
+# /mock/hub_update) is scripts/mock/hub_update_mock.py's, a domain (#11649).
 
 MOCK_SKILLS = [{"name": "lark-gateway", "description": "Feishu / Lark through a Lark gateway's agent API: messages, docs, calendar, tasks.", "source": "user"},
                {"name": "weekly-report", "description": "Draft the week's report from the calendar, docs and chats.", "source": "user"}]
@@ -25669,7 +25477,6 @@ MOCK_HELP = [
     "MOCK_TURN_USAGE=1|multi|unpriced  What a finished exchange cost, after the reply's time: \"菜谱搜索按用时排序\" on Opus 5.5 (1), with a Sonnet 5.5 subagent (multi), or on Haiku 5.5 without a price (unpriced: its tokens); the main conversation's last exchange the same (#5426)",
     "MOCK_CF_ACCESS=<client id>:<client secret>  The hub behind Cloudflare Access: /api/ requests without those two CF-Access-Client-* headers get a 302 to an Access login (no token) or Access's 403 page (wrong token) (#3502)",
     "MOCK_TODO_PROJECTS=1  To-dos filed under the example knowledge-base projects (#7077: the detail's Project, Group By › Project)",
-    "MOCK_SAVED_PROMPTS=1|old  Settings › Saved Prompts and every chat's / list: three saved prompts (1), or an assistant from before them, its routes answering 404 (old) (#7329)",
     "MOCK_KB_CORRECTIONS=1  Knowledge base: the lists links are held in, so links can be removed, and confirmed facts on one person (#6997)",
     "MOCK_KB_TOPICS_OFF=1  Knowledge points by topic starts off (the assistant's kb_topics), for the off state of the map (#7251)",
     "MOCK_KB_TOPICS=1  Knowledge base: five topics of knowledge points from the example projects and chats (Topics tab, a topic's page, the knowledge map)",
@@ -26353,9 +26160,6 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"ok": True, "version": SERVER_VERSION, "channel": "release", "build": 202611021500, "protocol": 1,
                                    "min_app_build": 0, "features": features(), **identity(), **hub_name_field()})
         if p == "/api/v1/endpoints": return self.send_json({**identity(), **hub_name_field(), "endpoints": list(ENDPOINTS)})
-        if p == "/api/v1/hub/update":
-            return self.send_json(hub_update_state()) if HUB_UPDATE_MODE else self.send_json({"error": "not found"}, 404)
-        if p == "/api/v1/hub/update/history": return self.send_json({"history": hub_update_history()})
         if p == "/api/v1/skills": return self.send_json({"machine_id": "macbook", "machine": "MacBook", "skills": MOCK_SKILLS})
         if p == "/api/v1/machines": return self.send_json({"machines": out_machines()})
         if p == "/api/v1/workspaces": return self.send_json({"workspaces": mock_workspaces()})
@@ -26536,9 +26340,6 @@ class H(BaseHTTPRequestHandler):
                 try: MESH["peers"] = mesh_peers(q["peers"][0], HUB_ID)
                 except ValueError as e: return self.send_json({"error": str(e)}, 400)
             return self.send_json(mesh_state())
-        if p == "/mock/hub_update":  # HubNoticeUITests: ?mode=<a MOCK_HUB_UPDATE mode>, from the start
-            set_hub_update_mode((q.get("mode") or [""])[0])
-            return self.send_json({"ok": True})
         if p == "/mock/paging":
             PAGING["on"] = q.get("on", ["0"])[0] == "1"
             return self.send_json({"ok": True, **PAGING})
@@ -26885,8 +26686,6 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({"runs": [r for r in RUNS if not ref or r["ref_id"] == ref]})
         if p == "/api/v1/assistant/places":
             return self.send_json({"places": PLACES})
-        if saved_prompts_route(self, p, "GET"):
-            return
         if p == "/api/v1/assistant/memory":
             if parse_qs(urlparse(self.path).query).get("space", [""])[0] == "health":
                 return self.send_json({"files": HEALTH_MEMORY, "dir": "/home/me/.persona/health/memory"})
@@ -26978,21 +26777,6 @@ class H(BaseHTTPRequestHandler):
             listed += [wechat_connector()] if WECHAT_MODE else []
             listed += [larkcli_connector()] if LARKCLI_MODE else []
             return self.send_json({"connectors": (LEGACY_CONNECTORS if q.get("all") == ["1"] else []) + listed})
-        if p == "/api/v1/imessage":  # Settings › Connectors › Messages; MOCK_IMESSAGE=denied: no Full Disk Access on the Mac
-            status = _imessage_status()
-            return self.send_json(status) if status else self.send_json({"error": "没有设置「信息」：在 设置 › 扩展 › 信息 选一台 Mac", "code": "not_configured"}, 404)
-        if p == "/api/v1/imessage/chats" or p.startswith("/api/v1/imessage/chats/") and p.endswith("/messages"):
-            if IMESSAGE_DENIED:
-                return self.send_json({"error": IMESSAGE_STATUS["error"], "code": "no_permission"}, 403)
-            if p == "/api/v1/imessage/chats":
-                return self.send_json({"chats": IMESSAGE_CHATS})
-            cid = p.split("/")[5]
-            chat = next((c for c in IMESSAGE_CHATS if c["id"] == cid), None)
-            if not chat:
-                return self.send_json({"error": "没有这个会话", "code": "no_chat"}, 404)
-            msgs = IMESSAGE_MESSAGES.get(cid) or [{"id": cid[-4:], "at": chat["last"], "kind": "message", "text": chat["preview"],
-                                                   "from_me": chat.get("from_me", False), "sender": None if chat.get("from_me") else chat["members"][0]}]
-            return self.send_json({"chat": chat, "messages": msgs})
         if p == "/api/v1/bots/feishu":  # Settings › Connectors › Lark bot
             st = dict(FEISHU_BOT, last_event_at=int(time.time()) - 40 if FEISHU_BOT["connected"] else None)
             if LARKCLI_MODE:
@@ -27619,18 +27403,6 @@ class H(BaseHTTPRequestHandler):
             GIT_PULL_STATE["behind"] = 0
             status, code = mock_files(p[:-4] + "status", {"cwd": [body.get("cwd", "")]})
             return self.send_json({"status": status, "updated": updated}, code)
-        if p.startswith("/api/v1/hub/update") and HUB_UPDATE_MODE:
-            s, body = hub_update_state(), json.loads(self.last_body or b"{}")
-            if p == "/api/v1/hub/update/settings" and self.command == "PUT":
-                if "source" in body:
-                    s["source"] = body["source"]
-                    s["latest"] = None
-                if "auto" in body: s.update(auto=bool(body["auto"]), auto_notice=False)
-                if body.get("auto_notice_seen"): s["auto_notice"] = False
-            elif p == "/api/v1/hub/update" and self.command == "POST":
-                if not s["can_update"]: return self.send_json({"error": "这个 hub 不能自己更新：" + s.get("why_not", "")}, 409)
-                s.update(state="restarting" if body.get("now") else "waiting_idle")
-            return self.send_json(s)
         if telegram_area(self, self.command, p, self.last_body): return
         if triage_route(self, self.command, p, self.last_body): return
         if wechat_area(self, self.command, p, self.last_body): return
@@ -27962,14 +27734,6 @@ class H(BaseHTTPRequestHandler):
                 return self.send_json({"error": "bad options"}, 400)
             GITHUB_CONNECTOR.setdefault("options", {}).update({k: v for k, v in o.items() if v is not None})
             return self.send_json(GITHUB_CONNECTOR)
-        if self.command == "PUT" and p == "/api/v1/imessage/settings":  # "Give to Persona" on / off
-            body = json.loads(self.last_body or b"{}")
-            if not isinstance(body.get("ai"), bool): return self.send_json({"error": "ai: true or false"}, 400)
-            IMESSAGE_STATUS["ai"] = body["ai"]
-            return self.send_json(IMESSAGE_STATUS)
-        if self.command == "DELETE" and p == "/api/v1/imessage/data":  # what the hub kept, once "Give to Persona" is off
-            if IMESSAGE_STATUS.get("ai"): return self.send_json({"error": "先关掉「交给 Persona」再删除", "code": "ai_on"}, 409)
-            return self.send_json({"chats": 6, "people": 9, "inbox": 1})
         if p.startswith("/api/v1/machines/") and p.endswith("/browser/cookies") and MOCK_BROWSER:  # sign-ins in ego (#1304)
             return self.send_json(*cookie_call(self.command, parse_qs(urlparse(self.path).query), self.last_body))
         if MOCK_CLIPBOARD and p.startswith("/api/v1/machines/") and (p.endswith("/clipboard") or p.endswith("/clipboard/settings")):
@@ -28452,8 +28216,6 @@ class H(BaseHTTPRequestHandler):
             mute, settled = mute_item(body.get("item_id"), body.get("tag"), other[0] if other else None)
             if not mute: return self.send_json({"error": "这一条没有可静音的" + str(body.get("tag"))}, 400)
             return self.send_json({"mute": mute, "settled": settled})
-        if saved_prompts_route(self, p, self.command):
-            return
         if p == "/api/v1/assistant/places" and self.command == "POST":
             if is_read_only(self): return self.send_json({"error": "只读角色不能修改常用地点"}, 403)
             return self.send_json(*save_place(json.loads(self.last_body or b"{}"), None))

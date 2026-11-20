@@ -50,13 +50,6 @@ nonisolated enum MessagingSources {
         return !(byManager[key(hub) + "@" + manager] ?? "").isEmpty
     }
 
-    /// A completed discovery with no source still retries next time; a historical
-    /// raw portrait waits for that answer before choosing generic or legacy media.
-    static func hasRead(_ hub: URL, manager: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return byManager[key(hub) + "@" + manager] != nil
-    }
-
     static func set(_ source: String?, for hub: URL, manager: String) {
         lock.lock(); defer { lock.unlock() }
         byManager[key(hub) + "@" + manager] = source ?? ""

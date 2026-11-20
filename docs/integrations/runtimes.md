@@ -420,6 +420,15 @@ For sessions it starts, the node restores persisted ownership and launcher metad
 The original assistant or health directory identifies the conversation after rediscovery and reconnects. Runtime
 status, model, permissions and capabilities continue to describe the running session.
 
+For shell calls to `personad tool --cli`, a runtime can use `rt.assistantPid(sessionId, pid)` from the runtime SDK.
+Report a dedicated local worker for each assistant conversation and pass `0` when that worker is dropped. Never report
+the main runtime process or a worker shared with ordinary Agent sessions. The node checks the session's ownership and
+assistant status, and verifies the worker is a strict process descendant of the connected runtime. It derives the
+caller's session from the worker's process tree, not from the CLI request. Antigravity runs each active assistant chat
+in its own ACP process, separate from the Agents' shared process. An idle assistant worker exits after five minutes
+without work; the next send or mode change resumes the chat in a fresh worker. A forked assistant chat gets its own
+worker when first used. An active turn or unanswered permission keeps the worker alive.
+
 A runtime that declares `caps.assistant` must:
 
 1. For **assistant chats** (started with `assistant: true`, or whose directory is the assistant directory), always send permissions and questions to the phone first (when there's a hub), regardless of whether the local UI is open.

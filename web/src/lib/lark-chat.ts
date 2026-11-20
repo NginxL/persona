@@ -338,12 +338,21 @@ export function quickReactions(manager?: string): Promise<string[]> {
 
 // ── profile ──────────────────────────────────────────────
 
+export interface LarkProfileRef {
+  id: string;
+  name: string;
+  avatar?: string;
+  avatar_url?: string;
+  bot?: boolean;
+}
+
 export interface LarkProfile {
   displayName?: string;
   enName?: string;
   alias?: string;
   groupNickname?: string;
   avatarUrl?: string;
+  avatar_url?: string;
   description?: string;
   userType?: string;
   timezone?: string;

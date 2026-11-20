@@ -8,7 +8,7 @@ import { clientIdFor, ON_DOCUMENT, readComments, replyText, sendComment, sendKey
 import { ago } from "../../lib/format";
 import { mentionsIn, type LarkPerson } from "../../lib/lark-people";
 import { clickLink } from "../../lib/links";
-import { useLinkManager } from "../../lib/manager-choice";
+import { defaultManager, useLinkManager } from "../../lib/manager-choice";
 import { Button, cx, EASE, IconButton, Loading, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { LarkPeopleMenu, useLarkPeoplePicker } from "../../ui/LarkPeoplePicker";
@@ -135,6 +135,7 @@ export function replyTarget(th: DocThread): CommentTarget {
 }
 
 export function DocCommentsView({ url, model, writes, resolved, onResolved, onBack, focus }: { url: string; model: DocComments; writes: boolean; resolved: boolean; onResolved: (v: boolean) => void; onBack: () => void; focus: number }) {
+  const manager = useLinkManager();
   const { threads, loadError } = model;
   const open = (threads ?? []).filter((t) => !t.resolved);
   const done = (threads ?? []).filter((t) => t.resolved);
@@ -195,7 +196,7 @@ export function DocCommentsView({ url, model, writes, resolved, onResolved, onBa
             )}
           </div>
         </div>
-        {writes && <CommentBox url={url} model={model} box={box} focus={focus} />}
+        {writes && <CommentBox key={JSON.stringify([manager ?? defaultManager(), url])} url={url} model={model} box={box} focus={focus} />}
       </div>
     </div>
   );
@@ -336,7 +337,7 @@ function CommentBox({ url, model, box, focus }: { url: string; model: DocComment
         </div>
       )}
       <div className="relative flex items-end gap-2">
-        <LarkPeopleMenu picker={picker} />
+        <LarkPeopleMenu picker={picker} manager={manager} />
         <textarea
           ref={box}
           rows={1}

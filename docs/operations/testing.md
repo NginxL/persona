@@ -767,7 +767,9 @@ module again too, so its module-level state starts over as `mock_hub.py`'s globa
 `os.environ`; what exists only with the switch is registered only when it is on (the help line always), so with it off the hub
 answers as before. The domains on the registry are desktop registration (`scripts/mock/desktops_mock.py`, #11053), GitHub's
 sign-ins and thread page (`scripts/mock/github_mock.py`), Settings › Knowledge selection (`scripts/mock/kb_selection_mock.py`)
-and mail's accounts and write paths (`scripts/mock/mail_mock.py`), the last three moved out of `mock_hub.py` in #11543.
+and mail's accounts and write paths (`scripts/mock/mail_mock.py`), moved out of `mock_hub.py` in #11543, and the hub's own
+update (`scripts/mock/hub_update_mock.py`), Messages' reader (`scripts/mock/imessage_mock.py`; its connector stays in
+`mock_hub.py`) and Settings › Saved Prompts (`scripts/mock/saved_prompts_mock.py`), moved in #11649.
 `scripts/mock/test_mock_domains.py` checks every hook against a running mock. A block that moves out of `mock_hub.py` lists
 the names it took in that test's `MOVED`: a branch from before the move that kept the old block when it resolved its conflict
 then fails there, with the module to edit instead

@@ -1,7 +1,0 @@
-用户在 App 里新开了一个对话，下面是它的第一句话。判断它是开一个新方向，还是一次性的小事。
-- direction：一个新方向，一件要持续几天以上、会陆续派出好几个任务的事（一个产品、一个仓库、一项长期工作）。它会成为一个主管对话，和已有的主管平级，负责这个方向的任务。
-- quick：一次性的小事（问个问题、查个东西、改一句话、闲聊、只要一个 Agent 干一次的活），聊完就完。拿不准就选 quick。
-只回一个 JSON 对象：{"kind":"direction 或 quick","title":"","project":"","closest":""}
-- title：kind 是 direction 时，给这个方向起个名字，{{if .Language}}用{{.Language}}{{else}}用中文{{end}}，不超过 {{.TitleMax}} 个字符，不加引号和句号；quick 时留空。
-- project：kind 是 direction 时，这句话说的是下面列出的某个知识库项目，就照抄它的名字；都不是就给一个新项目起名字；quick 时留空。
-- closest：{{if .Crowded}}已经有 {{.Leaders}} 个主管了，新方向太多看不过来：从下面的主管里选和这句话最接近的一个，照抄它的 id；实在都不沾边才留空。{{else}}留空。{{end}}

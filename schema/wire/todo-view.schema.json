@@ -60,6 +60,16 @@
         "rest"
       ]
     },
+    "TodoLineKey": {
+      "description": "The line keys produced by this version of the projection; see the Line keys table in spec/fixtures/todo-view/README.md. Clients can receive a newer key.",
+      "type": "string",
+      "enum": ["failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"]
+    },
+    "TodoLineArg": {
+      "description": "The argument names produced by this version of the projection. TodoLine.args remains an open string dictionary on the wire.",
+      "type": "string",
+      "enum": ["at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until"]
+    },
     "TodoLine": {
       "description": "The row's second line as a key and its arguments, never words: each client says it in its own language (spec/fixtures/todo-view/README.md lists every key and its arguments).",
       "type": "object",

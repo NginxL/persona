@@ -52,11 +52,7 @@ nonisolated enum TodoLineText {
     }
 
     /// Every key this build says: the README's table (`TodoLineTextTests` keeps the two the same).
-    static let keys: Set<String> = [
-        "failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working",
-        "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit",
-        "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday",
-    ]
+    static let keys = Set(TodoLineKey.all)
 
     /// The line in words; nil for no line, or a key this build does not know. `since`: when the row came to where it is
     /// (the view's `since`), said on the lines of rows that wait. `closedReason`: the to-do's own words on how it ended.
@@ -72,23 +68,23 @@ nonisolated enum TodoLineText {
         let run = arg("run")
         var said: Said
         switch line.key {
-        case "failed_start":
+        case TodoLineKey.failedStart:
             said = Said(lead: words("Didn't start [To-dos Line]"), rest: arg("error"), tone: .danger)
-        case "agent_asks":
+        case TodoLineKey.agentAsks:
             let who = run ?? words("An Agent [To-dos Line]")
             if let text = arg("text") {
                 said = Said(lead: words("\(who): \(text) [To-dos Line]"), tone: .needs)
             } else {
                 said = Said(lead: words("\(who) needs you [To-dos Line]"), tone: .needs)
             }
-        case "interrupted":
+        case TodoLineKey.interrupted:
             said = Said(lead: words("\(run ?? words("An Agent [To-dos Line]")) stopped before it finished [To-dos Line]"), tone: .needs)
-        case "decision":
+        case TodoLineKey.decision:
             said = Said(lead: arg("text") ?? words("A decision for you [To-dos Line]"),
                         rest: arg("recommend").map { words("\($0) recommended [To-dos Line]") }, tone: .needs)
-        case "decision_default":
+        case TodoLineKey.decisionDefault:
             // "on Fri", "on Apr 3", or "at 10:00" today.
-            let at = time("default_at")
+            let at = time(TodoLineArg.defaultAt)
             let today = at.map { calendar.isDate($0, inSameDayAs: now) } ?? false
             let when = at.map(day)
             let rest: String? = switch (arg("recommend"), when) {
@@ -100,43 +96,43 @@ nonisolated enum TodoLineText {
             case (nil, nil): nil
             }
             said = Said(lead: arg("text"), rest: rest)
-        case "cannot":
+        case TodoLineKey.cannot:
             said = Said(lead: words("Persona says it can't be done as asked [To-dos Line]"), tone: .needs)
-        case "awaits_reply":
+        case TodoLineKey.awaitsReply:
             said = Said(lead: StateName.awaitsReply.text,
                         rest: arg("text") ?? run.map { words("\($0) is waiting for your reply [To-dos Line]") })
-        case "working":
+        case TodoLineKey.working:
             let who = run ?? words("An Agent [To-dos Line]")
             said = arg("text").map { Said(lead: who, rest: $0) } ?? Said(lead: words("\(who) is working [To-dos Line]"))
-        case "persona_working":
+        case TodoLineKey.personaWorking:
             said = arg("text").map { Said(lead: "Persona", rest: $0) } ?? Said(lead: words("Persona is working [To-dos Line]"))
-        case "starting":
+        case TodoLineKey.starting:
             said = Said(lead: run.map { words("Starting \($0)… [To-dos Line]") } ?? words("Starting… [To-dos Line]"))
-        case "background":
+        case TodoLineKey.background:
             said = Said(lead: words("\(run ?? words("An Agent [To-dos Line]")) is working in the background [To-dos Line]"))
-        case "parked":
-            let until = time("until").map { words("until \(day($0)) [To-dos Line]") }
+        case TodoLineKey.parked:
+            let until = time(TodoLineArg.until).map { words("until \(day($0)) [To-dos Line]") }
             said = Said(lead: arg("reason") ?? words("Put aside [To-dos Line]"), rest: until ?? sinceRest)
-        case "finished":
+        case TodoLineKey.finished:
             said = Said(lead: run.map { words("\($0) finished [To-dos Line]") } ?? words("Finished [To-dos Line]"), rest: check,
                         tone: .ready)
-        case "accepted":
+        case TodoLineKey.accepted:
             said = Said(lead: words("Accepted [To-dos Line]"), rest: check, tone: .ready)
-        case "deployed":
+        case TodoLineKey.deployed:
             said = Said(lead: words("Live [To-dos Line]"), rest: check, tone: .ready)
-        case "pr_open":
+        case TodoLineKey.prOpen:
             said = Said(lead: words("Waiting for a merge [To-dos Line]"), rest: sinceRest)
-        case "usage_limit":
+        case TodoLineKey.usageLimit:
             let lead = run.map { words("\($0) reached its usage limit [To-dos Line]") } ?? words("Usage limit reached [To-dos Line]")
-            said = Said(lead: lead, rest: time("resets_at").map { words("back \(day($0)) [To-dos Line]") })
-        case "run_waits":
+            said = Said(lead: lead, rest: time(TodoLineArg.resetsAt).map { words("back \(day($0)) [To-dos Line]") })
+        case TodoLineKey.runWaits:
             let who = run ?? words("An Agent [To-dos Line]")
             let lead = arg("on") == "agent" ? words("\(who) is waiting for another Agent [To-dos Line]")
                 : words("\(who) is waiting for something outside [To-dos Line]")
             said = Said(lead: lead, rest: sinceRest)
-        case "finished_seen":
-            said = Said(lead: time("at").map { words("Finished \(day($0)) [To-dos Line]") } ?? words("Finished [To-dos Line]"))
-        case "completed":
+        case TodoLineKey.finishedSeen:
+            said = Said(lead: time(TodoLineArg.at).map { words("Finished \(day($0)) [To-dos Line]") } ?? words("Finished [To-dos Line]"))
+        case TodoLineKey.completed:
             let lead: String = switch arg("by") {
             case "auto": words("Done by Persona [To-dos Line]")
             case "review": words("Done after review [To-dos Line]")
@@ -144,14 +140,14 @@ nonisolated enum TodoLineText {
             default: StateName.done.text
             }
             said = Said(lead: lead, rest: closedReason)
-        case "canceled":
+        case TodoLineKey.canceled:
             said = Said(lead: words("Canceled [To-dos Line]"), rest: arg("reason"))
-        case "reported":
+        case TodoLineKey.reported:
             said = Said(lead: words("Reported back [To-dos Line]"))
-        case "superseded":
+        case TodoLineKey.superseded:
             said = Said(lead: words("Finished in a related to-do [To-dos Line]"))
-        case "someday":
-            said = Said(lead: StateName.todoSomeday, rest: time("until").map { words("from \(day($0)) [To-dos Line]") })
+        case TodoLineKey.someday:
+            said = Said(lead: StateName.todoSomeday, rest: time(TodoLineArg.until).map { words("from \(day($0)) [To-dos Line]") })
         default:
             return nil
         }

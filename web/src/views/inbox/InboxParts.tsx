@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type R
 import { agentDraft, docChangeKey, isDone, isLark, itemKey, keptChanges, movingKey, setDocStatus, useDroppedChanges, useInbox, useUnsentReply, withToken, type DocChange, type DocRow, type DocStatus, type InboxItem } from "../../lib/inbox";
 import { docChangeLine } from "../../lib/inbox-page";
 import { connectorBrand } from "../../lib/connectors";
-import { hubMediaURL } from "../../lib/lark-summary";
+import { larkAvatarSrc } from "../../lib/lark-summary";
 import { useItemManager, useShownManager, withManager } from "../../lib/manager-choice";
 import { managerOf, useRoster } from "../../lib/managers";
 import { t } from "../../i18n";
@@ -67,12 +67,20 @@ function hash(s: string) {
   return Math.abs(h);
 }
 
+type MonogramProps = { name: string; size?: number; square?: boolean; neutral?: boolean; src?: string; avatarURL?: string; manager?: string };
+
+function avatarPixels(size: number): number {
+  return Math.ceil(size * (globalThis.devicePixelRatio || 1));
+}
+
 /** `manager`: whose item the picture is of (a list row's; inside an item's view, ItemManager tells), so its URL names
  *  that manager (docs/assistant/managers.md "Clients"). */
-export function Monogram({ name, size = 40, square, neutral, src, avatarURL, manager }: { name: string; size?: number; square?: boolean; neutral?: boolean; src?: string; avatarURL?: string; manager?: string }) {
+export function Monogram({ name, size = 40, square, neutral, src, avatarURL, manager }: MonogramProps) {
   const owner = useItemManager();
-  // A new hub lists its own path; an older one only has the connector media ref in src.
-  const picture = avatarURL?.startsWith("/api/v1/avatars/") ? `${avatarURL}?size=${Math.ceil(size * devicePixelRatio)}` : src;
+  // Feishu paths already name their account; the requested size belongs to the same query.
+  const picture = avatarURL?.startsWith("/api/v1/avatars/")
+    ? `${avatarURL}${avatarURL.includes("?") ? "&" : "?"}size=${avatarPixels(size)}`
+    : src;
   const path = picture && withManager(picture, manager ?? owner);
   const [failed, setFailed] = useState<string>();
   const shape = square ? "rounded-[10px]" : "rounded-full";
@@ -83,6 +91,12 @@ export function Monogram({ name, size = 40, square, neutral, src, avatarURL, man
       {first.toUpperCase()}
     </span>
   );
+}
+
+/** A gateway from before the shared avatars route has its own thumbnail sizes and account selector. */
+export function LarkAvatar({ avatar, avatarURL, account, size = 40, ...rest }: Omit<MonogramProps, "src"> & { avatar?: string; account?: number }) {
+  const src = avatar && !avatarURL?.startsWith("/api/v1/avatars/") ? larkAvatarSrc(avatar, account, avatarPixels(size)) : undefined;
+  return <Monogram {...rest} size={size} avatarURL={avatarURL} src={src} />;
 }
 
 /** The 40px avatar of a row: chat / sender, or a tinted square for a document or a Moments post; a small mark of
@@ -117,7 +131,7 @@ export function ItemAvatar({ it, size = 40 }: { it: InboxItem; size?: number }) 
       </span>
     );
   } else if (isLark(it)) {
-    face = <Monogram name={it.title} size={size} square={it.lark?.is_group} src={hubMediaURL(it.avatar)} manager={it.manager} />;
+    face = <LarkAvatar name={it.title} size={size} square={it.lark?.is_group} avatarURL={it.avatar_url} avatar={it.avatar} account={it.lark?.ol_account ?? it.lark?.account_id} manager={it.manager} />;
   } else {
     // A connector's thread picture (the other person, a group's own) from the hub's avatars route, asked at the pixels
     // drawn (the route rounds up to the sizes it draws; the browser keeps it, `immutable`); the initial without one or

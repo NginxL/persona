@@ -343,14 +343,16 @@ fun ChatComposer(
     val mainClear = LocalMainChatClear.current?.takeIf { enabled }
     // Both the "/" list and the + sheet offer only what an Assistant conversation runs, never an Agent's quick messages.
     val useMainCommands = assistantChat || mainClear != null
-    val suggestions = if (!enabled) emptyList() else if (useMainCommands) {
-        SlashCommand.mainSuggestions(state.value.text, clear = mainClear != null, resources = resources,
+    val slashDraft = state.value.text.takeIf { enabled && !state.hasPickedSavedPrompt }.orEmpty()
+    val saved = matchingSavedPrompts(LocalSavedPrompts.current, slashDraft)
+    val suggestions = if (useMainCommands) {
+        SlashCommand.mainSuggestions(slashDraft, clear = mainClear != null, resources = resources,
             permissions = onPermissions != null)
     } else {
-        SlashCommand.suggestions(state.value.text, canClear && !working, resources, model = onModel != null, loop = loop,
-            permissions = onPermissions != null)
+        SlashCommand.suggestions(slashDraft, canClear && !working, resources, model = onModel != null, loop = loop,
+            permissions = onPermissions != null, keepExact = saved.isNotEmpty())
     }
-    val hint = if (enabled && loop) loopHint(state.value.text, resources) else null
+    val hint = if (loop) loopHint(slashDraft, resources) else null
     // @: the word being typed just before the caret, while nothing is selected and no "/" list is open.
     val selection = state.value.selection
     val mention = if (enabled && mentions != null && suggestions.isEmpty() && selection.collapsed) mentionAt(state.value.text, selection.start) else null
@@ -405,7 +407,12 @@ fun ChatComposer(
         state.focusRequest++
     }
     val extensionPrompts = if (enabled) LocalExtensionPrompts.current else emptyList()
-    val quick = ExtensionPromptText.matching(extensionPrompts, state.value.text)
+    val quick = ExtensionPromptText.matching(extensionPrompts, slashDraft)
+    val savedSection = stringResource(R.string.chat_slash_saved_prompts)
+    val slashItems = suggestions.map { ComposerSuggestion(it.word, it.detail, destructive = it.clear && mainClear == null) } +
+        saved.map { ComposerSuggestion("/${it.name}", it.text.lineSequence().first(), key = "saved:${it.id}",
+            flexible = true, section = savedSection) } +
+        quick.map { ComposerSuggestion(it.title, it.extensionName, key = "extension:${it.extension}/${it.id}", flexible = true) }
     // The main conversation's /clear: the box empties and the hub clears it; /clear goes back into the box if it did not.
     fun clearMain(clear: MainChatClear) {
         state.beginEdit()
@@ -522,12 +529,14 @@ fun ChatComposer(
             if (fullToolbar) accessory?.invoke(this)
             if (fullToolbar) modeHint?.let { JChip(it, icon = PhIcons.SlidersHorizontal) }
             if (working && hasContent && enabled) Text(stringResource(R.string.chat_composer_will_queue), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-            // A draft that is one "/" word: the quick messages it can be, right above the field.
-            ComposerSuggestions(quick.map { ComposerSuggestion(it.title, it.extensionName, key = "${it.extension}/${it.id}", flexible = true) },
-                onPick = { picked -> quick.firstOrNull { "${it.extension}/${it.id}" == picked.key }?.let { state.fillQuickPrompt(it) } },
-                modifier = Modifier.padding(vertical = Tokens.Space.xs))
-            ComposerSuggestions(suggestions.map { ComposerSuggestion(it.word, it.detail, destructive = it.clear && mainClear == null) },
-                onPick = { picked -> suggestions.firstOrNull { it.word == picked.word }?.let(::pick) },
+            ComposerSuggestions(slashItems,
+                onPick = { row ->
+                    when {
+                        row.key.startsWith("saved:") -> saved.firstOrNull { "saved:${it.id}" == row.key }?.let { state.fillSavedPrompt(it.text) }
+                        row.key.startsWith("extension:") -> quick.firstOrNull { "extension:${it.extension}/${it.id}" == row.key }?.let { state.fillQuickPrompt(it) }
+                        else -> suggestions.firstOrNull { it.word == row.key }?.let(::pick)
+                    }
+                },
                 modifier = Modifier.padding(vertical = Tokens.Space.xs))
             // The @ menu: Persona's open tasks, files this chat used, the session folder's entries, then other sessions; a word
             // that matches nothing says so. On Glass it grows in and out in iOS's state motion, rising from the field, as the
@@ -597,7 +606,8 @@ fun ChatComposer(
 
 /** True when [dispatchComposerSend] opens the permission picker instead of sending the draft. */
 internal fun isPermissionsCommand(state: ChatComposerState, extraContent: Boolean, onPermissions: (() -> Unit)?): Boolean =
-    onPermissions != null && SlashCommand.isPermissions(state.value.text) && state.attachments.isEmpty() && !extraContent
+    onPermissions != null && !state.hasPickedSavedPrompt && SlashCommand.isPermissions(state.value.text) &&
+        state.attachments.isEmpty() && !extraContent
 
 /**
  * Shared send dispatcher for both touch/IME send (`ChatComposer`) and hardware keyboard send (`LargeWindowComposer`):
@@ -611,7 +621,7 @@ internal fun dispatchComposerSend(
     onSend: () -> Unit,
 ) {
     when {
-        mainClear != null && isMainClearCommand(state.value.text, state.attachments.size, extraContent) -> {
+        mainClear != null && !state.hasPickedSavedPrompt && isMainClearCommand(state.value.text, state.attachments.size, extraContent) -> {
             state.beginEdit()
             state.value = TextFieldValue()
             mainClear.clear { state.value = TextFieldValue(SlashCommand.CLEAR, TextRange(SlashCommand.CLEAR.length)) }

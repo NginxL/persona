@@ -57,6 +57,7 @@ type InboxItem struct {
 	Title       string     `json:"title"`        // chat name / mail subject
 	Sender      string     `json:"sender,omitempty"`
 	Avatar      string     `json:"avatar,omitempty"`
+	AvatarURL   string     `json:"avatar_url,omitempty"` // listed only, for Feishu; the stored avatar stays readable by older clients
 	Preview     string     `json:"preview"`
 	Count       int        `json:"count"`
 	StartedAt   time.Time  `json:"started_at"`
@@ -266,6 +267,9 @@ func (it *InboxItem) listed() InboxItem {
 	c.Mutes = mutesOf(it)
 	c.Version = inboxVersion(it)
 	c.Conversation = conversationOf(it)
+	if it.Source == "lark" && it.Lark != nil {
+		c.AvatarURL = extwire.LarkAvatarURL(it.Avatar, it.Lark.AccountID)
+	}
 	if it.Agent != nil { // the copy is encoded after the lock is released
 		a := *it.Agent
 		if g := currentSuggestion(it); g != nil && suggestionAttempt(it, g.Version) != nil {

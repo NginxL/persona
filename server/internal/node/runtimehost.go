@@ -81,12 +81,15 @@ func (rh *RuntimeHost) current() *Node {
 // attach makes n the Node serving the hub: it lists and drives the runtimes' sessions from now on. What the last hub
 // connection watched is forgotten (the new one watches afresh); runtimes hear that a hub is there.
 func (rh *RuntimeHost) attach(n *Node) {
-	rh.mu.Lock()
-	rh.node = n
-	rh.mu.Unlock()
 	n.runtimes = rh.reg
 	rh.reg.setHostOff(n.engineHostOff)
 	n.runtimeHost = rh
+	rh.mu.Lock()
+	if rh.node != n {
+		rh.reg.clearAssistantPIDs()
+	}
+	rh.node = n
+	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(true)
 }
@@ -99,6 +102,7 @@ func (rh *RuntimeHost) detach(n *Node) {
 		return
 	}
 	rh.node = nil
+	rh.reg.clearAssistantPIDs()
 	rh.mu.Unlock()
 	rh.reg.resetWatches()
 	rh.notifyHub(false)
@@ -304,6 +308,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
 			features = append(features, "leader_tools", "supervision_policy")
+			if hello.Caps.Assistant {
+				features = append(features, "assistant_pids")
+			}
 		}
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
 			"features": features}
@@ -407,6 +414,21 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 	h.mu.Unlock()
 	if !ready {
 		return // hello first
+	}
+	if event == "runtime.assistant_pids" {
+		var p struct {
+			PIDs map[string]int `json:"pids"`
+		}
+		if json.Unmarshal(params, &p) == nil {
+			rh.mu.Lock()
+			defer rh.mu.Unlock()
+			n := rh.node
+			if n == nil {
+				p.PIDs = nil
+			}
+			rh.reg.setAssistantPIDs(h, p.PIDs, func(id string) bool { return n != nil && n.runtimeAssistantChat(h, id) })
+		}
+		return
 	}
 	n := rh.current()
 	if event == "runtime.launchers" { // its launchers changed (runtimecontrol.go)

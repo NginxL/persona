@@ -16,7 +16,7 @@ import { accountTitle, type LarkAccount, type LarkAccountList } from "../../lib/
 import { useLarkOn, useStore } from "../../lib/store";
 import { Button, copyText, cx, Dialog, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
-import { Count, Monogram } from "../inbox/InboxParts";
+import { Count, LarkAvatar } from "../inbox/InboxParts";
 import { ConnectorDetail, ConnectorList } from "./HubConnector";
 import { LarkDisplaySettings } from "./LarkDisplaySettings";
 import { LarkHomeSwitch } from "./LarkHomeSwitch";
@@ -492,7 +492,7 @@ function LarkAccountRow({ a, isDefault }: { a: LarkAccount; isDefault: boolean }
   const detail = a.quarantined ? t("settings-connectors.account_quarantined") : !a.signed_in ? t("settings-connectors.signed_out") : a.tenant || t("settings-connectors.signed_in");
   return (
     <div data-account={a.id} className="flex items-center gap-3 px-4 py-2.5">
-      <Monogram name={accountTitle(a)} size={30} src={a.avatar} />
+      <LarkAvatar name={accountTitle(a)} size={30} avatarURL={a.avatar_url} avatar={a.avatar} account={a.id} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] text-ink">{accountTitle(a)}</div>
         <div className={cx("mt-0.5 truncate text-[11.5px]", a.signed_in ? "text-ink-3" : "text-red")}>{detail}</div>

@@ -1266,18 +1266,6 @@ type SuperviseCloseout struct {
 	LocalDeployment                bool
 }
 
-// Route is the system prompt of assistant.route (assistant/route): is a New chat's first message a direction or a quick
-// chat. Language is the direction name's language by its own name ("" Chinese); Crowded: there are Leaders leaders
-// already, so the model names the closest one too.
-type Route struct {
-	Language string
-	TitleMax int
-	Crowded  bool
-	Leaders  int
-}
-
-func RenderRoute(r Route) string { return render("assistant/route", r) }
-
 // RouteLeader is a current leader as the route model is shown it.
 type RouteLeader struct{ ID, Title, Project string }
 

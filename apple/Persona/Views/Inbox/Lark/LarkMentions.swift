@@ -19,11 +19,14 @@ nonisolated struct LarkMember: Decodable, Hashable, Sendable, Identifiable {
     var userID: String
     var name: String
     var avatar: String?
+    var avatarURL: String?
+    var avatarUrl: String?
+    var picture: String? { avatarURL ?? avatar ?? avatarUrl }
     var id: String { userID }
 
     enum CodingKeys: String, CodingKey {
         case userID = "user_id"
-        case name, avatar
+        case name, avatar, avatarUrl, avatarURL = "avatar_url"
     }
 }
 
@@ -131,19 +134,19 @@ struct LarkMentionPicker: View {
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             if everyone && LarkMentions.offersEveryone(query) {
-                row(name: LarkMention.everyone.name, avatar: nil, isGroup: true) { pick(.everyone) }
+                row(name: LarkMention.everyone.name, avatar: nil) { pick(.everyone) }
             }
             ForEach(members) { m in
-                row(name: m.name, avatar: m.avatar, isGroup: false) { pick(LarkMention(userID: m.userID, name: m.name)) }
+                row(name: m.name, avatar: m.picture) { pick(LarkMention(userID: m.userID, name: m.name)) }
             }
         }
         .padding(.vertical, Theme.Space.xs)
     }
 
-    private func row(name: String, avatar: String?, isGroup: Bool, action: @escaping () -> Void) -> some View {
+    private func row(name: String, avatar: String?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
-                LarkAvatarImage(name: name, url: avatar, isGroup: isGroup, size: Theme.Size.well)
+                LarkAvatarImage(name: name, url: avatar, size: Theme.Size.well)
                 Text(name).font(Theme.Font.body).lineLimit(1)
                 Spacer(minLength: 0)
             }

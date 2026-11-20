@@ -7,6 +7,7 @@ export interface LarkPerson {
   user_id: string;
   name: string;
   avatar?: string;
+  avatar_url?: string;
 }
 
 export interface PersonToken {

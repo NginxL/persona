@@ -82,6 +82,58 @@ const (
 // TodoReasons are the values of TodoReason, in order.
 var TodoReasons = []string{"failed_start", "agent_asks", "interrupted", "stopped_unfinished", "owner_decides", "verify", "steps_proposed", "signin", "can_wait", "awaits_reply", "persona_working", "agent_running", "starting", "queued", "background", "closed_unseen", "completed", "canceled", "reported", "superseded", "parked", "finished_unseen", "finished_recent", "pr_open", "usage_limit", "computer_offline", "scheduled_report", "someone_else", "finished_seen", "deferred", "rest"}
 
+// TodoLineKey: the line keys produced by this version of the projection; see the Line keys table in
+// spec/fixtures/todo-view/README.md. Clients can receive a newer key.
+const (
+	TodoLineKeyFailedStart     = "failed_start"
+	TodoLineKeyAgentAsks       = "agent_asks"
+	TodoLineKeyInterrupted     = "interrupted"
+	TodoLineKeyDecision        = "decision"
+	TodoLineKeyDecisionDefault = "decision_default"
+	TodoLineKeyCannot          = "cannot"
+	TodoLineKeyAwaitsReply     = "awaits_reply"
+	TodoLineKeyWorking         = "working"
+	TodoLineKeyPersonaWorking  = "persona_working"
+	TodoLineKeyStarting        = "starting"
+	TodoLineKeyBackground      = "background"
+	TodoLineKeyParked          = "parked"
+	TodoLineKeyFinished        = "finished"
+	TodoLineKeyAccepted        = "accepted"
+	TodoLineKeyDeployed        = "deployed"
+	TodoLineKeyPrOpen          = "pr_open"
+	TodoLineKeyUsageLimit      = "usage_limit"
+	TodoLineKeyRunWaits        = "run_waits"
+	TodoLineKeyFinishedSeen    = "finished_seen"
+	TodoLineKeyCompleted       = "completed"
+	TodoLineKeyCanceled        = "canceled"
+	TodoLineKeyReported        = "reported"
+	TodoLineKeySuperseded      = "superseded"
+	TodoLineKeySomeday         = "someday"
+)
+
+// TodoLineKeys are the values of TodoLineKey, in order.
+var TodoLineKeys = []string{"failed_start", "agent_asks", "interrupted", "decision", "decision_default", "cannot", "awaits_reply", "working", "persona_working", "starting", "background", "parked", "finished", "accepted", "deployed", "pr_open", "usage_limit", "run_waits", "finished_seen", "completed", "canceled", "reported", "superseded", "someday"}
+
+// TodoLineArg: the argument names produced by this version of the projection. TodoLine.args remains an open string
+// dictionary on the wire.
+const (
+	TodoLineArgAt        = "at"
+	TodoLineArgBy        = "by"
+	TodoLineArgDefaultAt = "default_at"
+	TodoLineArgError     = "error"
+	TodoLineArgOn        = "on"
+	TodoLineArgReason    = "reason"
+	TodoLineArgRecommend = "recommend"
+	TodoLineArgResetsAt  = "resets_at"
+	TodoLineArgRun       = "run"
+	TodoLineArgStep      = "step"
+	TodoLineArgText      = "text"
+	TodoLineArgUntil     = "until"
+)
+
+// TodoLineArgs are the values of TodoLineArg, in order.
+var TodoLineArgs = []string{"at", "by", "default_at", "error", "on", "reason", "recommend", "resets_at", "run", "step", "text", "until"}
+
 // TodoLine: the row's second line as a key and its arguments, never words: each client says it in its own language
 // (spec/fixtures/todo-view/README.md lists every key and its arguments).
 type TodoLine struct {

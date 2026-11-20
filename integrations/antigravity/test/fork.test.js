@@ -48,7 +48,7 @@ async function fixture(t, { assistant = false, status = 'IDLE', pending = false,
   const binary = join(home, 'agy')
   writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' '${fake}' '${home}' "$@"\n`)
   chmodSync(binary, 0o700)
-  const node = await startFakeNode(t)
+  const node = await startFakeNode(t, { features: ['assistant_pids'] })
   const runtime = createAgyRuntime({ home, agyDir: config, agyBin: binary, personadBin: binary,
     socketPath: node.path, exportPollMs: 20, exportSettleTimeoutMs: 500, log: () => {} })
   t.after(async () => { await runtime.stop(); db.close(); rmSync(home, { recursive: true, force: true }) })
@@ -110,9 +110,13 @@ test('an assistant fork can be opened and continued before the native export arr
   await node.peer.call('session.send', { session_id: branched, text: 'Continue the branch' })
   const sent = await until('branch continued', () => calls().find((call) => call.method === 'session/prompt'))
   assert.equal(sent.params.sessionId, branch)
+  const forkWorker = calls().find((call) => call.method === 'ForkConversation').worker
+  assert.notEqual(sent.worker, forkWorker)
+  assert.deepEqual(node.last('runtime.assistant_pids').pids, { [sessionId]: forkWorker, [branched]: sent.worker })
   for (const id of [source, branch]) {
     const resume = calls().find((call) => call.method === 'session/resume' && call.params.sessionId === id)
     assert.equal(resume?.params.cwd, cwd)
+    assert.equal(resume.worker, id === source ? forkWorker : sent.worker)
     assert.ok(resume.params.mcpServers[0].env.some(({ name, value }) => name === 'PERSONA_ASSISTANT' && value === '1'))
   }
   await node.peer.call('session.modes', { session_id: sessionId, permission_mode: 'default' })

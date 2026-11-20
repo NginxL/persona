@@ -2788,7 +2788,7 @@ web's routes (`docs/protocol/protocol.md`, `/api/v1/assistant/saved-prompts`) an
 - **The editor** (`SavedPromptEditor`): Name after a fixed `/` and Text; `sheetCancel`'s ✕ leaves, `SheetConfirm`'s ✓ saves (a spinner while it runs; #11183). It says the hub's rules before asking it
   (`SavedPromptRules`: a taken name at once, the others once something is typed or Save was tapped); a count shows past
   80% of 8,000 characters; the hub's own refusal shows in the sheet and keeps what was typed.
-- Save as Prompt… on a message's menu, and Android, follow in their own issues.
+- Android supports saved prompts (#11667, `docs/android/android.md` "Saved prompts"). Save as Prompt… on a message's menu is a separate feature.
 - DEBUG: `-tab settings -openAssistantPage prompts|prompt|newPrompt` (`promptsEntry`: the profile scrolled to In Chats).
   Tests: `PersonaTests/SavedPromptsTests.swift`; UI suite `SavedPromptsUITests` against the mock with
   `MOCK_SAVED_PROMPTS=1` (`TEST_RUNNER_PERSONA_MOCK_HUB`; skips without it) swipes a row, checks Delete asks first and

@@ -2,14 +2,10 @@ package projection
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -236,11 +232,10 @@ func TestProjectionFollowsTheCountsCases(t *testing.T) {
 	}
 }
 
-// Every line key the projection writes is in spec/fixtures/todo-view/README.md's "Line keys" table and every key
-// there is one it writes; every view of every case, expected or worked out over a list, has a TodoReason and one of
-// those keys.
+// Every documented line key has a fixture that produces it. Both standalone and list projections use known reasons and keys.
 func TestProjectionCasesUseKnownNames(t *testing.T) {
-	keys, documented := sourceLineKeys(t), readmeLineKeys(t)
+	keys, documented := assistantwire.TodoLineKeys, readmeLineKeys(t)
+	seen := map[string]bool{}
 	for _, k := range keys {
 		if !slices.Contains(documented, k) {
 			t.Errorf("line key %s is not in spec/fixtures/todo-view/README.md's \"Line keys\"", k)
@@ -255,16 +250,16 @@ func TestProjectionCasesUseKnownNames(t *testing.T) {
 		if !slices.Contains(assistantwire.TodoReasons, v.Reason) {
 			t.Errorf("%s: reason %s", where, v.Reason)
 		}
-		if v.Line != nil && !slices.Contains(keys, v.Line.Key) {
-			t.Errorf("%s: line key %s", where, v.Line.Key)
+		if v.Line != nil {
+			seen[v.Line.Key] = true
+			if !slices.Contains(keys, v.Line.Key) {
+				t.Errorf("%s: line key %s", where, v.Line.Key)
+			}
 		}
 	}
 	for _, c := range readCases[viewInput](t, "todo-view/todo_view.json") {
-		var v assistantwire.TodoSummary
-		if err := json.Unmarshal(c.Expected.View, &v); err != nil {
-			t.Fatal(err)
-		}
-		known(c.Name, v)
+		list := viewList(t, c.Input)
+		known(c.Name, View(relate(list)[0], c.Input.Now))
 	}
 	for _, c := range readCases[countsInput](t, "todo-counts/todo_counts.json") {
 		list := listFacts(t, c.Input)
@@ -272,49 +267,11 @@ func TestProjectionCasesUseKnownNames(t *testing.T) {
 			known(c.Name+"/"+list[i].ID, v)
 		}
 	}
-}
-
-// sourceLineKeys are the values of the package's line* constants: every line key the projection writes.
-func sourceLineKeys(t *testing.T) []string {
-	t.Helper()
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []string
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.SkipObjectResolution)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, d := range f.Decls {
-			if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.CONST {
-				for _, spec := range g.Specs {
-					vs := spec.(*ast.ValueSpec)
-					for i, n := range vs.Names {
-						if lit, ok := valueAt(vs, i).(*ast.BasicLit); ok && strings.HasPrefix(n.Name, "line") {
-							v, _ := strconv.Unquote(lit.Value)
-							out = append(out, v)
-						}
-					}
-				}
-			}
+	for _, key := range keys {
+		if !seen[key] {
+			t.Errorf("no projection fixture produces line key %s", key)
 		}
 	}
-	if len(out) == 0 {
-		t.Fatal("no line* constants found")
-	}
-	return out
-}
-
-func valueAt(vs *ast.ValueSpec, i int) ast.Expr {
-	if i < len(vs.Values) {
-		return vs.Values[i]
-	}
-	return nil
 }
 
 // readmeLineKeys are the keys of the "### Line keys" table of spec/fixtures/todo-view/README.md.

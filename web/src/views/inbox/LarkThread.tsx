@@ -5,7 +5,7 @@
 // Like the phone's chat (lib/lark-chat.ts, LarkExtras.tsx): pictures open in the viewer, files download, voice and video
 // play here, a card's buttons press, my messages show who read them, reactions can be put on, an avatar opens the
 // person's card, a group's box can @ people, and what is typed stays as the chat's draft.
-import { ItemManager, ownerHeaders, useItemManager, withManager } from "../../lib/manager-choice";
+import { defaultManager, ItemManager, ownerHeaders, useItemManager, withManager } from "../../lib/manager-choice";
 import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, ApiError, enc, errorText, getToken } from "../../lib/api";
 import { startConversation } from "../../lib/assistant-start";
@@ -17,7 +17,7 @@ import { larkPath, olAccount } from "../../lib/lark-accounts";
 import { larkAccount } from "../../lib/lark-chats";
 import {
   cardButtons, chatImages, draftKey, isVoice, loadDraft, mergeAround, reactionsOf, readMark, ReadReceipts, readStates, react,
-  statusOf, toggledReactions, type ReadState,
+  statusOf, toggledReactions, type LarkProfileRef, type ReadState,
 } from "../../lib/lark-chat";
 import { quoteSummary, showsBody, showsHistory, useLarkDisplay, useLarkDisplayState, type LarkMessageDisplay } from "../../lib/lark-display";
 import { keepSameMessages, keepSameStates } from "../../lib/lark-reuse";
@@ -37,7 +37,7 @@ import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { ImageViewer } from "../chat/ImageViewer";
-import { MessageBar, Monogram, useFollowEnd } from "./InboxParts";
+import { MessageBar, LarkAvatar, useFollowEnd } from "./InboxParts";
 import { LarkEditHistoryDialog } from "./LarkEditHistory";
 import { LarkComposer, type LarkComposerHandle, type LarkReplyTarget } from "./LarkComposer";
 import { CardButtons, FilePart, ProfileDialog, ReactionPicker, Reactions, ReadMarkView, VideoPart, VoicePart } from "./LarkExtras";
@@ -114,7 +114,7 @@ interface ChatTools {
   feed: string;
   group: boolean;
   openImage: (src: string) => void;
-  openProfile: (who: { id: string; name: string; avatar?: string; bot?: boolean }) => void;
+  openProfile: (who: LarkProfileRef) => void;
   /** Reads the window around a message again (a card button was pressed on it). */
   refresh: (messageID: string) => Promise<void>;
 }
@@ -160,10 +160,13 @@ export function LarkThread(props: LarkThreadProps) {
   // whose Lark the chat is (an inbox item's manager; a chat opened from it is the same one's): every request below names it
   const outer = useItemManager();
   const manager = props.chat.manager ?? outer;
+  // A different manager or account can return the same feed and person IDs. Drop the old profile and member list
+  // before the new owner starts drawing images or fetching that person's details.
+  const owner = JSON.stringify([manager ?? defaultManager(), props.chat.account]);
   return (
     <ItemManager.Provider value={manager}>
       <ChatAccount.Provider value={props.chat.account}>
-        <ChatFeed.Provider value={props.chat.feed}><LarkThreadBody {...props} /></ChatFeed.Provider>
+        <ChatFeed.Provider value={props.chat.feed}><LarkThreadBody key={owner} {...props} /></ChatFeed.Provider>
       </ChatAccount.Provider>
     </ItemManager.Provider>
   );
@@ -194,7 +197,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   }
   const [viewing, setViewing] = useState<string | null>(null);
   const [reacting, setReacting] = useState<LarkMessage | null>(null);
-  const [person, setPerson] = useState<{ id: string; name: string; avatar?: string; bot?: boolean } | null>(null);
+  const [person, setPerson] = useState<LarkProfileRef | null>(null);
   const [direct, setDirect] = useState<{ feed: string; name: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<LarkComposerHandle>(null);
@@ -699,6 +702,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
               {topicGroup && !isSystem(m) ? (
                 <LarkTopicCard
                   topic={m}
+                  account={ol}
                   replies={topicReplies}
                   onOpen={setOpenTopic}
                   onReply={handleReply}
@@ -1273,14 +1277,14 @@ const Message = memo(function Message({
         {!compact && (tools && m.sender_id && !m.is_mine ? (
           <button
             type="button"
-            onClick={() => tools.openProfile({ id: m.sender_id!, name, avatar: m.sender_avatar, bot: m.sender_type === "bot" })}
+            onClick={() => tools.openProfile({ id: m.sender_id!, name, avatar: m.sender_avatar, avatar_url: m.sender_avatar_url, bot: m.sender_type === "bot" })}
             aria-label={t("inbox-larkthread.open_profile", { name })}
             title={t("inbox-larkthread.open_profile", { name })}
             className="block rounded-full transition-opacity hover:opacity-85"
           >
-            <Monogram name={name} size={nested ? 24 : 32} src={m.sender_avatar} />
+            <LarkAvatar name={name} size={nested ? 24 : 32} avatarURL={m.sender_avatar_url} avatar={m.sender_avatar} account={ol} />
           </button>
-        ) : <Monogram name={name} size={nested ? 24 : 32} src={m.sender_avatar} />)}
+        ) : <LarkAvatar name={name} size={nested ? 24 : 32} avatarURL={m.sender_avatar_url} avatar={m.sender_avatar} account={ol} />)}
       </span>
       <div className="min-w-0 flex-1">
         {!compact && (

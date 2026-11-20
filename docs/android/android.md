@@ -1505,6 +1505,25 @@ Requested 2026-11-02: "There is no setting at all for which device runs Persona'
 - **A new chat's first message** (#4339 C18, iOS `FirstMessagePending` and `FailedStart`): sent from New chat's page (or with a launcher picked for it), it leaves the composer for your bubble at the page's foot, with "Sending…" under it while the conversation starts; the conversation then shows it from the outbox with "Persona is getting ready…" (`gettingReady`, Persona's name) until its turn's work line comes, and its composer reads "Ask Persona…". A start that failed keeps the message as a failed bubble: "Not sent: <why>", **Resend** (the same conversation when it had started, with the same message id) and **Delete** (Undo puts it back). The page takes no other first message meanwhile, and the failure is kept on the device per assistant until it is sent or deleted (`FailedStarts`). The blank page with no main chat yet still sends to the main chat's queue as before. Tests `FirstMessageTest`, `NewConversationStartTest`; screenshots `AssistantDetailsShotsTest`.
 - Unit tests: `AssistantSettingsStateTest` (config read/write, machine-change warning and clearing main chat, notifying outbox before refresh after switching, missing launcher, phone-matched timezone, a picked zone kept on the hub and left alone by other devices, About me, memory read / edit / delete), `AssistantConfigTest` (`PUT` sends only changed fields, including empty About me and `timezone_picked`).
 
+### Saved prompts (#11667)
+
+**Settings › Assistant › In Chats › Saved Prompts** shows the current assistant's prompts in their hub order. Add a
+prompt, tap a row to edit it, or use its menu to move or delete it. Delete requires confirmation. A refused save keeps
+the editor open with its text, a refused reorder or delete restores the previous list, and a conflict rereads the hub.
+
+The Assistant and Agent composers show `/name` after built-in commands and before extension prompts. Choose a saved row
+to fill the draft and leave the caret at the end. A prompt with a built-in name has its own row. The composer treats
+the inserted draft as ordinary message text until the text is edited.
+
+Settings and chats share the list from `GET /api/v1/assistant/saved-prompts`. Android refreshes from the selected hub
+on connection and on `assistant_saved_prompts` for the shown assistant, and clears the list on an assistant or hub
+switch. A failed read keeps the last successful list for that assistant. A list-route 404 shows the update message in
+Settings and leaves saved rows out of the composer.
+
+Regression coverage is in `HttpSavedPromptsTest`, `SavedPromptsStoreTest`, `SavedPromptsPageTest`,
+`SavedPromptComposerTest` and `SavedPromptsHostTest`. For mock-hub checks use `MOCK_SAVED_PROMPTS=1` for sample
+prompts or `MOCK_SAVED_PROMPTS=old` for a 404, and `debug.assistantSettings prompts` to open the Settings page.
+
 ## Settings › Managers ([managers.md](../assistant/managers.md))
 
 - **Where**: Settings › Hub, after Hub version (hidden in demo mode); the roster the sidebar's switcher opens has **Manage assistants…** to it too. One row per manager: name and Default badge, status with its dot (online / offline · last synced … / installing · code expires in n minutes / code expired), and where it runs (host · OS · deployment, worded as on the web). A row opens the manager page (`ManagerRoute`, in the detail pane on wide screens): where it runs, version, connected since / last synced, Rename, Make default, Install elsewhere (New install code for a pending install, without the warning) and Delete (Cancel install while installing; the hub's own and the default manager can't be deleted, with the reason under the button). The hub's own manager's page also has **Show in the switcher** (#9055; `JSwitchRow`, on = not the roster's `hide`) in a group of its own after Notifications: off sends `PATCH /api/v1/managers/assistant {"hide": true}`, on `{"hide": false}` (`HubManagers.setHide`, `ManagersModel.showInSwitcher`); the switch moves at once, then the list is read again for what is in effect (`hidden`). As on the web: the note under it says the switcher leaves it out while it isn't the default and has no computer; while it is in use (the default, or a computer of this hub's is its: `Machine.manager`, another group's not counted) turning it off is disabled and the note says "It's the default or has a computer, so the switcher shows it" (turning it on again always goes). The hub's `409 builtin_in_use` all the same puts the switch back and says that under the actions, as every change's refusal is; a hub from before the choice (it takes `hide` and keeps none) puts it back with "This hub's version can't keep it out of the switcher yet". New manager and Install elsewhere open the install code sheet: the code and its countdown, New install code once it expires, and when the hub sends `commands`, Install as a service and Use Docker, each with Copy. An old hub without `/api/v1/managers` (404) gets a page saying to upgrade the hub.

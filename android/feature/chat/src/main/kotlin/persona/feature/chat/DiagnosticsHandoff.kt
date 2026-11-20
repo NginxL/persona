@@ -39,5 +39,6 @@ suspend fun prepareDiagnosticsDraft(
         id = attachmentId, type = DraftAttachmentType.File, uri = "", name = file.name,
         size = file.length(), uploadState = DraftUploadState.Uploaded, uploadedPath = path,
     )
-    return drafts.save(key, text, previous.version, previous.attachments + attachment, previous.sessionVersion)
+    return drafts.save(key, text, previous.version, previous.attachments + attachment, previous.sessionVersion,
+        hasPickedSavedPrompt = previous.hasPickedSavedPrompt && text == previous.text)
 }

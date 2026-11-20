@@ -31,11 +31,14 @@ func serveAPIExtensionForTest() {
 	if err != nil {
 		os.Exit(1)
 	}
-	var sends atomic.Int32
+	var sends, avatarReads atomic.Int32
 	var role, caps atomic.Value
 	role.Store("")
 	caps.Store([]string(nil))
 	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestLarkAvatars(w, r, &avatarReads) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/role") {
 			_ = json.NewEncoder(w).Encode(map[string]any{"role": role.Load(), "capabilities": caps.Load()})
 			return

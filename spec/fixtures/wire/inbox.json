@@ -154,5 +154,338 @@
         "/items/1/source": "mail"
       }
     }
+  },
+  {
+    "name": "inbox_every_block",
+    "description": "Every block an Inbox item can carry, on one made-up item, as the list shows it: the item's bookkeeping and each block's internal fields are left out.",
+    "source": [
+      "server/internal/assistant/inbox.go: InboxItem.listed",
+      "server/internal/assistant/inbox_listed_keys_test.go: TestListedKeys",
+      "apple/Shared/InboxModels.swift: InboxItem"
+    ],
+    "derived": true,
+    "decoder": "inbox",
+    "input": {
+      "items": [
+        {
+          "id": "lark:feed_blocks:20",
+          "source": "lark",
+          "kind": "mention",
+          "account": "feishu",
+          "account_name": "Lark",
+          "title": "Example discussion",
+          "sender": "Example sender",
+          "avatar": "https://example.com/avatar.png",
+          "preview": "Please confirm the example.",
+          "count": 2,
+          "started_at": "2026-01-02T02:04:05Z",
+          "updated_at": "2026-01-02T03:04:05Z",
+          "tier": "action",
+          "summary": "An example asks for a confirmation.",
+          "body": "**Example** body",
+          "reason": "Someone asks you directly.",
+          "lark": {
+            "account_id": 2,
+            "ol_account": 2,
+            "feed_id": "feed_blocks",
+            "is_group": true,
+            "is_topic": true,
+            "start_position": "19",
+            "read_position": "18",
+            "mention_position": "20",
+            "at_all": true,
+            "at_me": true,
+            "reply_to": "message_example",
+            "thread_kind": "topic",
+            "sender_id": "sender_example"
+          },
+          "conversation": {
+            "source": "lark",
+            "id": "feed_blocks",
+            "account": "2",
+            "start_position": "19",
+            "read_position": "18",
+            "mention_position": "20"
+          },
+          "mail": {
+            "account_id": "account_example",
+            "mailbox": "INBOX",
+            "generation": 3,
+            "uids": [
+              21,
+              22
+            ],
+            "message_id": "message_example",
+            "from": {
+              "name": "Example sender",
+              "email": "sender@example.com"
+            },
+            "direct": true,
+            "thread": "thread_example"
+          },
+          "doc": {
+            "url": "https://example.com/docx/doc_example",
+            "link": "https://example.com/docx/doc_example",
+            "type": "docx",
+            "notice": "comment",
+            "notice_id": "notice_example",
+            "quote": "An example passage",
+            "rows": [
+              {
+                "ref": "tbl_example/rec_example",
+                "table": "tbl_example",
+                "title": "Example row",
+                "fields": [
+                  {
+                    "name": "Owner",
+                    "value": "Example owner"
+                  }
+                ],
+                "status": [
+                  {
+                    "field": "fld_example",
+                    "name": "Status",
+                    "value": "Open",
+                    "options": [
+                      {
+                        "name": "Open",
+                        "color": "#336699"
+                      },
+                      {
+                        "name": "Done"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "reply": {
+              "kind": "thread",
+              "label": "Reply in the comment",
+              "thread": "comment_example"
+            },
+            "read_at": "2026-01-02T02:04:05Z"
+          },
+          "translations": {
+            "en": {
+              "subject": "Example subject",
+              "preview": "Example preview",
+              "clipped": true
+            }
+          },
+          "moment": {
+            "post_id": "post_example",
+            "notice": "comment",
+            "notices": [
+              "notice_a",
+              "notice_b"
+            ],
+            "reply_to": "comment_example",
+            "my_post": true,
+            "post_text": "An example post",
+            "anonymous": true,
+            "read_at": "2026-01-02T02:04:05Z"
+          },
+          "connector": {
+            "thread": "thread_example",
+            "label": "Review requested",
+            "url": "https://example.com/pull/1",
+            "open_url": "sms:example",
+            "reply_to": "Example repository",
+            "can_reply": true,
+            "avatar_url": "/api/v1/avatars/lark/bWVkaWFfZXhhbXBsZQ",
+            "rule_tier": "fyi",
+            "tags": [
+              {
+                "key": "repo",
+                "value": "example/repo",
+                "name": "example/repo"
+              }
+            ]
+          },
+          "agent": {
+            "state": "drafted",
+            "task": "Draft a short confirmation.",
+            "reason": "A direct question.",
+            "machine_id": "m1",
+            "session_id": "s1",
+            "draft": "Confirmed.",
+            "note": "The example says so.",
+            "changes": [
+              {
+                "ref": "tbl_example/rec_example",
+                "field": "fld_example",
+                "value": "Done"
+              }
+            ],
+            "of": "20",
+            "todo_id": "todo_example",
+            "started_at": "2026-01-02T02:04:05Z",
+            "drafted_at": "2026-01-02T03:04:05Z",
+            "attempts": 1,
+            "retry_after": "2026-01-02T04:04:05Z"
+          },
+          "mutes": [
+            {
+              "tag": "repo",
+              "value": "example/repo",
+              "name": "example/repo"
+            }
+          ],
+          "version": "28cd1cc52e74a603",
+          "where": "Example group",
+          "follow": {
+            "who": "Example sender",
+            "next": "Check the answer.",
+            "check_at": "2026-01-02T04:04:05Z",
+            "checks": 1,
+            "due": true
+          },
+          "now": "decide",
+          "merged_from": [
+            {
+              "id": "lark:feed_other:5",
+              "source": "lark",
+              "account_name": "Lark",
+              "title": "Another example"
+            }
+          ],
+          "pre_merge_tier": "fyi",
+          "parent": {
+            "kind": "todo",
+            "id": "todo_example",
+            "by": "user"
+          },
+          "folder": "work/examples",
+          "folder_by": "user",
+          "status": "action",
+          "urgent": true,
+          "recap": "The example waits for a confirmation.",
+          "handling": {
+            "owner": "manager",
+            "state": "done",
+            "machine_id": "m1",
+            "session_id": "s1",
+            "since": "2026-01-02T02:04:05Z"
+          },
+          "suggestion": {
+            "version": 2,
+            "kind": "reply",
+            "text": "Confirmed.",
+            "note": "The example says so.",
+            "handback": true,
+            "due": "2026-01-03",
+            "machine_id": "m1",
+            "changes": [
+              {
+                "ref": "tbl_example/rec_example",
+                "field": "fld_example",
+                "value": "Done"
+              }
+            ],
+            "at": "2026-01-02T03:04:05Z",
+            "conversation": {
+              "machine_id": "m1",
+              "session_id": "s2"
+            }
+          },
+          "suggestion_attempts": [
+            {
+              "version": 1,
+              "status": "failed",
+              "retryable": true,
+              "code": "send_failed",
+              "text": "Confirmed?",
+              "at": "2026-01-02T02:04:05Z",
+              "conversation": {
+                "machine_id": "m1",
+                "session_id": "s1"
+              },
+              "retry_after": 30
+            }
+          ],
+          "chain": [
+            {
+              "id": "c1",
+              "at": "2026-01-02T02:04:05Z",
+              "kind": "received",
+              "text": "2 new messages",
+              "count": 2,
+              "sender": "Example sender",
+              "messages": [
+                {
+                  "sender": "Example sender",
+                  "text": "Please confirm the example.",
+                  "at": "2026-01-02T02:04:05Z"
+                }
+              ],
+              "link": {
+                "type": "lark",
+                "position": "19"
+              },
+              "via": "lark"
+            },
+            {
+              "id": "c2",
+              "at": "2026-01-02T03:04:05Z",
+              "kind": "handling",
+              "text": "Looking into it",
+              "edited": true,
+              "detail": "A detail",
+              "link": {
+                "type": "session",
+                "uid": 21,
+                "url": "https://example.com/item",
+                "machine_id": "m1",
+                "session_id": "s1",
+                "id": "item_example"
+              },
+              "via": "assistant"
+            },
+            {
+              "id": "c3",
+              "at": "2026-01-02T03:04:05Z",
+              "kind": "done",
+              "text": "Marked as done",
+              "via": "user",
+              "by": "user"
+            }
+          ],
+          "chain_count": 3,
+          "related": [
+            {
+              "id": "mail:account_example:thread_other:9",
+              "title": "A related mail",
+              "source": "mail"
+            }
+          ],
+          "handoffs": [
+            {
+              "machine_id": "m1",
+              "session_id": "s2",
+              "at": "2026-01-02T03:04:05Z"
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/items/0/agent/state": "drafted",
+        "/items/0/chain/0/kind": "received",
+        "/items/0/context": null,
+        "/items/0/follow/who": "Example sender",
+        "/items/0/handling/state": "done",
+        "/items/0/id": "lark:feed_blocks:20",
+        "/items/0/lark/feed_id": "feed_blocks",
+        "/items/0/mail/thread": "thread_example",
+        "/items/0/moment/post_id": "post_example",
+        "/items/0/related/0/id": "mail:account_example:thread_other:9",
+        "/items/0/source": "lark",
+        "/items/0/status": "action",
+        "/items/0/suggestion/kind": "reply"
+      }
+    }
   }
 ]

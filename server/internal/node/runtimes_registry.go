@@ -212,6 +212,7 @@ func (b *runtimeRegistry) hello(h *runtimeConn, hello runtimeHello, reserved fun
 	}
 	h.mu.Lock()
 	h.hello, h.ready = hello, true
+	h.assistantPIDs = nil
 	h.mu.Unlock()
 	return stale, nil
 }
@@ -404,6 +405,80 @@ func (b *runtimeRegistry) assistantIn(pids []int) *runtimeConn {
 	return nil
 }
 
+func (b *runtimeRegistry) clearAssistantPIDs() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, h := range b.conns {
+		h.mu.Lock()
+		h.assistantPIDs = nil
+		h.mu.Unlock()
+	}
+}
+
+func (b *runtimeRegistry) setAssistantPIDs(h *runtimeConn, reports map[string]int, isAssistant func(string) bool) {
+	h.mu.Lock()
+	pid := h.pid
+	ready := h.ready && h.hello.Caps.Assistant
+	h.mu.Unlock()
+	if !ready || pid <= 0 {
+		return
+	}
+	verified := make(map[string]int)
+	seen := make(map[int]string)
+	for id, worker := range reports {
+		if runtimeSessionID(id) && strictDescendant(worker, pid, parentPID) && isAssistant(id) {
+			if previous, duplicate := seen[worker]; duplicate {
+				delete(verified, previous)
+			} else {
+				seen[worker] = id
+				verified[id] = worker
+			}
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conns[h.serial] != h {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ready && h.hello.Caps.Assistant && h.pid == pid {
+		h.assistantPIDs = verified
+	}
+}
+
+type runtimeAssistantWorker struct {
+	host            *runtimeConn
+	runtimePID, pid int
+	session         string
+}
+
+func (b *runtimeRegistry) assistantWorkers() []runtimeAssistantWorker {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var workers []runtimeAssistantWorker
+	for _, h := range b.conns {
+		if h.peer != nil {
+			select {
+			case <-h.peer.Done():
+				continue
+			default:
+			}
+		}
+		h.mu.Lock()
+		if h.ready && h.hello.Caps.Assistant && h.pid > 0 {
+			for id, worker := range h.assistantPIDs {
+				workers = append(workers, runtimeAssistantWorker{host: h, runtimePID: h.pid, pid: worker, session: id})
+			}
+		}
+		h.mu.Unlock()
+	}
+	return workers
+}
+
 func (b *runtimeRegistry) add(peer *rpc.Peer) *runtimeConn {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -418,6 +493,9 @@ func (b *runtimeRegistry) remove(h *runtimeConn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, h.serial)
+	h.mu.Lock()
+	h.assistantPIDs = nil
+	h.mu.Unlock()
 	b.leftUnlisted(id)
 	b.leftRows(h, id)
 	b.recomputeOwners()

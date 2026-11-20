@@ -490,4 +490,5 @@
     <string name="chat_turn_fix_model_route_launcher">模型没接好：%1$s 用不了这个模型</string>
     <string name="chat_turn_fix_model_route_detail">模型名不对，或者这个模型现在用不了，换一个试试。</string>
     <string name="chat_turn_fix_action">去修</string>
+    <string name="chat_slash_saved_prompts">已保存的提示词</string>
 </resources>

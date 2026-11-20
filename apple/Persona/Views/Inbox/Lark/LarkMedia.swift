@@ -264,54 +264,81 @@ nonisolated func larkThumbEdge(points: CGFloat) -> Int? {
     return edge > 0 && edge <= 624 ? edge : nil
 }
 
-/// Person or chat avatar: the real picture when there is one, otherwise (none, or it failed to load) the initial.
-/// `size` is at the default text size; the avatar grows with the text like the rest of the design system's sizes.
+/// A Feishu row owns the account, hub and manager used to resolve its picture. ChatAvatar draws and caches it.
 struct LarkAvatarImage: View {
     var name: String
     var url: String?
-    var isGroup = false
+    var account: Int?
     var size: CGFloat = Theme.Size.wellL
+    var origin: APIClient?
     @Environment(\.dynamicTypeSize) private var typeSize
-    /// The URL that failed to load: the initial instead of a broken picture.
-    @State private var failedURL: String?
+    @Environment(\.larkAccount) private var chatAccount
     @Environment(\.larkManager) private var manager
     @Environment(\.larkGroup) private var group
 
-    // A previously cached messaging row may still contain the old HTTPS value.
-    // Resolve it using the row's hub and manager before any image loader sees it.
-    private var picture: String? {
-        guard let url else { return nil }
-        if url.hasPrefix("/") { return url }
-        if let scheme = URLComponents(string: url)?.scheme?.lowercased(), ["http", "https"].contains(scheme) {
-            guard let api = AppModel.shared.larkAPI(group: group, manager: manager) else { return nil }
-            return Self.cachedPicture(url, using: api)
-        }
-        return url
-    }
-
-    static func cachedPicture(_ url: String, using api: APIClient) -> String? {
-        if let source = api.messagingSource { return MessagingShape.avatar(["avatar": url], source: source, account: nil) }
-        if let manager = api.managerID, !MessagingSources.hasRead(api.config.url, manager: manager) { return nil }
-        return url
-    }
-
     var body: some View {
-        let path = picture
-        if let url = path, url.hasPrefix("/api/v1/avatars/") || url.hasPrefix("/api/v1/messaging/") {
-            let origin = AppModel.shared.larkAPI(group: group, manager: manager)
-            ChatAvatar(url: origin.map { _ in LarkMedia.url(url, manager: manager) }, name: name,
-                       size: size * Theme.sizeScale(typeSize), origin: origin)
-        } else if let url = path, !url.isEmpty, failedURL != url {
-            let points = size * Theme.sizeScale(typeSize)
-            LarkRemoteImage(url: url, size: url.hasPrefix("/") ? larkThumbEdge(points: points) : nil, maxPixel: points * 3) {
-                failedURL = url
+        let slot = Self.slot(account) ?? Self.slot(chatAccount)
+        let api = origin ?? AppModel.shared.larkAPI(group: group, manager: manager, account: slot)
+        let picture = api.flatMap { api in url.flatMap { Self.cachedPicture($0, using: api, account: slot) } }
+        ChatAvatar(url: picture, name: name, size: size * Theme.sizeScale(typeSize), origin: api)
+    }
+
+    /// Cached rows from older hubs can contain a gateway path or a signed Feishu CDN link. Resolve the key through
+    /// this row's hub. Registered messaging sources retain their own media and account namespaces.
+    static func cachedPicture(_ raw: String, using api: APIClient, account: Int? = nil) -> String? {
+        guard !raw.isEmpty, let url = URLComponents(string: raw), url.fragment == nil else { return nil }
+        let path: String?
+        if raw.hasPrefix("/api/v1/avatars/lark/"), let slot = url.queryItems?.first(where: { $0.name == "lark_account" }) {
+            let key = url.percentEncodedPath.dropFirst("/api/v1/avatars/lark/".count)
+            guard let number = Self.slot(slot.value.flatMap(Int.init)), !key.isEmpty, key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else { return nil }
+            path = url.percentEncodedPath + "?lark_account=" + String(number)
+        } else if !(raw.hasPrefix("media/") && api.messagingSource != nil),
+                  let legacy = legacyPath(raw, url: url, account: account ?? api.larkAccount) {
+            // Native keys and known Feishu CDN references can share a manager with a messaging source.
+            path = legacy
+        } else if let source = api.messagingSource {
+            if raw.hasPrefix("/api/v1/messaging/" + source + "/media/") || raw.hasPrefix("/api/v1/avatars/" + source + "/") {
+                // A stored row's manager is supplied by the owning API client on every request.
+                var named = url
+                named.queryItems = url.queryItems?.filter { $0.name != "manager" && $0.name != "size" }
+                if named.queryItems?.isEmpty == true { named.queryItems = nil }
+                path = named.string
+            } else {
+                path = MessagingShape.avatar(["avatar": raw], source: source, account: account.map(String.init))
             }
-            .scaledFrame(width: size, height: size)
-            .clipShape(.circle)
-            .overlay(Circle().strokeBorder(Color.primary.opacity(0.06)))
         } else {
-            LarkAvatar(name: name, isGroup: isGroup, size: size)
+            return nil
         }
+        return path.map { LarkMedia.url($0, manager: api.managerID) }
+    }
+
+    private static func slot(_ number: Int?) -> Int? {
+        guard let number, (1...999_999_999).contains(number) else { return nil }
+        return number
+    }
+
+    private static let legacyMediaPrefixes = ["/api/v1/lark/media/", "/agent/v1/media/", "/api/media/"]
+
+    private static func legacyPath(_ raw: String, url: URLComponents, account: Int?) -> String? {
+        let key: String
+        var slot = Self.slot(account)
+        if let prefix = legacyMediaPrefixes.first(where: raw.hasPrefix) {
+            guard let value = String(url.percentEncodedPath.dropFirst(prefix.count)).removingPercentEncoding else { return nil }
+            key = value
+            if slot == nil, let value = url.queryItems?.first(where: { $0.name == "ol_account" })?.value { slot = Self.slot(Int(value)) }
+        } else if url.scheme?.lowercased() == "https", url.user == nil, url.password == nil, let host = url.host?.lowercased(),
+                  ["feishucdn.com", "larksuitecdn.com", "feishu.cn", "larksuite.com", "larkoffice.com"].contains(where: { host == $0 || host.hasSuffix("." + $0) }),
+                  let range = url.percentEncodedPath.range(of: "/static-resource/v1/"),
+                  let value = url.percentEncodedPath[range.upperBound...].prefix(while: { $0 != "/" && $0 != "~" }).removingPercentEncoding {
+            key = value
+        } else {
+            key = raw
+        }
+        let parts = key.split(separator: "/", omittingEmptySubsequences: false)
+        guard !key.isEmpty, key.utf8.count <= 500, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+              key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "_./:+-".contains($0)) }),
+              let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) else { return nil }
+        return "/api/v1/lark/media/" + encoded + (slot.map { "?ol_account=\($0)" } ?? "")
     }
 }
 
@@ -382,29 +409,5 @@ struct LarkFileOpener: ViewModifier {
                     do { local = try await LarkMedia.shared.file(url, name: r.name) } catch { AppModel.shared.show(error) }
                 }
             }
-    }
-}
-
-/// A chat or person without a picture: the design system's `Monogram` (the name's first letter on the neutral disc),
-/// sized like `LarkAvatarImage`.
-struct LarkAvatar: View {
-    var name: String
-    var isGroup: Bool
-    var size: CGFloat = Theme.Size.tapTarget
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        let disc = Theme.monogram(name)
-        Monogram(name: name, size: size * Theme.sizeScale(typeSize), fill: disc.fill, ink: disc.ink, font: Self.font(size))
-    }
-
-    /// The letter's text level for an avatar `size` points across at the default text size: about 0.4 of it, as before.
-    static func font(_ size: CGFloat) -> Font {
-        switch size {
-        case Theme.Size.avatar...: Theme.Font.heading
-        case Theme.Size.wellS...: Theme.Font.secondaryStrong
-        case Theme.Size.icon...: Theme.Font.captionStrong
-        default: Theme.Font.labelStrong
-        }
     }
 }

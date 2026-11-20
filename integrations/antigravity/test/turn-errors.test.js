@@ -174,6 +174,12 @@ for (const assistant of [false, true]) {
     await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.', assistant: true })
     await modes()
     assert.deepEqual(resumes().map(assistantMcp), assistant ? [true] : [false, true])
+    const loads = calls().filter((call) => call.method === 'session/resume')
+    if (!assistant) {
+      assert.notEqual(loads[0].worker, loads[1].worker)
+      const closed = calls().find((call) => call.method === 'session/close')
+      assert.equal(closed?.worker, loads[0].worker)
+    }
     assert.match(resumes().at(-1).args[0], /mcp-proxy\.mjs$/)
   })
 }

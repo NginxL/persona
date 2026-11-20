@@ -317,6 +317,7 @@ FILTERS = {
     # loads every module of mock_domains.DOMAINS as it starts.
     "desktop": ["desktop/**", "web/**", "scripts/mock/mock_hub.py", "scripts/mock/mock_domains.py", "scripts/mock/desktops_mock.py",
                   "scripts/mock/github_mock.py", "scripts/mock/kb_selection_mock.py", "scripts/mock/mail_mock.py",
+                  "scripts/mock/hub_update_mock.py", "scripts/mock/imessage_mock.py", "scripts/mock/saved_prompts_mock.py",
                   "scripts/mock/stream_trace.py", "scripts/mock/test_desktops_mock.py", "spec/desktop-bridge.d.ts",
                   # web/scripts/build-pake.mjs compiles these Go sources into the sign-in WebAssembly.
                   "server/cmd/password-wasm/**", "server/internal/passwordpake/**", "server/go.mod", "server/go.sum", "scripts/ci/desktop*.sh", ".github/workflows/desktop-test.yml"],

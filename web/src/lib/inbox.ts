@@ -101,6 +101,7 @@ export interface InboxItem {
   where?: string;
   sender?: string;
   avatar?: string;
+  avatar_url?: string;
   preview: string;
   count: number;
   started_at?: string;

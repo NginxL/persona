@@ -64,8 +64,15 @@ func (h *Manager) getAvatar(w http.ResponseWriter, r *http.Request) {
 		writeErrCode(w, http.StatusNotFound, remoteimage.CodeBadURL, errors.New("not an avatar"))
 		return
 	}
-	c := h.connectors.Get(source)
 	q := r.URL.Query()
+	size, _ := strconv.Atoi(q.Get("size"))
+	caller := cmp.Or(p.ID, p.Name, "hub")
+	if source == "lark" && q.Has("lark_account") {
+		img, err := h.larkAvatar(r.Context(), caller, value, q.Get("lark_account"), size)
+		h.answerAvatar(w, source, img, err)
+		return
+	}
+	c := h.connectors.Get(source)
 	var messaging *hubExtension
 	var item wire.MessagingItem
 	fromMessaging := q.Get("messaging") == "1"
@@ -76,8 +83,6 @@ func (h *Manager) getAvatar(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("no source %q", source))
 		return
 	}
-	size, _ := strconv.Atoi(q.Get("size"))
-	caller := cmp.Or(p.ID, p.Name, "hub")
 	var img *remoteimage.Image
 	var err error
 	cache := source
@@ -115,6 +120,10 @@ func (h *Manager) getAvatar(w http.ResponseWriter, r *http.Request) {
 			return h.connectorAvatar(ctx, c, th, value)
 		})
 	}
+	h.answerAvatar(w, source, img, err)
+}
+
+func (h *Manager) answerAvatar(w http.ResponseWriter, source string, img *remoteimage.Image, err error) {
 	if err != nil {
 		var e *remoteimage.Error
 		if !errors.As(err, &e) {

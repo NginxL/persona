@@ -73,6 +73,7 @@ class SlashCommandsTest {
 
     @Test fun aWordThatIsAlreadyThereHidesTheListButClearStays() {
         assertEquals(emptyList<SlashCommand>(), SlashCommand.suggestions("/compact", clear = true, res))
+        assertEquals(listOf("/compact"), SlashCommand.suggestions("/compact", clear = true, res, keepExact = true).map { it.word })
         assertEquals(emptyList<SlashCommand>(), SlashCommand.suggestions("/Context", clear = true, res))
         assertEquals(listOf("/clear"), SlashCommand.suggestions("/clear", clear = true, res).map { it.word })
         assertEquals(listOf("/compact", "/context"), SlashCommand.suggestions("/co", clear = true, res).map { it.word })

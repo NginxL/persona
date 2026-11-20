@@ -17,6 +17,7 @@ export interface LarkMessage {
   sender_id?: string;
   sender_name?: string;
   sender_avatar?: string;
+  sender_avatar_url?: string;
   sender_type?: string;
   is_mine?: boolean;
   type?: string;

@@ -19,12 +19,11 @@ export class AgyAcpClient extends EventEmitter {
     this.readyPromise = null
     this.nextId = 1
     this.pending = new Map()
+    this.permissionRequests = 0
     this.loadedSessions = new Map() // sessionId -> { mcpKey, extraDirsKey }
     this.availableModels = null
     this.agentVersion = ''
     this.supportsAdditionalDirectories = false
-    // Counts the agy processes started: a model list read from one carries its generation (#10368).
-    this.generation = 0
     this.closed = false
     this.initTimeoutMs = options.initTimeoutMs ?? 60_000
     this.promptInactivityMs = options.promptInactivityMs ?? 15 * 60_000
@@ -49,7 +48,6 @@ export class AgyAcpClient extends EventEmitter {
     const directory = mkdtempSync(join(tmpdir(), 'persona-agy-'))
     const nativeLog = join(directory, 'native.log')
     writeFileSync(nativeLog, '', { mode: 0o600 })
-    this.generation += 1
     const child = spawn(this.bin, [...this.args, '--log-file', nativeLog], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PATH: `${extraPath}:${process.env.PATH || ''}` },
@@ -92,6 +90,7 @@ export class AgyAcpClient extends EventEmitter {
       this._forget(child, new Error(`agy acp exited (${code ?? sig})`))
       this._removeNativeLog(child)
     })
+    if (child.pid) this.emit('process', child.pid)
 
     let init
     try {
@@ -129,6 +128,7 @@ export class AgyAcpClient extends EventEmitter {
     const pending = [...this.pending.values()]
     this.pending.clear()
     for (const p of pending) p.reject(err)
+    this.emit('process', 0)
     return true
   }
 
@@ -288,8 +288,13 @@ export class AgyAcpClient extends EventEmitter {
     for (const prompt of prompts) prompt.activity(1)
     try {
       if (method === 'session/request_permission' && this.onPermissionRequest) {
-        const result = await this.onPermissionRequest(params)
-        this._reply(child, { jsonrpc: '2.0', id, result })
+        this.permissionRequests++
+        try {
+          const result = await this.onPermissionRequest(params)
+          this._reply(child, { jsonrpc: '2.0', id, result })
+        } finally {
+          this.permissionRequests--
+        }
         return
       }
       // Default fallback for unhandled permission requests: select allow_once if available

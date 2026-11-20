@@ -30,6 +30,14 @@ struct TodoLineTextTests {
                 "by": "auto"]
     }
 
+    @Test func unknownLineAndArgumentsSurviveAnOlderReader() throws {
+        let bytes = Data(#"{"key":"future_line","args":{"future_time":"one day"}}"#.utf8)
+        let line = try JSONDecoder().decode(TodoLine.self, from: bytes)
+        #expect(line.args?["future_time"] == "one day")
+        #expect(TodoLineText.said(line, now: now) == nil)
+        #expect(try JSONDecoder().decode(TodoLine.self, from: JSONEncoder().encode(line)) == line)
+    }
+
     @Test func everyReadmeKeyIsSaid() throws {
         let keys = try Self.readmeKeys()
         #expect(keys.count > 20, "read the README's table")

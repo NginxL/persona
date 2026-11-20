@@ -76,11 +76,14 @@ internal data class SlashCommand(val title: String, val word: String, val detail
         /**
          * The list the composer shows: [matching], except once the draft is exactly the one quick message it matches
          * (picked, or typed out): there is nothing left to choose. /clear stays, so picking it can still ask first.
+         * [keepExact] keeps the built-in row when a saved prompt also matches the draft.
          */
         fun suggestions(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false,
-                        permissions: Boolean = false): List<SlashCommand> =
+                        permissions: Boolean = false, keepExact: Boolean = false): List<SlashCommand> =
             matching(draft, clear, resources, model, loop, permissions).takeUnless {
-                it.singleOrNull()?.let { only -> !only.clear && !only.model && !only.permissions && only.word.equals(draft, ignoreCase = true) } == true
+                !keepExact && it.singleOrNull()?.let { only ->
+                    !only.clear && !only.model && !only.permissions && only.word.equals(draft, ignoreCase = true)
+                } == true
             }.orEmpty()
 
         /** The main conversation has its own list (web mainCommands), never the Agent quick messages or terminal commands. */

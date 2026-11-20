@@ -148,7 +148,7 @@ var modelPurposes = []ModelPurpose{
 	{ID: "kb.moments", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.topics", Group: "group_processing", Kind: "api", Parent: "kb"}, // knowledge points by topic (kb/topics.go)
 	{ID: "assistant.title", Group: "group_processing", Kind: "api", Parent: "kb"},
-	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // New chat: a direction or a quick chat (route.go)
+	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // Suggest a supervisor for a new agent (agent_route.go).
 	{ID: "agent.title", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "todo.title", Group: "group_processing", Kind: "api", Parent: "kb"}, // a task's todo (assistant/todo_titles.go)
 	// A meeting or note named while it records (kb/recording_title.go, #8873): a few short calls a recording.

@@ -14,6 +14,7 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     var `where`: String? = nil
     var sender: String?
     var avatar: String?
+    var avatarURL: String?
     var preview: String
     var count: Int
     var startedAt: Date?
@@ -335,6 +336,7 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case avatarURL = "avatar_url"
         case id, source, kind, account, title, `where`, sender, avatar, preview, count, tier, summary, body, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
         case status, urgent, recap, handling, suggestion, follow, now, chain, related, manager, handoffs
         case mergedFrom = "merged_from"

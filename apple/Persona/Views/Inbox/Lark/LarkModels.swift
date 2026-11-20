@@ -7,6 +7,8 @@ nonisolated struct LarkConversation: Codable, Identifiable, Hashable, Sendable {
     var id: String
     var name: String
     var avatar: String?
+    var avatarURL: String?
+    var picture: String? { avatarURL ?? avatar }
     var isGroup: Bool
     var isTopic: Bool?
     var unread: Int
@@ -33,6 +35,7 @@ nonisolated struct LarkConversation: Codable, Identifiable, Hashable, Sendable {
     var accountName: String?
 
     enum CodingKeys: String, CodingKey {
+        case avatarURL = "avatar_url"
         case id, name, avatar, unread, muted, pinned, flagged, done, tags, preview
         case account = "ol_account", accountName = "account_name"
         case isGroup = "is_group", isTopic = "is_topic", markedUnread = "marked_unread", atMe = "at_me", atAll = "at_all"
@@ -79,6 +82,8 @@ nonisolated struct LarkAccount: Codable, Identifiable, Hashable, Sendable {
     var id: Int
     var name: String?
     var avatar: String?
+    var avatarURL: String?
+    var picture: String? { avatarURL ?? avatar }
     var tenant: String?
     var signedIn: Bool
     var primary: Bool?
@@ -86,6 +91,7 @@ nonisolated struct LarkAccount: Codable, Identifiable, Hashable, Sendable {
     var quarantined: Bool?
 
     enum CodingKeys: String, CodingKey {
+        case avatarURL = "avatar_url"
         case id, name, avatar, tenant, primary, unread, quarantined
         case signedIn = "signed_in"
     }
@@ -98,12 +104,13 @@ nonisolated struct LarkFlaggedMessage: Codable, Identifiable, Hashable, Sendable
     var feedID: String
     var chatName: String
     var chatAvatar: String?
+    var chatAvatarURL: String?
     var flaggedAt: Date?
     var message: LarkMessage
     var id: String { message.id }
 
     enum CodingKeys: String, CodingKey {
-        case message
+        case message, chatAvatarURL = "chat_avatar_url"
         case feedID = "feed_id", chatName = "chat_name", chatAvatar = "chat_avatar", flaggedAt = "flagged_at"
     }
 }
@@ -182,6 +189,8 @@ nonisolated struct LarkMessage: Codable, Identifiable, Hashable, Sendable {
     var senderID: String?
     var senderName: String
     var senderAvatar: String?
+    var senderAvatarURL: String?
+    var senderPicture: String? { senderAvatarURL ?? senderAvatar }
     var senderType: String?
     var isMine: Bool
     var type: String
@@ -207,6 +216,7 @@ nonisolated struct LarkMessage: Codable, Identifiable, Hashable, Sendable {
         case id, position, type, text, recalled, retained, edited, parts, reactions, olk, deleted, decorations
         case canPin = "can_pin", canUnpin = "can_unpin", threadID = "thread_id", threadKind = "thread_kind"
         case editHistory = "edit_history"
+        case senderAvatarURL = "sender_avatar_url"
         case senderID = "sender_id", senderName = "sender_name", senderAvatar = "sender_avatar", senderType = "sender_type"
         case isMine = "is_mine", createdAt = "created_at", replyCount = "reply_count"
         case threadReplyCount = "thread_reply_count", replyTo = "reply_to"
@@ -557,6 +567,14 @@ nonisolated struct LarkProfile: Decodable, Sendable {
     var anotherName: String?
     var groupNickname: String?
     var avatarUrl: String?
+    var avatar: String?
+    var avatarURL: String?
+    var picture: String? { avatarURL ?? avatarUrl ?? avatar }
+    enum CodingKeys: String, CodingKey {
+        case displayName, enName, alias, anotherName, groupNickname, avatarUrl, avatar, coverUrl, description, medalName
+        case timezone, userType, customStatus, workStatus, relation, fields, actions
+        case avatarURL = "avatar_url"
+    }
     var coverUrl: String?
     var description: String?
     var medalName: String?

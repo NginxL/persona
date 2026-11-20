@@ -201,7 +201,9 @@ private fun PersonaRootContent(
                             // A reply's ```persona-view / ```persona-card drawn with the extensions' components (#1851).
                             persona.core.designsystem.LocalViewBlocks provides persona.feature.settings.PersonaViewBlocks.blocks,
                         ) {
-                            PersonaShell(displayed, openNavigation, services.copy(connection = displayed.connection, sessions = displayed.sessions, demo = displayed.demo != null), remember(shell) { AppShellHost(shell) })
+                            SavedPromptsHost(displayed.savedPromptsConnection) {
+                                PersonaShell(displayed, openNavigation, services.copy(connection = displayed.connection, sessions = displayed.sessions, demo = displayed.demo != null), remember(shell) { AppShellHost(shell) })
+                            }
                         }
                     }
                     active.phone?.let { PhoneConfirmationHost(it.confirmations) }

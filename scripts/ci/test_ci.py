@@ -69,7 +69,9 @@ class PathTests(unittest.TestCase):
     def test_desktop_inputs_select_the_desktop_lane(self):
         for filename in ["desktop/src/main.ts", "web/src/main.tsx", "scripts/mock/mock_hub.py", "scripts/mock/mock_domains.py",
                          "scripts/mock/desktops_mock.py", "scripts/mock/github_mock.py", "scripts/mock/kb_selection_mock.py",
-                         "scripts/mock/mail_mock.py", "scripts/mock/test_desktops_mock.py", "scripts/mock/stream_trace.py", "spec/desktop-bridge.d.ts",
+                         "scripts/mock/mail_mock.py", "scripts/mock/hub_update_mock.py", "scripts/mock/imessage_mock.py",
+                         "scripts/mock/saved_prompts_mock.py", "scripts/mock/test_desktops_mock.py", "scripts/mock/stream_trace.py",
+                         "spec/desktop-bridge.d.ts",
                          "server/cmd/password-wasm/main.go", "server/internal/passwordpake/pake.go", "server/go.mod", "server/go.sum"]:
             self.assertTrue(paths.select([filename])["desktop"], filename)
         self.assertFalse(paths.select(["server/internal/hub/hub.go"])["desktop"])

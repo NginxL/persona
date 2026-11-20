@@ -57,7 +57,7 @@ import PersonaWire
         api.managerID = "other"
         #expect(LarkAvatarImage.cachedPicture(raw, using: api) == nil)
         await api.readMessagingSource(features: ["an_older_feature"])
-        #expect(LarkAvatarImage.cachedPicture(raw, using: api) == raw)
+        #expect(LarkAvatarImage.cachedPicture(raw, using: api) == nil)
     }
 
     @Test func theSameSourceAndManagerOnTwoHubsKeepSeparateBytes() async throws {

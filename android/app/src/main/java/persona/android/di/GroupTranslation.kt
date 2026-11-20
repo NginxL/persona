@@ -125,6 +125,9 @@ internal fun DraftRepository.inGroup(names: GroupNames): DraftRepository {
         override suspend fun save(key: DraftKey, text: String, expectedVersion: Long,
             attachments: List<DraftAttachment>, sessionVersion: DraftSessionVersion?) =
             names.draft(source.save(names.rawDraftKey(key), text, expectedVersion, attachments, sessionVersion))
+        override suspend fun save(key: DraftKey, text: String, expectedVersion: Long,
+            attachments: List<DraftAttachment>, sessionVersion: DraftSessionVersion?, hasPickedSavedPrompt: Boolean) =
+            names.draft(source.save(names.rawDraftKey(key), text, expectedVersion, attachments, sessionVersion, hasPickedSavedPrompt))
     }
 }
 

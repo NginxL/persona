@@ -101,6 +101,16 @@ afterEach(() => {
 });
 
 describe("Messages chat list renders", () => {
+  it("uses the owning Feishu account’s avatar route on a real conversation row", async () => {
+    chats = chats.map((c) => c.id === "oc_7" ? { ...c, avatar: "/agent/v1/media/old-chat", avatar_url: "/api/v1/avatars/lark/Y2hhdA?lark_account=2" } : c);
+    await push();
+    const face = host.querySelector<HTMLImageElement>("a[data-chat='oc_7'] img");
+    expect(face).not.toBeNull();
+    const url = new URL(face!.src);
+    expect(url.pathname).toBe("/api/v1/avatars/lark/Y2hhdA");
+    expect([url.searchParams.get("size"), url.searchParams.get("lark_account")]).toEqual(["40", "2"]);
+  });
+
   it("draws no row again for a push that changed nothing", async () => {
     await push();
     expect(hub.rowRenders).toBe(0);

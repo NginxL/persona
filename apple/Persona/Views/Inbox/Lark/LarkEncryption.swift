@@ -104,6 +104,7 @@ extension LarkMessage {
         try c.encodeIfPresent(senderID, forKey: .senderID)
         try c.encode(senderName, forKey: .senderName)
         try c.encodeIfPresent(senderAvatar, forKey: .senderAvatar)
+        try c.encodeIfPresent(senderAvatarURL, forKey: .senderAvatarURL)
         try c.encodeIfPresent(senderType, forKey: .senderType)
         try c.encode(isMine, forKey: .isMine)
         try c.encode(type, forKey: .type)

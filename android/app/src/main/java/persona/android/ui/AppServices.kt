@@ -61,6 +61,8 @@ class ShellSession(
     val computers: ComputerPairing? = null,
     /** The selected hub group's suffix in the merged session list; null for the primary group and demo. */
     val knowledgeNamespace: String? = null,
+    /** Saved prompts use only the selected group's socket and transport. */
+    val savedPromptsConnection: OkHttpHubConnection? = null,
 ) {
     val agents = object : AgentsDependencies {
         override fun sessions() = this@ShellSession.sessions
@@ -170,7 +172,8 @@ class AppServices @Inject constructor(
                     knowledgeConnection, shell.actions, phone, agentsWiring = agentsWiring, machines = machineManagement,
                     voice = voice, groups = hubGroups, tasks = tasksStore, hubUpdates = hubUpdates,
                     hubAddresses = { listOf(data.credentials.hubAddress) + data.credentials.candidateAddresses + socket.knownAddresses() },
-                    computers = computers, listAdapter = app.agentListAdapter, knowledgeNamespace = stacks.selected.value?.namespace)
+                    computers = computers, listAdapter = app.agentListAdapter, knowledgeNamespace = stacks.selected.value?.namespace,
+                    savedPromptsConnection = socket)
                 try {
                     coroutineScope {
                         launch {

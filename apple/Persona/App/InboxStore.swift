@@ -854,6 +854,7 @@ extension InboxItem {
         guard let l = lark else { return nil }
         var c = LarkConversation(id: l.feedID, name: title, avatar: avatar, isGroup: l.isGroup, isTopic: l.isTopic,
                                  unread: isDone ? 0 : count, atMe: kind == "mention")
+        c.avatarURL = avatarURL
         c.updatedAt = updatedAt
         c.readPosition = l.readPosition
         c.account = l.olAccount

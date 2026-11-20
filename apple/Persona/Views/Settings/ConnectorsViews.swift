@@ -658,7 +658,7 @@ struct FeishuConnectorView: View {
 
     private func accountRow(_ account: LarkAccount, isDefault: Bool) -> some View {
         HStack(spacing: Theme.Space.m) {
-            LarkAvatarImage(name: account.title, url: account.avatar, size: Theme.Size.wellM)
+            LarkAvatarImage(name: account.title, url: account.picture, account: account.id, size: Theme.Size.wellM, origin: capturedAPI)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 Text(account.title).font(Theme.Font.body).lineLimit(1)
                 Text(accountDetail(account)).font(Theme.Font.label).lineLimit(1)

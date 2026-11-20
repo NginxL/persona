@@ -9,12 +9,12 @@ import { emojiLabel } from "../../lib/inbox-page";
 import { useItemManager, withManager } from "../../lib/manager-choice";
 import {
   cardIconName, directChat, duration, emojiCatalog, fileSize, pressCardAction, profile, profileRows, quickBar, quickReactions,
-  type CardButton, type EmojiCatalog, type LarkProfile, type LarkReaction, type ReadMark,
+  type CardButton, type EmojiCatalog, type LarkProfile, type LarkProfileRef, type LarkReaction, type ReadMark,
 } from "../../lib/lark-chat";
 import { t } from "../../i18n";
 import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
-import { Monogram } from "./InboxParts";
+import { LarkAvatar } from "./InboxParts";
 
 // ── files, voice, video ──────────────────────────────────
 
@@ -400,7 +400,7 @@ export function ProfileDialog({
   onClose,
   onChat,
 }: {
-  who: { id: string; name: string; avatar?: string; bot?: boolean };
+  who: LarkProfileRef;
   feed?: string;
   account?: number;
   onClose: () => void;
@@ -446,7 +446,7 @@ export function ProfileDialog({
       ) : undefined}
     >
       <div className="flex items-center gap-3 pt-2">
-        <Monogram name={name} size={56} src={p?.avatarUrl || who.avatar} />
+        <LarkAvatar name={name} size={56} avatarURL={p?.avatar_url || who.avatar_url} avatar={p?.avatarUrl || who.avatar} account={account} />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5">
             <span className="truncate text-[16px] font-semibold text-ink">{name}</span>

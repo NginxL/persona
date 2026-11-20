@@ -25,9 +25,9 @@ struct ChatAvatar: View {
 
     var body: some View {
         let disc = Theme.monogram(name)
-        let edge = Self.edge(pixels: size * displayScale)
+        let edge = Self.edge(pixels: size * displayScale, path: url)
         let request = Request(path: url, edge: edge, hub: origin?.config.url, group: origin?.group)
-        Monogram(name: name, size: size, fill: disc.fill, ink: disc.ink, font: LarkAvatar.font(size))
+        Monogram(name: name, size: size, fill: disc.fill, ink: disc.ink, font: Self.font(size))
             .overlay {
                 if let loaded, loaded.request == request {
                     Image(uiImage: loaded.image).resizable().scaledToFill()
@@ -52,11 +52,23 @@ struct ChatAvatar: View {
             .accessibilityHidden(true)
     }
 
+    /// The letter's text level for an avatar `size` points across at the default text size: about 0.4 of it, as before.
+    private static func font(_ size: CGFloat) -> Font {
+        switch size {
+        case Theme.Size.avatar...: Theme.Font.heading
+        case Theme.Size.wellS...: Theme.Font.secondaryStrong
+        case Theme.Size.icon...: Theme.Font.captionStrong
+        default: Theme.Font.labelStrong
+        }
+    }
+
     /// The sizes the avatars route draws (remoteimage's Avatars profile): a picture is asked at the smallest that
     /// covers the pixels drawn, so each picture has one of a few keys in the caches.
     nonisolated static let edges = [64, 128, 256, 512]
 
-    nonisolated static func edge(pixels: CGFloat) -> Int {
-        edges.first { CGFloat($0) >= pixels } ?? edges[edges.count - 1]
+    nonisolated static func edge(pixels: CGFloat, path: String? = nil) -> Int {
+        let edge = edges.first { CGFloat($0) >= pixels } ?? edges[edges.count - 1]
+        // Older Feishu media endpoints only draw thumbnails in multiples of 24 pixels.
+        return path?.hasPrefix("/api/v1/lark/media/") == true ? ((edge + 23) / 24) * 24 : edge
     }
 }

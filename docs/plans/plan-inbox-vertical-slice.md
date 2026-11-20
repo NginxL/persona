@@ -242,6 +242,24 @@ type Kernel interface {
 - **Done when:** the new tests pass; a planted `s.inbox.items` read in a non-Inbox file fails the guard (shown in the
   PR); the guard passes on a local `git merge-tree` of each open Inbox PR's head, commands in the PR body; Android's
   `WireFixturesTest` still decodes `spec/fixtures/wire/inbox.json`.
+- **Landed (#11650):** `server/internal/archguard/inbox_slice_test.go`. `TestInboxBookStaysInTheInbox` parses the
+  package's production files and counts each place that reaches the book: a selector through the Service's `inbox`
+  field, its address, the name `inboxBook`, or a call of a function that returns one. Re-derived on 2cba124967 (and
+  unchanged at 44e9dadce0), it is as section 1 says (S3 moved none of it): the 52 core files, the bridge's five files by
+  name, and the five readers with pinned counts (`context.go` 3, `feishu_workbench.go` 1, `origins.go` 1, `service.go`
+  2, `tasks_draft_decisions.go` 5). The bridge's other three files reach nothing. `TestCentralListsGainNoInboxEntry`
+  treats as the Inbox's a tool named `inbox_*` or described in `server/internal/prompts/mcp/inbox`, and a route under
+  `/api/v1/inbox` or `/api/v1/translate` or with an Inbox scope. It allows main's five tools and 31 scopes, plus what
+  open PRs add: `inbox_replay` (#6539), `message_send` (#9782, described there, staying in `toolNames` at S5) and
+  #4512's three scopes. Two open PRs add files that reach the book, allowed apart with their counts until they land or
+  close: `outbound_messages.go` (#9782, a reader) and `tasks_inbox_existing.go` (#9744, the bridge's). In
+  `server/internal/assistant/inbox_listed_keys_test.go`, `TestListedKeys` fills every exported field by reflection and
+  pins the 43 key paths `listed()` leaves out, with `tier_was` (#4512) and `reply_approval` (#9790, #10580, #10587)
+  added ahead of their PRs. `inbox_every_block` follows `inbox_list` in `spec/fixtures/wire/inbox.json`, whose bytes
+  stay unchanged, and Android's `WireFixturesTest` decodes it. Deferred: the agreement test with `hub/devicetokens.go`,
+  because no per-route answer-only table exists and the plan defines one only as D7; a check that `inbox_every_block`
+  sets every block, which would make #4512 (a new `progress` block) edit the sample; and the two Reader methods S3
+  deferred, which are production code for a step of their own.
 
 ### S3. Seams in quiet files
 - **Change:** pure moves in package assistant, in files no open PR touches. `clipRunesTo` (`assistant/inbox_merge.go:50`,

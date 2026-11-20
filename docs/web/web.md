@@ -1458,7 +1458,7 @@ or writes them: the main chat's fixed payload stays as it was.
 - **Save as Prompt…** on your own message's menu (right click, a long press, the ⋯ beside the bubble) where the chat
   can send: the editor over the page, filled with the message's words and a name from its first ones (lower case, joined
   by `-`, moved past a name taken). Not on replies, and not in a read-only chat.
-- iOS has them too (#9436, `docs/apple/ios.md` "Saved prompts (#9436)"); Android follows in its own issue and until then ignores `assistant_saved_prompts`.
+- iOS (#9436, `docs/apple/ios.md` "Saved prompts") and Android (#11667, `docs/android/android.md` "Saved prompts") share the hub list.
 - Checks: `lib/saved-prompts.test.ts`, `views/settings/SavedPrompts.test.tsx`, `views/chat/Composer.saved-prompts.test.tsx`,
   `views/chat/MessageActions.save-prompt.test.tsx`; end to end against the mock hub (`MOCK_SAVED_PROMPTS=1`), wide and phone,
   light and dark: `node web/e2e/saved-prompts.mjs <web URL> --hub <mock hub URL> [--shots <dir>]`.
@@ -2561,6 +2561,23 @@ The web's controls for Claude Code's session-only ultracode switch (server and s
 - **Notices**: the node's "on" / "off" notices are ordinary chat notices.
 - **New agent**: a row in the flyout of the model picked in New Agent's model panel (#5104), for Claude Code when the effort can be set, off each time the sheet opens and never stored; grayed with why when the computer's `claude_version` is a known version before 2.1.284 (an unknown one may be tried; the grayed track keeps a hairline, as the shared switch at 50% all but vanishes on a white card). Only `"ultracode": true` goes with `POST /api/v1/sessions`; off is never sent. A start the hub refuses for it (`node_outdated`, `ultracode_unsupported`) fails with "Couldn't start with ultracode: … Retry starts without it", and **Retry** starts it without.
 - **Plan cards and to-dos** (#12): on an open plan card, each task has an `ultracode` chip after its permission chip (`UltracodeChip`), in the `--ai` tint while on and quiet while off, starting from the assistant's choice (`PlanTask.ultracode`); a click changes it before the task starts, whichever button starts it (**Start**, with **Start these right away from now on** checked or not, or **Edit**'s **Start**). **Edit** has the **New agent** row for each task (`UltracodeStartRow`), opening with the card's choice. Start sends `ultracode: true` / `false` only for tasks whose choice differs from the assistant's (`planUltracodeToSend`, `planEditsToSend` in `lib/feed.ts`); left out, the hub keeps the assistant's, and a plain Start still sends no `tasks`. On a computer whose `claude_version` is known to be before 2.1.284 the chip is grayed with why on hover, the task starts without it (`false` is sent where it was on), and a line under the task says so; **Edit** keeps the choice, so moving the task there to a computer that can turns it back on. A hub without the `ultracode` feature shows nothing. Plans the hub starts by itself (read-only, requested in the chat, or a remembered kind) have no card to change; their task cards show what they started with. Whether the launcher runs Claude Code is not known on the card: a non-Claude launcher starts without it, and the reason stays in the stored task and the hub log (#3596). To-dos carry the Agent row's mark after their title, on the chat's task card (and its folded line on another day) and on the to-dos page's row (`todoUltracode` in `lib/ultracode.ts`): one of its agents not released runs with it and is not offline; on the chat's cards, before any agent was linked, the plan task asks for it (the to-dos page has no plans at hand); never on a to-do that is done or did not start. Screenshots: the mock hub with `MOCK_TASKS=1 MOCK_ULTRACODE=1` (the open plan's three tasks: off, on, and on where Mac Studio's Claude Code is too old; `GET /mock/ultracode` lists `plan_starts`).
+
+## Use an approved project document in New Agent
+
+A member of a [team project](../design/proposals/team-project-spaces.md) can bring an approved text revision into a new personal Agent session. In New Agent, choose the computer, folder and a supported Claude Code or Codex launcher. Open the project document control by the first message, enter the project and document identifiers and supply your project member token. Review the text, approver and revision, then attach it. You can add your own instructions before starting the session. The selected Agent receives the confirmed revision and digest even if someone subsequently approves a newer revision. Fetch a new preview to use that newer text.
+
+**Pilot deployment.** Run the [project document service](../server/server.md#team-project-documents-pilot) and expose its read endpoint on the same HTTPS origin as Persona Web. The browser reads `/v1/projects/{project}/documents/{document}/approved` from the origin root, including when the Web app is hosted in a subdirectory. A reverse proxy on the service host can route the project prefix to its loopback listener. For example, inside the Nginx HTTPS virtual host for Persona:
+
+```nginx
+location ^~ /v1/projects/ {
+    proxy_pass http://127.0.0.1:18082;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Cookie "";
+    proxy_cache off;
+}
+```
+
+Keep authorization headers and document bodies out of proxy logs. Members use their project-issued tokens. The Web app sends the token only with the document read and checks the returned project, document, approval and SHA-256 before offering the text. The confirmed text becomes part of the personal session and reaches the selected model provider when the member starts it.
 
 ## New Agent's model choice (#5104)
 
